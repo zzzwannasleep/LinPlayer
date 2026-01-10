@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+
 import 'dart:html' as html;
 import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
@@ -44,28 +46,6 @@ class PlayerService implements def.PlayerService {
     await _controller!.initialize();
     play();
   }
-
-  // The initialize method in the abstract class does not have `file` as a parameter.
-  // This is a workaround to pass the file bytes on web. A better approach might be
-  // to refactor the interface to accept a more generic `MediaSource` object.
-  // For now, we will override it with a different signature for web.
-  @override
-  Future<void> initialize(String? path, {String? networkUrl}) async {
-    // This is a stub to satisfy the abstract class, but web will use the
-    // method with the `file` parameter. The conditional import will handle this.
-    // A better way is to have a unified interface.
-    // We will call the network initializer for web.
-    await _controller?.dispose();
-    _revokeBlobUrl();
-
-    if (networkUrl != null) {
-      final videoUri = Uri.parse(networkUrl);
-      _controller = VideoPlayerController.networkUrl(videoUri);
-      await _controller!.initialize();
-      play();
-    }
-  }
-
 
   @override
   void play() {

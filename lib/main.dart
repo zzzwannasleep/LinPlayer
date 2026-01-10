@@ -4,10 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:lin_player/player_service.dart';
 import 'package:video_player/video_player.dart';
 
-// An ugly hack to make the web implementation work with a different signature
-// A better way would be a more robust interface like a MediaSource class.
-import 'src/player/player_service_web.dart' if (dart.library.io) 'src/player/player_service_native.dart' as service_impl;
-
 
 void main() {
   runApp(const LinPlayerApp());
@@ -80,11 +76,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _currentlyPlayingIndex = index;
     });
 
-    // The web implementation has a different signature.
+    // Web: pass bytes via PlatformFile; Native: use file path
     if (kIsWeb) {
-      // Use dynamic to call the web-specific initialize method.
-      // This is a workaround for the current service design.
-      await (_playerService as dynamic).initialize(null, file: file);
+      await _playerService.initialize(null, file: file);
     } else {
       await _playerService.initialize(file.path);
     }

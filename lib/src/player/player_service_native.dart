@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'player_service.dart' as def;
 
@@ -23,7 +24,7 @@ class PlayerService implements def.PlayerService {
 
 
   @override
-  Future<void> initialize(String? path, {String? networkUrl}) async {
+  Future<void> initialize(String? path, {PlatformFile? file, String? networkUrl}) async {
     await _controller?.dispose();
     
     if (path != null) {

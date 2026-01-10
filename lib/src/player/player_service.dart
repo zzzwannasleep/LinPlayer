@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:video_player/video_player.dart';
 
 /// Abstract definition for a player service.
@@ -8,11 +9,12 @@ import 'package:video_player/video_player.dart';
 abstract class PlayerService {
   VideoPlayerController? get controller;
 
-  /// Initializes the player with a file path.
+  /// Initializes the player.
   ///
-  /// On native, this will be a direct file path.
-  /// On web, this will involve reading the file bytes and creating a blob URL.
-  Future<void> initialize(String? path, {String? networkUrl});
+  /// [path]: local file path (native).
+  /// [file]: picked file with in‑memory bytes (web).
+  /// [networkUrl]: remote media URL.
+  Future<void> initialize(String? path, {PlatformFile? file, String? networkUrl});
 
   void play();
 
