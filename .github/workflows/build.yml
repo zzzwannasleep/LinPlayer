@@ -18,7 +18,7 @@ jobs:
     steps:
       # 1. Check out the repository code
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 2. Set up JDK (Java Development Kit) for Android build
       - name: Set up JDK 11
@@ -43,7 +43,7 @@ jobs:
 
       # 6. Upload the generated APK file as a build artifact
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: LinPlayer-Android-APK
           path: build/app/outputs/flutter-apk/app-release.apk
@@ -55,7 +55,7 @@ jobs:
     steps:
       # 1. Check out the repository code
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 2. Set up Flutter SDK
       - name: Set up Flutter
@@ -81,7 +81,7 @@ jobs:
 
       # 7. Upload the generated ZIP file as a build artifact
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: LinPlayer-Windows-Release
           path: LinPlayer-Windows-Release.zip
