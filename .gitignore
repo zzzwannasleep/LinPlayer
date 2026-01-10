@@ -1,0 +1,52 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# Flutter/Dart specific
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+
+# Do not track the Flutter SDK if it's placed inside the project
+flutter/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+ios/Flutter/Generated.xcconfig
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+ios/Runner.xcworkspace/xcshareddata/
+ios/Runner.xcworkspace/xcuserdata/
+
+# Android
+android/key.properties
+android/local.properties
+android/.gradle/
+android/gradle/
+# android/gradlew
+# android/gradlew.bat
+android/build/
+android/app/src/main/assets/flutter_assets/
+.gradle/
+
+# Web
+web/

@@ -1,0 +1,87 @@
+# GitHub Actions workflow for building the Flutter application for Android and Windows.
+
+name: Build Flutter App
+
+# Controls when the action will run. 
+# Triggers the workflow on push events but only for the main branch,
+# or allows you to run this workflow manually from the Actions tab.
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # Job for building the Android APK
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Check out the repository code
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      # 2. Set up JDK (Java Development Kit) for Android build
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
+      # 3. Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable' # Use stable channel
+
+      # 4. Get Flutter dependencies
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      # 5. Build the APK in release mode
+      - name: Build APK
+        run: flutter build apk --release
+
+      # 6. Upload the generated APK file as a build artifact
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: LinPlayer-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  # Job for building the Windows application
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    steps:
+      # 1. Check out the repository code
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      # 2. Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable' # Use stable channel
+
+      # 3. Get Flutter dependencies
+      - name: Get Flutter dependencies
+        run: flutter pub get
+      
+      # 4. Enable windows-desktop support in Flutter
+      - name: Enable Windows desktop support
+        run: flutter config --enable-windows-desktop
+
+      # 5. Build the Windows executable in release mode
+      - name: Build Windows executable
+        run: flutter build windows --release
+
+      # 6. Archive the release build folder as a ZIP file
+      - name: Archive Windows release
+        run: Compress-Archive -Path build/windows/runner/Release -DestinationPath LinPlayer-Windows-Release.zip
+
+      # 7. Upload the generated ZIP file as a build artifact
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: LinPlayer-Windows-Release
+          path: LinPlayer-Windows-Release.zip

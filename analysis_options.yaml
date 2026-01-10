@@ -1,0 +1,7 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # You can add custom lint rules here if needed.
+    # For example:
+    # prefer_const_constructors: true
