@@ -123,27 +123,20 @@ jobs:
             "C:\Program Files\Microsoft Visual Studio\2022",
             "C:\Program Files (x86)\Microsoft Visual Studio\2022"
           )
-          $redists = @()
-          foreach ($root in $roots) {
-            $path = Join-Path $root "Enterprise\VC\Redist\MSVC"
-            if (Test-Path $path) { $redists += Get-ChildItem $path -Directory }
-            $path = Join-Path $root "Professional\VC\Redist\MSVC"
-            if (Test-Path $path) { $redists += Get-ChildItem $path -Directory }
-            $path = Join-Path $root "Community\VC\Redist\MSVC"
-            if (Test-Path $path) { $redists += Get-ChildItem $path -Directory }
-          }
-          if ($redists.Count -eq 0) { Write-Error "MSVC redist folders not found."; exit 1 }
-          $vcBase = $redists | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $candidates = @(
-            "x64/Microsoft.VC143.CRT",
-            "x64/Microsoft.VC142.CRT"
-          )
           $crtDir = $null
-          foreach ($c in $candidates) {
-            $p = Join-Path $vcBase.FullName $c
-            if (Test-Path $p) { $crtDir = $p; break }
+          foreach ($root in $roots) {
+            foreach ($edition in @("Enterprise","Professional","Community","BuildTools")) {
+              $search = Join-Path $root "$edition\VC\Redist\MSVC"
+              if (-not (Test-Path $search)) { continue }
+              $found = Get-ChildItem -Directory -Recurse -Filter "Microsoft.VC143.CRT" $search | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              if (-not $found) {
+                $found = Get-ChildItem -Directory -Recurse -Filter "Microsoft.VC142.CRT" $search | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+              }
+              if ($found) { $crtDir = $found.FullName; break }
+            }
+            if ($crtDir) { break }
           }
-          if (-not $crtDir) { Write-Error "MSVC CRT path not found under $($vcBase.FullName)."; exit 1 }
+          if (-not $crtDir) { Write-Error "MSVC CRT path not found."; exit 1 }
           Copy-Item -Path (Join-Path $crtDir "*") -Destination $release64 -Recurse -Force
 
       # 6. Archive the release build folder as a ZIP file
