@@ -14,11 +14,13 @@ class LibraryItemsPage extends StatefulWidget {
     required this.appState,
     required this.parentId,
     required this.title,
+    this.isTv = false,
   });
 
   final AppState appState;
   final String parentId;
   final String title;
+  final bool isTv;
 
   @override
   State<LibraryItemsPage> createState() => _LibraryItemsPageState();
@@ -107,6 +109,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                                 appState: widget.appState,
                                 parentId: item.id,
                                 title: item.name,
+                                isTv: widget.isTv,
                               ),
                             ),
                           );
@@ -119,6 +122,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                               builder: (_) => PlayNetworkPage(
                                 title: item.name,
                                 streamUrl: url,
+                                isTv: widget.isTv,
                               ),
                             ),
                           );

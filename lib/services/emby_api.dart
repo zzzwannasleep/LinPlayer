@@ -372,11 +372,12 @@ class EmbyApi {
     required String userId,
     required String libraryId,
     int limit = 12,
+    bool onlyEpisodes = true,
   }) async {
     final url = Uri.parse(
         '$baseUrl/emby/Users/$userId/Items'
         '?ParentId=$libraryId'
-        '&IncludeItemTypes=Episode'
+        '&IncludeItemTypes=${onlyEpisodes ? 'Episode' : 'Episode,Movie'}'
         '&Recursive=true'
         '&SortBy=DateCreated'
         '&SortOrder=Descending'

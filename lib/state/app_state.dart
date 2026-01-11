@@ -214,6 +214,8 @@ class AppState extends ChangeNotifier {
           userId: _userId!,
           libraryId: lib.id,
           limit: 12,
+          // 电视/连续剧库仅取剧集，其它库可包含电影
+          onlyEpisodes: lib.type.toLowerCase().contains('tv') || lib.type.toLowerCase().contains('series'),
         );
         if (latest.items.isNotEmpty) {
           libraryLatest['lib_${lib.id}'] = latest.items;

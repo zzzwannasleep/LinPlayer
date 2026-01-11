@@ -37,6 +37,22 @@ flutter build apk --split-per-abi
 flutter build windows --release
 ```
 
+## 自定义 mpv 参数（进阶）
+- 工程内已内置 `packages/media_kit_patched`，在 `pubspec.yaml` 通过 `dependency_overrides` 覆盖原包。
+- `PlayerConfiguration` 新增 `extraMpvOptions` 列表，可直接传入 mpv 的原生参数（形如 `key=value`，无 `=` 时默认视为 `key=yes`）。示例：
+  ```dart
+  PlayerConfiguration(
+    extraMpvOptions: [
+      'gpu-context=d3d11',
+      'hwdec=auto-safe',
+      'video-sync=audio',
+      'scale=lanczos',
+    ],
+  )
+  ```
+- TV 和桌面可按需分别传入不同配置，现有播放器创建处已支持该字段。
+- 播放页右上角提供“硬解/软解”切换，切换后会重新初始化播放器并应用 `hwdec` 参数。
+
 ## 常见问题
 - DNS 解析失败 / Host lookup：请确认域名在设备浏览器可访问；必要时改填 IP 或切换 http/端口（如 8096/8920）。
 - 电影或剧集 404：已使用 MediaSourceId 的播放 URL；若仍异常，请确认服务器对应条目可在网页端播放。
@@ -53,4 +69,3 @@ flutter build windows --release
 
 ## 鸣谢
 - Emby 项目与文档：https://dev.emby.media/doc/restapi/index.html
-

@@ -1,8 +1,9 @@
 import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'player_service.dart';
@@ -22,6 +23,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   String? _playError;
+  bool _hwdecOn = true;
+  Tracks _tracks = const Tracks();
 
   @override
   void dispose() {
@@ -29,6 +32,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _playerService.dispose();
     super.dispose();
   }
+
+  bool _isTv(BuildContext context) =>
+      defaultTargetPlatform == TargetPlatform.android &&
+      MediaQuery.of(context).size.shortestSide > 600;
 
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -49,16 +56,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _currentlyPlayingIndex = index;
       _playError = null;
     });
+    final isTv = _isTv(context);
     try {
       await _playerService.dispose();
     } catch (_) {}
 
     try {
       if (kIsWeb) {
-        await _playerService.initialize(null, networkUrl: file.path ?? '');
+        await _playerService.initialize(
+          null,
+          networkUrl: file.path ?? '',
+          isTv: isTv,
+          hardwareDecode: _hwdecOn,
+        );
       } else {
-        await _playerService.initialize(file.path);
+        await _playerService.initialize(
+          file.path,
+          isTv: isTv,
+          hardwareDecode: _hwdecOn,
+        );
       }
+      if (!mounted) return;
+      _tracks = _playerService.player.state.tracks;
+      _playerService.player.stream.tracks.listen((t) {
+        if (!mounted) return;
+        setState(() => _tracks = t);
+      });
       _duration = _playerService.duration;
       _posSub?.cancel();
       _posSub = _playerService.player.stream.position.listen((d) {
@@ -80,6 +103,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
         title: Text(currentFileName),
         centerTitle: true,
         actions: [
+          IconButton(
+            tooltip: '选集',
+            icon: const Icon(Icons.playlist_play),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                builder: (ctx) => ListView.builder(
+                  itemCount: _playlist.length,
+                  itemBuilder: (_, i) {
+                    final f = _playlist[i];
+                    return ListTile(
+                      title: Text(f.name),
+                      trailing: i == _currentlyPlayingIndex
+                          ? const Icon(Icons.play_arrow)
+                          : null,
+                      onTap: () {
+                        Navigator.of(ctx).pop();
+                        _playFile(f, i);
+                      },
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: '音轨',
+            icon: const Icon(Icons.audiotrack),
+            onPressed: () => _showAudioTracks(context),
+          ),
+          IconButton(
+            tooltip: '字幕',
+            icon: const Icon(Icons.subtitles),
+            onPressed: () => _showSubtitleTracks(context),
+          ),
+          IconButton(
+            tooltip: _hwdecOn ? '切换软解' : '切换硬解',
+            icon: Icon(_hwdecOn ? Icons.memory : Icons.settings_backup_restore),
+            onPressed: () {
+              setState(() => _hwdecOn = !_hwdecOn);
+              if (_currentlyPlayingIndex >= 0 && _playlist.isNotEmpty) {
+                _playFile(_playlist[_currentlyPlayingIndex], _currentlyPlayingIndex);
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.folder_open),
             onPressed: _pickFile,
@@ -171,6 +239,67 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showAudioTracks(BuildContext context) {
+    final audios = List<AudioTrack>.from(_tracks.audio);
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        if (audios.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('暂无音轨'),
+          );
+        }
+        final current = _playerService.player.state.track.audio;
+        return ListView(
+          children: audios
+              .map(
+                (a) => ListTile(
+                  title: Text(a.title ?? a.language ?? '音轨 ${a.id}'),
+                  subtitle: Text(a.codec ?? ''),
+                  trailing: current == a ? const Icon(Icons.check) : null,
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _playerService.player.setAudioTrack(a);
+                  },
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+
+  void _showSubtitleTracks(BuildContext context) {
+    final subs = List<SubtitleTrack>.from(_tracks.subtitle);
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        if (subs.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('暂无字幕'),
+          );
+        }
+        final current = _playerService.player.state.track.subtitle;
+        return ListView(
+          children: subs
+              .map(
+                (s) => ListTile(
+                  title: Text(s.title ?? s.language ?? '字幕 ${s.id}'),
+                  trailing: current == s ? const Icon(Icons.check) : null,
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _playerService.player.setSubtitleTrack(s);
+                  },
+                ),
+              )
+              .toList(),
+        );
+      },
     );
   }
 }

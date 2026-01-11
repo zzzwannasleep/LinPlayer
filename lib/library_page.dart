@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'services/emby_api.dart';
@@ -16,6 +17,10 @@ class LibraryPage extends StatefulWidget {
 
 class _LibraryPageState extends State<LibraryPage> {
   bool _showHidden = false;
+
+  bool _isTv(BuildContext context) =>
+      defaultTargetPlatform == TargetPlatform.android &&
+      MediaQuery.of(context).size.shortestSide > 600;
 
   @override
   Widget build(BuildContext context) {
@@ -54,10 +59,10 @@ class _LibraryPageState extends State<LibraryPage> {
                       padding: const EdgeInsets.all(12),
                       child: GridView.builder(
                         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 220, // 接近首页卡片宽度
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 1.3, // 横版卡片 + 标题
+                          maxCrossAxisExtent: 200, // 与首页卡片接近
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 1.25, // 横版卡片 + 标题
                         ),
                         itemCount: libs.length,
                         itemBuilder: (context, index) {
@@ -77,6 +82,7 @@ class _LibraryPageState extends State<LibraryPage> {
                                     appState: widget.appState,
                                     parentId: lib.id,
                                     title: lib.name,
+                                    isTv: _isTv(context),
                                   ),
                                 ),
                               );

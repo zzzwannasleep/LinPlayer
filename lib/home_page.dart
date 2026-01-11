@@ -147,6 +147,7 @@ class _HomePageState extends State<HomePage> {
             delegate: _GlobalSearchDelegate(appState: widget.appState)..query = q.trim(),
           );
         },
+        isTv: isTv,
       ),
       LibraryPage(appState: widget.appState),
       const PlayerScreen(),
@@ -193,6 +194,7 @@ class _HomeBody extends StatelessWidget {
     required this.onRefresh,
     required this.enableGlass,
     required this.onSearch,
+    required this.isTv,
   });
 
   final AppState appState;
@@ -200,6 +202,7 @@ class _HomeBody extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final bool enableGlass;
   final void Function(String) onSearch;
+  final bool isTv;
 
   @override
   Widget build(BuildContext context) {
@@ -255,6 +258,7 @@ class _HomeBody extends StatelessWidget {
                       item: item,
                       appState: appState,
                       enableGlass: enableGlass,
+                      isTv: isTv,
                     );
                   },
                   separatorBuilder: (_, __) => const SizedBox(width: 12),
@@ -280,11 +284,13 @@ class _HomeCard extends StatelessWidget {
     required this.item,
     required this.appState,
     required this.enableGlass,
+    required this.isTv,
   });
 
   final MediaItem item;
   final AppState appState;
   final bool enableGlass;
+  final bool isTv;
 
   bool get _isPlayable => item.type == 'Movie' || item.type == 'Episode';
 
@@ -310,7 +316,7 @@ class _HomeCard extends StatelessWidget {
     }
 
     final card = SizedBox(
-      width: 200,
+      width: 230,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -353,6 +359,7 @@ class _HomeCard extends StatelessWidget {
                   builder: (_) => PlayNetworkPage(
                     title: item.name,
                     streamUrl: url,
+                    isTv: isTv,
                   ),
                 ),
               );
@@ -364,6 +371,7 @@ class _HomeCard extends StatelessWidget {
                     appState: appState,
                     parentId: item.id,
                     title: item.name,
+                    isTv: isTv,
                   ),
                 ),
               );

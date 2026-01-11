@@ -14,8 +14,53 @@ class PlayerService {
   Duration get duration => _player.state.duration;
   bool get isPlaying => _player.state.playing;
 
-  Future<void> initialize(String? path, {String? networkUrl}) async {
-    _player = Player();
+  PlayerConfiguration _config({
+    required bool isTv,
+    required bool hardwareDecode,
+  }) {
+    // 基于 mpv_PlayKit 思路的精简版：启用 gpu-next 输出、适度放大缓存、放宽协议白名单。
+    return PlayerConfiguration(
+      vo: 'gpu-next',
+      osc: false,
+      title: 'LinPlayer',
+      logLevel: MPVLogLevel.warn,
+      // 对标 mpv 配置里 demuxer-max-bytes=150MiB
+      bufferSize: isTv ? 100 * 1024 * 1024 : 150 * 1024 * 1024,
+      protocolWhitelist: const [
+        'udp',
+        'rtp',
+        'tcp',
+        'tls',
+        'http',
+        'https',
+        'crypto',
+        'data',
+        'file',
+        'rtmp',
+        'rtmps',
+        'rtsp',
+        'ftp',
+      ],
+      extraMpvOptions: [
+        'gpu-context=d3d11',
+        hardwareDecode ? 'hwdec=auto-safe' : 'hwdec=no',
+        'video-sync=audio',
+        'scale=lanczos',
+        'dscale=hermite',
+        'sigmoid-upscaling=yes',
+        'linear-downscaling=yes',
+        'correct-downscaling=yes',
+      ],
+    );
+  }
+
+  Future<void> initialize(
+    String? path, {
+    String? networkUrl,
+    bool isTv = false,
+    bool hardwareDecode = true,
+  }) async {
+    _player = Player(configuration: _config(isTv: isTv, hardwareDecode: hardwareDecode));
     _controller = VideoController(_player);
     if (networkUrl != null) {
       await _player.open(Media(networkUrl));

@@ -29,5 +29,9 @@ dev_dependencies:
 
   flutter_lints: ^3.0.0
 
+dependency_overrides:
+  media_kit:
+    path: packages/media_kit_patched
+
 flutter:
   uses-material-design: true
