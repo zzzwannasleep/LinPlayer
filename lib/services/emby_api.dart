@@ -161,8 +161,13 @@ class EmbyApi {
     }
   }
 
-  Future<List<LibraryInfo>> fetchLibraries(String token, String baseUrl) async {
-    final url = Uri.parse('$baseUrl/emby/Library/Sections');
+  Future<List<LibraryInfo>> fetchLibraries({
+    required String token,
+    required String baseUrl,
+    required String userId,
+  }) async {
+    // Emby 官方推荐获取视图的接口：/Users/{userId}/Views
+    final url = Uri.parse('$baseUrl/emby/Users/$userId/Views');
     final resp = await http.get(url, headers: {
       'X-Emby-Token': token,
       'Accept': 'application/json',
