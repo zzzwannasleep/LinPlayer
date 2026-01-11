@@ -53,11 +53,11 @@ class _LibraryPageState extends State<LibraryPage> {
                   : Padding(
                       padding: const EdgeInsets.all(12),
                       child: GridView.builder(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
+                        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 220, // 接近首页卡片宽度
                           mainAxisSpacing: 12,
                           crossAxisSpacing: 12,
-                          childAspectRatio: 2 / 3,
+                          childAspectRatio: 1.3, // 横版卡片 + 标题
                         ),
                         itemCount: libs.length,
                         itemBuilder: (context, index) {
@@ -66,7 +66,7 @@ class _LibraryPageState extends State<LibraryPage> {
                             baseUrl: widget.appState.baseUrl!,
                             itemId: lib.id,
                             token: widget.appState.token!,
-                            maxWidth: 400,
+                            maxWidth: 500,
                           );
                           return InkWell(
                             borderRadius: BorderRadius.circular(12),
@@ -88,7 +88,8 @@ class _LibraryPageState extends State<LibraryPage> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(
+                                AspectRatio(
+                                  aspectRatio: 16 / 9,
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
                                     child: CachedNetworkImage(
@@ -105,7 +106,7 @@ class _LibraryPageState extends State<LibraryPage> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 6),
                                 Text(
                                   lib.name,
                                   maxLines: 1,

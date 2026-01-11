@@ -374,7 +374,14 @@ class EmbyApi {
     int limit = 12,
   }) async {
     final url = Uri.parse(
-        '$baseUrl/emby/Users/$userId/Items?ParentId=$libraryId&SortBy=DateCreated&SortOrder=Descending&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags&Limit=$limit');
+        '$baseUrl/emby/Users/$userId/Items'
+        '?ParentId=$libraryId'
+        '&IncludeItemTypes=Episode'
+        '&Recursive=true'
+        '&SortBy=DateCreated'
+        '&SortOrder=Descending'
+        '&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData'
+        '&Limit=$limit');
     final resp = await _client.get(url, headers: {
       'X-Emby-Token': token,
       'Accept': 'application/json',

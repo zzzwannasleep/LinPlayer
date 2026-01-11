@@ -208,8 +208,10 @@ class _HomeBody extends StatelessWidget {
       sections.add(('继续观看', appState.getHome('continue')));
     }
     for (final entry in appState.homeEntries) {
-      if (entry.items.isNotEmpty) {
-        sections.add(('${entry.displayName} · 最新', entry.items));
+      // 仅展示可播放条目，避免文件夹/分类
+      final playable = entry.items.where((e) => e.type == 'Episode' || e.type == 'Movie').toList();
+      if (playable.isNotEmpty) {
+        sections.add(('${entry.displayName} · 最新', playable));
       }
     }
     sections.add(('最新电影', appState.getHome('movies')));
@@ -308,7 +310,7 @@ class _HomeCard extends StatelessWidget {
     }
 
     final card = SizedBox(
-      width: 160,
+      width: 200,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
