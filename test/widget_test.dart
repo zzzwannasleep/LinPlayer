@@ -7,6 +7,6 @@ void main() {
   testWidgets('Shows login screen by default', (WidgetTester tester) async {
     final appState = AppState();
     await tester.pumpWidget(LinPlayerApp(appState: appState));
-    expect(find.text('登录'), findsWidgets); // 标题+按钮都会出现“登录”
+    expect(find.text('连接服务器'), findsOneWidget);
   });
 }
