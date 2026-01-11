@@ -1,22 +1,12 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lin_player/main.dart';
+import 'package:lin_player/state/app_state.dart';
 
 void main() {
-  testWidgets('App renders initial screen', (WidgetTester tester) async {
-    await tester.pumpWidget(const LinPlayerApp());
-
-    // Default title should be LinPlayer
-    expect(find.text('LinPlayer'), findsOneWidget);
-
-    // Should show the “Select a video to play” prompt before selecting files
-    expect(find.text('Select a video to play'), findsOneWidget);
+  testWidgets('Shows login screen by default', (WidgetTester tester) async {
+    final appState = AppState();
+    await tester.pumpWidget(LinPlayerApp(appState: appState));
+    expect(find.text('登录'), findsOneWidget);
   });
 }
