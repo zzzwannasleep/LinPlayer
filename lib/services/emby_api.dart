@@ -18,12 +18,20 @@ class DomainInfo {
 }
 
 class EmbyApi {
-  EmbyApi(String baseUrl)
-      : _baseUrl = baseUrl.endsWith('/')
-            ? baseUrl.substring(0, baseUrl.length - 1)
-            : baseUrl;
+  EmbyApi(String baseUrl) : _baseUrl = _normalizeBaseUrl(baseUrl);
 
   final String _baseUrl;
+
+  static String _normalizeBaseUrl(String input) {
+    var url = input.trim();
+    if (url.isEmpty) return url;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://$url'; // 默认加 https
+    }
+    // 去掉末尾斜杠
+    if (url.endsWith('/')) url = url.substring(0, url.length - 1);
+    return url;
+  }
 
   // Simple device id generator to satisfy Emby header requirements
   static String _randomId() {

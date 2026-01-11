@@ -27,6 +27,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
     await widget.appState.login(
       baseUrl: _baseUrlCtrl.text.trim(),
       username: _userCtrl.text.trim(),
@@ -65,6 +66,11 @@ class _LoginPageState extends State<LoginPage> {
                     keyboardType: TextInputType.url,
                     validator: (v) =>
                         (v == null || v.isEmpty) ? '请输入线路地址' : null,
+                    onChanged: (_) {
+                      if (widget.appState.error != null) {
+                        setState(() => widget.appState.error == null);
+                      }
+                    },
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -93,6 +99,13 @@ class _LoginPageState extends State<LoginPage> {
                     child:
                         loading ? const CircularProgressIndicator() : const Text('登录'),
                   ),
+                  if (widget.appState.error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      widget.appState.error!,
+                      style: const TextStyle(color: Colors.redAccent),
+                    ),
+                  ]
                 ],
               ),
             ),
