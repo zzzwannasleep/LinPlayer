@@ -26,9 +26,7 @@ class LibraryItemsPage extends StatefulWidget {
 
 class _LibraryItemsPageState extends State<LibraryItemsPage> {
   final _scroll = ScrollController();
-  final _searchCtrl = TextEditingController();
   bool _loadingMore = false;
-  String _searchTerm = '';
 
   @override
   void initState() {
@@ -56,7 +54,6 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
         parentId: widget.parentId,
         startIndex: start,
         limit: 30,
-        searchTerm: _searchTerm.isEmpty ? null : _searchTerm,
       );
     } finally {
       if (mounted) setState(() => _loadingMore = false);
@@ -66,7 +63,6 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
   @override
   void dispose() {
     _scroll.dispose();
-    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -85,33 +81,6 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                hintText: '搜索片名…',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchTerm.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          _searchTerm = '';
-                          _load(reset: true);
-                        },
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onSubmitted: (v) {
-                _searchTerm = v.trim();
-                _load(reset: true);
-              },
-            ),
-          ),
           Expanded(
             child: items.isEmpty && _loadingMore
                 ? const Center(child: CircularProgressIndicator())
@@ -221,17 +190,17 @@ class _ItemCard extends StatelessWidget {
           child: image != null
               ? CachedNetworkImage(
                   imageUrl: image,
-                  width: 110,
-                  height: 150,
+                  width: 90,
+                  height: 130,
                   fit: BoxFit.cover,
                   placeholder: (_, __) =>
-                      const SizedBox(width: 110, height: 150, child: Icon(Icons.image)),
+                      const SizedBox(width: 90, height: 130, child: Icon(Icons.image)),
                   errorWidget: (_, __, ___) =>
-                      const SizedBox(width: 110, height: 150, child: Icon(Icons.broken_image)),
+                      const SizedBox(width: 90, height: 130, child: Icon(Icons.broken_image)),
                 )
               : const SizedBox(
-                  width: 110,
-                  height: 150,
+                  width: 90,
+                  height: 130,
                   child: Icon(Icons.image),
                 ),
         ),

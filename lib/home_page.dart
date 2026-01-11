@@ -140,6 +140,13 @@ class _HomePageState extends State<HomePage> {
         loading: _loading,
         onRefresh: _load,
         enableGlass: enableGlass,
+        onSearch: (q) {
+          if (q.trim().isEmpty) return;
+          showSearch(
+            context: context,
+            delegate: _GlobalSearchDelegate(appState: widget.appState)..query = q.trim(),
+          );
+        },
       ),
       LibraryPage(appState: widget.appState),
       const PlayerScreen(),
@@ -149,16 +156,6 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('LinPlayer'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            tooltip: '搜索',
-            onPressed: () {
-              showSearch(
-                context: context,
-                delegate: _GlobalSearchDelegate(appState: widget.appState),
-              );
-            },
-          ),
           IconButton(
             icon: const Icon(Icons.cloud_queue),
             tooltip: '线路',
@@ -195,12 +192,14 @@ class _HomeBody extends StatelessWidget {
     required this.loading,
     required this.onRefresh,
     required this.enableGlass,
+    required this.onSearch,
   });
 
   final AppState appState;
   final bool loading;
   final Future<void> Function() onRefresh;
   final bool enableGlass;
+  final void Function(String) onSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -221,6 +220,20 @@ class _HomeBody extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 16),
         children: [
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              decoration: InputDecoration(
+                hintText: '搜索片名…',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              ),
+              textInputAction: TextInputAction.search,
+              onSubmitted: onSearch,
+            ),
+          ),
           const SizedBox(height: 12),
           if (loading) const LinearProgressIndicator(),
           for (final sec in sections)
@@ -295,7 +308,7 @@ class _HomeCard extends StatelessWidget {
     }
 
     final card = SizedBox(
-      width: 160,
+      width: 140,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

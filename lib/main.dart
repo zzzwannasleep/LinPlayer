@@ -7,6 +7,7 @@ import 'state/app_state.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Ensure native media backends (mpv) are ready before any player is created.
   MediaKit.ensureInitialized();
   final appState = AppState();
   await appState.loadFromStorage();
