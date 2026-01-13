@@ -25,6 +25,7 @@ class ShowDetailPage extends StatefulWidget {
 class _ShowDetailPageState extends State<ShowDetailPage> {
   MediaItem? _detail;
   List<MediaItem> _seasons = [];
+  bool _seasonsVirtual = false;
   List<MediaItem> _similar = [];
   bool _loading = true;
   String? _error;
@@ -50,21 +51,70 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         userId: widget.appState.userId!,
         itemId: widget.itemId,
       );
-      final seasons = await api.fetchSeasons(
-        token: widget.appState.token!,
-        baseUrl: widget.appState.baseUrl!,
-        userId: widget.appState.userId!,
-        seriesId: widget.itemId,
-      );
+      final isSeries = detail.type.toLowerCase() == 'series';
+
+      final seasons = isSeries
+          ? await api.fetchSeasons(
+              token: widget.appState.token!,
+              baseUrl: widget.appState.baseUrl!,
+              userId: widget.appState.userId!,
+              seriesId: widget.itemId,
+            )
+          : PagedResult<MediaItem>(const [], 0);
+
+      final seasonItems = isSeries
+          ? seasons.items.where((s) => s.type.toLowerCase() == 'season').toList()
+          : <MediaItem>[];
+      seasonItems.sort((a, b) {
+        final aNo = a.seasonNumber ?? a.episodeNumber ?? 0;
+        final bNo = b.seasonNumber ?? b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+
+      final virtualSeason = isSeries && seasonItems.isEmpty;
+      final seasonsForUi = isSeries
+          ? (virtualSeason
+              ? [
+                  MediaItem(
+                    id: widget.itemId,
+                    name: '第1季',
+                    type: 'Season',
+                    overview: '',
+                    communityRating: null,
+                    premiereDate: null,
+                    genres: const [],
+                    runTimeTicks: null,
+                    sizeBytes: null,
+                    container: null,
+                    providerIds: const {},
+                    seriesName: detail.name,
+                    seasonName: '第1季',
+                    seasonNumber: 1,
+                    episodeNumber: null,
+                    hasImage: detail.hasImage,
+                    playbackPositionTicks: 0,
+                    people: const [],
+                    parentId: widget.itemId,
+                  ),
+                ]
+              : seasonItems)
+          : <MediaItem>[];
+
       MediaItem? firstEp;
-      if (seasons.items.isNotEmpty) {
-        final eps = await api.fetchEpisodes(
-          token: widget.appState.token!,
-          baseUrl: widget.appState.baseUrl!,
-          userId: widget.appState.userId!,
-          seasonId: seasons.items.first.id,
-        );
-        if (eps.items.isNotEmpty) firstEp = eps.items.first;
+      if (isSeries) {
+        final firstSeasonId =
+            virtualSeason ? widget.itemId : seasonItems.first.id;
+        if (firstSeasonId.isNotEmpty) {
+          try {
+            final eps = await api.fetchEpisodes(
+              token: widget.appState.token!,
+              baseUrl: widget.appState.baseUrl!,
+              userId: widget.appState.userId!,
+              seasonId: firstSeasonId,
+            );
+            if (eps.items.isNotEmpty) firstEp = eps.items.first;
+          } catch (_) {}
+        }
       }
       PagedResult<MediaItem> similar = PagedResult(const [], 0);
       try {
@@ -94,7 +144,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       ];
       setState(() {
         _detail = detail;
-        _seasons = seasons.items;
+        _seasons = seasonsForUi;
+        _seasonsVirtual = virtualSeason;
         _featuredEpisode = firstEp;
         _similar = similar.items;
       });
@@ -228,29 +279,76 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                       ),
                       const SizedBox(height: 16),
                     ],
-                    Text('季', style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: _seasons
-                          .map((s) => ActionChip(
-                                label: Text(s.name.isNotEmpty ? s.name : '季'),
-                                onPressed: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => SeasonEpisodesPage(
-                                        season: s,
-                                        appState: widget.appState,
-                                        isTv: widget.isTv,
+                    if (_seasons.isNotEmpty) ...[
+                      Text('季', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: widget.isTv ? 260 : 220,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _seasons.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 12),
+                          itemBuilder: (context, index) {
+                            final s = _seasons[index];
+                            final label = s.name.isNotEmpty
+                                ? s.name
+                                : '第${s.seasonNumber ?? s.episodeNumber ?? (index + 1)}季';
+                            final img = EmbyApi.imageUrl(
+                              baseUrl: widget.appState.baseUrl!,
+                              itemId: s.hasImage ? s.id : item.id,
+                              token: widget.appState.token!,
+                              maxWidth: widget.isTv ? 600 : 400,
+                            );
+                            return InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => SeasonEpisodesPage(
+                                      season: s,
+                                      appState: widget.appState,
+                                      isTv: widget.isTv,
+                                      isVirtual: _seasonsVirtual,
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: SizedBox(
+                                width: widget.isTv ? 200 : 140,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    AspectRatio(
+                                      aspectRatio: 2 / 3,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(
+                                          img,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) =>
+                                              const ColoredBox(color: Colors.black26),
+                                        ),
                                       ),
                                     ),
-                                  );
-                                },
-                              ))
-                          .toList(),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                    ],
                     if (_similar.isNotEmpty) ...[
                       Text('更多类似', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
@@ -333,11 +431,13 @@ class SeasonEpisodesPage extends StatefulWidget {
     required this.season,
     required this.appState,
     this.isTv = false,
+    this.isVirtual = false,
   });
 
   final MediaItem season;
   final AppState appState;
   final bool isTv;
+  final bool isVirtual;
 
   @override
   State<SeasonEpisodesPage> createState() => _SeasonEpisodesPageState();
@@ -368,14 +468,25 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
         userId: widget.appState.userId!,
         seasonId: widget.season.id,
       );
-      final detail = await api.fetchItemDetail(
-        token: widget.appState.token!,
-        baseUrl: widget.appState.baseUrl!,
-        userId: widget.appState.userId!,
-        itemId: widget.season.id,
-      );
+      final items = List<MediaItem>.from(eps.items);
+      items.sort((a, b) {
+        final aNo = a.episodeNumber ?? 0;
+        final bNo = b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+      MediaItem? detail;
+      if (!widget.isVirtual) {
+        try {
+          detail = await api.fetchItemDetail(
+            token: widget.appState.token!,
+            baseUrl: widget.appState.baseUrl!,
+            userId: widget.appState.userId!,
+            itemId: widget.season.id,
+          );
+        } catch (_) {}
+      }
       setState(() {
-        _episodes = eps.items;
+        _episodes = items;
         _detailSeason = detail;
       });
     } catch (e) {
@@ -394,74 +505,97 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? Center(child: Text(_error!))
-              : Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_episodes.isNotEmpty)
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 4,
-                            childAspectRatio: 1.4,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                          ),
-                          itemCount: _episodes.length,
-                          itemBuilder: (context, index) {
-                            final e = _episodes[index];
-                            final dur = e.runTimeTicks != null
-                                ? Duration(microseconds: (e.runTimeTicks! / 10).round())
-                                : null;
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => EpisodeDetailPage(
-                                      episode: e,
-                                      appState: widget.appState,
-                                      isTv: widget.isTv,
+              : _episodes.isEmpty
+                  ? const Center(child: Text('暂无剧集'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _episodes.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final e = _episodes[index];
+                        final epNo = e.episodeNumber ?? (index + 1);
+                        final dur = e.runTimeTicks != null
+                            ? Duration(microseconds: (e.runTimeTicks! / 10).round())
+                            : null;
+                        final img = EmbyApi.imageUrl(
+                          baseUrl: widget.appState.baseUrl!,
+                          itemId: e.hasImage ? e.id : widget.season.id,
+                          token: widget.appState.token!,
+                          maxWidth: widget.isTv ? 900 : 700,
+                        );
+                        return Card(
+                          clipBehavior: Clip.antiAlias,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => EpisodeDetailPage(
+                                    episode: e,
+                                    appState: widget.appState,
+                                    isTv: widget.isTv,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SizedBox(
+                                    width: widget.isTv ? 240 : 160,
+                                    child: AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: Image.network(
+                                          img,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (_, __, ___) =>
+                                              const ColoredBox(color: Colors.black26),
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                );
-                              },
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest
-                                      .withValues(alpha: 0.3),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('${index + 1}',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge
-                                            ?.copyWith(fontWeight: FontWeight.bold)),
-                                    const SizedBox(height: 6),
-                                    Text(e.name,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.bodyMedium),
-                                    if (dur != null)
-                                      Text(_fmt(dur),
-                                          style: Theme.of(context).textTheme.bodySmall),
-                                  ],
-                                ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '第$epNo集 · ${e.name}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(fontWeight: FontWeight.w700),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        if (e.overview.isNotEmpty)
+                                          Text(
+                                            e.overview,
+                                            maxLines: 3,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context).textTheme.bodyMedium,
+                                          ),
+                                        if (dur != null) ...[
+                                          const SizedBox(height: 8),
+                                          Text(
+                                            _fmt(dur),
+                                            style: Theme.of(context).textTheme.bodySmall,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
     );
   }
 }
@@ -515,11 +649,16 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         deviceId: widget.appState.deviceId,
         itemId: widget.episode.id,
       );
-      final chaps = await api.fetchChapters(
-        token: widget.appState.token!,
-        baseUrl: widget.appState.baseUrl!,
-        itemId: widget.episode.id,
-      );
+      List<ChapterInfo> chaps = const [];
+      try {
+        chaps = await api.fetchChapters(
+          token: widget.appState.token!,
+          baseUrl: widget.appState.baseUrl!,
+          itemId: widget.episode.id,
+        );
+      } catch (_) {
+        // Chapters are optional; hide section when unavailable.
+      }
       setState(() {
         _playInfo = info;
         _detail = detail;

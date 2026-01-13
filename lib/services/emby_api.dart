@@ -389,7 +389,10 @@ class EmbyApi {
       userId: userId,
       parentId: seriesId,
       includeItemTypes: 'Season',
+      excludeFolders: false,
       limit: 100,
+      sortBy: 'SortName',
+      sortOrder: 'Ascending',
     );
   }
 
@@ -406,6 +409,8 @@ class EmbyApi {
       parentId: seasonId,
       includeItemTypes: 'Episode',
       limit: 200,
+      sortBy: 'IndexNumber',
+      sortOrder: 'Ascending',
     );
   }
 
@@ -623,6 +628,10 @@ class EmbyApi {
       'X-Emby-Token': token,
       'Accept': 'application/json',
     });
+    // 404 means the item has no chapters on many servers.
+    if (resp.statusCode == 404) {
+      return const [];
+    }
     if (resp.statusCode != 200) {
       throw Exception('获取章节失败(${resp.statusCode})');
     }
