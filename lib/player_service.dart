@@ -27,15 +27,6 @@ class PlayerService {
         (platform == TargetPlatform.windows ||
             platform == TargetPlatform.linux ||
             platform == TargetPlatform.macOS);
-    final extraOptions = <String>[
-      hardwareDecode ? 'hwdec=auto-safe' : 'hwdec=no',
-      'video-sync=audio',
-      'scale=lanczos',
-      'dscale=hermite',
-      'sigmoid-upscaling=yes',
-      'linear-downscaling=yes',
-      'correct-downscaling=yes',
-    ];
 
     return PlayerConfiguration(
       vo: isAndroid || isDesktop ? 'gpu' : null,
@@ -60,7 +51,6 @@ class PlayerService {
         'rtsp',
         'ftp',
       ],
-      extraMpvOptions: extraOptions,
     );
   }
 

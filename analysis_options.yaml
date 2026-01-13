@@ -5,3 +5,8 @@ linter:
     # You can add custom lint rules here if needed.
     # For example:
     # prefer_const_constructors: true
+
+analyzer:
+  exclude:
+    - packages/media_kit_patched/**
+    - tmp_play.dart
