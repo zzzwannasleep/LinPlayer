@@ -15,12 +15,18 @@ class PlayNetworkPage extends StatefulWidget {
     required this.itemId,
     required this.appState,
     this.isTv = false,
+    this.mediaSourceId,
+    this.audioStreamIndex,
+    this.subtitleStreamIndex,
   });
 
   final String title;
   final String itemId;
   final AppState appState;
   final bool isTv;
+  final String? mediaSourceId;
+  final int? audioStreamIndex; // Emby MediaStream Index
+  final int? subtitleStreamIndex; // Emby MediaStream Index, -1 = off
 
   @override
   State<PlayNetworkPage> createState() => _PlayNetworkPageState();
@@ -38,6 +44,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   StreamSubscription<double>? _bufferingPctSub;
   bool _buffering = false;
   double? _bufferingPct;
+  bool _appliedAudioPref = false;
+  bool _appliedSubtitlePref = false;
 
   @override
   void initState() {
@@ -52,6 +60,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _bufferingSub = null;
     await _bufferingPctSub?.cancel();
     _bufferingPctSub = null;
+    _appliedAudioPref = false;
+    _appliedSubtitlePref = false;
     try {
       final streamUrl = await _buildStreamUrl();
       _resolvedStream = streamUrl;
@@ -67,8 +77,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         hardwareDecode: _hwdecOn,
       );
       _tracks = _playerService.player.state.tracks;
+      _maybeApplyInitialTracks(_tracks);
       _playerService.player.stream.tracks.listen((t) {
         if (!mounted) return;
+        _maybeApplyInitialTracks(t);
         setState(() => _tracks = t);
       });
       _bufferingSub = _playerService.player.stream.buffering.listen((value) {
@@ -94,21 +106,57 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     }
   }
 
+  void _maybeApplyInitialTracks(Tracks tracks) {
+    final player = _playerService.isInitialized ? _playerService.player : null;
+    if (player == null) return;
+
+    if (!_appliedAudioPref && widget.audioStreamIndex != null) {
+      final target = widget.audioStreamIndex!.toString();
+      for (final a in tracks.audio) {
+        if (a.id == target) {
+          player.setAudioTrack(a);
+          break;
+        }
+      }
+      _appliedAudioPref = true;
+    }
+
+    if (!_appliedSubtitlePref && widget.subtitleStreamIndex != null) {
+      if (widget.subtitleStreamIndex == -1) {
+        player.setSubtitleTrack(SubtitleTrack.no());
+      } else {
+        final target = widget.subtitleStreamIndex!.toString();
+        for (final s in tracks.subtitle) {
+          if (s.id == target) {
+            player.setSubtitleTrack(s);
+            break;
+          }
+        }
+      }
+      _appliedSubtitlePref = true;
+    }
+  }
+
   Future<String> _buildStreamUrl() async {
     final base = widget.appState.baseUrl!;
     final token = widget.appState.token!;
     final userId = widget.appState.userId!;
-    String ensureApiKey(String url) {
+    String applyQueryPrefs(String url) {
       final uri = Uri.parse(url);
-      if (uri.queryParameters.containsKey('api_key')) return url;
       final params = Map<String, String>.from(uri.queryParameters);
-      params['api_key'] = token;
+      if (!params.containsKey('api_key')) params['api_key'] = token;
+      if (widget.audioStreamIndex != null) {
+        params['AudioStreamIndex'] = widget.audioStreamIndex.toString();
+      }
+      if (widget.subtitleStreamIndex != null && widget.subtitleStreamIndex! >= 0) {
+        params['SubtitleStreamIndex'] = widget.subtitleStreamIndex.toString();
+      }
       return uri.replace(queryParameters: params).toString();
     }
 
     String resolve(String candidate) {
       final resolved = Uri.parse(base).resolve(candidate).toString();
-      return ensureApiKey(resolved);
+      return applyQueryPrefs(resolved);
     }
     try {
       final api = EmbyApi(hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
@@ -119,21 +167,36 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         deviceId: widget.appState.deviceId,
         itemId: widget.itemId,
       );
-      final Map<String, dynamic>? ms = info.mediaSources.isNotEmpty
-          ? info.mediaSources.first as Map<String, dynamic>
-          : null;
+      final sources = info.mediaSources.cast<Map<String, dynamic>>();
+      Map<String, dynamic>? ms;
+      if (sources.isNotEmpty) {
+        final selectedId = widget.mediaSourceId;
+        if (selectedId != null && selectedId.isNotEmpty) {
+          ms = sources.firstWhere(
+            (s) => (s['Id'] as String? ?? '') == selectedId,
+            orElse: () => sources.first,
+          );
+        } else {
+          ms = sources.first;
+        }
+      }
       final directStreamUrl = ms?['DirectStreamUrl'] as String?;
       if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
         return resolve(directStreamUrl);
       }
       // Prefer direct stream (no transcoding). Even if server reports unsupported direct play/stream,
       // the static stream endpoint may still work with mpv's broader codec/container support.
-      return '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=${info.mediaSourceId}'
-          '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
-          '&api_key=$token';
+      final mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
+      return applyQueryPrefs(
+        '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=$mediaSourceId'
+            '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
+            '&api_key=$token',
+      );
     } catch (_) {
-      return '$base/emby/Videos/${widget.itemId}/stream?static=true&UserId=$userId'
-          '&DeviceId=${widget.appState.deviceId}&api_key=$token';
+      return applyQueryPrefs(
+        '$base/emby/Videos/${widget.itemId}/stream?static=true&UserId=$userId'
+            '&DeviceId=${widget.appState.deviceId}&api_key=$token',
+      );
       // 回退：无需 playbackInfo 的直链（部分服务器禁用该接口）
     }
   }

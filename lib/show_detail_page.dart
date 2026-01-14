@@ -31,6 +31,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   String? _error;
   MediaItem? _featuredEpisode;
   List<String> _album = [];
+  PlaybackInfoResult? _playInfo;
+  List<ChapterInfo> _chapters = [];
+  String? _selectedMediaSourceId;
+  int? _selectedAudioStreamIndex; // null = default
+  int? _selectedSubtitleStreamIndex; // null = default, -1 = off
 
   @override
   void initState() {
@@ -126,6 +131,44 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           limit: 12,
         );
       } catch (_) {}
+
+      PlaybackInfoResult? playInfo;
+      List<ChapterInfo> chaps = const [];
+      String? selectedMediaSourceId = _selectedMediaSourceId;
+      int? selectedAudioStreamIndex = _selectedAudioStreamIndex;
+      int? selectedSubtitleStreamIndex = _selectedSubtitleStreamIndex;
+      if (!isSeries) {
+        try {
+          playInfo = await api.fetchPlaybackInfo(
+            token: widget.appState.token!,
+            baseUrl: widget.appState.baseUrl!,
+            userId: widget.appState.userId!,
+            deviceId: widget.appState.deviceId,
+            itemId: widget.itemId,
+          );
+          final sources = playInfo.mediaSources.cast<Map<String, dynamic>>();
+          if (sources.isNotEmpty) {
+            final validSelection = selectedMediaSourceId != null &&
+                sources.any((s) => (s['Id'] as String? ?? '') == selectedMediaSourceId);
+            if (!validSelection) {
+              selectedMediaSourceId = sources.first['Id'] as String?;
+              selectedAudioStreamIndex = null;
+              selectedSubtitleStreamIndex = null;
+            }
+          }
+        } catch (_) {
+          // PlaybackInfo is optional for the detail UI.
+        }
+        try {
+          chaps = await api.fetchChapters(
+            token: widget.appState.token!,
+            baseUrl: widget.appState.baseUrl!,
+            itemId: widget.itemId,
+          );
+        } catch (_) {
+          // Chapters are optional; hide section when unavailable.
+        }
+      }
       _album = [
         EmbyApi.imageUrl(
           baseUrl: widget.appState.baseUrl!,
@@ -148,12 +191,281 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         _seasonsVirtual = virtualSeason;
         _featuredEpisode = firstEp;
         _similar = similar.items;
+        _playInfo = playInfo;
+        _chapters = chaps;
+        _selectedMediaSourceId = selectedMediaSourceId;
+        _selectedAudioStreamIndex = selectedAudioStreamIndex;
+        _selectedSubtitleStreamIndex = selectedSubtitleStreamIndex;
       });
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  static Map<String, dynamic>? _findMediaSource(PlaybackInfoResult info, String? id) {
+    final sources = info.mediaSources.cast<Map<String, dynamic>>();
+    if (sources.isEmpty) return null;
+    if (id != null && id.isNotEmpty) {
+      for (final s in sources) {
+        if ((s['Id'] as String? ?? '') == id) return s;
+      }
+    }
+    return sources.first;
+  }
+
+  static List<Map<String, dynamic>> _streamsOfType(Map<String, dynamic> ms, String type) {
+    final streams = (ms['MediaStreams'] as List?) ?? const [];
+    return streams
+        .where((e) => (e as Map)['Type'] == type)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  static Map<String, dynamic>? _defaultStream(List<Map<String, dynamic>> streams) {
+    for (final s in streams) {
+      if (s['IsDefault'] == true) return s;
+    }
+    return streams.isNotEmpty ? streams.first : null;
+  }
+
+  static String _streamLabel(Map<String, dynamic> stream, {bool includeCodec = true}) {
+    final title = (stream['DisplayTitle'] as String?) ??
+        (stream['Title'] as String?) ??
+        (stream['Language'] as String?) ??
+        '未知';
+    final codec = (stream['Codec'] as String?) ?? '';
+    return includeCodec && codec.isNotEmpty ? '$title ($codec)' : title;
+  }
+
+  static String _mediaSourceTitle(Map<String, dynamic> ms) {
+    return (ms['Name'] as String?) ?? (ms['Container'] as String?) ?? '默认版本';
+  }
+
+  String _mediaSourceSubtitle(Map<String, dynamic> ms) {
+    final size = ms['Size'];
+    final sizeGb = size is num ? (size / (1024 * 1024 * 1024)).toStringAsFixed(1) : null;
+    final bitrate = _asInt(ms['Bitrate']);
+    final bitrateMbps = bitrate != null ? (bitrate / 1000000).toStringAsFixed(1) : null;
+
+    final videoStreams = _streamsOfType(ms, 'Video');
+    final video = videoStreams.isNotEmpty ? videoStreams.first : null;
+    final height = _asInt(video?['Height']);
+    final vCodec = (ms['VideoCodec'] as String?) ?? (video?['Codec'] as String?);
+
+    final parts = <String>[];
+    if (height != null) parts.add('${height}p');
+    if (vCodec != null && vCodec.isNotEmpty) parts.add(vCodec.toUpperCase());
+    if (sizeGb != null) parts.add('$sizeGb GB');
+    if (bitrateMbps != null) parts.add('$bitrateMbps Mbps');
+    return parts.isEmpty ? '直连播放' : parts.join(' / ');
+  }
+
+  Widget _moviePlaybackOptionsCard(BuildContext context, PlaybackInfoResult info) {
+    final ms = _findMediaSource(info, _selectedMediaSourceId);
+    if (ms == null) return const SizedBox.shrink();
+
+    final audioStreams = _streamsOfType(ms, 'Audio');
+    final subtitleStreams = _streamsOfType(ms, 'Subtitle');
+
+    final defaultAudio = _defaultStream(audioStreams);
+    final selectedAudio = _selectedAudioStreamIndex != null
+        ? audioStreams.firstWhere(
+            (s) => _asInt(s['Index']) == _selectedAudioStreamIndex,
+            orElse: () => defaultAudio ?? const <String, dynamic>{},
+          )
+        : defaultAudio;
+
+    final defaultSub = _defaultStream(subtitleStreams);
+    final Map<String, dynamic>? selectedSub;
+    if (_selectedSubtitleStreamIndex == -1) {
+      selectedSub = null;
+    } else if (_selectedSubtitleStreamIndex != null) {
+      selectedSub = subtitleStreams.firstWhere(
+        (s) => _asInt(s['Index']) == _selectedSubtitleStreamIndex,
+        orElse: () => defaultSub ?? const <String, dynamic>{},
+      );
+    } else {
+      selectedSub = defaultSub;
+    }
+
+    final hasSubs = subtitleStreams.isNotEmpty;
+    final subtitleText = _selectedSubtitleStreamIndex == -1
+        ? '关闭'
+        : selectedSub != null && selectedSub.isNotEmpty
+            ? _streamLabel(selectedSub, includeCodec: false)
+            : hasSubs
+                ? '默认'
+                : '关闭';
+
+    final audioText = selectedAudio != null && selectedAudio.isNotEmpty
+        ? _streamLabel(selectedAudio, includeCodec: false) +
+            (selectedAudio == defaultAudio ? ' (默认)' : '')
+        : '默认';
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.video_file),
+            title: Text(_mediaSourceTitle(ms)),
+            subtitle: Text(_mediaSourceSubtitle(ms)),
+            trailing: const Icon(Icons.arrow_drop_down),
+            onTap: () => _pickMediaSource(context, info),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.audiotrack),
+            title: Text(audioText),
+            trailing: const Icon(Icons.arrow_drop_down),
+            onTap: audioStreams.isEmpty ? null : () => _pickAudioStream(context, ms),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.subtitles),
+            title: Text(subtitleText),
+            trailing: const Icon(Icons.arrow_drop_down),
+            onTap: hasSubs ? () => _pickSubtitleStream(context, ms) : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickMediaSource(BuildContext context, PlaybackInfoResult info) async {
+    final sources = info.mediaSources.cast<Map<String, dynamic>>();
+    if (sources.isEmpty) return;
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView(
+            children: [
+              const ListTile(title: Text('版本选择')),
+              ...sources.map((ms) {
+                final id = ms['Id'] as String? ?? '';
+                final selectedNow = id.isNotEmpty && id == _selectedMediaSourceId;
+                return ListTile(
+                  leading: Icon(selectedNow ? Icons.check_circle : Icons.circle_outlined),
+                  title: Text(_mediaSourceTitle(ms)),
+                  subtitle: Text(_mediaSourceSubtitle(ms)),
+                  onTap: () => Navigator.of(ctx).pop(id),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (selected == null || selected.isEmpty) return;
+    setState(() {
+      _selectedMediaSourceId = selected;
+      // Streams differ between sources; reset to defaults.
+      _selectedAudioStreamIndex = null;
+      _selectedSubtitleStreamIndex = null;
+    });
+  }
+
+  Future<void> _pickAudioStream(BuildContext context, Map<String, dynamic> ms) async {
+    final audioStreams = _streamsOfType(ms, 'Audio');
+    if (audioStreams.isEmpty) return;
+
+    final selected = await showModalBottomSheet<int?>(
+      context: context,
+      builder: (ctx) {
+        final def = _defaultStream(audioStreams);
+        final defIndex = _asInt(def?['Index']);
+        return SafeArea(
+          child: ListView(
+            children: [
+              const ListTile(title: Text('音轨选择')),
+              ListTile(
+                leading: Icon(_selectedAudioStreamIndex == null ? Icons.check : Icons.circle_outlined),
+                title: const Text('默认'),
+                onTap: () => Navigator.of(ctx).pop(null),
+              ),
+              ...audioStreams.map((s) {
+                final idx = _asInt(s['Index']);
+                final selectedNow = idx != null && idx == _selectedAudioStreamIndex;
+                final title = _streamLabel(s, includeCodec: false);
+                return ListTile(
+                  leading: Icon(selectedNow ? Icons.check_circle : Icons.circle_outlined),
+                  title: Text(idx == defIndex ? '$title (默认)' : title),
+                  subtitle: (s['Codec'] as String?)?.isNotEmpty == true
+                      ? Text(s['Codec'] as String)
+                      : null,
+                  onTap: idx == null ? null : () => Navigator.of(ctx).pop(idx),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    setState(() => _selectedAudioStreamIndex = selected);
+  }
+
+  Future<void> _pickSubtitleStream(BuildContext context, Map<String, dynamic> ms) async {
+    final subtitleStreams = _streamsOfType(ms, 'Subtitle');
+    if (subtitleStreams.isEmpty) return;
+
+    final selected = await showModalBottomSheet<int?>(
+      context: context,
+      builder: (ctx) {
+        final def = _defaultStream(subtitleStreams);
+        final defIndex = _asInt(def?['Index']);
+        final isOff = _selectedSubtitleStreamIndex == -1;
+        final isDefault = _selectedSubtitleStreamIndex == null;
+        return SafeArea(
+          child: ListView(
+            children: [
+              const ListTile(title: Text('字幕选择')),
+              ListTile(
+                leading: Icon(isOff ? Icons.check : Icons.circle_outlined),
+                title: const Text('关闭'),
+                onTap: () => Navigator.of(ctx).pop(-1),
+              ),
+              ListTile(
+                leading: Icon(isDefault ? Icons.check : Icons.circle_outlined),
+                title: const Text('默认'),
+                onTap: () => Navigator.of(ctx).pop(null),
+              ),
+              ...subtitleStreams.map((s) {
+                final idx = _asInt(s['Index']);
+                final selectedNow = idx != null && idx == _selectedSubtitleStreamIndex;
+                final title = _streamLabel(s, includeCodec: false);
+                return ListTile(
+                  leading: Icon(selectedNow ? Icons.check_circle : Icons.circle_outlined),
+                  title: Text(idx == defIndex ? '$title (默认)' : title),
+                  subtitle: (s['Codec'] as String?)?.isNotEmpty == true
+                      ? Text(s['Codec'] as String)
+                      : null,
+                  onTap: idx == null ? null : () => Navigator.of(ctx).pop(idx),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    setState(() => _selectedSubtitleStreamIndex = selected);
   }
 
   @override
@@ -168,6 +480,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       );
     }
     final item = _detail!;
+    final isSeries = item.type.toLowerCase() == 'series';
+    final runtime =
+        item.runTimeTicks != null ? Duration(microseconds: item.runTimeTicks! ~/ 10) : null;
     final hero = EmbyApi.imageUrl(
       baseUrl: widget.appState.baseUrl!,
       itemId: item.id,
@@ -219,7 +534,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               if (item.premiereDate != null)
                                 _pill(context, item.premiereDate!.split('T').first),
                               if (item.genres.isNotEmpty) _pill(context, item.genres.first),
-                              _pill(context, '${_seasons.length} 季'),
+                              if (isSeries)
+                                _pill(context, '${_seasons.length} 季')
+                              else if (runtime != null)
+                                _pill(context, _fmt(runtime)),
                             ],
                           ),
                         ],
@@ -251,9 +569,40 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           );
                         },
                     ),
+                    if (!isSeries) ...[
+                      if (_playInfo != null) _moviePlaybackOptionsCard(context, _playInfo!),
+                      if (_playInfo != null) const SizedBox(height: 12),
+                      _playButton(
+                        context,
+                        label: '播放',
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => PlayNetworkPage(
+                                title: item.name,
+                                itemId: item.id,
+                                appState: widget.appState,
+                                isTv: widget.isTv,
+                                mediaSourceId: _selectedMediaSourceId,
+                                audioStreamIndex: _selectedAudioStreamIndex,
+                                subtitleStreamIndex: _selectedSubtitleStreamIndex,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Text(item.overview, style: Theme.of(context).textTheme.bodyMedium),
                     const SizedBox(height: 16),
+                    if (_chapters.isNotEmpty) ...[
+                      _chaptersSection(context, _chapters),
+                      const SizedBox(height: 16),
+                    ],
+                    if (item.people.isNotEmpty) ...[
+                      _peopleSection(context, item.people, widget.appState),
+                      const SizedBox(height: 16),
+                    ],
                     if (_album.isNotEmpty) ...[
                       Text('相册', style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 8),
@@ -741,6 +1090,62 @@ String _fmt(Duration d) {
   final s = d.inSeconds.remainder(60);
   if (h > 0) return '${h}h ${m}m ${s}s';
   return '${m}m ${s}s';
+}
+
+Widget _chaptersSection(BuildContext context, List<ChapterInfo> chapters) {
+  final width = MediaQuery.of(context).size.width;
+  final crossAxisCount = width >= 900 ? 4 : (width >= 600 ? 3 : 2);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text('章节', style: Theme.of(context).textTheme.titleMedium),
+      const SizedBox(height: 8),
+      GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 16 / 9,
+        ),
+        itemCount: chapters.length,
+        itemBuilder: (context, index) {
+          final c = chapters[index];
+          return Card(
+            clipBehavior: Clip.antiAlias,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  const Icon(Icons.menu_book, size: 28),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          c.name.isNotEmpty ? c.name : 'Chapter ${index + 1}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _fmt(c.start),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    ],
+  );
 }
 
 Widget _pill(BuildContext context, String text) => Container(
