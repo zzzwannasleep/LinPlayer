@@ -57,6 +57,9 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
       - name: Flutter analyze
         run: flutter analyze
 
@@ -99,6 +102,10 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Generate launcher icons
+        shell: pwsh
+        run: dart run flutter_launcher_icons
+
       - name: Compute build version
         shell: pwsh
         env:
@@ -109,13 +116,11 @@ jobs:
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
-      - name: Regenerate Windows platform scaffolding if needed
+      - name: Verify Windows platform scaffolding
         shell: pwsh
         run: |
           if (-not (Test-Path "windows/flutter")) {
-            flutter create --platforms=windows .
-          } else {
-            Write-Host "windows/flutter exists; skip flutter create."
+            throw "windows/flutter is missing. Commit the Windows platform files; do not run flutter create in CI."
           }
 
       - name: Build Windows executable
@@ -225,6 +230,9 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
       - name: Compute build version
         shell: bash
         env:
@@ -308,6 +316,9 @@ jobs:
 
       - name: Get Flutter dependencies
         run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
 
       - name: Compute build version
         shell: bash

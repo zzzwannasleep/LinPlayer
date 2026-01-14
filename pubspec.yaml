@@ -39,22 +39,17 @@ dependency_overrides:
     path: packages/media_kit_patched
 
 flutter_launcher_icons:
-  image_path: assets/app_icon.png
+  image_path: assets/app_icon.jpg
   android: "ic_launcher"
   ios: true
   remove_alpha_ios: true
-  web:
-    generate: true
-    image_path: assets/app_icon.png
-    background_color: "#ffffff"
-    theme_color: "#ffffff"
   windows:
     generate: true
-    image_path: assets/app_icon.png
+    image_path: assets/app_icon.jpg
     icon_size: 256
   macos:
     generate: true
-    image_path: assets/app_icon.png
+    image_path: assets/app_icon.jpg
 
 flutter:
   uses-material-design: true
