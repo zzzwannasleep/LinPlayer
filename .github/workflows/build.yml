@@ -6,6 +6,13 @@ name: Build Flutter App
 # This workflow is manual (use Actions tab -> Run workflow).
 on:
   workflow_dispatch:
+    inputs:
+      build_name:
+        description: Version name (e.g. 1.2.3)
+        required: true
+      build_number:
+        description: Build number (integer, used as Android versionCode)
+        required: true
 
 jobs:
   # Job for building the Android APK
@@ -32,6 +39,13 @@ jobs:
         with:
           channel: 'stable' # Use stable channel
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       # 3.5 Cache pub dependencies
       - name: Cache Flutter pub packages
         uses: actions/cache@v4
@@ -57,7 +71,7 @@ jobs:
 
       # 5. Build the APK in release mode
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       # 6. Upload the generated APK file as a build artifact
       - name: Upload APK artifact
@@ -98,17 +112,31 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
       
+      - name: Compute build version
+        shell: pwsh
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: .github/scripts/compute_version.ps1
+
       # 4. Enable windows-desktop support in Flutter
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
       # 4.5. Ensure Windows platform files are present (handles missing windows/flutter)
       - name: Regenerate Windows platform scaffolding if needed
-        run: flutter create --platforms=windows .
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "windows/flutter")) {
+            flutter create --platforms=windows .
+          } else {
+            Write-Host "windows/flutter exists; skip flutter create."
+          }
 
       # 5. Build the Windows executable in release mode
       - name: Build Windows executable
-        run: flutter build windows --release
+        shell: pwsh
+        run: flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:BUILD_NUMBER
 
       # 5.5. Bundle MSVC runtime DLLs into the release folder (avoid missing VC runtime on target PCs)
       - name: Copy MSVC runtime DLLs
@@ -163,19 +191,14 @@ jobs:
             throw "Release folder not found after build."
           }
 
-          $versionLine = (Get-Content pubspec.yaml | Select-String -Pattern '^version:' | Select-Object -First 1).Line
-          if (-not $versionLine) { throw "Could not read version from pubspec.yaml." }
-          $fullVersion = $versionLine.Split(':', 2)[1].Trim()
-          $appVersion = $fullVersion.Split('+')[0].Trim()
-          $buildNumber = $null
-          if ($fullVersion -match '\\+(\\d+)$') { $buildNumber = $Matches[1] }
-          if ($buildNumber) { $appVersion = "$appVersion.$buildNumber" }
+          if ([string]::IsNullOrWhiteSpace($env:APP_VERSION) -or [string]::IsNullOrWhiteSpace($env:APP_VERSION_FULL)) {
+            throw "Missing APP_VERSION/APP_VERSION_FULL env vars. Did 'Compute build version' run?"
+          }
 
           $env:SOURCE_DIR = (Resolve-Path $release).Path
           $env:OUTPUT_DIR = (Resolve-Path ".").Path
           $env:APP_ARCH = "x64"
-          $env:APP_VERSION = $appVersion
-          $env:APP_VERSION_FULL = $fullVersion
+          # APP_VERSION / APP_VERSION_FULL already set by compute_version.ps1
 
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = Join-Path $env:ProgramFiles "Inno Setup 6\\ISCC.exe" }

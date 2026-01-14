@@ -6,7 +6,7 @@
 ; - APP_ARCH   : architecture label (e.g. x64)
 
 #define MyAppName "LinPlayer"
-#define MyAppExeName "lin_player.exe"
+#define MyAppExeName "LinPlayer.exe"
 #define MyAppVersion GetEnv("APP_VERSION")
 #define MyAppVersionFull GetEnv("APP_VERSION_FULL")
 #define MySourceDir GetEnv("SOURCE_DIR")

@@ -12,6 +12,12 @@ on:
           - stable
           - beta
           - master
+      build_name:
+        description: Version name (e.g. 1.2.3)
+        required: true
+      build_number:
+        description: Build number (integer)
+        required: true
 
 jobs:
   build-macos-dmg:
@@ -54,8 +60,15 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Build macOS app
-        run: flutter build macos --release
+        run: flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       - name: Create DMG installer
         shell: bash

@@ -12,6 +12,12 @@ on:
           - stable
           - beta
           - master
+      build_name:
+        description: Version name (e.g. 1.2.3)
+        required: true
+      build_number:
+        description: Build number (integer)
+        required: true
 
 jobs:
   build-ios-unsigned-ipa:
@@ -41,11 +47,18 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Build iOS app (no codesign)
         shell: bash
         run: |
           set -euo pipefail
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       - name: Package unsigned IPA
         shell: bash

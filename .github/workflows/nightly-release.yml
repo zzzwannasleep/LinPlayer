@@ -1,9 +1,14 @@
 name: Nightly Release
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      build_name:
+        description: Version name (e.g. 1.2.3)
+        required: true
+      build_number:
+        description: Build number (integer)
+        required: true
 
 concurrency:
   group: nightly-release
@@ -46,6 +51,13 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Flutter analyze
         run: flutter analyze
 
@@ -53,7 +65,7 @@ jobs:
         run: flutter test
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -88,14 +100,28 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Compute build version
+        shell: pwsh
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: .github/scripts/compute_version.ps1
+
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
 
       - name: Regenerate Windows platform scaffolding if needed
-        run: flutter create --platforms=windows .
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "windows/flutter")) {
+            flutter create --platforms=windows .
+          } else {
+            Write-Host "windows/flutter exists; skip flutter create."
+          }
 
       - name: Build Windows executable
-        run: flutter build windows --release
+        shell: pwsh
+        run: flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:BUILD_NUMBER
 
       - name: Copy MSVC runtime DLLs
         shell: pwsh
@@ -147,19 +173,14 @@ jobs:
             throw "Release folder not found after build."
           }
 
-          $versionLine = (Get-Content pubspec.yaml | Select-String -Pattern '^version:' | Select-Object -First 1).Line
-          if (-not $versionLine) { throw "Could not read version from pubspec.yaml." }
-          $fullVersion = $versionLine.Split(':', 2)[1].Trim()
-          $appVersion = $fullVersion.Split('+')[0].Trim()
-          $buildNumber = $null
-          if ($fullVersion -match '\\+(\\d+)$') { $buildNumber = $Matches[1] }
-          if ($buildNumber) { $appVersion = "$appVersion.$buildNumber" }
+          if ([string]::IsNullOrWhiteSpace($env:APP_VERSION) -or [string]::IsNullOrWhiteSpace($env:APP_VERSION_FULL)) {
+            throw "Missing APP_VERSION/APP_VERSION_FULL env vars. Did 'Compute build version' run?"
+          }
 
           $env:SOURCE_DIR = (Resolve-Path $release).Path
           $env:OUTPUT_DIR = (Resolve-Path ".").Path
           $env:APP_ARCH = "x64"
-          $env:APP_VERSION = $appVersion
-          $env:APP_VERSION_FULL = $fullVersion
+          # APP_VERSION / APP_VERSION_FULL already set by compute_version.ps1
 
           $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\\ISCC.exe"
           if (-not (Test-Path $iscc)) { $iscc = Join-Path $env:ProgramFiles "Inno Setup 6\\ISCC.exe" }
@@ -204,11 +225,18 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Build iOS app (no codesign)
         shell: bash
         run: |
           set -euo pipefail
-          flutter build ios --release --no-codesign
+          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       - name: Package unsigned IPA
         shell: bash
@@ -277,8 +305,15 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Build macOS app
-        run: flutter build macos --release
+        run: flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       - name: Create DMG installer
         shell: bash
@@ -335,6 +370,13 @@ jobs:
             sudo apt-get install -y gh
           fi
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Update nightly tag
         shell: bash
         run: |
@@ -348,7 +390,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NOTES="Nightly build\n\n- Commit: ${GITHUB_SHA}\n- Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+          NOTES="Nightly build\n\n- Version: ${VERSION_FULL}\n- Commit: ${GITHUB_SHA}\n- Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
 
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly --title "Nightly" --notes "$NOTES"
