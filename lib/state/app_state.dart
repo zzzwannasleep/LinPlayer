@@ -218,7 +218,7 @@ class AppState extends ChangeNotifier {
           includeItemTypes: 'Series,Movie',
           recursive: true,
           excludeFolders: false,
-          limit: 80,
+          limit: 12,
           sortBy: 'DateCreated',
         );
         libraryShows['lib_${lib.id}'] = fetched.items;

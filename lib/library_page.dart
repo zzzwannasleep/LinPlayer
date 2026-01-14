@@ -59,10 +59,10 @@ class _LibraryPageState extends State<LibraryPage> {
                       padding: const EdgeInsets.all(12),
                       child: GridView.builder(
                         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 200, // 与首页卡片接近
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          childAspectRatio: 1.25, // 横版卡片 + 标题
+                          maxCrossAxisExtent: 170,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                          childAspectRatio: 1.33,
                         ),
                         itemCount: libs.length,
                         itemBuilder: (context, index) {
@@ -71,7 +71,7 @@ class _LibraryPageState extends State<LibraryPage> {
                             baseUrl: widget.appState.baseUrl!,
                             itemId: lib.id,
                             token: widget.appState.token!,
-                            maxWidth: 500,
+                            maxWidth: 400,
                           );
                           return InkWell(
                             borderRadius: BorderRadius.circular(12),

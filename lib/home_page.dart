@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'library_page.dart';
+import 'library_items_page.dart';
 import 'player_screen.dart';
 import 'play_network_page.dart';
 import 'services/emby_api.dart';
@@ -210,11 +211,11 @@ class _HomeBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sections = <(String, List<MediaItem>)>[];
+    final sections = <HomeEntry>[];
     for (final entry in appState.homeEntries) {
       final shows = entry.items;
       if (shows.isNotEmpty) {
-        sections.add((entry.displayName, shows));
+        sections.add(entry);
       }
     }
 
@@ -240,68 +241,160 @@ class _HomeBody extends StatelessWidget {
           ],
           if (loading) const LinearProgressIndicator(),
           for (final sec in sections)
-            if (sec.$2.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Text(sec.$1, style: Theme.of(context).textTheme.titleLarge),
-          ),
-          GridView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 2 / 3,
-            ),
-            itemCount: sec.$2.length,
-            itemBuilder: (context, index) {
-              final item = sec.$2[index];
-              return _HomeCard(
-                item: item,
+            if (sec.items.isNotEmpty) ...[
+              _HomeSectionHeader(
+                title: sec.displayName,
+                onTap: () {
+                  if (!sec.key.startsWith('lib_')) return;
+                  final libId = sec.key.substring(4);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LibraryItemsPage(
+                        appState: appState,
+                        parentId: libId,
+                        title: sec.displayName,
+                        isTv: isTv,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              _HomeSectionCarousel(
+                items: sec.items,
                 appState: appState,
                 enableGlass: enableGlass,
                 isTv: isTv,
-                onTap: () {
-                  final type = item.type.toLowerCase();
-                  if (type == 'series') {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ShowDetailPage(
-                          itemId: item.id,
-                          title: item.name,
-                          appState: appState,
-                          isTv: isTv,
-                        ),
-                      ),
-                    );
-                  } else {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => PlayNetworkPage(
-                          title: item.name,
-                          itemId: item.id,
-                          appState: appState,
-                          isTv: isTv,
-                        ),
-                      ),
-                    );
-                  }
-                },
-              );
-            },
-          ),
+              ),
             ]
             else
               const SizedBox.shrink(),
-          if (sections.every((e) => e.$2.isEmpty) && !loading)
+          if (sections.every((e) => e.items.isEmpty) && !loading)
             const Padding(
               padding: EdgeInsets.all(24),
               child: Center(child: Text('暂无可展示内容')),
             ),
         ],
       ),
+    );
+  }
+}
+
+class _HomeSectionHeader extends StatelessWidget {
+  const _HomeSectionHeader({required this.title, required this.onTap});
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Text('＞', style: TextStyle(color: Colors.white70, fontSize: 20, height: 1)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeSectionCarousel extends StatelessWidget {
+  const _HomeSectionCarousel({
+    required this.items,
+    required this.appState,
+    required this.enableGlass,
+    required this.isTv,
+  });
+
+  final List<MediaItem> items;
+  final AppState appState;
+  final bool enableGlass;
+  final bool isTv;
+
+  static const _maxItems = 12;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const padding = 16.0;
+        const spacing = 10.0;
+        const visible = 3.0;
+        final maxCount = items.length < _maxItems ? items.length : _maxItems;
+
+        final itemWidth =
+            (constraints.maxWidth - padding * 2 - spacing * (visible - 1)) / visible;
+        final imageHeight = itemWidth * 3 / 2;
+        final listHeight = imageHeight + 44; // card padding + title line
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: SizedBox(
+            height: listHeight,
+            child: ListView.separated(
+              cacheExtent: 0,
+              padding: const EdgeInsets.symmetric(horizontal: padding),
+              scrollDirection: Axis.horizontal,
+              itemCount: maxCount,
+              separatorBuilder: (_, __) => const SizedBox(width: spacing),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return SizedBox(
+                  width: itemWidth,
+                  child: _HomeCard(
+                    item: item,
+                    appState: appState,
+                    enableGlass: enableGlass,
+                    isTv: isTv,
+                    onTap: () {
+                      final type = item.type.toLowerCase();
+                      if (type == 'series') {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => ShowDetailPage(
+                              itemId: item.id,
+                              title: item.name,
+                              appState: appState,
+                              isTv: isTv,
+                            ),
+                          ),
+                        );
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PlayNetworkPage(
+                              title: item.name,
+                              itemId: item.id,
+                              appState: appState,
+                              isTv: isTv,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -328,19 +421,9 @@ class _HomeCard extends StatelessWidget {
             baseUrl: appState.baseUrl!,
             itemId: item.id,
             token: appState.token!,
-            maxWidth: 500,
+            maxWidth: 320,
           )
         : null;
-
-    String subtitle = item.type;
-    if (item.type == 'Episode') {
-      final s = item.seasonNumber ?? 0;
-      final e = item.episodeNumber ?? 0;
-      subtitle = 'S${s.toString().padLeft(2, '0')}E${e.toString().padLeft(2, '0')}';
-      if (item.seriesName.isNotEmpty) {
-        subtitle = '${item.seriesName} · $subtitle';
-      }
-    }
 
     final card = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -348,7 +431,7 @@ class _HomeCard extends StatelessWidget {
         AspectRatio(
           aspectRatio: 2 / 3,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             child: image != null
                 ? CachedNetworkImage(
                     imageUrl: image,
@@ -364,7 +447,7 @@ class _HomeCard extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           item.name,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -372,28 +455,28 @@ class _HomeCard extends StatelessWidget {
     );
 
     return InkWell(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(12),
       onTap: onTap,
       child: enableGlass
           ? ClipRRect(
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                 child: Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.08),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: card,
                 ),
               ),
             )
           : Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               child: Padding(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(6),
                 child: card,
               ),
             ),

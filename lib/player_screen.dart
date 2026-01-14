@@ -205,16 +205,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       },
               ),
               IconButton(
-                icon: Icon(_playerService.isPlaying ? Icons.pause : Icons.play_arrow),
-                onPressed: !_playerService.isInitialized
-                    ? null
-                    : () {
-                        setState(() {
-                          _playerService.isPlaying ? _playerService.pause() : _playerService.play();
-                        });
-                      },
-              ),
-              IconButton(
                 icon: const Icon(Icons.forward_10),
                 onPressed: !_playerService.isInitialized
                     ? null

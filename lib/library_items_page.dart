@@ -77,7 +77,10 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
   @override
   Widget build(BuildContext context) {
     final items = widget.appState.getItems(widget.parentId);
-    final enableGlass = !_isTv(context);
+    final isTv = _isTv(context);
+    final enableGlass = !isTv;
+    final width = MediaQuery.of(context).size.width;
+    final crossAxisCount = isTv ? 6 : (width >= 600 ? 5 : 4);
 
     return Scaffold(
       appBar: AppBar(
@@ -89,11 +92,11 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
               padding: const EdgeInsets.all(12),
               child: GridView.builder(
                 controller: _scroll,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  childAspectRatio: 2 / 3,
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.7,
                 ),
                 itemCount: items.length + (_loadingMore ? 1 : 0),
                 itemBuilder: (context, index) {
@@ -105,7 +108,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                     item: item,
                     appState: widget.appState,
                     enableGlass: enableGlass,
-                    isTv: _isTv(context),
+                    isTv: isTv,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -113,7 +116,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                             itemId: item.id,
                             title: item.name,
                             appState: widget.appState,
-                            isTv: widget.isTv,
+                            isTv: isTv,
                           ),
                         ),
                       );
@@ -149,7 +152,7 @@ class _GridItem extends StatelessWidget {
             itemId: item.id,
             token: appState.token!,
             imageType: 'Primary',
-            maxWidth: 500,
+            maxWidth: 320,
           )
         : null;
 
@@ -163,7 +166,7 @@ class _GridItem extends StatelessWidget {
     }
 
     final poster = ClipRRect(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: Stack(
         children: [
           Positioned.fill(
@@ -181,14 +184,14 @@ class _GridItem extends StatelessWidget {
               left: 6,
               top: 6,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   badge,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -197,7 +200,7 @@ class _GridItem extends StatelessWidget {
     );
 
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -208,7 +211,7 @@ class _GridItem extends StatelessWidget {
             item.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),
