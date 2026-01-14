@@ -8,6 +8,7 @@ import 'library_page.dart';
 import 'library_items_page.dart';
 import 'player_screen.dart';
 import 'play_network_page.dart';
+import 'settings_page.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'show_detail_page.dart';
@@ -109,7 +110,7 @@ class _GlobalSearchDelegate extends SearchDelegate<String> {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _index = 0; // 0 home, 1 libraries, 2 local
+  int _index = 0; // 0 home, 1 local, 2 settings
   bool _loading = true;
 
   @override
@@ -148,8 +149,15 @@ class _HomePageState extends State<HomePage> {
         return AnimatedBuilder(
           animation: widget.appState,
           builder: (context, _) {
-            final domains = widget.appState.domains;
+            final pluginDomains = widget.appState.domains;
+            final customEntries = widget.appState.customDomains
+                .map((d) => DomainInfo(name: d.name, url: d.url))
+                .toList();
             final current = widget.appState.baseUrl;
+            final entries = <({DomainInfo domain, bool isCustom})>[
+              for (final d in customEntries) (domain: d, isCustom: true),
+              for (final d in pluginDomains) (domain: d, isCustom: false),
+            ];
             return Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Column(
@@ -164,13 +172,90 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ),
                       IconButton(
+                        tooltip: '添加自定义线路',
+                        onPressed: () async {
+                          final nameCtrl = TextEditingController();
+                          final urlCtrl = TextEditingController();
+                          final remarkCtrl = TextEditingController();
+                          final result = await showDialog<Map<String, String>>(
+                            context: context,
+                            builder: (dctx) => AlertDialog(
+                              title: const Text('添加自定义线路'),
+                              content: SingleChildScrollView(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    TextField(
+                                      controller: nameCtrl,
+                                      decoration: const InputDecoration(
+                                        labelText: '名称',
+                                        hintText: '例如：直连 / 备用 / 移动',
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    TextField(
+                                      controller: urlCtrl,
+                                      decoration: const InputDecoration(
+                                        labelText: '地址',
+                                        hintText: '例如：https://emby.example.com:8920',
+                                      ),
+                                      keyboardType: TextInputType.url,
+                                    ),
+                                    const SizedBox(height: 10),
+                                    TextField(
+                                      controller: remarkCtrl,
+                                      decoration: const InputDecoration(
+                                        labelText: '备注（可选）',
+                                        hintText: '例如：挂梯 / 移动 / 低延迟…',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(dctx).pop(),
+                                  child: const Text('取消'),
+                                ),
+                                FilledButton(
+                                  onPressed: () {
+                                    Navigator.of(dctx).pop({
+                                      'name': nameCtrl.text.trim(),
+                                      'url': urlCtrl.text.trim(),
+                                      'remark': remarkCtrl.text.trim(),
+                                    });
+                                  },
+                                  child: const Text('保存'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (result == null) return;
+                          try {
+                            await widget.appState.addCustomDomain(
+                              name: result['name'] ?? '',
+                              url: result['url'] ?? '',
+                              remark: (result['remark'] ?? '').trim().isEmpty
+                                  ? null
+                                  : (result['remark'] ?? '').trim(),
+                            );
+                          } catch (e) {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(e.toString())),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.add),
+                      ),
+                      IconButton(
                         tooltip: '刷新',
                         onPressed: widget.appState.isLoading ? null : widget.appState.refreshDomains,
                         icon: const Icon(Icons.refresh),
                       ),
                     ],
                   ),
-                  if (domains.isEmpty && !widget.appState.isLoading)
+                  if (entries.isEmpty && !widget.appState.isLoading)
                     const Padding(
                       padding: EdgeInsets.only(top: 10, bottom: 8),
                       child: Text('暂无线路（未部署扩展时属于正常情况）'),
@@ -179,10 +264,12 @@ class _HomePageState extends State<HomePage> {
                     Flexible(
                       child: ListView.separated(
                         shrinkWrap: true,
-                        itemCount: domains.length,
+                        itemCount: entries.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (context, index) {
-                          final d = domains[index];
+                          final entry = entries[index];
+                          final d = entry.domain;
+                          final isCustom = entry.isCustom;
                           final name = d.name.trim().isNotEmpty ? d.name.trim() : d.url;
                           final remark = widget.appState.domainRemark(d.url);
                           final selected = current == d.url;
@@ -246,8 +333,131 @@ class _HomePageState extends State<HomePage> {
                                 if (selected) const Icon(Icons.check),
                               ],
                             ),
+                            onLongPress: !isCustom
+                                ? null
+                                : () async {
+                                    final action = await showModalBottomSheet<String>(
+                                      context: context,
+                                      showDragHandle: true,
+                                      builder: (bctx) => SafeArea(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            ListTile(
+                                              title: Text(name),
+                                              subtitle: Text(d.url),
+                                            ),
+                                            const Divider(height: 1),
+                                            ListTile(
+                                              leading: const Icon(Icons.edit_outlined),
+                                              title: const Text('编辑'),
+                                              onTap: () => Navigator.of(bctx).pop('edit'),
+                                            ),
+                                            ListTile(
+                                              leading: const Icon(Icons.delete_outline),
+                                              title: const Text('删除'),
+                                              onTap: () => Navigator.of(bctx).pop('delete'),
+                                            ),
+                                            const SizedBox(height: 8),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                    if (action == null) return;
+                                    if (!context.mounted) return;
+
+                                    if (action == 'delete') {
+                                      final ok = await showDialog<bool>(
+                                        context: context,
+                                        builder: (dctx) => AlertDialog(
+                                          title: const Text('删除线路？'),
+                                          content: Text('将删除“$name”。'),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.of(dctx).pop(false),
+                                              child: const Text('取消'),
+                                            ),
+                                            FilledButton(
+                                              onPressed: () => Navigator.of(dctx).pop(true),
+                                              child: const Text('删除'),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (ok != true) return;
+                                      await widget.appState.removeCustomDomain(d.url);
+                                      return;
+                                    }
+
+                                    final nameCtrl = TextEditingController(text: d.name);
+                                    final urlCtrl = TextEditingController(text: d.url);
+                                    final remarkCtrl = TextEditingController(text: remark ?? '');
+                                    final result = await showDialog<Map<String, String>>(
+                                      context: context,
+                                      builder: (dctx) => AlertDialog(
+                                        title: const Text('编辑自定义线路'),
+                                        content: SingleChildScrollView(
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              TextField(
+                                                controller: nameCtrl,
+                                                decoration: const InputDecoration(labelText: '名称'),
+                                              ),
+                                              const SizedBox(height: 10),
+                                              TextField(
+                                                controller: urlCtrl,
+                                                decoration: const InputDecoration(labelText: '地址'),
+                                                keyboardType: TextInputType.url,
+                                              ),
+                                              const SizedBox(height: 10),
+                                              TextField(
+                                                controller: remarkCtrl,
+                                                decoration: const InputDecoration(labelText: '备注（可选）'),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.of(dctx).pop(),
+                                            child: const Text('取消'),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () {
+                                              Navigator.of(dctx).pop({
+                                                'name': nameCtrl.text.trim(),
+                                                'url': urlCtrl.text.trim(),
+                                                'remark': remarkCtrl.text.trim(),
+                                              });
+                                            },
+                                            child: const Text('保存'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (result == null) return;
+                                    try {
+                                      await widget.appState.updateCustomDomain(
+                                        d.url,
+                                        name: result['name'] ?? '',
+                                        url: result['url'] ?? '',
+                                        remark: (result['remark'] ?? '').trim().isEmpty
+                                            ? null
+                                            : (result['remark'] ?? '').trim(),
+                                      );
+                                    } catch (e) {
+                                      if (!context.mounted) return;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text(e.toString())),
+                                      );
+                                    }
+                                  },
                             onTap: () async {
                               await widget.appState.setBaseUrl(d.url);
+                              // Best-effort: reload content after line switch.
+                              // ignore: unawaited_futures
+                              widget.appState.refreshLibraries().then((_) => widget.appState.loadHome());
                               if (ctx.mounted) Navigator.of(ctx).pop();
                             },
                           );
@@ -288,41 +498,57 @@ class _HomePageState extends State<HomePage> {
         isTv: isTv,
         showSearchBar: true,
       ),
-      LibraryPage(appState: widget.appState),
-      const PlayerScreen(),
+      PlayerScreen(appState: widget.appState),
+      SettingsPage(appState: widget.appState),
     ];
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.appState.activeServer?.name ?? 'LinPlayer'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.alt_route_outlined),
-            tooltip: '线路',
-            onPressed: _showRoutePicker,
+    return AnimatedBuilder(
+      animation: widget.appState,
+      builder: (context, _) {
+        return Scaffold(
+          appBar: _index == 0
+              ? AppBar(
+                  title: Text(widget.appState.activeServer?.name ?? 'LinPlayer'),
+                  actions: [
+                    IconButton(
+                      icon: const Icon(Icons.video_library_outlined),
+                      tooltip: '媒体库',
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => LibraryPage(appState: widget.appState)),
+                        );
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.alt_route_outlined),
+                      tooltip: '线路',
+                      onPressed: _showRoutePicker,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.palette_outlined),
+                      tooltip: '主题',
+                      onPressed: _showThemeSheet,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.storage_outlined),
+                      tooltip: '服务器',
+                      onPressed: _switchServer,
+                    ),
+                  ],
+                )
+              : null,
+          body: pages[_index],
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: (i) => setState(() => _index = i),
+            destinations: const [
+              NavigationDestination(icon: Icon(Icons.home_outlined), label: '首页'),
+              NavigationDestination(icon: Icon(Icons.folder_open), label: '本地'),
+              NavigationDestination(icon: Icon(Icons.settings_outlined), label: '设置'),
+            ],
           ),
-          IconButton(
-            icon: const Icon(Icons.palette_outlined),
-            tooltip: '主题',
-            onPressed: _showThemeSheet,
-          ),
-          IconButton(
-            icon: const Icon(Icons.storage_outlined),
-            tooltip: '服务器',
-            onPressed: _switchServer,
-          ),
-        ],
-      ),
-      body: pages[_index],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: '首页'),
-          NavigationDestination(icon: Icon(Icons.video_library_outlined), label: '媒体库'),
-          NavigationDestination(icon: Icon(Icons.play_circle_outline), label: '本地'),
-        ],
-      ),
+        );
+      },
     );
   }
 }

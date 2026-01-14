@@ -8,6 +8,7 @@ import 'server_page.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'src/ui/app_theme.dart';
+import 'src/ui/app_icon_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,9 @@ void main() async {
 
   final appState = AppState();
   await appState.loadFromStorage();
+  // Best-effort: keep launcher icon in sync with settings (Android only).
+  // ignore: unawaited_futures
+  AppIconService.setIconId(appState.appIconId);
   runApp(LinPlayerApp(appState: appState));
 }
 
@@ -44,8 +48,16 @@ class LinPlayerApp extends StatelessWidget {
               title: 'LinPlayer',
               debugShowCheckedModeBanner: false,
               themeMode: appState.themeMode,
-              theme: AppTheme.light(dynamicScheme: useDynamic ? lightDynamic : null),
-              darkTheme: AppTheme.dark(dynamicScheme: useDynamic ? darkDynamic : null),
+              theme: AppTheme.light(
+                dynamicScheme: useDynamic ? lightDynamic : null,
+                seed: appState.themeSeedColor,
+                secondarySeed: appState.themeSecondarySeedColor,
+              ),
+              darkTheme: AppTheme.dark(
+                dynamicScheme: useDynamic ? darkDynamic : null,
+                seed: appState.themeSeedColor,
+                secondarySeed: appState.themeSecondarySeedColor,
+              ),
               home: isLoggedIn ? HomePage(appState: appState) : ServerPage(appState: appState),
             );
           },

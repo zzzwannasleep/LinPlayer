@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/emby_api.dart';
+import 'preferences.dart';
 import 'server_profile.dart';
 
 class AppState extends ChangeNotifier {
@@ -11,6 +12,12 @@ class AppState extends ChangeNotifier {
   static const _kActiveServerIdKey = 'activeServerId_v1';
   static const _kThemeModeKey = 'themeMode_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
+  static const _kThemeTemplateKey = 'themeTemplate_v1';
+  static const _kPreferHardwareDecodeKey = 'preferHardwareDecode_v1';
+  static const _kPreferredAudioLangKey = 'preferredAudioLang_v1';
+  static const _kPreferredSubtitleLangKey = 'preferredSubtitleLang_v1';
+  static const _kPreferredVideoVersionKey = 'preferredVideoVersion_v1';
+  static const _kAppIconIdKey = 'appIconId_v1';
 
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
@@ -23,6 +30,12 @@ class AppState extends ChangeNotifier {
   late final String _deviceId = _randomId();
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = true;
+  ThemeTemplate _themeTemplate = ThemeTemplate.defaultBlue;
+  bool _preferHardwareDecode = true;
+  String _preferredAudioLang = '';
+  String _preferredSubtitleLang = '';
+  VideoVersionPreference _preferredVideoVersion = VideoVersionPreference.defaultVersion;
+  String _appIconId = 'default';
   bool _loading = false;
   String? _error;
 
@@ -49,6 +62,15 @@ class AppState extends ChangeNotifier {
   List<MediaItem> getHome(String key) => _homeSections[key] ?? [];
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
+  ThemeTemplate get themeTemplate => _themeTemplate;
+  Color get themeSeedColor => _themeTemplate.seed;
+  Color get themeSecondarySeedColor => _themeTemplate.secondarySeed;
+
+  bool get preferHardwareDecode => _preferHardwareDecode;
+  String get preferredAudioLang => _preferredAudioLang;
+  String get preferredSubtitleLang => _preferredSubtitleLang;
+  VideoVersionPreference get preferredVideoVersion => _preferredVideoVersion;
+  String get appIconId => _appIconId;
 
   Iterable<HomeEntry> get homeEntries sync* {
     for (final entry in _homeSections.entries) {
@@ -73,6 +95,13 @@ class AppState extends ChangeNotifier {
 
     _themeMode = _decodeThemeMode(prefs.getString(_kThemeModeKey));
     _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
+    _themeTemplate = themeTemplateFromId(prefs.getString(_kThemeTemplateKey));
+    _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
+    _preferredAudioLang = prefs.getString(_kPreferredAudioLangKey) ?? '';
+    _preferredSubtitleLang = prefs.getString(_kPreferredSubtitleLangKey) ?? '';
+    _preferredVideoVersion =
+        videoVersionPreferenceFromId(prefs.getString(_kPreferredVideoVersionKey));
+    _appIconId = prefs.getString(_kAppIconIdKey) ?? 'default';
 
     final rawServers = prefs.getString(_kServersKey);
     _servers.clear();
@@ -156,6 +185,13 @@ class AppState extends ChangeNotifier {
         deviceId: _deviceId,
       );
 
+      String? serverName;
+      try {
+        serverName = await api.fetchServerName(auth.baseUrlUsed, token: auth.token);
+      } catch (_) {
+        // best-effort
+      }
+
       final lines = await api.fetchDomains(auth.token, auth.baseUrlUsed, allowFailure: true);
       final libs = await api.fetchLibraries(
         token: auth.token,
@@ -165,7 +201,9 @@ class AppState extends ChangeNotifier {
 
       final name = (displayName ?? '').trim().isNotEmpty
           ? displayName!.trim()
-          : _suggestServerName(auth.baseUrlUsed);
+          : ((serverName ?? '').trim().isNotEmpty
+              ? serverName!.trim()
+              : _suggestServerName(auth.baseUrlUsed));
 
       final existingIndex = _servers.indexWhere((s) => s.baseUrl == auth.baseUrlUsed);
       final server = ServerProfile(
@@ -177,6 +215,7 @@ class AppState extends ChangeNotifier {
         userId: auth.userId,
         hiddenLibraries: existingIndex >= 0 ? _servers[existingIndex].hiddenLibraries : null,
         domainRemarks: existingIndex >= 0 ? _servers[existingIndex].domainRemarks : null,
+        customDomains: existingIndex >= 0 ? _servers[existingIndex].customDomains : null,
       );
 
       if (existingIndex >= 0) {
@@ -387,6 +426,98 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  List<CustomDomain> get customDomains => activeServer?.customDomains ?? const <CustomDomain>[];
+
+  static String _normalizeUrl(String raw, {String defaultScheme = 'https'}) {
+    final v = raw.trim();
+    if (v.isEmpty) return '';
+    final parsed = Uri.tryParse(v);
+    if (parsed != null && parsed.hasScheme) return v;
+    return '$defaultScheme://$v';
+  }
+
+  static bool _isValidHttpUrl(String raw) {
+    final uri = Uri.tryParse(raw);
+    if (uri == null) return false;
+    return (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty;
+  }
+
+  Future<void> addCustomDomain({
+    required String name,
+    required String url,
+    String? remark,
+  }) async {
+    final server = activeServer;
+    if (server == null) return;
+
+    final fixedUrl = _normalizeUrl(url, defaultScheme: 'https');
+    if (!_isValidHttpUrl(fixedUrl)) {
+      throw Exception('线路地址不合法：$url');
+    }
+
+    final fixedName = name.trim().isEmpty ? fixedUrl : name.trim();
+    server.customDomains.removeWhere((d) => d.url == fixedUrl);
+    server.customDomains.add(CustomDomain(name: fixedName, url: fixedUrl));
+
+    final r = (remark ?? '').trim();
+    if (r.isNotEmpty) {
+      server.domainRemarks[fixedUrl] = r;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await _persistServers(prefs);
+    notifyListeners();
+  }
+
+  Future<void> updateCustomDomain(
+    String oldUrl, {
+    required String name,
+    required String url,
+    String? remark,
+  }) async {
+    final server = activeServer;
+    if (server == null) return;
+
+    final fixedUrl = _normalizeUrl(url, defaultScheme: 'https');
+    if (!_isValidHttpUrl(fixedUrl)) {
+      throw Exception('线路地址不合法：$url');
+    }
+
+    final fixedName = name.trim().isEmpty ? fixedUrl : name.trim();
+    final idx = server.customDomains.indexWhere((d) => d.url == oldUrl);
+    if (idx < 0) return;
+
+    server.customDomains[idx] = CustomDomain(name: fixedName, url: fixedUrl);
+
+    if (oldUrl != fixedUrl) {
+      final oldRemark = server.domainRemarks.remove(oldUrl);
+      if (oldRemark != null && oldRemark.trim().isNotEmpty) {
+        server.domainRemarks[fixedUrl] = oldRemark;
+      }
+    }
+
+    final r = (remark ?? '').trim();
+    if (r.isNotEmpty) {
+      server.domainRemarks[fixedUrl] = r;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await _persistServers(prefs);
+    notifyListeners();
+  }
+
+  Future<void> removeCustomDomain(String url) async {
+    final server = activeServer;
+    if (server == null) return;
+
+    server.customDomains.removeWhere((d) => d.url == url);
+    server.domainRemarks.remove(url);
+
+    final prefs = await SharedPreferences.getInstance();
+    await _persistServers(prefs);
+    notifyListeners();
+  }
+
   void toggleLibraryHidden(String libId) async {
     final server = activeServer;
     if (server == null) return;
@@ -418,6 +549,48 @@ class AppState extends ChangeNotifier {
     _useDynamicColor = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kDynamicColorKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setThemeTemplate(ThemeTemplate template) async {
+    _themeTemplate = template;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kThemeTemplateKey, template.id);
+    notifyListeners();
+  }
+
+  Future<void> setPreferHardwareDecode(bool enabled) async {
+    _preferHardwareDecode = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kPreferHardwareDecodeKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setPreferredAudioLang(String lang) async {
+    _preferredAudioLang = lang.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPreferredAudioLangKey, _preferredAudioLang);
+    notifyListeners();
+  }
+
+  Future<void> setPreferredSubtitleLang(String lang) async {
+    _preferredSubtitleLang = lang.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPreferredSubtitleLangKey, _preferredSubtitleLang);
+    notifyListeners();
+  }
+
+  Future<void> setPreferredVideoVersion(VideoVersionPreference pref) async {
+    _preferredVideoVersion = pref;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPreferredVideoVersionKey, pref.id);
+    notifyListeners();
+  }
+
+  Future<void> setAppIconId(String id) async {
+    _appIconId = id.trim().isEmpty ? 'default' : id.trim();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kAppIconIdKey, _appIconId);
     notifyListeners();
   }
 

@@ -7,9 +7,13 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'player_service.dart';
+import 'src/player/track_preferences.dart';
+import 'state/app_state.dart';
 
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key});
+  const PlayerScreen({super.key, this.appState});
+
+  final AppState? appState;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -24,9 +28,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   String? _playError;
-  bool _hwdecOn = true;
+  late bool _hwdecOn;
   Tracks _tracks = const Tracks();
   DateTime? _lastPositionUiUpdate;
+  bool _appliedAudioPref = false;
+  bool _appliedSubtitlePref = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hwdecOn = widget.appState?.preferHardwareDecode ?? true;
+  }
 
   @override
   void dispose() {
@@ -58,6 +70,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() {
       _currentlyPlayingIndex = index;
       _playError = null;
+      _appliedAudioPref = false;
+      _appliedSubtitlePref = false;
     });
     final isTv = _isTv(context);
     await _errorSub?.cancel();
@@ -83,8 +97,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       if (!mounted) return;
       _tracks = _playerService.player.state.tracks;
+      _maybeApplyPreferredTracks(_tracks);
       _playerService.player.stream.tracks.listen((t) {
         if (!mounted) return;
+        _maybeApplyPreferredTracks(t);
         setState(() => _tracks = t);
       });
       _errorSub?.cancel();
@@ -111,6 +127,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
       setState(() => _playError = e.toString());
     }
     setState(() {});
+  }
+
+  void _maybeApplyPreferredTracks(Tracks tracks) {
+    final appState = widget.appState;
+    final player = _playerService.isInitialized ? _playerService.player : null;
+    if (appState == null || player == null) return;
+
+    if (!_appliedAudioPref) {
+      final picked = pickPreferredAudioTrack(tracks, appState.preferredAudioLang);
+      if (picked != null) {
+        player.setAudioTrack(picked);
+      }
+      _appliedAudioPref = true;
+    }
+
+    if (!_appliedSubtitlePref) {
+      final pref = appState.preferredSubtitleLang;
+      if (isSubtitleOffPreference(pref)) {
+        player.setSubtitleTrack(SubtitleTrack.no());
+      } else {
+        final picked = pickPreferredSubtitleTrack(tracks, pref);
+        if (picked != null) {
+          player.setSubtitleTrack(picked);
+        }
+      }
+      _appliedSubtitlePref = true;
+    }
   }
 
   @override

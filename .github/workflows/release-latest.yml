@@ -100,13 +100,24 @@ jobs:
           ls -la dist || true
 
           # Android
-          if [[ -f "dist/LinPlayer-Android.apk" ]]; then
-            gh release upload latest "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
-          elif [[ -f "dist/app-release.apk" ]]; then
-            gh release upload latest "dist/app-release.apk#LinPlayer-Android.apk" --clobber
-          else
-            echo "Android APK not found in dist/." >&2
-            exit 1
+          ANDROID_FOUND=0
+          if [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
+            gh release upload latest "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+            ANDROID_FOUND=1
+          fi
+          if [[ -f "dist/LinPlayer-Android-armeabi-v7a.apk" ]]; then
+            gh release upload latest "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
+            ANDROID_FOUND=1
+          fi
+          if [[ "$ANDROID_FOUND" -eq 0 ]]; then
+            if [[ -f "dist/LinPlayer-Android.apk" ]]; then
+              gh release upload latest "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
+            elif [[ -f "dist/app-release.apk" ]]; then
+              gh release upload latest "dist/app-release.apk#LinPlayer-Android.apk" --clobber
+            else
+              echo "Android APK not found in dist/." >&2
+              exit 1
+            fi
           fi
 
           # Windows

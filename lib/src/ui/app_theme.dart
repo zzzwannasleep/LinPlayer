@@ -2,18 +2,28 @@ import 'package:flutter/material.dart';
 
 /// Centralized theme (light/dark + optional Material You dynamic color).
 class AppTheme {
-  static const _seed = Color(0xFF8CB4FF);
-  static const _seed2 = Color(0xFFFFC27A);
+  static const _defaultSeed = Color(0xFF8CB4FF);
+  static const _defaultSecondarySeed = Color(0xFFFFC27A);
 
-  static ThemeData light({ColorScheme? dynamicScheme}) {
-    final scheme = (dynamicScheme ?? ColorScheme.fromSeed(seedColor: _seed, brightness: Brightness.light))
-        .copyWith(secondary: _seed2);
+  static ThemeData light({
+    ColorScheme? dynamicScheme,
+    Color seed = _defaultSeed,
+    Color secondarySeed = _defaultSecondarySeed,
+  }) {
+    final scheme =
+        (dynamicScheme ?? ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.light))
+            .copyWith(secondary: secondarySeed);
     return _build(scheme);
   }
 
-  static ThemeData dark({ColorScheme? dynamicScheme}) {
-    final scheme = (dynamicScheme ?? ColorScheme.fromSeed(seedColor: _seed, brightness: Brightness.dark))
-        .copyWith(secondary: _seed2);
+  static ThemeData dark({
+    ColorScheme? dynamicScheme,
+    Color seed = _defaultSeed,
+    Color secondarySeed = _defaultSecondarySeed,
+  }) {
+    final scheme =
+        (dynamicScheme ?? ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark))
+            .copyWith(secondary: secondarySeed);
     return _build(scheme);
   }
 

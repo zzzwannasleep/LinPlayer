@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -7,6 +10,9 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'player_service.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
+import 'src/player/danmaku.dart';
+import 'src/player/danmaku_stage.dart';
+import 'src/player/track_preferences.dart';
 
 class PlayNetworkPage extends StatefulWidget {
   const PlayNetworkPage({
@@ -36,20 +42,30 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   final PlayerService _playerService = getPlayerService();
   bool _loading = true;
   String? _playError;
-  bool _hwdecOn = true;
+  late bool _hwdecOn;
   Tracks _tracks = const Tracks();
   StreamSubscription<String>? _errorSub;
   String? _resolvedStream;
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<double>? _bufferingPctSub;
+  StreamSubscription<Duration>? _posSub;
   bool _buffering = false;
   double? _bufferingPct;
   bool _appliedAudioPref = false;
   bool _appliedSubtitlePref = false;
 
+  final GlobalKey<DanmakuStageState> _danmakuKey = GlobalKey<DanmakuStageState>();
+  final List<DanmakuSource> _danmakuSources = [];
+  int _danmakuSourceIndex = -1;
+  bool _danmakuEnabled = false;
+  double _danmakuOpacity = 1.0;
+  int _nextDanmakuIndex = 0;
+  Duration _lastPosition = Duration.zero;
+
   @override
   void initState() {
     super.initState();
+    _hwdecOn = widget.appState.preferHardwareDecode;
     _init();
   }
 
@@ -60,8 +76,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _bufferingSub = null;
     await _bufferingPctSub?.cancel();
     _bufferingPctSub = null;
+    await _posSub?.cancel();
+    _posSub = null;
     _appliedAudioPref = false;
     _appliedSubtitlePref = false;
+    _nextDanmakuIndex = 0;
+    _danmakuKey.currentState?.clear();
     try {
       final streamUrl = await _buildStreamUrl();
       _resolvedStream = streamUrl;
@@ -92,6 +112,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         if (!mounted) return;
         setState(() => _bufferingPct = value);
       });
+      _posSub = _playerService.player.stream.position.listen((pos) {
+        if (!mounted) return;
+        final wentBack = pos + const Duration(seconds: 2) < _lastPosition;
+        _lastPosition = pos;
+        if (wentBack) _syncDanmakuCursor(pos);
+        _drainDanmaku(pos);
+      });
       _errorSub?.cancel();
       _errorSub = _playerService.player.stream.error.listen((message) {
         if (!mounted) return;
@@ -110,31 +137,222 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     final player = _playerService.isInitialized ? _playerService.player : null;
     if (player == null) return;
 
-    if (!_appliedAudioPref && widget.audioStreamIndex != null) {
-      final target = widget.audioStreamIndex!.toString();
-      for (final a in tracks.audio) {
-        if (a.id == target) {
-          player.setAudioTrack(a);
-          break;
+    if (!_appliedAudioPref) {
+      if (widget.audioStreamIndex != null) {
+        final target = widget.audioStreamIndex!.toString();
+        for (final a in tracks.audio) {
+          if (a.id == target) {
+            player.setAudioTrack(a);
+            break;
+          }
+        }
+      } else {
+        final pref = widget.appState.preferredAudioLang;
+        final picked = pickPreferredAudioTrack(tracks, pref);
+        if (picked != null) {
+          player.setAudioTrack(picked);
         }
       }
       _appliedAudioPref = true;
     }
 
-    if (!_appliedSubtitlePref && widget.subtitleStreamIndex != null) {
-      if (widget.subtitleStreamIndex == -1) {
-        player.setSubtitleTrack(SubtitleTrack.no());
+    if (!_appliedSubtitlePref) {
+      if (widget.subtitleStreamIndex != null) {
+        if (widget.subtitleStreamIndex == -1) {
+          player.setSubtitleTrack(SubtitleTrack.no());
+        } else {
+          final target = widget.subtitleStreamIndex!.toString();
+          for (final s in tracks.subtitle) {
+            if (s.id == target) {
+              player.setSubtitleTrack(s);
+              break;
+            }
+          }
+        }
       } else {
-        final target = widget.subtitleStreamIndex!.toString();
-        for (final s in tracks.subtitle) {
-          if (s.id == target) {
-            player.setSubtitleTrack(s);
-            break;
+        final pref = widget.appState.preferredSubtitleLang;
+        if (isSubtitleOffPreference(pref)) {
+          player.setSubtitleTrack(SubtitleTrack.no());
+        } else {
+          final picked = pickPreferredSubtitleTrack(tracks, pref);
+          if (picked != null) {
+            player.setSubtitleTrack(picked);
           }
         }
       }
       _appliedSubtitlePref = true;
     }
+  }
+
+  void _syncDanmakuCursor(Duration position) {
+    if (_danmakuSourceIndex < 0 || _danmakuSourceIndex >= _danmakuSources.length) {
+      _nextDanmakuIndex = 0;
+      return;
+    }
+    final items = _danmakuSources[_danmakuSourceIndex].items;
+    _nextDanmakuIndex = DanmakuParser.lowerBoundByTime(items, position);
+    _danmakuKey.currentState?.clear();
+  }
+
+  void _drainDanmaku(Duration position) {
+    if (!_danmakuEnabled) return;
+    if (_danmakuSourceIndex < 0 || _danmakuSourceIndex >= _danmakuSources.length) return;
+    final stage = _danmakuKey.currentState;
+    if (stage == null) return;
+
+    final items = _danmakuSources[_danmakuSourceIndex].items;
+    while (_nextDanmakuIndex < items.length && items[_nextDanmakuIndex].time <= position) {
+      stage.emit(items[_nextDanmakuIndex]);
+      _nextDanmakuIndex++;
+    }
+  }
+
+  Future<void> _pickDanmakuFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['xml'],
+      withData: kIsWeb,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+
+    String content = '';
+    if (kIsWeb) {
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      content = DanmakuParser.decodeBytes(bytes);
+    } else {
+      final path = file.path;
+      if (path == null || path.trim().isEmpty) return;
+      content = await File(path).readAsString();
+    }
+
+    final items = DanmakuParser.parseBilibiliXml(content);
+    if (!mounted) return;
+    setState(() {
+      _danmakuSources.add(DanmakuSource(name: file.name, items: items));
+      _danmakuSourceIndex = _danmakuSources.length - 1;
+      _danmakuEnabled = true;
+      _syncDanmakuCursor(_lastPosition);
+    });
+  }
+
+  Future<void> _showDanmakuSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final hasSources = _danmakuSources.isNotEmpty;
+            final selectedName = (_danmakuSourceIndex >= 0 && _danmakuSourceIndex < _danmakuSources.length)
+                ? _danmakuSources[_danmakuSourceIndex].name
+                : '未选择';
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('弹幕', style: Theme.of(context).textTheme.titleLarge),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          await _pickDanmakuFile();
+                          setSheetState(() {});
+                        },
+                        icon: const Icon(Icons.upload_file),
+                        label: const Text('加载'),
+                      ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    value: _danmakuEnabled,
+                    onChanged: (v) {
+                      setState(() => _danmakuEnabled = v);
+                      if (!v) _danmakuKey.currentState?.clear();
+                      setSheetState(() {});
+                    },
+                    title: const Text('启用弹幕'),
+                    subtitle: Text(hasSources ? '当前：$selectedName' : '尚未加载弹幕文件'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.layers_outlined),
+                    title: const Text('弹幕源'),
+                    trailing: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: _danmakuSourceIndex >= 0 ? _danmakuSourceIndex : null,
+                        hint: const Text('请选择'),
+                        items: [
+                          for (var i = 0; i < _danmakuSources.length; i++)
+                            DropdownMenuItem(
+                              value: i,
+                              child: Text(
+                                _danmakuSources[i].name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: !hasSources
+                            ? null
+                            : (v) {
+                                if (v == null) return;
+                                setState(() {
+                                  _danmakuSourceIndex = v;
+                                  _danmakuEnabled = true;
+                                  _syncDanmakuCursor(_lastPosition);
+                                });
+                                setSheetState(() {});
+                              },
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.opacity_outlined),
+                    title: const Text('不透明度'),
+                    subtitle: Slider(
+                      value: _danmakuOpacity,
+                      min: 0.2,
+                      max: 1.0,
+                      onChanged: (v) {
+                        setState(() => _danmakuOpacity = v);
+                        setSheetState(() {});
+                      },
+                    ),
+                  ),
+                  if (hasSources)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _danmakuSources.clear();
+                            _danmakuSourceIndex = -1;
+                            _danmakuEnabled = false;
+                            _danmakuKey.currentState?.clear();
+                          });
+                          setSheetState(() {});
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('清空弹幕'),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<String> _buildStreamUrl() async {
@@ -206,6 +424,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _errorSub?.cancel();
     _bufferingSub?.cancel();
     _bufferingPctSub?.cancel();
+    _posSub?.cancel();
     _playerService.dispose();
     super.dispose();
   }
@@ -237,6 +456,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
             onPressed: () => _showSubtitleTracks(context),
           ),
           IconButton(
+            tooltip: '弹幕',
+            icon: const Icon(Icons.comment_outlined),
+            onPressed: _showDanmakuSheet,
+          ),
+          IconButton(
             tooltip: _hwdecOn ? '切换软解' : '切换硬解',
             icon: Icon(_hwdecOn ? Icons.memory : Icons.settings_backup_restore),
             onPressed: () async {
@@ -264,6 +488,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
                       fit: StackFit.expand,
                       children: [
                         Video(controller: _playerService.controller),
+                        Positioned.fill(
+                          child: DanmakuStage(
+                            key: _danmakuKey,
+                            enabled: _danmakuEnabled,
+                            opacity: _danmakuOpacity,
+                          ),
+                        ),
                         if (_buffering)
                           Container(
                             color: Colors.black54,
@@ -295,21 +526,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
             ),
           ),
           if (_loading) const LinearProgressIndicator(),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              IconButton(
-                icon: Icon(_playerService.isPlaying ? Icons.pause : Icons.play_arrow),
-                onPressed: !initialized
-                    ? null
-                    : () {
-                        setState(() {
-                          _playerService.isPlaying ? _playerService.pause() : _playerService.play();
-                        });
-                      },
-              ),
-            ],
-          ),
         ],
       ),
     );

@@ -240,8 +240,10 @@ class EmbyApi {
     // If user pasted full URL with scheme, just try it.
     final parsed = Uri.tryParse(_hostOrUrl);
     if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
-      final port = parsed.hasPort ? ':${parsed.port}' : '';
-      final path = parsed.path.isNotEmpty ? parsed.path : '';
+      final port = parsed.hasPort
+          ? ':${parsed.port}'
+          : (_port != null && _port!.trim().isNotEmpty ? ':${_port!.trim()}' : '');
+      final path = parsed.path.isNotEmpty && parsed.path != '/' ? parsed.path : '';
       return ['${parsed.scheme}://${parsed.host}$port$path'];
     }
 
@@ -314,6 +316,38 @@ class EmbyApi {
       }
     }
     throw Exception('登录失败：${errors.join(" | ")}');
+  }
+
+  Future<String?> fetchServerName(
+    String baseUrl, {
+    String? token,
+  }) async {
+    final urls = [
+      Uri.parse('$baseUrl/emby/System/Info/Public'),
+      Uri.parse('$baseUrl/emby/System/Info'),
+    ];
+
+    for (final url in urls) {
+      try {
+        final headers = <String, String>{
+          'Accept': 'application/json',
+          'User-Agent': userAgent,
+          if (token != null && token.trim().isNotEmpty) 'X-Emby-Token': token.trim(),
+        };
+        final resp = await _client.get(url, headers: headers);
+        if (resp.statusCode != 200) continue;
+        final map = jsonDecode(resp.body);
+        if (map is! Map) continue;
+        final name = (map['ServerName'] ?? map['Name'] ?? map['ApplicationName'])?.toString();
+        if (name != null && name.trim().isNotEmpty) {
+          return name.trim();
+        }
+      } catch (_) {
+        // best-effort
+      }
+    }
+
+    return null;
   }
 
   Future<List<DomainInfo>> fetchDomains(

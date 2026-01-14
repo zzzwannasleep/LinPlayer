@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
+import 'state/preferences.dart';
 import 'play_network_page.dart';
 
 class ShowDetailPage extends StatefulWidget {
@@ -151,7 +152,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             final validSelection = selectedMediaSourceId != null &&
                 sources.any((s) => (s['Id'] as String? ?? '') == selectedMediaSourceId);
             if (!validSelection) {
-              selectedMediaSourceId = sources.first['Id'] as String?;
+              selectedMediaSourceId = _pickPreferredMediaSourceId(
+                    sources,
+                    widget.appState.preferredVideoVersion,
+                  ) ??
+                  (sources.first['Id'] as String?);
               selectedAudioStreamIndex = null;
               selectedSubtitleStreamIndex = null;
             }
@@ -248,6 +253,101 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
   static String _mediaSourceTitle(Map<String, dynamic> ms) {
     return (ms['Name'] as String?) ?? (ms['Container'] as String?) ?? '默认版本';
+  }
+
+  static String? _pickPreferredMediaSourceId(
+    List<Map<String, dynamic>> sources,
+    VideoVersionPreference pref,
+  ) {
+    if (pref == VideoVersionPreference.defaultVersion) return null;
+
+    int heightOf(Map<String, dynamic> ms) {
+      final videos = _streamsOfType(ms, 'Video');
+      final video = videos.isNotEmpty ? videos.first : null;
+      return _asInt(video?['Height']) ?? 0;
+    }
+
+    int bitrateOf(Map<String, dynamic> ms) => _asInt(ms['Bitrate']) ?? 0;
+
+    String codecOf(Map<String, dynamic> ms) {
+      final videos = _streamsOfType(ms, 'Video');
+      final video = videos.isNotEmpty ? videos.first : null;
+      return ((ms['VideoCodec'] as String?) ?? (video?['Codec'] as String?) ?? '').toLowerCase();
+    }
+
+    bool isHevc(Map<String, dynamic> ms) {
+      final c = codecOf(ms);
+      return c.contains('hevc') || c.contains('h265') || c.contains('x265');
+    }
+
+    bool isAvc(Map<String, dynamic> ms) {
+      final c = codecOf(ms);
+      return c.contains('h264') || c.contains('avc') || c.contains('x264');
+    }
+
+    Map<String, dynamic> pickBest(
+      Iterable<Map<String, dynamic>> list, {
+      required int Function(Map<String, dynamic>) primary,
+      required int Function(Map<String, dynamic>) secondary,
+      required bool higherIsBetter,
+    }) {
+      return list.reduce((a, b) {
+        final ap = primary(a);
+        final bp = primary(b);
+        if (ap != bp) {
+          return (higherIsBetter ? ap > bp : ap < bp) ? a : b;
+        }
+        final as = secondary(a);
+        final bs = secondary(b);
+        if (as != bs) {
+          return (higherIsBetter ? as > bs : as < bs) ? a : b;
+        }
+        return a;
+      });
+    }
+
+    Map<String, dynamic>? chosen;
+    switch (pref) {
+      case VideoVersionPreference.highestResolution:
+        chosen = pickBest(
+          sources,
+          primary: heightOf,
+          secondary: bitrateOf,
+          higherIsBetter: true,
+        );
+        break;
+      case VideoVersionPreference.lowestBitrate:
+        chosen = pickBest(
+          sources,
+          primary: (ms) => bitrateOf(ms) == 0 ? 1 << 30 : bitrateOf(ms),
+          secondary: heightOf,
+          higherIsBetter: false,
+        );
+        break;
+      case VideoVersionPreference.preferHevc:
+        final hevc = sources.where(isHevc).toList();
+        chosen = pickBest(
+          hevc.isNotEmpty ? hevc : sources,
+          primary: heightOf,
+          secondary: bitrateOf,
+          higherIsBetter: true,
+        );
+        break;
+      case VideoVersionPreference.preferAvc:
+        final avc = sources.where(isAvc).toList();
+        chosen = pickBest(
+          avc.isNotEmpty ? avc : sources,
+          primary: heightOf,
+          secondary: bitrateOf,
+          higherIsBetter: true,
+        );
+        break;
+      case VideoVersionPreference.defaultVersion:
+        break;
+    }
+
+    final id = chosen?['Id']?.toString();
+    return (id == null || id.trim().isEmpty) ? null : id.trim();
   }
 
   String _mediaSourceSubtitle(Map<String, dynamic> ms) {
@@ -983,6 +1083,7 @@ class EpisodeDetailPage extends StatefulWidget {
 
 class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   PlaybackInfoResult? _playInfo;
+  String? _preferredMediaSourceId;
   String? _error;
   bool _loading = true;
   MediaItem? _detail;
@@ -1014,6 +1115,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         deviceId: widget.appState.deviceId,
         itemId: widget.episode.id,
       );
+      final sources = info.mediaSources.cast<Map<String, dynamic>>();
+      final preferred = sources.isEmpty
+          ? null
+          : _ShowDetailPageState._pickPreferredMediaSourceId(
+              sources,
+              widget.appState.preferredVideoVersion,
+            );
       List<ChapterInfo> chaps = const [];
       try {
         chaps = await api.fetchChapters(
@@ -1028,6 +1136,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         _playInfo = info;
         _detail = detail;
         _chapters = chaps;
+        _preferredMediaSourceId = preferred;
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -1067,6 +1176,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                 itemId: ep.id,
                                 appState: widget.appState,
                                 isTv: widget.isTv,
+                                mediaSourceId: _preferredMediaSourceId,
                               ),
                             ),
                           );

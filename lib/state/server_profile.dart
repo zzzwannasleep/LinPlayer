@@ -8,8 +8,10 @@ class ServerProfile {
     this.remark,
     Set<String>? hiddenLibraries,
     Map<String, String>? domainRemarks,
+    List<CustomDomain>? customDomains,
   })  : hiddenLibraries = hiddenLibraries ?? <String>{},
-        domainRemarks = domainRemarks ?? <String, String>{};
+        domainRemarks = domainRemarks ?? <String, String>{},
+        customDomains = customDomains ?? <CustomDomain>[];
 
   final String id;
   String name;
@@ -26,6 +28,9 @@ class ServerProfile {
   /// User-defined remarks for domains/lines. Key is domain url.
   final Map<String, String> domainRemarks;
 
+  /// User-defined custom lines (domains). Stored per server.
+  final List<CustomDomain> customDomains;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
@@ -35,6 +40,7 @@ class ServerProfile {
         'userId': userId,
         'hiddenLibraries': hiddenLibraries.toList(),
         'domainRemarks': domainRemarks,
+        'customDomains': customDomains.map((e) => e.toJson()).toList(),
       };
 
   factory ServerProfile.fromJson(Map<String, dynamic> json) {
@@ -51,7 +57,28 @@ class ServerProfile {
             (key, value) => MapEntry(key.toString(), value.toString()),
           ) ??
           <String, String>{},
+      customDomains: (json['customDomains'] as List?)
+              ?.whereType<Map>()
+              .map((e) => CustomDomain.fromJson(e.map((k, v) => MapEntry(k.toString(), v))))
+              .toList() ??
+          <CustomDomain>[],
     );
   }
 }
 
+class CustomDomain {
+  final String name;
+  final String url;
+
+  CustomDomain({required this.name, required this.url});
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'url': url,
+      };
+
+  factory CustomDomain.fromJson(Map<String, dynamic> json) => CustomDomain(
+        name: json['name'] as String? ?? '',
+        url: json['url'] as String? ?? '',
+      );
+}

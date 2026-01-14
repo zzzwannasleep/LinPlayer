@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import 'state/app_state.dart';
 import 'state/server_profile.dart';
@@ -14,6 +15,10 @@ class ServerPage extends StatefulWidget {
 }
 
 class _ServerPageState extends State<ServerPage> {
+  bool _isTv(BuildContext context) =>
+      defaultTargetPlatform == TargetPlatform.android &&
+      MediaQuery.of(context).size.shortestSide > 600;
+
   Future<void> _showAddServerSheet() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -39,6 +44,11 @@ class _ServerPageState extends State<ServerPage> {
       builder: (context, _) {
         final servers = widget.appState.servers;
         final loading = widget.appState.isLoading;
+        final isTv = _isTv(context);
+        final width = MediaQuery.of(context).size.width;
+        final crossAxisCount = isTv
+            ? (width >= 1200 ? 10 : 8)
+            : (width >= 900 ? 8 : (width >= 600 ? 6 : 4));
 
         return Scaffold(
           body: SafeArea(
@@ -93,11 +103,11 @@ class _ServerPageState extends State<ServerPage> {
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
                     sliver: SliverGrid.builder(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 12,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 1.35,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                        childAspectRatio: 1.1,
                       ),
                       itemCount: servers.length,
                       itemBuilder: (context, index) {
@@ -144,31 +154,24 @@ class _ServerCard extends StatelessWidget {
     final initial = server.name.trim().isNotEmpty ? server.name.trim()[0].toUpperCase() : '?';
 
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(14),
       onTap: onTap,
       onLongPress: onLongPress,
       child: Ink(
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: active ? colorScheme.primary.withValues(alpha: 0.45) : colorScheme.outlineVariant,
             width: active ? 1.2 : 1,
           ),
         ),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(10),
         child: Stack(
           children: [
             Align(
               alignment: Alignment.topRight,
-              child: Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: Colors.lightGreenAccent,
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
+              child: active ? const Icon(Icons.check_circle, size: 18) : const SizedBox.shrink(),
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -176,18 +179,12 @@ class _ServerCard extends StatelessWidget {
                 Row(
                   children: [
                     CircleAvatar(
-                      radius: 18,
+                      radius: 14,
                       backgroundColor: colorScheme.primary.withValues(alpha: 0.14),
                       child: Text(
                         initial,
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
-                    ),
-                    const Spacer(),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 18,
-                      color: colorScheme.onSurfaceVariant,
                     ),
                   ],
                 ),
@@ -196,7 +193,7 @@ class _ServerCard extends StatelessWidget {
                   server.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 if ((server.remark ?? '').trim().isNotEmpty) ...[
                   const SizedBox(height: 3),
@@ -237,6 +234,18 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   final _userCtrl = TextEditingController();
   final _pwdCtrl = TextEditingController();
   String _scheme = 'https';
+  bool _pwdVisible = false;
+  bool _handlingHostParse = false;
+  bool _nameTouched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl.addListener(() {
+      _nameTouched = _nameCtrl.text.trim().isNotEmpty;
+    });
+    _hostCtrl.addListener(_maybeParseHostInput);
+  }
 
   @override
   void dispose() {
@@ -251,6 +260,47 @@ class _AddServerSheetState extends State<_AddServerSheet> {
 
   String _defaultPortForScheme(String s) => s == 'http' ? '80' : '443';
 
+  void _maybeParseHostInput() {
+    if (_handlingHostParse) return;
+    final raw = _hostCtrl.text.trim();
+    if (!raw.contains('://')) {
+      if (!_nameTouched && _nameCtrl.text.trim().isEmpty && raw.isNotEmpty) {
+        _nameCtrl.text = raw.split('/').first;
+        _nameCtrl.selection = TextSelection.collapsed(offset: _nameCtrl.text.length);
+      }
+      return;
+    }
+
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return;
+    if (uri.scheme != 'http' && uri.scheme != 'https') return;
+
+    _handlingHostParse = true;
+    try {
+      if (_scheme != uri.scheme) {
+        setState(() => _scheme = uri.scheme);
+      }
+      if (uri.hasPort) {
+        _portCtrl.text = uri.port.toString();
+      } else if (_portCtrl.text.trim().isEmpty) {
+        _portCtrl.text = _defaultPortForScheme(uri.scheme);
+      }
+
+      final hostPart = uri.host + ((uri.path.isNotEmpty && uri.path != '/') ? uri.path : '');
+      _hostCtrl.value = _hostCtrl.value.copyWith(
+        text: hostPart,
+        selection: TextSelection.collapsed(offset: hostPart.length),
+      );
+
+      if (!_nameTouched && _nameCtrl.text.trim().isEmpty) {
+        _nameCtrl.text = uri.host;
+        _nameCtrl.selection = TextSelection.collapsed(offset: _nameCtrl.text.length);
+      }
+    } finally {
+      _handlingHostParse = false;
+    }
+  }
+
   void _applyDefaultPort() {
     _portCtrl.text = _defaultPortForScheme(_scheme);
     setState(() {});
@@ -259,8 +309,11 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
+    // Auto-complete scheme if user only typed host/path.
+    final hostInput = _hostCtrl.text.trim();
+    final hostOrUrl = hostInput.contains('://') ? hostInput : '$_scheme://$hostInput';
     await widget.appState.addServer(
-      hostOrUrl: _hostCtrl.text.trim(),
+      hostOrUrl: hostOrUrl,
       scheme: _scheme,
       port: _portCtrl.text.trim().isEmpty ? null : _portCtrl.text.trim(),
       username: _userCtrl.text.trim(),
@@ -371,8 +424,15 @@ class _AddServerSheetState extends State<_AddServerSheet> {
             const SizedBox(height: 10),
             TextFormField(
               controller: _pwdCtrl,
-              decoration: const InputDecoration(labelText: '密码'),
-              obscureText: true,
+              decoration: InputDecoration(
+                labelText: '密码',
+                suffixIcon: IconButton(
+                  tooltip: _pwdVisible ? '隐藏密码' : '显示密码',
+                  icon: Icon(_pwdVisible ? Icons.visibility_off : Icons.visibility),
+                  onPressed: () => setState(() => _pwdVisible = !_pwdVisible),
+                ),
+              ),
+              obscureText: !_pwdVisible,
               validator: (v) => (v == null || v.isEmpty) ? '请输入密码' : null,
             ),
             const SizedBox(height: 14),

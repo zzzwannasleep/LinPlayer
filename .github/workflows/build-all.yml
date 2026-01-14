@@ -67,13 +67,13 @@ jobs:
         run: flutter test
 
       - name: Build APK
-        run: flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+        run: flutter build apk --release --split-per-abi --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LinPlayer-Android-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: LinPlayer-Android-APKs
+          path: build/app/outputs/flutter-apk/app-*-release.apk
 
   build-windows:
     name: Build Windows Setup (x64)
@@ -427,7 +427,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh release upload nightly "dist/LinPlayer-Android-APK/app-release.apk#LinPlayer-Android.apk" --clobber
+          gh release upload nightly "dist/LinPlayer-Android-APKs/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+          gh release upload nightly "dist/LinPlayer-Android-APKs/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
           gh release upload nightly "dist/LinPlayer-Windows-Setup/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
           gh release upload nightly "dist/LinPlayer-iOS-Unsigned-IPA/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
           gh release upload nightly "dist/LinPlayer-macOS-DMG-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
