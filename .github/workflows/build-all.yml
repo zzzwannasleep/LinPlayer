@@ -1,4 +1,6 @@
-name: Nightly Release
+# Build all platform packages in one workflow run.
+
+name: Build All Packages
 
 on:
   workflow_dispatch:
@@ -9,13 +11,6 @@ on:
       build_number:
         description: Build number (integer)
         required: true
-
-concurrency:
-  group: nightly-release
-  cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   build-android:
@@ -38,6 +33,13 @@ jobs:
         with:
           channel: stable
 
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
       - name: Cache Flutter pub packages
         uses: actions/cache@v4
         with:
@@ -51,13 +53,6 @@ jobs:
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Compute build version
-        shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
-        run: bash .github/scripts/compute_version.sh
-
       - name: Flutter analyze
         run: flutter analyze
 
@@ -67,10 +62,10 @@ jobs:
       - name: Build APK
         run: flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
 
-      - name: Upload artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-android
+          name: LinPlayer-Android-APK
           path: build/app/outputs/flutter-apk/app-release.apk
 
   build-windows:
@@ -136,6 +131,7 @@ jobs:
             Write-Error "Release folder not found after build."
             exit 1
           }
+
           $roots = @(
             "C:\Program Files\Microsoft Visual Studio\2022",
             "C:\Program Files (x86)\Microsoft Visual Studio\2022"
@@ -192,10 +188,10 @@ jobs:
 
           & $iscc ".github/installer/windows/linplayer.iss"
 
-      - name: Upload artifact
+      - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-windows
+          name: LinPlayer-Windows-Setup
           path: LinPlayer-Setup-x64.exe
 
   build-ios:
@@ -252,19 +248,23 @@ jobs:
           fi
           if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
             echo "Could not find built .app under build/ios."
+            echo "--- Debug: build/ios (maxdepth 4) ---"
             find build/ios -maxdepth 4 -print || true
+            echo "--- Debug: build/ios/iphoneos ---"
+            ls -la build/ios/iphoneos || true
             exit 1
           fi
 
           rm -rf Payload
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
+
           /usr/bin/zip -qry LinPlayer-iOS-unsigned.ipa Payload
 
-      - name: Upload artifact
+      - name: Upload unsigned IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-ios
+          name: LinPlayer-iOS-Unsigned-IPA
           path: LinPlayer-iOS-unsigned.ipa
 
   build-macos:
@@ -334,77 +334,9 @@ jobs:
           ln -s /Applications "$STAGING/Applications"
           hdiutil create -volname "LinPlayer" -srcfolder "$STAGING" -ov -format UDZO "LinPlayer-macOS-${{ matrix.arch }}.dmg"
 
-      - name: Upload artifact
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nightly-macos-${{ matrix.arch }}
+          name: LinPlayer-macOS-DMG-${{ matrix.arch }}
           path: LinPlayer-macOS-${{ matrix.arch }}.dmg
 
-  publish:
-    name: Publish Nightly Release
-    runs-on: ubuntu-latest
-    needs:
-      - build-android
-      - build-windows
-      - build-ios
-      - build-macos
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Check out code (for tagging)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Ensure GitHub CLI is available
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! command -v gh >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y gh
-          fi
-
-      - name: Compute build version
-        shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
-        run: bash .github/scripts/compute_version.sh
-
-      - name: Update nightly tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f nightly "$GITHUB_SHA"
-          git push -f origin refs/tags/nightly
-
-      - name: Create or update nightly release
-        shell: bash
-        run: |
-          set -euo pipefail
-          NOTES="Nightly build\n\n- Version: ${VERSION_FULL}\n- Commit: ${GITHUB_SHA}\n- Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
-
-          if gh release view nightly >/dev/null 2>&1; then
-            gh release edit nightly --title "Nightly" --notes "$NOTES"
-          else
-            gh release create nightly --title "Nightly" --notes "$NOTES" --prerelease
-          fi
-
-      - name: Upload release assets (overwrite)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gh release upload nightly "dist/nightly-android/app-release.apk#LinPlayer-Android.apk" --clobber
-          gh release upload nightly "dist/nightly-windows/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
-          gh release upload nightly "dist/nightly-ios/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
-          gh release upload nightly "dist/nightly-macos-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
-          gh release upload nightly "dist/nightly-macos-x86_64/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
