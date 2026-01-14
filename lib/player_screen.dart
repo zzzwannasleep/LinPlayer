@@ -26,6 +26,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _playError;
   bool _hwdecOn = true;
   Tracks _tracks = const Tracks();
+  DateTime? _lastPositionUiUpdate;
 
   @override
   void dispose() {
@@ -94,7 +95,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _duration = _playerService.duration;
       _posSub?.cancel();
       _posSub = _playerService.player.stream.position.listen((d) {
-        setState(() => _position = d);
+        if (!mounted) return;
+        final now = DateTime.now();
+        final deltaMs = (d.inMilliseconds - _position.inMilliseconds).abs();
+        final shouldRebuild = _lastPositionUiUpdate == null ||
+            now.difference(_lastPositionUiUpdate!) >= const Duration(milliseconds: 250) ||
+            deltaMs >= 1000;
+        _position = d;
+        if (shouldRebuild) {
+          _lastPositionUiUpdate = now;
+          setState(() {});
+        }
       });
     } catch (e) {
       setState(() => _playError = e.toString());

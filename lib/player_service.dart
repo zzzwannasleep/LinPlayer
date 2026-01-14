@@ -17,23 +17,35 @@ class PlayerService {
   Duration get duration => _player?.state.duration ?? Duration.zero;
   bool get isPlaying => _player?.state.playing ?? false;
 
+  static int _mb(int value) => value * 1024 * 1024;
+
   PlayerConfiguration _config({
     required bool isTv,
     required bool hardwareDecode,
+    required bool isNetwork,
   }) {
     final platform = defaultTargetPlatform;
     final isAndroid = !kIsWeb && platform == TargetPlatform.android;
+    final isWindows = !kIsWeb && platform == TargetPlatform.windows;
     final isDesktop = !kIsWeb &&
         (platform == TargetPlatform.windows ||
             platform == TargetPlatform.linux ||
             platform == TargetPlatform.macOS);
+
+    // Notes:
+    // - `media_kit` maps `bufferSize` to both `demuxer-max-bytes` & `demuxer-max-back-bytes`.
+    //   For network playback we prefer a larger *forward* cache, while keeping the backward
+    //   cache smaller to avoid excessive memory usage.
+    final bufferSize = isTv ? _mb(100) : _mb(150);
+    final networkDemuxerMaxBytes = isTv ? _mb(192) : (isDesktop ? _mb(256) : _mb(192));
+    final networkDemuxerMaxBackBytes = isTv ? _mb(48) : (isDesktop ? _mb(64) : _mb(32));
 
     return PlayerConfiguration(
       vo: isAndroid || isDesktop ? 'gpu' : null,
       osc: false,
       title: 'LinPlayer',
       logLevel: MPVLogLevel.warn,
-      bufferSize: isTv ? 100 * 1024 * 1024 : 150 * 1024 * 1024,
+      bufferSize: bufferSize,
       protocolWhitelist: const [
         'udp',
         'rtp',
@@ -52,8 +64,15 @@ class PlayerService {
         'ftp',
       ],
       extraMpvOptions: [
-        hardwareDecode ? 'hwdec=auto-safe' : 'hwdec=no',
+        // `auto` enables zero-copy hardware decoding where possible (often smoother than copy-back).
+        hardwareDecode ? 'hwdec=auto' : 'hwdec=no',
         'tls-verify=no',
+        // Avoid on-disk cache writes for network streams; prefer RAM cache + tuned demuxer buffer.
+        if (isNetwork) 'cache-on-disk=no',
+        if (isNetwork) 'demuxer-max-bytes=$networkDemuxerMaxBytes',
+        if (isNetwork) 'demuxer-max-back-bytes=$networkDemuxerMaxBackBytes',
+        // Reduce stutter on Windows by forcing a D3D11 GPU context for `vo=gpu`.
+        if (isWindows) 'gpu-context=d3d11',
       ],
     );
   }
@@ -67,10 +86,12 @@ class PlayerService {
   }) async {
     await dispose();
     MediaKit.ensureInitialized();
+    final isNetwork = networkUrl != null && networkUrl.isNotEmpty;
     final player = Player(
       configuration: _config(
         isTv: isTv,
         hardwareDecode: hardwareDecode,
+        isNetwork: isNetwork,
       ),
     );
     final controller = VideoController(player);

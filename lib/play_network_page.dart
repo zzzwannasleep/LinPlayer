@@ -34,6 +34,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   Tracks _tracks = const Tracks();
   StreamSubscription<String>? _errorSub;
   String? _resolvedStream;
+  StreamSubscription<bool>? _bufferingSub;
+  StreamSubscription<double>? _bufferingPctSub;
+  bool _buffering = false;
+  double? _bufferingPct;
 
   @override
   void initState() {
@@ -44,6 +48,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   Future<void> _init() async {
     await _errorSub?.cancel();
     _errorSub = null;
+    await _bufferingSub?.cancel();
+    _bufferingSub = null;
+    await _bufferingPctSub?.cancel();
+    _bufferingPctSub = null;
     try {
       final streamUrl = await _buildStreamUrl();
       _resolvedStream = streamUrl;
@@ -62,6 +70,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       _playerService.player.stream.tracks.listen((t) {
         if (!mounted) return;
         setState(() => _tracks = t);
+      });
+      _bufferingSub = _playerService.player.stream.buffering.listen((value) {
+        if (!mounted) return;
+        setState(() => _buffering = value);
+      });
+      _bufferingPctSub =
+          _playerService.player.stream.bufferingPercentage.listen((value) {
+        if (!mounted) return;
+        setState(() => _bufferingPct = value);
       });
       _errorSub?.cancel();
       _errorSub = _playerService.player.stream.error.listen((message) {
@@ -105,16 +122,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       final Map<String, dynamic>? ms = info.mediaSources.isNotEmpty
           ? info.mediaSources.first as Map<String, dynamic>
           : null;
-      final supportsDirect =
-          ms?['SupportsDirectPlay'] == true || ms?['SupportsDirectStream'] == true;
-      final transcodingUrl = ms?['TranscodingUrl'] as String?;
-      if (!supportsDirect && transcodingUrl != null && transcodingUrl.isNotEmpty) {
-        return resolve(transcodingUrl);
-      }
       final directStreamUrl = ms?['DirectStreamUrl'] as String?;
       if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
         return resolve(directStreamUrl);
       }
+      // Prefer direct stream (no transcoding). Even if server reports unsupported direct play/stream,
+      // the static stream endpoint may still work with mpv's broader codec/container support.
       return '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=${info.mediaSourceId}'
           '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
           '&api_key=$token';
@@ -128,6 +141,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   @override
   void dispose() {
     _errorSub?.cancel();
+    _bufferingSub?.cancel();
+    _bufferingPctSub?.cancel();
     _playerService.dispose();
     super.dispose();
   }
@@ -182,7 +197,31 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
             child: Container(
               color: Colors.black,
               child: initialized
-                  ? Video(controller: _playerService.controller)
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Video(controller: _playerService.controller),
+                        if (_buffering)
+                          Container(
+                            color: Colors.black54,
+                            alignment: Alignment.center,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(),
+                                if (_bufferingPct != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 12),
+                                    child: Text(
+                                      '缓冲中 ${(_bufferingPct! <= 1 ? _bufferingPct! * 100 : _bufferingPct!).clamp(0, 100).toStringAsFixed(0)}%',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    )
                   : _playError != null
                       ? Center(
                           child: Text(
