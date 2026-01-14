@@ -407,7 +407,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NOTES="Nightly build\n\n- Version: ${VERSION_FULL}\n- Commit: ${GITHUB_SHA}\n- Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+          NOTES="$(cat <<EOF
+          Nightly build
+
+          - Version: ${VERSION_FULL}
+          - Commit: ${GITHUB_SHA}
+          - Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')
+          EOF
+          )"
 
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly --title "Nightly (${VERSION_FULL})" --notes "$NOTES"

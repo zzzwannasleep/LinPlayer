@@ -58,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           BODY="$(gh release view nightly --json body -q '.body')"
-          VERSION_FULL="$(printf '%s\n' "$BODY" | sed -n 's/^- Version: //p' | head -n 1)"
+          VERSION_FULL="$(printf '%b\n' "$BODY" | sed -n 's/^- Version: //p' | head -n 1)"
           if [[ -z "${VERSION_FULL:-}" ]]; then
             VERSION_FULL="unknown"
           fi
@@ -77,7 +77,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NOTES="Stable build\n\n- Version: ${VERSION_FULL}\n- Commit: ${NIGHTLY_SHA}\n- Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+          NOTES="$(cat <<EOF
+          Stable build
+
+          - Version: ${VERSION_FULL}
+          - Commit: ${NIGHTLY_SHA}
+          - Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')
+          EOF
+          )"
 
           if gh release view latest >/dev/null 2>&1; then
             gh release edit latest --title "Latest (${VERSION_FULL})" --notes "$NOTES"
@@ -89,9 +96,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release upload latest "dist/LinPlayer-Android.apk" --clobber
-          gh release upload latest "dist/LinPlayer-Windows-Setup-x64.exe" --clobber
-          gh release upload latest "dist/LinPlayer-iOS-unsigned.ipa" --clobber
-          gh release upload latest "dist/LinPlayer-macOS-arm64.dmg" --clobber
-          gh release upload latest "dist/LinPlayer-macOS-x86_64.dmg" --clobber
+          echo "--- dist/ ---"
+          ls -la dist || true
 
+          # Android
+          if [[ -f "dist/LinPlayer-Android.apk" ]]; then
+            gh release upload latest "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
+          elif [[ -f "dist/app-release.apk" ]]; then
+            gh release upload latest "dist/app-release.apk#LinPlayer-Android.apk" --clobber
+          else
+            echo "Android APK not found in dist/." >&2
+            exit 1
+          fi
+
+          # Windows
+          if [[ -f "dist/LinPlayer-Windows-Setup-x64.exe" ]]; then
+            gh release upload latest "dist/LinPlayer-Windows-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+          elif [[ -f "dist/LinPlayer-Setup-x64.exe" ]]; then
+            gh release upload latest "dist/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+          else
+            echo "Windows installer not found in dist/." >&2
+            exit 1
+          fi
+
+          # iOS
+          if [[ -f "dist/LinPlayer-iOS-unsigned.ipa" ]]; then
+            gh release upload latest "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
+          else
+            echo "iOS IPA not found in dist/." >&2
+            exit 1
+          fi
+
+          # macOS
+          if [[ -f "dist/LinPlayer-macOS-arm64.dmg" ]]; then
+            gh release upload latest "dist/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
+          else
+            echo "macOS arm64 DMG not found in dist/." >&2
+            exit 1
+          fi
+
+          if [[ -f "dist/LinPlayer-macOS-x86_64.dmg" ]]; then
+            gh release upload latest "dist/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
+          else
+            echo "macOS x86_64 DMG not found in dist/." >&2
+            exit 1
+          fi
