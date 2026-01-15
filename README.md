@@ -7,6 +7,7 @@
 - 首页（类似 Emby）：继续观看 / 最新电影 / 最新剧集 横向卡片流，点击即播或进入详情。
 - 媒体库浏览：库 → Series/Season → Episode，电影直接播放；搜索框+无限下拉懒加载，防内存暴涨。
 - 封面与简介：库/剧集/季/集均展示海报和概要。播放链接自动携带 MediaSourceId，避免 404。
+- 响应式缩放：在竖屏平板/手机上自动放大 UI（文本/图标/间距），避免 UI 过小；大屏横屏基本保持原比例。
 - 双主题：Material 3，跟随系统明/暗色；桌面/手机卡片带轻量毛玻璃；Android TV 自动关闭毛玻璃，使用简洁卡片防卡顿。
 - 本地播放器：原生文件选择与播放功能保留。
 - 构建：Android 同时支持 32 位和 64 位；Windows 打包附带运行时与 DLL。
@@ -68,6 +69,10 @@ flutter build windows --release
 
 ## 源码导览
 - 目录结构、核心模块、Emby 接口与播放链路：`docs/ARCHITECTURE.md`
+
+## UI 自适应（开发者）
+- 全局缩放逻辑在 `lib/src/ui/ui_scale.dart`；应用入口通过 `MaterialApp.builder` 统一应用缩放（文本/图标/部分组件尺寸）。
+- 如果你新增了包含“固定尺寸”的页面（尤其是 `GridView` 的 `maxCrossAxisExtent`），建议显式乘上 `context.uiScale`，避免竖屏/小屏出现卡片过小。
 
 ## 自定义 mpv 参数（进阶）
 - 工程内已内置 `packages/media_kit_patched`，在 `pubspec.yaml` 通过 `dependency_overrides` 覆盖原包。

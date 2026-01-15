@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'show_detail_page.dart';
+import 'src/ui/ui_scale.dart';
 
 class LibraryItemsPage extends StatefulWidget {
   const LibraryItemsPage({
@@ -37,8 +38,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
 
   void _onScroll() {
     if (_loadingMore) return;
-    if (_scroll.position.pixels >
-        _scroll.position.maxScrollExtent - 320) {
+    if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 320) {
       _load(reset: false);
     }
   }
@@ -78,9 +78,10 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
   @override
   Widget build(BuildContext context) {
     final items = widget.appState.getItems(widget.parentId);
+    final uiScale = context.uiScale;
     final isTv = _isTv(context);
     final enableGlass = !isTv;
-    final maxCrossAxisExtent = isTv ? 160.0 : 180.0;
+    final maxCrossAxisExtent = (isTv ? 160.0 : 180.0) * uiScale;
 
     return Scaffold(
       appBar: AppBar(
@@ -90,14 +91,14 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
           ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: const EdgeInsets.all(12),
-                child: GridView.builder(
-                  controller: _scroll,
-                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: maxCrossAxisExtent,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childAspectRatio: 0.7,
-                  ),
+              child: GridView.builder(
+                controller: _scroll,
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: maxCrossAxisExtent,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.7,
+                ),
                 itemCount: items.length + (_loadingMore ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index >= items.length) {
@@ -160,7 +161,8 @@ class _GridItem extends StatelessWidget {
     if (item.type == 'Episode') {
       final s = item.seasonNumber ?? 0;
       final e = item.episodeNumber ?? 0;
-      badge = 'S${s.toString().padLeft(2, '0')}E${e.toString().padLeft(2, '0')}';
+      badge =
+          'S${s.toString().padLeft(2, '0')}E${e.toString().padLeft(2, '0')}';
     } else if (item.type == 'Movie') {
       badge = '电影';
     }
@@ -175,8 +177,10 @@ class _GridItem extends StatelessWidget {
                     imageUrl: image,
                     httpHeaders: {'User-Agent': EmbyApi.userAgent},
                     fit: BoxFit.cover,
-                    placeholder: (_, __) => const ColoredBox(color: Colors.black12),
-                    errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black26),
+                    placeholder: (_, __) =>
+                        const ColoredBox(color: Colors.black12),
+                    errorWidget: (_, __, ___) =>
+                        const ColoredBox(color: Colors.black26),
                   )
                 : const ColoredBox(color: Colors.black26),
           ),
@@ -192,7 +196,8 @@ class _GridItem extends StatelessWidget {
                 ),
                 child: Text(
                   badge,
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                      fontSize: 10, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -212,7 +217,10 @@ class _GridItem extends StatelessWidget {
             item.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),

@@ -5,6 +5,7 @@ import 'state/app_state.dart';
 import 'state/preferences.dart';
 import 'state/server_profile.dart';
 import 'src/ui/theme_sheet.dart';
+import 'src/ui/ui_scale.dart';
 
 class ServerPage extends StatefulWidget {
   const ServerPage({super.key, required this.appState});
@@ -47,10 +48,11 @@ class _ServerPageState extends State<ServerPage> {
       builder: (context, _) {
         final servers = widget.appState.servers;
         final loading = widget.appState.isLoading;
+        final uiScale = context.uiScale;
         final isTv = _isTv(context);
         final listLayout = widget.appState.serverListLayout;
         final isList = listLayout == ServerListLayout.list;
-        final maxCrossAxisExtent = isTv ? 160.0 : 180.0;
+        final maxCrossAxisExtent = (isTv ? 160.0 : 180.0) * uiScale;
 
         return Scaffold(
           body: SafeArea(
@@ -151,15 +153,15 @@ class _ServerPageState extends State<ServerPage> {
                               childCount: servers.length,
                             ),
                           )
-                         : SliverGrid.builder(
-                             gridDelegate:
-                                 SliverGridDelegateWithMaxCrossAxisExtent(
-                               maxCrossAxisExtent: maxCrossAxisExtent,
-                               mainAxisSpacing: 8,
-                               crossAxisSpacing: 8,
-                               childAspectRatio: 1.2,
-                             ),
-                             itemCount: servers.length,
+                        : SliverGrid.builder(
+                            gridDelegate:
+                                SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: maxCrossAxisExtent,
+                              mainAxisSpacing: 8,
+                              crossAxisSpacing: 8,
+                              childAspectRatio: 1.2,
+                            ),
+                            itemCount: servers.length,
                             itemBuilder: (context, index) {
                               final server = servers[index];
                               final isActive =

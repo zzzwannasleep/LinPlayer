@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'library_items_page.dart';
+import 'src/ui/ui_scale.dart';
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key, required this.appState});
@@ -25,11 +26,13 @@ class _LibraryPageState extends State<LibraryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final uiScale = context.uiScale;
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
         final libs = widget.appState.libraries
-            .where((l) => _showHidden ? true : !widget.appState.isLibraryHidden(l.id))
+            .where((l) =>
+                _showHidden ? true : !widget.appState.isLibraryHidden(l.id))
             .toList();
         return Scaffold(
           appBar: AppBar(
@@ -41,14 +44,16 @@ class _LibraryPageState extends State<LibraryPage> {
                 onPressed: widget.appState.sortLibrariesByName,
               ),
               IconButton(
-                icon: Icon(_showHidden ? Icons.visibility : Icons.visibility_off),
+                icon:
+                    Icon(_showHidden ? Icons.visibility : Icons.visibility_off),
                 tooltip: _showHidden ? '隐藏已隐藏的库' : '显示已隐藏的库',
                 onPressed: () => setState(() => _showHidden = !_showHidden),
               ),
               IconButton(
                 icon: const Icon(Icons.refresh),
-                onPressed:
-                    widget.appState.isLoading ? null : () => widget.appState.refreshLibraries(),
+                onPressed: widget.appState.isLoading
+                    ? null
+                    : () => widget.appState.refreshLibraries(),
               ),
             ],
           ),
@@ -58,9 +63,9 @@ class _LibraryPageState extends State<LibraryPage> {
                   ? const Center(child: Text('暂无媒体库，点击右上角刷新重试'))
                   : Padding(
                       padding: const EdgeInsets.all(12),
-                    child: GridView.builder(
-                      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 150,
+                      child: GridView.builder(
+                        gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 150 * uiScale,
                           mainAxisSpacing: 6,
                           crossAxisSpacing: 6,
                           childAspectRatio: 1.33,
@@ -101,15 +106,19 @@ class _LibraryPageState extends State<LibraryPage> {
                                     borderRadius: BorderRadius.circular(12),
                                     child: CachedNetworkImage(
                                       imageUrl: imageUrl,
-                                      httpHeaders: {'User-Agent': EmbyApi.userAgent},
+                                      httpHeaders: {
+                                        'User-Agent': EmbyApi.userAgent
+                                      },
                                       fit: BoxFit.cover,
                                       placeholder: (_, __) => const ColoredBox(
                                         color: Colors.black12,
                                         child: Center(child: Icon(Icons.image)),
                                       ),
-                                      errorWidget: (_, __, ___) => const ColoredBox(
+                                      errorWidget: (_, __, ___) =>
+                                          const ColoredBox(
                                         color: Colors.black12,
-                                        child: Center(child: Icon(Icons.folder)),
+                                        child:
+                                            Center(child: Icon(Icons.folder)),
                                       ),
                                     ),
                                   ),

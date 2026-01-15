@@ -37,6 +37,7 @@
   - `MediaKit.ensureInitialized()`：确保 native 播放后端（mpv）初始化。
   - `PackageInfo.fromPlatform()`：写入 `EmbyApi.setAppVersion()`，用于 User-Agent。
   - `AppState.loadFromStorage()`：恢复已保存的服务器、主题等状态。
+  - `MaterialApp.builder`：对竖屏/小屏做全局 UI 缩放（文本/图标/部分组件尺寸）。
   - 根据 `appState.hasActiveServer` 决定进入：
     - `ServerPage`（未登录/未选择服务器）
     - `HomePage`（已选择服务器）
@@ -119,6 +120,7 @@
 - `lib/src/ui/`：UI 基础设施
   - `app_theme.dart`：Material 3 主题与动态取色。
   - `theme_sheet.dart`：主题设置弹窗。
+  - `ui_scale.dart`：按屏幕宽度计算 UI 缩放系数（用于竖屏平板/手机避免 UI 过小）。
 
 ## 典型数据流（从 UI 到 API）
 
