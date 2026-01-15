@@ -756,7 +756,7 @@ class _HomeSectionCarousel extends StatelessWidget {
       builder: (context, constraints) {
         const padding = 14.0;
         const spacing = 8.0;
-        const visible = 4.0;
+        const visible = 8.0;
         final maxCount = items.length < _maxItems ? items.length : _maxItems;
 
         final itemWidth =
