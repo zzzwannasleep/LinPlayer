@@ -1,5 +1,7 @@
 import 'package:dynamic_color/dynamic_color.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -24,6 +26,13 @@ void main() async {
 
   final appState = AppState();
   await appState.loadFromStorage();
+
+  // Best-effort: request the highest refresh rate on Android devices.
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    try {
+      await FlutterDisplayMode.setHighRefreshRate();
+    } catch (_) {}
+  }
   // Best-effort: keep launcher icon in sync with settings (Android only).
   // ignore: unawaited_futures
   AppIconService.setIconId(appState.appIconId);

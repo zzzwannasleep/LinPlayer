@@ -97,6 +97,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         },
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
+        mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
       );
       _tracks = _playerService.player.state.tracks;
       _maybeApplyInitialTracks(_tracks);

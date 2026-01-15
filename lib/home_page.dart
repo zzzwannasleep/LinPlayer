@@ -133,7 +133,8 @@ class _HomePageState extends State<HomePage> {
 
   bool _isTv(BuildContext context) =>
       defaultTargetPlatform == TargetPlatform.android &&
-      MediaQuery.of(context).size.shortestSide > 600;
+      MediaQuery.of(context).orientation == Orientation.landscape &&
+      MediaQuery.of(context).size.shortestSide >= 720;
 
   Future<void> _showRoutePicker() async {
     if (widget.appState.domains.isEmpty && !widget.appState.isLoading) {
@@ -756,7 +757,7 @@ class _HomeSectionCarousel extends StatelessWidget {
       builder: (context, constraints) {
         const padding = 14.0;
         const spacing = 8.0;
-        const visible = 8.0;
+        final visible = (constraints.maxWidth / 180).clamp(2.2, 8.0);
         final maxCount = items.length < _maxItems ? items.length : _maxItems;
 
         final itemWidth =

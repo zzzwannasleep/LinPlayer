@@ -19,6 +19,7 @@ class AppState extends ChangeNotifier {
   static const _kPreferredVideoVersionKey = 'preferredVideoVersion_v1';
   static const _kAppIconIdKey = 'appIconId_v1';
   static const _kServerListLayoutKey = 'serverListLayout_v1';
+  static const _kMpvCacheSizeMbKey = 'mpvCacheSizeMb_v1';
 
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
@@ -39,6 +40,7 @@ class AppState extends ChangeNotifier {
       VideoVersionPreference.defaultVersion;
   String _appIconId = 'default';
   ServerListLayout _serverListLayout = ServerListLayout.grid;
+  int _mpvCacheSizeMb = 500;
   bool _loading = false;
   String? _error;
 
@@ -77,6 +79,7 @@ class AppState extends ChangeNotifier {
   VideoVersionPreference get preferredVideoVersion => _preferredVideoVersion;
   String get appIconId => _appIconId;
   ServerListLayout get serverListLayout => _serverListLayout;
+  int get mpvCacheSizeMb => _mpvCacheSizeMb;
 
   Iterable<HomeEntry> get homeEntries sync* {
     for (final entry in _homeSections.entries) {
@@ -108,8 +111,18 @@ class AppState extends ChangeNotifier {
     _preferredVideoVersion = videoVersionPreferenceFromId(
         prefs.getString(_kPreferredVideoVersionKey));
     _appIconId = prefs.getString(_kAppIconIdKey) ?? 'default';
+    const supportedAppIcons = {'default', 'pink', 'purple', 'miku'};
+    if (!supportedAppIcons.contains(_appIconId)) {
+      _appIconId = 'default';
+      await prefs.setString(_kAppIconIdKey, _appIconId);
+    }
     _serverListLayout =
         serverListLayoutFromId(prefs.getString(_kServerListLayoutKey));
+    _mpvCacheSizeMb = prefs.getInt(_kMpvCacheSizeMbKey) ?? 500;
+    if (_mpvCacheSizeMb < 200 || _mpvCacheSizeMb > 2048) {
+      _mpvCacheSizeMb = _mpvCacheSizeMb.clamp(200, 2048);
+      await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
+    }
 
     final rawServers = prefs.getString(_kServersKey);
     _servers.clear();
@@ -624,6 +637,15 @@ class AppState extends ChangeNotifier {
     _serverListLayout = layout;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kServerListLayoutKey, layout.id);
+    notifyListeners();
+  }
+
+  Future<void> setMpvCacheSizeMb(int mb) async {
+    final v = mb.clamp(200, 2048);
+    if (_mpvCacheSizeMb == v) return;
+    _mpvCacheSizeMb = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
     notifyListeners();
   }
 

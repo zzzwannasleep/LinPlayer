@@ -23,6 +23,8 @@ class PlayerService {
     required bool isTv,
     required bool hardwareDecode,
     required bool isNetwork,
+    required int mpvCacheSizeMb,
+    required bool dolbyVisionMode,
   }) {
     final platform = defaultTargetPlatform;
     final isAndroid = !kIsWeb && platform == TargetPlatform.android;
@@ -36,12 +38,14 @@ class PlayerService {
     // - `media_kit` maps `bufferSize` to both `demuxer-max-bytes` & `demuxer-max-back-bytes`.
     //   For network playback we prefer a larger *forward* cache, while keeping the backward
     //   cache smaller to avoid excessive memory usage.
-    final bufferSize = isTv ? _mb(100) : _mb(150);
-    final networkDemuxerMaxBytes = isTv ? _mb(192) : (isDesktop ? _mb(256) : _mb(192));
-    final networkDemuxerMaxBackBytes = isTv ? _mb(48) : (isDesktop ? _mb(64) : _mb(32));
+    final cacheMb = mpvCacheSizeMb.clamp(200, 2048);
+    final bufferSize = _mb(cacheMb);
+    final networkDemuxerMaxBytes = bufferSize;
+    final networkDemuxerMaxBackBytes =
+        (bufferSize ~/ 4).clamp(_mb(32), _mb(256)).toInt();
 
     return PlayerConfiguration(
-      vo: isAndroid || isDesktop ? 'gpu' : null,
+      vo: isAndroid || isDesktop ? (dolbyVisionMode ? 'gpu-next' : 'gpu') : null,
       osc: false,
       title: 'LinPlayer',
       logLevel: MPVLogLevel.warn,
@@ -65,8 +69,14 @@ class PlayerService {
       ],
       extraMpvOptions: [
         // `auto` enables zero-copy hardware decoding where possible (often smoother than copy-back).
-        hardwareDecode ? 'hwdec=auto' : 'hwdec=no',
+        if (dolbyVisionMode)
+          'hwdec=no'
+        else
+          (hardwareDecode ? (isAndroid ? 'hwdec=mediacodec-copy' : 'hwdec=auto') : 'hwdec=no'),
         'tls-verify=no',
+        if (dolbyVisionMode && isAndroid) 'gpu-context=android',
+        if (dolbyVisionMode && isAndroid) 'gpu-api=opengl',
+        if (dolbyVisionMode) 'target-colorspace-hint=auto',
         // Avoid on-disk cache writes for network streams; prefer RAM cache + tuned demuxer buffer.
         if (isNetwork) 'cache-on-disk=no',
         if (isNetwork) 'demuxer-max-bytes=$networkDemuxerMaxBytes',
@@ -77,12 +87,36 @@ class PlayerService {
     );
   }
 
+  static bool _isDolbyVisionCodec(String? codec) {
+    final c = (codec ?? '').toLowerCase();
+    return c.contains('dvhe') || c.contains('dvh1') || c.contains('dovi');
+  }
+
+  Future<bool> _isDolbyVision(Player player) async {
+    try {
+      final profile = await (player.platform as dynamic).getProperty(
+        'current-tracks/video/dolby-vision-profile',
+      );
+      if (profile.trim().isNotEmpty && profile.trim() != '0') return true;
+    } catch (_) {}
+
+    final tracks = player.state.tracks;
+    for (final v in tracks.video) {
+      if (_isDolbyVisionCodec(v.codec)) return true;
+      if ((v.title ?? '').toLowerCase().contains('dolby')) return true;
+      if ((v.decoder ?? '').toLowerCase().contains('dolby')) return true;
+    }
+    return false;
+  }
+
   Future<void> initialize(
     String? path, {
     String? networkUrl,
     Map<String, String>? httpHeaders,
     bool isTv = false,
     bool hardwareDecode = true,
+    int mpvCacheSizeMb = 500,
+    bool dolbyVisionMode = false,
   }) async {
     await dispose();
     MediaKit.ensureInitialized();
@@ -92,6 +126,8 @@ class PlayerService {
         isTv: isTv,
         hardwareDecode: hardwareDecode,
         isNetwork: isNetwork,
+        mpvCacheSizeMb: mpvCacheSizeMb,
+        dolbyVisionMode: dolbyVisionMode,
       ),
     );
     final controller = VideoController(player);
@@ -108,6 +144,26 @@ class PlayerService {
         await player.open(Media(path));
       } else {
         throw Exception('No media source provided');
+      }
+
+      // Best-effort: Dolby Vision workaround on Android.
+      // Many devices show green/purple tint with DV when hwdec is enabled or vo isn't gpu-next.
+      if (!dolbyVisionMode &&
+          !kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        final isDv = await _isDolbyVision(player);
+        if (isDv) {
+          await dispose();
+          return initialize(
+            path,
+            networkUrl: networkUrl,
+            httpHeaders: httpHeaders,
+            isTv: isTv,
+            hardwareDecode: false,
+            mpvCacheSizeMb: mpvCacheSizeMb,
+            dolbyVisionMode: true,
+          );
+        }
       }
     } catch (_) {
       await dispose();

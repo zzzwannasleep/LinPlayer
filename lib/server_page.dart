@@ -18,7 +18,8 @@ class ServerPage extends StatefulWidget {
 class _ServerPageState extends State<ServerPage> {
   bool _isTv(BuildContext context) =>
       defaultTargetPlatform == TargetPlatform.android &&
-      MediaQuery.of(context).size.shortestSide > 600;
+      MediaQuery.of(context).orientation == Orientation.landscape &&
+      MediaQuery.of(context).size.shortestSide >= 720;
 
   Future<void> _showAddServerSheet() async {
     await showModalBottomSheet<void>(
@@ -49,10 +50,7 @@ class _ServerPageState extends State<ServerPage> {
         final isTv = _isTv(context);
         final listLayout = widget.appState.serverListLayout;
         final isList = listLayout == ServerListLayout.list;
-        final width = MediaQuery.of(context).size.width;
-        final crossAxisCount = isTv
-            ? (width >= 1200 ? 12 : 10)
-            : (width >= 900 ? 10 : (width >= 600 ? 8 : 6));
+        final maxCrossAxisExtent = isTv ? 160.0 : 180.0;
 
         return Scaffold(
           body: SafeArea(
@@ -153,15 +151,15 @@ class _ServerPageState extends State<ServerPage> {
                               childCount: servers.length,
                             ),
                           )
-                        : SliverGrid.builder(
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: crossAxisCount,
-                              mainAxisSpacing: 8,
-                              crossAxisSpacing: 8,
-                              childAspectRatio: 1.2,
-                            ),
-                            itemCount: servers.length,
+                         : SliverGrid.builder(
+                             gridDelegate:
+                                 SliverGridDelegateWithMaxCrossAxisExtent(
+                               maxCrossAxisExtent: maxCrossAxisExtent,
+                               mainAxisSpacing: 8,
+                               crossAxisSpacing: 8,
+                               childAspectRatio: 1.2,
+                             ),
+                             itemCount: servers.length,
                             itemBuilder: (context, index) {
                               final server = servers[index];
                               final isActive =

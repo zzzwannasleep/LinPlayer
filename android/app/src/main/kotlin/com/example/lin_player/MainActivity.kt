@@ -17,8 +17,9 @@ class MainActivity : FlutterActivity() {
 
     private val aliases = listOf(
         Alias(id = "default", classNameSuffix = ".MainActivityDefault", manifestEnabled = true),
-        Alias(id = "warm", classNameSuffix = ".MainActivityWarm", manifestEnabled = false),
-        Alias(id = "cool", classNameSuffix = ".MainActivityCool", manifestEnabled = false),
+        Alias(id = "pink", classNameSuffix = ".MainActivityPink", manifestEnabled = false),
+        Alias(id = "purple", classNameSuffix = ".MainActivityPurple", manifestEnabled = false),
+        Alias(id = "miku", classNameSuffix = ".MainActivityMiku", manifestEnabled = false),
     )
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

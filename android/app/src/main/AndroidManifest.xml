@@ -45,10 +45,10 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".MainActivityWarm"
+            android:name=".MainActivityPink"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_warm"
+            android:icon="@mipmap/ic_launcher_pink"
             android:label="LinPlayer"
             android:targetActivity=".MainActivity">
             <intent-filter>
@@ -58,10 +58,23 @@
         </activity-alias>
 
         <activity-alias
-            android:name=".MainActivityCool"
+            android:name=".MainActivityPurple"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_cool"
+            android:icon="@mipmap/ic_launcher_purple"
+            android:label="LinPlayer"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".MainActivityMiku"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_miku"
             android:label="LinPlayer"
             android:targetActivity=".MainActivity">
             <intent-filter>

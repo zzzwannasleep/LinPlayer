@@ -20,7 +20,8 @@ class _LibraryPageState extends State<LibraryPage> {
 
   bool _isTv(BuildContext context) =>
       defaultTargetPlatform == TargetPlatform.android &&
-      MediaQuery.of(context).size.shortestSide > 600;
+      MediaQuery.of(context).orientation == Orientation.landscape &&
+      MediaQuery.of(context).size.shortestSide >= 720;
 
   @override
   Widget build(BuildContext context) {

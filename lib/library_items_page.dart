@@ -72,15 +72,15 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
 
   bool _isTv(BuildContext context) =>
       defaultTargetPlatform == TargetPlatform.android &&
-      MediaQuery.of(context).size.shortestSide > 600;
+      MediaQuery.of(context).orientation == Orientation.landscape &&
+      MediaQuery.of(context).size.shortestSide >= 720;
 
   @override
   Widget build(BuildContext context) {
     final items = widget.appState.getItems(widget.parentId);
     final isTv = _isTv(context);
     final enableGlass = !isTv;
-    final width = MediaQuery.of(context).size.width;
-    final crossAxisCount = isTv ? 6 : (width >= 600 ? 5 : 4);
+    final maxCrossAxisExtent = isTv ? 160.0 : 180.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -90,14 +90,14 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
           ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: const EdgeInsets.all(12),
-              child: GridView.builder(
-                controller: _scroll,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 0.7,
-                ),
+                child: GridView.builder(
+                  controller: _scroll,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: maxCrossAxisExtent,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 0.7,
+                  ),
                 itemCount: items.length + (_loadingMore ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index >= items.length) {

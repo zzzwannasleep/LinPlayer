@@ -32,7 +32,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       brightness: scheme.brightness,
-      visualDensity: VisualDensity.compact,
+      visualDensity: VisualDensity.adaptivePlatformDensity,
     );
 
     final radius = BorderRadius.circular(18);

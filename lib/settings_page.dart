@@ -20,10 +20,12 @@ class _SettingsPageState extends State<SettingsPage> {
   static const _donateUrl = 'https://afdian.com/a/zzzwannasleep';
   static const _customSentinel = '__custom__';
   static const _subtitleOff = 'off';
+  double? _mpvCacheDraftMb;
 
   bool _isTv(BuildContext context) =>
       defaultTargetPlatform == TargetPlatform.android &&
-      MediaQuery.of(context).size.shortestSide > 600;
+      MediaQuery.of(context).orientation == Orientation.landscape &&
+      MediaQuery.of(context).size.shortestSide >= 720;
 
   List<DropdownMenuItem<String>> _audioLangItems(String current) {
     final base = <MapEntry<String, String>>[
@@ -180,6 +182,41 @@ class _SettingsPageState extends State<SettingsPage> {
                     const Divider(height: 1),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.storage_outlined),
+                      title: const Text('MPV 缓存大小'),
+                      subtitle: Builder(
+                        builder: (context) {
+                          final cacheMb =
+                              (_mpvCacheDraftMb ?? appState.mpvCacheSizeMb.toDouble())
+                                  .round()
+                                  .clamp(200, 2048);
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('当前：${cacheMb}MB（200-2048MB，默认500MB）'),
+                              Slider(
+                                value: cacheMb.toDouble(),
+                                min: 200,
+                                max: 2048,
+                                divisions: 2048 - 200,
+                                label: '${cacheMb}MB',
+                                onChanged: (v) =>
+                                    setState(() => _mpvCacheDraftMb = v),
+                                onChangeEnd: (v) {
+                                  final mb = v.round().clamp(200, 2048);
+                                  setState(() => _mpvCacheDraftMb = null);
+                                  // ignore: unawaited_futures
+                                  appState.setMpvCacheSizeMb(mb);
+                                },
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.audiotrack),
                       title: const Text('优先音轨'),
                       trailing: DropdownButtonHideUnderline(
@@ -275,8 +312,9 @@ class _SettingsPageState extends State<SettingsPage> {
                           items: const [
                             DropdownMenuItem(
                                 value: 'default', child: Text('默认')),
-                            DropdownMenuItem(value: 'warm', child: Text('暖色调')),
-                            DropdownMenuItem(value: 'cool', child: Text('冷色调')),
+                            DropdownMenuItem(value: 'pink', child: Text('粉色')),
+                            DropdownMenuItem(value: 'purple', child: Text('紫色')),
+                            DropdownMenuItem(value: 'miku', child: Text('初音未来')),
                           ],
                           onChanged: !AppIconService.isSupported
                               ? null

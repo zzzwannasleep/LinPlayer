@@ -61,7 +61,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   bool _isTv(BuildContext context) =>
       defaultTargetPlatform == TargetPlatform.android &&
-      MediaQuery.of(context).size.shortestSide > 600;
+      MediaQuery.of(context).orientation == Orientation.landscape &&
+      MediaQuery.of(context).size.shortestSide >= 720;
 
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -95,19 +96,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       if (kIsWeb) {
-        await _playerService.initialize(
-          null,
-          networkUrl: file.path ?? '',
-          isTv: isTv,
-          hardwareDecode: _hwdecOn,
-        );
-      } else {
-        await _playerService.initialize(
-          file.path,
-          isTv: isTv,
-          hardwareDecode: _hwdecOn,
-        );
-      }
+          await _playerService.initialize(
+            null,
+            networkUrl: file.path ?? '',
+            isTv: isTv,
+            hardwareDecode: _hwdecOn,
+            mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+          );
+        } else {
+          await _playerService.initialize(
+            file.path,
+            isTv: isTv,
+            hardwareDecode: _hwdecOn,
+            mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+          );
+        }
       if (!mounted) return;
       _tracks = _playerService.player.state.tracks;
       _maybeApplyPreferredTracks(_tracks);
