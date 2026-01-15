@@ -102,6 +102,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             isTv: isTv,
             hardwareDecode: _hwdecOn,
             mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+            externalMpvPath: widget.appState?.externalMpvPath,
           );
         } else {
           await _playerService.initialize(
@@ -109,9 +110,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
             isTv: isTv,
             hardwareDecode: _hwdecOn,
             mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+            externalMpvPath: widget.appState?.externalMpvPath,
           );
         }
       if (!mounted) return;
+      if (_playerService.isExternalPlayback) {
+        setState(() => _playError =
+            _playerService.externalPlaybackMessage ?? '已使用外部播放器播放');
+        return;
+      }
       _tracks = _playerService.player.state.tracks;
       _maybeApplyPreferredTracks(_tracks);
       _playerService.player.stream.tracks.listen((t) {

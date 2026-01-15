@@ -4,14 +4,21 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'src/external_player/external_mpv_launcher.dart';
+
 class PlayerService {
   Player? _player;
   VideoController? _controller;
   StreamSubscription<String>? _errorSub;
 
+  bool _externalPlayback = false;
+  String? _externalPlaybackMessage;
+
   Player get player => _player!;
   VideoController get controller => _controller!;
   bool get isInitialized => _player != null && _controller != null;
+  bool get isExternalPlayback => _externalPlayback;
+  String? get externalPlaybackMessage => _externalPlaybackMessage;
 
   Duration get position => _player?.state.position ?? Duration.zero;
   Duration get duration => _player?.state.duration ?? Duration.zero;
@@ -19,8 +26,26 @@ class PlayerService {
 
   static int _mb(int value) => value * 1024 * 1024;
 
+  VideoControllerConfiguration _videoConfig({
+    required bool hardwareDecode,
+    required bool dolbyVisionMode,
+  }) {
+    final platform = defaultTargetPlatform;
+    final isAndroid = !kIsWeb && platform == TargetPlatform.android;
+    final hwdec = dolbyVisionMode || !hardwareDecode
+        ? 'no'
+        : (isAndroid ? 'mediacodec-copy' : 'auto-safe');
+
+    return VideoControllerConfiguration(
+      // `vo` is platform specific: desktop uses `libmpv` (render API), Android uses `gpu`.
+      // For Dolby Vision on Android, `gpu-next` may fix the green/purple tint on some files.
+      vo: (dolbyVisionMode && isAndroid) ? 'gpu-next' : null,
+      hwdec: hwdec,
+      enableHardwareAcceleration: true,
+    );
+  }
+
   PlayerConfiguration _config({
-    required bool isTv,
     required bool hardwareDecode,
     required bool isNetwork,
     required int mpvCacheSizeMb,
@@ -29,10 +54,6 @@ class PlayerService {
     final platform = defaultTargetPlatform;
     final isAndroid = !kIsWeb && platform == TargetPlatform.android;
     final isWindows = !kIsWeb && platform == TargetPlatform.windows;
-    final isDesktop = !kIsWeb &&
-        (platform == TargetPlatform.windows ||
-            platform == TargetPlatform.linux ||
-            platform == TargetPlatform.macOS);
 
     // Notes:
     // - `media_kit` maps `bufferSize` to both `demuxer-max-bytes` & `demuxer-max-back-bytes`.
@@ -45,7 +66,6 @@ class PlayerService {
         (bufferSize ~/ 4).clamp(_mb(32), _mb(256)).toInt();
 
     return PlayerConfiguration(
-      vo: isAndroid || isDesktop ? (dolbyVisionMode ? 'gpu-next' : 'gpu') : null,
       osc: false,
       title: 'LinPlayer',
       logLevel: MPVLogLevel.warn,
@@ -68,13 +88,6 @@ class PlayerService {
         'ftp',
       ],
       extraMpvOptions: [
-        // `auto` enables zero-copy hardware decoding where possible (often smoother than copy-back).
-        if (dolbyVisionMode)
-          'hwdec=no'
-        else
-          (hardwareDecode
-              ? (isAndroid ? 'hwdec=mediacodec-copy' : 'hwdec=auto-safe')
-              : 'hwdec=no'),
         'tls-verify=no',
         if (dolbyVisionMode && isAndroid) 'gpu-context=android',
         if (dolbyVisionMode && isAndroid) 'gpu-api=opengl',
@@ -165,6 +178,33 @@ class PlayerService {
     return false;
   }
 
+  Future<int?> _dolbyVisionProfile(Player player) async {
+    String? profile = await _tryGetProperty(
+          player,
+          'current-tracks/video/dolby-vision-profile',
+        ) ??
+        await _tryGetProperty(player, 'video-params/dolby-vision-profile');
+
+    if (profile != null) {
+      profile = profile.trim();
+      // mpv may expose values like "5" or "8.1". We only need the major.
+      final major = int.tryParse(profile.split('.').first);
+      if (major != null && major > 0) return major;
+    }
+
+    final tracks = await _waitForTracks(player);
+    for (final v in tracks.video) {
+      final codec = (v.codec ?? '').toLowerCase();
+      final m = RegExp(r'(?:dvhe|dvh1)\.(\d{2})').firstMatch(codec);
+      if (m != null) {
+        final p = int.tryParse(m.group(1)!);
+        if (p != null && p > 0) return p;
+      }
+    }
+
+    return null;
+  }
+
   Future<void> initialize(
     String? path, {
     String? networkUrl,
@@ -173,20 +213,28 @@ class PlayerService {
     bool hardwareDecode = true,
     int mpvCacheSizeMb = 500,
     bool dolbyVisionMode = false,
+    String? externalMpvPath,
   }) async {
     await dispose();
+    _externalPlayback = false;
+    _externalPlaybackMessage = null;
     MediaKit.ensureInitialized();
     final isNetwork = networkUrl != null && networkUrl.isNotEmpty;
     final player = Player(
       configuration: _config(
-        isTv: isTv,
         hardwareDecode: hardwareDecode,
         isNetwork: isNetwork,
         mpvCacheSizeMb: mpvCacheSizeMb,
         dolbyVisionMode: dolbyVisionMode,
       ),
     );
-    final controller = VideoController(player);
+    final controller = VideoController(
+      player,
+      configuration: _videoConfig(
+        hardwareDecode: hardwareDecode,
+        dolbyVisionMode: dolbyVisionMode,
+      ),
+    );
     _player = player;
     _controller = controller;
     _errorSub = player.stream.error.listen((message) {
@@ -200,6 +248,41 @@ class PlayerService {
         await player.open(Media(path));
       } else {
         throw Exception('No media source provided');
+      }
+
+      // Desktop workaround: libmpv render API (vo=libmpv) cannot use gpu-next for Dolby Vision reshaping.
+      // For common single-layer Dolby Vision (Profile 5), launching external mpv is the only reliable fix.
+      if (!kIsWeb) {
+        final platform = defaultTargetPlatform;
+        final isDesktop = platform == TargetPlatform.windows ||
+            platform == TargetPlatform.linux ||
+            platform == TargetPlatform.macOS;
+        if (isDesktop) {
+          final dvProfile = await _dolbyVisionProfile(player);
+          if (dvProfile == 5) {
+            final source = (networkUrl != null && networkUrl.isNotEmpty)
+                ? networkUrl
+                : (path ?? '');
+            if (source.isNotEmpty) {
+              final launched = await launchExternalMpv(
+                executablePath: externalMpvPath,
+                source: source,
+                httpHeaders: httpHeaders,
+              );
+              if (launched) {
+                _externalPlayback = true;
+                _externalPlaybackMessage =
+                    '检测到杜比视界（Profile 5），已尝试使用外部 mpv 播放。可在设置里选择 mpv 可执行文件。';
+                await _errorSub?.cancel();
+                _errorSub = null;
+                _player = null;
+                _controller = null;
+                await player.dispose();
+                return;
+              }
+            }
+          }
+        }
       }
 
       // Best-effort: Dolby Vision workaround on Android & desktop.
@@ -239,6 +322,8 @@ class PlayerService {
   Future<void> dispose() async {
     await _errorSub?.cancel();
     _errorSub = null;
+    _externalPlayback = false;
+    _externalPlaybackMessage = null;
     final player = _player;
     _player = null;
     _controller = null;

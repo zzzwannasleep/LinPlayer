@@ -98,7 +98,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
+        externalMpvPath: widget.appState.externalMpvPath,
       );
+      if (_playerService.isExternalPlayback) {
+        _playError =
+            _playerService.externalPlaybackMessage ?? '已使用外部播放器播放';
+        return;
+      }
       _tracks = _playerService.player.state.tracks;
       _maybeApplyInitialTracks(_tracks);
       _playerService.player.stream.tracks.listen((t) {

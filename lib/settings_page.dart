@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'src/ui/app_icon_service.dart';
@@ -100,6 +101,10 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final isTv = _isTv(context);
+    final isDesktop = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS);
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
@@ -232,6 +237,44 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     const Divider(height: 1),
+                    if (isDesktop) ...[
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.open_in_new),
+                        title: const Text('外部 MPV（PC）'),
+                        subtitle: Text(
+                          appState.externalMpvPath.trim().isEmpty
+                              ? '未设置：将尝试调用系统 mpv（PATH 或同目录）'
+                              : appState.externalMpvPath,
+                        ),
+                        trailing: const Icon(Icons.folder_open),
+                        onTap: () async {
+                          final result = await FilePicker.platform.pickFiles(
+                            dialogTitle: '选择 mpv 可执行文件',
+                            allowMultiple: false,
+                            withData: false,
+                            type: FileType.any,
+                          );
+                          final path = result?.files.single.path;
+                          if (path == null || path.trim().isEmpty) return;
+                          // ignore: unawaited_futures
+                          appState.setExternalMpvPath(path);
+                        },
+                      ),
+                      if (appState.externalMpvPath.trim().isNotEmpty) ...[
+                        const Divider(height: 1),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.delete_outline),
+                          title: const Text('清除外部 MPV 路径'),
+                          onTap: () {
+                            // ignore: unawaited_futures
+                            appState.setExternalMpvPath('');
+                          },
+                        ),
+                      ],
+                      const Divider(height: 1),
+                    ],
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.audiotrack),

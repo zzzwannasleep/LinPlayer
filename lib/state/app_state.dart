@@ -21,6 +21,7 @@ class AppState extends ChangeNotifier {
   static const _kServerListLayoutKey = 'serverListLayout_v1';
   static const _kMpvCacheSizeMbKey = 'mpvCacheSizeMb_v1';
   static const _kEnableBlurEffectsKey = 'enableBlurEffects_v1';
+  static const _kExternalMpvPathKey = 'externalMpvPath_v1';
 
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
@@ -43,6 +44,7 @@ class AppState extends ChangeNotifier {
   ServerListLayout _serverListLayout = ServerListLayout.grid;
   int _mpvCacheSizeMb = 500;
   bool _enableBlurEffects = true;
+  String _externalMpvPath = '';
   bool _loading = false;
   String? _error;
 
@@ -83,6 +85,7 @@ class AppState extends ChangeNotifier {
   ServerListLayout get serverListLayout => _serverListLayout;
   int get mpvCacheSizeMb => _mpvCacheSizeMb;
   bool get enableBlurEffects => _enableBlurEffects;
+  String get externalMpvPath => _externalMpvPath;
 
   Iterable<HomeEntry> get homeEntries sync* {
     for (final entry in _homeSections.entries) {
@@ -127,6 +130,7 @@ class AppState extends ChangeNotifier {
       await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
     }
     _enableBlurEffects = prefs.getBool(_kEnableBlurEffectsKey) ?? true;
+    _externalMpvPath = prefs.getString(_kExternalMpvPathKey) ?? '';
 
     final rawServers = prefs.getString(_kServersKey);
     _servers.clear();
@@ -658,6 +662,19 @@ class AppState extends ChangeNotifier {
     _enableBlurEffects = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kEnableBlurEffectsKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setExternalMpvPath(String path) async {
+    final p = path.trim();
+    if (_externalMpvPath == p) return;
+    _externalMpvPath = p;
+    final prefs = await SharedPreferences.getInstance();
+    if (p.isEmpty) {
+      await prefs.remove(_kExternalMpvPathKey);
+    } else {
+      await prefs.setString(_kExternalMpvPathKey, p);
+    }
     notifyListeners();
   }
 
