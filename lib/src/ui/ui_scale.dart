@@ -1,18 +1,39 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 
-extension UiScaleContext on BuildContext {
+class UiScaleScope extends InheritedWidget {
+  const UiScaleScope({
+    super.key,
+    required this.scale,
+    required super.child,
+  });
+
+  final double scale;
+
+  static UiScaleScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<UiScaleScope>();
+
   /// UI scale factor based on the current logical screen width.
   ///
-  /// - Landscape tablets typically end up around `1.0`.
-  /// - Large desktop windows scale down to fit more content.
-  double get uiScale {
-    final width = MediaQuery.sizeOf(this).width;
+  /// - Landscape tablets typically end up at `1.0`.
+  /// - Portrait tablets / phones scale up (clamped) to avoid tiny UI.
+  static double autoScaleFor(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
     if (width <= 0) return 1.0;
 
     const referenceWidth = 1000.0;
-    // Allow UI to scale down on large screens while avoiding overly tiny UI.
-    const minScale = 0.5;
-    const maxScale = 1.0;
-    return (referenceWidth / width).clamp(minScale, maxScale);
+    const minScale = 1.0;
+    const maxScale = 1.3;
+    return (referenceWidth / width).clamp(minScale, maxScale).toDouble();
+  }
+
+  @override
+  bool updateShouldNotify(UiScaleScope oldWidget) => scale != oldWidget.scale;
+}
+
+extension UiScaleContext on BuildContext {
+  double get uiScale {
+    final scoped = UiScaleScope.maybeOf(this);
+    if (scoped != null) return scoped.scale;
+    return UiScaleScope.autoScaleFor(this);
   }
 }

@@ -530,8 +530,6 @@ class _HomeBody extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 16),
         children: [
-          const SizedBox(height: 8),
-          _RandomRecommendSection(appState: appState, isTv: isTv),
           if (showSearchBar) ...[
             const SizedBox(height: 8),
             Padding(
@@ -553,8 +551,9 @@ class _HomeBody extends StatelessWidget {
                 },
               ),
             ),
-            const SizedBox(height: 8),
           ],
+          const SizedBox(height: 8),
+          _RandomRecommendSection(appState: appState, isTv: isTv),
           if (loading) const LinearProgressIndicator(),
           for (final sec in sections)
             if (sec.items.isNotEmpty) ...[
@@ -669,6 +668,11 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
         final items = snap.data ?? const <MediaItem>[];
         final loading = snap.connectionState == ConnectionState.waiting;
         final theme = Theme.of(context);
+        final isDesktop = kIsWeb ||
+            defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.linux ||
+            defaultTargetPlatform == TargetPlatform.macOS;
+        const bannerAspectRatio = 32 / 9;
 
         if (!loading && snap.hasError && items.isEmpty) {
           return Padding(
@@ -698,7 +702,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: AspectRatio(
-              aspectRatio: 16 / 9,
+              aspectRatio: bannerAspectRatio,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: ColoredBox(
@@ -762,7 +766,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
               child: Row(
                 children: [
                   Expanded(
@@ -784,104 +788,156 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: AspectRatio(
-                aspectRatio: 16 / 9,
+                aspectRatio: bannerAspectRatio,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: PageView.builder(
-                    controller: _controller,
-                    itemCount: items.length,
-                    onPageChanged: (i) => setState(() => _page = i),
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      final year = _yearOf(item);
-                      final rating = item.communityRating;
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      PageView.builder(
+                        controller: _controller,
+                        itemCount: items.length,
+                        onPageChanged: (i) => setState(() => _page = i),
+                        itemBuilder: (context, index) {
+                          final item = items[index];
+                          final year = _yearOf(item);
+                          final rating = item.communityRating;
 
-                      return Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => ShowDetailPage(
-                                  itemId: item.id,
-                                  title: item.name,
-                                  appState: widget.appState,
-                                  isTv: widget.isTv,
-                                ),
-                              ),
-                            );
-                          },
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              bannerImage(item),
-                              const DecoratedBox(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.bottomCenter,
-                                    end: Alignment.center,
-                                    colors: [
-                                      Color(0xCC000000),
-                                      Color(0x33000000),
-                                      Colors.transparent,
-                                    ],
+                          return Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ShowDetailPage(
+                                      itemId: item.id,
+                                      title: item.name,
+                                      appState: widget.appState,
+                                      isTv: widget.isTv,
+                                    ),
                                   ),
-                                ),
-                              ),
-                              Positioned(
-                                left: 14,
-                                right: 14,
-                                bottom: 12,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style:
-                                          theme.textTheme.titleMedium?.copyWith(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w700,
+                                );
+                              },
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  bannerImage(item),
+                                  const DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.bottomCenter,
+                                        end: Alignment.center,
+                                        colors: [
+                                          Color(0xCC000000),
+                                          Color(0x33000000),
+                                          Colors.transparent,
+                                        ],
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
-                                    DefaultTextStyle(
-                                      style:
-                                          theme.textTheme.labelLarge?.copyWith(
+                                  ),
+                                  Positioned(
+                                    left: 12,
+                                    right: 12,
+                                    bottom: 10,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.titleSmall
+                                              ?.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        DefaultTextStyle(
+                                          style: theme.textTheme.labelMedium
+                                                  ?.copyWith(
                                                 color: Colors.white70,
                                               ) ??
                                               const TextStyle(
                                                   color: Colors.white70),
-                                      child: Row(
-                                        children: [
-                                          if (rating != null) ...[
-                                            const Icon(Icons.star,
-                                                size: 16, color: Colors.amber),
-                                            const SizedBox(width: 4),
-                                            Text(rating.toStringAsFixed(1)),
-                                          ],
-                                          if (year.isNotEmpty) ...[
-                                            if (rating != null)
-                                              const SizedBox(width: 10),
-                                            Text(year),
-                                          ],
-                                        ],
-                                      ),
+                                          child: Row(
+                                            children: [
+                                              if (rating != null) ...[
+                                                const Icon(
+                                                  Icons.star,
+                                                  size: 14,
+                                                  color: Colors.amber,
+                                                ),
+                                                const SizedBox(width: 3),
+                                                Text(rating.toStringAsFixed(1)),
+                                              ],
+                                              if (year.isNotEmpty) ...[
+                                                if (rating != null)
+                                                  const SizedBox(width: 10),
+                                                Text(year),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
+                          );
+                        },
+                      ),
+                      if (isDesktop && items.length > 1) ...[
+                        Positioned(
+                          left: 6,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: _BannerNavButton(
+                              icon: Icons.chevron_left,
+                              tooltip: '上一个',
+                              onPressed: () {
+                                if (items.isEmpty) return;
+                                final target =
+                                    _page <= 0 ? items.length - 1 : _page - 1;
+                                _controller.animateToPage(
+                                  target,
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: Curves.easeOutCubic,
+                                );
+                              },
+                            ),
                           ),
                         ),
-                      );
-                    },
+                        Positioned(
+                          right: 6,
+                          top: 0,
+                          bottom: 0,
+                          child: Center(
+                            child: _BannerNavButton(
+                              icon: Icons.chevron_right,
+                              tooltip: '下一个',
+                              onPressed: () {
+                                if (items.isEmpty) return;
+                                final target = (_page + 1) % items.length;
+                                _controller.animateToPage(
+                                  target,
+                                  duration: const Duration(milliseconds: 220),
+                                  curve: Curves.easeOutCubic,
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(items.length, (i) {
@@ -891,9 +947,9 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
                     : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5);
                 return AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: selected ? 14 : 6,
-                  height: 6,
+                  margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                  width: selected ? 12 : 5,
+                  height: 5,
                   decoration: BoxDecoration(
                     color: color,
                     borderRadius: BorderRadius.circular(999),
@@ -901,10 +957,36 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
                 );
               }),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
           ],
         );
       },
+    );
+  }
+}
+
+class _BannerNavButton extends StatelessWidget {
+  const _BannerNavButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black38,
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onPressed,
+        icon: Icon(icon, color: Colors.white),
+      ),
     );
   }
 }

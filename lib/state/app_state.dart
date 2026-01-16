@@ -12,6 +12,7 @@ class AppState extends ChangeNotifier {
   static const _kServersKey = 'servers_v1';
   static const _kActiveServerIdKey = 'activeServerId_v1';
   static const _kThemeModeKey = 'themeMode_v1';
+  static const _kUiScaleFactorKey = 'uiScaleFactor_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
   static const _kThemeTemplateKey = 'themeTemplate_v1';
   static const _kPreferHardwareDecodeKey = 'preferHardwareDecode_v1';
@@ -44,6 +45,7 @@ class AppState extends ChangeNotifier {
   final Map<String, List<MediaItem>> _homeSections = {};
   late final String _deviceId = _randomId();
   ThemeMode _themeMode = ThemeMode.system;
+  double _uiScaleFactor = 1.0;
   bool _useDynamicColor = true;
   ThemeTemplate _themeTemplate = ThemeTemplate.defaultBlue;
   bool _preferHardwareDecode = true;
@@ -93,6 +95,7 @@ class AppState extends ChangeNotifier {
   int getTotal(String parentId) => _itemsTotal[parentId] ?? 0;
   List<MediaItem> getHome(String key) => _homeSections[key] ?? [];
   ThemeMode get themeMode => _themeMode;
+  double get uiScaleFactor => _uiScaleFactor;
   bool get useDynamicColor => _useDynamicColor;
   ThemeTemplate get themeTemplate => _themeTemplate;
   Color get themeSeedColor => _themeTemplate.seed;
@@ -140,6 +143,9 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     _themeMode = _decodeThemeMode(prefs.getString(_kThemeModeKey));
+    _uiScaleFactor =
+        ((prefs.getDouble(_kUiScaleFactorKey) ?? 1.0).clamp(0.5, 2.0))
+            .toDouble();
     _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
     _themeTemplate = themeTemplateFromId(prefs.getString(_kThemeTemplateKey));
     _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
@@ -641,6 +647,15 @@ class AppState extends ChangeNotifier {
     _themeMode = mode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kThemeModeKey, _encodeThemeMode(mode));
+    notifyListeners();
+  }
+
+  Future<void> setUiScaleFactor(double factor) async {
+    final v = factor.clamp(0.5, 2.0).toDouble();
+    if (_uiScaleFactor == v) return;
+    _uiScaleFactor = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kUiScaleFactorKey, v);
     notifyListeners();
   }
 
