@@ -12,6 +12,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'player_service.dart';
 import 'services/dandanplay_api.dart';
 import 'src/player/danmaku.dart';
+import 'src/player/danmaku_processing.dart';
 import 'src/player/danmaku_stage.dart';
 import 'src/player/track_preferences.dart';
 import 'state/app_state.dart';
@@ -33,6 +34,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription<Duration>? _posSub;
   StreamSubscription<String>? _errorSub;
   StreamSubscription<VideoParams>? _videoParamsSub;
+  StreamSubscription<bool>? _playingSub;
+  StreamSubscription<bool>? _bufferingSub;
   VideoParams? _lastVideoParams;
   _OrientationMode _orientationMode = _OrientationMode.auto;
   String? _lastOrientationKey;
@@ -56,7 +59,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _danmakuSpeed = 1.0;
   bool _danmakuBold = true;
   int _danmakuMaxLines = 10;
+  int _danmakuTopMaxLines = 10;
+  int _danmakuBottomMaxLines = 10;
+  bool _danmakuPreventOverlap = true;
   int _nextDanmakuIndex = 0;
+  bool _buffering = false;
+  bool _danmakuPaused = false;
 
   @override
   void initState() {
@@ -69,6 +77,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _danmakuSpeed = appState?.danmakuSpeed ?? 1.0;
     _danmakuBold = appState?.danmakuBold ?? true;
     _danmakuMaxLines = appState?.danmakuMaxLines ?? 10;
+    _danmakuTopMaxLines = appState?.danmakuTopMaxLines ?? 0;
+    _danmakuBottomMaxLines = appState?.danmakuBottomMaxLines ?? 0;
+    _danmakuPreventOverlap = appState?.danmakuPreventOverlap ?? true;
   }
 
   @override
@@ -76,10 +87,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _posSub?.cancel();
     _errorSub?.cancel();
     _videoParamsSub?.cancel();
+    _playingSub?.cancel();
+    _bufferingSub?.cancel();
     // ignore: unawaited_futures
     _exitOrientationLock();
     _playerService.dispose();
     super.dispose();
+  }
+
+  void _applyDanmakuPauseState(bool pause) {
+    if (_danmakuPaused == pause) return;
+    _danmakuPaused = pause;
+    final stage = _danmakuKey.currentState;
+    if (pause) {
+      stage?.pause();
+    } else {
+      stage?.resume();
+    }
   }
 
   bool _isTv(BuildContext context) =>
@@ -110,6 +134,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _nextDanmakuIndex = 0;
       _danmakuSources.clear();
       _danmakuSourceIndex = -1;
+      _buffering = false;
       final appState = widget.appState;
       _danmakuEnabled = appState?.danmakuEnabled ?? true;
       _danmakuOpacity = appState?.danmakuOpacity ?? 1.0;
@@ -117,6 +142,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _danmakuSpeed = appState?.danmakuSpeed ?? 1.0;
       _danmakuBold = appState?.danmakuBold ?? true;
       _danmakuMaxLines = appState?.danmakuMaxLines ?? 10;
+      _danmakuTopMaxLines = appState?.danmakuTopMaxLines ?? 0;
+      _danmakuBottomMaxLines = appState?.danmakuBottomMaxLines ?? 0;
+      _danmakuPreventOverlap = appState?.danmakuPreventOverlap ?? true;
     });
     _danmakuKey.currentState?.clear();
     final isTv = _isTv(context);
@@ -125,6 +153,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _errorSub = null;
     await _videoParamsSub?.cancel();
     _videoParamsSub = null;
+    await _playingSub?.cancel();
+    _playingSub = null;
+    await _bufferingSub?.cancel();
+    _bufferingSub = null;
     try {
       await _playerService.dispose();
     } catch (_) {}
@@ -166,6 +198,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (!mounted) return;
         setState(() => _playError = message);
       });
+      _bufferingSub = _playerService.player.stream.buffering.listen((value) {
+        _buffering = value;
+        _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
+      });
+      _playingSub = _playerService.player.stream.playing.listen((playing) {
+        _applyDanmakuPauseState(_buffering || !playing);
+      });
+      _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
       _duration = _playerService.duration;
       _maybeAutoLoadOnlineDanmaku(file);
       _videoParamsSub = _playerService.player.stream.videoParams.listen((p) {
@@ -179,7 +219,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _posSub?.cancel();
       _posSub = _playerService.player.stream.position.listen((d) {
         if (!mounted) return;
-        final wentBack = d + const Duration(seconds: 2) < _position;
+        final prev = _position;
+        final wentBack = d + const Duration(seconds: 2) < prev;
+        final jumpedForward = d > prev + const Duration(seconds: 3);
         final now = DateTime.now();
         final deltaMs = (d.inMilliseconds - _position.inMilliseconds).abs();
         final shouldRebuild = _lastPositionUiUpdate == null ||
@@ -187,7 +229,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 const Duration(milliseconds: 250) ||
             deltaMs >= 1000;
         _position = d;
-        if (wentBack) {
+        if (wentBack || jumpedForward) {
           _syncDanmakuCursor(d);
         }
         _drainDanmaku(d);
@@ -384,12 +426,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
         fileHash: hash,
         fileSizeBytes: size,
         videoDurationSeconds: _duration.inSeconds,
+        matchMode: appState.danmakuMatchMode,
+        chConvert: appState.danmakuChConvert,
         appId: appState.danmakuAppId,
         appSecret: appState.danmakuAppSecret,
         throwIfEmpty: showToast,
       );
       if (!mounted) return;
-      if (sources.isEmpty) {
+      final processed = processDanmakuSources(
+        sources,
+        blockWords: appState.danmakuBlockWords,
+        mergeDuplicates: appState.danmakuMergeDuplicates,
+      );
+      if (processed.isEmpty) {
         if (showToast) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('未匹配到在线弹幕')),
@@ -398,8 +447,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return;
       }
       setState(() {
-        _danmakuSources.addAll(sources);
-        _danmakuSourceIndex = _danmakuSources.length - 1;
+        _danmakuSources.addAll(processed);
+        final desiredName = appState.danmakuRememberSelectedSource
+            ? appState.danmakuLastSelectedSourceName
+            : '';
+        final idx = desiredName.isEmpty
+            ? -1
+            : _danmakuSources.indexWhere((s) => s.name == desiredName);
+        _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
         _danmakuEnabled = true;
         _syncDanmakuCursor(_position);
       });
@@ -462,14 +517,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       final path = file.path;
       if (path == null || path.trim().isEmpty) return;
-      content = await File(path).readAsString();
+      final bytes = await File(path).readAsBytes();
+      content = DanmakuParser.decodeBytes(bytes);
     }
 
-    final items = DanmakuParser.parseBilibiliXml(content);
+    var items = DanmakuParser.parseBilibiliXml(content);
+    final appState = widget.appState;
+    if (appState != null) {
+      items = processDanmakuItems(
+        items,
+        blockWords: appState.danmakuBlockWords,
+        mergeDuplicates: appState.danmakuMergeDuplicates,
+      );
+    }
     if (!mounted) return;
     setState(() {
       _danmakuSources.add(DanmakuSource(name: file.name, items: items));
-      _danmakuSourceIndex = _danmakuSources.length - 1;
+      final desiredName =
+          appState != null && appState.danmakuRememberSelectedSource
+              ? appState.danmakuLastSelectedSourceName
+              : '';
+      final idx = desiredName.isEmpty
+          ? -1
+          : _danmakuSources.indexWhere((s) => s.name == desiredName);
+      _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
       _danmakuEnabled = true;
       _syncDanmakuCursor(_position);
     });
@@ -584,6 +655,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   _danmakuEnabled = true;
                                   _syncDanmakuCursor(_position);
                                 });
+                                final appState = widget.appState;
+                                if (appState != null &&
+                                    appState.danmakuRememberSelectedSource &&
+                                    v >= 0 &&
+                                    v < _danmakuSources.length) {
+                                  // ignore: unawaited_futures
+                                  appState.setDanmakuLastSelectedSourceName(
+                                      _danmakuSources[v].name);
+                                }
                                 setSheetState(() {});
                               },
                       ),
@@ -752,7 +832,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             scale: _danmakuScale,
                             speed: _danmakuSpeed,
                             bold: _danmakuBold,
-                            maxLines: _danmakuMaxLines,
+                            scrollMaxLines: _danmakuMaxLines,
+                            topMaxLines: _danmakuTopMaxLines,
+                            bottomMaxLines: _danmakuBottomMaxLines,
+                            preventOverlap: _danmakuPreventOverlap,
                           ),
                         ),
                       ],

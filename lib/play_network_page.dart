@@ -14,6 +14,7 @@ import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
 import 'src/player/danmaku.dart';
+import 'src/player/danmaku_processing.dart';
 import 'src/player/danmaku_stage.dart';
 import 'src/player/track_preferences.dart';
 
@@ -81,8 +82,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   double _danmakuSpeed = 1.0;
   bool _danmakuBold = true;
   int _danmakuMaxLines = 10;
+  int _danmakuTopMaxLines = 10;
+  int _danmakuBottomMaxLines = 10;
+  bool _danmakuPreventOverlap = true;
   int _nextDanmakuIndex = 0;
   Duration _lastPosition = Duration.zero;
+  bool _danmakuPaused = false;
 
   @override
   void initState() {
@@ -98,6 +103,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _danmakuSpeed = widget.appState.danmakuSpeed;
     _danmakuBold = widget.appState.danmakuBold;
     _danmakuMaxLines = widget.appState.danmakuMaxLines;
+    _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
+    _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
+    _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
     // ignore: unawaited_futures
     _enterImmersiveMode();
     _init();
@@ -160,7 +168,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       });
       _bufferingSub = _playerService.player.stream.buffering.listen((value) {
         if (!mounted) return;
-        setState(() => _buffering = value);
+        _buffering = value;
+        _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
+        setState(() {});
       });
       _bufferingPctSub =
           _playerService.player.stream.bufferingPercentage.listen((value) {
@@ -169,18 +179,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       });
       _posSub = _playerService.player.stream.position.listen((pos) {
         if (!mounted) return;
-        final wentBack = pos + const Duration(seconds: 2) < _lastPosition;
+        final prev = _lastPosition;
+        final wentBack = pos + const Duration(seconds: 2) < prev;
+        final jumpedForward = pos > prev + const Duration(seconds: 3);
         _lastPosition = pos;
-        if (wentBack) {
+        if (wentBack || jumpedForward) {
           _syncDanmakuCursor(pos);
         }
         _drainDanmaku(pos);
         _maybeReportPlaybackProgress(pos);
       });
-      _playingSub = _playerService.player.stream.playing.listen((_) {
+      _playingSub = _playerService.player.stream.playing.listen((playing) {
         if (!mounted) return;
+        _applyDanmakuPauseState(_buffering || !playing);
         _maybeReportPlaybackProgress(_lastPosition, force: true);
       });
+      _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
       _completedSub = _playerService.player.stream.completed.listen((value) {
         if (!value) return;
         // ignore: unawaited_futures
@@ -246,6 +260,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       );
     }
 
+    var fileName = widget.title;
     int fileSizeBytes = 0;
     int videoDurationSeconds = 0;
     try {
@@ -257,6 +272,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         userId: appState.userId!,
         itemId: widget.itemId,
       );
+      fileName = _buildDanmakuMatchName(item);
       fileSizeBytes = item.sizeBytes ?? 0;
       final ticks = item.runTimeTicks ?? 0;
       if (ticks > 0) {
@@ -271,16 +287,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     try {
       final sources = await loadOnlineDanmakuSources(
         apiUrls: appState.danmakuApiUrls,
-        fileName: widget.title,
+        fileName: fileName,
         fileHash: null,
         fileSizeBytes: fileSizeBytes,
         videoDurationSeconds: videoDurationSeconds,
+        matchMode: appState.danmakuMatchMode,
+        chConvert: appState.danmakuChConvert,
         appId: appState.danmakuAppId,
         appSecret: appState.danmakuAppSecret,
         throwIfEmpty: showToast,
       );
       if (!mounted) return;
-      if (sources.isEmpty) {
+      final processed = processDanmakuSources(
+        sources,
+        blockWords: appState.danmakuBlockWords,
+        mergeDuplicates: appState.danmakuMergeDuplicates,
+      );
+      if (processed.isEmpty) {
         if (showToast) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('未匹配到在线弹幕')),
@@ -289,8 +312,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         return;
       }
       setState(() {
-        _danmakuSources.addAll(sources);
-        _danmakuSourceIndex = _danmakuSources.length - 1;
+        _danmakuSources.addAll(processed);
+        final desiredName = appState.danmakuRememberSelectedSource
+            ? appState.danmakuLastSelectedSourceName
+            : '';
+        final idx = desiredName.isEmpty
+            ? -1
+            : _danmakuSources.indexWhere((s) => s.name == desiredName);
+        _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
         _danmakuEnabled = true;
         _syncDanmakuCursor(_lastPosition);
       });
@@ -359,6 +388,43 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     }
   }
 
+  void _applyDanmakuPauseState(bool pause) {
+    if (_danmakuPaused == pause) return;
+    _danmakuPaused = pause;
+    final stage = _danmakuKey.currentState;
+    if (pause) {
+      stage?.pause();
+    } else {
+      stage?.resume();
+    }
+  }
+
+  String _buildDanmakuMatchName(MediaItem item) {
+    final seriesName = item.seriesName.trim();
+    final name = item.name.trim();
+    final season = item.seasonNumber ?? 0;
+    final episode = item.episodeNumber ?? 0;
+
+    final base = seriesName.isNotEmpty
+        ? seriesName
+        : (name.isNotEmpty ? name : widget.title);
+    final extra = (name.isNotEmpty && name != base) ? ' $name' : '';
+
+    if (season > 0 && episode > 0) {
+      final s = season.toString().padLeft(2, '0');
+      final e = episode.toString().padLeft(2, '0');
+      return '$base S${s}E${e}$extra'.trim();
+    }
+    if (episode > 0) {
+      final e = episode.toString().padLeft(2, '0');
+      return '$base EP$e$extra'.trim();
+    }
+    if (seriesName.isNotEmpty && name.isNotEmpty && name != seriesName) {
+      return '$seriesName $name'.trim();
+    }
+    return widget.title;
+  }
+
   void _syncDanmakuCursor(Duration position) {
     if (_danmakuSourceIndex < 0 ||
         _danmakuSourceIndex >= _danmakuSources.length) {
@@ -404,14 +470,26 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     } else {
       final path = file.path;
       if (path == null || path.trim().isEmpty) return;
-      content = await File(path).readAsString();
+      final bytes = await File(path).readAsBytes();
+      content = DanmakuParser.decodeBytes(bytes);
     }
 
-    final items = DanmakuParser.parseBilibiliXml(content);
+    var items = DanmakuParser.parseBilibiliXml(content);
+    items = processDanmakuItems(
+      items,
+      blockWords: widget.appState.danmakuBlockWords,
+      mergeDuplicates: widget.appState.danmakuMergeDuplicates,
+    );
     if (!mounted) return;
     setState(() {
       _danmakuSources.add(DanmakuSource(name: file.name, items: items));
-      _danmakuSourceIndex = _danmakuSources.length - 1;
+      final desiredName = widget.appState.danmakuRememberSelectedSource
+          ? widget.appState.danmakuLastSelectedSourceName
+          : '';
+      final idx = desiredName.isEmpty
+          ? -1
+          : _danmakuSources.indexWhere((s) => s.name == desiredName);
+      _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
       _danmakuEnabled = true;
       _syncDanmakuCursor(_lastPosition);
     });
@@ -524,6 +602,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
                                   _danmakuEnabled = true;
                                   _syncDanmakuCursor(_lastPosition);
                                 });
+                                if (widget.appState
+                                        .danmakuRememberSelectedSource &&
+                                    v >= 0 &&
+                                    v < _danmakuSources.length) {
+                                  // ignore: unawaited_futures
+                                  widget.appState
+                                      .setDanmakuLastSelectedSourceName(
+                                          _danmakuSources[v].name);
+                                }
                                 setSheetState(() {});
                               },
                       ),
@@ -597,7 +684,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
 
     try {
       final api = _embyApi ??
-          EmbyApi(hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
+          EmbyApi(
+              hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
       final info = await api.fetchPlaybackInfo(
         token: token,
         baseUrl: base,
@@ -695,7 +783,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         now.difference(_lastProgressReportAt!) >= const Duration(seconds: 15);
     final pausedChanged = paused != _lastProgressReportPaused &&
         (_lastProgressReportAt == null ||
-            now.difference(_lastProgressReportAt!) >= const Duration(seconds: 1));
+            now.difference(_lastProgressReportAt!) >=
+                const Duration(seconds: 1));
     final shouldReport = force || due || pausedChanged;
     if (!shouldReport) return;
 
@@ -737,7 +826,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     }();
   }
 
-  Future<void> _reportPlaybackStoppedBestEffort({bool completed = false}) async {
+  Future<void> _reportPlaybackStoppedBestEffort(
+      {bool completed = false}) async {
     if (_reportedStop) return;
     _reportedStop = true;
 
@@ -750,11 +840,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       return;
     }
 
-    final pos = _playerService.isInitialized ? _playerService.position : _lastPosition;
+    final pos =
+        _playerService.isInitialized ? _playerService.position : _lastPosition;
     final dur = _playerService.duration;
     final played = completed ||
-        (dur > Duration.zero &&
-            pos >= dur - const Duration(seconds: 20));
+        (dur > Duration.zero && pos >= dur - const Duration(seconds: 20));
     final ticks = _toTicks(pos);
 
     try {
@@ -1004,7 +1094,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
                             scale: _danmakuScale,
                             speed: _danmakuSpeed,
                             bold: _danmakuBold,
-                            maxLines: _danmakuMaxLines,
+                            scrollMaxLines: _danmakuMaxLines,
+                            topMaxLines: _danmakuTopMaxLines,
+                            bottomMaxLines: _danmakuBottomMaxLines,
+                            preventOverlap: _danmakuPreventOverlap,
                           ),
                         ),
                         if (_buffering)

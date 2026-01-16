@@ -35,6 +35,17 @@ class AppState extends ChangeNotifier {
   static const _kDanmakuSpeedKey = 'danmakuSpeed_v1';
   static const _kDanmakuBoldKey = 'danmakuBold_v1';
   static const _kDanmakuMaxLinesKey = 'danmakuMaxLines_v1';
+  static const _kDanmakuTopMaxLinesKey = 'danmakuTopMaxLines_v1';
+  static const _kDanmakuBottomMaxLinesKey = 'danmakuBottomMaxLines_v1';
+  static const _kDanmakuRememberSelectedSourceKey =
+      'danmakuRememberSelectedSource_v1';
+  static const _kDanmakuLastSelectedSourceNameKey =
+      'danmakuLastSelectedSourceName_v1';
+  static const _kDanmakuMergeDuplicatesKey = 'danmakuMergeDuplicates_v1';
+  static const _kDanmakuPreventOverlapKey = 'danmakuPreventOverlap_v1';
+  static const _kDanmakuBlockWordsKey = 'danmakuBlockWords_v1';
+  static const _kDanmakuMatchModeKey = 'danmakuMatchMode_v1';
+  static const _kDanmakuChConvertKey = 'danmakuChConvert_v1';
 
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
@@ -72,6 +83,15 @@ class AppState extends ChangeNotifier {
   double _danmakuSpeed = 1.0;
   bool _danmakuBold = true;
   int _danmakuMaxLines = 10;
+  int _danmakuTopMaxLines = 0;
+  int _danmakuBottomMaxLines = 0;
+  bool _danmakuRememberSelectedSource = false;
+  String _danmakuLastSelectedSourceName = '';
+  bool _danmakuMergeDuplicates = false;
+  bool _danmakuPreventOverlap = true;
+  String _danmakuBlockWords = '';
+  DanmakuMatchMode _danmakuMatchMode = DanmakuMatchMode.auto;
+  DanmakuChConvert _danmakuChConvert = DanmakuChConvert.off;
   bool _loading = false;
   String? _error;
 
@@ -125,6 +145,15 @@ class AppState extends ChangeNotifier {
   double get danmakuSpeed => _danmakuSpeed;
   bool get danmakuBold => _danmakuBold;
   int get danmakuMaxLines => _danmakuMaxLines;
+  int get danmakuTopMaxLines => _danmakuTopMaxLines;
+  int get danmakuBottomMaxLines => _danmakuBottomMaxLines;
+  bool get danmakuRememberSelectedSource => _danmakuRememberSelectedSource;
+  String get danmakuLastSelectedSourceName => _danmakuLastSelectedSourceName;
+  bool get danmakuMergeDuplicates => _danmakuMergeDuplicates;
+  bool get danmakuPreventOverlap => _danmakuPreventOverlap;
+  String get danmakuBlockWords => _danmakuBlockWords;
+  DanmakuMatchMode get danmakuMatchMode => _danmakuMatchMode;
+  DanmakuChConvert get danmakuChConvert => _danmakuChConvert;
 
   Iterable<HomeEntry> get homeEntries sync* {
     for (final entry in _homeSections.entries) {
@@ -196,6 +225,22 @@ class AppState extends ChangeNotifier {
         (prefs.getDouble(_kDanmakuSpeedKey) ?? 1.0).clamp(0.4, 2.5).toDouble();
     _danmakuBold = prefs.getBool(_kDanmakuBoldKey) ?? true;
     _danmakuMaxLines = (prefs.getInt(_kDanmakuMaxLinesKey) ?? 10).clamp(1, 40);
+    _danmakuTopMaxLines =
+        (prefs.getInt(_kDanmakuTopMaxLinesKey) ?? 0).clamp(0, 40);
+    _danmakuBottomMaxLines =
+        (prefs.getInt(_kDanmakuBottomMaxLinesKey) ?? 0).clamp(0, 40);
+    _danmakuRememberSelectedSource =
+        prefs.getBool(_kDanmakuRememberSelectedSourceKey) ?? false;
+    _danmakuLastSelectedSourceName =
+        prefs.getString(_kDanmakuLastSelectedSourceNameKey) ?? '';
+    _danmakuMergeDuplicates =
+        prefs.getBool(_kDanmakuMergeDuplicatesKey) ?? false;
+    _danmakuPreventOverlap = prefs.getBool(_kDanmakuPreventOverlapKey) ?? true;
+    _danmakuBlockWords = prefs.getString(_kDanmakuBlockWordsKey) ?? '';
+    _danmakuMatchMode =
+        danmakuMatchModeFromId(prefs.getString(_kDanmakuMatchModeKey));
+    _danmakuChConvert =
+        danmakuChConvertFromId(prefs.getString(_kDanmakuChConvertKey));
 
     final rawServers = prefs.getString(_kServersKey);
     _servers.clear();
@@ -943,6 +988,90 @@ class AppState extends ChangeNotifier {
     _danmakuMaxLines = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kDanmakuMaxLinesKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuTopMaxLines(int lines) async {
+    final v = lines.clamp(0, 40);
+    if (_danmakuTopMaxLines == v) return;
+    _danmakuTopMaxLines = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kDanmakuTopMaxLinesKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuBottomMaxLines(int lines) async {
+    final v = lines.clamp(0, 40);
+    if (_danmakuBottomMaxLines == v) return;
+    _danmakuBottomMaxLines = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kDanmakuBottomMaxLinesKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuRememberSelectedSource(bool enabled) async {
+    if (_danmakuRememberSelectedSource == enabled) return;
+    _danmakuRememberSelectedSource = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDanmakuRememberSelectedSourceKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuLastSelectedSourceName(String name) async {
+    final v = name.trim();
+    if (_danmakuLastSelectedSourceName == v) return;
+    _danmakuLastSelectedSourceName = v;
+    final prefs = await SharedPreferences.getInstance();
+    if (v.isEmpty) {
+      await prefs.remove(_kDanmakuLastSelectedSourceNameKey);
+    } else {
+      await prefs.setString(_kDanmakuLastSelectedSourceNameKey, v);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuMergeDuplicates(bool enabled) async {
+    if (_danmakuMergeDuplicates == enabled) return;
+    _danmakuMergeDuplicates = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDanmakuMergeDuplicatesKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuPreventOverlap(bool enabled) async {
+    if (_danmakuPreventOverlap == enabled) return;
+    _danmakuPreventOverlap = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDanmakuPreventOverlapKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuBlockWords(String text) async {
+    final v = text.replaceAll('\r\n', '\n').trimRight();
+    if (_danmakuBlockWords == v) return;
+    _danmakuBlockWords = v;
+    final prefs = await SharedPreferences.getInstance();
+    if (v.isEmpty) {
+      await prefs.remove(_kDanmakuBlockWordsKey);
+    } else {
+      await prefs.setString(_kDanmakuBlockWordsKey, v);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuMatchMode(DanmakuMatchMode mode) async {
+    if (_danmakuMatchMode == mode) return;
+    _danmakuMatchMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDanmakuMatchModeKey, mode.id);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuChConvert(DanmakuChConvert v) async {
+    if (_danmakuChConvert == v) return;
+    _danmakuChConvert = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDanmakuChConvertKey, v.id);
     notifyListeners();
   }
 

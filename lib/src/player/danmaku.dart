@@ -1,9 +1,21 @@
 import 'dart:convert';
 
+enum DanmakuType {
+  scrolling,
+  top,
+  bottom,
+}
+
 class DanmakuItem {
   final Duration time;
   final String text;
-  const DanmakuItem({required this.time, required this.text});
+  final DanmakuType type;
+
+  const DanmakuItem({
+    required this.time,
+    required this.text,
+    required this.type,
+  });
 }
 
 class DanmakuSource {
@@ -18,6 +30,19 @@ class DanmakuParser {
     caseSensitive: false,
   );
 
+  static DanmakuType _typeFromMode(int mode) {
+    // Bilibili: 1/2/3 scrolling, 4 bottom, 5 top, 6 reversed (treat as scroll)
+    // Keep it simple: only map top/bottom explicitly.
+    switch (mode) {
+      case 4:
+        return DanmakuType.bottom;
+      case 5:
+        return DanmakuType.top;
+      default:
+        return DanmakuType.scrolling;
+    }
+  }
+
   static List<DanmakuItem> parseBilibiliXml(String xml) {
     final items = <DanmakuItem>[];
     for (final m in _biliDanmakuRe.allMatches(xml)) {
@@ -28,12 +53,14 @@ class DanmakuParser {
       if (parts.isEmpty) continue;
       final sec = double.tryParse(parts.first);
       if (sec == null || sec.isNaN || sec.isInfinite || sec < 0) continue;
+      final mode = parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1;
       final text = _unescapeXmlText(rawText).trim();
       if (text.isEmpty) continue;
       items.add(
         DanmakuItem(
           time: Duration(milliseconds: (sec * 1000).round()),
           text: text,
+          type: _typeFromMode(mode),
         ),
       );
     }
@@ -54,6 +81,7 @@ class DanmakuParser {
       if (parts.isEmpty) continue;
       final sec = double.tryParse(parts.first);
       if (sec == null || sec.isNaN || sec.isInfinite) continue;
+      final mode = parts.length > 1 ? int.tryParse(parts[1]) ?? 1 : 1;
       final shifted = sec + shiftSeconds;
       if (shifted < 0) continue;
       final text = _unescapeXmlText(rawText).trim();
@@ -62,6 +90,7 @@ class DanmakuParser {
         DanmakuItem(
           time: Duration(milliseconds: (shifted * 1000).round()),
           text: text,
+          type: _typeFromMode(mode),
         ),
       );
     }

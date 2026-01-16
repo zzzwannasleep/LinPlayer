@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import '../src/player/danmaku.dart';
+import '../state/danmaku_preferences.dart';
 
 class DandanplayMatchResult {
   final int episodeId;
@@ -94,6 +95,7 @@ class DandanplayApiClient {
   final String appId;
   final String appSecret;
   final http.Client _client;
+  static const Duration _timeout = Duration(seconds: 12);
 
   bool get _hasAuth => appId.trim().isNotEmpty && appSecret.trim().isNotEmpty;
 
@@ -143,16 +145,18 @@ class DandanplayApiClient {
       'Content-Type': 'application/json',
       ..._signatureHeaders(uri),
     };
-    var resp =
-        await _client.post(uri, headers: headers, body: jsonEncode(body));
+    var resp = await _client
+        .post(uri, headers: headers, body: jsonEncode(body))
+        .timeout(_timeout);
     if (_shouldRetryWithCredentials(resp)) {
       final retryHeaders = <String, String>{
         'Accept': 'application/json',
         'Content-Type': 'application/json',
         ..._credentialHeaders(),
       };
-      resp = await _client.post(uri,
-          headers: retryHeaders, body: jsonEncode(body));
+      resp = await _client
+          .post(uri, headers: retryHeaders, body: jsonEncode(body))
+          .timeout(_timeout);
     }
     return resp;
   }
@@ -162,13 +166,13 @@ class DandanplayApiClient {
       'Accept': 'application/json',
       ..._signatureHeaders(uri),
     };
-    var resp = await _client.get(uri, headers: headers);
+    var resp = await _client.get(uri, headers: headers).timeout(_timeout);
     if (_shouldRetryWithCredentials(resp)) {
       final retryHeaders = <String, String>{
         'Accept': 'application/json',
         ..._credentialHeaders(),
       };
-      resp = await _client.get(uri, headers: retryHeaders);
+      resp = await _client.get(uri, headers: retryHeaders).timeout(_timeout);
     }
     return resp;
   }
@@ -229,6 +233,28 @@ String stripFileExtension(String name) {
   final v = name.trim();
   final idx = v.lastIndexOf('.');
   if (idx <= 0) return v;
+  final ext = v.substring(idx + 1).toLowerCase();
+  const known = {
+    // Video containers.
+    'mkv',
+    'mp4',
+    'm4v',
+    'mov',
+    'avi',
+    'flv',
+    'webm',
+    'ts',
+    'm2ts',
+    'mpg',
+    'mpeg',
+    'wmv',
+    'rm',
+    'rmvb',
+    '3gp',
+    // Danmaku files.
+    'xml',
+  };
+  if (!known.contains(ext)) return v;
   return v.substring(0, idx);
 }
 
@@ -238,14 +264,20 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
   String? fileHash,
   required int fileSizeBytes,
   required int videoDurationSeconds,
+  DanmakuMatchMode matchMode = DanmakuMatchMode.auto,
+  DanmakuChConvert chConvert = DanmakuChConvert.off,
   String appId = '',
   String appSecret = '',
   bool throwIfEmpty = false,
 }) async {
   final cleanedName = stripFileExtension(fileName);
-  final mode = (fileHash == null || fileHash.trim().isEmpty)
-      ? 'fileNameOnly'
-      : 'hashAndFileName';
+  final hasHash = fileHash != null && fileHash.trim().isNotEmpty;
+  final resolvedMode = switch (matchMode) {
+    DanmakuMatchMode.auto => hasHash ? 'hashAndFileName' : 'fileNameOnly',
+    DanmakuMatchMode.fileNameOnly => 'fileNameOnly',
+    DanmakuMatchMode.hashAndFileName =>
+      hasHash ? 'hashAndFileName' : 'fileNameOnly',
+  };
 
   final sources = <DanmakuSource>[];
   final errors = <String>[];
@@ -263,7 +295,7 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
         fileHash: fileHash,
         fileSize: fileSizeBytes,
         videoDurationSeconds: videoDurationSeconds,
-        matchMode: mode,
+        matchMode: resolvedMode,
       );
       if (!match.success || match.errorCode != 0) continue;
       if (match.matches.isEmpty) continue;
@@ -272,6 +304,7 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
       final comments = await client.getComments(
         episodeId: picked.episodeId,
         withRelated: true,
+        chConvert: chConvert.apiValue,
       );
 
       final items = DanmakuParser.parseDandanplayComments(
