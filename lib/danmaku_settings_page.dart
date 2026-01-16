@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'src/ui/frosted_card.dart';
+import 'src/ui/glass_background.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
 
@@ -90,9 +91,16 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
             title: const Text('弹幕'),
             centerTitle: true,
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          body: Stack(
             children: [
+              Positioned.fill(
+                child: GlassBackground(
+                  intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
+                ),
+              ),
+              ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
               _Section(
                 title: '弹幕',
                 enableBlur: enableBlur,
@@ -330,6 +338,8 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                     ),
                   ],
                 ),
+              ),
+            ],
               ),
             ],
           ),

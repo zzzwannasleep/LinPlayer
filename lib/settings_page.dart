@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'danmaku_settings_page.dart';
 import 'src/ui/app_icon_service.dart';
 import 'src/ui/frosted_card.dart';
+import 'src/ui/glass_background.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
 import 'state/preferences.dart';
@@ -119,9 +120,16 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('设置'),
             centerTitle: true,
           ),
-          body: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          body: Stack(
             children: [
+              Positioned.fill(
+                child: GlassBackground(
+                  intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
+                ),
+              ),
+              ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
               _Section(
                 title: '外观',
                 subtitle: blurAllowed
@@ -443,6 +451,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
+              ),
+            ],
               ),
             ],
           ),

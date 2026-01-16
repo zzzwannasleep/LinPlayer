@@ -25,8 +25,8 @@ class FrostedCard extends StatelessWidget {
     final isDark = scheme.brightness == Brightness.dark;
     final radius = BorderRadius.circular(borderRadius);
 
-    final a = isDark ? 0.62 : 0.78;
-    final b = isDark ? 0.48 : 0.68;
+    final a = enableBlur ? (isDark ? 0.62 : 0.78) : (isDark ? 0.98 : 1.0);
+    final b = enableBlur ? (isDark ? 0.48 : 0.68) : (isDark ? 0.92 : 0.96);
     final gradient = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
@@ -38,6 +38,8 @@ class FrostedCard extends StatelessWidget {
     final border = Border.all(
       color: scheme.outlineVariant.withValues(alpha: isDark ? 0.42 : 0.7),
     );
+    final shadowColor =
+        scheme.shadow.withValues(alpha: enableBlur ? (isDark ? 0.18 : 0.12) : 0);
 
     Widget content = Container(
       padding: padding,
@@ -45,6 +47,15 @@ class FrostedCard extends StatelessWidget {
         gradient: gradient,
         border: border,
         borderRadius: radius,
+        boxShadow: shadowColor.a == 0
+            ? null
+            : [
+                BoxShadow(
+                  color: shadowColor,
+                  blurRadius: enableBlur ? 18 : 0,
+                  offset: const Offset(0, 10),
+                ),
+              ],
       ),
       child: child,
     );
@@ -54,7 +65,7 @@ class FrostedCard extends StatelessWidget {
     return ClipRRect(
       borderRadius: radius,
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: content,
       ),
     );

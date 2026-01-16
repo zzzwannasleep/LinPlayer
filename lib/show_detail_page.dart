@@ -791,9 +791,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               const SizedBox(width: 12),
                           itemBuilder: (context, index) {
                             final s = _seasons[index];
-                            final label = s.name.isNotEmpty
-                                ? s.name
-                                : '第${s.seasonNumber ?? s.episodeNumber ?? (index + 1)}季';
+                            final name = s.name.trim();
+                            final seasonNo = s.seasonNumber ?? s.episodeNumber;
+                            final label = seasonNo != null
+                                ? '第$seasonNo季'
+                                : (name.isNotEmpty ? name : '第${index + 1}季');
                             final img = EmbyApi.imageUrl(
                               baseUrl: widget.appState.baseUrl!,
                               itemId: s.hasImage ? s.id : item.id,
@@ -1036,6 +1038,9 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
                       itemBuilder: (context, index) {
                         final e = _episodes[index];
                         final epNo = e.episodeNumber ?? (index + 1);
+                        final epName = e.name.trim();
+                        final titleText =
+                            epName.isNotEmpty ? '$epNo. $epName' : '$epNo. 第$epNo集';
                         final dur = e.runTimeTicks != null
                             ? Duration(
                                 microseconds: (e.runTimeTicks! / 10).round())
@@ -1062,66 +1067,82 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
                             },
                             child: Padding(
                               padding: const EdgeInsets.all(12),
-                              child: Row(
+                              child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  SizedBox(
-                                    width: widget.isTv ? 240 : 160,
-                                    child: AspectRatio(
-                                      aspectRatio: 16 / 9,
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: Image.network(
-                                          img,
-                                          fit: BoxFit.cover,
-                                          headers: {
-                                            'User-Agent': EmbyApi.userAgent
-                                          },
-                                          errorBuilder: (_, __, ___) =>
-                                              const ColoredBox(
-                                                  color: Colors.black26),
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      SizedBox(
+                                        width: widget.isTv ? 260 : 170,
+                                        child: AspectRatio(
+                                          aspectRatio: 16 / 9,
+                                          child: ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            child: Image.network(
+                                              img,
+                                              fit: BoxFit.cover,
+                                              headers: {
+                                                'User-Agent': EmbyApi.userAgent
+                                              },
+                                              errorBuilder: (_, __, ___) =>
+                                                  const ColoredBox(
+                                                      color: Colors.black26),
+                                            ),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '第$epNo集 · ${e.name}',
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium
-                                              ?.copyWith(
-                                                  fontWeight: FontWeight.w700),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              titleText,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .titleMedium
+                                                  ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w700),
+                                            ),
+                                            if (dur != null) ...[
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                _fmt(dur),
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall
+                                                    ?.copyWith(
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                              ),
+                                            ],
+                                          ],
                                         ),
-                                        const SizedBox(height: 6),
-                                        if (e.overview.isNotEmpty)
-                                          Text(
-                                            e.overview,
-                                            maxLines: 3,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodyMedium,
-                                          ),
-                                        if (dur != null) ...[
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            _fmt(dur),
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodySmall,
-                                          ),
-                                        ],
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
+                                  if (e.overview.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      e.overview,
+                                      maxLines: 4,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium,
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
