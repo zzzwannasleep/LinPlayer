@@ -43,6 +43,7 @@ class PlayNetworkPage extends StatefulWidget {
 
 class _PlayNetworkPageState extends State<PlayNetworkPage> {
   final PlayerService _playerService = getPlayerService();
+  EmbyApi? _embyApi;
   bool _loading = true;
   String? _playError;
   late bool _hwdecOn;
@@ -52,10 +53,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<double>? _bufferingPctSub;
   StreamSubscription<Duration>? _posSub;
+  StreamSubscription<bool>? _playingSub;
+  StreamSubscription<bool>? _completedSub;
   bool _buffering = false;
   double? _bufferingPct;
   bool _appliedAudioPref = false;
   bool _appliedSubtitlePref = false;
+  String? _playSessionId;
+  String? _mediaSourceId;
+  DateTime? _lastProgressReportAt;
+  bool _lastProgressReportPaused = false;
+  bool _reportedStart = false;
+  bool _reportedStop = false;
+  bool _progressReportInFlight = false;
+  StreamSubscription<VideoParams>? _videoParamsSub;
+  VideoParams? _lastVideoParams;
+  _OrientationMode _orientationMode = _OrientationMode.auto;
+  String? _lastOrientationKey;
 
   final GlobalKey<DanmakuStageState> _danmakuKey =
       GlobalKey<DanmakuStageState>();
@@ -73,6 +87,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   @override
   void initState() {
     super.initState();
+    final baseUrl = widget.appState.baseUrl;
+    if (baseUrl != null && baseUrl.trim().isNotEmpty) {
+      _embyApi = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+    }
     _hwdecOn = widget.appState.preferHardwareDecode;
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
@@ -80,6 +98,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _danmakuSpeed = widget.appState.danmakuSpeed;
     _danmakuBold = widget.appState.danmakuBold;
     _danmakuMaxLines = widget.appState.danmakuMaxLines;
+    // ignore: unawaited_futures
+    _enterImmersiveMode();
     _init();
   }
 
@@ -92,8 +112,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _bufferingPctSub = null;
     await _posSub?.cancel();
     _posSub = null;
+    await _playingSub?.cancel();
+    _playingSub = null;
+    await _completedSub?.cancel();
+    _completedSub = null;
+    await _videoParamsSub?.cancel();
+    _videoParamsSub = null;
+    _lastVideoParams = null;
+    _lastOrientationKey = null;
     _appliedAudioPref = false;
     _appliedSubtitlePref = false;
+    _playSessionId = null;
+    _mediaSourceId = null;
+    _lastProgressReportAt = null;
+    _lastProgressReportPaused = false;
+    _reportedStart = false;
+    _reportedStop = false;
+    _progressReportInFlight = false;
     _nextDanmakuIndex = 0;
     _danmakuKey.currentState?.clear();
     try {
@@ -140,12 +175,32 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
           _syncDanmakuCursor(pos);
         }
         _drainDanmaku(pos);
+        _maybeReportPlaybackProgress(pos);
       });
+      _playingSub = _playerService.player.stream.playing.listen((_) {
+        if (!mounted) return;
+        _maybeReportPlaybackProgress(_lastPosition, force: true);
+      });
+      _completedSub = _playerService.player.stream.completed.listen((value) {
+        if (!value) return;
+        // ignore: unawaited_futures
+        _reportPlaybackStoppedBestEffort(completed: true);
+      });
+      _videoParamsSub = _playerService.player.stream.videoParams.listen((p) {
+        _lastVideoParams = p;
+        // ignore: unawaited_futures
+        _applyOrientationForMode(videoParams: p);
+      });
+      _lastVideoParams = _playerService.player.state.videoParams;
+      // ignore: unawaited_futures
+      _applyOrientationForMode(videoParams: _lastVideoParams);
       _errorSub?.cancel();
       _errorSub = _playerService.player.stream.error.listen((message) {
         if (!mounted) return;
         setState(() => _playError = message);
       });
+      // ignore: unawaited_futures
+      _reportPlaybackStartBestEffort();
       _maybeAutoLoadOnlineDanmaku();
     } catch (e) {
       _playError = e.toString();
@@ -519,6 +574,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     final base = widget.appState.baseUrl!;
     final token = widget.appState.token!;
     final userId = widget.appState.userId!;
+    _playSessionId = null;
+    _mediaSourceId = null;
     String applyQueryPrefs(String url) {
       final uri = Uri.parse(url);
       final params = Map<String, String>.from(uri.queryParameters);
@@ -539,8 +596,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     }
 
     try {
-      final api = EmbyApi(
-          hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
+      final api = _embyApi ??
+          EmbyApi(hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
       final info = await api.fetchPlaybackInfo(
         token: token,
         baseUrl: base,
@@ -561,6 +618,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
           ms = sources.first;
         }
       }
+      _playSessionId = info.playSessionId;
+      _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
       final directStreamUrl = ms?['DirectStreamUrl'] as String?;
       if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
         return resolve(directStreamUrl);
@@ -582,12 +641,262 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     }
   }
 
+  int _toTicks(Duration d) => d.inMicroseconds * 10;
+
+  Future<void> _reportPlaybackStartBestEffort() async {
+    if (_reportedStart || _reportedStop) return;
+    final api = _embyApi;
+    if (api == null) return;
+    final baseUrl = widget.appState.baseUrl;
+    final token = widget.appState.token;
+    final userId = widget.appState.userId;
+    if (baseUrl == null || baseUrl.isEmpty || token == null || token.isEmpty) {
+      return;
+    }
+
+    _reportedStart = true;
+    final posTicks = _toTicks(_lastPosition);
+    final paused = !_playerService.isPlaying;
+    try {
+      final ps = _playSessionId;
+      final ms = _mediaSourceId;
+      if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
+        await api.reportPlaybackStart(
+          token: token,
+          baseUrl: baseUrl,
+          deviceId: widget.appState.deviceId,
+          itemId: widget.itemId,
+          mediaSourceId: ms,
+          playSessionId: ps,
+          positionTicks: posTicks,
+          isPaused: paused,
+          userId: userId,
+        );
+      }
+    } catch (_) {}
+  }
+
+  void _maybeReportPlaybackProgress(Duration position, {bool force = false}) {
+    if (_reportedStop) return;
+    if (_progressReportInFlight) return;
+    final api = _embyApi;
+    if (api == null) return;
+    final baseUrl = widget.appState.baseUrl;
+    final token = widget.appState.token;
+    final userId = widget.appState.userId;
+    if (baseUrl == null || baseUrl.isEmpty || token == null || token.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final paused = !_playerService.isPlaying;
+
+    final due = _lastProgressReportAt == null ||
+        now.difference(_lastProgressReportAt!) >= const Duration(seconds: 15);
+    final pausedChanged = paused != _lastProgressReportPaused &&
+        (_lastProgressReportAt == null ||
+            now.difference(_lastProgressReportAt!) >= const Duration(seconds: 1));
+    final shouldReport = force || due || pausedChanged;
+    if (!shouldReport) return;
+
+    _lastProgressReportAt = now;
+    _lastProgressReportPaused = paused;
+    _progressReportInFlight = true;
+
+    final ticks = _toTicks(position);
+
+    // ignore: unawaited_futures
+    () async {
+      try {
+        final ps = _playSessionId;
+        final ms = _mediaSourceId;
+        if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
+          await api.reportPlaybackProgress(
+            token: token,
+            baseUrl: baseUrl,
+            deviceId: widget.appState.deviceId,
+            itemId: widget.itemId,
+            mediaSourceId: ms,
+            playSessionId: ps,
+            positionTicks: ticks,
+            isPaused: paused,
+            userId: userId,
+          );
+        } else if (userId != null && userId.isNotEmpty) {
+          await api.updatePlaybackPosition(
+            token: token,
+            baseUrl: baseUrl,
+            userId: userId,
+            itemId: widget.itemId,
+            positionTicks: ticks,
+          );
+        }
+      } finally {
+        _progressReportInFlight = false;
+      }
+    }();
+  }
+
+  Future<void> _reportPlaybackStoppedBestEffort({bool completed = false}) async {
+    if (_reportedStop) return;
+    _reportedStop = true;
+
+    final api = _embyApi;
+    if (api == null) return;
+    final baseUrl = widget.appState.baseUrl;
+    final token = widget.appState.token;
+    final userId = widget.appState.userId;
+    if (baseUrl == null || baseUrl.isEmpty || token == null || token.isEmpty) {
+      return;
+    }
+
+    final pos = _playerService.isInitialized ? _playerService.position : _lastPosition;
+    final dur = _playerService.duration;
+    final played = completed ||
+        (dur > Duration.zero &&
+            pos >= dur - const Duration(seconds: 20));
+    final ticks = _toTicks(pos);
+
+    try {
+      final ps = _playSessionId;
+      final ms = _mediaSourceId;
+      if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
+        await api.reportPlaybackStopped(
+          token: token,
+          baseUrl: baseUrl,
+          deviceId: widget.appState.deviceId,
+          itemId: widget.itemId,
+          mediaSourceId: ms,
+          playSessionId: ps,
+          positionTicks: ticks,
+          userId: userId,
+        );
+      }
+    } catch (_) {}
+
+    try {
+      if (userId != null && userId.isNotEmpty) {
+        await api.updatePlaybackPosition(
+          token: token,
+          baseUrl: baseUrl,
+          userId: userId,
+          itemId: widget.itemId,
+          positionTicks: ticks,
+          played: played,
+        );
+      }
+    } catch (_) {}
+  }
+
+  bool get _shouldControlSystemUi {
+    if (kIsWeb) return false;
+    if (widget.isTv) return false;
+    return Platform.isAndroid || Platform.isIOS;
+  }
+
+  Future<void> _enterImmersiveMode() async {
+    if (!_shouldControlSystemUi) return;
+    try {
+      await SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersiveSticky,
+        overlays: const [],
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _exitImmersiveMode() async {
+    if (!_shouldControlSystemUi) return;
+    try {
+      await SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      );
+    } catch (_) {}
+    try {
+      await SystemChrome.setPreferredOrientations(const []);
+    } catch (_) {}
+  }
+
+  double? _displayAspect(VideoParams p) {
+    var aspect = p.aspect;
+    if (aspect == null || aspect <= 0) {
+      final w = (p.dw ?? p.w)?.toDouble();
+      final h = (p.dh ?? p.h)?.toDouble();
+      if (w != null && h != null && w > 0 && h > 0) {
+        aspect = w / h;
+      }
+    }
+    final rotate = (p.rotate ?? 0) % 180;
+    if (rotate != 0 && aspect != null && aspect != 0) {
+      aspect = 1 / aspect;
+    }
+    if (aspect == null || aspect <= 0) return null;
+    return aspect;
+  }
+
+  Future<void> _applyOrientationForMode({VideoParams? videoParams}) async {
+    if (!_shouldControlSystemUi) return;
+
+    List<DeviceOrientation>? orientations;
+    switch (_orientationMode) {
+      case _OrientationMode.landscape:
+        orientations = const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ];
+        break;
+      case _OrientationMode.portrait:
+        orientations = const [DeviceOrientation.portraitUp];
+        break;
+      case _OrientationMode.auto:
+        final p = videoParams;
+        if (p == null) return;
+        final aspect = _displayAspect(p);
+        if (aspect == null) return;
+        orientations = aspect < 1.0
+            ? const [DeviceOrientation.portraitUp]
+            : const [
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ];
+        break;
+    }
+
+    final key = orientations.map((o) => o.name).join(',');
+    if (_lastOrientationKey == key) return;
+    _lastOrientationKey = key;
+    try {
+      await SystemChrome.setPreferredOrientations(orientations);
+    } catch (_) {}
+  }
+
+  Future<void> _cycleOrientationMode() async {
+    final next = switch (_orientationMode) {
+      _OrientationMode.auto => _OrientationMode.landscape,
+      _OrientationMode.landscape => _OrientationMode.portrait,
+      _OrientationMode.portrait => _OrientationMode.auto,
+    };
+    if (mounted) {
+      setState(() => _orientationMode = next);
+    } else {
+      _orientationMode = next;
+    }
+    await _applyOrientationForMode(videoParams: _lastVideoParams);
+  }
+
   @override
   void dispose() {
+    // ignore: unawaited_futures
+    _reportPlaybackStoppedBestEffort();
+    // ignore: unawaited_futures
+    _exitImmersiveMode();
     _errorSub?.cancel();
     _bufferingSub?.cancel();
     _bufferingPctSub?.cancel();
     _posSub?.cancel();
+    _playingSub?.cancel();
+    _completedSub?.cancel();
+    _videoParamsSub?.cancel();
     _playerService.dispose();
     super.dispose();
   }
@@ -596,7 +905,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   Widget build(BuildContext context) {
     final initialized = _playerService.isInitialized;
     return Scaffold(
+      backgroundColor: Colors.black,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.white,
         title: Text(widget.title),
         actions: [
           if (_resolvedStream != null)
@@ -643,12 +957,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
               await _init();
             },
           ),
+          IconButton(
+            tooltip: 'Rotate',
+            icon: const Icon(Icons.screen_rotation),
+            onPressed: _cycleOrientationMode,
+          ),
         ],
       ),
       body: Column(
         children: [
-          AspectRatio(
-            aspectRatio: 16 / 9,
+          Expanded(
             child: Container(
               color: Colors.black,
               child: initialized
@@ -765,3 +1083,5 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     );
   }
 }
+
+enum _OrientationMode { auto, landscape, portrait }

@@ -641,6 +641,132 @@ class EmbyApi {
     );
   }
 
+  Future<void> reportPlaybackStart({
+    required String token,
+    required String baseUrl,
+    required String deviceId,
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    required int positionTicks,
+    bool isPaused = false,
+    String? userId,
+  }) async {
+    await _postPlaybackEvent(
+      token: token,
+      baseUrl: baseUrl,
+      deviceId: deviceId,
+      path: 'Sessions/Playing',
+      body: <String, dynamic>{
+        if (userId != null && userId.isNotEmpty) 'UserId': userId,
+        'ItemId': itemId,
+        'MediaSourceId': mediaSourceId,
+        'PlaySessionId': playSessionId,
+        'PositionTicks': positionTicks,
+        'IsPaused': isPaused,
+        'CanSeek': true,
+      },
+    );
+  }
+
+  Future<void> reportPlaybackProgress({
+    required String token,
+    required String baseUrl,
+    required String deviceId,
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    required int positionTicks,
+    bool isPaused = false,
+    String? userId,
+  }) async {
+    await _postPlaybackEvent(
+      token: token,
+      baseUrl: baseUrl,
+      deviceId: deviceId,
+      path: 'Sessions/Playing/Progress',
+      body: <String, dynamic>{
+        if (userId != null && userId.isNotEmpty) 'UserId': userId,
+        'ItemId': itemId,
+        'MediaSourceId': mediaSourceId,
+        'PlaySessionId': playSessionId,
+        'PositionTicks': positionTicks,
+        'IsPaused': isPaused,
+        'CanSeek': true,
+        'EventName': 'timeupdate',
+      },
+    );
+  }
+
+  Future<void> reportPlaybackStopped({
+    required String token,
+    required String baseUrl,
+    required String deviceId,
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    required int positionTicks,
+    String? userId,
+  }) async {
+    await _postPlaybackEvent(
+      token: token,
+      baseUrl: baseUrl,
+      deviceId: deviceId,
+      path: 'Sessions/Playing/Stopped',
+      body: <String, dynamic>{
+        if (userId != null && userId.isNotEmpty) 'UserId': userId,
+        'ItemId': itemId,
+        'MediaSourceId': mediaSourceId,
+        'PlaySessionId': playSessionId,
+        'PositionTicks': positionTicks,
+      },
+    );
+  }
+
+  Future<void> updatePlaybackPosition({
+    required String token,
+    required String baseUrl,
+    required String userId,
+    required String itemId,
+    required int positionTicks,
+    bool? played,
+  }) async {
+    final url = Uri.parse('$baseUrl/emby/Users/$userId/Items/$itemId/UserData');
+    final body = <String, dynamic>{
+      'PlaybackPositionTicks': positionTicks,
+      if (played != null) 'Played': played,
+    };
+    final resp = await _client.post(
+      url,
+      headers: _jsonHeaders(token: token, includeContentType: true),
+      body: jsonEncode(body),
+    );
+    if (resp.statusCode != 200 && resp.statusCode != 204) {
+      throw Exception('UpdateUserData failed (${resp.statusCode})');
+    }
+  }
+
+  Future<void> _postPlaybackEvent({
+    required String token,
+    required String baseUrl,
+    required String deviceId,
+    required String path,
+    required Map<String, dynamic> body,
+  }) async {
+    final resp = await _client.post(
+      Uri.parse('$baseUrl/emby/$path'),
+      headers: _jsonHeaders(
+        token: token,
+        deviceId: deviceId,
+        includeContentType: true,
+      ),
+      body: jsonEncode(body),
+    );
+    if (resp.statusCode != 200 && resp.statusCode != 204) {
+      throw Exception('PlaybackEvent failed ($path, ${resp.statusCode})');
+    }
+  }
+
   Future<MediaItem> fetchItemDetail({
     required String token,
     required String baseUrl,
