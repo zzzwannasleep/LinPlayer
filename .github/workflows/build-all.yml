@@ -394,6 +394,70 @@ jobs:
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
 
+      - name: Prepare preview tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$BUILD_NAME" == v* ]]; then
+            PREVIEW_TAG="${BUILD_NAME}-preview.${BUILD_NUMBER}"
+          else
+            PREVIEW_TAG="v${BUILD_NAME}-preview.${BUILD_NUMBER}"
+          fi
+          echo "PREVIEW_TAG=$PREVIEW_TAG" >> "$GITHUB_ENV"
+          echo "Preview tag: $PREVIEW_TAG"
+
+      - name: Create or verify preview tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/$PREVIEW_TAG" >/dev/null; then
+            EXISTING_SHA="$(git rev-parse "refs/tags/${PREVIEW_TAG}^{}")"
+            if [[ "$EXISTING_SHA" != "$GITHUB_SHA" ]]; then
+              echo "Tag $PREVIEW_TAG already exists at $EXISTING_SHA; expected $GITHUB_SHA." >&2
+              exit 1
+            fi
+            echo "Tag $PREVIEW_TAG already exists; leaving as-is."
+          else
+            git tag "$PREVIEW_TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/${PREVIEW_TAG}"
+          fi
+
+      - name: Create or update preview release
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOTES="$(cat <<EOF
+          Preview build
+
+          - Version: ${VERSION_FULL}
+          - Commit: ${GITHUB_SHA}
+          - Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')
+          EOF
+          )"
+
+          if gh release view "$PREVIEW_TAG" >/dev/null 2>&1; then
+            gh release edit "$PREVIEW_TAG" --title "Preview (${VERSION_FULL})" --notes "$NOTES"
+          else
+            gh release create "$PREVIEW_TAG" --title "Preview (${VERSION_FULL})" --notes "$NOTES" --prerelease
+          fi
+
+      - name: Upload preview assets (overwrite)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Windows-Setup/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-iOS-Unsigned-IPA/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-macOS-DMG-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-macOS-DMG-x86_64/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
+
       - name: Update nightly tag
         shell: bash
         run: |

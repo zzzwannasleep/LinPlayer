@@ -64,6 +64,74 @@ jobs:
           fi
           echo "VERSION_FULL=$VERSION_FULL" >> "$GITHUB_ENV"
 
+      - name: Derive stable tag from nightly version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$VERSION_FULL" != *"+"* ]]; then
+            echo "VERSION_FULL must look like 1.2.3+45 (got: $VERSION_FULL)." >&2
+            exit 1
+          fi
+
+          BUILD_NAME="${VERSION_FULL%%+*}"
+          BUILD_NUMBER="${VERSION_FULL##*+}"
+          if [[ -z "${BUILD_NAME:-}" || -z "${BUILD_NUMBER:-}" || ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "Could not parse VERSION_FULL=$VERSION_FULL into BUILD_NAME and BUILD_NUMBER." >&2
+            exit 1
+          fi
+
+          if [[ "$BUILD_NAME" == v* ]]; then
+            STABLE_TAG="$BUILD_NAME"
+          else
+            STABLE_TAG="v$BUILD_NAME"
+          fi
+
+          echo "BUILD_NAME=$BUILD_NAME" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+          echo "STABLE_TAG=$STABLE_TAG" >> "$GITHUB_ENV"
+          echo "Stable tag: $STABLE_TAG"
+
+      - name: Create or verify stable tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --tags --force
+
+          if git rev-parse -q --verify "refs/tags/$STABLE_TAG" >/dev/null; then
+            EXISTING_SHA="$(git rev-parse "refs/tags/${STABLE_TAG}^{}")"
+            if [[ "$EXISTING_SHA" != "$NIGHTLY_SHA" ]]; then
+              echo "Tag $STABLE_TAG already exists at $EXISTING_SHA; expected $NIGHTLY_SHA." >&2
+              exit 1
+            fi
+            echo "Tag $STABLE_TAG already exists; leaving as-is."
+          else
+            git tag "$STABLE_TAG" "$NIGHTLY_SHA"
+            git push origin "refs/tags/${STABLE_TAG}"
+          fi
+
+      - name: Create or update stable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOTES="$(cat <<EOF
+          Stable release
+
+          - Version: ${VERSION_FULL}
+          - Tag: ${STABLE_TAG}
+          - Commit: ${NIGHTLY_SHA}
+          - Date (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')
+          EOF
+          )"
+
+          if gh release view "$STABLE_TAG" >/dev/null 2>&1; then
+            gh release edit "$STABLE_TAG" --title "$STABLE_TAG" --notes "$NOTES"
+          else
+            gh release create "$STABLE_TAG" --title "$STABLE_TAG" --notes "$NOTES"
+          fi
+
       - name: Update latest tag
         shell: bash
         run: |
@@ -92,63 +160,71 @@ jobs:
             gh release create latest --title "Latest (${VERSION_FULL})" --notes "$NOTES"
           fi
 
-      - name: Upload latest assets (overwrite)
+      - name: Upload assets (stable + latest)
         shell: bash
         run: |
           set -euo pipefail
           echo "--- dist/ ---"
           ls -la dist || true
 
-          # Android
-          ANDROID_FOUND=0
-          if [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
-            gh release upload latest "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
-            ANDROID_FOUND=1
-          fi
-          if [[ -f "dist/LinPlayer-Android-armeabi-v7a.apk" ]]; then
-            gh release upload latest "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
-            ANDROID_FOUND=1
-          fi
-          if [[ "$ANDROID_FOUND" -eq 0 ]]; then
-            if [[ -f "dist/LinPlayer-Android.apk" ]]; then
-              gh release upload latest "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
-            elif [[ -f "dist/app-release.apk" ]]; then
-              gh release upload latest "dist/app-release.apk#LinPlayer-Android.apk" --clobber
+          upload_assets() {
+            local target="$1"
+            echo "Uploading assets to: $target"
+
+            # Android
+            ANDROID_FOUND=0
+            if [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
+              gh release upload "$target" "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+              ANDROID_FOUND=1
+            fi
+            if [[ -f "dist/LinPlayer-Android-armeabi-v7a.apk" ]]; then
+              gh release upload "$target" "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
+              ANDROID_FOUND=1
+            fi
+            if [[ "$ANDROID_FOUND" -eq 0 ]]; then
+              if [[ -f "dist/LinPlayer-Android.apk" ]]; then
+                gh release upload "$target" "dist/LinPlayer-Android.apk#LinPlayer-Android.apk" --clobber
+              elif [[ -f "dist/app-release.apk" ]]; then
+                gh release upload "$target" "dist/app-release.apk#LinPlayer-Android.apk" --clobber
+              else
+                echo "Android APK not found in dist/." >&2
+                exit 1
+              fi
+            fi
+
+            # Windows
+            if [[ -f "dist/LinPlayer-Windows-Setup-x64.exe" ]]; then
+              gh release upload "$target" "dist/LinPlayer-Windows-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+            elif [[ -f "dist/LinPlayer-Setup-x64.exe" ]]; then
+              gh release upload "$target" "dist/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
             else
-              echo "Android APK not found in dist/." >&2
+              echo "Windows installer not found in dist/." >&2
               exit 1
             fi
-          fi
 
-          # Windows
-          if [[ -f "dist/LinPlayer-Windows-Setup-x64.exe" ]]; then
-            gh release upload latest "dist/LinPlayer-Windows-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
-          elif [[ -f "dist/LinPlayer-Setup-x64.exe" ]]; then
-            gh release upload latest "dist/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
-          else
-            echo "Windows installer not found in dist/." >&2
-            exit 1
-          fi
+            # iOS
+            if [[ -f "dist/LinPlayer-iOS-unsigned.ipa" ]]; then
+              gh release upload "$target" "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
+            else
+              echo "iOS IPA not found in dist/." >&2
+              exit 1
+            fi
 
-          # iOS
-          if [[ -f "dist/LinPlayer-iOS-unsigned.ipa" ]]; then
-            gh release upload latest "dist/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
-          else
-            echo "iOS IPA not found in dist/." >&2
-            exit 1
-          fi
+            # macOS
+            if [[ -f "dist/LinPlayer-macOS-arm64.dmg" ]]; then
+              gh release upload "$target" "dist/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
+            else
+              echo "macOS arm64 DMG not found in dist/." >&2
+              exit 1
+            fi
 
-          # macOS
-          if [[ -f "dist/LinPlayer-macOS-arm64.dmg" ]]; then
-            gh release upload latest "dist/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
-          else
-            echo "macOS arm64 DMG not found in dist/." >&2
-            exit 1
-          fi
+            if [[ -f "dist/LinPlayer-macOS-x86_64.dmg" ]]; then
+              gh release upload "$target" "dist/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
+            else
+              echo "macOS x86_64 DMG not found in dist/." >&2
+              exit 1
+            fi
+          }
 
-          if [[ -f "dist/LinPlayer-macOS-x86_64.dmg" ]]; then
-            gh release upload latest "dist/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
-          else
-            echo "macOS x86_64 DMG not found in dist/." >&2
-            exit 1
-          fi
+          upload_assets "$STABLE_TAG"
+          upload_assets latest
