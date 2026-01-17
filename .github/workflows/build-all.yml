@@ -244,7 +244,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          # flutter build ios --no-codesign can return a non-zero exit code on CI
+          # with the generic "select a Development Team" message, even though the
+          # Xcode build already produced a usable .app. Treat it as a soft-fail
+          # when build output exists, so we can still package an unsigned IPA.
+          set +e
           flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          status=$?
+          set -e
+
+          if [[ "$status" -ne 0 ]]; then
+            echo "flutter build ios exited with $status; checking for built app output..."
+
+            APP_PATH="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
+            if [[ -z "${APP_PATH:-}" ]]; then
+              ARCHIVE_PATH="$(find build/ios -maxdepth 6 -type d -name '*.xcarchive' 2>/dev/null | head -n 1 || true)"
+              if [[ -n "${ARCHIVE_PATH:-}" ]]; then
+                APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -n 1 || true)"
+              fi
+            fi
+
+            if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
+              echo "No built .app found under build/ios; failing."
+              exit "$status"
+            fi
+
+            echo "Found built app despite non-zero exit: $APP_PATH"
+          fi
 
       - name: Package unsigned IPA
         shell: bash

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
@@ -158,7 +159,7 @@ class WebsiteMetadataService {
   static Map<String, String> _parseAttributes(String rawTag) {
     final attrs = <String, String>{};
     final attrRegex = RegExp(
-      r'([a-zA-Z0-9:_-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^s"\'=<>`]+))',
+      r'''([a-zA-Z0-9:_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))''',
     );
     for (final m in attrRegex.allMatches(rawTag)) {
       final key = (m.group(1) ?? '').toLowerCase();
@@ -205,4 +206,3 @@ class WebsiteMetadataService {
     return s;
   }
 }
-
