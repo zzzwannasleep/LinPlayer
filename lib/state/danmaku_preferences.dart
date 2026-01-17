@@ -66,11 +66,11 @@ extension DanmakuMatchModeX on DanmakuMatchMode {
   String get label {
     switch (this) {
       case DanmakuMatchMode.auto:
-        return '鑷姩';
+        return '自动';
       case DanmakuMatchMode.fileNameOnly:
-        return '浠呮枃浠跺悕';
+        return '仅文件名';
       case DanmakuMatchMode.hashAndFileName:
-        return '鍝堝笇鍊?+ 鏂囦欢鍚?';
+        return '哈希值 + 文件名';
     }
   }
 }
@@ -108,11 +108,11 @@ extension DanmakuChConvertX on DanmakuChConvert {
   String get label {
     switch (this) {
       case DanmakuChConvert.off:
-        return '鍏抽棴';
+        return '关闭';
       case DanmakuChConvert.toSimplified:
-        return '杞畝浣?';
+        return '转简体';
       case DanmakuChConvert.toTraditional:
-        return '杞箒浣?';
+        return '转繁体';
     }
   }
 
