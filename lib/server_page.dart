@@ -1,6 +1,13 @@
+import 'dart:async';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
+import 'services/cover_cache_manager.dart';
+import 'services/emby_api.dart';
+import 'services/server_icon_library.dart';
+import 'services/website_metadata.dart';
 import 'state/app_state.dart';
 import 'state/preferences.dart';
 import 'state/server_profile.dart';
@@ -216,9 +223,6 @@ class _ServerCardState extends State<_ServerCard> {
     final active = widget.active;
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = colorScheme.brightness == Brightness.dark;
-    final initial = server.name.trim().isNotEmpty
-        ? server.name.trim()[0].toUpperCase()
-        : '?';
     final highlighted = _focused || _hovered;
 
     final borderColor = active
@@ -268,14 +272,10 @@ class _ServerCardState extends State<_ServerCard> {
               children: [
                 Row(
                   children: [
-                    CircleAvatar(
+                    _ServerIconAvatar(
+                      iconUrl: server.iconUrl,
+                      name: server.name,
                       radius: 12,
-                      backgroundColor:
-                          colorScheme.primary.withValues(alpha: 0.14),
-                      child: Text(
-                        initial,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
                     ),
                   ],
                 ),
@@ -337,9 +337,6 @@ class _ServerListTileState extends State<_ServerListTile> {
     final active = widget.active;
     final scheme = Theme.of(context).colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
-    final initial = server.name.trim().isNotEmpty
-        ? server.name.trim()[0].toUpperCase()
-        : '?';
     final highlighted = _focused || _hovered;
 
     final borderColor = active
@@ -375,13 +372,10 @@ class _ServerListTileState extends State<_ServerListTile> {
         ),
         child: Row(
           children: [
-            CircleAvatar(
+            _ServerIconAvatar(
+              iconUrl: server.iconUrl,
+              name: server.name,
               radius: 14,
-              backgroundColor: scheme.primary.withValues(alpha: 0.14),
-              child: Text(
-                initial,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -443,17 +437,25 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   bool _handlingHostParse = false;
   bool _nameTouched = false;
 
+  String? _iconUrl;
+  bool _iconTouched = false;
+
+  Timer? _autoMetaDebounce;
+  int _autoMetaReqId = 0;
+  bool _autoMetaLoading = false;
+  String? _autoMetaError;
+  String? _autoMetaLastUrl;
+
   @override
   void initState() {
     super.initState();
-    _nameCtrl.addListener(() {
-      _nameTouched = _nameCtrl.text.trim().isNotEmpty;
-    });
-    _hostCtrl.addListener(_maybeParseHostInput);
+    _hostCtrl.addListener(_onHostChanged);
+    _portCtrl.addListener(_scheduleAutoMetaFetch);
   }
 
   @override
   void dispose() {
+    _autoMetaDebounce?.cancel();
     _nameCtrl.dispose();
     _remarkCtrl.dispose();
     _hostCtrl.dispose();
@@ -509,6 +511,134 @@ class _AddServerSheetState extends State<_AddServerSheet> {
     }
   }
 
+  void _onHostChanged() {
+    _maybeParseHostInput();
+    _scheduleAutoMetaFetch();
+  }
+
+  Uri? _buildAutoMetaUri() {
+    final hostInput = _hostCtrl.text.trim();
+    if (hostInput.isEmpty) return null;
+
+    final withScheme =
+        hostInput.contains('://') ? hostInput : '$_scheme://$hostInput';
+    final parsed = Uri.tryParse(withScheme);
+    if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) return null;
+    if (parsed.scheme != 'http' && parsed.scheme != 'https') return null;
+
+    var uri = parsed;
+    final portText = _portCtrl.text.trim();
+    if (portText.isNotEmpty) {
+      final port = int.tryParse(portText);
+      if (port != null && port > 0 && port <= 65535) {
+        uri = uri.replace(port: port);
+      }
+    }
+    if (uri.path.isEmpty) {
+      uri = uri.replace(path: '/');
+    }
+    return uri.replace(query: '', fragment: '');
+  }
+
+  void _scheduleAutoMetaFetch({bool force = false}) {
+    if (!mounted) return;
+    if (widget.appState.isLoading) return;
+
+    _autoMetaDebounce?.cancel();
+    final uri = _buildAutoMetaUri();
+    if (uri == null) {
+      if (_autoMetaLoading || _autoMetaError != null) {
+        setState(() {
+          _autoMetaLoading = false;
+          _autoMetaError = null;
+        });
+      }
+      return;
+    }
+
+    final urlKey = uri.toString();
+    if (!force && urlKey == _autoMetaLastUrl) return;
+
+    _autoMetaDebounce = Timer(
+      const Duration(milliseconds: 650),
+      () => _fetchAutoMeta(uri, urlKey: urlKey),
+    );
+  }
+
+  Future<void> _fetchAutoMeta(
+    Uri uri, {
+    required String urlKey,
+    bool overrideIcon = false,
+  }) async {
+    final reqId = ++_autoMetaReqId;
+    setState(() {
+      _autoMetaLoading = true;
+      _autoMetaError = null;
+      _autoMetaLastUrl = urlKey;
+    });
+
+    try {
+      final meta = await WebsiteMetadataService.instance.fetch(uri);
+      if (!mounted || reqId != _autoMetaReqId) return;
+
+      final displayName = (meta.displayName ?? '').trim();
+      if (!_nameTouched && displayName.isNotEmpty) {
+        _nameCtrl.value = _nameCtrl.value.copyWith(
+          text: displayName,
+          selection: TextSelection.collapsed(offset: displayName.length),
+        );
+      }
+
+      final favicon = (meta.faviconUrl ?? '').trim();
+      if ((overrideIcon || !_iconTouched) && favicon.isNotEmpty) {
+        setState(() {
+          _iconTouched = overrideIcon ? false : _iconTouched;
+          _iconUrl = favicon;
+        });
+      }
+
+      setState(() => _autoMetaLoading = false);
+    } catch (e) {
+      if (!mounted || reqId != _autoMetaReqId) return;
+      setState(() {
+        _autoMetaLoading = false;
+        _autoMetaError = e.toString();
+      });
+    }
+  }
+
+  Future<void> _forceFetchWebsiteMeta() async {
+    final uri = _buildAutoMetaUri();
+    if (uri == null) return;
+    _autoMetaDebounce?.cancel();
+    await _fetchAutoMeta(
+      uri,
+      urlKey: uri.toString(),
+      overrideIcon: true,
+    );
+  }
+
+  Future<void> _pickIconFromLibrary() async {
+    final pickedUrl = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _ServerIconLibrarySheet(selectedUrl: _iconUrl),
+    );
+    if (!mounted || pickedUrl == null) return;
+    setState(() {
+      _iconTouched = true;
+      _iconUrl = pickedUrl.trim().isEmpty ? null : pickedUrl.trim();
+    });
+  }
+
+  void _clearIcon() {
+    setState(() {
+      _iconTouched = true;
+      _iconUrl = null;
+    });
+  }
+
   void _applyDefaultPort() {
     _portCtrl.text = _defaultPortForScheme(_scheme);
     setState(() {});
@@ -529,6 +659,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
       password: _pwdCtrl.text,
       displayName: _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
       remark: _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
+      iconUrl: _iconUrl,
     );
     if (!mounted) return;
     if (widget.appState.error != null) {
@@ -553,100 +684,194 @@ class _AddServerSheetState extends State<_AddServerSheet> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('添加服务器', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _nameCtrl,
-              decoration: const InputDecoration(labelText: '服务器名称（可选）'),
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _remarkCtrl,
-              decoration: const InputDecoration(labelText: '备注（可选）'),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _scheme,
-                    decoration: const InputDecoration(labelText: '协议'),
-                    items: const [
-                      DropdownMenuItem(value: 'https', child: Text('https')),
-                      DropdownMenuItem(value: 'http', child: Text('http')),
-                    ],
-                    onChanged: loading
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            setState(() {
-                              _scheme = v;
-                              if (_portCtrl.text.isEmpty ||
-                                  _portCtrl.text == '80' ||
-                                  _portCtrl.text == '443') {
-                                _portCtrl.text = _defaultPortForScheme(v);
-                              }
-                            });
-                          },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 5,
-                  child: TextFormField(
-                    controller: _hostCtrl,
-                    decoration: const InputDecoration(
-                      labelText: '服务器地址',
-                      hintText: '例如：emby.example.com 或 1.2.3.4',
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('添加服务器',
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _nameCtrl,
+                      onChanged: (_) => _nameTouched = true,
+                      decoration: const InputDecoration(labelText: '服务器名称（可选）'),
                     ),
-                    keyboardType: TextInputType.url,
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? '请输入服务器地址' : null,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _portCtrl,
-              decoration: InputDecoration(
-                labelText: '端口（留空默认 ${_scheme == 'http' ? '80' : '443'}）',
-                suffixIcon: IconButton(
-                  tooltip: '使用默认端口',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: loading ? null : _applyDefaultPort,
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _remarkCtrl,
+                      decoration: const InputDecoration(labelText: '备注（可选）'),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        _ServerIconAvatar(
+                          iconUrl: _iconUrl,
+                          name: _nameCtrl.text,
+                          radius: 16,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text('服务器图标（可选）'),
+                              const SizedBox(height: 2),
+                              Text(
+                                _iconTouched
+                                    ? '已自定义'
+                                    : (_iconUrl == null ||
+                                            _iconUrl!.trim().isEmpty)
+                                        ? '未设置'
+                                        : '已自动获取',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '自动获取网站信息',
+                          onPressed: loading ? null : _forceFetchWebsiteMeta,
+                          icon: const Icon(Icons.travel_explore_outlined),
+                        ),
+                        IconButton(
+                          tooltip: '从图标库选择',
+                          onPressed: loading ? null : _pickIconFromLibrary,
+                          icon: const Icon(Icons.collections_outlined),
+                        ),
+                        IconButton(
+                          tooltip: '清除图标',
+                          onPressed: loading ? null : _clearIcon,
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    if (_autoMetaLoading) ...[
+                      const SizedBox(height: 8),
+                      const Row(
+                        children: [
+                          SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: 10),
+                          Expanded(child: Text('正在自动获取网站名称和 favicon…')),
+                        ],
+                      ),
+                    ] else if ((_autoMetaError ?? '').trim().isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        '自动获取失败，可手动设置名称/图标。',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: _scheme,
+                            decoration: const InputDecoration(labelText: '协议'),
+                            items: const [
+                              DropdownMenuItem(
+                                  value: 'https', child: Text('https')),
+                              DropdownMenuItem(
+                                  value: 'http', child: Text('http')),
+                            ],
+                            onChanged: loading
+                                ? null
+                                : (v) {
+                                    if (v == null) return;
+                                    setState(() {
+                                      _scheme = v;
+                                      if (_portCtrl.text.isEmpty ||
+                                          _portCtrl.text == '80' ||
+                                          _portCtrl.text == '443') {
+                                        _portCtrl.text =
+                                            _defaultPortForScheme(v);
+                                      }
+                                    });
+                                    _scheduleAutoMetaFetch(force: true);
+                                  },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 5,
+                          child: TextFormField(
+                            controller: _hostCtrl,
+                            decoration: const InputDecoration(
+                              labelText: '服务器地址',
+                              hintText: '例如：emby.example.com 或 1.2.3.4',
+                            ),
+                            keyboardType: TextInputType.url,
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? '请输入服务器地址'
+                                : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _portCtrl,
+                      decoration: InputDecoration(
+                        labelText:
+                            '端口（留空默认 ${_scheme == 'http' ? '80' : '443'}）',
+                        suffixIcon: IconButton(
+                          tooltip: '使用默认端口',
+                          icon: const Icon(Icons.refresh),
+                          onPressed: loading ? null : _applyDefaultPort,
+                        ),
+                      ),
+                      keyboardType: TextInputType.number,
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return null;
+                        final n = int.tryParse(v.trim());
+                        if (n == null || n <= 0 || n > 65535) return '端口不合法';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _userCtrl,
+                      decoration: const InputDecoration(labelText: '账号'),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? '请输入账号' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: _pwdCtrl,
+                      decoration: InputDecoration(
+                        labelText: '密码（可选）',
+                        suffixIcon: IconButton(
+                          tooltip: _pwdVisible ? '隐藏密码' : '显示密码',
+                          icon: Icon(_pwdVisible
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () =>
+                              setState(() => _pwdVisible = !_pwdVisible),
+                        ),
+                      ),
+                      obscureText: !_pwdVisible,
+                    ),
+                  ],
                 ),
               ),
-              keyboardType: TextInputType.number,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return null;
-                final n = int.tryParse(v.trim());
-                if (n == null || n <= 0 || n > 65535) return '端口不合法';
-                return null;
-              },
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _userCtrl,
-              decoration: const InputDecoration(labelText: '账号'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? '请输入账号' : null,
-            ),
-            const SizedBox(height: 10),
-            TextFormField(
-              controller: _pwdCtrl,
-              decoration: InputDecoration(
-                labelText: '密码',
-                suffixIcon: IconButton(
-                  tooltip: _pwdVisible ? '隐藏密码' : '显示密码',
-                  icon: Icon(
-                      _pwdVisible ? Icons.visibility_off : Icons.visibility),
-                  onPressed: () => setState(() => _pwdVisible = !_pwdVisible),
-                ),
-              ),
-              obscureText: !_pwdVisible,
-              validator: (v) => (v == null || v.isEmpty) ? '请输入密码' : null,
             ),
             const SizedBox(height: 14),
             SizedBox(
@@ -686,6 +911,15 @@ class _EditServerSheetState extends State<_EditServerSheet> {
   late final TextEditingController _remarkCtrl =
       TextEditingController(text: widget.server.remark);
 
+  String? _iconUrl;
+  bool _iconLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _iconUrl = widget.server.iconUrl;
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -693,11 +927,52 @@ class _EditServerSheetState extends State<_EditServerSheet> {
     super.dispose();
   }
 
+  Future<void> _pickIconFromLibrary() async {
+    final pickedUrl = await showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => _ServerIconLibrarySheet(selectedUrl: _iconUrl),
+    );
+    if (!mounted || pickedUrl == null) return;
+    setState(() {
+      _iconUrl = pickedUrl.trim().isEmpty ? null : pickedUrl.trim();
+    });
+  }
+
+  Future<void> _autoFetchIcon() async {
+    final uri = Uri.tryParse(widget.server.baseUrl);
+    if (uri == null) return;
+
+    setState(() => _iconLoading = true);
+    try {
+      final meta = await WebsiteMetadataService.instance.fetch(uri);
+      if (!mounted) return;
+      final favicon = (meta.faviconUrl ?? '').trim();
+      if (favicon.isNotEmpty) {
+        setState(() => _iconUrl = favicon);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('自动获取失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _iconLoading = false);
+    }
+  }
+
+  void _clearIcon() {
+    setState(() => _iconUrl = null);
+  }
+
   Future<void> _save() async {
+    final iconArg = _iconUrl == widget.server.iconUrl ? null : (_iconUrl ?? '');
     await widget.appState.updateServerMeta(
       widget.server.id,
       name: _nameCtrl.text,
       remark: _remarkCtrl.text,
+      iconUrl: iconArg,
     );
     if (!mounted) return;
     Navigator.of(context).pop();
@@ -745,6 +1020,57 @@ class _EditServerSheetState extends State<_EditServerSheet> {
             controller: _remarkCtrl,
             decoration: const InputDecoration(labelText: '备注（可选，小字显示）'),
           ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _ServerIconAvatar(
+                iconUrl: _iconUrl,
+                name: _nameCtrl.text,
+                radius: 16,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('服务器图标'),
+                    const SizedBox(height: 2),
+                    Text(
+                      (_iconUrl == null || _iconUrl!.trim().isEmpty)
+                          ? '未设置'
+                          : '已设置',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '自动获取 favicon',
+                onPressed: _iconLoading ? null : _autoFetchIcon,
+                icon: _iconLoading
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.travel_explore_outlined),
+              ),
+              IconButton(
+                tooltip: '从图标库选择',
+                onPressed: _pickIconFromLibrary,
+                icon: const Icon(Icons.collections_outlined),
+              ),
+              IconButton(
+                tooltip: '清除图标',
+                onPressed: _clearIcon,
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -765,6 +1091,168 @@ class _EditServerSheetState extends State<_EditServerSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ServerIconAvatar extends StatelessWidget {
+  const _ServerIconAvatar({
+    required this.iconUrl,
+    required this.name,
+    required this.radius,
+  });
+
+  final String? iconUrl;
+  final String name;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final initial = name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+    final url = (iconUrl ?? '').trim();
+    final backgroundColor = scheme.primary.withValues(alpha: 0.14);
+
+    Widget fallback() => CircleAvatar(
+          radius: radius,
+          backgroundColor: backgroundColor,
+          child: Text(
+            initial,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        );
+
+    if (url.isEmpty) return fallback();
+
+    return CachedNetworkImage(
+      imageUrl: url,
+      cacheManager: CoverCacheManager.instance,
+      httpHeaders: {'User-Agent': EmbyApi.userAgent},
+      imageBuilder: (_, provider) => CircleAvatar(
+        radius: radius,
+        backgroundColor: backgroundColor,
+        backgroundImage: provider,
+      ),
+      placeholder: (_, __) => fallback(),
+      errorWidget: (_, __, ___) => fallback(),
+    );
+  }
+}
+
+class _ServerIconLibrarySheet extends StatefulWidget {
+  const _ServerIconLibrarySheet({required this.selectedUrl});
+
+  final String? selectedUrl;
+
+  @override
+  State<_ServerIconLibrarySheet> createState() =>
+      _ServerIconLibrarySheetState();
+}
+
+class _ServerIconLibrarySheetState extends State<_ServerIconLibrarySheet> {
+  final _queryCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _queryCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    return Padding(
+      padding:
+          EdgeInsets.only(left: 16, right: 16, bottom: viewInsets.bottom + 16),
+      child: FutureBuilder<ServerIconLibrary>(
+        future: ServerIconLibrary.loadDefault(),
+        builder: (context, snapshot) {
+          final lib = snapshot.data;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '选择图标',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _queryCtrl,
+                decoration: const InputDecoration(
+                  labelText: '搜索',
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 10),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: CircularProgressIndicator(),
+                )
+              else if (snapshot.hasError)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text('加载图标库失败：${snapshot.error}'),
+                )
+              else if (lib == null || lib.icons.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Text('图标库为空'),
+                )
+              else
+                Expanded(
+                  child: _IconList(
+                    icons: lib.icons,
+                    query: _queryCtrl.text,
+                    selectedUrl: widget.selectedUrl,
+                    onPick: (url) => Navigator.of(context).pop(url),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _IconList extends StatelessWidget {
+  const _IconList({
+    required this.icons,
+    required this.query,
+    required this.selectedUrl,
+    required this.onPick,
+  });
+
+  final List<ServerIconEntry> icons;
+  final String query;
+  final String? selectedUrl;
+  final ValueChanged<String> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final q = query.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? icons
+        : icons
+            .where((e) => e.name.toLowerCase().contains(q))
+            .toList(growable: false);
+
+    return ListView.separated(
+      itemCount: filtered.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final icon = filtered[index];
+        final selected = (selectedUrl ?? '').trim() == icon.url.trim();
+        return ListTile(
+          leading:
+              _ServerIconAvatar(iconUrl: icon.url, name: icon.name, radius: 18),
+          title: Text(icon.name),
+          trailing: selected ? const Icon(Icons.check) : null,
+          onTap: () => onPick(icon.url),
+        );
+      },
     );
   }
 }

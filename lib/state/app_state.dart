@@ -320,6 +320,7 @@ class AppState extends ChangeNotifier {
     required String password,
     String? displayName,
     String? remark,
+    String? iconUrl,
   }) async {
     _loading = true;
     _error = null;
@@ -358,10 +359,16 @@ class AppState extends ChangeNotifier {
 
       final existingIndex =
           _servers.indexWhere((s) => s.baseUrl == auth.baseUrlUsed);
+
+      final resolvedIconUrl = switch (iconUrl) {
+        null => existingIndex >= 0 ? _servers[existingIndex].iconUrl : null,
+        _ => iconUrl.trim().isEmpty ? null : iconUrl.trim(),
+      };
       final server = ServerProfile(
         id: existingIndex >= 0 ? _servers[existingIndex].id : _randomId(),
         name: name,
         remark: (remark ?? '').trim().isEmpty ? null : remark!.trim(),
+        iconUrl: resolvedIconUrl,
         baseUrl: auth.baseUrlUsed,
         token: auth.token,
         userId: auth.userId,
@@ -442,6 +449,7 @@ class AppState extends ChangeNotifier {
     String serverId, {
     String? name,
     String? remark,
+    String? iconUrl,
   }) async {
     final server = _servers.firstWhereOrNull((s) => s.id == serverId);
     if (server == null) return;
@@ -450,6 +458,9 @@ class AppState extends ChangeNotifier {
     }
     if (remark != null) {
       server.remark = remark.trim().isEmpty ? null : remark.trim();
+    }
+    if (iconUrl != null) {
+      server.iconUrl = iconUrl.trim().isEmpty ? null : iconUrl.trim();
     }
     final prefs = await SharedPreferences.getInstance();
     await _persistServers(prefs);

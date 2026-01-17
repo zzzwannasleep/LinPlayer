@@ -6,8 +6,6 @@ import 'library_page.dart';
 import 'library_items_page.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
-import 'play_network_page.dart';
-import 'play_network_page_exo.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
 import 'services/cover_cache_manager.dart';
@@ -1137,40 +1135,16 @@ class _HomeSectionCarousel extends StatelessWidget {
                     appState: appState,
                     isTv: isTv,
                     onTap: () {
-                      final type = item.type.toLowerCase();
-                      final useExoCore = !kIsWeb &&
-                          defaultTargetPlatform == TargetPlatform.android &&
-                          appState.playerCore == PlayerCore.exo;
-                      if (type == 'series') {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ShowDetailPage(
-                              itemId: item.id,
-                              title: item.name,
-                              appState: appState,
-                              isTv: isTv,
-                            ),
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ShowDetailPage(
+                            itemId: item.id,
+                            title: item.name,
+                            appState: appState,
+                            isTv: isTv,
                           ),
-                        );
-                      } else {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => useExoCore
-                                ? ExoPlayNetworkPage(
-                                    title: item.name,
-                                    itemId: item.id,
-                                    appState: appState,
-                                    isTv: isTv,
-                                  )
-                                : PlayNetworkPage(
-                                    title: item.name,
-                                    itemId: item.id,
-                                    appState: appState,
-                                    isTv: isTv,
-                                  ),
-                          ),
-                        );
-                      }
+                        ),
+                      );
                     },
                   ),
                 );

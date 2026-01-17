@@ -6,6 +6,7 @@ class ServerProfile {
     required this.token,
     required this.userId,
     this.remark,
+    this.iconUrl,
     Set<String>? hiddenLibraries,
     Map<String, String>? domainRemarks,
     List<CustomDomain>? customDomains,
@@ -16,6 +17,9 @@ class ServerProfile {
   final String id;
   String name;
   String? remark;
+
+  /// Display icon url (favicon or user-selected icon library entry).
+  String? iconUrl;
 
   /// Current selected base url (may point to a "line"/domain).
   String baseUrl;
@@ -35,6 +39,7 @@ class ServerProfile {
         'id': id,
         'name': name,
         'remark': remark,
+        'iconUrl': iconUrl,
         'baseUrl': baseUrl,
         'token': token,
         'userId': userId,
@@ -48,6 +53,7 @@ class ServerProfile {
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
       remark: json['remark'] as String?,
+      iconUrl: json['iconUrl'] as String?,
       baseUrl: json['baseUrl'] as String? ?? '',
       token: json['token'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
