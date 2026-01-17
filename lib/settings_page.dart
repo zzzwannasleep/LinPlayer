@@ -66,7 +66,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final hh = pad2(now.hour);
     final mm = pad2(now.minute);
     final ss = pad2(now.second);
-    return 'linplayer_backup_${y}${m}${d}_${hh}${mm}${ss}.json';
+    return 'linplayer_backup_$y$m${d}_$hh$mm$ss.json';
   }
 
   Future<T> _runWithBlockingDialog<T>(
@@ -108,26 +108,25 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (dctx) => StatefulBuilder(
         builder: (dctx, setState) => AlertDialog(
           title: const Text('导出方式'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RadioListTile<BackupServerSecretMode>(
-                value: BackupServerSecretMode.password,
-                groupValue: selected,
-                onChanged: (v) =>
-                    setState(() => selected = v ?? BackupServerSecretMode.password),
-                title: const Text('账号迁移（不导出 token）'),
-                subtitle: const Text('导入时会重新登录，需联网；需要输入账号密码'),
-              ),
-              RadioListTile<BackupServerSecretMode>(
-                value: BackupServerSecretMode.token,
-                groupValue: selected,
-                onChanged: (v) =>
-                    setState(() => selected = v ?? BackupServerSecretMode.password),
-                title: const Text('会话迁移（导出 token）'),
-                subtitle: const Text('导入无需重新登录；适合离线迁移'),
-              ),
-            ],
+          content: RadioGroup<BackupServerSecretMode>(
+            groupValue: selected,
+            onChanged: (v) =>
+                setState(() => selected = v ?? BackupServerSecretMode.password),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<BackupServerSecretMode>(
+                  value: BackupServerSecretMode.password,
+                  title: Text('账号迁移（不导出 token）'),
+                  subtitle: Text('导入时会重新登录，需联网；需要输入账号密码'),
+                ),
+                RadioListTile<BackupServerSecretMode>(
+                  value: BackupServerSecretMode.token,
+                  title: Text('会话迁移（导出 token）'),
+                  subtitle: Text('导入无需重新登录；适合离线迁移'),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -383,6 +382,8 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
+    if (!context.mounted) return;
+
     try {
       await _runWithBlockingDialog(
         context,
@@ -431,6 +432,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (confirmed != true) return;
+    if (!context.mounted) return;
 
     final json = widget.appState.exportBackupJson(pretty: true);
 
@@ -496,6 +498,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _exportEncryptedBackup(BuildContext context) async {
     final mode = await _askBackupMode(context);
     if (mode == null) return;
+    if (!context.mounted) return;
 
     final passphrase = await _askBackupPassphrase(
       context,
@@ -503,12 +506,14 @@ class _SettingsPageState extends State<SettingsPage> {
       confirm: true,
     );
     if (passphrase == null) return;
+    if (!context.mounted) return;
 
     Map<String, BackupServerLogin>? logins;
     if (mode == BackupServerSecretMode.password &&
         widget.appState.servers.isNotEmpty) {
       logins = await _collectServerLogins(context);
       if (logins == null) return;
+      if (!context.mounted) return;
     }
 
     final action = await showDialog<_BackupIoAction>(
@@ -536,6 +541,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
 
     if (action == null) return;
+    if (!context.mounted) return;
 
     try {
       final json = await _runWithBlockingDialog(
@@ -605,6 +611,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (confirmed != true) return;
+    if (!context.mounted) return;
 
     final action = await showDialog<_BackupIoAction>(
       context: context,
@@ -627,6 +634,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
     if (action == null) return;
+    if (!context.mounted) return;
 
     switch (action) {
       case _BackupIoAction.file:

@@ -394,7 +394,7 @@ class AppState extends ChangeNotifier {
   String exportBackupJson({bool pretty = true}) {
     final json = exportBackupMap();
     if (!pretty) return jsonEncode(json);
-    return JsonEncoder.withIndent('  ').convert(json);
+    return const JsonEncoder.withIndent('  ').convert(json);
   }
 
   Future<String> exportEncryptedBackupJson({
@@ -448,7 +448,7 @@ class AppState extends ChangeNotifier {
       'crypto': encrypted,
     };
     if (!pretty) return jsonEncode(wrapper);
-    return JsonEncoder.withIndent('  ').convert(wrapper);
+    return const JsonEncoder.withIndent('  ').convert(wrapper);
   }
 
   Future<void> importBackupJson(
