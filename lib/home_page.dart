@@ -556,6 +556,7 @@ class _HomeBody extends StatelessWidget {
           ],
           const SizedBox(height: 8),
           _RandomRecommendSection(appState: appState, isTv: isTv),
+          _ContinueWatchingSection(appState: appState, isTv: isTv),
           if (loading) const LinearProgressIndicator(),
           for (final sec in sections)
             if (sec.items.isNotEmpty) ...[
@@ -606,6 +607,260 @@ class _RandomRecommendSection extends StatefulWidget {
   @override
   State<_RandomRecommendSection> createState() =>
       _RandomRecommendSectionState();
+}
+
+class _ContinueWatchingSection extends StatefulWidget {
+  const _ContinueWatchingSection({
+    required this.appState,
+    required this.isTv,
+  });
+
+  final AppState appState;
+  final bool isTv;
+
+  @override
+  State<_ContinueWatchingSection> createState() =>
+      _ContinueWatchingSectionState();
+}
+
+class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
+  Future<List<MediaItem>>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetch();
+  }
+
+  Future<List<MediaItem>> _fetch({bool forceRefresh = false}) {
+    return widget.appState.loadContinueWatching(forceRefresh: forceRefresh);
+  }
+
+  void _reload() {
+    setState(() => _future = _fetch(forceRefresh: true));
+  }
+
+  Duration _ticksToDuration(int ticks) =>
+      Duration(microseconds: (ticks / 10).round());
+
+  String _fmt(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    final s = d.inSeconds.remainder(60);
+    if (h > 0) {
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  String _episodeTag(MediaItem item) {
+    final s = item.seasonNumber ?? 0;
+    final e = item.episodeNumber ?? 0;
+    if (s <= 0 && e <= 0) return '';
+    if (s > 0 && e > 0) {
+      return 'S${s.toString().padLeft(2, '0')}E${e.toString().padLeft(2, '0')}';
+    }
+    if (e > 0) return 'E${e.toString().padLeft(2, '0')}';
+    return 'S${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<MediaItem>>(
+      future: _future,
+      builder: (context, snap) {
+        final items = snap.data ?? const <MediaItem>[];
+        final loading = snap.connectionState == ConnectionState.waiting;
+        final theme = Theme.of(context);
+
+        if (!loading && snap.hasError && items.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '继续观看加载失败',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _reload,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('重试'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (items.isEmpty) return const SizedBox.shrink();
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            const padding = 14.0;
+            const spacing = 10.0;
+            final visible = (constraints.maxWidth / 280).clamp(1.4, 4.5);
+            final maxCount = items.length < 12 ? items.length : 12;
+
+            final itemWidth =
+                (constraints.maxWidth - padding * 2 - spacing * (visible - 1)) /
+                    visible;
+            final imageHeight = itemWidth * 9 / 16;
+            final listHeight = imageHeight + 46;
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '继续观看',
+                          style: theme.textTheme.titleMedium,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '刷新',
+                        onPressed: loading ? null : _reload,
+                        icon: const Icon(Icons.refresh),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  height: listHeight,
+                  child: ListView.separated(
+                    cacheExtent: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: padding),
+                    scrollDirection: Axis.horizontal,
+                    itemCount: maxCount,
+                    separatorBuilder: (_, __) => const SizedBox(width: spacing),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      final isEpisode = item.type.toLowerCase() == 'episode';
+                      final title = isEpisode && item.seriesName.isNotEmpty
+                          ? item.seriesName
+                          : item.name;
+                      final pos = _ticksToDuration(item.playbackPositionTicks);
+                      final tag = isEpisode ? _episodeTag(item) : '';
+                      final sub = [
+                        if (tag.isNotEmpty) tag,
+                        if (pos > Duration.zero) '观看到 ${_fmt(pos)}',
+                      ].join(' · ');
+
+                      final img = item.hasImage
+                          ? EmbyApi.imageUrl(
+                              baseUrl: widget.appState.baseUrl!,
+                              itemId: item.id,
+                              token: widget.appState.token!,
+                              imageType: 'Primary',
+                              maxWidth: 640,
+                            )
+                          : null;
+
+                      return SizedBox(
+                        width: itemWidth,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => isEpisode
+                                    ? EpisodeDetailPage(
+                                        episode: item,
+                                        appState: widget.appState,
+                                        isTv: widget.isTv,
+                                      )
+                                    : ShowDetailPage(
+                                        itemId: item.id,
+                                        title: item.name,
+                                        appState: widget.appState,
+                                        isTv: widget.isTv,
+                                      ),
+                              ),
+                            );
+                          },
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AspectRatio(
+                                aspectRatio: 16 / 9,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: img != null
+                                      ? CachedNetworkImage(
+                                          imageUrl: img,
+                                          cacheManager: CoverCacheManager
+                                              .instance,
+                                          httpHeaders: {
+                                            'User-Agent': EmbyApi.userAgent
+                                          },
+                                          fit: BoxFit.cover,
+                                          placeholder: (_, __) =>
+                                              const ColoredBox(
+                                            color: Colors.black12,
+                                            child: Center(
+                                                child: Icon(Icons.image)),
+                                          ),
+                                          errorWidget: (_, __, ___) =>
+                                              const ColoredBox(
+                                            color: Colors.black12,
+                                            child: Center(
+                                                child: Icon(
+                                                    Icons.broken_image)),
+                                          ),
+                                        )
+                                      : const ColoredBox(
+                                          color: Colors.black12,
+                                          child:
+                                              Center(child: Icon(Icons.image)),
+                                        ),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (sub.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Text(
+                                    sub,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 class _RandomRecommendSectionState extends State<_RandomRecommendSection> {

@@ -102,6 +102,8 @@ class AppState extends ChangeNotifier {
   final Map<String, List<MediaItem>> _homeSections = {};
   List<MediaItem>? _randomRecommendations;
   Future<List<MediaItem>>? _randomRecommendationsInFlight;
+  List<MediaItem>? _continueWatching;
+  Future<List<MediaItem>>? _continueWatchingInFlight;
   late final String _deviceId = _randomId();
   ThemeMode _themeMode = ThemeMode.system;
   double _uiScaleFactor = 1.0;
@@ -749,6 +751,8 @@ class AppState extends ChangeNotifier {
     _homeSections.clear();
     _randomRecommendations = null;
     _randomRecommendationsInFlight = null;
+    _continueWatching = null;
+    _continueWatchingInFlight = null;
     _error = null;
     _loading = false;
 
@@ -838,6 +842,8 @@ class AppState extends ChangeNotifier {
     _homeSections.clear();
     _randomRecommendations = null;
     _randomRecommendationsInFlight = null;
+    _continueWatching = null;
+    _continueWatchingInFlight = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kActiveServerIdKey);
     notifyListeners();
@@ -926,6 +932,8 @@ class AppState extends ChangeNotifier {
       _homeSections.clear();
       _randomRecommendations = null;
       _randomRecommendationsInFlight = null;
+      _continueWatching = null;
+      _continueWatchingInFlight = null;
 
       final prefs = await SharedPreferences.getInstance();
       await _persistServers(prefs);
@@ -951,6 +959,8 @@ class AppState extends ChangeNotifier {
       _homeSections.clear();
       _randomRecommendations = null;
       _randomRecommendationsInFlight = null;
+      _continueWatching = null;
+      _continueWatchingInFlight = null;
       _error = null;
 
       final prefs = await SharedPreferences.getInstance();
@@ -1035,6 +1045,8 @@ class AppState extends ChangeNotifier {
       _homeSections.clear();
       _randomRecommendations = null;
       _randomRecommendationsInFlight = null;
+      _continueWatching = null;
+      _continueWatchingInFlight = null;
       _error = null;
     } catch (e) {
       _error = e.toString();
@@ -1151,6 +1163,41 @@ class AppState extends ChangeNotifier {
     return withArtwork.length >= 6
         ? withArtwork.take(6).toList()
         : res.items.take(6).toList();
+  }
+
+  Future<List<MediaItem>> loadContinueWatching({
+    bool forceRefresh = false,
+  }) {
+    if (!forceRefresh) {
+      final cached = _continueWatching;
+      if (cached != null) return Future.value(cached);
+      final inFlight = _continueWatchingInFlight;
+      if (inFlight != null) return inFlight;
+    }
+
+    final future = _fetchContinueWatching();
+    _continueWatchingInFlight = future;
+    return future.then((items) {
+      _continueWatching = items;
+      return items;
+    }).whenComplete(() {
+      if (_continueWatchingInFlight == future) {
+        _continueWatchingInFlight = null;
+      }
+    });
+  }
+
+  Future<List<MediaItem>> _fetchContinueWatching() async {
+    if (baseUrl == null || token == null || userId == null) return const [];
+
+    final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+    final res = await api.fetchContinueWatching(
+      token: token!,
+      baseUrl: baseUrl!,
+      userId: userId!,
+      limit: 20,
+    );
+    return res.items;
   }
 
   Future<void> setBaseUrl(String url) async {

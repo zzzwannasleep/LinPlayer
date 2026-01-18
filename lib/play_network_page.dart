@@ -26,6 +26,7 @@ class PlayNetworkPage extends StatefulWidget {
     required this.itemId,
     required this.appState,
     this.isTv = false,
+    this.startPosition,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -35,6 +36,7 @@ class PlayNetworkPage extends StatefulWidget {
   final String itemId;
   final AppState appState;
   final bool isTv;
+  final Duration? startPosition;
   final String? mediaSourceId;
   final int? audioStreamIndex; // Emby MediaStream Index
   final int? subtitleStreamIndex; // Emby MediaStream Index, -1 = off
@@ -161,6 +163,19 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       if (_playerService.isExternalPlayback) {
         _playError = _playerService.externalPlaybackMessage ?? '已使用外部播放器播放';
         return;
+      }
+      final start = widget.startPosition;
+      if (start != null && start > Duration.zero) {
+        final total = _playerService.duration;
+        Duration safeStart = start;
+        if (total > Duration.zero && start >= total) {
+          final rewind = total - const Duration(seconds: 5);
+          safeStart = rewind > Duration.zero ? rewind : Duration.zero;
+        }
+        _lastPosition = safeStart;
+        try {
+          await _playerService.seek(safeStart);
+        } catch (_) {}
       }
       _tracks = _playerService.player.state.tracks;
       _maybeApplyInitialTracks(_tracks);

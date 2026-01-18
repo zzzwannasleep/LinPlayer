@@ -17,6 +17,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
     required this.itemId,
     required this.appState,
     this.isTv = false,
+    this.startPosition,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -26,6 +27,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
   final String itemId;
   final AppState appState;
   final bool isTv;
+  final Duration? startPosition;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex; // Emby MediaStream Index, -1 = off
@@ -131,6 +133,19 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
       );
       _controller = controller;
       await controller.initialize();
+      final start = widget.startPosition;
+      if (start != null && start > Duration.zero) {
+        final total = controller.value.duration;
+        Duration safeStart = start;
+        if (total > Duration.zero && start >= total) {
+          final rewind = total - const Duration(seconds: 5);
+          safeStart = rewind > Duration.zero ? rewind : Duration.zero;
+        }
+        try {
+          await controller.seekTo(safeStart);
+          _position = safeStart;
+        } catch (_) {}
+      }
       await controller.play();
 
       _uiTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {

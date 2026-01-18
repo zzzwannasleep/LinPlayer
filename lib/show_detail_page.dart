@@ -717,8 +717,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                       if (_playInfo != null) const SizedBox(height: 12),
                       _playButton(
                         context,
-                        label: '播放',
+                        label: item.playbackPositionTicks > 0
+                            ? '继续播放（${_fmtClock(_ticksToDuration(item.playbackPositionTicks))}）'
+                            : '播放',
                         onTap: () {
+                          final start = item.playbackPositionTicks > 0
+                              ? _ticksToDuration(item.playbackPositionTicks)
+                              : null;
                           final useExoCore = !kIsWeb &&
                               defaultTargetPlatform == TargetPlatform.android &&
                               widget.appState.playerCore == PlayerCore.exo;
@@ -730,6 +735,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                       itemId: item.id,
                                       appState: widget.appState,
                                       isTv: widget.isTv,
+                                      startPosition: start,
                                       mediaSourceId: _selectedMediaSourceId,
                                       audioStreamIndex:
                                           _selectedAudioStreamIndex,
@@ -741,6 +747,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                       itemId: item.id,
                                       appState: widget.appState,
                                       isTv: widget.isTv,
+                                      startPosition: start,
                                       mediaSourceId: _selectedMediaSourceId,
                                       audioStreamIndex:
                                           _selectedAudioStreamIndex,
@@ -1279,8 +1286,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                       const SizedBox(height: 12),
                       _playButton(
                         context,
-                        label: '播放',
+                        label: (_detail?.playbackPositionTicks ?? 0) > 0
+                            ? '继续播放（${_fmtClock(_ticksToDuration(_detail!.playbackPositionTicks))}）'
+                            : '播放',
                         onTap: () {
+                          final start = (_detail?.playbackPositionTicks ?? 0) > 0
+                              ? _ticksToDuration(_detail!.playbackPositionTicks)
+                              : null;
                           final useExoCore = !kIsWeb &&
                               defaultTargetPlatform == TargetPlatform.android &&
                               widget.appState.playerCore == PlayerCore.exo;
@@ -1292,6 +1304,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       itemId: ep.id,
                                       appState: widget.appState,
                                       isTv: widget.isTv,
+                                      startPosition: start,
                                       mediaSourceId: _preferredMediaSourceId,
                                     )
                                   : PlayNetworkPage(
@@ -1299,6 +1312,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       itemId: ep.id,
                                       appState: widget.appState,
                                       isTv: widget.isTv,
+                                      startPosition: start,
                                       mediaSourceId: _preferredMediaSourceId,
                                     ),
                             ),
@@ -1341,6 +1355,19 @@ String _fmt(Duration d) {
   final s = d.inSeconds.remainder(60);
   if (h > 0) return '${h}h ${m}m ${s}s';
   return '${m}m ${s}s';
+}
+
+Duration _ticksToDuration(int ticks) =>
+    Duration(microseconds: (ticks / 10).round());
+
+String _fmtClock(Duration d) {
+  final h = d.inHours;
+  final m = d.inMinutes.remainder(60);
+  final s = d.inSeconds.remainder(60);
+  if (h > 0) {
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+  return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
 }
 
 Widget _chaptersSection(BuildContext context, List<ChapterInfo> chapters) {
