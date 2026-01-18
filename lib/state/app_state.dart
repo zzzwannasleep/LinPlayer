@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/backup_crypto.dart';
 import '../services/emby_api.dart';
 import 'danmaku_preferences.dart';
+import 'local_playback_handoff.dart';
 import 'preferences.dart';
 import 'server_profile.dart';
 
@@ -142,6 +143,7 @@ class AppState extends ChangeNotifier {
   String _danmakuBlockWords = '';
   DanmakuMatchMode _danmakuMatchMode = DanmakuMatchMode.auto;
   DanmakuChConvert _danmakuChConvert = DanmakuChConvert.off;
+  LocalPlaybackHandoff? _localPlaybackHandoff;
   bool _loading = false;
   String? _error;
 
@@ -207,6 +209,16 @@ class AppState extends ChangeNotifier {
   String get danmakuBlockWords => _danmakuBlockWords;
   DanmakuMatchMode get danmakuMatchMode => _danmakuMatchMode;
   DanmakuChConvert get danmakuChConvert => _danmakuChConvert;
+
+  void setLocalPlaybackHandoff(LocalPlaybackHandoff? handoff) {
+    _localPlaybackHandoff = handoff;
+  }
+
+  LocalPlaybackHandoff? takeLocalPlaybackHandoff() {
+    final handoff = _localPlaybackHandoff;
+    _localPlaybackHandoff = null;
+    return handoff;
+  }
 
   Iterable<HomeEntry> get homeEntries sync* {
     for (final entry in _homeSections.entries) {

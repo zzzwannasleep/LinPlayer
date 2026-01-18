@@ -8,6 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import 'state/app_state.dart';
+import 'state/local_playback_handoff.dart';
+import 'state/preferences.dart';
 import 'src/player/playback_controls.dart';
 
 class ExoPlayerScreen extends StatefulWidget {
@@ -40,6 +42,63 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  @override
+  void initState() {
+    super.initState();
+    final handoff = widget.appState.takeLocalPlaybackHandoff();
+    if (handoff != null && handoff.playlist.isNotEmpty) {
+      final files = handoff.playlist
+          .where((e) => e.path.trim().isNotEmpty)
+          .map(
+            (e) => PlatformFile(
+              name: e.name,
+              size: 0,
+              path: e.path,
+            ),
+          )
+          .toList();
+      if (files.isNotEmpty) {
+        _playlist.addAll(files);
+        final idx = handoff.index < 0
+            ? 0
+            : handoff.index >= files.length
+                ? files.length - 1
+                : handoff.index;
+        unawaited(
+          _playFile(
+            files[idx],
+            idx,
+            startPosition: handoff.position,
+            autoPlay: handoff.wasPlaying,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _switchCore() async {
+    final playlist = _playlist
+        .where((f) => (f.path ?? '').trim().isNotEmpty)
+        .map((f) => LocalPlaybackItem(name: f.name, path: f.path!.trim()))
+        .toList();
+    if (playlist.isNotEmpty) {
+      final idx = _currentIndex < 0
+          ? 0
+          : _currentIndex >= playlist.length
+              ? playlist.length - 1
+              : _currentIndex;
+      widget.appState.setLocalPlaybackHandoff(
+        LocalPlaybackHandoff(
+          playlist: playlist,
+          index: idx,
+          position: _position,
+          wasPlaying: _controller?.value.isPlaying ?? false,
+        ),
+      );
+    }
+    await widget.appState.setPlayerCore(PlayerCore.mpv);
+  }
 
   @override
   void dispose() {
@@ -194,7 +253,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
     }
   }
 
-  Future<void> _playFile(PlatformFile file, int index) async {
+  Future<void> _playFile(
+    PlatformFile file,
+    int index, {
+    Duration? startPosition,
+    bool? autoPlay,
+  }) async {
     final path = (file.path ?? '').trim();
     if (path.isEmpty) {
       setState(() => _playError = '无法读取文件路径');
@@ -234,7 +298,17 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
           : VideoPlayerController.file(File(path), viewType: viewType);
       _controller = controller;
       await controller.initialize();
-      await controller.play();
+      if (startPosition != null && startPosition > Duration.zero) {
+        final d = controller.value.duration;
+        final target = (d > Duration.zero && startPosition > d) ? d : startPosition;
+        await controller.seekTo(target);
+        _position = target;
+      }
+      if (autoPlay == false) {
+        await controller.pause();
+      } else {
+        await controller.play();
+      }
 
       _uiTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
         final c = _controller;
@@ -400,6 +474,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
                                     position: _position,
                                     duration: _duration,
                                     isPlaying: controller.value.isPlaying,
+                                    onSwitchCore: _switchCore,
                                     onScrubStart: _onScrubStart,
                                     onScrubEnd: _onScrubEnd,
                                     onSeek: (pos) async {

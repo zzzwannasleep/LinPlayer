@@ -15,9 +15,12 @@ import 'src/player/danmaku.dart';
 import 'src/player/danmaku_processing.dart';
 import 'src/player/playback_controls.dart';
 import 'src/player/danmaku_stage.dart';
+import 'src/player/thumbnail_generator.dart';
 import 'src/player/track_preferences.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
+import 'state/local_playback_handoff.dart';
+import 'state/preferences.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({super.key, this.appState});
@@ -30,6 +33,7 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   final PlayerService _playerService = getPlayerService();
+  MediaKitThumbnailGenerator? _thumbnailer;
   final List<PlatformFile> _playlist = [];
   int _currentlyPlayingIndex = -1;
   StreamSubscription<Duration>? _posSub;
@@ -86,6 +90,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _danmakuTopMaxLines = appState?.danmakuTopMaxLines ?? 0;
     _danmakuBottomMaxLines = appState?.danmakuBottomMaxLines ?? 0;
     _danmakuPreventOverlap = appState?.danmakuPreventOverlap ?? true;
+
+    final handoff = appState?.takeLocalPlaybackHandoff();
+    if (handoff != null && handoff.playlist.isNotEmpty) {
+      final files = handoff.playlist
+          .where((e) => e.path.trim().isNotEmpty)
+          .map(
+            (e) => PlatformFile(
+              name: e.name,
+              size: 0,
+              path: e.path,
+            ),
+          )
+          .toList();
+      if (files.isNotEmpty) {
+        _playlist.addAll(files);
+        final idx = handoff.index < 0
+            ? 0
+            : handoff.index >= files.length
+                ? files.length - 1
+                : handoff.index;
+        unawaited(
+          _playFile(
+            files[idx],
+            idx,
+            startPosition: handoff.position,
+            autoPlay: handoff.wasPlaying,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -99,6 +133,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _bufferingSub?.cancel();
     // ignore: unawaited_futures
     _exitOrientationLock();
+    final thumb = _thumbnailer;
+    _thumbnailer = null;
+    if (thumb != null) {
+      // ignore: unawaited_futures
+      thumb.dispose();
+    }
     _playerService.dispose();
     super.dispose();
   }
@@ -132,6 +172,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _scheduleControlsHide();
   }
 
+  Future<void> _switchCore() async {
+    final appState = widget.appState;
+    if (appState == null) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Exo 内核仅支持 Android')),
+      );
+      return;
+    }
+
+    final playlist = _playlist
+        .where((f) => (f.path ?? '').trim().isNotEmpty)
+        .map((f) => LocalPlaybackItem(name: f.name, path: f.path!.trim()))
+        .toList();
+    if (playlist.isNotEmpty) {
+      final idx = _currentlyPlayingIndex < 0
+          ? 0
+          : _currentlyPlayingIndex >= playlist.length
+              ? playlist.length - 1
+              : _currentlyPlayingIndex;
+      appState.setLocalPlaybackHandoff(
+        LocalPlaybackHandoff(
+          playlist: playlist,
+          index: idx,
+          position: _position,
+          wasPlaying: _playerService.isPlaying,
+        ),
+      );
+    }
+    await appState.setPlayerCore(PlayerCore.exo);
+  }
+
   void _applyDanmakuPauseState(bool pause) {
     if (_danmakuPaused == pause) return;
     _danmakuPaused = pause;
@@ -162,7 +235,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _playFile(PlatformFile file, int index) async {
+  Future<void> _playFile(
+    PlatformFile file,
+    int index, {
+    Duration? startPosition,
+    bool? autoPlay,
+  }) async {
     setState(() {
       _currentlyPlayingIndex = index;
       _playError = null;
@@ -201,6 +279,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       await _playerService.dispose();
     } catch (_) {}
+    try {
+      await _thumbnailer?.dispose();
+    } catch (_) {}
+    _thumbnailer = null;
 
     try {
       if (kIsWeb) {
@@ -252,6 +334,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
       _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
       _duration = _playerService.duration;
+      if (!kIsWeb && (file.path ?? '').isNotEmpty) {
+        _thumbnailer = MediaKitThumbnailGenerator(media: Media(file.path!));
+      }
+      if (startPosition != null && startPosition > Duration.zero) {
+        final d = _duration;
+        final target = (d > Duration.zero && startPosition > d) ? d : startPosition;
+        await _playerService.seek(target);
+        _position = target;
+        _syncDanmakuCursor(target);
+      }
+      if (autoPlay == false) {
+        await _playerService.pause();
+      }
       _maybeAutoLoadOnlineDanmaku(file);
       _videoParamsSub = _playerService.player.stream.videoParams.listen((p) {
         _lastVideoParams = p;
@@ -921,6 +1016,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     position: _position,
                                     duration: _duration,
                                     isPlaying: _playerService.isPlaying,
+                                    onRequestThumbnail: _thumbnailer == null
+                                        ? null
+                                        : (pos) => _thumbnailer!.getThumbnail(
+                                              pos,
+                                            ),
+                                    onSwitchCore: (!kIsWeb &&
+                                            defaultTargetPlatform ==
+                                                TargetPlatform.android &&
+                                            widget.appState != null)
+                                        ? _switchCore
+                                        : null,
                                     onScrubStart: _onScrubStart,
                                     onScrubEnd: _onScrubEnd,
                                     onSeek: (pos) async {

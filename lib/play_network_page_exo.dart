@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import 'play_network_page.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
+import 'state/preferences.dart';
 import 'src/player/playback_controls.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
@@ -18,6 +20,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
     required this.appState,
     this.isTv = false,
     this.startPosition,
+    this.resumeImmediately = false,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -28,6 +31,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
   final AppState appState;
   final bool isTv;
   final Duration? startPosition;
+  final bool resumeImmediately;
   final String? mediaSourceId;
   final int? audioStreamIndex;
   final int? subtitleStreamIndex; // Emby MediaStream Index, -1 = off
@@ -61,6 +65,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
 
   String? _playSessionId;
   String? _mediaSourceId;
+  List<Map<String, dynamic>> _availableMediaSources = const [];
+  String? _selectedMediaSourceId;
+  int? _selectedAudioStreamIndex;
+  int? _selectedSubtitleStreamIndex;
+  Duration? _overrideStartPosition;
+  bool _overrideResumeImmediately = false;
   DateTime? _lastProgressReportAt;
   bool _lastProgressReportPaused = false;
   bool _reportedStart = false;
@@ -79,6 +89,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
     if (baseUrl != null && baseUrl.trim().isNotEmpty) {
       _embyApi = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
     }
+    _selectedMediaSourceId = widget.mediaSourceId;
+    _selectedAudioStreamIndex = widget.audioStreamIndex;
+    _selectedSubtitleStreamIndex = widget.subtitleStreamIndex;
     // ignore: unawaited_futures
     _enterImmersiveMode();
     _init();
@@ -129,6 +142,103 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
   void _onScrubEnd() {
     _isScrubbing = false;
     _scheduleControlsHide();
+  }
+
+  Future<void> _switchCore() async {
+    final pos = _position;
+    _maybeReportPlaybackProgress(pos, force: true);
+    await widget.appState.setPlayerCore(PlayerCore.mpv);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => PlayNetworkPage(
+          title: widget.title,
+          itemId: widget.itemId,
+          appState: widget.appState,
+          isTv: widget.isTv,
+          startPosition: pos,
+          resumeImmediately: true,
+          mediaSourceId:
+              _selectedMediaSourceId ?? _mediaSourceId ?? widget.mediaSourceId,
+          audioStreamIndex: _selectedAudioStreamIndex,
+          subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchVersion() async {
+    final pos = _position;
+    _maybeReportPlaybackProgress(pos, force: true);
+
+    var sources = _availableMediaSources;
+    if (sources.isEmpty) {
+      try {
+        final base = widget.appState.baseUrl!;
+        final token = widget.appState.token!;
+        final userId = widget.appState.userId!;
+        final api = _embyApi ??
+            EmbyApi(hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
+        final info = await api.fetchPlaybackInfo(
+          token: token,
+          baseUrl: base,
+          userId: userId,
+          deviceId: widget.appState.deviceId,
+          itemId: widget.itemId,
+        );
+        sources = info.mediaSources.cast<Map<String, dynamic>>();
+        _availableMediaSources = List<Map<String, dynamic>>.from(sources);
+      } catch (_) {
+        sources = const [];
+      }
+    }
+
+    if (sources.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法获取版本列表')),
+      );
+      return;
+    }
+
+    final current = _mediaSourceId ?? _selectedMediaSourceId ?? '';
+    if (!mounted) return;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView(
+            children: [
+              const ListTile(title: Text('版本选择')),
+              for (final ms in sources)
+                ListTile(
+                  leading: Icon(
+                    (ms['Id']?.toString() ?? '') == current
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                  ),
+                  title: Text(_mediaSourceTitle(ms)),
+                  subtitle: Text(_mediaSourceSubtitle(ms)),
+                  onTap: () => Navigator.of(ctx).pop(ms['Id']?.toString() ?? ''),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (selected == null || selected.trim().isEmpty) return;
+    if (selected.trim() == current) return;
+
+    setState(() {
+      _selectedMediaSourceId = selected.trim();
+      _selectedAudioStreamIndex = null;
+      _selectedSubtitleStreamIndex = null;
+      _overrideStartPosition = pos;
+      _overrideResumeImmediately = true;
+    });
+    await _init();
   }
 
   Future<void> _init() async {
@@ -184,11 +294,21 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
       );
       _controller = controller;
       await controller.initialize();
-      final start = widget.startPosition;
+      final start = _overrideStartPosition ?? widget.startPosition;
+      final resumeImmediately =
+          _overrideResumeImmediately || widget.resumeImmediately;
+      _overrideStartPosition = null;
+      _overrideResumeImmediately = false;
       if (start != null && start > Duration.zero) {
-        _resumeHintPosition = _safeSeekTarget(start, controller.value.duration);
-        _showResumeHint = true;
-        _deferProgressReporting = true;
+        final target = _safeSeekTarget(start, controller.value.duration);
+        if (resumeImmediately) {
+          await controller.seekTo(target);
+          _position = target;
+        } else {
+          _resumeHintPosition = target;
+          _showResumeHint = true;
+          _deferProgressReporting = true;
+        }
       }
       await controller.play();
 
@@ -251,12 +371,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
       final uri = Uri.parse(url);
       final params = Map<String, String>.from(uri.queryParameters);
       if (!params.containsKey('api_key')) params['api_key'] = token;
-      if (widget.audioStreamIndex != null) {
-        params['AudioStreamIndex'] = widget.audioStreamIndex.toString();
+      if (_selectedAudioStreamIndex != null) {
+        params['AudioStreamIndex'] = _selectedAudioStreamIndex.toString();
       }
-      if (widget.subtitleStreamIndex != null &&
-          widget.subtitleStreamIndex! >= 0) {
-        params['SubtitleStreamIndex'] = widget.subtitleStreamIndex.toString();
+      if (_selectedSubtitleStreamIndex != null && _selectedSubtitleStreamIndex! >= 0) {
+        params['SubtitleStreamIndex'] = _selectedSubtitleStreamIndex.toString();
       }
       return uri.replace(queryParameters: params).toString();
     }
@@ -278,9 +397,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
         itemId: widget.itemId,
       );
       final sources = info.mediaSources.cast<Map<String, dynamic>>();
+      _availableMediaSources = List<Map<String, dynamic>>.from(sources);
       Map<String, dynamic>? ms;
       if (sources.isNotEmpty) {
-        final selectedId = widget.mediaSourceId;
+        final selectedId = _selectedMediaSourceId;
         if (selectedId != null && selectedId.isNotEmpty) {
           ms = sources.firstWhere(
             (s) => (s['Id'] as String? ?? '') == selectedId,
@@ -318,6 +438,50 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
     final m = d.inMinutes.remainder(60);
     final s = d.inSeconds.remainder(60);
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  static List<Map<String, dynamic>> _streamsOfType(
+      Map<String, dynamic> ms, String type) {
+    final streams = (ms['MediaStreams'] as List?) ?? const [];
+    return streams
+        .where((e) => (e as Map)['Type'] == type)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  static String _mediaSourceTitle(Map<String, dynamic> ms) {
+    return (ms['Name'] as String?) ??
+        (ms['Container'] as String?) ??
+        '默认版本';
+  }
+
+  static String _mediaSourceSubtitle(Map<String, dynamic> ms) {
+    final size = ms['Size'];
+    final sizeGb =
+        size is num ? (size / (1024 * 1024 * 1024)).toStringAsFixed(1) : null;
+    final bitrate = _asInt(ms['Bitrate']);
+    final bitrateMbps =
+        bitrate != null ? (bitrate / 1000000).toStringAsFixed(1) : null;
+
+    final videoStreams = _streamsOfType(ms, 'Video');
+    final video = videoStreams.isNotEmpty ? videoStreams.first : null;
+    final height = _asInt(video?['Height']);
+    final vCodec =
+        (ms['VideoCodec'] as String?) ?? (video?['Codec'] as String?);
+
+    final parts = <String>[];
+    if (height != null) parts.add('${height}p');
+    if (vCodec != null && vCodec.isNotEmpty) parts.add(vCodec.toUpperCase());
+    if (sizeGb != null) parts.add('$sizeGb GB');
+    if (bitrateMbps != null) parts.add('$bitrateMbps Mbps');
+    return parts.isEmpty ? '直连播放' : parts.join(' / ');
   }
 
   Duration _safeSeekTarget(Duration target, Duration total) {
@@ -783,6 +947,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
                                     position: _position,
                                     duration: _duration,
                                     isPlaying: _isPlaying,
+                                    onSwitchCore: _switchCore,
+                                    onSwitchVersion: _switchVersion,
                                     onScrubStart: _onScrubStart,
                                     onScrubEnd: _onScrubEnd,
                                     onSeek: (pos) async {

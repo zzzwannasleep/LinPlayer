@@ -9,14 +9,17 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'player_service.dart';
+import 'play_network_page_exo.dart';
 import 'services/dandanplay_api.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
+import 'state/preferences.dart';
 import 'src/player/danmaku.dart';
 import 'src/player/danmaku_processing.dart';
 import 'src/player/playback_controls.dart';
 import 'src/player/danmaku_stage.dart';
+import 'src/player/thumbnail_generator.dart';
 import 'src/player/track_preferences.dart';
 
 class PlayNetworkPage extends StatefulWidget {
@@ -27,6 +30,7 @@ class PlayNetworkPage extends StatefulWidget {
     required this.appState,
     this.isTv = false,
     this.startPosition,
+    this.resumeImmediately = false,
     this.mediaSourceId,
     this.audioStreamIndex,
     this.subtitleStreamIndex,
@@ -37,6 +41,7 @@ class PlayNetworkPage extends StatefulWidget {
   final AppState appState;
   final bool isTv;
   final Duration? startPosition;
+  final bool resumeImmediately;
   final String? mediaSourceId;
   final int? audioStreamIndex; // Emby MediaStream Index
   final int? subtitleStreamIndex; // Emby MediaStream Index, -1 = off
@@ -47,6 +52,7 @@ class PlayNetworkPage extends StatefulWidget {
 
 class _PlayNetworkPageState extends State<PlayNetworkPage> {
   final PlayerService _playerService = getPlayerService();
+  MediaKitThumbnailGenerator? _thumbnailer;
   EmbyApi? _embyApi;
   bool _loading = true;
   String? _playError;
@@ -65,6 +71,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   bool _appliedSubtitlePref = false;
   String? _playSessionId;
   String? _mediaSourceId;
+  List<Map<String, dynamic>> _availableMediaSources = const [];
+  String? _selectedMediaSourceId;
+  int? _selectedAudioStreamIndex;
+  int? _selectedSubtitleStreamIndex;
+  Duration? _overrideStartPosition;
+  bool _overrideResumeImmediately = false;
   DateTime? _lastProgressReportAt;
   bool _lastProgressReportPaused = false;
   bool _reportedStart = false;
@@ -119,6 +131,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
     _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
     _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+    _selectedMediaSourceId = widget.mediaSourceId;
+    _selectedAudioStreamIndex = widget.audioStreamIndex;
+    _selectedSubtitleStreamIndex = widget.subtitleStreamIndex;
     // ignore: unawaited_futures
     _enterImmersiveMode();
     _init();
@@ -163,16 +178,26 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     try {
+      await _thumbnailer?.dispose();
+    } catch (_) {}
+    _thumbnailer = null;
+    try {
       final streamUrl = await _buildStreamUrl();
       _resolvedStream = streamUrl;
+      final embyHeaders = {
+        'X-Emby-Token': widget.appState.token!,
+        'X-Emby-Authorization':
+            'MediaBrowser Client="LinPlayer", Device="Flutter", DeviceId="${widget.appState.deviceId}", Version="1.0.0"',
+      };
+      if (!kIsWeb && streamUrl.isNotEmpty) {
+        _thumbnailer = MediaKitThumbnailGenerator(
+          media: Media(streamUrl, httpHeaders: embyHeaders),
+        );
+      }
       await _playerService.initialize(
         null,
         networkUrl: streamUrl,
-        httpHeaders: {
-          'X-Emby-Token': widget.appState.token!,
-          'X-Emby-Authorization':
-              'MediaBrowser Client="LinPlayer", Device="Flutter", DeviceId="${widget.appState.deviceId}", Version="1.0.0"',
-        },
+        httpHeaders: embyHeaders,
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
@@ -182,11 +207,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         _playError = _playerService.externalPlaybackMessage ?? '已使用外部播放器播放';
          return;
        }
-      final start = widget.startPosition;
+      final start = _overrideStartPosition ?? widget.startPosition;
+      final resumeImmediately =
+          _overrideResumeImmediately || widget.resumeImmediately;
+      _overrideStartPosition = null;
+      _overrideResumeImmediately = false;
       if (start != null && start > Duration.zero) {
-        _resumeHintPosition = _safeSeekTarget(start, _playerService.duration);
-        _showResumeHint = true;
-        _deferProgressReporting = true;
+        final target = _safeSeekTarget(start, _playerService.duration);
+        if (resumeImmediately) {
+          await _playerService.seek(target);
+          _lastPosition = target;
+          _syncDanmakuCursor(target);
+        } else {
+          _resumeHintPosition = target;
+          _showResumeHint = true;
+          _deferProgressReporting = true;
+        }
       }
       _tracks = _playerService.player.state.tracks;
       _maybeApplyInitialTracks(_tracks);
@@ -389,8 +425,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     if (player == null) return;
 
     if (!_appliedAudioPref) {
-      if (widget.audioStreamIndex != null) {
-        final target = widget.audioStreamIndex!.toString();
+      if (_selectedAudioStreamIndex != null) {
+        final target = _selectedAudioStreamIndex!.toString();
         for (final a in tracks.audio) {
           if (a.id == target) {
             player.setAudioTrack(a);
@@ -408,11 +444,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     }
 
     if (!_appliedSubtitlePref) {
-      if (widget.subtitleStreamIndex != null) {
-        if (widget.subtitleStreamIndex == -1) {
+      if (_selectedSubtitleStreamIndex != null) {
+        if (_selectedSubtitleStreamIndex == -1) {
           player.setSubtitleTrack(SubtitleTrack.no());
         } else {
-          final target = widget.subtitleStreamIndex!.toString();
+          final target = _selectedSubtitleStreamIndex!.toString();
           for (final s in tracks.subtitle) {
             if (s.id == target) {
               player.setSubtitleTrack(s);
@@ -714,12 +750,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
       final uri = Uri.parse(url);
       final params = Map<String, String>.from(uri.queryParameters);
       if (!params.containsKey('api_key')) params['api_key'] = token;
-      if (widget.audioStreamIndex != null) {
-        params['AudioStreamIndex'] = widget.audioStreamIndex.toString();
+      if (_selectedAudioStreamIndex != null) {
+        params['AudioStreamIndex'] = _selectedAudioStreamIndex.toString();
       }
-      if (widget.subtitleStreamIndex != null &&
-          widget.subtitleStreamIndex! >= 0) {
-        params['SubtitleStreamIndex'] = widget.subtitleStreamIndex.toString();
+      if (_selectedSubtitleStreamIndex != null && _selectedSubtitleStreamIndex! >= 0) {
+        params['SubtitleStreamIndex'] = _selectedSubtitleStreamIndex.toString();
       }
       return uri.replace(queryParameters: params).toString();
     }
@@ -741,9 +776,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
         itemId: widget.itemId,
       );
       final sources = info.mediaSources.cast<Map<String, dynamic>>();
+      _availableMediaSources = List<Map<String, dynamic>>.from(sources);
       Map<String, dynamic>? ms;
       if (sources.isNotEmpty) {
-        final selectedId = widget.mediaSourceId;
+        final selectedId = _selectedMediaSourceId;
         if (selectedId != null && selectedId.isNotEmpty) {
           ms = sources.firstWhere(
             (s) => (s['Id'] as String? ?? '') == selectedId,
@@ -784,6 +820,50 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     final m = d.inMinutes.remainder(60);
     final s = d.inSeconds.remainder(60);
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
+  }
+
+  static int? _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  static List<Map<String, dynamic>> _streamsOfType(
+      Map<String, dynamic> ms, String type) {
+    final streams = (ms['MediaStreams'] as List?) ?? const [];
+    return streams
+        .where((e) => (e as Map)['Type'] == type)
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  static String _mediaSourceTitle(Map<String, dynamic> ms) {
+    return (ms['Name'] as String?) ??
+        (ms['Container'] as String?) ??
+        '默认版本';
+  }
+
+  static String _mediaSourceSubtitle(Map<String, dynamic> ms) {
+    final size = ms['Size'];
+    final sizeGb =
+        size is num ? (size / (1024 * 1024 * 1024)).toStringAsFixed(1) : null;
+    final bitrate = _asInt(ms['Bitrate']);
+    final bitrateMbps =
+        bitrate != null ? (bitrate / 1000000).toStringAsFixed(1) : null;
+
+    final videoStreams = _streamsOfType(ms, 'Video');
+    final video = videoStreams.isNotEmpty ? videoStreams.first : null;
+    final height = _asInt(video?['Height']);
+    final vCodec =
+        (ms['VideoCodec'] as String?) ?? (video?['Codec'] as String?);
+
+    final parts = <String>[];
+    if (height != null) parts.add('${height}p');
+    if (vCodec != null && vCodec.isNotEmpty) parts.add(vCodec.toUpperCase());
+    if (sizeGb != null) parts.add('$sizeGb GB');
+    if (bitrateMbps != null) parts.add('$bitrateMbps Mbps');
+    return parts.isEmpty ? '直连播放' : parts.join(' / ');
   }
 
   Duration _safeSeekTarget(Duration target, Duration total) {
@@ -1120,6 +1200,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
     _playingSub?.cancel();
     _completedSub?.cancel();
     _videoParamsSub?.cancel();
+    final thumb = _thumbnailer;
+    _thumbnailer = null;
+    if (thumb != null) {
+      // ignore: unawaited_futures
+      thumb.dispose();
+    }
     _playerService.dispose();
     super.dispose();
   }
@@ -1151,6 +1237,112 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
   void _onScrubEnd() {
     _isScrubbing = false;
     _scheduleControlsHide();
+  }
+
+  Future<void> _switchCore() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Exo 内核仅支持 Android')),
+      );
+      return;
+    }
+
+    final pos = _lastPosition;
+    _maybeReportPlaybackProgress(pos, force: true);
+    await widget.appState.setPlayerCore(PlayerCore.exo);
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => ExoPlayNetworkPage(
+          title: widget.title,
+          itemId: widget.itemId,
+          appState: widget.appState,
+          isTv: widget.isTv,
+          startPosition: pos,
+          resumeImmediately: true,
+          mediaSourceId: _selectedMediaSourceId ?? _mediaSourceId ?? widget.mediaSourceId,
+          audioStreamIndex: _selectedAudioStreamIndex,
+          subtitleStreamIndex: _selectedSubtitleStreamIndex,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchVersion() async {
+    final pos = _playerService.isInitialized ? _lastPosition : Duration.zero;
+    _maybeReportPlaybackProgress(pos, force: true);
+
+    var sources = _availableMediaSources;
+    if (sources.isEmpty) {
+      try {
+        final base = widget.appState.baseUrl!;
+        final token = widget.appState.token!;
+        final userId = widget.appState.userId!;
+        final api = _embyApi ??
+            EmbyApi(hostOrUrl: widget.appState.baseUrl!, preferredScheme: 'https');
+        final info = await api.fetchPlaybackInfo(
+          token: token,
+          baseUrl: base,
+          userId: userId,
+          deviceId: widget.appState.deviceId,
+          itemId: widget.itemId,
+        );
+        sources = info.mediaSources.cast<Map<String, dynamic>>();
+        _availableMediaSources = List<Map<String, dynamic>>.from(sources);
+      } catch (_) {
+        sources = const [];
+      }
+    }
+
+    if (sources.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法获取版本列表')),
+      );
+      return;
+    }
+
+    final current = _mediaSourceId ?? _selectedMediaSourceId ?? '';
+    if (!mounted) return;
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView(
+            children: [
+              const ListTile(title: Text('版本选择')),
+              for (final ms in sources)
+                ListTile(
+                  leading: Icon(
+                    (ms['Id']?.toString() ?? '') == current
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                  ),
+                  title: Text(_mediaSourceTitle(ms)),
+                  subtitle: Text(_mediaSourceSubtitle(ms)),
+                  onTap: () => Navigator.of(ctx).pop(ms['Id']?.toString() ?? ''),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (selected == null || selected.trim().isEmpty) return;
+    if (selected.trim() == current) return;
+
+    setState(() {
+      _selectedMediaSourceId = selected.trim();
+      _selectedAudioStreamIndex = null;
+      _selectedSubtitleStreamIndex = null;
+      _overrideStartPosition = pos;
+      _overrideResumeImmediately = true;
+      _loading = true;
+      _playError = null;
+    });
+    await _init();
   }
 
   @override
@@ -1353,6 +1545,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
                                     position: _lastPosition,
                                     duration: duration,
                                     isPlaying: isPlaying,
+                                    onRequestThumbnail: _thumbnailer == null
+                                        ? null
+                                        : (pos) => _thumbnailer!.getThumbnail(
+                                              pos,
+                                            ),
+                                    onSwitchCore: (!kIsWeb &&
+                                            defaultTargetPlatform ==
+                                                TargetPlatform.android)
+                                        ? _switchCore
+                                        : null,
+                                    onSwitchVersion: _switchVersion,
                                     onScrubStart: _onScrubStart,
                                     onScrubEnd: _onScrubEnd,
                                     onSeek: (pos) async {
