@@ -23,6 +23,14 @@
 3. 媒体库页：显示库海报；点库进入分层列表，可搜索并无限滚动；Episode / Movie 直接播放，Series / Season / Folder 继续下钻。
 4. 本地播放器：底部导航「本地」进入，选择本地文件播放。
 
+## 播放器内核（MPV / Exo）
+
+- 默认：MPV（`media_kit`），跨平台可用。
+- Android 可选：Exo（Media3 / ExoPlayer，基于 `video_player`），在「设置 → 播放 → 播放器内核」切换。
+- Exo 更适合部分杜比视界 P8 片源（在 MPV 下可能出现偏紫/偏绿问题），并默认使用 `VideoViewType.platformView` 渲染。
+- Exo 内核支持音轨切换与字幕选择/关闭（本地播放与 Emby 在线播放均支持）。
+- 如遇到 Exo/platformView 兼容性或性能问题，可切回 MPV。
+
 ## 弹幕（本地 / 在线）
 
 设置入口：设置 → 播放 → 弹幕

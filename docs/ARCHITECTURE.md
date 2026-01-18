@@ -15,15 +15,16 @@
 - `lib/`：Flutter 应用代码（UI、状态、Emby API 封装、播放器封装）。
 - `packages/`：项目内置/改造后的依赖。
   - `packages/media_kit_patched/`：对 `media_kit` 的小改造版本，用于更细粒度传递 mpv 参数（见下文）。
+  - `packages/video_player_android_patched/`：对 `video_player_android` 的改造版本，用于 Exo 内核的字幕轨道枚举/选择与 platformView 字幕渲染（见下文）。
 - `android/`、`ios/`、`macos/`、`windows/`、`linux/`：Flutter 各平台宿主工程（应用名、图标、打包配置都在这里落地）。
-- `test/`：Flutter 测试（目前是基础 widget test）。
+- `test/`：Flutter 测试（widget test + 部分单元测试）。
 - `build/`、`.dart_tool/`：构建/缓存产物（生成目录，通常不入库）。
 
 ## 关键配置文件
 
 - `pubspec.yaml`
   - Flutter/Dart 依赖清单。
-  - `dependency_overrides`：指向 `packages/media_kit_patched`（项目内改造的 `media_kit`）。
+  - `dependency_overrides`：指向 `packages/media_kit_patched` 与 `packages/video_player_android_patched`（项目内改造的 `media_kit`/`video_player_android`）。
   - `flutter_launcher_icons`：图标生成配置（源文件为 `assets/app_icon.jpg`）。
 - `analysis_options.yaml`：Dart/Flutter lints 配置。
 - `.gitignore`
@@ -126,6 +127,21 @@
   - 弹幕：
     - `Video` 上方叠加 `DanmakuStage`（覆盖层渲染）。
     - 在线匹配默认仅使用标题/文件名（无法获取文件 Hash 时准确度可能下降）。
+
+#### 4) Exo 播放内核（Android，可选）
+- 入口：设置 → 播放 → 播放器内核（`PlayerCore.exo`）。
+- 本地播放：`lib/player_screen_exo.dart`
+  - 基于 `video_player`（Android 底层为 Media3 ExoPlayer）。
+  - 默认使用 `VideoViewType.platformView`（用于规避部分 HDR/Dolby Vision 片源的颜色问题）。
+  - 支持音轨/字幕切换：
+    - 音轨：通过 `video_player_platform_interface` 的 `getAudioTracks/selectAudioTrack`（Android 支持）。
+    - 字幕：通过本项目对 `video_player_android` 的补丁接口（支持枚举/选择/关闭）。
+- 在线播放：`lib/play_network_page_exo.dart`
+  - 仍通过 Emby 的 `AudioStreamIndex/SubtitleStreamIndex` 把“默认音轨/字幕”写入 URL；播放过程中也可再次切换。
+- 实现与维护：
+  - `packages/video_player_android_patched/lib/exo_tracks.dart`：对外暴露 Pigeon 生成的 Exo 字幕相关 API，避免直接 `import` 依赖包的 `lib/src`。
+  - `packages/video_player_android_patched/android/.../PlatformVideoView.java`：Android 侧监听 `Player.Listener.onCues` 并叠加 `TextView` 显示字幕。
+  - 如需升级 `video_player_android`，建议先阅读 `packages/video_player_android_patched/README_LINPLAYER.md`。
 
 ### 主要页面（UI）
 - `lib/server_page.dart`：服务器管理（添加/编辑/删除/选择），并提供主题设置入口。
