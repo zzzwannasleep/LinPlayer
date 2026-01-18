@@ -696,6 +696,30 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
           );
         }
 
+        if (loading && items.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '继续观看',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ],
+            ),
+          );
+        }
+
         if (items.isEmpty) return const SizedBox.shrink();
 
         return LayoutBuilder(

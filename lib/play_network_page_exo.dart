@@ -142,7 +142,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
           safeStart = rewind > Duration.zero ? rewind : Duration.zero;
         }
         try {
-          await controller.seekTo(safeStart);
+          final seekFuture = controller.seekTo(safeStart);
+          await seekFuture.timeout(const Duration(seconds: 3));
           _position = safeStart;
         } catch (_) {}
       }

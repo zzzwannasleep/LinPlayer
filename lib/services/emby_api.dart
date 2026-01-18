@@ -566,17 +566,28 @@ class EmbyApi {
     int limit = 30,
   }) async {
     final url = Uri.parse(
-        '$baseUrl/emby/Users/$userId/Items?Filters=IsResumable&SortBy=DatePlayed&SortOrder=Descending&Limit=$limit&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags');
+        '$baseUrl/emby/Users/$userId/Items'
+        '?Filters=IsResumable'
+        '&IncludeItemTypes=Episode,Movie'
+        '&Recursive=true'
+        '&SortBy=DatePlayed'
+        '&SortOrder=Descending'
+        '&Limit=$limit'
+        '&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData');
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode != 200) {
       throw Exception('获取继续观看失败（${resp.statusCode}）');
     }
     final map = jsonDecode(resp.body) as Map<String, dynamic>;
-    final items = (map['Items'] as List<dynamic>? ?? [])
+    final parsed = (map['Items'] as List<dynamic>? ?? [])
         .map((e) => MediaItem.fromJson(e as Map<String, dynamic>))
-        // 只保留真正有播放进度的
-        .where((e) => e.playbackPositionTicks > 0)
         .toList();
+
+    // Prefer items with real progress. Some servers may omit UserData (or return 0)
+    // even when `IsResumable` is requested; in that case, keep the raw list.
+    final withProgress =
+        parsed.where((e) => e.playbackPositionTicks > 0).toList();
+    final items = withProgress.isNotEmpty ? withProgress : parsed;
     final total = map['TotalRecordCount'] as int? ?? items.length;
     return PagedResult(items, total);
   }
@@ -847,7 +858,7 @@ class EmbyApi {
     required String itemId,
   }) async {
     final url = Uri.parse(
-        '$baseUrl/emby/Users/$userId/Items/$itemId?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container');
+        '$baseUrl/emby/Users/$userId/Items/$itemId?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container');
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode != 200) {
       throw Exception('获取详情失败(${resp.statusCode})');

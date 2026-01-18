@@ -172,9 +172,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage> {
           final rewind = total - const Duration(seconds: 5);
           safeStart = rewind > Duration.zero ? rewind : Duration.zero;
         }
-        _lastPosition = safeStart;
         try {
-          await _playerService.seek(safeStart);
+          final seekFuture = _playerService.seek(safeStart);
+          await seekFuture.timeout(const Duration(seconds: 3));
+          _lastPosition = safeStart;
         } catch (_) {}
       }
       _tracks = _playerService.player.state.tracks;
