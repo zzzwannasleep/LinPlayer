@@ -179,18 +179,21 @@ class EmbyApi {
     required String hostOrUrl,
     required String preferredScheme,
     String? port,
+    http.Client? client,
   })  : _hostOrUrl = hostOrUrl.trim(),
         _preferredScheme = preferredScheme,
-        _port = port?.trim();
+        _port = port?.trim(),
+        _client = client ??
+            IOClient(
+              HttpClient()
+                ..userAgent = userAgent
+                ..badCertificateCallback = (_, __, ___) => true,
+            );
 
   final String _hostOrUrl;
   final String _preferredScheme;
   final String? _port;
-  final http.Client _client = IOClient(
-    HttpClient()
-      ..userAgent = userAgent
-      ..badCertificateCallback = (_, __, ___) => true,
-  );
+  final http.Client _client;
 
   // Simple device id generator to satisfy Emby header requirements
   static String _randomId() {
@@ -238,6 +241,54 @@ class EmbyApi {
     return headers;
   }
 
+  static Uri _normalizeAuthBase(Uri uri) {
+    final segments = uri.pathSegments.toList(growable: true);
+
+    // Users often paste the web UI url: /web or /web/index.html.
+    while (segments.isNotEmpty) {
+      final last = segments.last.toLowerCase();
+      final secondLast =
+          segments.length >= 2 ? segments[segments.length - 2].toLowerCase() : null;
+
+      if (secondLast == 'web' && last == 'index.html') {
+        segments.removeLast();
+        segments.removeLast();
+        continue;
+      }
+      if (last == 'web') {
+        segments.removeLast();
+        continue;
+      }
+      break;
+    }
+
+    // Normalize to the "root" before the API prefix. We will try both:
+    //   {root}/emby/... (normal deployments)
+    //   {root}/emby/emby/... (when server base URL is set to /emby)
+    while (segments.isNotEmpty && segments.last.toLowerCase() == 'emby') {
+      segments.removeLast();
+    }
+
+    final normalizedPath = segments.isEmpty ? '' : '/${segments.join('/')}';
+    return uri.replace(path: normalizedPath, query: null, fragment: null);
+  }
+
+  static Iterable<String> _expandAuthBaseVariants(String rawBase) sync* {
+    final normalized = _normalizeAuthBase(Uri.parse(rawBase));
+
+    // Base without "/emby" suffix.
+    yield normalized.toString();
+
+    // Base with one "/emby" suffix. The API paths in this project always add
+    // another "/emby", so this makes requests like:
+    //   {base}/emby/...  -> /emby/emby/... when baseUrl ends with /emby
+    final withEmbySegments = [...normalized.pathSegments, 'emby'];
+    final withEmby = normalized.replace(path: '/${withEmbySegments.join('/')}');
+    if (withEmby.toString() != normalized.toString()) {
+      yield withEmby.toString();
+    }
+  }
+
   List<String> _candidates() {
     // If user pasted full URL with scheme, just try it.
     final parsed = Uri.tryParse(_hostOrUrl);
@@ -249,7 +300,8 @@ class EmbyApi {
               : '');
       final path =
           parsed.path.isNotEmpty && parsed.path != '/' ? parsed.path : '';
-      return ['${parsed.scheme}://${parsed.host}$port$path'];
+      final raw = '${parsed.scheme}://${parsed.host}$port$path';
+      return _expandAuthBaseVariants(raw).toList();
     }
 
     // handle host/path form without scheme
@@ -275,7 +327,9 @@ class EmbyApi {
     final seen = <String>{};
     final result = <String>[];
     for (final c in withPort) {
-      if (seen.add(c)) result.add(c);
+      for (final v in _expandAuthBaseVariants(c)) {
+        if (seen.add(v)) result.add(v);
+      }
     }
     return result;
   }
@@ -301,7 +355,7 @@ class EmbyApi {
           body: body,
         );
         if (resp.statusCode != 200) {
-          errors.add('${url.origin}: HTTP ${resp.statusCode}');
+          errors.add('${url.toString()}: HTTP ${resp.statusCode}');
           continue;
         }
         final map = jsonDecode(resp.body) as Map<String, dynamic>;
