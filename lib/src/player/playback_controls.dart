@@ -15,6 +15,8 @@ class PlaybackControls extends StatefulWidget {
     required this.onPause,
     required this.onSeekBackward,
     required this.onSeekForward,
+    this.onScrubStart,
+    this.onScrubEnd,
     this.backgroundColor = const Color(0x99000000),
   });
 
@@ -28,6 +30,9 @@ class PlaybackControls extends StatefulWidget {
   final FutureOr<void> Function() onPause;
   final FutureOr<void> Function() onSeekBackward;
   final FutureOr<void> Function() onSeekForward;
+
+  final VoidCallback? onScrubStart;
+  final VoidCallback? onScrubEnd;
 
   final Color backgroundColor;
 
@@ -91,11 +96,18 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                       value: displayMs,
                       min: 0,
                       max: maxMs.toDouble().clamp(1, double.infinity),
+                      onChangeStart: !enabled
+                          ? null
+                          : (v) {
+                              widget.onScrubStart?.call();
+                              setState(() => _scrubMs = v);
+                            },
                       onChanged:
                           !enabled ? null : (v) => setState(() => _scrubMs = v),
                       onChangeEnd: !enabled
                           ? null
                           : (v) async {
+                              widget.onScrubEnd?.call();
                               setState(() => _scrubMs = null);
                               await _call1(
                                 widget.onSeek,

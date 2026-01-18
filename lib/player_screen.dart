@@ -67,6 +67,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _buffering = false;
   bool _danmakuPaused = false;
 
+  static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
+  Timer? _controlsHideTimer;
+  bool _controlsVisible = true;
+  bool _isScrubbing = false;
+
   @override
   void initState() {
     super.initState();
@@ -85,6 +90,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
     _posSub?.cancel();
     _errorSub?.cancel();
     _videoParamsSub?.cancel();
@@ -94,6 +101,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _exitOrientationLock();
     _playerService.dispose();
     super.dispose();
+  }
+
+  void _showControls({bool scheduleHide = true}) {
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+    }
+    if (scheduleHide) _scheduleControlsHide();
+  }
+
+  void _scheduleControlsHide() {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    if (!_controlsVisible || _isScrubbing) return;
+    _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
+      if (!mounted || _isScrubbing) return;
+      setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _onScrubStart() {
+    _isScrubbing = true;
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _showControls(scheduleHide: false);
+  }
+
+  void _onScrubEnd() {
+    _isScrubbing = false;
+    _scheduleControlsHide();
   }
 
   void _applyDanmakuPauseState(bool pause) {
@@ -146,7 +182,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _danmakuTopMaxLines = appState?.danmakuTopMaxLines ?? 0;
       _danmakuBottomMaxLines = appState?.danmakuBottomMaxLines ?? 0;
       _danmakuPreventOverlap = appState?.danmakuPreventOverlap ?? true;
+      _controlsVisible = true;
+      _isScrubbing = false;
     });
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
     _danmakuKey.currentState?.clear();
     final isTv = _isTv(context);
     _isTvDevice = isTv;
@@ -243,6 +283,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           setState(() {});
         }
       });
+      _scheduleControlsHide();
     } catch (e) {
       setState(() => _playError = e.toString());
     }
@@ -853,6 +894,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               child: Center(child: CircularProgressIndicator()),
                             ),
                           ),
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTapDown: (_) => _showControls(),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
                         Align(
                           alignment: Alignment.bottomCenter,
                           child: SafeArea(
@@ -860,43 +908,64 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             left: false,
                             right: false,
                             minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            child: PlaybackControls(
-                              enabled: _playerService.isInitialized &&
-                                  _playError == null,
-                              position: _position,
-                              duration: _duration,
-                              isPlaying: _playerService.isPlaying,
-                              onSeek: (pos) async {
-                                await _playerService.seek(pos);
-                                _position = pos;
-                                _syncDanmakuCursor(pos);
-                                if (mounted) setState(() {});
-                              },
-                              onPlay: () => _playerService.play(),
-                              onPause: () => _playerService.pause(),
-                              onSeekBackward: () async {
-                                final target =
-                                    _position - const Duration(seconds: 10);
-                                final pos = target < Duration.zero
-                                    ? Duration.zero
-                                    : target;
-                                await _playerService.seek(pos);
-                                _position = pos;
-                                _syncDanmakuCursor(pos);
-                                if (mounted) setState(() {});
-                              },
-                              onSeekForward: () async {
-                                final d = _duration;
-                                final target =
-                                    _position + const Duration(seconds: 10);
-                                final pos = (d > Duration.zero && target > d)
-                                    ? d
-                                    : target;
-                                await _playerService.seek(pos);
-                                _position = pos;
-                                _syncDanmakuCursor(pos);
-                                if (mounted) setState(() {});
-                              },
+                            child: AnimatedOpacity(
+                              opacity: _controlsVisible ? 1 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible,
+                                child: Listener(
+                                  onPointerDown: (_) => _showControls(),
+                                  child: PlaybackControls(
+                                    enabled: _playerService.isInitialized &&
+                                        _playError == null,
+                                    position: _position,
+                                    duration: _duration,
+                                    isPlaying: _playerService.isPlaying,
+                                    onScrubStart: _onScrubStart,
+                                    onScrubEnd: _onScrubEnd,
+                                    onSeek: (pos) async {
+                                      await _playerService.seek(pos);
+                                      _position = pos;
+                                      _syncDanmakuCursor(pos);
+                                      if (mounted) setState(() {});
+                                    },
+                                    onPlay: () {
+                                      _showControls();
+                                      return _playerService.play();
+                                    },
+                                    onPause: () {
+                                      _showControls();
+                                      return _playerService.pause();
+                                    },
+                                    onSeekBackward: () async {
+                                      _showControls();
+                                      final target = _position -
+                                          const Duration(seconds: 10);
+                                      final pos = target < Duration.zero
+                                          ? Duration.zero
+                                          : target;
+                                      await _playerService.seek(pos);
+                                      _position = pos;
+                                      _syncDanmakuCursor(pos);
+                                      if (mounted) setState(() {});
+                                    },
+                                    onSeekForward: () async {
+                                      _showControls();
+                                      final d = _duration;
+                                      final target = _position +
+                                          const Duration(seconds: 10);
+                                      final pos =
+                                          (d > Duration.zero && target > d)
+                                              ? d
+                                              : target;
+                                      await _playerService.seek(pos);
+                                      _position = pos;
+                                      _syncDanmakuCursor(pos);
+                                      if (mounted) setState(() {});
+                                    },
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),

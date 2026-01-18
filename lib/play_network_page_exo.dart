@@ -54,6 +54,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
   Timer? _resumeHintTimer;
   bool _deferProgressReporting = false;
 
+  static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
+  Timer? _controlsHideTimer;
+  bool _controlsVisible = true;
+  bool _isScrubbing = false;
+
   String? _playSessionId;
   String? _mediaSourceId;
   DateTime? _lastProgressReportAt;
@@ -81,6 +86,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
 
   @override
   void dispose() {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
     _resumeHintTimer?.cancel();
@@ -93,6 +100,35 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
     _controller?.dispose();
     _controller = null;
     super.dispose();
+  }
+
+  void _showControls({bool scheduleHide = true}) {
+    if (!_controlsVisible) {
+      setState(() => _controlsVisible = true);
+    }
+    if (scheduleHide) _scheduleControlsHide();
+  }
+
+  void _scheduleControlsHide() {
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    if (!_controlsVisible || _isScrubbing) return;
+    _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
+      if (!mounted || _isScrubbing) return;
+      setState(() => _controlsVisible = false);
+    });
+  }
+
+  void _onScrubStart() {
+    _isScrubbing = true;
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _showControls(scheduleHide: false);
+  }
+
+  void _onScrubEnd() {
+    _isScrubbing = false;
+    _scheduleControlsHide();
   }
 
   Future<void> _init() async {
@@ -115,6 +151,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
     _resumeHintPosition = null;
     _showResumeHint = false;
     _deferProgressReporting = false;
+    _controlsVisible = true;
+    _isScrubbing = false;
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
 
     final prev = _controller;
     _controller = null;
@@ -195,6 +235,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
         if (_showResumeHint && _resumeHintPosition != null) {
           _startResumeHintTimer();
         }
+        _scheduleControlsHide();
       }
     }
   }
@@ -671,6 +712,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
                               child: Center(child: CircularProgressIndicator()),
                             ),
                           ),
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTapDown: (_) => _showControls(),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
                         if (controlsEnabled &&
                             _showResumeHint &&
                             _resumeHintPosition != null)
@@ -723,59 +771,79 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
                             left: false,
                             right: false,
                             minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                            child: PlaybackControls(
-                              enabled: controlsEnabled,
-                              position: _position,
-                              duration: _duration,
-                              isPlaying: _isPlaying,
-                              onSeek: (pos) async {
-                                await controller.seekTo(pos);
-                                _maybeReportPlaybackProgress(pos, force: true);
-                                if (mounted) setState(() {});
-                              },
-                              onPlay: () async {
-                                await controller.play();
-                                _maybeReportPlaybackProgress(
-                                  controller.value.position,
-                                  force: true,
-                                );
-                                if (mounted) setState(() {});
-                              },
-                              onPause: () async {
-                                await controller.pause();
-                                _maybeReportPlaybackProgress(
-                                  controller.value.position,
-                                  force: true,
-                                );
-                                if (mounted) setState(() {});
-                              },
-                              onSeekBackward: () async {
-                                final target =
-                                    _position - const Duration(seconds: 10);
-                                final pos = target < Duration.zero
-                                    ? Duration.zero
-                                    : target;
-                                await controller.seekTo(pos);
-                                _maybeReportPlaybackProgress(
-                                  controller.value.position,
-                                  force: true,
-                                );
-                                if (mounted) setState(() {});
-                              },
-                              onSeekForward: () async {
-                                final d = _duration;
-                                final target =
-                                    _position + const Duration(seconds: 10);
-                                final pos = (d > Duration.zero && target > d)
-                                    ? d
-                                    : target;
-                                await controller.seekTo(pos);
-                                _maybeReportPlaybackProgress(
-                                  controller.value.position,
-                                  force: true,
-                                );
-                                if (mounted) setState(() {});
-                              },
+                            child: AnimatedOpacity(
+                              opacity: _controlsVisible ? 1 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible,
+                                child: Listener(
+                                  onPointerDown: (_) => _showControls(),
+                                  child: PlaybackControls(
+                                    enabled: controlsEnabled,
+                                    position: _position,
+                                    duration: _duration,
+                                    isPlaying: _isPlaying,
+                                    onScrubStart: _onScrubStart,
+                                    onScrubEnd: _onScrubEnd,
+                                    onSeek: (pos) async {
+                                      await controller.seekTo(pos);
+                                      _maybeReportPlaybackProgress(
+                                        pos,
+                                        force: true,
+                                      );
+                                      if (mounted) setState(() {});
+                                    },
+                                    onPlay: () async {
+                                      _showControls();
+                                      await controller.play();
+                                      _maybeReportPlaybackProgress(
+                                        controller.value.position,
+                                        force: true,
+                                      );
+                                      if (mounted) setState(() {});
+                                    },
+                                    onPause: () async {
+                                      _showControls();
+                                      await controller.pause();
+                                      _maybeReportPlaybackProgress(
+                                        controller.value.position,
+                                        force: true,
+                                      );
+                                      if (mounted) setState(() {});
+                                    },
+                                    onSeekBackward: () async {
+                                      _showControls();
+                                      final target = _position -
+                                          const Duration(seconds: 10);
+                                      final pos = target < Duration.zero
+                                          ? Duration.zero
+                                          : target;
+                                      await controller.seekTo(pos);
+                                      _maybeReportPlaybackProgress(
+                                        controller.value.position,
+                                        force: true,
+                                      );
+                                      if (mounted) setState(() {});
+                                    },
+                                    onSeekForward: () async {
+                                      _showControls();
+                                      final d = _duration;
+                                      final target = _position +
+                                          const Duration(seconds: 10);
+                                      final pos =
+                                          (d > Duration.zero && target > d)
+                                              ? d
+                                              : target;
+                                      await controller.seekTo(pos);
+                                      _maybeReportPlaybackProgress(
+                                        controller.value.position,
+                                        force: true,
+                                      );
+                                      if (mounted) setState(() {});
+                                    },
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),
