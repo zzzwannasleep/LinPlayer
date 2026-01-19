@@ -66,14 +66,28 @@ jobs:
       - name: Flutter tests
         run: flutter test
 
-      - name: Build APK
-        run: flutter build apk --release --split-per-abi --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+      - name: Build APKs (split + universal)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT_DIR="build/ci-android-apks"
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+
+          flutter build apk --release --split-per-abi --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          cp -v build/app/outputs/flutter-apk/app-*-release.apk "$OUT_DIR/"
+
+          flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          cp -v build/app/outputs/flutter-apk/app-release.apk "$OUT_DIR/"
+
+          echo "--- Staged APKs ---"
+          ls -la "$OUT_DIR"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: LinPlayer-Android-APKs
-          path: build/app/outputs/flutter-apk/app-*-release.apk
+          path: build/ci-android-apks/*.apk
 
   build-windows:
     name: Build Windows Setup (x64)
@@ -480,6 +494,7 @@ jobs:
 
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-release.apk#LinPlayer-Android.apk" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Windows-Setup/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-iOS-Unsigned-IPA/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-macOS-DMG-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
@@ -520,6 +535,7 @@ jobs:
 
           gh release upload nightly "dist/LinPlayer-Android-APKs/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
           gh release upload nightly "dist/LinPlayer-Android-APKs/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
+          gh release upload nightly "dist/LinPlayer-Android-APKs/app-release.apk#LinPlayer-Android.apk" --clobber
           gh release upload nightly "dist/LinPlayer-Windows-Setup/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
           gh release upload nightly "dist/LinPlayer-iOS-Unsigned-IPA/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
           gh release upload nightly "dist/LinPlayer-macOS-DMG-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
