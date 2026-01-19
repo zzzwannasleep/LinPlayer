@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
-import 'services/cover_cache_manager.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'library_items_page.dart';
+import 'src/ui/app_components.dart';
 import 'src/ui/ui_scale.dart';
 
 class LibraryPage extends StatefulWidget {
@@ -80,8 +79,9 @@ class _LibraryPageState extends State<LibraryPage> {
                             token: widget.appState.token!,
                             maxWidth: 400,
                           );
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(12),
+                          return MediaBackdropTile(
+                            title: lib.name,
+                            imageUrl: imageUrl,
                             onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
@@ -98,45 +98,6 @@ class _LibraryPageState extends State<LibraryPage> {
                               widget.appState.toggleLibraryHidden(lib.id);
                               setState(() {});
                             },
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                AspectRatio(
-                                  aspectRatio: 16 / 9,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: CachedNetworkImage(
-                                      imageUrl: imageUrl,
-                                      cacheManager: CoverCacheManager.instance,
-                                      httpHeaders: {
-                                        'User-Agent': EmbyApi.userAgent
-                                      },
-                                      fit: BoxFit.cover,
-                                      placeholder: (_, __) => const ColoredBox(
-                                        color: Colors.black12,
-                                        child: Center(child: Icon(Icons.image)),
-                                      ),
-                                      errorWidget: (_, __, ___) =>
-                                          const ColoredBox(
-                                        color: Colors.black12,
-                                        child:
-                                            Center(child: Icon(Icons.folder)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  lib.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(fontWeight: FontWeight.w700),
-                                ),
-                              ],
-                            ),
                           );
                         },
                       ),

@@ -4,6 +4,9 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../state/preferences.dart';
+import '../ui/app_style.dart';
+
 class PlaybackControls extends StatefulWidget {
   const PlaybackControls({
     super.key,
@@ -21,7 +24,7 @@ class PlaybackControls extends StatefulWidget {
     this.onRequestThumbnail,
     this.onSwitchCore,
     this.onSwitchVersion,
-    this.backgroundColor = const Color(0x99000000),
+    this.backgroundColor,
   });
 
   final Duration position;
@@ -47,7 +50,7 @@ class PlaybackControls extends StatefulWidget {
   final FutureOr<void> Function()? onSwitchCore;
   final FutureOr<void> Function()? onSwitchVersion;
 
-  final Color backgroundColor;
+  final Color? backgroundColor;
 
   @override
   State<PlaybackControls> createState() => _PlaybackControlsState();
@@ -136,6 +139,81 @@ class _PlaybackControlsState extends State<PlaybackControls> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.extension<AppStyle>() ?? const AppStyle();
+    final template = style.template;
+
+    final bg = widget.backgroundColor ??
+        switch (template) {
+          UiTemplate.neonHud => Color.lerp(
+              const Color(0xCC000000),
+              scheme.primary.withValues(alpha: 0.85),
+              0.18,
+            )!,
+          UiTemplate.pixelArcade => Color.lerp(
+              const Color(0xCC000000),
+              scheme.secondary.withValues(alpha: 0.85),
+              0.14,
+            )!,
+          UiTemplate.stickerJournal => Color.lerp(
+              const Color(0xCC000000),
+              scheme.secondary.withValues(alpha: 0.75),
+              0.10,
+            )!,
+          UiTemplate.candyGlass => Color.lerp(
+              const Color(0xCC000000),
+              scheme.primary.withValues(alpha: 0.70),
+              0.10,
+            )!,
+          UiTemplate.washiWatercolor => Color.lerp(
+              const Color(0xCC000000),
+              scheme.tertiary.withValues(alpha: 0.70),
+              0.08,
+            )!,
+          UiTemplate.mangaStoryboard => const Color(0xD0000000),
+          UiTemplate.proTool => const Color(0xCC000000),
+          UiTemplate.minimalCovers => const Color(0xC8000000),
+        };
+
+    final radius = switch (template) {
+      UiTemplate.pixelArcade => 10.0,
+      UiTemplate.neonHud => 12.0,
+      UiTemplate.mangaStoryboard => 10.0,
+      UiTemplate.proTool => 12.0,
+      _ => 12.0,
+    };
+
+    final accent = switch (template) {
+      UiTemplate.neonHud => scheme.primary,
+      UiTemplate.pixelArcade => scheme.secondary,
+      UiTemplate.stickerJournal => scheme.secondary,
+      UiTemplate.candyGlass => scheme.primary,
+      UiTemplate.washiWatercolor => scheme.primary,
+      _ => Colors.white,
+    };
+
+    final borderSide = switch (template) {
+      UiTemplate.neonHud => BorderSide(
+          color: scheme.primary.withValues(alpha: 0.75),
+          width: math.max(1.0, style.borderWidth),
+        ),
+      UiTemplate.pixelArcade => BorderSide(
+          color: scheme.secondary.withValues(alpha: 0.75),
+          width: math.max(1.2, style.borderWidth + 0.6),
+        ),
+      UiTemplate.mangaStoryboard => BorderSide(
+          color: Colors.white.withValues(alpha: 0.55),
+          width: math.max(1.1, style.borderWidth + 0.6),
+        ),
+      _ => BorderSide.none,
+    };
+
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(radius),
+      side: borderSide,
+    );
+
     final durationMs = widget.duration.inMilliseconds;
     final maxMs = math.max(durationMs, 1);
     final posMs = widget.position.inMilliseconds;
@@ -146,8 +224,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
     final enabled = widget.enabled;
 
     return Material(
-      color: widget.backgroundColor,
-      borderRadius: BorderRadius.circular(12),
+      color: bg,
+      shape: shape,
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
@@ -170,6 +248,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                       final sliderTheme = SliderTheme.of(context).copyWith(
                         trackHeight: 3,
                         overlayShape: SliderComponentShape.noOverlay,
+                        activeTrackColor: accent,
+                        thumbColor: accent,
                       );
 
                       final bubbleWidth = math.min(160.0, constraints.maxWidth);
@@ -276,6 +356,26 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                                               color: const Color(0xAA000000),
                                               borderRadius:
                                                   BorderRadius.circular(6),
+                                              border: switch (template) {
+                                                UiTemplate.neonHud =>
+                                                  Border.all(
+                                                    color: accent.withValues(
+                                                        alpha: 0.65),
+                                                  ),
+                                                UiTemplate.pixelArcade =>
+                                                  Border.all(
+                                                    color: accent.withValues(
+                                                        alpha: 0.65),
+                                                    width: 1.2,
+                                                  ),
+                                                UiTemplate.mangaStoryboard =>
+                                                  Border.all(
+                                                    color: Colors.white
+                                                        .withValues(
+                                                            alpha: 0.35),
+                                                  ),
+                                                _ => null,
+                                              },
                                             ),
                                             child: Padding(
                                               padding:
@@ -328,27 +428,31 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                     },
                     itemBuilder: (context) => [
                       if (widget.onSwitchCore != null)
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: _PlaybackMenuAction.switchCore,
                           child: Row(
                             children: [
-                              Icon(Icons.tune, color: Colors.white),
-                              SizedBox(width: 10),
-                              Text('切换内核',
-                                  style: TextStyle(color: Colors.white)),
+                              Icon(Icons.tune, color: accent),
+                              const SizedBox(width: 10),
+                              const Text(
+                                '切换内核',
+                                style: TextStyle(color: Colors.white),
+                              ),
                             ],
                           ),
                         ),
                       if (widget.onSwitchVersion != null)
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: _PlaybackMenuAction.switchVersion,
                           child: Row(
                             children: [
                               Icon(Icons.video_file_outlined,
-                                  color: Colors.white),
-                              SizedBox(width: 10),
-                              Text('切换版本',
-                                  style: TextStyle(color: Colors.white)),
+                                  color: accent),
+                              const SizedBox(width: 10),
+                              const Text(
+                                '切换版本',
+                                style: TextStyle(color: Colors.white),
+                              ),
                             ],
                           ),
                         ),
@@ -374,7 +478,7 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                     widget.isPlaying ? Icons.pause_circle : Icons.play_circle,
                   ),
                   iconSize: 44,
-                  color: Colors.white,
+                  color: accent,
                   onPressed: !enabled
                       ? null
                       : () => widget.isPlaying

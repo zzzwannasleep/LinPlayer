@@ -6,6 +6,8 @@ import 'state/app_state.dart';
 import 'state/preferences.dart';
 import 'play_network_page.dart';
 import 'play_network_page_exo.dart';
+import 'src/ui/app_components.dart';
+import 'src/ui/app_style.dart';
 
 class ShowDetailPage extends StatefulWidget {
   const ShowDetailPage({
@@ -622,6 +624,83 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       imageType: 'Primary',
       maxWidth: 1200,
     );
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.extension<AppStyle>() ?? const AppStyle();
+    final template = style.template;
+    final isDark = scheme.brightness == Brightness.dark;
+
+    const grayscale = ColorFilter.matrix(<double>[
+      0.2126, 0.7152, 0.0722, 0, 0, //
+      0.2126, 0.7152, 0.0722, 0, 0, //
+      0.2126, 0.7152, 0.0722, 0, 0, //
+      0, 0, 0, 1, 0, //
+    ]);
+
+    final heroFilter = switch (template) {
+      UiTemplate.mangaStoryboard => grayscale,
+      UiTemplate.neonHud => ColorFilter.mode(
+          scheme.primary.withValues(alpha: isDark ? 0.18 : 0.12),
+          BlendMode.overlay,
+        ),
+      UiTemplate.pixelArcade => ColorFilter.mode(
+          scheme.secondary.withValues(alpha: isDark ? 0.18 : 0.12),
+          BlendMode.overlay,
+        ),
+      UiTemplate.candyGlass => ColorFilter.mode(
+          scheme.secondary.withValues(alpha: isDark ? 0.10 : 0.08),
+          BlendMode.softLight,
+        ),
+      UiTemplate.stickerJournal => ColorFilter.mode(
+          scheme.secondary.withValues(alpha: isDark ? 0.10 : 0.08),
+          BlendMode.softLight,
+        ),
+      UiTemplate.washiWatercolor => ColorFilter.mode(
+          scheme.tertiary.withValues(alpha: isDark ? 0.10 : 0.08),
+          BlendMode.softLight,
+        ),
+      UiTemplate.proTool => null,
+      UiTemplate.minimalCovers => null,
+    };
+
+    final scrimBottom = switch (template) {
+      UiTemplate.neonHud =>
+        Color.lerp(Colors.black, scheme.primary, 0.22)!.withValues(
+          alpha: isDark ? 0.74 : 0.62,
+        ),
+      UiTemplate.pixelArcade =>
+        Color.lerp(Colors.black, scheme.secondary, 0.18)!.withValues(
+          alpha: isDark ? 0.74 : 0.62,
+        ),
+      UiTemplate.stickerJournal =>
+        Color.lerp(Colors.black, scheme.secondary, 0.14)!.withValues(
+          alpha: isDark ? 0.70 : 0.60,
+        ),
+      UiTemplate.candyGlass =>
+        Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
+          alpha: isDark ? 0.68 : 0.58,
+        ),
+      UiTemplate.washiWatercolor =>
+        Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
+          alpha: isDark ? 0.66 : 0.56,
+        ),
+      UiTemplate.mangaStoryboard => Colors.black.withValues(
+          alpha: isDark ? 0.76 : 0.66,
+        ),
+      UiTemplate.proTool => Colors.black.withValues(alpha: isDark ? 0.68 : 0.58),
+      UiTemplate.minimalCovers =>
+        Colors.black.withValues(alpha: isDark ? 0.64 : 0.55),
+    };
+
+    Widget heroImage = Image.network(
+      hero,
+      fit: BoxFit.cover,
+      headers: {'User-Agent': EmbyApi.userAgent},
+      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
+    );
+    if (heroFilter != null) {
+      heroImage = ColorFiltered(colorFilter: heroFilter, child: heroImage);
+    }
 
     return Scaffold(
       body: RefreshIndicator(
@@ -635,19 +714,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 background: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.network(
-                      hero,
-                      fit: BoxFit.cover,
-                      headers: {'User-Agent': EmbyApi.userAgent},
-                      errorBuilder: (_, __, ___) =>
-                          const ColoredBox(color: Colors.black26),
-                    ),
-                    Container(
-                      decoration: const BoxDecoration(
+                    heroImage,
+                    DecoratedBox(
+                      decoration: BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black54],
+                          colors: [Colors.transparent, scrimBottom],
                         ),
                       ),
                     ),
@@ -658,7 +731,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(item.name,
-                              style: Theme.of(context)
+                              style: theme
                                   .textTheme
                                   .headlineSmall
                                   ?.copyWith(
@@ -828,54 +901,23 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               token: widget.appState.token!,
                               maxWidth: widget.isTv ? 600 : 400,
                             );
-                            return InkWell(
-                              borderRadius: BorderRadius.circular(12),
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => SeasonEpisodesPage(
-                                      season: s,
-                                      appState: widget.appState,
-                                      isTv: widget.isTv,
-                                      isVirtual: _seasonsVirtual,
-                                    ),
-                                  ),
-                                );
-                              },
-                              child: SizedBox(
-                                width: widget.isTv ? 200 : 140,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    AspectRatio(
-                                      aspectRatio: 2 / 3,
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: Image.network(
-                                          img,
-                                          fit: BoxFit.cover,
-                                          headers: {
-                                            'User-Agent': EmbyApi.userAgent
-                                          },
-                                          errorBuilder: (_, __, ___) =>
-                                              const ColoredBox(
-                                                  color: Colors.black26),
-                                        ),
+                            return SizedBox(
+                              width: widget.isTv ? 200 : 140,
+                              child: MediaPosterTile(
+                                title: label,
+                                imageUrl: img,
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => SeasonEpisodesPage(
+                                        season: s,
+                                        appState: widget.appState,
+                                        isTv: widget.isTv,
+                                        isVirtual: _seasonsVirtual,
                                       ),
                                     ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyMedium
-                                          ?.copyWith(
-                                              fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
+                                  );
+                                },
                               ),
                             );
                           },
@@ -904,57 +946,38 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                     maxWidth: 400,
                                   )
                                 : null;
-                            return InkWell(
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ShowDetailPage(
-                                      itemId: s.id,
-                                      title: s.name,
-                                      appState: widget.appState,
-                                      isTv: widget.isTv,
+                            final date = (s.premiereDate ?? '').trim();
+                            final parsed = date.isEmpty
+                                ? null
+                                : DateTime.tryParse(date);
+                            final year = parsed != null
+                                ? parsed.year.toString()
+                                : (date.length >= 4 ? date.substring(0, 4) : '');
+                            final badge = s.type == 'Movie'
+                                ? '电影'
+                                : (s.type == 'Series' ? '剧集' : '');
+
+                            return SizedBox(
+                              width: 140,
+                              child: MediaPosterTile(
+                                title: s.name,
+                                titleMaxLines: 2,
+                                imageUrl: img,
+                                year: year,
+                                rating: s.communityRating,
+                                badgeText: badge,
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ShowDetailPage(
+                                        itemId: s.id,
+                                        title: s.name,
+                                        appState: widget.appState,
+                                        isTv: widget.isTv,
+                                      ),
                                     ),
-                                  ),
-                                );
-                              },
-                              child: SizedBox(
-                                width: 140,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: img != null
-                                          ? SizedBox(
-                                              height: 180,
-                                              width: 140,
-                                              child: Image.network(
-                                                img,
-                                                fit: BoxFit.cover,
-                                                headers: {
-                                                  'User-Agent':
-                                                      EmbyApi.userAgent
-                                                },
-                                                errorBuilder: (_, __, ___) =>
-                                                    const ColoredBox(
-                                                        color: Colors.black26),
-                                              ),
-                                            )
-                                          : const SizedBox(
-                                              height: 180,
-                                              width: 140,
-                                              child: ColoredBox(
-                                                  color: Colors.black26)),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(s.name,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium),
-                                  ],
-                                ),
+                                  );
+                                },
                               ),
                             );
                           },
@@ -1427,39 +1450,235 @@ Widget _chaptersSection(BuildContext context, List<ChapterInfo> chapters) {
   );
 }
 
-Widget _pill(BuildContext context, String text) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(20),
+Widget _pill(BuildContext context, String text) {
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  final style = theme.extension<AppStyle>() ?? const AppStyle();
+  final isDark = scheme.brightness == Brightness.dark;
+
+  final pillRadius = switch (style.template) {
+    UiTemplate.neonHud => 12.0,
+    UiTemplate.pixelArcade => 10.0,
+    UiTemplate.mangaStoryboard => 10.0,
+    _ => 20.0,
+  };
+
+  final (Color bg, Color fg, BorderSide border) = switch (style.template) {
+    UiTemplate.neonHud => (
+        Colors.black.withValues(alpha: isDark ? 0.28 : 0.24),
+        Colors.white,
+        BorderSide(
+          color: scheme.primary.withValues(alpha: isDark ? 0.75 : 0.85),
+          width: 1.1,
+        ),
       ),
-      child: Text(text, style: const TextStyle(color: Colors.white)),
-    );
+    UiTemplate.pixelArcade => (
+        Colors.black.withValues(alpha: isDark ? 0.30 : 0.24),
+        Colors.white,
+        BorderSide(
+          color: scheme.secondary.withValues(alpha: isDark ? 0.75 : 0.85),
+          width: 1.2,
+        ),
+      ),
+    UiTemplate.mangaStoryboard => (
+        Colors.white.withValues(alpha: isDark ? 0.24 : 0.88),
+        isDark ? Colors.white : Colors.black,
+        BorderSide(
+          color: (isDark ? Colors.white : Colors.black)
+              .withValues(alpha: isDark ? 0.55 : 0.85),
+          width: 1.2,
+        ),
+      ),
+    UiTemplate.stickerJournal => (
+        Color.lerp(Colors.black, scheme.secondary, 0.18)!.withValues(
+          alpha: isDark ? 0.30 : 0.24,
+        ),
+        Colors.white,
+        BorderSide(
+          color: scheme.secondary.withValues(alpha: isDark ? 0.50 : 0.70),
+          width: 1.0,
+        ),
+      ),
+    UiTemplate.candyGlass => (
+        Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
+          alpha: isDark ? 0.28 : 0.22,
+        ),
+        Colors.white,
+        BorderSide.none,
+      ),
+    UiTemplate.washiWatercolor => (
+        Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
+          alpha: isDark ? 0.26 : 0.20,
+        ),
+        Colors.white,
+        BorderSide.none,
+      ),
+    UiTemplate.proTool => (
+        Colors.black.withValues(alpha: isDark ? 0.28 : 0.22),
+        Colors.white,
+        BorderSide(
+          color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.18),
+          width: 1.0,
+        ),
+      ),
+    UiTemplate.minimalCovers => (
+        Colors.black.withValues(alpha: isDark ? 0.26 : 0.20),
+        Colors.white,
+        BorderSide.none,
+      ),
+  };
+
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(pillRadius),
+      border: border == BorderSide.none ? null : Border.fromBorderSide(border),
+    ),
+    child: Text(
+      text,
+      style: theme.textTheme.labelMedium?.copyWith(
+            color: fg,
+            fontWeight: FontWeight.w700,
+            letterSpacing: style.template == UiTemplate.neonHud ? 0.2 : null,
+          ) ??
+          TextStyle(
+            color: fg,
+            fontWeight: FontWeight.w700,
+          ),
+    ),
+  );
+}
 
 Widget _playButton(BuildContext context,
     {required String label, required VoidCallback onTap}) {
-  return GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(30),
+  final theme = Theme.of(context);
+  final scheme = theme.colorScheme;
+  final style = theme.extension<AppStyle>() ?? const AppStyle();
+  final isDark = scheme.brightness == Brightness.dark;
+
+  final radius = switch (style.template) {
+    UiTemplate.neonHud => 14.0,
+    UiTemplate.pixelArcade => 12.0,
+    UiTemplate.mangaStoryboard => 12.0,
+    UiTemplate.proTool => 16.0,
+    UiTemplate.stickerJournal => 20.0,
+    _ => 30.0,
+  };
+
+  final (Color bg, Color fg, BorderSide border, Color glow) =
+      switch (style.template) {
+    UiTemplate.neonHud => (
+        scheme.surface.withValues(alpha: isDark ? 0.55 : 0.90),
+        scheme.primary,
+        BorderSide(
+          color: scheme.primary.withValues(alpha: isDark ? 0.85 : 0.95),
+          width: 1.4,
+        ),
+        scheme.primary.withValues(alpha: isDark ? 0.22 : 0.14),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.play_arrow,
-              color: Theme.of(context).colorScheme.onPrimaryContainer),
-          const SizedBox(width: 6),
-          Text(label,
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16)),
-        ],
+    UiTemplate.pixelArcade => (
+        scheme.surface.withValues(alpha: isDark ? 0.70 : 0.92),
+        scheme.secondary,
+        BorderSide(
+          color: scheme.secondary.withValues(alpha: isDark ? 0.85 : 0.95),
+          width: 1.8,
+        ),
+        Colors.transparent,
+      ),
+    UiTemplate.mangaStoryboard => (
+        scheme.surface,
+        scheme.onSurface,
+        BorderSide(
+          color: scheme.onSurface.withValues(alpha: isDark ? 0.70 : 0.90),
+          width: 1.8,
+        ),
+        Colors.transparent,
+      ),
+    UiTemplate.stickerJournal => (
+        scheme.secondaryContainer,
+        scheme.onSecondaryContainer,
+        BorderSide(
+          color: scheme.secondary.withValues(alpha: isDark ? 0.55 : 0.75),
+          width: 1.2,
+        ),
+        Colors.transparent,
+      ),
+    UiTemplate.candyGlass => (
+        scheme.primaryContainer,
+        scheme.onPrimaryContainer,
+        BorderSide.none,
+        Colors.transparent,
+      ),
+    UiTemplate.washiWatercolor => (
+        scheme.primaryContainer,
+        scheme.onPrimaryContainer,
+        BorderSide.none,
+        Colors.transparent,
+      ),
+    UiTemplate.proTool => (
+        scheme.surfaceContainerHigh,
+        scheme.onSurface,
+        BorderSide(
+          color: scheme.outlineVariant.withValues(alpha: isDark ? 0.55 : 0.70),
+          width: 1.1,
+        ),
+        Colors.transparent,
+      ),
+    UiTemplate.minimalCovers => (
+        scheme.primaryContainer,
+        scheme.onPrimaryContainer,
+        BorderSide.none,
+        Colors.transparent,
+      ),
+  };
+
+  return Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(radius),
+      child: Ink(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(radius),
+          border:
+              border == BorderSide.none ? null : Border.fromBorderSide(border),
+          boxShadow: glow == Colors.transparent
+              ? null
+              : [
+                  BoxShadow(
+                    color: glow,
+                    blurRadius: 22,
+                    spreadRadius: 1,
+                  ),
+                ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.play_arrow, color: fg),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: theme.textTheme.titleSmall?.copyWith(
+                    color: fg,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: style.template == UiTemplate.neonHud
+                        ? 0.25
+                        : null,
+                  ) ??
+                  TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+            ),
+          ],
+        ),
       ),
     ),
   );

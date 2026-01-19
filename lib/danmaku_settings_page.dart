@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
-import 'src/ui/frosted_card.dart';
+import 'src/ui/app_components.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
 
@@ -633,7 +633,7 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FrostedCard(
+    return AppPanel(
       enableBlur: enableBlur,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
       child: Column(

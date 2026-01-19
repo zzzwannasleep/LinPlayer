@@ -5,6 +5,54 @@ import 'app_style.dart';
 
 /// Centralized theme (light/dark + optional Material You dynamic color).
 class AppTheme {
+  static ColorScheme _resolveScheme({
+    required Brightness brightness,
+    required UiTemplate template,
+    ColorScheme? dynamicScheme,
+    Color? seed,
+    Color? secondarySeed,
+  }) {
+    final resolvedSeed = seed ?? template.seed;
+    final resolvedSecondarySeed = secondarySeed ?? template.secondarySeed;
+
+    final primaryScheme = ColorScheme.fromSeed(
+      seedColor: resolvedSeed,
+      brightness: brightness,
+    );
+    final secondaryScheme = ColorScheme.fromSeed(
+      seedColor: resolvedSecondarySeed,
+      brightness: brightness,
+    );
+
+    final seeded = primaryScheme.copyWith(
+      secondary: secondaryScheme.primary,
+      onSecondary: secondaryScheme.onPrimary,
+      secondaryContainer: secondaryScheme.primaryContainer,
+      onSecondaryContainer: secondaryScheme.onPrimaryContainer,
+    );
+
+    if (dynamicScheme == null) return seeded;
+
+    // Keep dynamic neutrals/surfaces, but use template accents for visible
+    // differentiation between UI templates.
+    return dynamicScheme.copyWith(
+      primary: seeded.primary,
+      onPrimary: seeded.onPrimary,
+      primaryContainer: seeded.primaryContainer,
+      onPrimaryContainer: seeded.onPrimaryContainer,
+      secondary: seeded.secondary,
+      onSecondary: seeded.onSecondary,
+      secondaryContainer: seeded.secondaryContainer,
+      onSecondaryContainer: seeded.onSecondaryContainer,
+      tertiary: seeded.tertiary,
+      onTertiary: seeded.onTertiary,
+      tertiaryContainer: seeded.tertiaryContainer,
+      onTertiaryContainer: seeded.onTertiaryContainer,
+      surfaceTint: seeded.surfaceTint,
+      inversePrimary: seeded.inversePrimary,
+    );
+  }
+
   static ThemeData light({
     ColorScheme? dynamicScheme,
     required UiTemplate template,
@@ -12,14 +60,13 @@ class AppTheme {
     Color? secondarySeed,
     bool compact = false,
   }) {
-    final resolvedSeed = seed ?? template.seed;
-    final resolvedSecondary = secondarySeed ?? template.secondarySeed;
-    final scheme = (dynamicScheme ??
-            ColorScheme.fromSeed(
-              seedColor: resolvedSeed,
-              brightness: Brightness.light,
-            ))
-        .copyWith(secondary: resolvedSecondary);
+    final scheme = _resolveScheme(
+      brightness: Brightness.light,
+      template: template,
+      dynamicScheme: dynamicScheme,
+      seed: seed,
+      secondarySeed: secondarySeed,
+    );
     return _build(scheme, template: template, compact: compact);
   }
 
@@ -30,14 +77,13 @@ class AppTheme {
     Color? secondarySeed,
     bool compact = false,
   }) {
-    final resolvedSeed = seed ?? template.seed;
-    final resolvedSecondary = secondarySeed ?? template.secondarySeed;
-    final scheme = (dynamicScheme ??
-            ColorScheme.fromSeed(
-              seedColor: resolvedSeed,
-              brightness: Brightness.dark,
-            ))
-        .copyWith(secondary: resolvedSecondary);
+    final scheme = _resolveScheme(
+      brightness: Brightness.dark,
+      template: template,
+      dynamicScheme: dynamicScheme,
+      seed: seed,
+      secondarySeed: secondarySeed,
+    );
     return _build(scheme, template: template, compact: compact);
   }
 
@@ -114,6 +160,70 @@ class AppTheme {
     final outlineSoft =
         scheme.outlineVariant.withValues(alpha: isDark ? 0.36 : 0.55);
 
+    final cardSide = switch (template) {
+      UiTemplate.neonHud => BorderSide(
+          color: scheme.primary.withValues(alpha: isDark ? 0.55 : 0.70),
+          width: style.borderWidth + 0.2,
+        ),
+      UiTemplate.pixelArcade => BorderSide(
+          color: scheme.secondary.withValues(alpha: isDark ? 0.50 : 0.70),
+          width: style.borderWidth + 0.6,
+        ),
+      UiTemplate.mangaStoryboard => BorderSide(
+          color: scheme.onSurface.withValues(alpha: isDark ? 0.55 : 0.75),
+          width: style.borderWidth + 0.8,
+        ),
+      UiTemplate.proTool => BorderSide(
+          color: outlineSoft,
+          width: style.borderWidth,
+        ),
+      UiTemplate.stickerJournal => BorderSide(
+          color: scheme.secondary.withValues(alpha: isDark ? 0.35 : 0.55),
+          width: style.borderWidth,
+        ),
+      _ => BorderSide.none,
+    };
+
+    final navIndicatorShape = switch (template) {
+      UiTemplate.neonHud => RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: scheme.primary.withValues(alpha: isDark ? 0.70 : 0.80),
+            width: style.borderWidth,
+          ),
+        ),
+      UiTemplate.pixelArcade => RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: scheme.secondary.withValues(alpha: isDark ? 0.55 : 0.75),
+            width: style.borderWidth + 0.4,
+          ),
+        ),
+      UiTemplate.mangaStoryboard => RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: scheme.onSurface.withValues(alpha: isDark ? 0.55 : 0.75),
+            width: style.borderWidth + 0.6,
+          ),
+        ),
+      UiTemplate.stickerJournal => RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: scheme.secondary.withValues(alpha: isDark ? 0.35 : 0.55),
+            width: style.borderWidth,
+          ),
+        ),
+      _ => RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    };
+
+    final appBarBorder = switch (template) {
+      UiTemplate.neonHud ||
+      UiTemplate.pixelArcade ||
+      UiTemplate.mangaStoryboard =>
+        Border(bottom: BorderSide(color: outline, width: style.borderWidth)),
+      _ => null,
+    };
+
     final chipRadius = switch (template) {
       UiTemplate.candyGlass => 14.0,
       UiTemplate.stickerJournal => 14.0,
@@ -138,6 +248,7 @@ class AppTheme {
       appBarTheme: base.appBarTheme.copyWith(
         backgroundColor: appBarBg,
         surfaceTintColor: Colors.transparent,
+        shape: appBarBorder,
         elevation: 0,
         toolbarHeight: effectiveCompact ? 44 : 48,
         titleTextStyle:
@@ -150,6 +261,7 @@ class AppTheme {
               ? (glassSurfaces ? 0.22 : 0.18)
               : (glassSurfaces ? 0.18 : 0.14),
         ),
+        indicatorShape: navIndicatorShape,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         height: effectiveCompact ? 50 : 54,
       ),
@@ -157,7 +269,7 @@ class AppTheme {
         color: surfaceHigh,
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(borderRadius: radius),
+        shape: RoundedRectangleBorder(borderRadius: radius, side: cardSide),
       ),
       listTileTheme: base.listTileTheme.copyWith(
         iconColor: scheme.onSurfaceVariant,
@@ -176,6 +288,23 @@ class AppTheme {
         ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(chipRadius),
+          side: switch (template) {
+            UiTemplate.neonHud => BorderSide(
+                color: scheme.primary.withValues(alpha: isDark ? 0.50 : 0.70),
+                width: style.borderWidth,
+              ),
+            UiTemplate.pixelArcade => BorderSide(
+                color:
+                    scheme.secondary.withValues(alpha: isDark ? 0.45 : 0.65),
+                width: style.borderWidth + 0.4,
+              ),
+            UiTemplate.mangaStoryboard => BorderSide(
+                color:
+                    scheme.onSurface.withValues(alpha: isDark ? 0.45 : 0.65),
+                width: style.borderWidth + 0.5,
+              ),
+            _ => BorderSide.none,
+          },
         ),
         labelStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
@@ -211,8 +340,21 @@ class AppTheme {
       ),
       dividerTheme: base.dividerTheme.copyWith(
         color: outline,
-        thickness: 1,
+        thickness: switch (template) {
+          UiTemplate.mangaStoryboard => 1.4,
+          UiTemplate.pixelArcade => 1.2,
+          _ => 1,
+        },
         space: effectiveCompact ? 12 : 16,
+      ),
+      navigationRailTheme: base.navigationRailTheme.copyWith(
+        backgroundColor: navBarBg,
+        indicatorColor: scheme.primary.withValues(
+          alpha: isDark
+              ? (glassSurfaces ? 0.22 : 0.18)
+              : (glassSurfaces ? 0.18 : 0.14),
+        ),
+        useIndicator: true,
       ),
     );
   }
@@ -225,6 +367,7 @@ class AppTheme {
     switch (template) {
       case UiTemplate.candyGlass:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 22,
           panelRadius: 22,
@@ -232,10 +375,11 @@ class AppTheme {
           background: AppBackgroundKind.gradient,
           pattern: AppPatternKind.dotsSparkles,
           backgroundIntensity: 1.0,
-          patternOpacity: isDark ? 0.045 : 0.06,
+          patternOpacity: isDark ? 0.06 : 0.075,
         );
       case UiTemplate.stickerJournal:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 20,
           panelRadius: 20,
@@ -243,10 +387,11 @@ class AppTheme {
           background: AppBackgroundKind.gradient,
           pattern: AppPatternKind.dotsSparkles,
           backgroundIntensity: 0.9,
-          patternOpacity: isDark ? 0.03 : 0.045,
+          patternOpacity: isDark ? 0.045 : 0.06,
         );
       case UiTemplate.neonHud:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 14,
           panelRadius: 14,
@@ -254,10 +399,11 @@ class AppTheme {
           background: AppBackgroundKind.gradient,
           pattern: AppPatternKind.grid,
           backgroundIntensity: 0.9,
-          patternOpacity: isDark ? 0.05 : 0.06,
+          patternOpacity: isDark ? 0.065 : 0.075,
         );
       case UiTemplate.minimalCovers:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 18,
           panelRadius: 18,
@@ -269,6 +415,7 @@ class AppTheme {
         );
       case UiTemplate.washiWatercolor:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 20,
           panelRadius: 20,
@@ -280,17 +427,19 @@ class AppTheme {
         );
       case UiTemplate.pixelArcade:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 10,
           panelRadius: 10,
           borderWidth: 1.4,
           background: AppBackgroundKind.none,
           pattern: AppPatternKind.pixels,
-          backgroundIntensity: 0.7,
-          patternOpacity: isDark ? 0.04 : 0.06,
+          backgroundIntensity: 0.8,
+          patternOpacity: isDark ? 0.06 : 0.085,
         );
       case UiTemplate.mangaStoryboard:
         return AppStyle(
+          template: template,
           compact: compact,
           radius: 16,
           panelRadius: 16,
@@ -298,10 +447,11 @@ class AppTheme {
           background: AppBackgroundKind.none,
           pattern: AppPatternKind.halftone,
           backgroundIntensity: 0.8,
-          patternOpacity: isDark ? 0.03 : 0.055,
+          patternOpacity: isDark ? 0.045 : 0.075,
         );
       case UiTemplate.proTool:
         return AppStyle(
+          template: template,
           compact: true,
           radius: 14,
           panelRadius: 14,
@@ -309,7 +459,7 @@ class AppTheme {
           background: AppBackgroundKind.none,
           pattern: AppPatternKind.grid,
           backgroundIntensity: 0.35,
-          patternOpacity: isDark ? 0.02 : 0.03,
+          patternOpacity: isDark ? 0.03 : 0.04,
         );
     }
   }

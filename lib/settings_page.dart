@@ -14,7 +14,7 @@ import 'services/app_update_service.dart';
 import 'services/cover_cache_manager.dart';
 import 'services/stream_cache.dart';
 import 'src/ui/app_icon_service.dart';
-import 'src/ui/frosted_card.dart';
+import 'src/ui/app_components.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
 import 'state/preferences.dart';
@@ -1774,7 +1774,7 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FrostedCard(
+    return AppPanel(
       enableBlur: enableBlur,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
       child: Column(
