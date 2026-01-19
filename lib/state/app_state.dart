@@ -557,8 +557,9 @@ class AppState extends ChangeNotifier {
       passphrase: passphrase,
     );
     final decrypted = _coerceStringKeyedMap(jsonDecode(decryptedJson));
-    if (decrypted == null)
+    if (decrypted == null) {
       throw const FormatException('Invalid backup payload');
+    }
 
     final mode = backupServerSecretModeFromId(decrypted['mode']?.toString());
     final data = _coerceStringKeyedMap(decrypted['data']);
