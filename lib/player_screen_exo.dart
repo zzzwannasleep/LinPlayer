@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,9 +10,14 @@ import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
+import 'services/dandanplay_api.dart';
 import 'state/app_state.dart';
+import 'state/danmaku_preferences.dart';
 import 'state/local_playback_handoff.dart';
 import 'state/preferences.dart';
+import 'src/player/danmaku.dart';
+import 'src/player/danmaku_processing.dart';
+import 'src/player/danmaku_stage.dart';
 import 'src/player/playback_controls.dart';
 import 'src/ui/glass_blur.dart';
 
@@ -38,6 +44,24 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
   DateTime? _lastUiTickAt;
   _OrientationMode _orientationMode = _OrientationMode.auto;
 
+  VideoViewType _viewType = VideoViewType.platformView;
+
+  final GlobalKey<DanmakuStageState> _danmakuKey =
+      GlobalKey<DanmakuStageState>();
+  final List<DanmakuSource> _danmakuSources = [];
+  int _danmakuSourceIndex = -1;
+  bool _danmakuEnabled = false;
+  double _danmakuOpacity = 1.0;
+  double _danmakuScale = 1.0;
+  double _danmakuSpeed = 1.0;
+  bool _danmakuBold = true;
+  int _danmakuMaxLines = 10;
+  int _danmakuTopMaxLines = 10;
+  int _danmakuBottomMaxLines = 10;
+  bool _danmakuPreventOverlap = true;
+  int _nextDanmakuIndex = 0;
+  bool _danmakuPaused = false;
+
   static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
@@ -49,6 +73,16 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    _danmakuEnabled = widget.appState.danmakuEnabled;
+    _danmakuOpacity = widget.appState.danmakuOpacity;
+    _danmakuScale = widget.appState.danmakuScale;
+    _danmakuSpeed = widget.appState.danmakuSpeed;
+    _danmakuBold = widget.appState.danmakuBold;
+    _danmakuMaxLines = widget.appState.danmakuMaxLines;
+    _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
+    _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
+    _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+
     final handoff = widget.appState.takeLocalPlaybackHandoff();
     if (handoff != null && handoff.playlist.isNotEmpty) {
       final files = handoff.playlist
@@ -115,6 +149,411 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
     _controller?.dispose();
     _controller = null;
     super.dispose();
+  }
+
+  void _applyDanmakuPauseState(bool pause) {
+    if (_danmakuPaused == pause) return;
+    _danmakuPaused = pause;
+    final stage = _danmakuKey.currentState;
+    if (pause) {
+      stage?.pause();
+    } else {
+      stage?.resume();
+    }
+  }
+
+  void _syncDanmakuCursor(Duration position) {
+    if (_danmakuSourceIndex < 0 ||
+        _danmakuSourceIndex >= _danmakuSources.length) {
+      _nextDanmakuIndex = 0;
+      return;
+    }
+    final items = _danmakuSources[_danmakuSourceIndex].items;
+    _nextDanmakuIndex = DanmakuParser.lowerBoundByTime(items, position);
+    _danmakuKey.currentState?.clear();
+  }
+
+  void _drainDanmaku(Duration position) {
+    if (!_danmakuEnabled) return;
+    if (_danmakuSourceIndex < 0 ||
+        _danmakuSourceIndex >= _danmakuSources.length) {
+      return;
+    }
+    final stage = _danmakuKey.currentState;
+    if (stage == null) return;
+
+    final items = _danmakuSources[_danmakuSourceIndex].items;
+    while (_nextDanmakuIndex < items.length &&
+        items[_nextDanmakuIndex].time <= position) {
+      stage.emit(items[_nextDanmakuIndex]);
+      _nextDanmakuIndex++;
+    }
+  }
+
+  Future<String> _computeFileHash16M(String path) async {
+    const maxBytes = 16 * 1024 * 1024;
+    final file = File(path);
+    final digest = await md5.bind(file.openRead(0, maxBytes)).first;
+    return digest.toString();
+  }
+
+  void _maybeAutoLoadOnlineDanmaku(PlatformFile file) {
+    final appState = widget.appState;
+    if (!appState.danmakuEnabled) return;
+    if (appState.danmakuLoadMode != DanmakuLoadMode.online) return;
+    if (kIsWeb) return;
+    // ignore: unawaited_futures
+    _loadOnlineDanmakuForFile(file, showToast: false);
+  }
+
+  Future<void> _loadOnlineDanmakuForFile(
+    PlatformFile file, {
+    bool showToast = true,
+  }) async {
+    final appState = widget.appState;
+    if (appState.danmakuApiUrls.isEmpty) {
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先在设置-弹幕中添加在线弹幕源')),
+        );
+      }
+      return;
+    }
+    if (kIsWeb) {
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Web 端暂不支持在线弹幕匹配')),
+        );
+      }
+      return;
+    }
+    final path = file.path;
+    if (path == null || path.trim().isEmpty) {
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法读取视频文件路径')),
+        );
+      }
+      return;
+    }
+
+    final hasOfficial = appState.danmakuApiUrls.any((u) {
+      final host = Uri.tryParse(u)?.host.toLowerCase() ?? '';
+      return host == 'api.dandanplay.net';
+    });
+    final hasCreds = appState.danmakuAppId.trim().isNotEmpty &&
+        appState.danmakuAppSecret.trim().isNotEmpty;
+
+    if (hasOfficial && !hasCreds && showToast && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('使用官方弹弹play源时通常需要配置 AppId/AppSecret（设置-弹幕）'),
+        ),
+      );
+    }
+
+    try {
+      final size = await File(path).length();
+      final hash = await _computeFileHash16M(path);
+      final sources = await loadOnlineDanmakuSources(
+        apiUrls: appState.danmakuApiUrls,
+        fileName: file.name,
+        fileHash: hash,
+        fileSizeBytes: size,
+        videoDurationSeconds: _duration.inSeconds,
+        matchMode: appState.danmakuMatchMode,
+        chConvert: appState.danmakuChConvert,
+        appId: appState.danmakuAppId,
+        appSecret: appState.danmakuAppSecret,
+        throwIfEmpty: showToast,
+      );
+      if (!mounted) return;
+      final processed = processDanmakuSources(
+        sources,
+        blockWords: appState.danmakuBlockWords,
+        mergeDuplicates: appState.danmakuMergeDuplicates,
+      );
+      if (processed.isEmpty) {
+        if (showToast) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('未匹配到在线弹幕')),
+          );
+        }
+        return;
+      }
+      setState(() {
+        _danmakuSources.addAll(processed);
+        final desiredName = appState.danmakuRememberSelectedSource
+            ? appState.danmakuLastSelectedSourceName
+            : '';
+        final idx = desiredName.isEmpty
+            ? -1
+            : _danmakuSources.indexWhere((s) => s.name == desiredName);
+        _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
+        _danmakuEnabled = true;
+        _syncDanmakuCursor(_position);
+      });
+
+      await _ensureDanmakuVisible();
+
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已加载在线弹幕：${sources.length} 个来源')),
+        );
+      }
+    } catch (e) {
+      if (showToast && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('在线弹幕加载失败：$e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _pickDanmakuFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['xml'],
+      withData: kIsWeb,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+
+    String content = '';
+    if (kIsWeb) {
+      final bytes = file.bytes;
+      if (bytes == null) return;
+      content = DanmakuParser.decodeBytes(bytes);
+    } else {
+      final path = file.path;
+      if (path == null || path.trim().isEmpty) return;
+      final bytes = await File(path).readAsBytes();
+      content = DanmakuParser.decodeBytes(bytes);
+    }
+
+    var items = DanmakuParser.parseBilibiliXml(content);
+    items = processDanmakuItems(
+      items,
+      blockWords: widget.appState.danmakuBlockWords,
+      mergeDuplicates: widget.appState.danmakuMergeDuplicates,
+    );
+    if (!mounted) return;
+    setState(() {
+      _danmakuSources.add(DanmakuSource(name: file.name, items: items));
+      final desiredName = widget.appState.danmakuRememberSelectedSource
+          ? widget.appState.danmakuLastSelectedSourceName
+          : '';
+      final idx = desiredName.isEmpty
+          ? -1
+          : _danmakuSources.indexWhere((s) => s.name == desiredName);
+      _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
+      _danmakuEnabled = true;
+      _syncDanmakuCursor(_position);
+    });
+
+    await _ensureDanmakuVisible();
+  }
+
+  Future<void> _ensureDanmakuVisible() async {
+    if (!_isAndroid) return;
+    if (_viewType == VideoViewType.textureView) return;
+
+    final idx = _currentIndex;
+    if (idx < 0 || idx >= _playlist.length) {
+      setState(() => _viewType = VideoViewType.textureView);
+      return;
+    }
+
+    final wasPlaying = _controller?.value.isPlaying ?? true;
+    final pos = _position;
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('为显示弹幕已切换到纹理渲染（部分 HDR/DV 片源可能偏色）'),
+            duration: Duration(milliseconds: 1200),
+          ),
+        );
+    }
+
+    setState(() => _viewType = VideoViewType.textureView);
+    await _playFile(
+      _playlist[idx],
+      idx,
+      startPosition: pos,
+      autoPlay: wasPlaying,
+      resetDanmaku: false,
+    );
+  }
+
+  Future<void> _showDanmakuSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        var onlineLoading = false;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final hasSources = _danmakuSources.isNotEmpty;
+            final selectedName = (_danmakuSourceIndex >= 0 &&
+                    _danmakuSourceIndex < _danmakuSources.length)
+                ? _danmakuSources[_danmakuSourceIndex].name
+                : '未选择';
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '弹幕',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          await _pickDanmakuFile();
+                          setSheetState(() {});
+                        },
+                        icon: const Icon(Icons.upload_file),
+                        label: const Text('本地'),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: onlineLoading ||
+                                _currentIndex < 0 ||
+                                _currentIndex >= _playlist.length
+                            ? null
+                            : () async {
+                                onlineLoading = true;
+                                setSheetState(() {});
+                                try {
+                                  await _loadOnlineDanmakuForFile(
+                                    _playlist[_currentIndex],
+                                    showToast: true,
+                                  );
+                                } finally {
+                                  onlineLoading = false;
+                                  setSheetState(() {});
+                                }
+                              },
+                        icon: onlineLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.cloud_download_outlined),
+                        label: const Text('在线'),
+                      ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    value: _danmakuEnabled,
+                    onChanged: (v) async {
+                      setState(() => _danmakuEnabled = v);
+                      if (!v) {
+                        _danmakuKey.currentState?.clear();
+                      } else if (hasSources) {
+                        await _ensureDanmakuVisible();
+                      }
+                      setSheetState(() {});
+                    },
+                    title: const Text('启用弹幕'),
+                    subtitle:
+                        Text(hasSources ? '当前：$selectedName' : '尚未加载弹幕文件'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.layers_outlined),
+                    title: const Text('弹幕源'),
+                    trailing: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        value: _danmakuSourceIndex >= 0
+                            ? _danmakuSourceIndex
+                            : null,
+                        hint: const Text('请选择'),
+                        items: [
+                          for (var i = 0; i < _danmakuSources.length; i++)
+                            DropdownMenuItem(
+                              value: i,
+                              child: Text(
+                                _danmakuSources[i].name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: !hasSources
+                            ? null
+                            : (v) async {
+                                if (v == null) return;
+                                setState(() {
+                                  _danmakuSourceIndex = v;
+                                  _danmakuEnabled = true;
+                                  _syncDanmakuCursor(_position);
+                                });
+                                if (widget.appState
+                                        .danmakuRememberSelectedSource &&
+                                    v >= 0 &&
+                                    v < _danmakuSources.length) {
+                                  // ignore: unawaited_futures
+                                  widget.appState
+                                      .setDanmakuLastSelectedSourceName(
+                                          _danmakuSources[v].name);
+                                }
+                                await _ensureDanmakuVisible();
+                                setSheetState(() {});
+                              },
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.opacity_outlined),
+                    title: const Text('不透明度'),
+                    subtitle: Slider(
+                      value: _danmakuOpacity,
+                      min: 0.2,
+                      max: 1.0,
+                      onChanged: (v) {
+                        setState(() => _danmakuOpacity = v);
+                        setSheetState(() {});
+                      },
+                    ),
+                  ),
+                  if (hasSources)
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _danmakuSources.clear();
+                            _danmakuSourceIndex = -1;
+                            _danmakuEnabled = false;
+                            _danmakuKey.currentState?.clear();
+                          });
+                          setSheetState(() {});
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('清空弹幕'),
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showControls({bool scheduleHide = true}) {
@@ -440,6 +879,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
     int index, {
     Duration? startPosition,
     bool? autoPlay,
+    bool resetDanmaku = true,
   }) async {
     final path = (file.path ?? '').trim();
     if (path.isEmpty) {
@@ -455,6 +895,22 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
       _duration = Duration.zero;
       _controlsVisible = true;
       _isScrubbing = false;
+      if (resetDanmaku) {
+        _nextDanmakuIndex = 0;
+        _danmakuSources.clear();
+        _danmakuSourceIndex = -1;
+        _danmakuKey.currentState?.clear();
+        _danmakuEnabled = widget.appState.danmakuEnabled;
+        _danmakuOpacity = widget.appState.danmakuOpacity;
+        _danmakuScale = widget.appState.danmakuScale;
+        _danmakuSpeed = widget.appState.danmakuSpeed;
+        _danmakuBold = widget.appState.danmakuBold;
+        _danmakuMaxLines = widget.appState.danmakuMaxLines;
+        _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
+        _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
+        _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+        _danmakuPaused = false;
+      }
     });
 
     _controlsHideTimer?.cancel();
@@ -473,8 +929,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
       final isUri = uri != null && uri.scheme.isNotEmpty;
       // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
       // (Texture-based rendering may show green/purple tint on certain P8 files.)
-      final viewType =
-          _isAndroid ? VideoViewType.platformView : VideoViewType.textureView;
+      final viewType = _isAndroid ? _viewType : VideoViewType.textureView;
       final controller = isUri
           ? VideoPlayerController.networkUrl(uri, viewType: viewType)
           : VideoPlayerController.file(File(path), viewType: viewType);
@@ -500,6 +955,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
         _buffering = v.isBuffering;
         _position = v.position;
         _duration = v.duration;
+        _applyDanmakuPauseState(_buffering || !v.isPlaying);
+        _drainDanmaku(_position);
         final now = DateTime.now();
         final shouldRebuild = _lastUiTickAt == null ||
             now.difference(_lastUiTickAt!) >= const Duration(milliseconds: 250);
@@ -508,6 +965,12 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
           setState(() {});
         }
       });
+
+      if (resetDanmaku) {
+        _maybeAutoLoadOnlineDanmaku(file);
+      } else {
+        _syncDanmakuCursor(_position);
+      }
 
       _scheduleControlsHide();
       if (mounted) setState(() {});
@@ -592,7 +1055,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
             IconButton(
               tooltip: '弹幕',
               icon: const Icon(Icons.comment_outlined),
-              onPressed: () => _showNotSupported('弹幕'),
+              onPressed: _showDanmakuSheet,
             ),
             IconButton(
               tooltip: '软/硬解切换',
@@ -623,6 +1086,20 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
                                 ? 16 / 9
                                 : controller.value.aspectRatio,
                             child: VideoPlayer(controller),
+                          ),
+                        ),
+                        Positioned.fill(
+                          child: DanmakuStage(
+                            key: _danmakuKey,
+                            enabled: _danmakuEnabled,
+                            opacity: _danmakuOpacity,
+                            scale: _danmakuScale,
+                            speed: _danmakuSpeed,
+                            bold: _danmakuBold,
+                            scrollMaxLines: _danmakuMaxLines,
+                            topMaxLines: _danmakuTopMaxLines,
+                            bottomMaxLines: _danmakuBottomMaxLines,
+                            preventOverlap: _danmakuPreventOverlap,
                           ),
                         ),
                         if (_buffering)
@@ -672,16 +1149,19 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
                                     onSeek: (pos) async {
                                       await controller.seekTo(pos);
                                       _position = pos;
+                                      _syncDanmakuCursor(pos);
                                       if (mounted) setState(() {});
                                     },
                                     onPlay: () async {
                                       _showControls();
                                       await controller.play();
+                                      _applyDanmakuPauseState(false);
                                       if (mounted) setState(() {});
                                     },
                                     onPause: () async {
                                       _showControls();
                                       await controller.pause();
+                                      _applyDanmakuPauseState(true);
                                       if (mounted) setState(() {});
                                     },
                                     onSeekBackward: () async {
@@ -693,6 +1173,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
                                           : target;
                                       await controller.seekTo(pos);
                                       _position = pos;
+                                      _syncDanmakuCursor(pos);
                                       if (mounted) setState(() {});
                                     },
                                     onSeekForward: () async {
@@ -706,6 +1187,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
                                               : target;
                                       await controller.seekTo(pos);
                                       _position = pos;
+                                      _syncDanmakuCursor(pos);
                                       if (mounted) setState(() {});
                                     },
                                   ),

@@ -30,17 +30,19 @@ class PlayerService {
   VideoControllerConfiguration _videoConfig({
     required bool hardwareDecode,
     required bool dolbyVisionMode,
+    required bool hdrMode,
   }) {
     final platform = defaultTargetPlatform;
     final isAndroid = !kIsWeb && platform == TargetPlatform.android;
     final hwdec = dolbyVisionMode || !hardwareDecode
         ? 'no'
         : (isAndroid ? 'mediacodec-copy' : 'auto-safe');
+    final useGpuNext = isAndroid && (dolbyVisionMode || hdrMode);
 
     return VideoControllerConfiguration(
       // `vo` is platform specific: desktop uses `libmpv` (render API), Android uses `gpu`.
-      // For Dolby Vision on Android, `gpu-next` may fix the green/purple tint on some files.
-      vo: (dolbyVisionMode && isAndroid) ? 'gpu-next' : null,
+      // For HDR on Android, `gpu-next` may help fix incorrect colors on some files.
+      vo: useGpuNext ? 'gpu-next' : null,
       hwdec: hwdec,
       enableHardwareAcceleration: true,
     );
@@ -51,12 +53,14 @@ class PlayerService {
     required bool isNetwork,
     required int mpvCacheSizeMb,
     required bool dolbyVisionMode,
+    required bool hdrMode,
     required bool unlimitedStreamCache,
     required int? networkStreamSizeBytes,
   }) {
     final platform = defaultTargetPlatform;
     final isAndroid = !kIsWeb && platform == TargetPlatform.android;
     final isWindows = !kIsWeb && platform == TargetPlatform.windows;
+    final useGpuNext = isAndroid && (dolbyVisionMode || hdrMode);
 
     // Notes:
     // - `media_kit` maps `bufferSize` to both `demuxer-max-bytes` & `demuxer-max-back-bytes`.
@@ -100,9 +104,11 @@ class PlayerService {
       ],
       extraMpvOptions: [
         'tls-verify=no',
-        if (dolbyVisionMode && isAndroid) 'gpu-context=android',
-        if (dolbyVisionMode && isAndroid) 'gpu-api=opengl',
-        if (dolbyVisionMode) 'target-colorspace-hint=auto',
+        if (useGpuNext) 'gpu-context=android',
+        if (useGpuNext) 'gpu-api=opengl',
+        if (dolbyVisionMode || hdrMode) 'target-colorspace-hint=yes',
+        if (hdrMode) 'tone-mapping=bt.2390',
+        if (hdrMode) 'hdr-compute-peak=yes',
         if (isNetwork && unlimitedStreamCache) ...[
           'cache-on-disk=yes',
           'cache-dir=${StreamCache.directory.path}',
@@ -120,6 +126,15 @@ class PlayerService {
   static bool _isDolbyVisionCodec(String? codec) {
     final c = (codec ?? '').toLowerCase();
     return c.contains('dvhe') || c.contains('dvh1') || c.contains('dovi');
+  }
+
+  static bool _isHdrTransfer(String? gamma) {
+    final g = (gamma ?? '').toLowerCase().trim();
+    if (g.isEmpty) return false;
+    if (g == 'pq' || g == 'hlg') return true;
+    if (g.contains('2084') || g.contains('smpte')) return true;
+    if (g.contains('arib') || g.contains('std-b67')) return true;
+    return false;
   }
 
   Future<String?> _tryGetProperty(Player player, String name) async {
@@ -193,6 +208,21 @@ class PlayerService {
     return false;
   }
 
+  Future<bool> _isHdr(Player player) async {
+    final videoParams = await _waitForVideoParams(player);
+    final matrix = (videoParams.colormatrix ?? '').toLowerCase().trim();
+    if (matrix == 'dolbyvision') return false;
+
+    final gamma = (videoParams.gamma ?? '').toLowerCase().trim();
+    if (_isHdrTransfer(gamma)) return true;
+
+    final primaries = (videoParams.primaries ?? '').toLowerCase().trim();
+    final wideGamut = primaries.contains('bt.2020') ||
+        primaries.contains('bt2020') ||
+        primaries.contains('2020');
+    return wideGamut && gamma.isNotEmpty && gamma != 'bt.1886';
+  }
+
   Future<int?> _dolbyVisionProfile(Player player) async {
     String? profile = await _tryGetProperty(
           player,
@@ -230,6 +260,7 @@ class PlayerService {
     bool unlimitedStreamCache = false,
     int? networkStreamSizeBytes,
     bool dolbyVisionMode = false,
+    bool hdrMode = false,
     String? externalMpvPath,
   }) async {
     await dispose();
@@ -246,6 +277,7 @@ class PlayerService {
         isNetwork: isNetwork,
         mpvCacheSizeMb: mpvCacheSizeMb,
         dolbyVisionMode: dolbyVisionMode,
+        hdrMode: hdrMode,
         unlimitedStreamCache: unlimitedStreamCache,
         networkStreamSizeBytes: networkStreamSizeBytes,
       ),
@@ -255,6 +287,7 @@ class PlayerService {
       configuration: _videoConfig(
         hardwareDecode: hardwareDecode,
         dolbyVisionMode: dolbyVisionMode,
+        hdrMode: hdrMode,
       ),
     );
     _player = player;
@@ -329,6 +362,36 @@ class PlayerService {
               unlimitedStreamCache: unlimitedStreamCache,
               networkStreamSizeBytes: networkStreamSizeBytes,
               dolbyVisionMode: true,
+              hdrMode: false,
+            );
+          }
+        }
+      }
+
+      // Best-effort: HDR (PQ/HLG) workaround.
+      // Some builds/devices show incorrect colors on HDR content unless using gpu-next + proper colorspace hints.
+      if (!hdrMode && !dolbyVisionMode && !kIsWeb) {
+        final platform = defaultTargetPlatform;
+        final isSupportedPlatform = platform == TargetPlatform.android ||
+            platform == TargetPlatform.windows ||
+            platform == TargetPlatform.linux ||
+            platform == TargetPlatform.macOS;
+        if (isSupportedPlatform) {
+          final isHdr = await _isHdr(player);
+          if (isHdr) {
+            await dispose();
+            return initialize(
+              path,
+              networkUrl: networkUrl,
+              httpHeaders: httpHeaders,
+              isTv: isTv,
+              hardwareDecode: hardwareDecode,
+              mpvCacheSizeMb: mpvCacheSizeMb,
+              unlimitedStreamCache: unlimitedStreamCache,
+              networkStreamSizeBytes: networkStreamSizeBytes,
+              dolbyVisionMode: false,
+              hdrMode: true,
+              externalMpvPath: externalMpvPath,
             );
           }
         }
