@@ -13,8 +13,6 @@ import 'rating_badge.dart';
 AppStyle _styleOf(BuildContext context) =>
     Theme.of(context).extension<AppStyle>() ?? const AppStyle();
 
-UiTemplate _templateOf(BuildContext context) => _styleOf(context).template;
-
 class AppPanel extends StatelessWidget {
   const AppPanel({
     super.key,
