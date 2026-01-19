@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dynamic_color/dynamic_color.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -11,6 +12,7 @@ import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'src/ui/app_theme.dart';
 import 'src/ui/app_icon_service.dart';
+import 'src/ui/glass_background.dart';
 import 'src/ui/high_refresh_rate.dart';
 import 'src/ui/ui_scale.dart';
 
@@ -86,11 +88,15 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                 dynamicScheme: useDynamic ? lightDynamic : null,
                 seed: appState.themeSeedColor,
                 secondarySeed: appState.themeSecondarySeedColor,
+                kawaii: appState.isKawaiiTheme,
+                compact: appState.compactMode,
               ),
               darkTheme: AppTheme.dark(
                 dynamicScheme: useDynamic ? darkDynamic : null,
                 seed: appState.themeSeedColor,
                 secondarySeed: appState.themeSecondarySeedColor,
+                kawaii: appState.isKawaiiTheme,
+                compact: appState.compactMode,
               ),
               builder: (context, child) {
                 if (child == null) return const SizedBox.shrink();
@@ -174,11 +180,28 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                     ? mediaQuery.textScaler
                     : TextScaler.linear(userScale * scale);
 
+                final isTv = defaultTargetPlatform == TargetPlatform.android &&
+                    mediaQuery.orientation == Orientation.landscape &&
+                    mediaQuery.size.shortestSide >= 720;
+                final showBackground = appState.isKawaiiTheme;
+                final backgroundIntensity = (!showBackground || isTv)
+                    ? 0.0
+                    : (appState.enableBlurEffects ? 1.0 : 0.65);
+                final appChild = backgroundIntensity <= 0
+                    ? child
+                    : Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          GlassBackground(intensity: backgroundIntensity),
+                          child,
+                        ],
+                      );
+
                 return UiScaleScope(
                   scale: scale,
                   child: MediaQuery(
                     data: mediaQuery.copyWith(textScaler: textScaler),
-                    child: Theme(data: scaledTheme, child: child),
+                    child: Theme(data: scaledTheme, child: appChild),
                   ),
                 );
               },

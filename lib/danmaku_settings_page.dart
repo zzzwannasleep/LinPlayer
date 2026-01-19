@@ -72,8 +72,8 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
       trackShape: const RoundedRectSliderTrackShape(),
       showValueIndicator: ShowValueIndicator.never,
       tickMarkShape: showTicks
-           ? const RoundSliderTickMarkShape(tickMarkRadius: 2.4)
-           : const RoundSliderTickMarkShape(tickMarkRadius: 0),
+          ? const RoundSliderTickMarkShape(tickMarkRadius: 2.4)
+          : const RoundSliderTickMarkShape(tickMarkRadius: 0),
       activeTickMarkColor: cs.primary.withValues(alpha: 0.75),
       inactiveTickMarkColor: cs.onSurface.withValues(alpha: 0.25),
     );
@@ -204,11 +204,12 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
           ),
           body: Stack(
             children: [
-              Positioned.fill(
-                child: GlassBackground(
-                  intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
+              if (!appState.isKawaiiTheme)
+                Positioned.fill(
+                  child: GlassBackground(
+                    intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
+                  ),
                 ),
-              ),
               ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [

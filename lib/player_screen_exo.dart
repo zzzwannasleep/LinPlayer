@@ -219,7 +219,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
                     Navigator.of(ctx).pop();
                     try {
                       // ignore: invalid_use_of_visible_for_testing_member
-                      await platform.selectAudioTrack(controller.playerId, t.id);
+                      await platform.selectAudioTrack(
+                          controller.playerId, t.id);
                     } catch (e) {
                       if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -478,7 +479,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
       await controller.initialize();
       if (startPosition != null && startPosition > Duration.zero) {
         final d = controller.value.duration;
-        final target = (d > Duration.zero && startPosition > d) ? d : startPosition;
+        final target =
+            (d > Duration.zero && startPosition > d) ? d : startPosition;
         await controller.seekTo(target);
         _position = target;
       }
@@ -529,6 +531,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen> {
     final controlsEnabled = isReady && _playError == null;
 
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(fileName),
         centerTitle: true,

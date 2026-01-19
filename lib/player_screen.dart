@@ -332,7 +332,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _errorSub = _playerService.player.stream.error.listen((message) {
         if (!mounted) return;
         final lower = message.toLowerCase();
-        final isShaderError = lower.contains('glsl') || lower.contains('shader');
+        final isShaderError =
+            lower.contains('glsl') || lower.contains('shader');
         if (!_anime4kPreset.isOff && isShaderError) {
           setState(() => _anime4kPreset = Anime4kPreset.off);
           // ignore: unawaited_futures
@@ -364,7 +365,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       if (startPosition != null && startPosition > Duration.zero) {
         final d = _duration;
-        final target = (d > Duration.zero && startPosition > d) ? d : startPosition;
+        final target =
+            (d > Duration.zero && startPosition > d) ? d : startPosition;
         await _playerService.seek(target);
         _position = target;
         _syncDanmakuCursor(target);
@@ -913,6 +915,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _isTvDevice = _isTv(context);
 
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(
         title: Text(currentFileName),
         centerTitle: true,
@@ -1198,7 +1201,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       await Anime4k.apply(_playerService.player, selected);
       if (!mounted) return;
-      final text = selected.isOff ? '已关闭 Anime4K' : '已启用 Anime4K：${selected.label}';
+      final text =
+          selected.isOff ? '已关闭 Anime4K' : '已启用 Anime4K：${selected.label}';
       messenger.showSnackBar(
         SnackBar(content: Text(text)),
       );

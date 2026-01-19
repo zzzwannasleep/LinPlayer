@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -60,6 +61,7 @@ class AppState extends ChangeNotifier {
   static const _kThemeModeKey = 'themeMode_v1';
   static const _kUiScaleFactorKey = 'uiScaleFactor_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
+  static const _kCompactModeKey = 'compactMode_v1';
   static const _kThemeTemplateKey = 'themeTemplate_v1';
   static const _kPreferHardwareDecodeKey = 'preferHardwareDecode_v1';
   static const _kPlayerCoreKey = 'playerCore_v1';
@@ -115,6 +117,7 @@ class AppState extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   double _uiScaleFactor = 1.0;
   bool _useDynamicColor = true;
+  bool _compactMode = _defaultCompactModeForPlatform();
   ThemeTemplate _themeTemplate = ThemeTemplate.defaultBlue;
   bool _preferHardwareDecode = true;
   PlayerCore _playerCore = PlayerCore.mpv;
@@ -160,6 +163,12 @@ class AppState extends ChangeNotifier {
         .join();
   }
 
+  static bool _defaultCompactModeForPlatform() {
+    return defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.macOS;
+  }
+
   List<ServerProfile> get servers => List.unmodifiable(_servers);
   String? get activeServerId => _activeServerId;
   ServerProfile? get activeServer =>
@@ -179,9 +188,11 @@ class AppState extends ChangeNotifier {
   ThemeMode get themeMode => _themeMode;
   double get uiScaleFactor => _uiScaleFactor;
   bool get useDynamicColor => _useDynamicColor;
+  bool get compactMode => _compactMode;
   ThemeTemplate get themeTemplate => _themeTemplate;
   Color get themeSeedColor => _themeTemplate.seed;
   Color get themeSecondarySeedColor => _themeTemplate.secondarySeed;
+  bool get isKawaiiTheme => _themeTemplate == ThemeTemplate.kawaii;
 
   bool get preferHardwareDecode => _preferHardwareDecode;
   PlayerCore get playerCore => _playerCore;
@@ -253,6 +264,8 @@ class AppState extends ChangeNotifier {
         ((prefs.getDouble(_kUiScaleFactorKey) ?? 1.0).clamp(0.5, 2.0))
             .toDouble();
     _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
+    _compactMode =
+        prefs.getBool(_kCompactModeKey) ?? _defaultCompactModeForPlatform();
     _themeTemplate = themeTemplateFromId(prefs.getString(_kThemeTemplateKey));
     _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
     _playerCore = playerCoreFromId(prefs.getString(_kPlayerCoreKey));
@@ -273,8 +286,7 @@ class AppState extends ChangeNotifier {
       _mpvCacheSizeMb = _mpvCacheSizeMb.clamp(200, 2048);
       await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
     }
-    final hasNewStreamCacheKey =
-        prefs.containsKey(_kUnlimitedStreamCacheKey);
+    final hasNewStreamCacheKey = prefs.containsKey(_kUnlimitedStreamCacheKey);
     _unlimitedStreamCache = hasNewStreamCacheKey
         ? (prefs.getBool(_kUnlimitedStreamCacheKey) ?? false)
         : (prefs.getBool(_kLegacyUnlimitedCoverCacheKey) ?? false);
@@ -297,8 +309,7 @@ class AppState extends ChangeNotifier {
           .toList();
     }
 
-    final rawIconLibraryUrls =
-        prefs.getStringList(_kServerIconLibraryUrlsKey);
+    final rawIconLibraryUrls = prefs.getStringList(_kServerIconLibraryUrlsKey);
     if (rawIconLibraryUrls != null) {
       final seen = <String>{};
       _serverIconLibraryUrls = rawIconLibraryUrls
@@ -397,6 +408,7 @@ class AppState extends ChangeNotifier {
         'themeMode': _encodeThemeMode(_themeMode),
         'uiScaleFactor': _uiScaleFactor,
         'useDynamicColor': _useDynamicColor,
+        'compactMode': _compactMode,
         'themeTemplate': _themeTemplate.id,
         'preferHardwareDecode': _preferHardwareDecode,
         'playerCore': _playerCore.id,
@@ -545,7 +557,8 @@ class AppState extends ChangeNotifier {
       passphrase: passphrase,
     );
     final decrypted = _coerceStringKeyedMap(jsonDecode(decryptedJson));
-    if (decrypted == null) throw const FormatException('Invalid backup payload');
+    if (decrypted == null)
+      throw const FormatException('Invalid backup payload');
 
     final mode = backupServerSecretModeFromId(decrypted['mode']?.toString());
     final data = _coerceStringKeyedMap(decrypted['data']);
@@ -659,6 +672,10 @@ class AppState extends ChangeNotifier {
         .clamp(0.5, 2.0)
         .toDouble();
     final nextUseDynamic = _readBool(data['useDynamicColor'], fallback: true);
+    final nextCompactMode = _readBool(
+      data['compactMode'],
+      fallback: _defaultCompactModeForPlatform(),
+    );
     final nextThemeTemplate =
         themeTemplateFromId(data['themeTemplate']?.toString());
     final nextPreferHardware =
@@ -698,8 +715,7 @@ class AppState extends ChangeNotifier {
           .toList(growable: false);
     }();
 
-    final nextDanmakuEnabled =
-        _readBool(danmakuMap['enabled'], fallback: true);
+    final nextDanmakuEnabled = _readBool(danmakuMap['enabled'], fallback: true);
     final nextDanmakuLoadMode =
         danmakuLoadModeFromId(danmakuMap['loadMode']?.toString());
     final nextDanmakuApiUrls = _readStringList(danmakuMap['apiUrls'])
@@ -761,6 +777,7 @@ class AppState extends ChangeNotifier {
     _themeMode = nextThemeMode;
     _uiScaleFactor = nextUiScale;
     _useDynamicColor = nextUseDynamic;
+    _compactMode = nextCompactMode;
     _themeTemplate = nextThemeTemplate;
     _preferHardwareDecode = nextPreferHardware;
     _playerCore = nextPlayerCore;
@@ -822,6 +839,7 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_kThemeModeKey, _encodeThemeMode(_themeMode));
     await prefs.setDouble(_kUiScaleFactorKey, _uiScaleFactor);
     await prefs.setBool(_kDynamicColorKey, _useDynamicColor);
+    await prefs.setBool(_kCompactModeKey, _compactMode);
     await prefs.setString(_kThemeTemplateKey, _themeTemplate.id);
     await prefs.setBool(_kPreferHardwareDecodeKey, _preferHardwareDecode);
     await prefs.setString(_kPlayerCoreKey, _playerCore.id);
@@ -1452,6 +1470,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setCompactMode(bool enabled) async {
+    if (_compactMode == enabled) return;
+    _compactMode = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kCompactModeKey, enabled);
+    notifyListeners();
+  }
+
   Future<void> setUseDynamicColor(bool enabled) async {
     _useDynamicColor = enabled;
     final prefs = await SharedPreferences.getInstance();
@@ -1909,11 +1935,11 @@ class AppState extends ChangeNotifier {
     final port = (uri != null && uri.hasPort) ? uri.port.toString() : null;
 
     final hostOrUrl = (uri != null && uri.host.isNotEmpty)
-        ? uri.host +
-            ((uri.path.isNotEmpty && uri.path != '/') ? uri.path : '')
+        ? uri.host + ((uri.path.isNotEmpty && uri.path != '/') ? uri.path : '')
         : raw;
 
-    final api = EmbyApi(hostOrUrl: hostOrUrl, preferredScheme: scheme, port: port);
+    final api =
+        EmbyApi(hostOrUrl: hostOrUrl, preferredScheme: scheme, port: port);
     return api.authenticate(
       username: username,
       password: password,

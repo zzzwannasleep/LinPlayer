@@ -478,9 +478,8 @@ class _SettingsPageState extends State<SettingsPage> {
             allowedExtensions: const ['json'],
           );
           if (path == null || path.trim().isEmpty) return;
-          final normalized = path.toLowerCase().endsWith('.json')
-              ? path
-              : '$path.json';
+          final normalized =
+              path.toLowerCase().endsWith('.json') ? path : '$path.json';
           await File(normalized).writeAsString(json, flush: true);
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -573,9 +572,8 @@ class _SettingsPageState extends State<SettingsPage> {
             allowedExtensions: const ['json'],
           );
           if (path == null || path.trim().isEmpty) return;
-          final normalized = path.toLowerCase().endsWith('.json')
-              ? path
-              : '$path.json';
+          final normalized =
+              path.toLowerCase().endsWith('.json') ? path : '$path.json';
           await File(normalized).writeAsString(json, flush: true);
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1015,11 +1013,12 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           body: Stack(
             children: [
-              Positioned.fill(
-                child: GlassBackground(
-                  intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
+              if (!appState.isKawaiiTheme)
+                Positioned.fill(
+                  child: GlassBackground(
+                    intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
+                  ),
                 ),
-              ),
               ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [
@@ -1094,6 +1093,14 @@ class _SettingsPageState extends State<SettingsPage> {
                               );
                             },
                           ),
+                        ),
+                        const Divider(height: 1),
+                        SwitchListTile(
+                          value: appState.compactMode,
+                          onChanged: (v) => appState.setCompactMode(v),
+                          title: const Text('紧凑模式'),
+                          subtitle: const Text('缩小控件间距与高度（手机开启会更小）'),
+                          contentPadding: EdgeInsets.zero,
                         ),
                         const Divider(height: 1),
                         SwitchListTile(

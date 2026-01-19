@@ -4,6 +4,7 @@ enum ThemeTemplate {
   defaultBlue,
   warm,
   cool,
+  kawaii,
 }
 
 ThemeTemplate themeTemplateFromId(String? id) {
@@ -12,6 +13,8 @@ ThemeTemplate themeTemplateFromId(String? id) {
       return ThemeTemplate.warm;
     case 'cool':
       return ThemeTemplate.cool;
+    case 'kawaii':
+      return ThemeTemplate.kawaii;
     default:
       return ThemeTemplate.defaultBlue;
   }
@@ -26,6 +29,8 @@ extension ThemeTemplateX on ThemeTemplate {
         return 'warm';
       case ThemeTemplate.cool:
         return 'cool';
+      case ThemeTemplate.kawaii:
+        return 'kawaii';
     }
   }
 
@@ -37,6 +42,8 @@ extension ThemeTemplateX on ThemeTemplate {
         return '暖色调';
       case ThemeTemplate.cool:
         return '冷色调';
+      case ThemeTemplate.kawaii:
+        return '可爱二次元';
     }
   }
 
@@ -48,6 +55,8 @@ extension ThemeTemplateX on ThemeTemplate {
         return const Color(0xFFFFA36C);
       case ThemeTemplate.cool:
         return const Color(0xFF63D2FF);
+      case ThemeTemplate.kawaii:
+        return const Color(0xFFFF6FB1);
     }
   }
 
@@ -59,6 +68,8 @@ extension ThemeTemplateX on ThemeTemplate {
         return const Color(0xFFFFE08A);
       case ThemeTemplate.cool:
         return const Color(0xFFB0E6FF);
+      case ThemeTemplate.kawaii:
+        return const Color(0xFF7DD9FF);
     }
   }
 }
