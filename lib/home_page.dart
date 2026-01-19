@@ -433,9 +433,16 @@ class _HomePageState extends State<HomePage> {
       animation: widget.appState,
       builder: (context, _) {
         final isTv = _isTv(context);
+        final isDesktop = !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.windows ||
+                defaultTargetPlatform == TargetPlatform.linux ||
+                defaultTargetPlatform == TargetPlatform.macOS);
         final useExoCore = !kIsWeb &&
             defaultTargetPlatform == TargetPlatform.android &&
             widget.appState.playerCore == PlayerCore.exo;
+        final template = widget.appState.uiTemplate;
+        final useRail = isDesktop &&
+            (template == UiTemplate.proTool || template == UiTemplate.neonHud);
         final pages = [
           _HomeBody(
             appState: widget.appState,
@@ -449,41 +456,74 @@ class _HomePageState extends State<HomePage> {
               : PlayerScreen(appState: widget.appState),
           SettingsPage(appState: widget.appState),
         ];
-        return Scaffold(
-          appBar: _index == 0
-              ? AppBar(
-                  title:
-                      Text(widget.appState.activeServer?.name ?? 'LinPlayer'),
-                  actions: [
-                    IconButton(
-                      icon: const Icon(Icons.video_library_outlined),
-                      tooltip: '媒体库',
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) =>
-                                  LibraryPage(appState: widget.appState)),
-                        );
-                      },
+
+        final appBar = _index == 0
+            ? AppBar(
+                title: Text(widget.appState.activeServer?.name ?? 'LinPlayer'),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.video_library_outlined),
+                    tooltip: '媒体库',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              LibraryPage(appState: widget.appState),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.alt_route_outlined),
+                    tooltip: '线路',
+                    onPressed: _showRoutePicker,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.palette_outlined),
+                    tooltip: '主题',
+                    onPressed: _showThemeSheet,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.storage_outlined),
+                    tooltip: '服务器',
+                    onPressed: _switchServer,
+                  ),
+                ],
+              )
+            : null;
+
+        if (useRail) {
+          return Scaffold(
+            appBar: appBar,
+            body: Row(
+              children: [
+                NavigationRail(
+                  selectedIndex: _index,
+                  onDestinationSelected: (i) => setState(() => _index = i),
+                  labelType: NavigationRailLabelType.all,
+                  destinations: const [
+                    NavigationRailDestination(
+                      icon: Icon(Icons.home_outlined),
+                      label: Text('首页'),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.alt_route_outlined),
-                      tooltip: '线路',
-                      onPressed: _showRoutePicker,
+                    NavigationRailDestination(
+                      icon: Icon(Icons.folder_open),
+                      label: Text('本地'),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.palette_outlined),
-                      tooltip: '主题',
-                      onPressed: _showThemeSheet,
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.storage_outlined),
-                      tooltip: '服务器',
-                      onPressed: _switchServer,
+                    NavigationRailDestination(
+                      icon: Icon(Icons.settings_outlined),
+                      label: Text('设置'),
                     ),
                   ],
-                )
-              : null,
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(child: pages[_index]),
+              ],
+            ),
+          );
+        }
+        return Scaffold(
+          appBar: appBar,
           body: pages[_index],
           bottomNavigationBar: NavigationBar(
             selectedIndex: _index,
@@ -806,113 +846,116 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
                             const SizedBox(width: spacing),
                         itemBuilder: (context, index) {
                           final item = items[index];
-                      final isEpisode = item.type.toLowerCase() == 'episode';
-                      final title = isEpisode && item.seriesName.isNotEmpty
-                          ? item.seriesName
-                          : item.name;
-                      final pos = _ticksToDuration(item.playbackPositionTicks);
-                      final tag = isEpisode ? _episodeTag(item) : '';
-                      final sub = [
-                        if (tag.isNotEmpty) tag,
-                        if (pos > Duration.zero) '观看到 ${_fmt(pos)}',
-                      ].join(' · ');
+                          final isEpisode =
+                              item.type.toLowerCase() == 'episode';
+                          final title = isEpisode && item.seriesName.isNotEmpty
+                              ? item.seriesName
+                              : item.name;
+                          final pos =
+                              _ticksToDuration(item.playbackPositionTicks);
+                          final tag = isEpisode ? _episodeTag(item) : '';
+                          final sub = [
+                            if (tag.isNotEmpty) tag,
+                            if (pos > Duration.zero) '观看到 ${_fmt(pos)}',
+                          ].join(' · ');
 
-                      final img = item.hasImage
-                          ? EmbyApi.imageUrl(
-                              baseUrl: widget.appState.baseUrl!,
-                              itemId: item.id,
-                              token: widget.appState.token!,
-                              imageType: 'Primary',
-                              maxWidth: 640,
-                            )
-                          : null;
+                          final img = item.hasImage
+                              ? EmbyApi.imageUrl(
+                                  baseUrl: widget.appState.baseUrl!,
+                                  itemId: item.id,
+                                  token: widget.appState.token!,
+                                  imageType: 'Primary',
+                                  maxWidth: 640,
+                                )
+                              : null;
 
-                      return SizedBox(
-                        width: itemWidth,
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => isEpisode
-                                    ? EpisodeDetailPage(
-                                        episode: item,
-                                        appState: widget.appState,
-                                        isTv: widget.isTv,
-                                      )
-                                    : ShowDetailPage(
-                                        itemId: item.id,
-                                        title: item.name,
-                                        appState: widget.appState,
-                                        isTv: widget.isTv,
-                                      ),
-                              ),
-                            );
-                          },
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              AspectRatio(
-                                aspectRatio: 16 / 9,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: img != null
-                                      ? CachedNetworkImage(
-                                          imageUrl: img,
-                                          cacheManager: CoverCacheManager
-                                              .instance,
-                                          httpHeaders: {
-                                            'User-Agent': EmbyApi.userAgent
-                                          },
-                                          fit: BoxFit.cover,
-                                          placeholder: (_, __) =>
-                                              const ColoredBox(
-                                            color: Colors.black12,
-                                            child: Center(
-                                                child: Icon(Icons.image)),
+                          return SizedBox(
+                            width: itemWidth,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => isEpisode
+                                        ? EpisodeDetailPage(
+                                            episode: item,
+                                            appState: widget.appState,
+                                            isTv: widget.isTv,
+                                          )
+                                        : ShowDetailPage(
+                                            itemId: item.id,
+                                            title: item.name,
+                                            appState: widget.appState,
+                                            isTv: widget.isTv,
                                           ),
-                                          errorWidget: (_, __, ___) =>
-                                              const ColoredBox(
-                                            color: Colors.black12,
-                                            child: Center(
-                                                child: Icon(
-                                                    Icons.broken_image)),
-                                          ),
-                                        )
-                                      : const ColoredBox(
-                                          color: Colors.black12,
-                                          child:
-                                              Center(child: Icon(Icons.image)),
-                                        ),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              if (sub.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    sub,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color:
-                                          theme.colorScheme.onSurfaceVariant,
-                                      fontWeight: FontWeight.w600,
+                                  ),
+                                );
+                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  AspectRatio(
+                                    aspectRatio: 16 / 9,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: img != null
+                                          ? CachedNetworkImage(
+                                              imageUrl: img,
+                                              cacheManager:
+                                                  CoverCacheManager.instance,
+                                              httpHeaders: {
+                                                'User-Agent': EmbyApi.userAgent
+                                              },
+                                              fit: BoxFit.cover,
+                                              placeholder: (_, __) =>
+                                                  const ColoredBox(
+                                                color: Colors.black12,
+                                                child: Center(
+                                                    child: Icon(Icons.image)),
+                                              ),
+                                              errorWidget: (_, __, ___) =>
+                                                  const ColoredBox(
+                                                color: Colors.black12,
+                                                child: Center(
+                                                    child: Icon(
+                                                        Icons.broken_image)),
+                                              ),
+                                            )
+                                          : const ColoredBox(
+                                              color: Colors.black12,
+                                              child: Center(
+                                                  child: Icon(Icons.image)),
+                                            ),
                                     ),
                                   ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (sub.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        sub,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                          color: theme
+                                              .colorScheme.onSurfaceVariant,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
                         },
                       ),
                       if (_showDesktopArrows && canScroll) ...[

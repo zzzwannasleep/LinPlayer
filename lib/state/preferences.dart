@@ -1,75 +1,132 @@
 import 'package:flutter/material.dart';
 
-enum ThemeTemplate {
-  defaultBlue,
-  warm,
-  cool,
-  kawaii,
+enum UiTemplate {
+  candyGlass,
+  stickerJournal,
+  neonHud,
+  minimalCovers,
+  washiWatercolor,
+  pixelArcade,
+  mangaStoryboard,
+  proTool,
 }
 
-ThemeTemplate themeTemplateFromId(String? id) {
+UiTemplate uiTemplateFromId(String? id) {
   switch (id) {
+    // Legacy ids (<= early versions).
+    case 'default':
+      return UiTemplate.minimalCovers;
     case 'warm':
-      return ThemeTemplate.warm;
+      return UiTemplate.washiWatercolor;
     case 'cool':
-      return ThemeTemplate.cool;
+      return UiTemplate.neonHud;
     case 'kawaii':
-      return ThemeTemplate.kawaii;
+      return UiTemplate.candyGlass;
+
+    // New ids.
+    case 'candy':
+      return UiTemplate.candyGlass;
+    case 'sticker':
+      return UiTemplate.stickerJournal;
+    case 'hud':
+      return UiTemplate.neonHud;
+    case 'minimal':
+      return UiTemplate.minimalCovers;
+    case 'washi':
+      return UiTemplate.washiWatercolor;
+    case 'pixel':
+      return UiTemplate.pixelArcade;
+    case 'manga':
+      return UiTemplate.mangaStoryboard;
+    case 'pro':
+      return UiTemplate.proTool;
     default:
-      return ThemeTemplate.defaultBlue;
+      return UiTemplate.minimalCovers;
   }
 }
 
-extension ThemeTemplateX on ThemeTemplate {
+extension UiTemplateX on UiTemplate {
   String get id {
     switch (this) {
-      case ThemeTemplate.defaultBlue:
-        return 'default';
-      case ThemeTemplate.warm:
-        return 'warm';
-      case ThemeTemplate.cool:
-        return 'cool';
-      case ThemeTemplate.kawaii:
-        return 'kawaii';
+      case UiTemplate.candyGlass:
+        return 'candy';
+      case UiTemplate.stickerJournal:
+        return 'sticker';
+      case UiTemplate.neonHud:
+        return 'hud';
+      case UiTemplate.minimalCovers:
+        return 'minimal';
+      case UiTemplate.washiWatercolor:
+        return 'washi';
+      case UiTemplate.pixelArcade:
+        return 'pixel';
+      case UiTemplate.mangaStoryboard:
+        return 'manga';
+      case UiTemplate.proTool:
+        return 'pro';
     }
   }
 
   String get label {
     switch (this) {
-      case ThemeTemplate.defaultBlue:
-        return '默认';
-      case ThemeTemplate.warm:
-        return '暖色调';
-      case ThemeTemplate.cool:
-        return '冷色调';
-      case ThemeTemplate.kawaii:
-        return '可爱二次元';
+      case UiTemplate.candyGlass:
+        return '可爱二次元｜糖果玻璃';
+      case UiTemplate.stickerJournal:
+        return '可爱二次元｜贴纸手帐';
+      case UiTemplate.neonHud:
+        return '赛博霓虹｜HUD 控制台';
+      case UiTemplate.minimalCovers:
+        return '极简高级｜纯净封面墙';
+      case UiTemplate.washiWatercolor:
+        return '日系清淡｜和纸水彩';
+      case UiTemplate.pixelArcade:
+        return '复古像素｜街机风';
+      case UiTemplate.mangaStoryboard:
+        return '漫画分镜｜黑白网点';
+      case UiTemplate.proTool:
+        return '专业工具｜桌面优先';
     }
   }
 
   Color get seed {
     switch (this) {
-      case ThemeTemplate.defaultBlue:
-        return const Color(0xFF8CB4FF);
-      case ThemeTemplate.warm:
-        return const Color(0xFFFFA36C);
-      case ThemeTemplate.cool:
-        return const Color(0xFF63D2FF);
-      case ThemeTemplate.kawaii:
+      case UiTemplate.candyGlass:
         return const Color(0xFFFF6FB1);
+      case UiTemplate.stickerJournal:
+        return const Color(0xFFB69CFF);
+      case UiTemplate.neonHud:
+        return const Color(0xFF00E5FF);
+      case UiTemplate.minimalCovers:
+        return const Color(0xFF8CB4FF);
+      case UiTemplate.washiWatercolor:
+        return const Color(0xFF7CC8A7);
+      case UiTemplate.pixelArcade:
+        return const Color(0xFF4ADE80);
+      case UiTemplate.mangaStoryboard:
+        return const Color(0xFF111827);
+      case UiTemplate.proTool:
+        return const Color(0xFF64748B);
     }
   }
 
   Color get secondarySeed {
     switch (this) {
-      case ThemeTemplate.defaultBlue:
-        return const Color(0xFFFFC27A);
-      case ThemeTemplate.warm:
-        return const Color(0xFFFFE08A);
-      case ThemeTemplate.cool:
-        return const Color(0xFFB0E6FF);
-      case ThemeTemplate.kawaii:
+      case UiTemplate.candyGlass:
         return const Color(0xFF7DD9FF);
+      case UiTemplate.stickerJournal:
+        return const Color(0xFFFFC7A5);
+      case UiTemplate.neonHud:
+        return const Color(0xFFFF2DAA);
+      case UiTemplate.minimalCovers:
+        return const Color(0xFFFFC27A);
+      case UiTemplate.washiWatercolor:
+        return const Color(0xFFFFD6A5);
+      case UiTemplate.pixelArcade:
+        return const Color(0xFFFDE047);
+      case UiTemplate.mangaStoryboard:
+        return const Color(0xFFF9FAFB);
+      case UiTemplate.proTool:
+        return const Color(0xFF60A5FA);
     }
   }
 }

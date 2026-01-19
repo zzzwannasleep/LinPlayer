@@ -62,7 +62,8 @@ class AppState extends ChangeNotifier {
   static const _kUiScaleFactorKey = 'uiScaleFactor_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
   static const _kCompactModeKey = 'compactMode_v1';
-  static const _kThemeTemplateKey = 'themeTemplate_v1';
+  static const _kUiTemplateKey = 'uiTemplate_v1';
+  static const _kLegacyThemeTemplateKey = 'themeTemplate_v1';
   static const _kPreferHardwareDecodeKey = 'preferHardwareDecode_v1';
   static const _kPlayerCoreKey = 'playerCore_v1';
   static const _kPreferredAudioLangKey = 'preferredAudioLang_v1';
@@ -118,7 +119,7 @@ class AppState extends ChangeNotifier {
   double _uiScaleFactor = 1.0;
   bool _useDynamicColor = true;
   bool _compactMode = _defaultCompactModeForPlatform();
-  ThemeTemplate _themeTemplate = ThemeTemplate.defaultBlue;
+  UiTemplate _uiTemplate = UiTemplate.minimalCovers;
   bool _preferHardwareDecode = true;
   PlayerCore _playerCore = PlayerCore.mpv;
   String _preferredAudioLang = '';
@@ -189,10 +190,16 @@ class AppState extends ChangeNotifier {
   double get uiScaleFactor => _uiScaleFactor;
   bool get useDynamicColor => _useDynamicColor;
   bool get compactMode => _compactMode;
-  ThemeTemplate get themeTemplate => _themeTemplate;
-  Color get themeSeedColor => _themeTemplate.seed;
-  Color get themeSecondarySeedColor => _themeTemplate.secondarySeed;
-  bool get isKawaiiTheme => _themeTemplate == ThemeTemplate.kawaii;
+  UiTemplate get uiTemplate => _uiTemplate;
+  Color get themeSeedColor => _uiTemplate.seed;
+  Color get themeSecondarySeedColor => _uiTemplate.secondarySeed;
+
+  bool get prefersFancyBackground =>
+      _uiTemplate == UiTemplate.candyGlass ||
+      _uiTemplate == UiTemplate.stickerJournal ||
+      _uiTemplate == UiTemplate.neonHud ||
+      _uiTemplate == UiTemplate.washiWatercolor ||
+      _uiTemplate == UiTemplate.mangaStoryboard;
 
   bool get preferHardwareDecode => _preferHardwareDecode;
   PlayerCore get playerCore => _playerCore;
@@ -266,7 +273,13 @@ class AppState extends ChangeNotifier {
     _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
     _compactMode =
         prefs.getBool(_kCompactModeKey) ?? _defaultCompactModeForPlatform();
-    _themeTemplate = themeTemplateFromId(prefs.getString(_kThemeTemplateKey));
+    final storedTemplateId = prefs.getString(_kUiTemplateKey) ??
+        prefs.getString(_kLegacyThemeTemplateKey);
+    _uiTemplate = uiTemplateFromId(storedTemplateId);
+    if (!prefs.containsKey(_kUiTemplateKey) &&
+        prefs.containsKey(_kLegacyThemeTemplateKey)) {
+      await prefs.setString(_kUiTemplateKey, _uiTemplate.id);
+    }
     _preferHardwareDecode = prefs.getBool(_kPreferHardwareDecodeKey) ?? true;
     _playerCore = playerCoreFromId(prefs.getString(_kPlayerCoreKey));
     _preferredAudioLang = prefs.getString(_kPreferredAudioLangKey) ?? '';
@@ -409,7 +422,9 @@ class AppState extends ChangeNotifier {
         'uiScaleFactor': _uiScaleFactor,
         'useDynamicColor': _useDynamicColor,
         'compactMode': _compactMode,
-        'themeTemplate': _themeTemplate.id,
+        'uiTemplate': _uiTemplate.id,
+        // Legacy alias for older builds/backups.
+        'themeTemplate': _uiTemplate.id,
         'preferHardwareDecode': _preferHardwareDecode,
         'playerCore': _playerCore.id,
         'preferredAudioLang': _preferredAudioLang,
@@ -677,8 +692,9 @@ class AppState extends ChangeNotifier {
       data['compactMode'],
       fallback: _defaultCompactModeForPlatform(),
     );
-    final nextThemeTemplate =
-        themeTemplateFromId(data['themeTemplate']?.toString());
+    final nextUiTemplate = uiTemplateFromId(
+      (data['uiTemplate'] ?? data['themeTemplate'])?.toString(),
+    );
     final nextPreferHardware =
         _readBool(data['preferHardwareDecode'], fallback: true);
     final nextPlayerCore = playerCoreFromId(data['playerCore']?.toString());
@@ -779,7 +795,7 @@ class AppState extends ChangeNotifier {
     _uiScaleFactor = nextUiScale;
     _useDynamicColor = nextUseDynamic;
     _compactMode = nextCompactMode;
-    _themeTemplate = nextThemeTemplate;
+    _uiTemplate = nextUiTemplate;
     _preferHardwareDecode = nextPreferHardware;
     _playerCore = nextPlayerCore;
     _preferredAudioLang = nextPreferredAudioLang;
@@ -841,7 +857,7 @@ class AppState extends ChangeNotifier {
     await prefs.setDouble(_kUiScaleFactorKey, _uiScaleFactor);
     await prefs.setBool(_kDynamicColorKey, _useDynamicColor);
     await prefs.setBool(_kCompactModeKey, _compactMode);
-    await prefs.setString(_kThemeTemplateKey, _themeTemplate.id);
+    await prefs.setString(_kUiTemplateKey, _uiTemplate.id);
     await prefs.setBool(_kPreferHardwareDecodeKey, _preferHardwareDecode);
     await prefs.setString(_kPlayerCoreKey, _playerCore.id);
     await prefs.setString(_kPreferredAudioLangKey, _preferredAudioLang);
@@ -1486,10 +1502,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setThemeTemplate(ThemeTemplate template) async {
-    _themeTemplate = template;
+  Future<void> setUiTemplate(UiTemplate template) async {
+    if (_uiTemplate == template) return;
+    _uiTemplate = template;
+    if (template == UiTemplate.proTool) {
+      _compactMode = true;
+    }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kThemeTemplateKey, template.id);
+    await prefs.setString(_kUiTemplateKey, template.id);
+    if (template == UiTemplate.proTool) {
+      await prefs.setBool(_kCompactModeKey, _compactMode);
+    }
     notifyListeners();
   }
 

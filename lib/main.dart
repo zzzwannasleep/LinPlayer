@@ -12,6 +12,7 @@ import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'src/ui/app_theme.dart';
 import 'src/ui/app_icon_service.dart';
+import 'src/ui/app_style.dart';
 import 'src/ui/glass_background.dart';
 import 'src/ui/high_refresh_rate.dart';
 import 'src/ui/ui_scale.dart';
@@ -86,16 +87,12 @@ class _LinPlayerAppState extends State<LinPlayerApp>
               themeMode: appState.themeMode,
               theme: AppTheme.light(
                 dynamicScheme: useDynamic ? lightDynamic : null,
-                seed: appState.themeSeedColor,
-                secondarySeed: appState.themeSecondarySeedColor,
-                kawaii: appState.isKawaiiTheme,
+                template: appState.uiTemplate,
                 compact: appState.compactMode,
               ),
               darkTheme: AppTheme.dark(
                 dynamicScheme: useDynamic ? darkDynamic : null,
-                seed: appState.themeSeedColor,
-                secondarySeed: appState.themeSecondarySeedColor,
-                kawaii: appState.isKawaiiTheme,
+                template: appState.uiTemplate,
                 compact: appState.compactMode,
               ),
               builder: (context, child) {
@@ -183,8 +180,14 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                 final isTv = defaultTargetPlatform == TargetPlatform.android &&
                     mediaQuery.orientation == Orientation.landscape &&
                     mediaQuery.size.shortestSide >= 720;
-                final showBackground = appState.isKawaiiTheme;
-                final backgroundIntensity = (!showBackground || isTv)
+
+                final style = scaledTheme.extension<AppStyle>();
+                final hasBackdrop = style != null &&
+                    style.backgroundIntensity > 0 &&
+                    (style.background != AppBackgroundKind.none ||
+                        style.pattern != AppPatternKind.none);
+
+                final backgroundIntensity = (!hasBackdrop || isTv)
                     ? 0.0
                     : (appState.enableBlurEffects ? 1.0 : 0.65);
                 final appChild = backgroundIntensity <= 0

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'src/ui/frosted_card.dart';
-import 'src/ui/glass_background.dart';
 import 'state/app_state.dart';
 import 'state/danmaku_preferences.dart';
 
@@ -202,383 +201,367 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
             title: const Text('弹幕'),
             centerTitle: true,
           ),
-          body: Stack(
+          body: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
-              if (!appState.isKawaiiTheme)
-                Positioned.fill(
-                  child: GlassBackground(
-                    intensity: blurAllowed ? (enableBlur ? 1 : 0.55) : 0,
-                  ),
+              _Section(
+                title: '弹幕',
+                enableBlur: enableBlur,
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      value: appState.danmakuEnabled,
+                      onChanged: (v) => appState.setDanmakuEnabled(v),
+                      title: const Text('启用弹幕'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.source_outlined),
+                      title: const Text('弹幕来源'),
+                      subtitle: const Text('本地：手动加载 XML；在线：从 API 匹配下载'),
+                      trailing: DropdownButtonHideUnderline(
+                        child: DropdownButton<DanmakuLoadMode>(
+                          value: appState.danmakuLoadMode,
+                          items: DanmakuLoadMode.values
+                              .map(
+                                (m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Text(m.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            appState.setDanmakuLoadMode(v);
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                children: [
-                  _Section(
-                    title: '弹幕',
-                    enableBlur: enableBlur,
-                    child: Column(
-                      children: [
-                        SwitchListTile(
-                          value: appState.danmakuEnabled,
-                          onChanged: (v) => appState.setDanmakuEnabled(v),
-                          title: const Text('启用弹幕'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.source_outlined),
-                          title: const Text('弹幕来源'),
-                          subtitle: const Text('本地：手动加载 XML；在线：从 API 匹配下载'),
-                          trailing: DropdownButtonHideUnderline(
-                            child: DropdownButton<DanmakuLoadMode>(
-                              value: appState.danmakuLoadMode,
-                              items: DanmakuLoadMode.values
-                                  .map(
-                                    (m) => DropdownMenuItem(
-                                      value: m,
-                                      child: Text(m.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) {
-                                if (v == null) return;
-                                appState.setDanmakuLoadMode(v);
-                              },
-                            ),
-                          ),
-                        ),
-                      ],
+              ),
+              const SizedBox(height: 12),
+              _Section(
+                title: '弹幕数量',
+                enableBlur: enableBlur,
+                child: Column(
+                  children: [
+                    _SliderTile(
+                      leading: const Icon(Icons.view_headline_outlined),
+                      title: const Text('滚动弹幕最大行数'),
+                      value: scrollLines.toDouble(),
+                      min: 1,
+                      max: 40,
+                      divisions: 39,
+                      trailing: Text('$scrollLines'),
+                      sliderTheme: _sliderTheme(context, showTicks: true),
+                      onChanged: (v) =>
+                          setState(() => _scrollMaxLinesDraft = v),
+                      onChangeEnd: (v) async {
+                        setState(() => _scrollMaxLinesDraft = null);
+                        await appState.setDanmakuMaxLines(v.round());
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  _Section(
-                    title: '弹幕数量',
-                    enableBlur: enableBlur,
-                    child: Column(
-                      children: [
-                        _SliderTile(
-                          leading: const Icon(Icons.view_headline_outlined),
-                          title: const Text('滚动弹幕最大行数'),
-                          value: scrollLines.toDouble(),
-                          min: 1,
-                          max: 40,
-                          divisions: 39,
-                          trailing: Text('$scrollLines'),
-                          sliderTheme: _sliderTheme(context, showTicks: true),
-                          onChanged: (v) =>
-                              setState(() => _scrollMaxLinesDraft = v),
-                          onChangeEnd: (v) async {
-                            setState(() => _scrollMaxLinesDraft = null);
-                            await appState.setDanmakuMaxLines(v.round());
-                          },
-                        ),
-                        const Divider(height: 1),
-                        _SliderTile(
-                          leading:
-                              const Icon(Icons.vertical_align_top_outlined),
-                          title: const Text('顶部弹幕最大行数'),
-                          value: topLines.toDouble(),
-                          min: 0,
-                          max: 40,
-                          divisions: 40,
-                          trailing: Text('$topLines'),
-                          sliderTheme: _sliderTheme(context, showTicks: true),
-                          onChanged: (v) =>
-                              setState(() => _topMaxLinesDraft = v),
-                          onChangeEnd: (v) async {
-                            setState(() => _topMaxLinesDraft = null);
-                            await appState.setDanmakuTopMaxLines(v.round());
-                          },
-                        ),
-                        const Divider(height: 1),
-                        _SliderTile(
-                          leading:
-                              const Icon(Icons.vertical_align_bottom_outlined),
-                          title: const Text('底部弹幕最大行数'),
-                          value: bottomLines.toDouble(),
-                          min: 0,
-                          max: 40,
-                          divisions: 40,
-                          trailing: Text('$bottomLines'),
-                          sliderTheme: _sliderTheme(context, showTicks: true),
-                          onChanged: (v) =>
-                              setState(() => _bottomMaxLinesDraft = v),
-                          onChangeEnd: (v) async {
-                            setState(() => _bottomMaxLinesDraft = null);
-                            await appState.setDanmakuBottomMaxLines(v.round());
-                          },
-                        ),
-                      ],
+                    const Divider(height: 1),
+                    _SliderTile(
+                      leading: const Icon(Icons.vertical_align_top_outlined),
+                      title: const Text('顶部弹幕最大行数'),
+                      value: topLines.toDouble(),
+                      min: 0,
+                      max: 40,
+                      divisions: 40,
+                      trailing: Text('$topLines'),
+                      sliderTheme: _sliderTheme(context, showTicks: true),
+                      onChanged: (v) => setState(() => _topMaxLinesDraft = v),
+                      onChangeEnd: (v) async {
+                        setState(() => _topMaxLinesDraft = null);
+                        await appState.setDanmakuTopMaxLines(v.round());
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  _Section(
-                    title: '弹幕样式',
-                    enableBlur: enableBlur,
-                    child: Column(
-                      children: [
-                        _SliderTile(
-                          leading: const Icon(Icons.format_size),
-                          title: const Text('弹幕缩放'),
-                          value: scale.clamp(0.5, 1.6),
-                          min: 0.5,
-                          max: 1.6,
-                          trailing: Text('${scale.toStringAsFixed(2)}x'),
-                          sliderTheme: _sliderTheme(context),
-                          onChanged: (v) => setState(() => _scaleDraft = v),
-                          onChangeEnd: (v) async {
-                            setState(() => _scaleDraft = null);
-                            await appState.setDanmakuScale(v);
-                          },
-                        ),
-                        const Divider(height: 1),
-                        _SliderTile(
-                          leading: const Icon(Icons.opacity_outlined),
-                          title: const Text('弹幕透明度'),
-                          value: opacity.clamp(0.2, 1.0),
-                          min: 0.2,
-                          max: 1.0,
-                          trailing: Text('${(opacity * 100).round()}%'),
-                          sliderTheme: _sliderTheme(context),
-                          onChanged: (v) => setState(() => _opacityDraft = v),
-                          onChangeEnd: (v) async {
-                            setState(() => _opacityDraft = null);
-                            await appState.setDanmakuOpacity(v);
-                          },
-                        ),
-                        const Divider(height: 1),
-                        _SliderTile(
-                          leading: const Icon(Icons.speed_outlined),
-                          title: const Text('弹幕滚动速度'),
-                          value: speed.clamp(0.4, 2.5),
-                          min: 0.4,
-                          max: 2.5,
-                          trailing: Text('${speed.toStringAsFixed(2)}x'),
-                          sliderTheme: _sliderTheme(context),
-                          onChanged: (v) => setState(() => _speedDraft = v),
-                          onChangeEnd: (v) async {
-                            setState(() => _speedDraft = null);
-                            await appState.setDanmakuSpeed(v);
-                          },
-                        ),
-                        const Divider(height: 1),
-                        SwitchListTile(
-                          value: appState.danmakuBold,
-                          onChanged: (v) => appState.setDanmakuBold(v),
-                          title: const Text('粗体'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                      ],
+                    const Divider(height: 1),
+                    _SliderTile(
+                      leading: const Icon(Icons.vertical_align_bottom_outlined),
+                      title: const Text('底部弹幕最大行数'),
+                      value: bottomLines.toDouble(),
+                      min: 0,
+                      max: 40,
+                      divisions: 40,
+                      trailing: Text('$bottomLines'),
+                      sliderTheme: _sliderTheme(context, showTicks: true),
+                      onChanged: (v) =>
+                          setState(() => _bottomMaxLinesDraft = v),
+                      onChangeEnd: (v) async {
+                        setState(() => _bottomMaxLinesDraft = null);
+                        await appState.setDanmakuBottomMaxLines(v.round());
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  _Section(
-                    title: '杂项',
-                    enableBlur: enableBlur,
-                    child: Column(
-                      children: [
-                        SwitchListTile(
-                          value: appState.danmakuRememberSelectedSource,
-                          onChanged: (v) =>
-                              appState.setDanmakuRememberSelectedSource(v),
-                          title: const Text('记忆手动选择的弹幕'),
-                          subtitle: const Text('开启后优先加载上次手动选择的弹幕'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        const Divider(height: 1),
-                        SwitchListTile(
-                          value: appState.danmakuMergeDuplicates,
-                          onChanged: (v) =>
-                              appState.setDanmakuMergeDuplicates(v),
-                          title: const Text('合并重复弹幕'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        const Divider(height: 1),
-                        SwitchListTile(
-                          value: appState.danmakuPreventOverlap,
-                          onChanged: (v) =>
-                              appState.setDanmakuPreventOverlap(v),
-                          title: const Text('防止弹幕重叠'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.block_outlined),
-                          title: const Text('弹幕屏蔽词'),
-                          subtitle: const Text('添加屏蔽词；正则用 /.../ 包裹'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: _showBlockWordsSheet,
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.rule_folder_outlined),
-                          title: const Text('弹幕匹配模式'),
-                          trailing: DropdownButtonHideUnderline(
-                            child: DropdownButton<DanmakuMatchMode>(
-                              value: appState.danmakuMatchMode,
-                              items: DanmakuMatchMode.values
-                                  .map(
-                                    (m) => DropdownMenuItem(
-                                      value: m,
-                                      child: Text(m.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) {
-                                if (v == null) return;
-                                appState.setDanmakuMatchMode(v);
-                              },
-                            ),
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.translate_outlined),
-                          title: const Text('弹幕简繁体转换'),
-                          trailing: DropdownButtonHideUnderline(
-                            child: DropdownButton<DanmakuChConvert>(
-                              value: appState.danmakuChConvert,
-                              items: DanmakuChConvert.values
-                                  .map(
-                                    (v) => DropdownMenuItem(
-                                      value: v,
-                                      child: Text(v.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) {
-                                if (v == null) return;
-                                appState.setDanmakuChConvert(v);
-                              },
-                            ),
-                          ),
-                        ),
-                      ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _Section(
+                title: '弹幕样式',
+                enableBlur: enableBlur,
+                child: Column(
+                  children: [
+                    _SliderTile(
+                      leading: const Icon(Icons.format_size),
+                      title: const Text('弹幕缩放'),
+                      value: scale.clamp(0.5, 1.6),
+                      min: 0.5,
+                      max: 1.6,
+                      trailing: Text('${scale.toStringAsFixed(2)}x'),
+                      sliderTheme: _sliderTheme(context),
+                      onChanged: (v) => setState(() => _scaleDraft = v),
+                      onChangeEnd: (v) async {
+                        setState(() => _scaleDraft = null);
+                        await appState.setDanmakuScale(v);
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  _Section(
-                    title: '在线弹幕',
-                    subtitle: '支持 dandanplay API v2 兼容服务',
-                    enableBlur: enableBlur,
-                    child: Column(
-                      children: [
-                        const ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.cloud_outlined),
-                          title: Text('弹幕 API URL'),
-                          subtitle: Text('支持多个，长按拖动调整优先级（越靠前优先尝试）'),
-                        ),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _apiUrlCtrl,
-                                decoration: const InputDecoration(
-                                  labelText: '添加弹幕 API URL',
-                                  hintText: 'https://api.dandanplay.net',
+                    const Divider(height: 1),
+                    _SliderTile(
+                      leading: const Icon(Icons.opacity_outlined),
+                      title: const Text('弹幕透明度'),
+                      value: opacity.clamp(0.2, 1.0),
+                      min: 0.2,
+                      max: 1.0,
+                      trailing: Text('${(opacity * 100).round()}%'),
+                      sliderTheme: _sliderTheme(context),
+                      onChanged: (v) => setState(() => _opacityDraft = v),
+                      onChangeEnd: (v) async {
+                        setState(() => _opacityDraft = null);
+                        await appState.setDanmakuOpacity(v);
+                      },
+                    ),
+                    const Divider(height: 1),
+                    _SliderTile(
+                      leading: const Icon(Icons.speed_outlined),
+                      title: const Text('弹幕滚动速度'),
+                      value: speed.clamp(0.4, 2.5),
+                      min: 0.4,
+                      max: 2.5,
+                      trailing: Text('${speed.toStringAsFixed(2)}x'),
+                      sliderTheme: _sliderTheme(context),
+                      onChanged: (v) => setState(() => _speedDraft = v),
+                      onChangeEnd: (v) async {
+                        setState(() => _speedDraft = null);
+                        await appState.setDanmakuSpeed(v);
+                      },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.danmakuBold,
+                      onChanged: (v) => appState.setDanmakuBold(v),
+                      title: const Text('粗体'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _Section(
+                title: '杂项',
+                enableBlur: enableBlur,
+                child: Column(
+                  children: [
+                    SwitchListTile(
+                      value: appState.danmakuRememberSelectedSource,
+                      onChanged: (v) =>
+                          appState.setDanmakuRememberSelectedSource(v),
+                      title: const Text('记忆手动选择的弹幕'),
+                      subtitle: const Text('开启后优先加载上次手动选择的弹幕'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.danmakuMergeDuplicates,
+                      onChanged: (v) => appState.setDanmakuMergeDuplicates(v),
+                      title: const Text('合并重复弹幕'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.danmakuPreventOverlap,
+                      onChanged: (v) => appState.setDanmakuPreventOverlap(v),
+                      title: const Text('防止弹幕重叠'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.block_outlined),
+                      title: const Text('弹幕屏蔽词'),
+                      subtitle: const Text('添加屏蔽词；正则用 /.../ 包裹'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _showBlockWordsSheet,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.rule_folder_outlined),
+                      title: const Text('弹幕匹配模式'),
+                      trailing: DropdownButtonHideUnderline(
+                        child: DropdownButton<DanmakuMatchMode>(
+                          value: appState.danmakuMatchMode,
+                          items: DanmakuMatchMode.values
+                              .map(
+                                (m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Text(m.label),
                                 ),
-                                onSubmitted: (_) => _addApiUrl(),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            FilledButton(
-                              onPressed: _addApiUrl,
-                              child: const Text('添加'),
-                            ),
-                          ],
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            appState.setDanmakuMatchMode(v);
+                          },
                         ),
-                        const SizedBox(height: 10),
-                        if (appState.danmakuApiUrls.isEmpty)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 6),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                '尚未添加在线弹幕源',
-                                style: TextStyle(fontSize: 12),
-                              ),
-                            ),
-                          )
-                        else
-                          ReorderableListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            buildDefaultDragHandles: false,
-                            itemCount: appState.danmakuApiUrls.length,
-                            onReorder: appState.reorderDanmakuApiUrls,
-                            itemBuilder: (context, index) {
-                              final url = appState.danmakuApiUrls[index];
-                              return ListTile(
-                                key: ValueKey(url),
-                                contentPadding: EdgeInsets.zero,
-                                leading: ReorderableDragStartListener(
-                                  index: index,
-                                  child: const Icon(Icons.drag_handle),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.translate_outlined),
+                      title: const Text('弹幕简繁体转换'),
+                      trailing: DropdownButtonHideUnderline(
+                        child: DropdownButton<DanmakuChConvert>(
+                          value: appState.danmakuChConvert,
+                          items: DanmakuChConvert.values
+                              .map(
+                                (v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v.label),
                                 ),
-                                title: Text(url),
-                                trailing: IconButton(
-                                  tooltip: '删除',
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () =>
-                                      appState.removeDanmakuApiUrlAt(index),
-                                ),
-                              );
-                            },
-                          ),
-                        const Divider(height: 16),
-                        ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.vpn_key_outlined),
-                          title: const Text('弹弹play 开放平台凭证（可选）'),
-                          subtitle: const Text('使用官方源时通常需要配置 AppId/AppSecret'),
-                          trailing: TextButton(
-                            onPressed: () async {
-                              final ok =
-                                  await launchUrlString(_openPlatformUrl);
-                              if (!ok && context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('无法打开链接')),
-                                );
-                              }
-                            },
-                            child: const Text('说明'),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            appState.setDanmakuChConvert(v);
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _Section(
+                title: '在线弹幕',
+                subtitle: '支持 dandanplay API v2 兼容服务',
+                enableBlur: enableBlur,
+                child: Column(
+                  children: [
+                    const ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.cloud_outlined),
+                      title: Text('弹幕 API URL'),
+                      subtitle: Text('支持多个，长按拖动调整优先级（越靠前优先尝试）'),
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _apiUrlCtrl,
+                            decoration: const InputDecoration(
+                              labelText: '添加弹幕 API URL',
+                              hintText: 'https://api.dandanplay.net',
+                            ),
+                            onSubmitted: (_) => _addApiUrl(),
                           ),
                         ),
-                        TextField(
-                          controller: _appIdCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'AppId',
-                          ),
-                          onChanged: (_) => _scheduleSaveCreds(),
+                        const SizedBox(width: 12),
+                        FilledButton(
+                          onPressed: _addApiUrl,
+                          child: const Text('添加'),
                         ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: _appSecretCtrl,
-                          decoration: InputDecoration(
-                            labelText: 'AppSecret',
-                            suffixIcon: IconButton(
-                              tooltip: _showSecret ? '隐藏' : '显示',
-                              icon: Icon(
-                                _showSecret
-                                    ? Icons.visibility_off_outlined
-                                    : Icons.visibility_outlined,
-                              ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (appState.danmakuApiUrls.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 6),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '尚未添加在线弹幕源',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      )
+                    else
+                      ReorderableListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        buildDefaultDragHandles: false,
+                        itemCount: appState.danmakuApiUrls.length,
+                        onReorder: appState.reorderDanmakuApiUrls,
+                        itemBuilder: (context, index) {
+                          final url = appState.danmakuApiUrls[index];
+                          return ListTile(
+                            key: ValueKey(url),
+                            contentPadding: EdgeInsets.zero,
+                            leading: ReorderableDragStartListener(
+                              index: index,
+                              child: const Icon(Icons.drag_handle),
+                            ),
+                            title: Text(url),
+                            trailing: IconButton(
+                              tooltip: '删除',
+                              icon: const Icon(Icons.delete_outline),
                               onPressed: () =>
-                                  setState(() => _showSecret = !_showSecret),
+                                  appState.removeDanmakuApiUrlAt(index),
                             ),
-                          ),
-                          obscureText: !_showSecret,
-                          onChanged: (_) => _scheduleSaveCreds(),
-                        ),
-                      ],
+                          );
+                        },
+                      ),
+                    const Divider(height: 16),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.vpn_key_outlined),
+                      title: const Text('弹弹play 开放平台凭证（可选）'),
+                      subtitle: const Text('使用官方源时通常需要配置 AppId/AppSecret'),
+                      trailing: TextButton(
+                        onPressed: () async {
+                          final ok = await launchUrlString(_openPlatformUrl);
+                          if (!ok && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('无法打开链接')),
+                            );
+                          }
+                        },
+                        child: const Text('说明'),
+                      ),
                     ),
-                  ),
-                ],
+                    TextField(
+                      controller: _appIdCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'AppId',
+                      ),
+                      onChanged: (_) => _scheduleSaveCreds(),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _appSecretCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'AppSecret',
+                        suffixIcon: IconButton(
+                          tooltip: _showSecret ? '隐藏' : '显示',
+                          icon: Icon(
+                            _showSecret
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                          ),
+                          onPressed: () =>
+                              setState(() => _showSecret = !_showSecret),
+                        ),
+                      ),
+                      obscureText: !_showSecret,
+                      onChanged: (_) => _scheduleSaveCreds(),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

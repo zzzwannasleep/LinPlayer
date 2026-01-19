@@ -19,7 +19,7 @@ void main() {
     expect(appState.themeMode, ThemeMode.dark);
     expect(appState.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(appState.useDynamicColor, isFalse);
-    expect(appState.themeTemplate, ThemeTemplate.warm);
+    expect(appState.uiTemplate, UiTemplate.washiWatercolor);
     expect(appState.preferHardwareDecode, isFalse);
     expect(appState.playerCore, PlayerCore.exo);
     expect(appState.preferredAudioLang, 'jpn');
@@ -59,7 +59,7 @@ void main() {
 
     expect(reloaded.themeMode, ThemeMode.dark);
     expect(reloaded.uiScaleFactor, closeTo(1.25, 0.0001));
-    expect(reloaded.themeTemplate, ThemeTemplate.warm);
+    expect(reloaded.uiTemplate, UiTemplate.washiWatercolor);
     expect(reloaded.servers.length, 2);
     expect(reloaded.activeServerId, 'srv_1');
     expect(reloaded.activeServer?.name, 'Home');
@@ -87,7 +87,7 @@ void main() {
     expect(restored.themeMode, ThemeMode.dark);
     expect(restored.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(restored.useDynamicColor, isFalse);
-    expect(restored.themeTemplate, ThemeTemplate.warm);
+    expect(restored.uiTemplate, UiTemplate.washiWatercolor);
     expect(restored.playerCore, PlayerCore.exo);
     expect(restored.servers.length, 2);
     expect(restored.activeServerId, 'srv_1');
@@ -133,8 +133,10 @@ void main() {
 
     expect(restored.servers.length, 2);
     expect(restored.activeServerId, 'srv_1');
-    expect(restored.servers.firstWhere((s) => s.id == 'srv_1').token, 'token_demo');
-    expect(restored.servers.firstWhere((s) => s.id == 'srv_2').token, 'token_demo2');
+    expect(restored.servers.firstWhere((s) => s.id == 'srv_1').token,
+        'token_demo');
+    expect(restored.servers.firstWhere((s) => s.id == 'srv_2').token,
+        'token_demo2');
     expect(restored.serverIconLibraryUrls, const [
       'https://example.com/icons.json',
       'http://foo.bar/iconlib.json?token=1',
