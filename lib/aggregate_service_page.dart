@@ -174,6 +174,34 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
     return 'S${s.toString().padLeft(2, '0')}';
   }
 
+  List<MediaItem> _latestWatchPerSeries(List<MediaItem> items) {
+    final visible = items.where((e) => e.playbackPositionTicks > 0).toList();
+    if (visible.isEmpty) return const [];
+
+    final seenSeries = <String>{};
+    final result = <MediaItem>[];
+    for (final item in visible) {
+      final isEpisode = item.type.toLowerCase() == 'episode';
+      if (!isEpisode) {
+        result.add(item);
+        continue;
+      }
+
+      final seriesId = item.seriesId?.trim() ?? '';
+      final seriesName = item.seriesName.trim();
+      final seriesKey = seriesId.isNotEmpty
+          ? seriesId
+          : (seriesName.isNotEmpty
+              ? 'name:${seriesName.toLowerCase()}'
+              : item.id);
+
+      if (seenSeries.add(seriesKey)) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
   @override
   Widget build(BuildContext context) {
     final servers = widget.appState.servers;
@@ -197,11 +225,14 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                 items: [],
               );
 
+          final visibleItems = _latestWatchPerSeries(state.items);
           final headerSubtitle = state.loading
               ? '加载中…'
               : (state.error != null
                   ? '加载失败'
-                  : (state.items.isEmpty ? '暂无记录' : '${state.items.length} 条'));
+                  : (visibleItems.isEmpty
+                      ? '暂无记录'
+                      : '${visibleItems.length} 条'));
 
           return ExpansionTile(
             initiallyExpanded: index == 0,
@@ -210,7 +241,8 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
               name: server.name,
               radius: 18,
             ),
-            title: Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+            title:
+                Text(server.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(headerSubtitle),
             childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             children: [
@@ -225,12 +257,12 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                     ),
                   ),
                 )
-              else if (state.items.isEmpty && !state.loading)
+              else if (visibleItems.isEmpty && !state.loading)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Text('暂无观看记录'),
                 )
-              else if (state.loading && state.items.isEmpty)
+              else if (state.loading && visibleItems.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Center(child: CircularProgressIndicator()),
@@ -239,17 +271,15 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                 ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: state.items.length,
+                  itemCount: visibleItems.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, i) {
-                    final item = state.items[i];
+                    final item = visibleItems[i];
                     final isEpisode = item.type.toLowerCase() == 'episode';
-                    final title =
-                        isEpisode && item.seriesName.trim().isNotEmpty
-                            ? item.seriesName
-                            : item.name;
-                    final pos =
-                        _ticksToDuration(item.playbackPositionTicks);
+                    final title = isEpisode && item.seriesName.trim().isNotEmpty
+                        ? item.seriesName
+                        : item.name;
+                    final pos = _ticksToDuration(item.playbackPositionTicks);
                     final tag = isEpisode ? _episodeTag(item) : '';
                     final subParts = <String>[
                       if (tag.isNotEmpty) tag,
@@ -316,7 +346,8 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
                               )
                             : null,
                         onTap: () {
@@ -692,10 +723,12 @@ class _AggregateSearchTabStatefulState
   List<_WorkGroup> _sortedGroups(List<_WorkGroup> input) {
     final groups = List<_WorkGroup>.from(input);
     groups.sort((a, b) {
-      if (a.type.toLowerCase() == 'series' && b.type.toLowerCase() != 'series') {
+      if (a.type.toLowerCase() == 'series' &&
+          b.type.toLowerCase() != 'series') {
         return -1;
       }
-      if (a.type.toLowerCase() != 'series' && b.type.toLowerCase() == 'series') {
+      if (a.type.toLowerCase() != 'series' &&
+          b.type.toLowerCase() == 'series') {
         return 1;
       }
 
@@ -814,7 +847,8 @@ class _AggregateSearchTabStatefulState
                               height: 104,
                               child: ColoredBox(
                                 color: Colors.black12,
-                                child: Center(child: Icon(Icons.image_outlined)),
+                                child:
+                                    Center(child: Icon(Icons.image_outlined)),
                               ),
                             )
                           : CachedNetworkImage(
@@ -829,7 +863,8 @@ class _AggregateSearchTabStatefulState
                                 height: 104,
                                 child: ColoredBox(
                                   color: Colors.black12,
-                                  child: Center(child: Icon(Icons.image_outlined)),
+                                  child:
+                                      Center(child: Icon(Icons.image_outlined)),
                                 ),
                               ),
                               errorWidget: (_, __, ___) => const SizedBox(
@@ -1044,8 +1079,7 @@ class _ServerProgressRow extends StatelessWidget {
                   return Text(
                     '获取中…',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color:
-                              Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                   );
                 }
