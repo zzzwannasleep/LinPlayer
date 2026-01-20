@@ -467,65 +467,65 @@ class _HomePageState extends State<HomePage> {
         ];
 
         final appBar = _index == 0
-            ? GlassAppBar(
-                enableBlur: enableBlur,
-                child: AppBar(
-                  centerTitle: false,
-                  title: _ServerGlassButton(
+            ? AppBar(
+                backgroundColor: Colors.transparent,
+                surfaceTintColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                shape: const RoundedRectangleBorder(),
+                centerTitle: false,
+                title: _ServerGlassButton(
+                  enableBlur: enableBlur,
+                  useGlass: usesGlassSurfaces,
+                  serverName: widget.appState.activeServer?.name ?? 'LinPlayer',
+                  iconUrl: widget.appState.activeServer?.iconUrl,
+                  onTap: widget.appState.hasActiveServer ? _switchServer : null,
+                ),
+                actions: [
+                  _GlassActionIconButton(
+                    icon: Icons.search,
+                    tooltip: '搜索',
                     enableBlur: enableBlur,
                     useGlass: usesGlassSurfaces,
-                    serverName:
-                        widget.appState.activeServer?.name ?? 'LinPlayer',
-                    iconUrl: widget.appState.activeServer?.iconUrl,
-                    onTap:
-                        widget.appState.hasActiveServer ? _switchServer : null,
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SearchPage(appState: widget.appState),
+                        ),
+                      );
+                    },
                   ),
-                  actions: [
-                    _GlassActionIconButton(
-                      icon: Icons.search,
-                      tooltip: '搜索',
-                      enableBlur: enableBlur,
-                      useGlass: usesGlassSurfaces,
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                SearchPage(appState: widget.appState),
-                          ),
-                        );
-                      },
-                    ),
-                    _GlassActionIconButton(
-                      icon: Icons.video_library_outlined,
-                      tooltip: '媒体库',
-                      enableBlur: enableBlur,
-                      useGlass: usesGlassSurfaces,
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                LibraryPage(appState: widget.appState),
-                          ),
-                        );
-                      },
-                    ),
-                    _GlassActionIconButton(
-                      icon: Icons.alt_route_outlined,
-                      tooltip: '线路',
-                      enableBlur: enableBlur,
-                      useGlass: usesGlassSurfaces,
-                      onPressed: _showRoutePicker,
-                    ),
-                    _GlassActionIconButton(
-                      icon: Icons.palette_outlined,
-                      tooltip: '主题',
-                      enableBlur: enableBlur,
-                      useGlass: usesGlassSurfaces,
-                      onPressed: _showThemeSheet,
-                    ),
-                    const SizedBox(width: 4),
-                  ],
-                ),
+                  _GlassActionIconButton(
+                    icon: Icons.video_library_outlined,
+                    tooltip: '媒体库',
+                    enableBlur: enableBlur,
+                    useGlass: usesGlassSurfaces,
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              LibraryPage(appState: widget.appState),
+                        ),
+                      );
+                    },
+                  ),
+                  _GlassActionIconButton(
+                    icon: Icons.alt_route_outlined,
+                    tooltip: '线路',
+                    enableBlur: enableBlur,
+                    useGlass: usesGlassSurfaces,
+                    onPressed: _showRoutePicker,
+                  ),
+                  _GlassActionIconButton(
+                    icon: Icons.palette_outlined,
+                    tooltip: '主题',
+                    enableBlur: enableBlur,
+                    useGlass: usesGlassSurfaces,
+                    onPressed: _showThemeSheet,
+                  ),
+                  const SizedBox(width: 4),
+                ],
               )
             : null;
 
@@ -563,23 +563,25 @@ class _HomePageState extends State<HomePage> {
           );
         }
         return Scaffold(
+          extendBody: _index == 0,
           appBar: appBar,
           body: pages[_index],
           bottomNavigationBar: isTv
-              ? GlassNavigationBar(
-                  enableBlur: enableBlur,
-                  child: NavigationBar(
-                    selectedIndex: _index,
-                    onDestinationSelected: (i) => setState(() => _index = i),
-                    destinations: const [
-                      NavigationDestination(
-                          icon: Icon(Icons.home_outlined), label: '首页'),
-                      NavigationDestination(
-                          icon: Icon(Icons.folder_open), label: '本地'),
-                      NavigationDestination(
-                          icon: Icon(Icons.settings_outlined), label: '设置'),
-                    ],
-                  ),
+              ? NavigationBar(
+                  backgroundColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  elevation: 0,
+                  selectedIndex: _index,
+                  onDestinationSelected: (i) => setState(() => _index = i),
+                  destinations: const [
+                    NavigationDestination(
+                        icon: Icon(Icons.home_outlined), label: '首页'),
+                    NavigationDestination(
+                        icon: Icon(Icons.folder_open), label: '本地'),
+                    NavigationDestination(
+                        icon: Icon(Icons.settings_outlined), label: '设置'),
+                  ],
                 )
               : _FloatingBottomNav(
                   selectedIndex: _index,
@@ -906,76 +908,85 @@ class _HomeBody extends StatelessWidget {
       }
     }
 
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        padding: const EdgeInsets.only(bottom: 16),
-        children: [
-          if (showSearchBar) ...[
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: TextField(
-                readOnly: true,
-                showCursor: false,
-                enableInteractiveSelection: false,
-                decoration: const InputDecoration(
-                  hintText: '搜索片名…',
-                  prefixIcon: Icon(Icons.search),
-                ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => SearchPage(appState: appState),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
+    final bottomPadding = isTv ? 90.0 : 120.0;
+
+    return Column(
+      children: [
+        if (showSearchBar) ...[
           const SizedBox(height: 8),
-          _RandomRecommendSection(appState: appState, isTv: isTv),
-          _ContinueWatchingSection(appState: appState, isTv: isTv),
-          if (appState.showHomeLibraryQuickAccess)
-            _LibraryQuickAccessSection(appState: appState, isTv: isTv),
-          if (loading) const LinearProgressIndicator(),
-          for (final sec in sections)
-            if (sec.items.isNotEmpty) ...[
-              _HomeSectionHeader(
-                template: appState.uiTemplate,
-                title: sec.displayName,
-                count: sec.key.startsWith('lib_')
-                    ? appState.getTotal(sec.key.substring(4))
-                    : 0,
-                onTap: () {
-                  if (!sec.key.startsWith('lib_')) return;
-                  final libId = sec.key.substring(4);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => LibraryItemsPage(
-                        appState: appState,
-                        parentId: libId,
-                        title: sec.displayName,
-                        isTv: isTv,
-                      ),
-                    ),
-                  );
-                },
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: TextField(
+              readOnly: true,
+              showCursor: false,
+              enableInteractiveSelection: false,
+              decoration: const InputDecoration(
+                hintText: '搜索片名…',
+                prefixIcon: Icon(Icons.search),
               ),
-              _HomeSectionCarousel(
-                items: sec.items,
-                appState: appState,
-                isTv: isTv,
-              ),
-            ] else
-              const SizedBox.shrink(),
-          if (sections.every((e) => e.items.isEmpty) && !loading)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: Text('暂无可展示内容')),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => SearchPage(appState: appState),
+                  ),
+                );
+              },
             ),
+          ),
+          const SizedBox(height: 8),
         ],
-      ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: onRefresh,
+            child: ListView(
+              padding: EdgeInsets.only(bottom: bottomPadding),
+              children: [
+                const SizedBox(height: 8),
+                _RandomRecommendSection(appState: appState, isTv: isTv),
+                _ContinueWatchingSection(appState: appState, isTv: isTv),
+                if (appState.showHomeLibraryQuickAccess)
+                  _LibraryQuickAccessSection(appState: appState, isTv: isTv),
+                if (loading) const LinearProgressIndicator(),
+                for (final sec in sections)
+                  if (sec.items.isNotEmpty) ...[
+                    _HomeSectionHeader(
+                      template: appState.uiTemplate,
+                      title: sec.displayName,
+                      count: sec.key.startsWith('lib_')
+                          ? appState.getTotal(sec.key.substring(4))
+                          : 0,
+                      onTap: () {
+                        if (!sec.key.startsWith('lib_')) return;
+                        final libId = sec.key.substring(4);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => LibraryItemsPage(
+                              appState: appState,
+                              parentId: libId,
+                              title: sec.displayName,
+                              isTv: isTv,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    _HomeSectionCarousel(
+                      items: sec.items,
+                      appState: appState,
+                      isTv: isTv,
+                    ),
+                  ] else
+                    const SizedBox.shrink(),
+                if (sections.every((e) => e.items.isEmpty) && !loading)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: Text('暂无可展示内容')),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
