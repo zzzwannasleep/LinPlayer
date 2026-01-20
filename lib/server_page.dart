@@ -274,6 +274,15 @@ class _ServerCardState extends State<_ServerCard> {
         child: Stack(
           children: [
             Align(
+              alignment: Alignment.topLeft,
+              child: server.lastErrorCode == null
+                  ? const SizedBox.shrink()
+                  : _ServerErrorBadge(
+                      code: server.lastErrorCode!,
+                      message: server.lastErrorMessage,
+                    ),
+            ),
+            Align(
               alignment: Alignment.topRight,
               child: active
                   ? const Icon(Icons.check_circle, size: 16)
@@ -419,11 +428,56 @@ class _ServerListTileState extends State<_ServerListTile> {
                 ],
               ),
             ),
+            if (server.lastErrorCode != null) ...[
+              _ServerErrorBadge(
+                code: server.lastErrorCode!,
+                message: server.lastErrorMessage,
+              ),
+              const SizedBox(width: 8),
+            ],
             if (active) const Icon(Icons.check_circle, size: 18),
           ],
         ),
       ),
     );
+  }
+}
+
+class _ServerErrorBadge extends StatelessWidget {
+  const _ServerErrorBadge({required this.code, this.message});
+
+  final int code;
+  final String? message;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = colorScheme.brightness == Brightness.dark;
+
+    final bg = colorScheme.errorContainer
+        .withValues(alpha: isDark ? 0.56 : 0.74);
+    final border = colorScheme.error.withValues(alpha: isDark ? 0.55 : 0.4);
+    final fg = colorScheme.onErrorContainer;
+
+    final child = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: border, width: 0.8),
+      ),
+      child: Text(
+        'HTTP $code',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: fg,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+
+    final tooltip = (message ?? '').trim();
+    if (tooltip.isEmpty) return child;
+    return Tooltip(message: tooltip, child: child);
   }
 }
 

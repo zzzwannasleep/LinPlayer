@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lin_player/main.dart';
 import 'package:lin_player/state/app_state.dart';
+import 'package:lin_player/state/server_profile.dart';
 
 void main() {
   testWidgets('Shows server screen by default', (WidgetTester tester) async {
@@ -48,6 +49,8 @@ class _FakeAppState extends AppState {
     String? displayName,
     String? remark,
     String? iconUrl,
+    List<CustomDomain>? customDomains,
+    bool activate = true,
   }) async {
     addServerCalled = true;
     lastPassword = password;

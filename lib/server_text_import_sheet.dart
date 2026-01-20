@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'services/server_share_text_parser.dart';
 import 'state/app_state.dart';
+import 'state/server_profile.dart';
 import 'src/ui/server_icon_picker.dart';
 
 class ServerTextImportSheet extends StatefulWidget {
@@ -182,6 +183,10 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
                 final scheme =
                     (uri?.scheme.toLowerCase() == 'http') ? 'http' : 'https';
                 final remark = g.remarkCtrl.text.trim();
+                final extraDomains = lines
+                    .where((l) => l.url != primaryUrl)
+                    .map((l) => CustomDomain(name: l.name, url: l.url))
+                    .toList(growable: false);
 
                 await widget.appState.addServer(
                   hostOrUrl: primaryUrl,
@@ -192,6 +197,8 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
                   displayName: null,
                   remark: remark.isEmpty ? null : remark,
                   iconUrl: g.iconUrl,
+                  customDomains: extraDomains,
+                  activate: false,
                 );
 
                 final err = widget.appState.error;
@@ -201,16 +208,6 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
                 }
                 success++;
                 results.add('成功 $display');
-
-                for (final l in lines) {
-                  if (l.url == primaryUrl) continue;
-                  try {
-                    await widget.appState
-                        .addCustomDomain(name: l.name, url: l.url);
-                  } catch (e) {
-                    results.add('警告 $display：添加线路失败（${l.url}）$e');
-                  }
-                }
               }
 
               if (dctx.mounted) Navigator.of(dctx).pop();

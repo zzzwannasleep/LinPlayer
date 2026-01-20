@@ -177,11 +177,23 @@ class AppState extends ChangeNotifier {
   String? get activeServerId => _activeServerId;
   ServerProfile? get activeServer =>
       _servers.firstWhereOrNull((s) => s.id == _activeServerId);
-  bool get hasActiveServer => activeServer != null;
+  bool get hasActiveServer =>
+      activeServer != null && baseUrl != null && token != null && userId != null;
 
-  String? get baseUrl => activeServer?.baseUrl;
-  String? get token => activeServer?.token;
-  String? get userId => activeServer?.userId;
+  String? get baseUrl {
+    final v = activeServer?.baseUrl;
+    return (v == null || v.trim().isEmpty) ? null : v;
+  }
+
+  String? get token {
+    final v = activeServer?.token;
+    return (v == null || v.trim().isEmpty) ? null : v;
+  }
+
+  String? get userId {
+    final v = activeServer?.userId;
+    return (v == null || v.trim().isEmpty) ? null : v;
+  }
 
   String get deviceId => _deviceId;
   List<DomainInfo> get domains => _domains;
@@ -374,9 +386,7 @@ class AppState extends ChangeNotifier {
           for (final item in decoded) {
             if (item is Map<String, dynamic>) {
               final s = ServerProfile.fromJson(item);
-              if (s.id.isNotEmpty &&
-                  s.baseUrl.isNotEmpty &&
-                  s.token.isNotEmpty) {
+              if (s.id.isNotEmpty && s.baseUrl.isNotEmpty) {
                 _servers.add(s);
               }
             }
@@ -984,16 +994,23 @@ class AppState extends ChangeNotifier {
     String? displayName,
     String? remark,
     String? iconUrl,
+    List<CustomDomain>? customDomains,
+    bool activate = true,
   }) async {
     _loading = true;
     _error = null;
     notifyListeners();
 
+    final fixedUsername = username.trim();
+    final fixedRemark = (remark ?? '').trim();
+    final fixedIconUrl = iconUrl?.trim();
+    final fixedDisplayName = (displayName ?? '').trim();
+
     try {
       final api =
           EmbyApi(hostOrUrl: hostOrUrl, preferredScheme: scheme, port: port);
       final auth = await api.authenticate(
-        username: username,
+        username: fixedUsername,
         password: password,
         deviceId: _deviceId,
       );
@@ -1006,16 +1023,8 @@ class AppState extends ChangeNotifier {
         // best-effort
       }
 
-      final lines = await api.fetchDomains(auth.token, auth.baseUrlUsed,
-          allowFailure: true);
-      final libs = await api.fetchLibraries(
-        token: auth.token,
-        baseUrl: auth.baseUrlUsed,
-        userId: auth.userId,
-      );
-
-      final name = (displayName ?? '').trim().isNotEmpty
-          ? displayName!.trim()
+      final name = fixedDisplayName.isNotEmpty
+          ? fixedDisplayName
           : ((serverName ?? '').trim().isNotEmpty
               ? serverName!.trim()
               : _suggestServerName(auth.baseUrlUsed));
@@ -1023,19 +1032,21 @@ class AppState extends ChangeNotifier {
       final existingIndex =
           _servers.indexWhere((s) => s.baseUrl == auth.baseUrlUsed);
 
-      final resolvedIconUrl = switch (iconUrl) {
+      final resolvedIconUrl = switch (fixedIconUrl) {
         null => existingIndex >= 0 ? _servers[existingIndex].iconUrl : null,
-        _ => iconUrl.trim().isEmpty ? null : iconUrl.trim(),
+        _ => fixedIconUrl.isEmpty ? null : fixedIconUrl,
       };
       final server = ServerProfile(
         id: existingIndex >= 0 ? _servers[existingIndex].id : _randomId(),
-        username: username.trim(),
+        username: fixedUsername,
         name: name,
-        remark: (remark ?? '').trim().isEmpty ? null : remark!.trim(),
+        remark: fixedRemark.isEmpty ? null : fixedRemark,
         iconUrl: resolvedIconUrl,
         baseUrl: auth.baseUrlUsed,
         token: auth.token,
         userId: auth.userId,
+        lastErrorCode: null,
+        lastErrorMessage: null,
         hiddenLibraries:
             existingIndex >= 0 ? _servers[existingIndex].hiddenLibraries : null,
         domainRemarks:
@@ -1044,28 +1055,93 @@ class AppState extends ChangeNotifier {
             existingIndex >= 0 ? _servers[existingIndex].customDomains : null,
       );
 
+      if (customDomains != null && customDomains.isNotEmpty) {
+        _mergeCustomDomains(server, customDomains);
+      }
+
       if (existingIndex >= 0) {
         _servers[existingIndex] = server;
       } else {
         _servers.add(server);
       }
 
-      _activeServerId = server.id;
-      _domains = lines;
-      _libraries = libs;
-      _itemsCache.clear();
-      _itemsTotal.clear();
-      _homeSections.clear();
-      _randomRecommendations = null;
-      _randomRecommendationsInFlight = null;
-      _continueWatching = null;
-      _continueWatchingInFlight = null;
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+
+      if (!activate) return;
+
+      try {
+        final lines = await api.fetchDomains(
+          auth.token,
+          auth.baseUrlUsed,
+          allowFailure: true,
+        );
+        final libs = await api.fetchLibraries(
+          token: auth.token,
+          baseUrl: auth.baseUrlUsed,
+          userId: auth.userId,
+        );
+
+        _activeServerId = server.id;
+        _domains = lines;
+        _libraries = libs;
+        _itemsCache.clear();
+        _itemsTotal.clear();
+        _homeSections.clear();
+        _randomRecommendations = null;
+        _randomRecommendationsInFlight = null;
+        _continueWatching = null;
+        _continueWatchingInFlight = null;
+        await prefs.setString(_kActiveServerIdKey, server.id);
+      } catch (e) {
+        final msg = e.toString();
+        _error = msg;
+        server.lastErrorCode = _extractHttpStatusCode(msg);
+        server.lastErrorMessage = msg;
+        await _persistServers(prefs);
+      }
+    } catch (e) {
+      final msg = e.toString();
+      _error = msg;
+
+      final code = _extractHttpStatusCode(msg);
+      final inferredBaseUrl = _tryExtractAuthBaseUrl(msg) ??
+          _normalizeServerBaseUrl(
+              _normalizeUrl(hostOrUrl, defaultScheme: scheme));
+
+      final existingIndex =
+          _servers.indexWhere((s) => s.baseUrl == inferredBaseUrl);
+
+      if (existingIndex >= 0) {
+        final s = _servers[existingIndex];
+        s.lastErrorCode = code;
+        s.lastErrorMessage = msg;
+      } else {
+        final name = fixedDisplayName.isNotEmpty
+            ? fixedDisplayName
+            : _suggestServerName(inferredBaseUrl);
+        final server = ServerProfile(
+          id: _randomId(),
+          username: fixedUsername,
+          name: name,
+          remark: fixedRemark.isEmpty ? null : fixedRemark,
+          iconUrl: (fixedIconUrl == null || fixedIconUrl.isEmpty)
+              ? null
+              : fixedIconUrl,
+          baseUrl: inferredBaseUrl,
+          token: '',
+          userId: '',
+          lastErrorCode: code,
+          lastErrorMessage: msg,
+        );
+        if (customDomains != null && customDomains.isNotEmpty) {
+          _mergeCustomDomains(server, customDomains);
+        }
+        _servers.add(server);
+      }
 
       final prefs = await SharedPreferences.getInstance();
       await _persistServers(prefs);
-      await prefs.setString(_kActiveServerIdKey, server.id);
-    } catch (e) {
-      _error = e.toString();
     } finally {
       _loading = false;
       notifyListeners();
@@ -1379,6 +1455,101 @@ class AppState extends ChangeNotifier {
     final parsed = Uri.tryParse(v);
     if (parsed != null && parsed.hasScheme) return v;
     return '$defaultScheme://$v';
+  }
+
+  static int? _extractHttpStatusCode(String message) {
+    final v = message.trim();
+    if (v.isEmpty) return null;
+
+    final patterns = <RegExp>[
+      RegExp(r'HTTP\s+(\d{3})', caseSensitive: false),
+      RegExp(r'[（(](\d{3})[)）]'),
+    ];
+
+    for (final re in patterns) {
+      final m = re.firstMatch(v);
+      if (m == null) continue;
+      final code = int.tryParse(m.group(1) ?? '');
+      if (code != null && code >= 100 && code <= 599) return code;
+    }
+    return null;
+  }
+
+  static String? _tryExtractAuthBaseUrl(String message) {
+    final v = message.trim();
+    if (v.isEmpty) return null;
+
+    final matches = RegExp(
+      r'(https?://[^\s|]+):\s*HTTP\s*(\d{3})',
+      caseSensitive: false,
+    ).allMatches(v).toList(growable: false);
+
+    if (matches.isEmpty) return null;
+
+    RegExpMatch pick(RegExpMatch a, RegExpMatch b) {
+      final ac = int.tryParse(a.group(2) ?? '') ?? 0;
+      final bc = int.tryParse(b.group(2) ?? '') ?? 0;
+      final aAuth = ac == 401 || ac == 403;
+      final bAuth = bc == 401 || bc == 403;
+      if (aAuth != bAuth) return aAuth ? a : b;
+      return a;
+    }
+
+    var best = matches.first;
+    for (final m in matches.skip(1)) {
+      best = pick(best, m);
+    }
+
+    final url = best.group(1) ?? '';
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.host.isEmpty) return null;
+
+    final segs = uri.pathSegments.toList(growable: false);
+    if (segs.length < 3) return _normalizeServerBaseUrl(uri.toString());
+
+    final tail = segs.skip(segs.length - 3).map((e) => e.toLowerCase()).toList();
+    if (tail[0] != 'emby' || tail[1] != 'users' || tail[2] != 'authenticatebyname') {
+      return _normalizeServerBaseUrl(uri.toString());
+    }
+
+    final kept = segs.take(segs.length - 3).toList(growable: false);
+    final path = kept.isEmpty ? '' : '/${kept.join('/')}';
+    return _normalizeServerBaseUrl(
+      uri.replace(path: path, query: null, fragment: null).toString(),
+    );
+  }
+
+  static String _normalizeServerBaseUrl(String raw) {
+    final v = raw.trim();
+    if (v.isEmpty) return '';
+
+    Uri? uri;
+    try {
+      uri = Uri.parse(v);
+    } catch (_) {
+      return v;
+    }
+    if (uri.host.isEmpty) return v;
+
+    final segments = uri.pathSegments.toList(growable: true);
+    while (segments.isNotEmpty) {
+      final last = segments.last.toLowerCase();
+      final secondLast =
+          segments.length >= 2 ? segments[segments.length - 2].toLowerCase() : null;
+      if (secondLast == 'web' && last == 'index.html') {
+        segments.removeLast();
+        segments.removeLast();
+        continue;
+      }
+      if (last == 'web') {
+        segments.removeLast();
+        continue;
+      }
+      break;
+    }
+
+    final path = segments.isEmpty ? '' : '/${segments.join('/')}';
+    return uri.replace(path: path, query: null, fragment: null).toString();
   }
 
   static bool _isValidHttpUrl(String raw) {
@@ -2047,6 +2218,16 @@ class AppState extends ChangeNotifier {
       return [v];
     }
     return const [];
+  }
+
+  static void _mergeCustomDomains(ServerProfile server, List<CustomDomain> domains) {
+    for (final domain in domains) {
+      final fixedUrl = _normalizeUrl(domain.url, defaultScheme: 'https');
+      if (!_isValidHttpUrl(fixedUrl)) continue;
+      final fixedName = domain.name.trim().isEmpty ? fixedUrl : domain.name.trim();
+      server.customDomains.removeWhere((d) => d.url == fixedUrl);
+      server.customDomains.add(CustomDomain(name: fixedName, url: fixedUrl));
+    }
   }
 }
 

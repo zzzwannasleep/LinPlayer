@@ -8,6 +8,8 @@ class ServerProfile {
     required this.userId,
     this.remark,
     this.iconUrl,
+    this.lastErrorCode,
+    this.lastErrorMessage,
     Set<String>? hiddenLibraries,
     Map<String, String>? domainRemarks,
     List<CustomDomain>? customDomains,
@@ -29,6 +31,12 @@ class ServerProfile {
   String token;
   String userId;
 
+  /// Last known error code for this server (typically HTTP status code).
+  int? lastErrorCode;
+
+  /// Last known error message for this server.
+  String? lastErrorMessage;
+
   final Set<String> hiddenLibraries;
 
   /// User-defined remarks for domains/lines. Key is domain url.
@@ -46,6 +54,8 @@ class ServerProfile {
         'baseUrl': baseUrl,
         'token': token,
         'userId': userId,
+        'lastErrorCode': lastErrorCode,
+        'lastErrorMessage': lastErrorMessage,
         'hiddenLibraries': hiddenLibraries.toList(),
         'domainRemarks': domainRemarks,
         'customDomains': customDomains.map((e) => e.toJson()).toList(),
@@ -61,6 +71,10 @@ class ServerProfile {
       baseUrl: json['baseUrl'] as String? ?? '',
       token: json['token'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
+      lastErrorCode: json['lastErrorCode'] is int
+          ? json['lastErrorCode'] as int
+          : int.tryParse((json['lastErrorCode'] ?? '').toString()),
+      lastErrorMessage: json['lastErrorMessage'] as String?,
       hiddenLibraries: ((json['hiddenLibraries'] as List?)?.cast<String>() ??
               const <String>[])
           .toSet(),
