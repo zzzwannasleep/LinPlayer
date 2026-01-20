@@ -617,7 +617,6 @@ class _ImportGroupDraft {
     required this.remarkCtrl,
     required this.lines,
     required this.primaryUrl,
-    this.iconUrl,
   });
 
   String get displayName {
