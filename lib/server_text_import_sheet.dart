@@ -200,8 +200,8 @@ class _ServerTextImportSheetState extends State<ServerTextImportSheet> {
             }());
           }
 
-          return WillPopScope(
-            onWillPop: () async => false,
+          return PopScope(
+            canPop: false,
             child: AlertDialog(
               title: const Text('正在批量导入'),
               content: Row(
