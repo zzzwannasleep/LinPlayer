@@ -911,14 +911,19 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
           alpha: isDark ? 0.66 : 0.56,
         ),
-      UiTemplate.mangaStoryboard => Colors.black.withValues(
-          alpha: isDark ? 0.76 : 0.66,
-        ),
+      UiTemplate.mangaStoryboard => isDark
+          ? Colors.black.withValues(alpha: 0.76)
+          : Colors.white.withValues(alpha: 0.82),
       UiTemplate.proTool =>
         Colors.black.withValues(alpha: isDark ? 0.68 : 0.58),
       UiTemplate.minimalCovers =>
         Colors.black.withValues(alpha: isDark ? 0.64 : 0.55),
     };
+
+    final heroTitleColor =
+        (template == UiTemplate.mangaStoryboard && !isDark)
+            ? Colors.black
+            : Colors.white;
 
     Widget heroImage = Image.network(
       hero,
@@ -960,7 +965,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                         children: [
                           Text(item.name,
                               style: theme.textTheme.headlineSmall?.copyWith(
-                                  color: Colors.white,
+                                  color: heroTitleColor,
                                   fontWeight: FontWeight.w700)),
                           const SizedBox(height: 8),
                           Wrap(

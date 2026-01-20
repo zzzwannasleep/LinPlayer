@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -535,23 +537,123 @@ class _HomePageState extends State<HomePage> {
         return Scaffold(
           appBar: appBar,
           body: pages[_index],
-          bottomNavigationBar: GlassNavigationBar(
-            enableBlur: enableBlur,
-            child: NavigationBar(
-              selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
-              destinations: const [
-                NavigationDestination(
-                    icon: Icon(Icons.home_outlined), label: '首页'),
-                NavigationDestination(
-                    icon: Icon(Icons.folder_open), label: '本地'),
-                NavigationDestination(
-                    icon: Icon(Icons.settings_outlined), label: '设置'),
-              ],
-            ),
-          ),
+          bottomNavigationBar: isTv
+              ? GlassNavigationBar(
+                  enableBlur: enableBlur,
+                  child: NavigationBar(
+                    selectedIndex: _index,
+                    onDestinationSelected: (i) => setState(() => _index = i),
+                    destinations: const [
+                      NavigationDestination(
+                          icon: Icon(Icons.home_outlined), label: '首页'),
+                      NavigationDestination(
+                          icon: Icon(Icons.folder_open), label: '本地'),
+                      NavigationDestination(
+                          icon: Icon(Icons.settings_outlined), label: '设置'),
+                    ],
+                  ),
+                )
+              : _FloatingBottomNav(
+                  selectedIndex: _index,
+                  onSelected: (i) => setState(() => _index = i),
+                  enableBlur: enableBlur,
+                  template: template,
+                ),
         );
       },
+    );
+  }
+}
+
+class _FloatingBottomNav extends StatelessWidget {
+  const _FloatingBottomNav({
+    required this.selectedIndex,
+    required this.onSelected,
+    required this.enableBlur,
+    required this.template,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  final bool enableBlur;
+  final UiTemplate template;
+
+  bool get _usesGlassSurfaces =>
+      template == UiTemplate.candyGlass ||
+      template == UiTemplate.stickerJournal ||
+      template == UiTemplate.neonHud ||
+      template == UiTemplate.washiWatercolor;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+
+    Widget buildButton({
+      required int index,
+      required IconData icon,
+      required String tooltip,
+    }) {
+      final selected = index == selectedIndex;
+      final bg = selected
+          ? scheme.primary.withValues(alpha: isDark ? 0.90 : 0.96)
+          : scheme.surfaceContainerHigh.withValues(alpha: isDark ? 0.78 : 0.92);
+      final fg = selected ? scheme.onPrimary : scheme.onSurfaceVariant;
+      final elevation = selected ? 10.0 : 5.0;
+      final shadowColor =
+          scheme.shadow.withValues(alpha: isDark ? 0.32 : 0.18);
+
+      Widget child = Material(
+        color: bg,
+        shape: const CircleBorder(),
+        elevation: elevation,
+        shadowColor: shadowColor,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => onSelected(index),
+          child: Center(child: Icon(icon, color: fg, size: 22)),
+        ),
+      );
+
+      if (_usesGlassSurfaces && enableBlur) {
+        child = ClipOval(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+            child: child,
+          ),
+        );
+      }
+
+      return Semantics(
+        button: true,
+        selected: selected,
+        label: tooltip,
+        child: Tooltip(
+          message: tooltip,
+          child: SizedBox(width: 44, height: 44, child: child),
+        ),
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      left: false,
+      right: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            buildButton(index: 0, icon: Icons.home_outlined, tooltip: '首页'),
+            const SizedBox(width: 14),
+            buildButton(index: 1, icon: Icons.folder_open, tooltip: '本地'),
+            const SizedBox(width: 14),
+            buildButton(
+                index: 2, icon: Icons.settings_outlined, tooltip: '设置'),
+          ],
+        ),
+      ),
     );
   }
 }
