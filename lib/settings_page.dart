@@ -10,6 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'danmaku_settings_page.dart';
+import 'server_text_import_sheet.dart';
 import 'services/app_update_service.dart';
 import 'services/cover_cache_manager.dart';
 import 'services/stream_cache.dart';
@@ -56,6 +57,15 @@ class _SettingsPageState extends State<SettingsPage> {
         _currentVersionFull = AppUpdateService.packageVersionFull(info);
       });
     } catch (_) {}
+  }
+
+  Future<void> _openServerTextImport(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => ServerTextImportSheet(appState: widget.appState),
+    );
   }
 
   String _backupFileName() {
@@ -1426,6 +1436,15 @@ class _SettingsPageState extends State<SettingsPage> {
                       subtitle: const Text('覆盖本机全部设置与 Emby 服务器列表'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => _importBackup(context),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.content_paste_outlined),
+                      title: const Text('从文本提取并导入服务器'),
+                      subtitle: const Text('解析“线路 & 用户密码”消息，批量创建服务器/线路'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _openServerTextImport(context),
                     ),
                   ],
                 ),
