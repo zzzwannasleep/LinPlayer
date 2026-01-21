@@ -1,6 +1,6 @@
 # LinPlayer 源码导览（Architecture）
 
-本文面向想二次开发/排查问题的开发者，解释项目目录结构、核心模块职责，以及 Emby 接口与播放链路的实现逻辑。
+本文面向想二次开发/排查问题的开发者，解释项目目录结构、核心模块职责，以及 Emby/Jellyfin 接口与播放链路（并包含 Plex PIN 登录添加服务器）的实现逻辑。
 
 ## 目录结构（顶层）
 
@@ -12,7 +12,7 @@
 - `assets/`：项目资源（目前主要用于应用图标）。
   - `assets/app_icon.jpg`：图标源文件。
   - `assets/README.md`：图标生成说明（`dart run flutter_launcher_icons`）。
-- `lib/`：Flutter 应用代码（UI、状态、Emby API 封装、播放器封装）。
+- `lib/`：Flutter 应用代码（UI、状态、Emby/Jellyfin API 封装、Plex PIN 登录封装、播放器封装）。
 - `packages/`：项目内置/改造后的依赖。
   - `packages/media_kit_patched/`：对 `media_kit` 的小改造版本，用于更细粒度传递 mpv 参数（见下文）。
   - `packages/video_player_android_patched/`：对 `video_player_android` 的改造版本，用于 Exo 内核的字幕轨道枚举/选择与 platformView 字幕渲染（见下文）。
@@ -54,21 +54,24 @@
     - SharedPreferences 持久化（servers/activeServer/theme/danmaku...）
   - 关键流程：
     - `addServer(...)`：登录并保存服务器（调用 `EmbyApi.authenticate` → `fetchDomains`/`fetchLibraries`）。
+    - `addPlexServer(...)`：保存 Plex 服务器信息（Token/连接地址等；当前仅保存登录信息，暂不支持浏览/播放）。
     - `enterServer(serverId)`：切换服务器并刷新线路/媒体库/首页区块。
     - `loadItems(...)`：拉取分页列表并写入缓存（用于库列表、搜索等）。
     - `loadHome()`：按媒体库拉取最新条目，组成首页区块。
 - `lib/state/server_profile.dart`
   - 角色：单个服务器配置与用户偏好。
   - 字段：
-    - `baseUrl/token/userId`：Emby 访问三要素
+    - `serverType/apiPrefix`：服务器类型与 API 前缀（Emby 常见为 `emby`，Jellyfin 常见为空字符串）。
+    - `baseUrl/token/userId`：Emby/Jellyfin 访问三要素
     - `hiddenLibraries`：隐藏的媒体库（长按媒体库卡片切换）
     - `domainRemarks`：线路备注（可选）
+    - `plexMachineIdentifier`：Plex 服务器机器标识（可选，用于后续匹配/识别）
 - `lib/state/danmaku_preferences.dart`
   - 角色：弹幕偏好枚举与序列化（本地/在线）。
 
-### Emby 接口封装（HTTP）
+### Emby/Jellyfin 接口封装（HTTP）
 - `lib/services/emby_api.dart`
-  - 角色：封装 Emby 常用接口 + 必要的 Header（`X-Emby-Token`、`X-Emby-Authorization`、`User-Agent`）。
+  - 角色：封装 Emby/Jellyfin 常用接口 + 必要的 Header（`X-Emby-Token`、`X-Emby-Authorization`、`User-Agent`）。
   - 主要方法（对应 UI/状态层调用）：
     - `authenticate(username, password, deviceId)`：
       - 尝试 http/https + 可选端口组合（`_candidates()`），命中后返回 `token/userId/baseUrlUsed`。
@@ -88,6 +91,16 @@
       - 详情页、章节、相似推荐等。
   - `imageUrl(...)` / `personImageUrl(...)`：
     - 统一生成封面/人物图片 URL（UI 用 `CachedNetworkImage` 加载）。
+
+### Plex 接口封装（PIN 登录）
+- `lib/services/plex_api.dart`
+  - 角色：封装 Plex PIN 登录与资源列表接口（plex.tv API v2），用于在 App 内完成“账号授权 → 选择服务器 → 保存”。
+  - 主要方法：
+    - `createPin()`：创建 PIN（返回 `id/code/expiresAt`）。
+    - `buildAuthUrl(code)`：拼接授权 URL（在外部浏览器打开）。
+    - `fetchPin(id)`：轮询 PIN 状态，直到获得 `authToken`。
+    - `fetchResources(authToken)`：拉取账号资源列表并筛选 `server`。
+  - UI 集成：`lib/server_page.dart` 中选择 Plex 后可用“账号登录（推荐）”走浏览器授权，或在“手动添加”里登录获取 Token 并填入。
 
 ### 在线弹幕接口封装（弹弹play）
 - `lib/services/dandanplay_api.dart`
@@ -163,6 +176,12 @@
 3. `EmbyApi.fetchDomains(...)`（可选）+ `EmbyApi.fetchLibraries(...)`
 4. `AppState` 保存到 SharedPreferences，并切换到 `HomePage`
 
+### Plex PIN 登录（仅保存）
+1. `ServerPage` 选择 Plex → 调用 `PlexApi.createPin()`，并在外部浏览器打开 `buildAuthUrl(code)`。
+2. App 轮询 `PlexApi.fetchPin(id)` 直到拿到 `authToken`。
+3. 账号登录模式：`PlexApi.fetchResources(authToken)` 获取服务器列表 → 用户选择服务器 → `AppState.addPlexServer(...)` 保存。
+4. 手动添加模式：用户填写服务器地址/端口 + Token → `AppState.addPlexServer(...)` 保存。
+
 ### 列表与搜索
 - `AppState.loadItems(...)` → `EmbyApi.fetchItems(...)` → 写入 `_itemsCache/_itemsTotal` → UI 通过 `AnimatedBuilder` 刷新。
 
@@ -183,7 +202,8 @@
 ## 你要改哪里？（常见改动入口）
 
 - **改 UI/交互**：优先看 `lib/home_page.dart`、`lib/show_detail_page.dart`、`lib/play_network_page.dart`。
-- **改 Emby 接口/字段**：`lib/services/emby_api.dart`（必要时同步调整 `MediaItem` 字段解析）。
+- **改 Emby/Jellyfin 接口/字段**：`lib/services/emby_api.dart`（必要时同步调整 `MediaItem` 字段解析）。
+- **改 Plex PIN 登录/资源列表**：`lib/services/plex_api.dart`、`lib/server_page.dart`。
 - **改缓存/状态/持久化**：`lib/state/app_state.dart`。
 - **调播放器体验（硬解/缓冲/参数）**：`lib/player_service.dart`。
 - **改主题/视觉规范**：`lib/src/ui/app_theme.dart`。

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/app_icon.jpg" width="120" alt="LinPlayer" />
   <h1>LinPlayer</h1>
-  <p>跨平台（Windows / macOS / Linux / Android / Android TV）本地 + Emby 媒体播放器</p>
+  <p>跨平台（Windows / macOS / Linux / Android / Android TV）本地 + Emby/Jellyfin 媒体播放器（含 Plex PIN 登录）</p>
   <p>
     <a href="#download">下载</a> ·
     <a href="#features">特性</a> ·
@@ -11,7 +11,7 @@
   </p>
 </div>
 
-A cross-platform local & Emby media player built with Flutter.
+A cross-platform local & Emby/Jellyfin media player built with Flutter (with Plex PIN flow for adding servers).
 
 ---
 
@@ -31,11 +31,12 @@ A cross-platform local & Emby media player built with Flutter.
 | iOS | `LinPlayer-iOS-unsigned.ipa` | 未签名 IPA，需要自行签名/侧载 |
 | Linux | （暂无 CI 产物） | 可自行 `flutter build linux` |
 
-> 说明：本项目为非官方客户端，与 Emby / 弹弹play 无官方隶属关系。
+> 说明：本项目为非官方客户端，与 Emby / Jellyfin / Plex / 弹弹play 无官方隶属关系。
 
 ## <a id="features"></a>特性
 
-- Emby 登录：支持 http/https 与自定义端口；未部署扩展线路服务也能使用（线路列表为空但播放/浏览可用）。
+- Emby/Jellyfin 登录：支持 http/https 与自定义端口；若未部署（可选的）线路扩展服务，线路列表可能为空，但播放/浏览可用。
+- Plex 登录（PIN）：支持浏览器授权获取 Token，并从账号资源列表中选择服务器保存（当前仅保存登录信息，暂不支持浏览/播放）。
 - 首页推荐（类似 Emby）：继续观看 / 最新电影 / 最新剧集 横向卡片流，点击即播或进详情。
 - 媒体库分层：库 → Series/Season → Episode；电影可直接播放；搜索支持无限下拉懒加载。
 - 播放链接更稳：自动携带 `MediaSourceId`，减少 404。
@@ -47,6 +48,7 @@ A cross-platform local & Emby media player built with Flutter.
 
 ## <a id="quickstart"></a>快速上手
 1. 启动应用，进入「连接服务器」页：
+   - 选择服务器类型：Emby / Jellyfin（默认 Emby）。
    - 选择协议：http / https（默认 https）。
    - 填写服务器地址（域名或 IP）。
    - 端口：留空自动 80/443，或手动填写如 8096/8920。
@@ -54,6 +56,8 @@ A cross-platform local & Emby media player built with Flutter.
 2. 登录后默认进入首页：继续观看、最新电影/剧集；点击卡片可播放（电影/剧集）或下钻（剧集/合集）。
 3. 媒体库页：显示库海报；点库进入分层列表，可搜索并无限滚动；Episode / Movie 直接播放，Series / Season / Folder 继续下钻。
 4. 本地播放器：底部导航「本地」进入，选择本地文件播放。
+
+> Plex：在「连接服务器」页选择 Plex，可用「账号登录（推荐）」走浏览器 PIN 授权并选择服务器；或切换到「手动添加」填写服务器地址/端口（默认 32400）+ Plex Token。当前版本仅保存登录信息，暂不支持浏览/播放。
 
 ## 播放器内核（MPV / Exo）
 
@@ -173,6 +177,7 @@ flutter build windows --release
 - `lib/player_screen.dart` 本地播放器
 - `lib/player_service.dart` 播放器封装（mpv 参数、硬解/软解）
 - `lib/services/emby_api.dart` Emby API 封装
+- `lib/services/plex_api.dart` Plex PIN 登录/资源列表 API 封装
 - `lib/services/dandanplay_api.dart` 在线弹幕（弹弹play API v2）封装
 - `lib/src/player/danmaku.dart` 弹幕解析（本地 XML / 在线列表）
 - `lib/src/player/danmaku_stage.dart` 弹幕渲染（覆盖层）
@@ -180,3 +185,5 @@ flutter build windows --release
 
 ## 鸣谢
 - Emby 项目与文档：https://dev.emby.media/doc/restapi/index.html
+- Jellyfin API 文档：https://api.jellyfin.org/
+- Plex 开发者文档：https://developer.plex.tv/pms/
