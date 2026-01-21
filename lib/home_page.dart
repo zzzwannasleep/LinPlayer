@@ -1145,14 +1145,6 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
     return v.replaceAll(RegExp(r'\\s+'), ' ');
   }
 
-  static String _yearOf(String? premiereDate) {
-    final d = (premiereDate ?? '').trim();
-    if (d.isEmpty) return '';
-    final parsed = DateTime.tryParse(d);
-    if (parsed != null) return parsed.year.toString();
-    return d.length >= 4 ? d.substring(0, 4) : '';
-  }
-
   static String? _providerId(MediaItem item, String key) {
     final direct = item.providerIds[key];
     if (direct != null && direct.trim().isNotEmpty) return direct.trim();
@@ -1180,22 +1172,6 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
     }
 
     return '';
-  }
-
-  static String _movieKey(MediaItem item) {
-    final pid = _providerKey(item, const ['Tmdb', 'Imdb']);
-    if (pid.isNotEmpty) return 'movie:$pid';
-    final name = _normalize(item.name);
-    final year = _yearOf(item.premiereDate);
-    return year.isEmpty ? 'movie:name:$name' : 'movie:name:$name|y:$year';
-  }
-
-  static String _seriesKey(MediaItem item) {
-    final pid = _providerKey(item, const ['Tvdb', 'Tmdb', 'Imdb']);
-    if (pid.isNotEmpty) return 'series:$pid';
-    final name = _normalize(item.name);
-    final year = _yearOf(item.premiereDate);
-    return year.isEmpty ? 'series:name:$name' : 'series:name:$name|y:$year';
   }
 
   static String _episodeKey(MediaItem item) {
