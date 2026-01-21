@@ -176,9 +176,15 @@ jobs:
             if [[ -f "dist/LinPlayer-Android-arm64-v8a.apk" ]]; then
               gh release upload "$target" "dist/LinPlayer-Android-arm64-v8a.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
               ANDROID_FOUND=1
+            elif [[ -f "dist/app-arm64-v8a-release.apk" ]]; then
+              gh release upload "$target" "dist/app-arm64-v8a-release.apk#LinPlayer-Android-arm64-v8a.apk" --clobber
+              ANDROID_FOUND=1
             fi
             if [[ -f "dist/LinPlayer-Android-armeabi-v7a.apk" ]]; then
               gh release upload "$target" "dist/LinPlayer-Android-armeabi-v7a.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
+              ANDROID_FOUND=1
+            elif [[ -f "dist/app-armeabi-v7a-release.apk" ]]; then
+              gh release upload "$target" "dist/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
               ANDROID_FOUND=1
             fi
             if [[ -f "dist/LinPlayer-Android.apk" ]]; then
