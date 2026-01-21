@@ -122,7 +122,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
     super.initState();
     final baseUrl = _baseUrl;
     if (baseUrl != null && baseUrl.trim().isNotEmpty) {
-      _embyApi = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+      _embyApi = EmbyApi(
+        hostOrUrl: baseUrl,
+        preferredScheme: 'https',
+        apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+      );
     }
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
@@ -236,7 +240,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
     int videoDurationSeconds = 0;
     try {
       final api = _embyApi ??
-          EmbyApi(hostOrUrl: appState.baseUrl!, preferredScheme: 'https');
+          EmbyApi(
+            hostOrUrl: appState.baseUrl!,
+            preferredScheme: 'https',
+            apiPrefix: appState.apiPrefix,
+          );
       final item = await api.fetchItemDetail(
         token: appState.token!,
         baseUrl: appState.baseUrl!,
@@ -734,7 +742,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
         final token = _token!;
         final userId = _userId!;
         final api = _embyApi ??
-            EmbyApi(hostOrUrl: base, preferredScheme: 'https');
+            EmbyApi(
+              hostOrUrl: base,
+              preferredScheme: 'https',
+              apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+            );
         final info = await api.fetchPlaybackInfo(
           token: token,
           baseUrl: base,
@@ -960,7 +972,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage> {
 
     try {
       final api = _embyApi ??
-          EmbyApi(hostOrUrl: base, preferredScheme: 'https');
+          EmbyApi(
+            hostOrUrl: base,
+            preferredScheme: 'https',
+            apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+          );
       final info = await api.fetchPlaybackInfo(
         token: token,
         baseUrl: base,

@@ -93,7 +93,11 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      final api = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+      final api = EmbyApi(
+        hostOrUrl: baseUrl,
+        preferredScheme: 'https',
+        apiPrefix: widget.appState.apiPrefix,
+      );
       final fetched = await api.fetchItems(
         token: token,
         baseUrl: baseUrl,
@@ -257,6 +261,7 @@ class _SearchGridItem extends StatelessWidget {
             baseUrl: appState.baseUrl!,
             itemId: item.id,
             token: appState.token!,
+            apiPrefix: appState.apiPrefix,
             imageType: 'Primary',
             maxWidth: 320,
           )

@@ -1,3 +1,5 @@
+import 'media_server_type.dart';
+
 class ServerProfile {
   ServerProfile({
     required this.id,
@@ -6,6 +8,9 @@ class ServerProfile {
     required this.baseUrl,
     required this.token,
     required this.userId,
+    this.serverType = MediaServerType.emby,
+    this.apiPrefix = 'emby',
+    this.plexMachineIdentifier,
     this.remark,
     this.iconUrl,
     this.lastErrorCode,
@@ -18,6 +23,7 @@ class ServerProfile {
         customDomains = customDomains ?? <CustomDomain>[];
 
   final String id;
+  MediaServerType serverType;
   String username;
   String name;
   String? remark;
@@ -30,6 +36,12 @@ class ServerProfile {
 
   String token;
   String userId;
+
+  /// API prefix for Emby-like servers. Common values: "emby" or "".
+  String apiPrefix;
+
+  /// Plex machine identifier (optional, used for future server matching).
+  String? plexMachineIdentifier;
 
   /// Last known error code for this server (typically HTTP status code).
   int? lastErrorCode;
@@ -47,6 +59,7 @@ class ServerProfile {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'serverType': serverType.id,
         'username': username,
         'name': name,
         'remark': remark,
@@ -54,6 +67,8 @@ class ServerProfile {
         'baseUrl': baseUrl,
         'token': token,
         'userId': userId,
+        'apiPrefix': apiPrefix,
+        'plexMachineIdentifier': plexMachineIdentifier,
         'lastErrorCode': lastErrorCode,
         'lastErrorMessage': lastErrorMessage,
         'hiddenLibraries': hiddenLibraries.toList(),
@@ -64,6 +79,7 @@ class ServerProfile {
   factory ServerProfile.fromJson(Map<String, dynamic> json) {
     return ServerProfile(
       id: json['id'] as String? ?? '',
+      serverType: mediaServerTypeFromId(json['serverType']?.toString()),
       username: json['username'] as String? ?? '',
       name: json['name'] as String? ?? '',
       remark: json['remark'] as String?,
@@ -71,6 +87,8 @@ class ServerProfile {
       baseUrl: json['baseUrl'] as String? ?? '',
       token: json['token'] as String? ?? '',
       userId: json['userId'] as String? ?? '',
+      apiPrefix: (json['apiPrefix'] as String?) ?? 'emby',
+      plexMachineIdentifier: json['plexMachineIdentifier'] as String?,
       lastErrorCode: json['lastErrorCode'] is int
           ? json['lastErrorCode'] as int
           : int.tryParse((json['lastErrorCode'] ?? '').toString()),

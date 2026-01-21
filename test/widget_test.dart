@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:lin_player/main.dart';
 import 'package:lin_player/state/app_state.dart';
+import 'package:lin_player/state/media_server_type.dart';
 import 'package:lin_player/state/server_profile.dart';
 
 void main() {
@@ -44,6 +45,7 @@ class _FakeAppState extends AppState {
     required String hostOrUrl,
     required String scheme,
     String? port,
+    MediaServerType serverType = MediaServerType.emby,
     required String username,
     required String password,
     String? displayName,

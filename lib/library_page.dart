@@ -79,6 +79,7 @@ class _LibraryPageState extends State<LibraryPage> {
                             baseUrl: widget.appState.baseUrl!,
                             itemId: lib.id,
                             token: widget.appState.token!,
+                            apiPrefix: widget.appState.apiPrefix,
                             maxWidth: 400,
                           );
                           return MediaBackdropTile(

@@ -155,6 +155,7 @@ class _GridItem extends StatelessWidget {
             baseUrl: appState.baseUrl!,
             itemId: item.id,
             token: appState.token!,
+            apiPrefix: appState.apiPrefix,
             imageType: 'Primary',
             maxWidth: 320,
           )

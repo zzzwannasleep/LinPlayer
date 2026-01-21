@@ -1043,7 +1043,11 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
       return const _MediaStats(movieCount: 0, seriesCount: 0, tvEpisodeCount: 0);
     }
 
-    final api = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+    final api = EmbyApi(
+      hostOrUrl: baseUrl,
+      preferredScheme: 'https',
+      apiPrefix: widget.appState.apiPrefix,
+    );
 
     const fields =
         'ProviderIds,SeriesId,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,PremiereDate';
@@ -1607,15 +1611,16 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
                             if (pos > Duration.zero) '观看到 ${_fmt(pos)}',
                           ].join(' · ');
 
-                          final img = item.hasImage
-                              ? EmbyApi.imageUrl(
-                                  baseUrl: widget.appState.baseUrl!,
-                                  itemId: item.id,
-                                  token: widget.appState.token!,
-                                  imageType: 'Primary',
-                                  maxWidth: 640,
-                                )
-                              : null;
+                           final img = item.hasImage
+                               ? EmbyApi.imageUrl(
+                                   baseUrl: widget.appState.baseUrl!,
+                                   itemId: item.id,
+                                   token: widget.appState.token!,
+                                   apiPrefix: widget.appState.apiPrefix,
+                                   imageType: 'Primary',
+                                   maxWidth: 640,
+                                 )
+                               : null;
 
                           return SizedBox(
                             width: itemWidth,
@@ -1847,12 +1852,13 @@ class _LibraryQuickAccessSectionState
                     separatorBuilder: (_, __) => const SizedBox(width: spacing),
                     itemBuilder: (context, index) {
                       final lib = libs[index];
-                      final imageUrl = EmbyApi.imageUrl(
-                        baseUrl: baseUrl,
-                        itemId: lib.id,
-                        token: token,
-                        maxWidth: 640,
-                      );
+                       final imageUrl = EmbyApi.imageUrl(
+                         baseUrl: baseUrl,
+                         itemId: lib.id,
+                         token: token,
+                         apiPrefix: widget.appState.apiPrefix,
+                         maxWidth: 640,
+                       );
                       return SizedBox(
                         width: itemWidth,
                         child: MediaBackdropTile(
@@ -1947,24 +1953,26 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
     // Pre-cache banner images to avoid reloading when swiping back & forth.
     final urls = <String>{};
     for (final item in picked) {
-      urls.add(
-        EmbyApi.imageUrl(
-          baseUrl: baseUrl,
-          itemId: item.id,
-          token: token,
-          imageType: 'Backdrop',
-          maxWidth: 1280,
-        ),
-      );
-      urls.add(
-        EmbyApi.imageUrl(
-          baseUrl: baseUrl,
-          itemId: item.id,
-          token: token,
-          imageType: 'Primary',
-          maxWidth: 720,
-        ),
-      );
+        urls.add(
+          EmbyApi.imageUrl(
+            baseUrl: baseUrl,
+            itemId: item.id,
+            token: token,
+            apiPrefix: widget.appState.apiPrefix,
+            imageType: 'Backdrop',
+            maxWidth: 1280,
+          ),
+        );
+        urls.add(
+          EmbyApi.imageUrl(
+            baseUrl: baseUrl,
+            itemId: item.id,
+            token: token,
+            apiPrefix: widget.appState.apiPrefix,
+            imageType: 'Primary',
+            maxWidth: 720,
+          ),
+        );
     }
     _lastImageUrls = urls;
     if (!mounted) return picked;
@@ -2077,6 +2085,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
             baseUrl: baseUrl,
             itemId: item.id,
             token: token,
+            apiPrefix: widget.appState.apiPrefix,
             imageType: 'Backdrop',
             maxWidth: 1280,
           );
@@ -2084,6 +2093,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
             baseUrl: baseUrl,
             itemId: item.id,
             token: token,
+            apiPrefix: widget.appState.apiPrefix,
             imageType: 'Primary',
             maxWidth: 720,
           );
@@ -2699,6 +2709,7 @@ class _HomeCard extends StatelessWidget {
             baseUrl: appState.baseUrl!,
             itemId: item.id,
             token: appState.token!,
+            apiPrefix: appState.apiPrefix,
             maxWidth: isTv ? 320 : 240,
           )
         : null;

@@ -9,6 +9,7 @@ import '../services/emby_api.dart';
 import 'anime4k_preferences.dart';
 import 'danmaku_preferences.dart';
 import 'local_playback_handoff.dart';
+import 'media_server_type.dart';
 import 'preferences.dart';
 import 'server_profile.dart';
 
@@ -194,6 +195,9 @@ class AppState extends ChangeNotifier {
     final v = activeServer?.userId;
     return (v == null || v.trim().isEmpty) ? null : v;
   }
+
+  MediaServerType get serverType => activeServer?.serverType ?? MediaServerType.emby;
+  String get apiPrefix => activeServer?.apiPrefix ?? 'emby';
 
   String get deviceId => _deviceId;
   List<DomainInfo> get domains => _domains;
@@ -989,6 +993,7 @@ class AppState extends ChangeNotifier {
     required String hostOrUrl,
     required String scheme,
     String? port,
+    MediaServerType serverType = MediaServerType.emby,
     required String username,
     required String password,
     String? displayName,
@@ -1007,18 +1012,28 @@ class AppState extends ChangeNotifier {
     final fixedDisplayName = (displayName ?? '').trim();
 
     try {
+      if (!serverType.isEmbyLike) {
+        _error = '当前版本仅支持 Emby/Jellyfin 登录；Plex 请用 Plex 登录入口添加。';
+        return;
+      }
       final api =
           EmbyApi(hostOrUrl: hostOrUrl, preferredScheme: scheme, port: port);
       final auth = await api.authenticate(
         username: fixedUsername,
         password: password,
         deviceId: _deviceId,
+        serverType: serverType,
+      );
+      final apiForServer = EmbyApi(
+        hostOrUrl: auth.baseUrlUsed,
+        preferredScheme: scheme,
+        apiPrefix: auth.apiPrefixUsed,
       );
 
       String? serverName;
       try {
         serverName =
-            await api.fetchServerName(auth.baseUrlUsed, token: auth.token);
+            await apiForServer.fetchServerName(auth.baseUrlUsed, token: auth.token);
       } catch (_) {
         // best-effort
       }
@@ -1029,8 +1044,9 @@ class AppState extends ChangeNotifier {
               ? serverName!.trim()
               : _suggestServerName(auth.baseUrlUsed));
 
-      final existingIndex =
-          _servers.indexWhere((s) => s.baseUrl == auth.baseUrlUsed);
+      final existingIndex = _servers.indexWhere(
+        (s) => s.baseUrl == auth.baseUrlUsed && s.serverType == serverType,
+      );
 
       final resolvedIconUrl = switch (fixedIconUrl) {
         null => existingIndex >= 0 ? _servers[existingIndex].iconUrl : null,
@@ -1038,6 +1054,7 @@ class AppState extends ChangeNotifier {
       };
       final server = ServerProfile(
         id: existingIndex >= 0 ? _servers[existingIndex].id : _randomId(),
+        serverType: serverType,
         username: fixedUsername,
         name: name,
         remark: fixedRemark.isEmpty ? null : fixedRemark,
@@ -1045,6 +1062,7 @@ class AppState extends ChangeNotifier {
         baseUrl: auth.baseUrlUsed,
         token: auth.token,
         userId: auth.userId,
+        apiPrefix: auth.apiPrefixUsed,
         lastErrorCode: null,
         lastErrorMessage: null,
         hiddenLibraries:
@@ -1071,12 +1089,12 @@ class AppState extends ChangeNotifier {
       if (!activate) return;
 
       try {
-        final lines = await api.fetchDomains(
+        final lines = await apiForServer.fetchDomains(
           auth.token,
           auth.baseUrlUsed,
           allowFailure: true,
         );
-        final libs = await api.fetchLibraries(
+        final libs = await apiForServer.fetchLibraries(
           token: auth.token,
           baseUrl: auth.baseUrlUsed,
           userId: auth.userId,
@@ -1109,8 +1127,9 @@ class AppState extends ChangeNotifier {
           _normalizeServerBaseUrl(
               _normalizeUrl(hostOrUrl, defaultScheme: scheme));
 
-      final existingIndex =
-          _servers.indexWhere((s) => s.baseUrl == inferredBaseUrl);
+      final existingIndex = _servers.indexWhere(
+        (s) => s.baseUrl == inferredBaseUrl && s.serverType == serverType,
+      );
 
       if (existingIndex >= 0) {
         final s = _servers[existingIndex];
@@ -1122,6 +1141,7 @@ class AppState extends ChangeNotifier {
             : _suggestServerName(inferredBaseUrl);
         final server = ServerProfile(
           id: _randomId(),
+          serverType: serverType,
           username: fixedUsername,
           name: name,
           remark: fixedRemark.isEmpty ? null : fixedRemark,
@@ -1131,6 +1151,7 @@ class AppState extends ChangeNotifier {
           baseUrl: inferredBaseUrl,
           token: '',
           userId: '',
+          apiPrefix: serverType == MediaServerType.jellyfin ? '' : 'emby',
           lastErrorCode: code,
           lastErrorMessage: msg,
         );
@@ -1148,11 +1169,95 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> enterServer(String serverId) async {
-    if (_activeServerId != serverId) {
-      final server = _servers.firstWhereOrNull((s) => s.id == serverId);
-      if (server == null) return;
+  Future<void> addPlexServer({
+    required String baseUrl,
+    required String token,
+    String? displayName,
+    String? remark,
+    String? iconUrl,
+    String? plexMachineIdentifier,
+  }) async {
+    _loading = true;
+    _error = null;
+    notifyListeners();
 
+    final fixedBaseUrl =
+        _normalizeServerBaseUrl(_normalizeUrl(baseUrl, defaultScheme: 'https'));
+    final fixedToken = token.trim();
+    final fixedName = (displayName ?? '').trim();
+    final fixedRemark = (remark ?? '').trim();
+    final fixedIconUrl = iconUrl?.trim();
+    final fixedMachineId = (plexMachineIdentifier ?? '').trim();
+
+    try {
+      if (fixedBaseUrl.isEmpty || !_isValidHttpUrl(fixedBaseUrl)) {
+        throw const FormatException('Invalid Plex server url');
+      }
+      if (fixedToken.isEmpty) {
+        throw const FormatException('Missing Plex token');
+      }
+
+      final name =
+          fixedName.isNotEmpty ? fixedName : _suggestServerName(fixedBaseUrl);
+
+      final existingIndex = _servers.indexWhere(
+        (s) => s.baseUrl == fixedBaseUrl && s.serverType == MediaServerType.plex,
+      );
+
+      final resolvedIconUrl = switch (fixedIconUrl) {
+        null => existingIndex >= 0 ? _servers[existingIndex].iconUrl : null,
+        _ => fixedIconUrl.isEmpty ? null : fixedIconUrl,
+      };
+
+      final server = ServerProfile(
+        id: existingIndex >= 0 ? _servers[existingIndex].id : _randomId(),
+        serverType: MediaServerType.plex,
+        username: '',
+        name: name,
+        remark: fixedRemark.isEmpty ? null : fixedRemark,
+        iconUrl: resolvedIconUrl,
+        baseUrl: fixedBaseUrl,
+        token: fixedToken,
+        userId: '',
+        apiPrefix: '',
+        plexMachineIdentifier: fixedMachineId.isEmpty ? null : fixedMachineId,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        hiddenLibraries:
+            existingIndex >= 0 ? _servers[existingIndex].hiddenLibraries : null,
+        domainRemarks:
+            existingIndex >= 0 ? _servers[existingIndex].domainRemarks : null,
+        customDomains:
+            existingIndex >= 0 ? _servers[existingIndex].customDomains : null,
+      );
+
+      if (existingIndex >= 0) {
+        _servers[existingIndex] = server;
+      } else {
+        _servers.add(server);
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> enterServer(String serverId) async {
+    final server = _servers.firstWhereOrNull((s) => s.id == serverId);
+    if (server == null) return;
+
+    if (!server.serverType.isEmbyLike) {
+      _error = '${server.serverType.label} 暂未支持浏览/播放（仅可保存登录信息）。';
+      notifyListeners();
+      return;
+    }
+
+    if (_activeServerId != serverId) {
       _activeServerId = serverId;
       _domains = [];
       _libraries = [];
@@ -1220,7 +1325,11 @@ class AppState extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+      final api = EmbyApi(
+        hostOrUrl: baseUrl!,
+        preferredScheme: 'https',
+        apiPrefix: apiPrefix,
+      );
       _domains = await api.fetchDomains(token!, baseUrl!, allowFailure: true);
       _error = null;
     } catch (e) {
@@ -1236,7 +1345,11 @@ class AppState extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+      final api = EmbyApi(
+        hostOrUrl: baseUrl!,
+        preferredScheme: 'https',
+        apiPrefix: apiPrefix,
+      );
       _libraries = await api.fetchLibraries(
         token: token!,
         baseUrl: baseUrl!,
@@ -1272,7 +1385,11 @@ class AppState extends ChangeNotifier {
     if (baseUrl == null || token == null || userId == null) {
       throw Exception('未选择服务器');
     }
-    final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+    final api = EmbyApi(
+      hostOrUrl: baseUrl!,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+    );
     final result = await api.fetchItems(
       token: token!,
       baseUrl: baseUrl!,
@@ -1300,7 +1417,11 @@ class AppState extends ChangeNotifier {
 
   Future<void> loadHome() async {
     if (baseUrl == null || token == null || userId == null) return;
-    final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+    final api = EmbyApi(
+      hostOrUrl: baseUrl!,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+    );
     final Map<String, List<MediaItem>> libraryShows = {};
     for (final lib in _libraries) {
       try {
@@ -1352,7 +1473,11 @@ class AppState extends ChangeNotifier {
   Future<List<MediaItem>> _fetchRandomRecommendations() async {
     if (baseUrl == null || token == null || userId == null) return const [];
 
-    final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+    final api = EmbyApi(
+      hostOrUrl: baseUrl!,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+    );
     // Fetch a few more to increase the chance of getting items with artwork.
     final res = await api.fetchRandomRecommendations(
       token: token!,
@@ -1392,7 +1517,11 @@ class AppState extends ChangeNotifier {
   Future<List<MediaItem>> _fetchContinueWatching() async {
     if (baseUrl == null || token == null || userId == null) return const [];
 
-    final api = EmbyApi(hostOrUrl: baseUrl!, preferredScheme: 'https');
+    final api = EmbyApi(
+      hostOrUrl: baseUrl!,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+    );
     final res = await api.fetchContinueWatching(
       token: token!,
       baseUrl: baseUrl!,

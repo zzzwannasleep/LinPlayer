@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
+import '../state/media_server_type.dart';
+
 class DomainInfo {
   final String name;
   final String url;
@@ -36,8 +38,12 @@ class AuthResult {
   final String token;
   final String baseUrlUsed;
   final String userId;
+  final String apiPrefixUsed;
   AuthResult(
-      {required this.token, required this.baseUrlUsed, required this.userId});
+      {required this.token,
+      required this.baseUrlUsed,
+      required this.userId,
+      this.apiPrefixUsed = 'emby'});
 }
 
 class MediaItem {
@@ -182,10 +188,12 @@ class EmbyApi {
     required String hostOrUrl,
     required String preferredScheme,
     String? port,
+    String apiPrefix = 'emby',
     http.Client? client,
   })  : _hostOrUrl = hostOrUrl.trim(),
         _preferredScheme = preferredScheme,
         _port = port?.trim(),
+        apiPrefix = _normalizeApiPrefix(apiPrefix),
         _client = client ??
             IOClient(
               HttpClient()
@@ -196,7 +204,36 @@ class EmbyApi {
   final String _hostOrUrl;
   final String _preferredScheme;
   final String? _port;
+  final String apiPrefix;
   final http.Client _client;
+
+  static String _normalizeApiPrefix(String raw) {
+    var v = raw.trim();
+    while (v.startsWith('/')) v = v.substring(1);
+    while (v.endsWith('/')) v = v.substring(0, v.length - 1);
+    return v;
+  }
+
+  static String _apiUrlWithPrefix(
+    String baseUrl,
+    String apiPrefix,
+    String path,
+  ) {
+    var base = baseUrl.trim();
+    while (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+
+    final fixedPrefix = _normalizeApiPrefix(apiPrefix);
+    final prefixPart = fixedPrefix.isEmpty ? '' : '/$fixedPrefix';
+
+    final fixedPath = path.trim().startsWith('/') ? path.trim() : '/${path.trim()}';
+    return '$base$prefixPart$fixedPath';
+  }
+
+  String _apiUrl(String baseUrl, String path) {
+    return _apiUrlWithPrefix(baseUrl, apiPrefix, path);
+  }
 
   // Simple device id generator to satisfy Emby header requirements
   static String _randomId() {
@@ -341,10 +378,17 @@ class EmbyApi {
     required String username,
     required String password,
     String? deviceId,
+    MediaServerType serverType = MediaServerType.emby,
   }) async {
     final errors = <String>[];
     for (final base in _candidates()) {
-      final url = Uri.parse('$base/emby/Users/AuthenticateByName');
+      final prefixes = serverType == MediaServerType.jellyfin
+          ? const ['', 'jellyfin', 'emby']
+          : const ['emby'];
+      for (final prefix in prefixes) {
+        final url = Uri.parse(
+          _apiUrlWithPrefix(base, prefix, 'Users/AuthenticateByName'),
+        );
       final body = jsonEncode({
         'Username': username,
         'Pw': password,
@@ -369,13 +413,19 @@ class EmbyApi {
           errors.add('${url.origin}: 未返回 token');
           continue;
         }
-        return AuthResult(token: token, baseUrlUsed: base, userId: userId);
+        return AuthResult(
+          token: token,
+          baseUrlUsed: base,
+          userId: userId,
+          apiPrefixUsed: _normalizeApiPrefix(prefix),
+        );
       } catch (e) {
         if (e is SocketException) {
           errors.add('${url.origin}: DNS/网络不可达 (${e.message})');
         } else {
           errors.add('${url.origin}: $e');
         }
+      }
       }
     }
     throw Exception('登录失败：${errors.join(" | ")}');
@@ -386,8 +436,8 @@ class EmbyApi {
     String? token,
   }) async {
     final urls = [
-      Uri.parse('$baseUrl/emby/System/Info/Public'),
-      Uri.parse('$baseUrl/emby/System/Info'),
+      Uri.parse(_apiUrl(baseUrl, 'System/Info/Public')),
+      Uri.parse(_apiUrl(baseUrl, 'System/Info')),
     ];
 
     for (final url in urls) {
@@ -421,7 +471,7 @@ class EmbyApi {
     String baseUrl, {
     bool allowFailure = true,
   }) async {
-    final url = Uri.parse('$baseUrl/emby/System/Ext/ServerDomains');
+    final url = Uri.parse(_apiUrl(baseUrl, 'System/Ext/ServerDomains'));
     try {
       final resp = await _client.get(url, headers: {
         ..._jsonHeaders(token: token),
@@ -447,7 +497,7 @@ class EmbyApi {
     required String userId,
   }) async {
     // Emby 官方推荐获取视图的接口：/Users/{userId}/Views
-    final url = Uri.parse('$baseUrl/emby/Users/$userId/Views');
+    final url = Uri.parse(_apiUrl(baseUrl, 'Users/$userId/Views'));
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode != 200) {
       throw Exception('拉取媒体库失败（${resp.statusCode}）');
@@ -497,7 +547,7 @@ class EmbyApi {
       params.add('SearchTerm=${Uri.encodeComponent(searchTerm)}');
     }
     final url =
-        Uri.parse('$baseUrl/emby/Users/$userId/Items?${params.join('&')}');
+        Uri.parse(_apiUrl(baseUrl, 'Users/$userId/Items?${params.join('&')}'));
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode != 200) {
       throw Exception('拉取媒体列表失败（${resp.statusCode}）');
@@ -573,14 +623,18 @@ class EmbyApi {
     int limit = 30,
   }) async {
     final url = Uri.parse(
-        '$baseUrl/emby/Users/$userId/Items'
+      _apiUrl(
+        baseUrl,
+        'Users/$userId/Items'
         '?Filters=IsResumable'
         '&IncludeItemTypes=Episode,Movie'
         '&Recursive=true'
         '&SortBy=DatePlayed'
         '&SortOrder=Descending'
         '&Limit=$limit'
-        '&Fields=Overview,ParentId,SeriesId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData');
+        '&Fields=Overview,ParentId,SeriesId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData',
+      ),
+    );
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode != 200) {
       throw Exception('获取继续观看失败（${resp.statusCode}）');
@@ -642,14 +696,19 @@ class EmbyApi {
     int limit = 12,
     bool onlyEpisodes = true,
   }) async {
-    final url = Uri.parse('$baseUrl/emby/Users/$userId/Items'
+    final url = Uri.parse(
+      _apiUrl(
+        baseUrl,
+        'Users/$userId/Items'
         '?ParentId=$libraryId'
         '&IncludeItemTypes=${onlyEpisodes ? 'Episode' : 'Episode,Movie'}'
         '&Recursive=true'
         '&SortBy=DateCreated'
         '&SortOrder=Descending'
         '&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData'
-        '&Limit=$limit');
+        '&Limit=$limit',
+      ),
+    );
     final resp = await _client.get(url, headers: {
       ..._jsonHeaders(token: token),
     });
@@ -683,7 +742,7 @@ class EmbyApi {
     };
 
     Future<http.Response> postReq() => _client.post(
-          Uri.parse('$baseUrl/emby/Items/$itemId/PlaybackInfo'),
+          Uri.parse(_apiUrl(baseUrl, 'Items/$itemId/PlaybackInfo')),
           headers: _jsonHeaders(
             token: token,
             deviceId: deviceId,
@@ -696,7 +755,11 @@ class EmbyApi {
         );
     Future<http.Response> getReq() => _client.get(
           Uri.parse(
-              '$baseUrl/emby/Items/$itemId/PlaybackInfo?UserId=$userId&DeviceId=$deviceId'),
+            _apiUrl(
+              baseUrl,
+              'Items/$itemId/PlaybackInfo?UserId=$userId&DeviceId=$deviceId',
+            ),
+          ),
           headers: _jsonHeaders(token: token, deviceId: deviceId),
         );
 
@@ -822,7 +885,8 @@ class EmbyApi {
     required int positionTicks,
     bool? played,
   }) async {
-    final url = Uri.parse('$baseUrl/emby/Users/$userId/Items/$itemId/UserData');
+    final url =
+        Uri.parse(_apiUrl(baseUrl, 'Users/$userId/Items/$itemId/UserData'));
     final body = <String, dynamic>{
       'PlaybackPositionTicks': positionTicks,
       if (played != null) 'Played': played,
@@ -845,7 +909,7 @@ class EmbyApi {
     required Map<String, dynamic> body,
   }) async {
     final resp = await _client.post(
-      Uri.parse('$baseUrl/emby/$path'),
+      Uri.parse(_apiUrl(baseUrl, path)),
       headers: _jsonHeaders(
         token: token,
         deviceId: deviceId,
@@ -865,7 +929,12 @@ class EmbyApi {
     required String itemId,
   }) async {
     final url = Uri.parse(
-        '$baseUrl/emby/Users/$userId/Items/$itemId?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container');
+      _apiUrl(
+        baseUrl,
+        'Users/$userId/Items/$itemId'
+        '?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container',
+      ),
+    );
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode != 200) {
       throw Exception('获取详情失败(${resp.statusCode})');
@@ -878,21 +947,31 @@ class EmbyApi {
     required String baseUrl,
     required String itemId,
     required String token,
+    String apiPrefix = 'emby',
     String imageType = 'Primary',
     int? maxWidth,
   }) {
     final mw = maxWidth != null ? '&maxWidth=$maxWidth' : '';
-    return '$baseUrl/emby/Items/$itemId/Images/$imageType?quality=90$mw&api_key=$token';
+    return _apiUrlWithPrefix(
+      baseUrl,
+      apiPrefix,
+      'Items/$itemId/Images/$imageType?quality=90$mw&api_key=$token',
+    );
   }
 
   static String personImageUrl({
     required String baseUrl,
     required String personId,
     required String token,
+    String apiPrefix = 'emby',
     int? maxWidth,
   }) {
     final mw = maxWidth != null ? '&maxWidth=$maxWidth' : '';
-    return '$baseUrl/emby/Items/$personId/Images/Primary?quality=90$mw&api_key=$token';
+    return _apiUrlWithPrefix(
+      baseUrl,
+      apiPrefix,
+      'Items/$personId/Images/Primary?quality=90$mw&api_key=$token',
+    );
   }
 
   Future<List<ChapterInfo>> fetchChapters({
@@ -900,7 +979,7 @@ class EmbyApi {
     required String baseUrl,
     required String itemId,
   }) async {
-    final url = Uri.parse('$baseUrl/emby/Items/$itemId/Chapters');
+    final url = Uri.parse(_apiUrl(baseUrl, 'Items/$itemId/Chapters'));
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     // 404 means the item has no chapters on many servers.
     if (resp.statusCode == 404) {
@@ -923,7 +1002,11 @@ class EmbyApi {
     int limit = 10,
   }) async {
     final url = Uri.parse(
-        '$baseUrl/emby/Users/$userId/Items/$itemId/Similar?Limit=$limit&Fields=Overview,ImageTags,ProviderIds,CommunityRating,Genres,ProductionYear');
+      _apiUrl(
+        baseUrl,
+        'Users/$userId/Items/$itemId/Similar?Limit=$limit&Fields=Overview,ImageTags,ProviderIds,CommunityRating,Genres,ProductionYear',
+      ),
+    );
     final resp = await _client.get(url, headers: _jsonHeaders(token: token));
     if (resp.statusCode == 404) {
       return PagedResult(const [], 0);

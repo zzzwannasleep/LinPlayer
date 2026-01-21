@@ -1,10 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'server_text_import_sheet.dart';
+import 'services/plex_api.dart';
 import 'services/website_metadata.dart';
 import 'state/app_state.dart';
+import 'state/media_server_type.dart';
 import 'state/preferences.dart';
 import 'state/server_profile.dart';
 import 'src/device/device_type.dart';
@@ -161,6 +164,17 @@ class _ServerPageState extends State<ServerPage> {
                                     onTap: loading
                                         ? null
                                         : () async {
+                                            if (!server.serverType.isEmbyLike) {
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(
+                                                SnackBar(
+                                                  content: Text(
+                                                    '${server.serverType.label} 暂未支持浏览/播放（仅可保存登录信息）。',
+                                                  ),
+                                                ),
+                                              );
+                                              return;
+                                            }
                                             await widget.appState
                                                 .enterServer(server.id);
                                           },
@@ -191,6 +205,17 @@ class _ServerPageState extends State<ServerPage> {
                                 onTap: loading
                                     ? null
                                     : () async {
+                                        if (!server.serverType.isEmbyLike) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                '${server.serverType.label} 暂未支持浏览/播放（仅可保存登录信息）。',
+                                              ),
+                                            ),
+                                          );
+                                          return;
+                                        }
                                         await widget.appState
                                             .enterServer(server.id);
                                       },
@@ -236,6 +261,10 @@ class _ServerCardState extends State<_ServerCard> {
     final colorScheme = Theme.of(context).colorScheme;
     final isDark = colorScheme.brightness == Brightness.dark;
     final highlighted = _focused || _hovered;
+    final remark = (server.remark ?? '').trim();
+    final subtitleText = remark.isNotEmpty
+        ? '${server.serverType.label} · $remark'
+        : server.serverType.label;
 
     final borderColor = active
         ? colorScheme.primary.withValues(alpha: 0.55)
@@ -310,18 +339,16 @@ class _ServerCardState extends State<_ServerCard> {
                       .bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w700),
                 ),
-                if ((server.remark ?? '').trim().isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    server.remark!.trim(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: colorScheme.onSurfaceVariant),
-                  ),
-                ],
+                const SizedBox(height: 3),
+                Text(
+                  subtitleText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: colorScheme.onSurfaceVariant),
+                ),
               ],
             ),
           ],
@@ -359,6 +386,10 @@ class _ServerListTileState extends State<_ServerListTile> {
     final scheme = Theme.of(context).colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
     final highlighted = _focused || _hovered;
+    final remark = (server.remark ?? '').trim();
+    final subtitleText = remark.isNotEmpty
+        ? '${server.serverType.label} · $remark'
+        : server.serverType.label;
 
     final borderColor = active
         ? scheme.primary.withValues(alpha: 0.55)
@@ -413,18 +444,16 @@ class _ServerListTileState extends State<_ServerListTile> {
                         .bodyMedium
                         ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  if ((server.remark ?? '').trim().isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      server.remark!.trim(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
-                  ],
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitleText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
                 ],
               ),
             ),
@@ -481,6 +510,22 @@ class _ServerErrorBadge extends StatelessWidget {
   }
 }
 
+enum _PlexAddMode {
+  account,
+  manual,
+}
+
+extension _PlexAddModeX on _PlexAddMode {
+  String get label {
+    switch (this) {
+      case _PlexAddMode.account:
+        return '账号登录（推荐）';
+      case _PlexAddMode.manual:
+        return '手动添加';
+    }
+  }
+}
+
 class _AddServerSheet extends StatefulWidget {
   const _AddServerSheet({required this.appState, this.onOpenBulkImport});
 
@@ -499,13 +544,25 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   final _portCtrl = TextEditingController();
   final _userCtrl = TextEditingController();
   final _pwdCtrl = TextEditingController();
+  final _plexTokenCtrl = TextEditingController();
+
+  MediaServerType _serverType = MediaServerType.emby;
+  _PlexAddMode _plexMode = _PlexAddMode.account;
   String _scheme = 'https';
   bool _pwdVisible = false;
+  bool _plexTokenVisible = false;
   bool _handlingHostParse = false;
   bool _nameTouched = false;
 
   String? _iconUrl;
   bool _iconTouched = false;
+
+  PlexPin? _plexPin;
+  String? _plexAccountToken;
+  List<PlexResource> _plexServers = const [];
+  PlexResource? _selectedPlexServer;
+  bool _plexLoading = false;
+  String? _plexError;
 
   Timer? _autoMetaDebounce;
   int _autoMetaReqId = 0;
@@ -529,6 +586,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
     _portCtrl.dispose();
     _userCtrl.dispose();
     _pwdCtrl.dispose();
+    _plexTokenCtrl.dispose();
     super.dispose();
   }
 
@@ -710,27 +768,185 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   }
 
   void _applyDefaultPort() {
-    _portCtrl.text = _defaultPortForScheme(_scheme);
+    _portCtrl.text =
+        _serverType == MediaServerType.plex ? '32400' : _defaultPortForScheme(_scheme);
     setState(() {});
+  }
+
+  void _setServerType(MediaServerType type) {
+    if (_serverType == type) return;
+    setState(() {
+      _serverType = type;
+      if (type == MediaServerType.plex && _portCtrl.text.trim().isEmpty) {
+        _portCtrl.text = '32400';
+      }
+      _plexMode = _PlexAddMode.account;
+      _plexError = null;
+      _plexPin = null;
+      _plexAccountToken = null;
+      _plexServers = const [];
+      _selectedPlexServer = null;
+    });
+  }
+
+  PlexApi _buildPlexApi() {
+    return PlexApi(
+      clientIdentifier: widget.appState.deviceId,
+      product: 'LinPlayer',
+      device: 'Flutter',
+      platform: 'Flutter',
+      version: '1.0.0',
+    );
+  }
+
+  Future<void> _startPlexLogin({required bool fillTokenOnly}) async {
+    if (_plexLoading) return;
+    setState(() {
+      _plexLoading = true;
+      _plexError = null;
+      if (!fillTokenOnly) {
+        _plexServers = const [];
+        _selectedPlexServer = null;
+      }
+    });
+
+    try {
+      final api = _buildPlexApi();
+      final pin = await api.createPin();
+      if (!mounted) return;
+      setState(() {
+        _plexPin = pin;
+        _plexAccountToken = null;
+      });
+
+      final authUrl = api.buildAuthUrl(code: pin.code);
+      final launched = await launchUrl(
+        Uri.parse(authUrl),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        throw Exception('无法打开浏览器进行 Plex 授权');
+      }
+
+      final deadline = (pin.expiresAt ??
+              DateTime.now().toUtc().add(const Duration(minutes: 10)))
+          .toLocal();
+      PlexPin latest = pin;
+      while (mounted && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(seconds: 2));
+        latest = await api.fetchPin(pin.id);
+        final t = (latest.authToken ?? '').trim();
+        if (t.isNotEmpty) break;
+      }
+
+      final authToken = (latest.authToken ?? '').trim();
+      if (authToken.isEmpty) {
+        throw Exception('等待 Plex 授权超时/未完成授权');
+      }
+
+      if (!mounted) return;
+
+      if (fillTokenOnly) {
+        _plexTokenCtrl.text = authToken;
+        setState(() {
+          _plexAccountToken = authToken;
+          _plexLoading = false;
+        });
+        return;
+      }
+
+      final resources = await api.fetchResources(authToken: authToken);
+      final servers = resources
+          .where((r) => r.isServer)
+          .toList(growable: false)
+        ..sort((a, b) => a.name.compareTo(b.name));
+
+      if (!mounted) return;
+      setState(() {
+        _plexAccountToken = authToken;
+        _plexServers = servers;
+        _selectedPlexServer = servers.isEmpty ? null : servers.first;
+        _plexLoading = false;
+      });
+
+      final picked = servers.isEmpty ? null : servers.first;
+      if (picked != null &&
+          !_nameTouched &&
+          _nameCtrl.text.trim().isEmpty &&
+          picked.name.trim().isNotEmpty) {
+        _nameCtrl.text = picked.name.trim();
+        _nameCtrl.selection =
+            TextSelection.collapsed(offset: _nameCtrl.text.length);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _plexLoading = false;
+        _plexError = e.toString();
+      });
+    }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
-    // Auto-complete scheme if user only typed host/path.
-    final hostInput = _hostCtrl.text.trim();
-    final hostOrUrl =
-        hostInput.contains('://') ? hostInput : '$_scheme://$hostInput';
-    await widget.appState.addServer(
-      hostOrUrl: hostOrUrl,
-      scheme: _scheme,
-      port: _portCtrl.text.trim().isEmpty ? null : _portCtrl.text.trim(),
-      username: _userCtrl.text.trim(),
-      password: _pwdCtrl.text,
-      displayName: _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
-      remark: _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
-      iconUrl: _iconUrl,
-    );
+
+    if (_serverType == MediaServerType.plex) {
+      if (_plexMode == _PlexAddMode.account) {
+        final selected = _selectedPlexServer;
+        final serverUri = selected?.pickBestConnectionUri();
+        final token = (selected?.accessToken ?? _plexAccountToken ?? '').trim();
+        if (selected == null || (serverUri ?? '').trim().isEmpty) {
+          setState(() => _plexError = '请选择 Plex 服务器');
+          return;
+        }
+        if (token.isEmpty) {
+          setState(() => _plexError = '未获取到 Plex Token（请重新登录）');
+          return;
+        }
+        await widget.appState.addPlexServer(
+          baseUrl: serverUri!.trim(),
+          token: token,
+          displayName:
+              _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
+          remark:
+              _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
+          iconUrl: _iconUrl,
+          plexMachineIdentifier: selected.clientIdentifier,
+        );
+      } else {
+        final uri = _buildAutoMetaUri();
+        if (uri == null) return;
+        await widget.appState.addPlexServer(
+          baseUrl: uri.toString(),
+          token: _plexTokenCtrl.text.trim(),
+          displayName:
+              _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
+          remark:
+              _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
+          iconUrl: _iconUrl,
+        );
+      }
+    } else {
+      // Emby/Jellyfin
+      // Auto-complete scheme if user only typed host/path.
+      final hostInput = _hostCtrl.text.trim();
+      final hostOrUrl =
+          hostInput.contains('://') ? hostInput : '$_scheme://$hostInput';
+      await widget.appState.addServer(
+        hostOrUrl: hostOrUrl,
+        scheme: _scheme,
+        port: _portCtrl.text.trim().isEmpty ? null : _portCtrl.text.trim(),
+        serverType: _serverType,
+        username: _userCtrl.text.trim(),
+        password: _pwdCtrl.text,
+        displayName:
+            _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
+        remark:
+            _remarkCtrl.text.trim().isEmpty ? null : _remarkCtrl.text.trim(),
+        iconUrl: _iconUrl,
+      );
+    }
     if (!mounted) return;
     if (widget.appState.error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -745,6 +961,12 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
     final loading = widget.appState.isLoading;
+    final showHostFields = _serverType.isEmbyLike ||
+        (_serverType == MediaServerType.plex &&
+            _plexMode == _PlexAddMode.manual);
+    final showUserPass = _serverType.isEmbyLike;
+    final showPlexToken =
+        _serverType == MediaServerType.plex && _plexMode == _PlexAddMode.manual;
 
     return Padding(
       padding:
@@ -767,7 +989,8 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                         ),
-                        if (widget.onOpenBulkImport != null)
+                        if (widget.onOpenBulkImport != null &&
+                            _serverType.isEmbyLike)
                           TextButton.icon(
                             onPressed: loading
                                 ? null
@@ -779,39 +1002,131 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _nameCtrl,
-                      onChanged: (_) => _nameTouched = true,
-                      decoration: const InputDecoration(labelText: '服务器名称（可选）'),
+                    SegmentedButton<MediaServerType>(
+                      segments: MediaServerType.values
+                          .map(
+                            (t) => ButtonSegment<MediaServerType>(
+                              value: t,
+                              label: Text(t.label),
+                            ),
+                          )
+                          .toList(growable: false),
+                      selected: <MediaServerType>{_serverType},
+                      onSelectionChanged:
+                          loading ? null : (s) => _setServerType(s.first),
                     ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _remarkCtrl,
-                      decoration: const InputDecoration(labelText: '备注（可选）'),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        ServerIconAvatar(
-                          iconUrl: _iconUrl,
-                          name: _nameCtrl.text,
-                          radius: 16,
+                    if (_serverType == MediaServerType.plex) ...[
+                      const SizedBox(height: 12),
+                      SegmentedButton<_PlexAddMode>(
+                        segments: _PlexAddMode.values
+                            .map(
+                              (m) => ButtonSegment<_PlexAddMode>(
+                                value: m,
+                                label: Text(m.label),
+                              ),
+                            )
+                            .toList(growable: false),
+                        selected: <_PlexAddMode>{_plexMode},
+                        onSelectionChanged: loading
+                            ? null
+                            : (s) => setState(() {
+                                  _plexMode = s.first;
+                                  _plexError = null;
+                                }),
+                      ),
+                      if (_plexMode == _PlexAddMode.account) ...[
+                        const SizedBox(height: 10),
+                        FilledButton.icon(
+                          onPressed: (_plexLoading || loading)
+                              ? null
+                              : () => _startPlexLogin(fillTokenOnly: false),
+                          icon: _plexLoading
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.login),
+                          label: Text(
+                            _plexAccountToken == null
+                                ? '登录 Plex 获取服务器列表'
+                                : '重新登录 Plex',
+                          ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('服务器图标（可选）'),
-                              const SizedBox(height: 2),
-                              Text(
-                                _iconTouched
-                                    ? '已自定义'
-                                    : (_iconUrl == null ||
-                                            _iconUrl!.trim().isEmpty)
-                                        ? '未设置'
-                                        : '已自动获取',
+                        if ((_plexPin?.code ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            '授权码：${_plexPin!.code}（在浏览器完成授权后返回）',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
+                        ],
+                        if ((_plexError ?? '').trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            _plexError!.trim(),
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                          ),
+                        ],
+                        if (_plexAccountToken != null &&
+                            _plexServers.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          DropdownButtonFormField<PlexResource>(
+                            value: _selectedPlexServer,
+                            items: _plexServers
+                                .map(
+                                  (r) => DropdownMenuItem<PlexResource>(
+                                    value: r,
+                                    child: Text(
+                                      r.name.isEmpty ? r.clientIdentifier : r.name,
+                                    ),
+                                  ),
+                                )
+                                .toList(growable: false),
+                            onChanged: loading
+                                ? null
+                                : (v) => setState(() {
+                                      _selectedPlexServer = v;
+                                      _plexError = null;
+                                      if (v != null &&
+                                          !_nameTouched &&
+                                          _nameCtrl.text.trim().isEmpty &&
+                                          v.name.trim().isNotEmpty) {
+                                        _nameCtrl.text = v.name.trim();
+                                        _nameCtrl.selection =
+                                            TextSelection.collapsed(
+                                          offset: _nameCtrl.text.length,
+                                        );
+                                      }
+                                    }),
+                            decoration: const InputDecoration(
+                              labelText: '选择 Plex 服务器',
+                            ),
+                            validator: (_) =>
+                                (_selectedPlexServer == null) ? '请选择服务器' : null,
+                          ),
+                          const SizedBox(height: 4),
+                          Builder(
+                            builder: (context) {
+                              final uri =
+                                  _selectedPlexServer?.pickBestConnectionUri();
+                              if ((uri ?? '').trim().isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return Text(
+                                '连接：$uri',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
@@ -820,28 +1135,122 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                                           .colorScheme
                                           .onSurfaceVariant,
                                     ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
-                        ),
-                        IconButton(
-                          tooltip: '自动获取网站信息',
-                          onPressed: loading ? null : _forceFetchWebsiteMeta,
-                          icon: const Icon(Icons.travel_explore_outlined),
-                        ),
-                        IconButton(
-                          tooltip: '从图标库选择',
-                          onPressed: loading ? null : _pickIconFromLibrary,
-                          icon: const Icon(Icons.collections_outlined),
-                        ),
-                        IconButton(
-                          tooltip: '清除图标',
-                          onPressed: loading ? null : _clearIcon,
-                          icon: const Icon(Icons.close),
-                        ),
+                        ],
                       ],
+                    ],
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _nameCtrl,
+                      onChanged: (_) => _nameTouched = true,
+                      decoration: const InputDecoration(labelText: '服务器名称（可选）'),
                     ),
-                    if (_autoMetaLoading) ...[
+                    const SizedBox(height: 10),
+                     TextFormField(
+                       controller: _remarkCtrl,
+                       decoration: const InputDecoration(labelText: '备注（可选）'),
+                     ),
+                     if (showHostFields) ...[
+                       const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            ServerIconAvatar(
+                              iconUrl: _iconUrl,
+                              name: _nameCtrl.text,
+                              radius: 16,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text('服务器图标（可选）'),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _iconTouched
+                                        ? '已自定义'
+                                        : (_iconUrl == null ||
+                                                _iconUrl!.trim().isEmpty)
+                                            ? '未设置'
+                                            : '已自动获取',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: '自动获取网站信息',
+                              onPressed: loading ? null : _forceFetchWebsiteMeta,
+                              icon: const Icon(Icons.travel_explore_outlined),
+                            ),
+                            IconButton(
+                              tooltip: '从图标库选择',
+                              onPressed: loading ? null : _pickIconFromLibrary,
+                              icon: const Icon(Icons.collections_outlined),
+                            ),
+                            IconButton(
+                              tooltip: '清除图标',
+                              onPressed: loading ? null : _clearIcon,
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                        ),
+                        if (showPlexToken) ...[
+                          const SizedBox(height: 10),
+                          FilledButton.icon(
+                            onPressed: (_plexLoading || loading)
+                                ? null
+                                : () => _startPlexLogin(fillTokenOnly: true),
+                            icon: _plexLoading
+                                ? const SizedBox(
+                                    height: 18,
+                                    width: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.login),
+                            label: Text(
+                              _plexAccountToken == null
+                                  ? '登录 Plex 获取 Token'
+                                  : '重新登录 Plex（刷新 Token）',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextFormField(
+                            controller: _plexTokenCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Plex Token',
+                              suffixIcon: IconButton(
+                                tooltip: _plexTokenVisible ? '隐藏 Token' : '显示 Token',
+                                icon: Icon(
+                                  _plexTokenVisible
+                                      ? Icons.visibility_off
+                                      : Icons.visibility,
+                                ),
+                                onPressed: () => setState(
+                                  () => _plexTokenVisible = !_plexTokenVisible,
+                                ),
+                              ),
+                            ),
+                            obscureText: !_plexTokenVisible,
+                            validator: (v) {
+                              if (!showPlexToken) return null;
+                              return (v == null || v.trim().isEmpty)
+                                  ? '请输入 Plex Token'
+                                  : null;
+                            },
+                          ),
+                        ],
+                        if (_autoMetaLoading) ...[
                       const SizedBox(height: 8),
                       const Row(
                         children: [
@@ -933,29 +1342,32 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                         return null;
                       },
                     ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _userCtrl,
-                      decoration: const InputDecoration(labelText: '账号'),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? '请输入账号' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: _pwdCtrl,
-                      decoration: InputDecoration(
-                        labelText: '密码（可选）',
-                        suffixIcon: IconButton(
-                          tooltip: _pwdVisible ? '隐藏密码' : '显示密码',
-                          icon: Icon(_pwdVisible
-                              ? Icons.visibility_off
-                              : Icons.visibility),
-                          onPressed: () =>
-                              setState(() => _pwdVisible = !_pwdVisible),
-                        ),
+                    if (showUserPass) ...[
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _userCtrl,
+                        decoration: const InputDecoration(labelText: '账号'),
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? '请输入账号' : null,
                       ),
-                      obscureText: !_pwdVisible,
-                    ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: _pwdCtrl,
+                        decoration: InputDecoration(
+                          labelText: '密码（可选）',
+                          suffixIcon: IconButton(
+                            tooltip: _pwdVisible ? '隐藏密码' : '显示密码',
+                            icon: Icon(
+                              _pwdVisible ? Icons.visibility_off : Icons.visibility,
+                            ),
+                            onPressed: () =>
+                                setState(() => _pwdVisible = !_pwdVisible),
+                          ),
+                        ),
+                        obscureText: !_pwdVisible,
+                      ),
+                    ],
+                      ],
                   ],
                 ),
               ),

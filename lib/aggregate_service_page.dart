@@ -123,7 +123,11 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
     }
 
     try {
-      final api = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+      final api = EmbyApi(
+        hostOrUrl: baseUrl,
+        preferredScheme: 'https',
+        apiPrefix: server.apiPrefix,
+      );
       final res = await api.fetchContinueWatching(
         token: token,
         baseUrl: baseUrl,
@@ -287,15 +291,16 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                     ];
                     final subtitle = subParts.join(' · ');
 
-                    final img = item.hasImage
-                        ? EmbyApi.imageUrl(
-                            baseUrl: server.baseUrl,
-                            itemId: item.id,
-                            token: server.token,
-                            imageType: 'Primary',
-                            maxWidth: 320,
-                          )
-                        : '';
+                     final img = item.hasImage
+                         ? EmbyApi.imageUrl(
+                             baseUrl: server.baseUrl,
+                             itemId: item.id,
+                             token: server.token,
+                             apiPrefix: server.apiPrefix,
+                             imageType: 'Primary',
+                             maxWidth: 320,
+                           )
+                         : '';
 
                     return Card(
                       clipBehavior: Clip.antiAlias,
@@ -555,7 +560,11 @@ class _AggregateSearchTabStatefulState
     final userId = server.userId.trim();
     if (baseUrl.isEmpty || token.isEmpty || userId.isEmpty) return null;
 
-    final api = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+    final api = EmbyApi(
+      hostOrUrl: baseUrl,
+      preferredScheme: 'https',
+      apiPrefix: server.apiPrefix,
+    );
     final res = await api.fetchItems(
       token: token,
       baseUrl: baseUrl,
@@ -656,7 +665,11 @@ class _AggregateSearchTabStatefulState
           return;
         }
         try {
-          final api = EmbyApi(hostOrUrl: baseUrl, preferredScheme: 'https');
+          final api = EmbyApi(
+            hostOrUrl: baseUrl,
+            preferredScheme: 'https',
+            apiPrefix: server.apiPrefix,
+          );
           final res = await api.fetchItems(
             token: token,
             baseUrl: baseUrl,
@@ -808,13 +821,14 @@ class _AggregateSearchTabStatefulState
           }
           final posterUrl = posterHit == null
               ? ''
-              : EmbyApi.imageUrl(
-                  baseUrl: posterHit.server.baseUrl,
-                  itemId: posterHit.item.id,
-                  token: posterHit.server.token,
-                  imageType: 'Primary',
-                  maxWidth: 320,
-                );
+               : EmbyApi.imageUrl(
+                   baseUrl: posterHit.server.baseUrl,
+                   itemId: posterHit.item.id,
+                   token: posterHit.server.token,
+                   apiPrefix: posterHit.server.apiPrefix,
+                   imageType: 'Primary',
+                   maxWidth: 320,
+                 );
 
           final shownHits = hits.length <= 3 ? hits : hits.take(3).toList();
 
