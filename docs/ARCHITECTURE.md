@@ -76,7 +76,7 @@
     - `authenticate(username, password, deviceId)`：
       - 尝试 http/https + 可选端口组合（`_candidates()`），命中后返回 `token/userId/baseUrlUsed`。
     - `fetchDomains(token, baseUrl)`：
-      - 拉取扩展线路：`/emby/System/Ext/ServerDomains`（允许失败，失败即返回空）。
+      - 拉取扩展线路：`/emby/System/Ext/ServerDomains`（允许失败，失败即返回空；可配合 `https://github.com/uhdnow/emby_ext_domains` 部署/使用）。
     - `fetchLibraries(token, baseUrl, userId)`：
       - 拉取媒体库视图：`/emby/Users/{userId}/Views`。
     - `fetchItems(...)`：
@@ -108,6 +108,7 @@
   - 鉴权：
     - 优先使用开放平台签名头：`X-AppId` / `X-Timestamp` / `X-Signature`。
     - 若返回 403 且提示缺少鉴权，会回退到 `X-AppSecret` 模式（方便自建兼容服务）。
+  - 兼容服务示例（自建/第三方）：`https://github.com/huangxd-/danmu_api`、`https://github.com/l429609201/misaka_danmu_server`
 
 ### 播放器封装与播放链路
 
@@ -119,6 +120,11 @@
     - 网络播放时增大 forward cache、限制 back cache，减少内存占用与回退卡顿。
     - Windows 上设置 `gpu-context=d3d11`，降低 `vo=gpu` 的卡顿概率。
   - 注意：该配置依赖 `packages/media_kit_patched` 暴露的 `extraMpvOptions`（用于传入 mpv 原生参数）。
+
+#### 1.5) 画质增强（Anime4K）
+- `lib/src/player/anime4k.dart`：通过 mpv `glsl-shaders` 管线加载 Anime4K 预设（仅 MPV 内核）。
+- Shader 资源位于 `assets/shaders/anime4k/`（来自 Anime4K：`https://github.com/bloc97/Anime4K`；具体版本与 License 见该目录 `README.md` / `LICENSE`）。
+- 预设枚举与说明：`lib/state/anime4k_preferences.dart`。
 
 #### 2) 本地播放（文件）
 - `lib/player_screen.dart`
@@ -207,3 +213,9 @@
 - **改缓存/状态/持久化**：`lib/state/app_state.dart`。
 - **调播放器体验（硬解/缓冲/参数）**：`lib/player_service.dart`。
 - **改主题/视觉规范**：`lib/src/ui/app_theme.dart`。
+
+## 参考项目（灵感/对照实现）
+
+- Anime4K：https://github.com/bloc97/Anime4K
+- Playboy Player：https://github.com/Playboy-Player/Playboy
+- NipaPlay Reload：https://github.com/MCDFsteve/NipaPlay-Reload

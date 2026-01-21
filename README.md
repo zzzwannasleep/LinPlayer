@@ -43,6 +43,7 @@ A cross-platform local & Emby/Jellyfin media player built with Flutter (with Ple
 - 响应式缩放：竖屏平板/手机自动放大 UI（文本/图标/间距），避免 UI 过小。
 - Material 3 双主题：跟随系统明/暗色；桌面/手机轻量毛玻璃；Android TV 默认关闭毛玻璃，减少卡顿。
 - 本地播放：保留原生文件选择与播放。
+- Anime4K（MPV shader）：内置 Anime4K GLSL 预设，播放页一键开关/切换（仅 MPV 内核有效）。
 - 弹幕：支持本地 XML 与在线弹幕（兼容弹弹play API v2），支持样式调节。
 - 构建产物：Android 同时支持 32 位与 64 位；Windows 打包附带运行时与 DLL。
 
@@ -89,6 +90,7 @@ A cross-platform local & Emby/Jellyfin media player built with Flutter (with Ple
 - Emby 在线播放：无法获取文件 Hash 时默认仅用标题/文件名匹配，可能需要更准确的命名。
 - Web 端暂不支持在线弹幕匹配。
 - 目前在线弹幕按「弹弹play API v2」实现；其它弹幕服务器仅当实现了同样的接口（如 `/api/v2/match`、`/api/v2/comment/{episodeId}`）才能直接作为弹幕源使用。
+  - 示例（自建/第三方服务）：`https://github.com/huangxd-/danmu_api`、`https://github.com/l429609201/misaka_danmu_server`
 
 ## 构建与运行
 <a id="build"></a>
@@ -183,7 +185,20 @@ flutter build windows --release
 - `lib/src/player/danmaku_stage.dart` 弹幕渲染（覆盖层）
 - `lib/state/app_state.dart` 状态/登录/缓存
 
-## 鸣谢
+## 鸣谢与参考
+
+### 引用 / 上游
+- Anime4K：https://github.com/bloc97/Anime4K（本项目内置部分 GLSL shader：`assets/shaders/anime4k/`，用于 MPV 内核的 Anime4K 预设）
+
+### 参考 / 灵感
+- Playboy Player：https://github.com/Playboy-Player/Playboy
+- NipaPlay Reload：https://github.com/MCDFsteve/NipaPlay-Reload
+
+### 可配合使用的服务
+- Emby 扩展线路：`emby_ext_domains`（参考/服务实现：`https://github.com/uhdnow/emby_ext_domains`）
+- 在线弹幕兼容服务：`https://github.com/huangxd-/danmu_api`、`https://github.com/l429609201/misaka_danmu_server`
+
+### 文档
 - Emby 项目与文档：https://dev.emby.media/doc/restapi/index.html
 - Jellyfin API 文档：https://api.jellyfin.org/
 - Plex 开发者文档：https://developer.plex.tv/pms/
