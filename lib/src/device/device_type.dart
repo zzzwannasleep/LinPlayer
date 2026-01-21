@@ -9,6 +9,19 @@ class DeviceType {
 
   static bool get isTv => _isTv;
 
+  static Future<int?> batteryLevel() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
+
+    try {
+      final v = await _channel.invokeMethod<int>('batteryLevel');
+      if (v == null) return null;
+      if (v < 0 || v > 100) return null;
+      return v;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<void> init() async {
     if (_initialized) return;
     _initialized = true;
@@ -23,4 +36,3 @@ class DeviceType {
     }
   }
 }
-

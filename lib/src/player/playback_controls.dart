@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../state/preferences.dart';
+import '../device/device_type.dart';
 import '../ui/app_style.dart';
 
 class PlaybackControls extends StatefulWidget {
@@ -19,6 +20,13 @@ class PlaybackControls extends StatefulWidget {
     required this.onPause,
     required this.onSeekBackward,
     required this.onSeekForward,
+    this.seekBackwardSeconds = 10,
+    this.seekForwardSeconds = 10,
+    this.showSystemTime = false,
+    this.showBattery = false,
+    this.showBufferSpeed = false,
+    this.buffering = false,
+    this.bufferSpeedX,
     this.onScrubStart,
     this.onScrubEnd,
     this.onRequestThumbnail,
@@ -37,6 +45,14 @@ class PlaybackControls extends StatefulWidget {
   final FutureOr<void> Function() onPause;
   final FutureOr<void> Function() onSeekBackward;
   final FutureOr<void> Function() onSeekForward;
+
+  final int seekBackwardSeconds;
+  final int seekForwardSeconds;
+  final bool showSystemTime;
+  final bool showBattery;
+  final bool showBufferSpeed;
+  final bool buffering;
+  final double? bufferSpeedX;
 
   final VoidCallback? onScrubStart;
   final VoidCallback? onScrubEnd;
@@ -110,12 +126,40 @@ class _PlaybackControlsState extends State<PlaybackControls> {
   Timer? _thumbnailDebounceTimer;
   int _thumbnailRequestId = 0;
 
+  Timer? _clockTimer;
+  DateTime _now = DateTime.now();
+  Timer? _batteryTimer;
+  int? _batteryLevel;
+
   static String _fmt(Duration d) {
     String two(int v) => v.toString().padLeft(2, '0');
     final h = d.inHours;
     final m = d.inMinutes.remainder(60);
     final s = d.inSeconds.remainder(60);
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
+  }
+
+  static String _fmtTime(DateTime t) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(t.hour)}:${two(t.minute)}';
+  }
+
+  static IconData _replayIcon(int seconds) {
+    return switch (seconds) {
+      5 => Icons.replay_5,
+      10 => Icons.replay_10,
+      30 => Icons.replay_30,
+      _ => Icons.replay,
+    };
+  }
+
+  static IconData _forwardIcon(int seconds) {
+    return switch (seconds) {
+      5 => Icons.forward_5,
+      10 => Icons.forward_10,
+      30 => Icons.forward_30,
+      _ => Icons.forward,
+    };
   }
 
   Future<void> _call0(FutureOr<void> Function() fn) => Future<void>.sync(fn);
@@ -177,9 +221,65 @@ class _PlaybackControlsState extends State<PlaybackControls> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _syncStatusTimers();
+  }
+
+  @override
+  void didUpdateWidget(covariant PlaybackControls oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.showSystemTime != widget.showSystemTime ||
+        oldWidget.showBattery != widget.showBattery) {
+      _syncStatusTimers();
+    }
+  }
+
+  void _syncStatusTimers() {
+    _clockTimer?.cancel();
+    _clockTimer = null;
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
+
+    if (widget.showSystemTime) {
+      _now = DateTime.now();
+      _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!mounted) return;
+        setState(() => _now = DateTime.now());
+      });
+    }
+
+    if (widget.showBattery) {
+      // ignore: unawaited_futures
+      _refreshBattery();
+      _batteryTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+        // ignore: unawaited_futures
+        _refreshBattery();
+      });
+    } else {
+      _batteryLevel = null;
+    }
+  }
+
+  Future<void> _refreshBattery() async {
+    int? level;
+    try {
+      level = await DeviceType.batteryLevel();
+    } catch (_) {
+      level = null;
+    }
+    if (!mounted) return;
+    setState(() => _batteryLevel = level);
+  }
+
+  @override
   void dispose() {
     _thumbnailDebounceTimer?.cancel();
     _thumbnailDebounceTimer = null;
+    _clockTimer?.cancel();
+    _clockTimer = null;
+    _batteryTimer?.cancel();
+    _batteryTimer = null;
     super.dispose();
   }
 
@@ -269,6 +369,53 @@ class _PlaybackControlsState extends State<PlaybackControls> {
     final displayPos = Duration(milliseconds: displayMs.round());
 
     final enabled = widget.enabled;
+    final backSeconds = widget.seekBackwardSeconds.clamp(1, 120);
+    final forwardSeconds = widget.seekForwardSeconds.clamp(1, 120);
+
+    final statusChips = <Widget>[];
+    Widget chip({required IconData icon, required String text}) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: Colors.white.withValues(alpha: 0.85)),
+            const SizedBox(width: 4),
+            Text(
+              text,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.85),
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (widget.showSystemTime) {
+      statusChips.add(chip(icon: Icons.schedule, text: _fmtTime(_now)));
+    }
+    if (widget.showBattery && _batteryLevel != null) {
+      statusChips.add(
+        chip(icon: Icons.battery_std, text: '${_batteryLevel!.clamp(0, 100)}%'),
+      );
+    }
+    if (widget.showBufferSpeed && widget.buffering) {
+      final x = widget.bufferSpeedX;
+      statusChips.add(
+        chip(
+          icon: Icons.downloading_outlined,
+          text: x == null
+              ? '缓冲中'
+              : '缓冲 ${x.clamp(0.0, 99.0).toStringAsFixed(1)}×',
+        ),
+      );
+    }
 
     return Material(
       color: bg,
@@ -279,6 +426,17 @@ class _PlaybackControlsState extends State<PlaybackControls> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (statusChips.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: statusChips,
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
             Row(
               children: [
                 Text(
@@ -524,8 +682,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 IconButton(
-                  tooltip: '后退 10 秒',
-                  icon: const Icon(Icons.replay_10),
+                  tooltip: '快退 $backSeconds 秒',
+                  icon: Icon(_replayIcon(backSeconds)),
                   color: Colors.white,
                   onPressed:
                       !enabled ? null : () => _call0(widget.onSeekBackward),
@@ -544,8 +702,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                           : _call0(widget.onPlay),
                 ),
                 IconButton(
-                  tooltip: '前进 10 秒',
-                  icon: const Icon(Icons.forward_10),
+                  tooltip: '快进 $forwardSeconds 秒',
+                  icon: Icon(_forwardIcon(forwardSeconds)),
                   color: Colors.white,
                   onPressed:
                       !enabled ? null : () => _call0(widget.onSeekForward),

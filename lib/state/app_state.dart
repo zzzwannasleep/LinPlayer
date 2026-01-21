@@ -8,6 +8,7 @@ import '../services/backup_crypto.dart';
 import '../services/emby_api.dart';
 import 'anime4k_preferences.dart';
 import 'danmaku_preferences.dart';
+import 'interaction_preferences.dart';
 import 'local_playback_handoff.dart';
 import 'media_server_type.dart';
 import 'preferences.dart';
@@ -105,6 +106,24 @@ class AppState extends ChangeNotifier {
   static const _kShowHomeLibraryQuickAccessKey =
       'showHomeLibraryQuickAccess_v1';
 
+  // Interaction & gestures (shared by MPV/Exo).
+  static const _kGestureBrightnessKey = 'gestureBrightness_v1';
+  static const _kGestureVolumeKey = 'gestureVolume_v1';
+  static const _kGestureSeekKey = 'gestureSeek_v1';
+  static const _kGestureLongPressSpeedKey = 'gestureLongPressSpeed_v1';
+  static const _kLongPressSpeedMultiplierKey = 'longPressSpeedMultiplier_v1';
+  static const _kLongPressSlideSpeedKey = 'longPressSlideSpeed_v1';
+  static const _kDoubleTapLeftKey = 'doubleTapLeft_v1';
+  static const _kDoubleTapCenterKey = 'doubleTapCenter_v1';
+  static const _kDoubleTapRightKey = 'doubleTapRight_v1';
+  static const _kReturnHomeBehaviorKey = 'returnHomeBehavior_v1';
+  static const _kShowSystemTimeInControlsKey = 'showSystemTimeInControls_v1';
+  static const _kShowBufferSpeedKey = 'showBufferSpeed_v1';
+  static const _kShowBatteryInControlsKey = 'showBatteryInControls_v1';
+  static const _kSeekBackwardSecondsKey = 'seekBackwardSeconds_v1';
+  static const _kSeekForwardSecondsKey = 'seekForwardSeconds_v1';
+  static const _kForceRemoteControlKeysKey = 'forceRemoteControlKeys_v1';
+
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
 
@@ -157,6 +176,24 @@ class AppState extends ChangeNotifier {
   String _danmakuBlockWords = '';
   DanmakuMatchMode _danmakuMatchMode = DanmakuMatchMode.auto;
   DanmakuChConvert _danmakuChConvert = DanmakuChConvert.off;
+
+  // Interaction & gestures (shared by MPV/Exo).
+  bool _gestureBrightness = true;
+  bool _gestureVolume = true;
+  bool _gestureSeek = true;
+  bool _gestureLongPressSpeed = true;
+  double _longPressSpeedMultiplier = 2.5;
+  bool _longPressSlideSpeed = true;
+  DoubleTapAction _doubleTapLeft = DoubleTapAction.seekBackward;
+  DoubleTapAction _doubleTapCenter = DoubleTapAction.playPause;
+  DoubleTapAction _doubleTapRight = DoubleTapAction.seekForward;
+  ReturnHomeBehavior _returnHomeBehavior = ReturnHomeBehavior.pause;
+  bool _showSystemTimeInControls = false;
+  bool _showBufferSpeed = true;
+  bool _showBatteryInControls = false;
+  int _seekBackwardSeconds = 10;
+  int _seekForwardSeconds = 20;
+  bool _forceRemoteControlKeys = false;
   LocalPlaybackHandoff? _localPlaybackHandoff;
   bool _loading = false;
   String? _error;
@@ -179,7 +216,10 @@ class AppState extends ChangeNotifier {
   ServerProfile? get activeServer =>
       _servers.firstWhereOrNull((s) => s.id == _activeServerId);
   bool get hasActiveServer =>
-      activeServer != null && baseUrl != null && token != null && userId != null;
+      activeServer != null &&
+      baseUrl != null &&
+      token != null &&
+      userId != null;
 
   String? get baseUrl {
     final v = activeServer?.baseUrl;
@@ -196,7 +236,8 @@ class AppState extends ChangeNotifier {
     return (v == null || v.trim().isEmpty) ? null : v;
   }
 
-  MediaServerType get serverType => activeServer?.serverType ?? MediaServerType.emby;
+  MediaServerType get serverType =>
+      activeServer?.serverType ?? MediaServerType.emby;
   String get apiPrefix => activeServer?.apiPrefix ?? 'emby';
 
   String get deviceId => _deviceId;
@@ -254,6 +295,23 @@ class AppState extends ChangeNotifier {
   String get danmakuBlockWords => _danmakuBlockWords;
   DanmakuMatchMode get danmakuMatchMode => _danmakuMatchMode;
   DanmakuChConvert get danmakuChConvert => _danmakuChConvert;
+
+  bool get gestureBrightness => _gestureBrightness;
+  bool get gestureVolume => _gestureVolume;
+  bool get gestureSeek => _gestureSeek;
+  bool get gestureLongPressSpeed => _gestureLongPressSpeed;
+  double get longPressSpeedMultiplier => _longPressSpeedMultiplier;
+  bool get longPressSlideSpeed => _longPressSlideSpeed;
+  DoubleTapAction get doubleTapLeft => _doubleTapLeft;
+  DoubleTapAction get doubleTapCenter => _doubleTapCenter;
+  DoubleTapAction get doubleTapRight => _doubleTapRight;
+  ReturnHomeBehavior get returnHomeBehavior => _returnHomeBehavior;
+  bool get showSystemTimeInControls => _showSystemTimeInControls;
+  bool get showBufferSpeed => _showBufferSpeed;
+  bool get showBatteryInControls => _showBatteryInControls;
+  int get seekBackwardSeconds => _seekBackwardSeconds;
+  int get seekForwardSeconds => _seekForwardSeconds;
+  bool get forceRemoteControlKeys => _forceRemoteControlKeys;
 
   void setLocalPlaybackHandoff(LocalPlaybackHandoff? handoff) {
     _localPlaybackHandoff = handoff;
@@ -381,6 +439,42 @@ class AppState extends ChangeNotifier {
     _danmakuChConvert =
         danmakuChConvertFromId(prefs.getString(_kDanmakuChConvertKey));
 
+    _gestureBrightness = prefs.getBool(_kGestureBrightnessKey) ?? true;
+    _gestureVolume = prefs.getBool(_kGestureVolumeKey) ?? true;
+    _gestureSeek = prefs.getBool(_kGestureSeekKey) ?? true;
+    _gestureLongPressSpeed = prefs.getBool(_kGestureLongPressSpeedKey) ?? true;
+    _longPressSpeedMultiplier =
+        (prefs.getDouble(_kLongPressSpeedMultiplierKey) ?? 2.5)
+            .clamp(1.0, 4.0)
+            .toDouble();
+    _longPressSlideSpeed = prefs.getBool(_kLongPressSlideSpeedKey) ?? true;
+
+    if (prefs.containsKey(_kDoubleTapLeftKey)) {
+      _doubleTapLeft =
+          doubleTapActionFromId(prefs.getString(_kDoubleTapLeftKey));
+    }
+    if (prefs.containsKey(_kDoubleTapCenterKey)) {
+      _doubleTapCenter =
+          doubleTapActionFromId(prefs.getString(_kDoubleTapCenterKey));
+    }
+    if (prefs.containsKey(_kDoubleTapRightKey)) {
+      _doubleTapRight =
+          doubleTapActionFromId(prefs.getString(_kDoubleTapRightKey));
+    }
+
+    _returnHomeBehavior =
+        returnHomeBehaviorFromId(prefs.getString(_kReturnHomeBehaviorKey));
+    _showSystemTimeInControls =
+        prefs.getBool(_kShowSystemTimeInControlsKey) ?? false;
+    _showBufferSpeed = prefs.getBool(_kShowBufferSpeedKey) ?? true;
+    _showBatteryInControls = prefs.getBool(_kShowBatteryInControlsKey) ?? false;
+    _seekBackwardSeconds =
+        (prefs.getInt(_kSeekBackwardSecondsKey) ?? 10).clamp(1, 120);
+    _seekForwardSeconds =
+        (prefs.getInt(_kSeekForwardSecondsKey) ?? 20).clamp(1, 120);
+    _forceRemoteControlKeys =
+        prefs.getBool(_kForceRemoteControlKeysKey) ?? false;
+
     final rawServers = prefs.getString(_kServersKey);
     _servers.clear();
     if (rawServers != null && rawServers.trim().isNotEmpty) {
@@ -479,6 +573,26 @@ class AppState extends ChangeNotifier {
           'blockWords': _danmakuBlockWords,
           'matchMode': _danmakuMatchMode.id,
           'chConvert': _danmakuChConvert.id,
+        },
+        'interaction': {
+          'gestureBrightness': _gestureBrightness,
+          'gestureVolume': _gestureVolume,
+          'gestureSeek': _gestureSeek,
+          'gestureLongPressSpeed': _gestureLongPressSpeed,
+          'longPressSpeedMultiplier': _longPressSpeedMultiplier,
+          'longPressSlideSpeed': _longPressSlideSpeed,
+          'doubleTap': {
+            'left': _doubleTapLeft.id,
+            'center': _doubleTapCenter.id,
+            'right': _doubleTapRight.id,
+          },
+          'returnHomeBehavior': _returnHomeBehavior.id,
+          'showSystemTimeInControls': _showSystemTimeInControls,
+          'showBufferSpeed': _showBufferSpeed,
+          'showBatteryInControls': _showBatteryInControls,
+          'seekBackwardSeconds': _seekBackwardSeconds,
+          'seekForwardSeconds': _seekForwardSeconds,
+          'forceRemoteControlKeys': _forceRemoteControlKeys,
         },
         'activeServerId': _activeServerId,
         'servers': _servers.map((s) => s.toJson()).toList(),
@@ -703,6 +817,10 @@ class AppState extends ChangeNotifier {
     }
 
     final danmakuMap = _coerceStringKeyedMap(data['danmaku']) ?? const {};
+    final interactionMap =
+        _coerceStringKeyedMap(data['interaction']) ?? const {};
+    final doubleTapMap =
+        _coerceStringKeyedMap(interactionMap['doubleTap']) ?? const {};
 
     final nextThemeMode = _decodeThemeMode(data['themeMode']?.toString());
     final nextUiScale = _readDouble(data['uiScaleFactor'], fallback: 1.0)
@@ -796,6 +914,46 @@ class AppState extends ChangeNotifier {
     final nextDanmakuChConvert =
         danmakuChConvertFromId(danmakuMap['chConvert']?.toString());
 
+    final nextGestureBrightness =
+        _readBool(interactionMap['gestureBrightness'], fallback: true);
+    final nextGestureVolume =
+        _readBool(interactionMap['gestureVolume'], fallback: true);
+    final nextGestureSeek =
+        _readBool(interactionMap['gestureSeek'], fallback: true);
+    final nextGestureLongPressSpeed =
+        _readBool(interactionMap['gestureLongPressSpeed'], fallback: true);
+    final nextLongPressSpeedMultiplier =
+        _readDouble(interactionMap['longPressSpeedMultiplier'], fallback: 2.5)
+            .clamp(1.0, 4.0)
+            .toDouble();
+    final nextLongPressSlideSpeed =
+        _readBool(interactionMap['longPressSlideSpeed'], fallback: true);
+    final nextDoubleTapLeft = doubleTapMap.containsKey('left')
+        ? doubleTapActionFromId(doubleTapMap['left']?.toString())
+        : DoubleTapAction.seekBackward;
+    final nextDoubleTapCenter = doubleTapMap.containsKey('center')
+        ? doubleTapActionFromId(doubleTapMap['center']?.toString())
+        : DoubleTapAction.playPause;
+    final nextDoubleTapRight = doubleTapMap.containsKey('right')
+        ? doubleTapActionFromId(doubleTapMap['right']?.toString())
+        : DoubleTapAction.seekForward;
+    final nextReturnHomeBehavior = returnHomeBehaviorFromId(
+        interactionMap['returnHomeBehavior']?.toString());
+    final nextShowSystemTimeInControls =
+        _readBool(interactionMap['showSystemTimeInControls'], fallback: false);
+    final nextShowBufferSpeed =
+        _readBool(interactionMap['showBufferSpeed'], fallback: true);
+    final nextShowBatteryInControls =
+        _readBool(interactionMap['showBatteryInControls'], fallback: false);
+    final nextSeekBackwardSeconds =
+        _readInt(interactionMap['seekBackwardSeconds'], fallback: 10)
+            .clamp(1, 120);
+    final nextSeekForwardSeconds =
+        _readInt(interactionMap['seekForwardSeconds'], fallback: 20)
+            .clamp(1, 120);
+    final nextForceRemoteControlKeys =
+        _readBool(interactionMap['forceRemoteControlKeys'], fallback: false);
+
     final nextServers = <ServerProfile>[];
     final rawServers = data['servers'];
     if (rawServers is List) {
@@ -858,6 +1016,23 @@ class AppState extends ChangeNotifier {
     _danmakuBlockWords = nextDanmakuBlockWords;
     _danmakuMatchMode = nextDanmakuMatchMode;
     _danmakuChConvert = nextDanmakuChConvert;
+
+    _gestureBrightness = nextGestureBrightness;
+    _gestureVolume = nextGestureVolume;
+    _gestureSeek = nextGestureSeek;
+    _gestureLongPressSpeed = nextGestureLongPressSpeed;
+    _longPressSpeedMultiplier = nextLongPressSpeedMultiplier;
+    _longPressSlideSpeed = nextLongPressSlideSpeed;
+    _doubleTapLeft = nextDoubleTapLeft;
+    _doubleTapCenter = nextDoubleTapCenter;
+    _doubleTapRight = nextDoubleTapRight;
+    _returnHomeBehavior = nextReturnHomeBehavior;
+    _showSystemTimeInControls = nextShowSystemTimeInControls;
+    _showBufferSpeed = nextShowBufferSpeed;
+    _showBatteryInControls = nextShowBatteryInControls;
+    _seekBackwardSeconds = nextSeekBackwardSeconds;
+    _seekForwardSeconds = nextSeekForwardSeconds;
+    _forceRemoteControlKeys = nextForceRemoteControlKeys;
 
     _servers
       ..clear()
@@ -963,6 +1138,25 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_kDanmakuMatchModeKey, _danmakuMatchMode.id);
     await prefs.setString(_kDanmakuChConvertKey, _danmakuChConvert.id);
 
+    await prefs.setBool(_kGestureBrightnessKey, _gestureBrightness);
+    await prefs.setBool(_kGestureVolumeKey, _gestureVolume);
+    await prefs.setBool(_kGestureSeekKey, _gestureSeek);
+    await prefs.setBool(_kGestureLongPressSpeedKey, _gestureLongPressSpeed);
+    await prefs.setDouble(
+        _kLongPressSpeedMultiplierKey, _longPressSpeedMultiplier);
+    await prefs.setBool(_kLongPressSlideSpeedKey, _longPressSlideSpeed);
+    await prefs.setString(_kDoubleTapLeftKey, _doubleTapLeft.id);
+    await prefs.setString(_kDoubleTapCenterKey, _doubleTapCenter.id);
+    await prefs.setString(_kDoubleTapRightKey, _doubleTapRight.id);
+    await prefs.setString(_kReturnHomeBehaviorKey, _returnHomeBehavior.id);
+    await prefs.setBool(
+        _kShowSystemTimeInControlsKey, _showSystemTimeInControls);
+    await prefs.setBool(_kShowBufferSpeedKey, _showBufferSpeed);
+    await prefs.setBool(_kShowBatteryInControlsKey, _showBatteryInControls);
+    await prefs.setInt(_kSeekBackwardSecondsKey, _seekBackwardSeconds);
+    await prefs.setInt(_kSeekForwardSecondsKey, _seekForwardSeconds);
+    await prefs.setBool(_kForceRemoteControlKeysKey, _forceRemoteControlKeys);
+
     await _persistServers(prefs);
     if (_activeServerId == null) {
       await prefs.remove(_kActiveServerIdKey);
@@ -1032,8 +1226,8 @@ class AppState extends ChangeNotifier {
 
       String? serverName;
       try {
-        serverName =
-            await apiForServer.fetchServerName(auth.baseUrlUsed, token: auth.token);
+        serverName = await apiForServer.fetchServerName(auth.baseUrlUsed,
+            token: auth.token);
       } catch (_) {
         // best-effort
       }
@@ -1201,7 +1395,8 @@ class AppState extends ChangeNotifier {
           fixedName.isNotEmpty ? fixedName : _suggestServerName(fixedBaseUrl);
 
       final existingIndex = _servers.indexWhere(
-        (s) => s.baseUrl == fixedBaseUrl && s.serverType == MediaServerType.plex,
+        (s) =>
+            s.baseUrl == fixedBaseUrl && s.serverType == MediaServerType.plex,
       );
 
       final resolvedIconUrl = switch (fixedIconUrl) {
@@ -1636,8 +1831,11 @@ class AppState extends ChangeNotifier {
     final segs = uri.pathSegments.toList(growable: false);
     if (segs.length < 3) return _normalizeServerBaseUrl(uri.toString());
 
-    final tail = segs.skip(segs.length - 3).map((e) => e.toLowerCase()).toList();
-    if (tail[0] != 'emby' || tail[1] != 'users' || tail[2] != 'authenticatebyname') {
+    final tail =
+        segs.skip(segs.length - 3).map((e) => e.toLowerCase()).toList();
+    if (tail[0] != 'emby' ||
+        tail[1] != 'users' ||
+        tail[2] != 'authenticatebyname') {
       return _normalizeServerBaseUrl(uri.toString());
     }
 
@@ -1663,8 +1861,9 @@ class AppState extends ChangeNotifier {
     final segments = uri.pathSegments.toList(growable: true);
     while (segments.isNotEmpty) {
       final last = segments.last.toLowerCase();
-      final secondLast =
-          segments.length >= 2 ? segments[segments.length - 2].toLowerCase() : null;
+      final secondLast = segments.length >= 2
+          ? segments[segments.length - 2].toLowerCase()
+          : null;
       if (secondLast == 'web' && last == 'index.html') {
         segments.removeLast();
         segments.removeLast();
@@ -2224,6 +2423,137 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setGestureBrightness(bool enabled) async {
+    if (_gestureBrightness == enabled) return;
+    _gestureBrightness = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kGestureBrightnessKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setGestureVolume(bool enabled) async {
+    if (_gestureVolume == enabled) return;
+    _gestureVolume = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kGestureVolumeKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setGestureSeek(bool enabled) async {
+    if (_gestureSeek == enabled) return;
+    _gestureSeek = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kGestureSeekKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setGestureLongPressSpeed(bool enabled) async {
+    if (_gestureLongPressSpeed == enabled) return;
+    _gestureLongPressSpeed = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kGestureLongPressSpeedKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setLongPressSpeedMultiplier(double multiplier) async {
+    final v = multiplier.clamp(1.0, 4.0).toDouble();
+    if (_longPressSpeedMultiplier == v) return;
+    _longPressSpeedMultiplier = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kLongPressSpeedMultiplierKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setLongPressSlideSpeed(bool enabled) async {
+    if (_longPressSlideSpeed == enabled) return;
+    _longPressSlideSpeed = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kLongPressSlideSpeedKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDoubleTapLeft(DoubleTapAction action) async {
+    if (_doubleTapLeft == action) return;
+    _doubleTapLeft = action;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDoubleTapLeftKey, action.id);
+    notifyListeners();
+  }
+
+  Future<void> setDoubleTapCenter(DoubleTapAction action) async {
+    if (_doubleTapCenter == action) return;
+    _doubleTapCenter = action;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDoubleTapCenterKey, action.id);
+    notifyListeners();
+  }
+
+  Future<void> setDoubleTapRight(DoubleTapAction action) async {
+    if (_doubleTapRight == action) return;
+    _doubleTapRight = action;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDoubleTapRightKey, action.id);
+    notifyListeners();
+  }
+
+  Future<void> setReturnHomeBehavior(ReturnHomeBehavior behavior) async {
+    if (_returnHomeBehavior == behavior) return;
+    _returnHomeBehavior = behavior;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kReturnHomeBehaviorKey, behavior.id);
+    notifyListeners();
+  }
+
+  Future<void> setShowSystemTimeInControls(bool enabled) async {
+    if (_showSystemTimeInControls == enabled) return;
+    _showSystemTimeInControls = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kShowSystemTimeInControlsKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setShowBufferSpeed(bool enabled) async {
+    if (_showBufferSpeed == enabled) return;
+    _showBufferSpeed = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kShowBufferSpeedKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setShowBatteryInControls(bool enabled) async {
+    if (_showBatteryInControls == enabled) return;
+    _showBatteryInControls = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kShowBatteryInControlsKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setSeekBackwardSeconds(int seconds) async {
+    final v = seconds.clamp(1, 120);
+    if (_seekBackwardSeconds == v) return;
+    _seekBackwardSeconds = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kSeekBackwardSecondsKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setSeekForwardSeconds(int seconds) async {
+    final v = seconds.clamp(1, 120);
+    if (_seekForwardSeconds == v) return;
+    _seekForwardSeconds = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kSeekForwardSecondsKey, v);
+    notifyListeners();
+  }
+
+  Future<void> setForceRemoteControlKeys(bool enabled) async {
+    if (_forceRemoteControlKeys == enabled) return;
+    _forceRemoteControlKeys = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kForceRemoteControlKeysKey, enabled);
+    notifyListeners();
+  }
+
   static ThemeMode _decodeThemeMode(String? raw) {
     switch (raw) {
       case 'light':
@@ -2349,11 +2679,13 @@ class AppState extends ChangeNotifier {
     return const [];
   }
 
-  static void _mergeCustomDomains(ServerProfile server, List<CustomDomain> domains) {
+  static void _mergeCustomDomains(
+      ServerProfile server, List<CustomDomain> domains) {
     for (final domain in domains) {
       final fixedUrl = _normalizeUrl(domain.url, defaultScheme: 'https');
       if (!_isValidHttpUrl(fixedUrl)) continue;
-      final fixedName = domain.name.trim().isEmpty ? fixedUrl : domain.name.trim();
+      final fixedName =
+          domain.name.trim().isEmpty ? fixedUrl : domain.name.trim();
       server.customDomains.removeWhere((d) => d.url == fixedUrl);
       server.customDomains.add(CustomDomain(name: fixedName, url: fixedUrl));
     }

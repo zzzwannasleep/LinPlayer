@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.os.BatteryManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -49,6 +50,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, deviceChannelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isAndroidTv" -> result.success(isAndroidTv())
+                "batteryLevel" -> result.success(batteryLevel())
                 else -> result.notImplemented()
             }
         }
@@ -61,6 +63,13 @@ class MainActivity : FlutterActivity() {
         val pm = applicationContext.packageManager
         return pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION) ||
             pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+
+    private fun batteryLevel(): Int? {
+        val bm = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
+        val level = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        if (level < 0) return null
+        return level
     }
 
     private fun setIconId(id: String) {

@@ -10,6 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'danmaku_settings_page.dart';
+import 'interaction_settings_page.dart';
 import 'server_text_import_sheet.dart';
 import 'services/app_update_service.dart';
 import 'services/cover_cache_manager.dart';
@@ -1372,6 +1373,23 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       ),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.touch_app_outlined),
+                      title: const Text('交互设置'),
+                      subtitle: const Text('手势、双击、快进快退等'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => InteractionSettingsPage(
+                              appState: widget.appState,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     const Divider(height: 1),
                     ListTile(
