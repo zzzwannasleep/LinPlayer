@@ -172,6 +172,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         hostOrUrl: baseUrl,
         preferredScheme: 'https',
         apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+        serverType: widget.server?.serverType ?? widget.appState.serverType,
+        deviceId: widget.appState.deviceId,
       );
     }
     _hwdecOn = widget.appState.preferHardwareDecode;
@@ -247,8 +249,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _resolvedStream = streamUrl;
       final embyHeaders = {
         'X-Emby-Token': _token!,
-        'X-Emby-Authorization':
-            'MediaBrowser Client="LinPlayer", Device="Flutter", DeviceId="${widget.appState.deviceId}", Version="1.0.0"',
+        ...EmbyApi.buildAuthorizationHeaders(
+          serverType: widget.server?.serverType ?? widget.appState.serverType,
+          deviceId: widget.appState.deviceId,
+          userId: _userId,
+        ),
       };
       if (!kIsWeb && streamUrl.isNotEmpty) {
         _thumbnailer = MediaKitThumbnailGenerator(
@@ -462,6 +467,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         hostOrUrl: appState.baseUrl!,
         preferredScheme: 'https',
         apiPrefix: appState.apiPrefix,
+        serverType: appState.serverType,
+        deviceId: appState.deviceId,
       );
       final item = await api.fetchItemDetail(
         token: appState.token!,
@@ -642,6 +649,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           hostOrUrl: baseUrl,
           preferredScheme: 'https',
           apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+          serverType: widget.server?.serverType ?? widget.appState.serverType,
+          deviceId: widget.appState.deviceId,
         );
     try {
       final detail = await api.fetchItemDetail(
@@ -712,6 +721,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             hostOrUrl: baseUrl,
             preferredScheme: 'https',
             apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+            serverType: widget.server?.serverType ?? widget.appState.serverType,
+            deviceId: widget.appState.deviceId,
           );
 
       final seasons = await api.fetchSeasons(
@@ -800,6 +811,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           hostOrUrl: baseUrl,
           preferredScheme: 'https',
           apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+          serverType: widget.server?.serverType ?? widget.appState.serverType,
+          deviceId: widget.appState.deviceId,
         );
     final eps = await api.fetchEpisodes(
       token: token,
@@ -1511,6 +1524,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             hostOrUrl: base,
             preferredScheme: 'https',
             apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+            serverType: widget.server?.serverType ?? widget.appState.serverType,
+            deviceId: widget.appState.deviceId,
           );
       final info = await api.fetchPlaybackInfo(
         token: token,
@@ -2350,6 +2365,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               hostOrUrl: base,
               preferredScheme: 'https',
               apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+              serverType: widget.server?.serverType ?? widget.appState.serverType,
+              deviceId: widget.appState.deviceId,
             );
         final info = await api.fetchPlaybackInfo(
           token: token,

@@ -1217,7 +1217,13 @@ class AppState extends ChangeNotifier {
         return;
       }
       final api =
-          EmbyApi(hostOrUrl: hostOrUrl, preferredScheme: scheme, port: port);
+          EmbyApi(
+            hostOrUrl: hostOrUrl,
+            preferredScheme: scheme,
+            port: port,
+            serverType: serverType,
+            deviceId: _deviceId,
+          );
       final auth = await api.authenticate(
         username: fixedUsername,
         password: password,
@@ -1228,6 +1234,8 @@ class AppState extends ChangeNotifier {
         hostOrUrl: auth.baseUrlUsed,
         preferredScheme: scheme,
         apiPrefix: auth.apiPrefixUsed,
+        serverType: serverType,
+        deviceId: _deviceId,
       );
 
       String? serverName;
@@ -1643,6 +1651,8 @@ class AppState extends ChangeNotifier {
         hostOrUrl: baseUrl!,
         preferredScheme: 'https',
         apiPrefix: apiPrefix,
+        serverType: serverType,
+        deviceId: _deviceId,
       );
       _domains = await api.fetchDomains(token!, baseUrl!, allowFailure: true);
       _error = null;
@@ -1663,6 +1673,8 @@ class AppState extends ChangeNotifier {
         hostOrUrl: baseUrl!,
         preferredScheme: 'https',
         apiPrefix: apiPrefix,
+        serverType: serverType,
+        deviceId: _deviceId,
       );
       _libraries = await api.fetchLibraries(
         token: token!,
@@ -1703,6 +1715,8 @@ class AppState extends ChangeNotifier {
       hostOrUrl: baseUrl!,
       preferredScheme: 'https',
       apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
     );
     final result = await api.fetchItems(
       token: token!,
@@ -1735,6 +1749,8 @@ class AppState extends ChangeNotifier {
       hostOrUrl: baseUrl!,
       preferredScheme: 'https',
       apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
     );
     final Map<String, List<MediaItem>> libraryShows = {};
     for (final lib in _libraries) {
@@ -1791,6 +1807,8 @@ class AppState extends ChangeNotifier {
       hostOrUrl: baseUrl!,
       preferredScheme: 'https',
       apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
     );
     // Fetch a few more to increase the chance of getting items with artwork.
     final res = await api.fetchRandomRecommendations(
@@ -1835,6 +1853,8 @@ class AppState extends ChangeNotifier {
       hostOrUrl: baseUrl!,
       preferredScheme: 'https',
       apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
     );
     final res = await api.fetchContinueWatching(
       token: token!,

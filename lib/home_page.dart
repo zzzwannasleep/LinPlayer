@@ -1007,14 +1007,12 @@ class _HomeBody extends StatelessWidget {
 class _MediaStats {
   final int? movieCount;
   final int? seriesCount;
-  final int? episodeSingleCount;
-  final int? episodeMultiCount;
+  final int? episodeCount;
 
   const _MediaStats({
     required this.movieCount,
     required this.seriesCount,
-    required this.episodeSingleCount,
-    required this.episodeMultiCount,
+    required this.episodeCount,
   });
 }
 
@@ -1045,8 +1043,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
       return const _MediaStats(
         movieCount: 0,
         seriesCount: 0,
-        episodeSingleCount: 0,
-        episodeMultiCount: 0,
+        episodeCount: 0,
       );
     }
 
@@ -1054,6 +1051,8 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: widget.appState.apiPrefix,
+      serverType: widget.appState.serverType,
+      deviceId: widget.appState.deviceId,
     );
 
     Future<int?> quickTotal(String includeItemTypes) async {
@@ -1075,7 +1074,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
 
     int? movieCount;
     int? seriesCount;
-    int? episodeMultiCount;
+    int? episodeCount;
 
     try {
       final counts = await api.fetchItemCounts(
@@ -1085,128 +1084,30 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
       );
       movieCount = counts.movieCount;
       seriesCount = counts.seriesCount;
-      episodeMultiCount = counts.episodeCount;
+      episodeCount = counts.episodeCount;
     } catch (_) {}
 
-    movieCount ??= await quickTotal('Movie');
-    seriesCount ??= await quickTotal('Series');
-    episodeMultiCount ??= await quickTotal('Episode');
-
-    int? episodeSingleCount;
-    int? scannedEpisodeTotal;
-    try {
-      const fields =
-          'ProviderIds,SeriesId,SeriesName,SeasonName,ParentIndexNumber,IndexNumber,Name';
-      const pageSize = 500;
-      final episodeKeys = <String>{};
-
-      var startIndex = 0;
-      while (true) {
-        final res = await api.fetchItems(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
-          includeItemTypes: 'Episode',
-          recursive: true,
-          startIndex: startIndex,
-          limit: pageSize,
-          fields: fields,
-        );
-        scannedEpisodeTotal = res.total;
-
-        for (final item in res.items) {
-          episodeKeys.add(_episodeKey(item));
-        }
-
-        startIndex += res.items.length;
-        if (startIndex >= res.total || res.items.isEmpty) break;
-      }
-
-      episodeSingleCount = episodeKeys.length;
-    } catch (_) {
-      episodeSingleCount = null;
+    final futures = <Future<void>>[];
+    if (movieCount == null) {
+      futures.add(quickTotal('Movie').then((v) => movieCount = v));
     }
-
-    episodeMultiCount ??= scannedEpisodeTotal;
+    if (seriesCount == null) {
+      futures.add(quickTotal('Series').then((v) => seriesCount = v));
+    }
+    if (episodeCount == null) {
+      futures.add(quickTotal('Episode').then((v) => episodeCount = v));
+    }
+    if (futures.isNotEmpty) await Future.wait(futures);
 
     return _MediaStats(
       movieCount: movieCount,
       seriesCount: seriesCount,
-      episodeSingleCount: episodeSingleCount,
-      episodeMultiCount: episodeMultiCount,
+      episodeCount: episodeCount,
     );
   }
 
   void _reload() {
     setState(() => _future = _fetch());
-  }
-
-  static String _normalize(String raw) {
-    final v = raw.trim().toLowerCase();
-    if (v.isEmpty) return '';
-    return v.replaceAll(RegExp(r'\\s+'), ' ');
-  }
-
-  static String? _providerId(MediaItem item, String key) {
-    final direct = item.providerIds[key];
-    if (direct != null && direct.trim().isNotEmpty) return direct.trim();
-
-    final lowered = key.toLowerCase();
-    for (final entry in item.providerIds.entries) {
-      if (entry.key.toLowerCase() == lowered && entry.value.trim().isNotEmpty) {
-        return entry.value.trim();
-      }
-    }
-
-    return null;
-  }
-
-  static String _providerKey(MediaItem item, List<String> preferredKeys) {
-    for (final key in preferredKeys) {
-      final id = _providerId(item, key);
-      if (id != null) return '${key.toLowerCase()}:$id';
-    }
-
-    for (final entry in item.providerIds.entries) {
-      final id = entry.value.trim();
-      if (id.isEmpty) continue;
-      return '${entry.key.toLowerCase()}:$id';
-    }
-
-    return '';
-  }
-
-  static String _episodeKey(MediaItem item) {
-    final pid = _providerKey(item, const ['Tvdb', 'Tmdb', 'Imdb']);
-    if (pid.isNotEmpty) return 'episode:$pid';
-
-    final seriesId = (item.seriesId ?? '').trim();
-    final seriesName = _normalize(item.seriesName);
-    final seasonName = _normalize(item.seasonName);
-    final season = item.seasonNumber;
-    final episode = item.episodeNumber;
-    final name = _normalize(item.name);
-
-    if (seriesId.isNotEmpty && season != null && episode != null) {
-      return 'episode:seriesId:$seriesId|s:$season|e:$episode';
-    }
-    if (seriesName.isNotEmpty && season != null && episode != null) {
-      return 'episode:seriesName:$seriesName|s:$season|e:$episode';
-    }
-    if (seriesId.isNotEmpty && seasonName.isNotEmpty && name.isNotEmpty) {
-      return 'episode:seriesId:$seriesId|sn:$seasonName|n:$name';
-    }
-    if (seriesName.isNotEmpty && seasonName.isNotEmpty && name.isNotEmpty) {
-      return 'episode:seriesName:$seriesName|sn:$seasonName|n:$name';
-    }
-    if (seriesId.isNotEmpty && name.isNotEmpty) {
-      return 'episode:seriesId:$seriesId|n:$name';
-    }
-    if (seriesName.isNotEmpty && name.isNotEmpty) {
-      return 'episode:seriesName:$seriesName|n:$name';
-    }
-
-    return 'episode:id:${item.id}';
   }
 
   Widget _statCard({
@@ -1295,12 +1196,8 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
             stats?.movieCount == null ? '—' : '${stats!.movieCount} 部';
         final seriesText =
             stats?.seriesCount == null ? '—' : '${stats!.seriesCount} 部';
-        final episodeSingleText = stats?.episodeSingleCount == null
-            ? '—'
-            : '${stats!.episodeSingleCount} 集';
-        final episodeMultiText = stats?.episodeMultiCount == null
-            ? '—'
-            : '${stats!.episodeMultiCount} 集';
+        final episodeText =
+            stats?.episodeCount == null ? '—' : '${stats!.episodeCount} 集';
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1332,8 +1229,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                 builder: (context, constraints) {
                   const spacing = 10.0;
                   final maxWidth = constraints.maxWidth;
-                  final columns =
-                      maxWidth >= 860 ? 4 : (maxWidth >= 620 ? 3 : 2);
+                  final columns = maxWidth >= 620 ? 3 : 2;
                   final cardWidth =
                       (maxWidth - spacing * (columns - 1)) / columns;
 
@@ -1365,19 +1261,9 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                         width: cardWidth,
                         child: _statCard(
                           icon: Icons.filter_1_outlined,
-                          label: '剧集数量（单版本）',
-                          value: valueOrLoading(episodeSingleText),
+                          label: '剧集数量',
+                          value: valueOrLoading(episodeText),
                           accent: theme.colorScheme.tertiary,
-                          enableBlur: enableBlur,
-                        ),
-                      ),
-                      SizedBox(
-                        width: cardWidth,
-                        child: _statCard(
-                          icon: Icons.layers_outlined,
-                          label: '剧集数量（多版本）',
-                          value: valueOrLoading(episodeMultiText),
-                          accent: theme.colorScheme.inversePrimary,
                           enableBlur: enableBlur,
                         ),
                       ),

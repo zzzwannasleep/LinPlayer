@@ -80,6 +80,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+      serverType: widget.server?.serverType ?? widget.appState.serverType,
+      deviceId: widget.appState.deviceId,
     );
     try {
       final detail = await api.fetchItemDetail(
@@ -218,6 +220,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           chaps = await api.fetchChapters(
             token: token,
             baseUrl: baseUrl,
+            userId: userId,
             itemId: widget.itemId,
           );
         } catch (_) {
@@ -307,6 +310,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+      serverType: widget.server?.serverType ?? widget.appState.serverType,
+      deviceId: widget.appState.deviceId,
     );
     final eps = await api.fetchEpisodes(
       token: token,
@@ -1533,6 +1538,8 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+      serverType: widget.server?.serverType ?? widget.appState.serverType,
+      deviceId: widget.appState.deviceId,
     );
     try {
       final eps = await api.fetchEpisodes(
@@ -1775,6 +1782,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+      serverType: widget.server?.serverType ?? widget.appState.serverType,
+      deviceId: widget.appState.deviceId,
     );
     try {
       final detail = await api.fetchItemDetail(
@@ -1827,6 +1836,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         chaps = await api.fetchChapters(
           token: token,
           baseUrl: baseUrl,
+          userId: userId,
           itemId: widget.episode.id,
         );
       } catch (_) {
@@ -2097,6 +2107,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+      serverType: widget.server?.serverType ?? widget.appState.serverType,
+      deviceId: widget.appState.deviceId,
     );
     final eps = await api.fetchEpisodes(
       token: token,

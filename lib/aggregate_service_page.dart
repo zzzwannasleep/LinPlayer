@@ -127,6 +127,8 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
         hostOrUrl: baseUrl,
         preferredScheme: 'https',
         apiPrefix: server.apiPrefix,
+        serverType: server.serverType,
+        deviceId: widget.appState.deviceId,
       );
       final res = await api.fetchContinueWatching(
         token: token,
@@ -564,6 +566,8 @@ class _AggregateSearchTabStatefulState
       hostOrUrl: baseUrl,
       preferredScheme: 'https',
       apiPrefix: server.apiPrefix,
+      serverType: server.serverType,
+      deviceId: widget.appState.deviceId,
     );
     final res = await api.fetchItems(
       token: token,
@@ -669,6 +673,8 @@ class _AggregateSearchTabStatefulState
             hostOrUrl: baseUrl,
             preferredScheme: 'https',
             apiPrefix: server.apiPrefix,
+            serverType: server.serverType,
+            deviceId: widget.appState.deviceId,
           );
           final res = await api.fetchItems(
             token: token,

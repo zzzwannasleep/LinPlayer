@@ -172,6 +172,8 @@ class _SearchPageState extends State<SearchPage> {
         hostOrUrl: baseUrl,
         preferredScheme: 'https',
         apiPrefix: widget.appState.apiPrefix,
+        serverType: widget.appState.serverType,
+        deviceId: widget.appState.deviceId,
       );
       final fetched = await api.fetchItems(
         token: token,
