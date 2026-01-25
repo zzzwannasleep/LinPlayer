@@ -217,6 +217,7 @@ class MediaPosterTile extends StatelessWidget {
     this.year,
     this.rating,
     this.badgeText,
+    this.topRightBadge,
     this.titleMaxLines = 1,
   });
 
@@ -226,6 +227,7 @@ class MediaPosterTile extends StatelessWidget {
   final String? year;
   final double? rating;
   final String? badgeText;
+  final Widget? topRightBadge;
   final int titleMaxLines;
 
   @override
@@ -345,6 +347,12 @@ class MediaPosterTile extends StatelessWidget {
                     if (badge.isNotEmpty) MediaLabelBadge(text: badge),
                   ],
                 ),
+              ),
+            if (topRightBadge != null)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: topRightBadge!,
               ),
           ],
         ),

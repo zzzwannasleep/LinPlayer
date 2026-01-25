@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -55,6 +56,19 @@ typedef BackupServerAuthenticator = Future<AuthResult> Function({
   required String deviceId,
 });
 
+@immutable
+class MediaStats {
+  final int? movieCount;
+  final int? seriesCount;
+  final int? episodeCount;
+
+  const MediaStats({
+    required this.movieCount,
+    required this.seriesCount,
+    required this.episodeCount,
+  });
+}
+
 class AppState extends ChangeNotifier {
   static const _kBackupType = 'lin_player_backup';
   static const _kBackupSchemaVersionV1 = 1;
@@ -106,6 +120,9 @@ class AppState extends ChangeNotifier {
   static const _kServerIconLibraryUrlsKey = 'serverIconLibraryUrls_v1';
   static const _kShowHomeLibraryQuickAccessKey =
       'showHomeLibraryQuickAccess_v1';
+
+  static const _kServerLibrariesCachePrefix = 'serverLibrariesCache_v1:';
+  static const _kServerHomeCachePrefix = 'serverHomeCache_v1:';
 
   // Interaction & gestures (shared by MPV/Exo).
   static const _kGestureBrightnessKey = 'gestureBrightness_v1';
@@ -198,6 +215,263 @@ class AppState extends ChangeNotifier {
   LocalPlaybackHandoff? _localPlaybackHandoff;
   bool _loading = false;
   String? _error;
+  MediaStats? _mediaStats;
+  Future<MediaStats>? _mediaStatsInFlight;
+  Future<void>? _homeInFlight;
+  final Map<String, int> _seriesEpisodeCountCache = {};
+  final Map<String, Future<int?>> _seriesEpisodeCountInFlight = {};
+
+  static String _librariesCacheKey(String serverId) =>
+      '$_kServerLibrariesCachePrefix$serverId';
+  static String _homeCacheKey(String serverId) =>
+      '$_kServerHomeCachePrefix$serverId';
+
+  void _restoreServerCaches(SharedPreferences prefs, String serverId) {
+    _restoreLibrariesFromCache(prefs, serverId);
+    _restoreHomeFromCache(prefs, serverId);
+  }
+
+  void _restoreLibrariesFromCache(SharedPreferences prefs, String serverId) {
+    final raw = prefs.getString(_librariesCacheKey(serverId));
+    if (raw == null || raw.trim().isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final libs = <LibraryInfo>[];
+      for (final item in decoded) {
+        if (item is Map<String, dynamic>) {
+          final lib = LibraryInfo.fromJson(item);
+          if (lib.id.trim().isEmpty) continue;
+          libs.add(lib);
+        }
+      }
+      if (libs.isNotEmpty) {
+        _libraries = libs;
+      }
+    } catch (_) {
+      // ignore broken cache
+    }
+  }
+
+  void _restoreHomeFromCache(SharedPreferences prefs, String serverId) {
+    final raw = prefs.getString(_homeCacheKey(serverId));
+    if (raw == null || raw.trim().isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+
+      final sections = decoded['sections'];
+      if (sections is Map) {
+        for (final entry in sections.entries) {
+          final key = entry.key.toString();
+          if (!key.startsWith('lib_')) continue;
+          final list = entry.value;
+          if (list is! List) continue;
+          final items = <MediaItem>[];
+          for (final it in list) {
+            if (it is Map<String, dynamic>) {
+              items.add(MediaItem.fromJson(it));
+            }
+          }
+          if (items.isNotEmpty) {
+            _homeSections[key] = items;
+          }
+        }
+      }
+
+      final totals = decoded['totals'];
+      if (totals is Map) {
+        for (final entry in totals.entries) {
+          final libId = entry.key.toString();
+          final v = entry.value;
+          if (v is int) {
+            _itemsTotal[libId] = v;
+          } else if (v is num) {
+            _itemsTotal[libId] = v.toInt();
+          }
+        }
+      }
+    } catch (_) {
+      // ignore broken cache
+    }
+  }
+
+  Future<void> _persistLibrariesCache() async {
+    final serverId = activeServerId;
+    if (serverId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final encoded = jsonEncode(_libraries.map((l) => l.toJson()).toList());
+    await prefs.setString(_librariesCacheKey(serverId), encoded);
+  }
+
+  Future<void> _persistHomeCache() async {
+    final serverId = activeServerId;
+    if (serverId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final totals = <String, int>{};
+    for (final key in _homeSections.keys) {
+      if (!key.startsWith('lib_')) continue;
+      final libId = key.substring(4);
+      final total = _itemsTotal[libId];
+      if (total != null) totals[libId] = total;
+    }
+    final data = <String, dynamic>{
+      'sections': _homeSections.map(
+        (key, value) => MapEntry(key, value.map((e) => e.toJson()).toList()),
+      ),
+      'totals': totals,
+    };
+    await prefs.setString(_homeCacheKey(serverId), jsonEncode(data));
+  }
+
+  void _resetPerServerCaches() {
+    _mediaStats = null;
+    _mediaStatsInFlight = null;
+    _homeInFlight = null;
+    _seriesEpisodeCountCache.clear();
+    _seriesEpisodeCountInFlight.clear();
+  }
+
+  Future<MediaStats> loadMediaStats({bool forceRefresh = false}) {
+    final inFlight = _mediaStatsInFlight;
+    if (inFlight != null) return inFlight;
+
+    if (!forceRefresh) {
+      final cached = _mediaStats;
+      if (cached != null) return Future.value(cached);
+    }
+
+    final future = _fetchMediaStats();
+    _mediaStatsInFlight = future;
+    return future.then((stats) {
+      _mediaStats = stats;
+      return stats;
+    }).whenComplete(() {
+      if (_mediaStatsInFlight == future) _mediaStatsInFlight = null;
+    });
+  }
+
+  Future<MediaStats> _fetchMediaStats() async {
+    final baseUrl = this.baseUrl;
+    final token = this.token;
+    final userId = this.userId;
+    if (baseUrl == null || token == null || userId == null) {
+      return const MediaStats(movieCount: 0, seriesCount: 0, episodeCount: 0);
+    }
+
+    final api = EmbyApi(
+      hostOrUrl: baseUrl,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
+    );
+
+    Future<int?> quickTotal(String includeItemTypes) async {
+      try {
+        final res = await api.fetchItems(
+          token: token,
+          baseUrl: baseUrl,
+          userId: userId,
+          includeItemTypes: includeItemTypes,
+          recursive: true,
+          startIndex: 0,
+          limit: 1,
+        );
+        return res.total;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    int? movieCount;
+    int? seriesCount;
+    int? episodeCount;
+
+    try {
+      final counts = await api.fetchItemCounts(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+      );
+      movieCount = counts.movieCount;
+      seriesCount = counts.seriesCount;
+      episodeCount = counts.episodeCount;
+    } catch (_) {}
+
+    final futures = <Future<void>>[];
+    if (movieCount == null) {
+      futures.add(quickTotal('Movie').then((v) => movieCount = v));
+    }
+    if (seriesCount == null) {
+      futures.add(quickTotal('Series').then((v) => seriesCount = v));
+    }
+    if (episodeCount == null) {
+      futures.add(quickTotal('Episode').then((v) => episodeCount = v));
+    }
+    if (futures.isNotEmpty) await Future.wait(futures);
+
+    return MediaStats(
+      movieCount: movieCount,
+      seriesCount: seriesCount,
+      episodeCount: episodeCount,
+    );
+  }
+
+  Future<int?> loadSeriesEpisodeCount(
+    String seriesId, {
+    bool forceRefresh = false,
+  }) {
+    if (seriesId.trim().isEmpty) return Future.value(null);
+
+    if (!forceRefresh) {
+      final cached = _seriesEpisodeCountCache[seriesId];
+      if (cached != null) return Future.value(cached);
+      final inFlight = _seriesEpisodeCountInFlight[seriesId];
+      if (inFlight != null) return inFlight;
+    }
+
+    final future = _fetchSeriesEpisodeCount(seriesId);
+    _seriesEpisodeCountInFlight[seriesId] = future;
+    return future.then((count) {
+      if (count != null) _seriesEpisodeCountCache[seriesId] = count;
+      return count;
+    }).whenComplete(() {
+      final current = _seriesEpisodeCountInFlight[seriesId];
+      if (current == future) _seriesEpisodeCountInFlight.remove(seriesId);
+    });
+  }
+
+  Future<int?> _fetchSeriesEpisodeCount(String seriesId) async {
+    final baseUrl = this.baseUrl;
+    final token = this.token;
+    final userId = this.userId;
+    if (baseUrl == null || token == null || userId == null) return null;
+
+    final api = EmbyApi(
+      hostOrUrl: baseUrl,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
+    );
+
+    try {
+      final res = await api.fetchItems(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+        parentId: seriesId,
+        includeItemTypes: 'Episode',
+        recursive: true,
+        startIndex: 0,
+        limit: 1,
+      );
+      return res.total;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static String _randomId() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -334,6 +608,9 @@ class AppState extends ChangeNotifier {
       if (!entry.key.startsWith('lib_')) continue;
       final libId = entry.key.substring(4);
       if (activeServer?.hiddenLibraries.contains(libId) == true) continue;
+      if (_libraries.isNotEmpty && !_libraries.any((l) => l.id == libId)) {
+        continue;
+      }
       final name = _libraries
           .firstWhere(
             (l) => l.id == libId,
@@ -527,6 +804,11 @@ class AppState extends ChangeNotifier {
     if (_activeServerId != null && activeServer == null) {
       _activeServerId = null;
       await prefs.remove(_kActiveServerIdKey);
+    }
+
+    final serverId = _activeServerId;
+    if (serverId != null && activeServer?.serverType.isEmbyLike == true) {
+      _restoreServerCaches(prefs, serverId);
     }
 
     notifyListeners();
@@ -1184,6 +1466,7 @@ class AppState extends ChangeNotifier {
     _randomRecommendationsInFlight = null;
     _continueWatching = null;
     _continueWatchingInFlight = null;
+    _resetPerServerCaches();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kActiveServerIdKey);
     notifyListeners();
@@ -1588,10 +1871,14 @@ class AppState extends ChangeNotifier {
       _randomRecommendationsInFlight = null;
       _continueWatching = null;
       _continueWatchingInFlight = null;
+      _resetPerServerCaches();
       _error = null;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_kActiveServerIdKey, serverId);
+      if (activeServer?.serverType.isEmbyLike == true) {
+        _restoreServerCaches(prefs, serverId);
+      }
       notifyListeners();
     }
 
@@ -1599,7 +1886,7 @@ class AppState extends ChangeNotifier {
 
     await refreshDomains();
     await refreshLibraries();
-    await loadHome();
+    unawaited(loadHome(forceRefresh: true));
   }
 
   Future<void> removeServer(String serverId) async {
@@ -1681,9 +1968,8 @@ class AppState extends ChangeNotifier {
         baseUrl: baseUrl!,
         userId: userId!,
       );
+      await _persistLibrariesCache();
       _itemsCache.clear();
-      _itemsTotal.clear();
-      _homeSections.clear();
       _randomRecommendations = null;
       _randomRecommendationsInFlight = null;
       _continueWatching = null;
@@ -1743,7 +2029,22 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadHome() async {
+  Future<void> loadHome({bool forceRefresh = false}) {
+    final inFlight = _homeInFlight;
+    if (inFlight != null) return inFlight;
+
+    if (!forceRefresh) {
+      if (_homeSections.isNotEmpty) return Future.value();
+    }
+
+    final future = _loadHomeInternal(forceRefresh: forceRefresh);
+    _homeInFlight = future;
+    return future.whenComplete(() {
+      if (_homeInFlight == future) _homeInFlight = null;
+    });
+  }
+
+  Future<void> _loadHomeInternal({required bool forceRefresh}) async {
     if (baseUrl == null || token == null || userId == null) return;
     final api = EmbyApi(
       hostOrUrl: baseUrl!,
@@ -1752,7 +2053,16 @@ class AppState extends ChangeNotifier {
       serverType: serverType,
       deviceId: _deviceId,
     );
-    final Map<String, List<MediaItem>> libraryShows = {};
+    final libIds = _libraries.map((l) => l.id).toSet();
+    if (forceRefresh) {
+      // Drop sections for libraries that no longer exist, but keep existing
+      // sections as a cache while refreshing.
+      _homeSections.removeWhere((key, _) {
+        if (!key.startsWith('lib_')) return false;
+        final libId = key.substring(4);
+        return !libIds.contains(libId);
+      });
+    }
     for (final lib in _libraries) {
       try {
         final fetched = await api.fetchItems(
@@ -1766,15 +2076,14 @@ class AppState extends ChangeNotifier {
           limit: 12,
           sortBy: 'DateCreated',
         );
-        libraryShows['lib_${lib.id}'] = fetched.items;
+        _homeSections['lib_${lib.id}'] = fetched.items;
         _itemsTotal[lib.id] = fetched.total;
+        notifyListeners();
       } catch (_) {
         // ignore failures per library
       }
     }
-    _homeSections
-      ..clear()
-      ..addAll(libraryShows);
+    await _persistHomeCache();
     notifyListeners();
   }
 

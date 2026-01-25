@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -19,6 +20,7 @@ import 'state/route_entries.dart';
 import 'show_detail_page.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/app_components.dart';
+import 'src/ui/episode_count_badge.dart';
 import 'src/ui/glass_blur.dart';
 import 'src/ui/theme_sheet.dart';
 
@@ -41,13 +43,36 @@ class _HomePageState extends State<HomePage> {
     _load();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool forceRefresh = false}) async {
     setState(() => _loading = true);
     try {
+      // Prefetch bottom stats once per server entry.
+      unawaited(widget.appState.loadMediaStats());
+
+      if (forceRefresh) {
+        if (!widget.appState.isLoading) {
+          await widget.appState.refreshLibraries();
+        }
+        await widget.appState.loadHome(forceRefresh: true);
+        return;
+      }
+
       if (widget.appState.libraries.isEmpty && !widget.appState.isLoading) {
         await widget.appState.refreshLibraries();
+      } else if (!widget.appState.isLoading) {
+        // Refresh libraries in background; they rarely change but can recover
+        // from transient failures that leave the list empty.
+        unawaited(widget.appState.refreshLibraries());
       }
-      await widget.appState.loadHome();
+
+      final hasHome =
+          widget.appState.homeEntries.any((e) => e.items.isNotEmpty);
+      if (!hasHome) {
+        await widget.appState.loadHome(forceRefresh: true);
+      } else {
+        // Cache exists: update slowly while browsing home.
+        unawaited(widget.appState.loadHome(forceRefresh: true));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -411,7 +436,8 @@ class _HomePageState extends State<HomePage> {
                               // ignore: unawaited_futures
                               widget.appState
                                   .refreshLibraries()
-                                  .then((_) => widget.appState.loadHome());
+                                  .then((_) => widget.appState
+                                      .loadHome(forceRefresh: true));
                               if (ctx.mounted) Navigator.of(ctx).pop();
                             },
                           );
@@ -457,7 +483,7 @@ class _HomePageState extends State<HomePage> {
           _HomeBody(
             appState: widget.appState,
             loading: _loading,
-            onRefresh: _load,
+            onRefresh: () => _load(forceRefresh: true),
             isTv: isTv,
             showSearchBar: true,
           ),
@@ -1003,19 +1029,6 @@ class _HomeBody extends StatelessWidget {
   }
 }
 
-@immutable
-class _MediaStats {
-  final int? movieCount;
-  final int? seriesCount;
-  final int? episodeCount;
-
-  const _MediaStats({
-    required this.movieCount,
-    required this.seriesCount,
-    required this.episodeCount,
-  });
-}
-
 class _MediaStatsSection extends StatefulWidget {
   const _MediaStatsSection({required this.appState, required this.isTv});
 
@@ -1027,87 +1040,18 @@ class _MediaStatsSection extends StatefulWidget {
 }
 
 class _MediaStatsSectionState extends State<_MediaStatsSection> {
-  Future<_MediaStats>? _future;
+  Future<MediaStats>? _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _fetch();
-  }
-
-  Future<_MediaStats> _fetch() async {
-    final baseUrl = widget.appState.baseUrl;
-    final token = widget.appState.token;
-    final userId = widget.appState.userId;
-    if (baseUrl == null || token == null || userId == null) {
-      return const _MediaStats(
-        movieCount: 0,
-        seriesCount: 0,
-        episodeCount: 0,
-      );
-    }
-
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.appState.apiPrefix,
-      serverType: widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
-
-    Future<int?> quickTotal(String includeItemTypes) async {
-      try {
-        final res = await api.fetchItems(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
-          includeItemTypes: includeItemTypes,
-          recursive: true,
-          startIndex: 0,
-          limit: 1,
-        );
-        return res.total;
-      } catch (_) {
-        return null;
-      }
-    }
-
-    int? movieCount;
-    int? seriesCount;
-    int? episodeCount;
-
-    try {
-      final counts = await api.fetchItemCounts(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-      );
-      movieCount = counts.movieCount;
-      seriesCount = counts.seriesCount;
-      episodeCount = counts.episodeCount;
-    } catch (_) {}
-
-    final futures = <Future<void>>[];
-    if (movieCount == null) {
-      futures.add(quickTotal('Movie').then((v) => movieCount = v));
-    }
-    if (seriesCount == null) {
-      futures.add(quickTotal('Series').then((v) => seriesCount = v));
-    }
-    if (episodeCount == null) {
-      futures.add(quickTotal('Episode').then((v) => episodeCount = v));
-    }
-    if (futures.isNotEmpty) await Future.wait(futures);
-
-    return _MediaStats(
-      movieCount: movieCount,
-      seriesCount: seriesCount,
-      episodeCount: episodeCount,
-    );
+    _future = widget.appState.loadMediaStats();
   }
 
   void _reload() {
-    setState(() => _future = _fetch());
+    setState(
+      () => _future = widget.appState.loadMediaStats(forceRefresh: true),
+    );
   }
 
   Widget _statCard({
@@ -1123,20 +1067,20 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
 
     return AppPanel(
       enableBlur: enableBlur,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               Container(
-                width: 34,
-                height: 34,
+                width: 30,
+                height: 30,
                 decoration: BoxDecoration(
                   color: accent.withValues(alpha: isDark ? 0.20 : 0.14),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(icon, color: accent, size: 20),
+                child: Icon(icon, color: accent, size: 18),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1144,7 +1088,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
+                  style: theme.textTheme.labelMedium?.copyWith(
                     color: scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1152,9 +1096,9 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           DefaultTextStyle.merge(
-            style: theme.textTheme.titleLarge?.copyWith(
+            style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w800,
               letterSpacing: 0.2,
             ),
@@ -1170,7 +1114,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
     final theme = Theme.of(context);
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
 
-    return FutureBuilder<_MediaStats>(
+    return FutureBuilder<MediaStats>(
       future: _future,
       builder: (context, snap) {
         final stats = snap.data;
@@ -1200,7 +1144,7 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
             stats?.episodeCount == null ? '—' : '${stats!.episodeCount} 集';
 
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1227,9 +1171,9 @@ class _MediaStatsSectionState extends State<_MediaStatsSection> {
                 ),
               LayoutBuilder(
                 builder: (context, constraints) {
-                  const spacing = 10.0;
+                  const spacing = 8.0;
                   final maxWidth = constraints.maxWidth;
-                  final columns = maxWidth >= 620 ? 3 : 2;
+                  const columns = 3;
                   final cardWidth =
                       (maxWidth - spacing * (columns - 1)) / columns;
 
@@ -2617,6 +2561,17 @@ class _HomeCard extends StatelessWidget {
     final year = _yearOf();
     final rating = item.communityRating;
 
+    final topRightBadge = item.type == 'Series'
+        ? FutureBuilder<int?>(
+            future: appState.loadSeriesEpisodeCount(item.id),
+            builder: (context, snap) {
+              final count = snap.data;
+              if (count == null || count <= 0) return const SizedBox.shrink();
+              return EpisodeCountBadge(count: count);
+            },
+          )
+        : null;
+
     final badge =
         item.type == 'Movie' ? '电影' : (item.type == 'Series' ? '剧集' : '');
 
@@ -2626,6 +2581,7 @@ class _HomeCard extends StatelessWidget {
       year: year,
       rating: rating,
       badgeText: badge,
+      topRightBadge: topRightBadge,
       onTap: onTap,
     );
   }

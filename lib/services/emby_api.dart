@@ -32,6 +32,12 @@ class LibraryInfo {
         name: json['Name'] as String? ?? '',
         type: json['CollectionType'] as String? ?? '',
       );
+
+  Map<String, dynamic> toJson() => {
+        'Id': id,
+        'Name': name,
+        'CollectionType': type,
+      };
 }
 
 class AuthResult {
@@ -119,6 +125,31 @@ class MediaItem {
             const [],
         parentId: json['ParentId'] as String?,
       );
+
+  Map<String, dynamic> toJson() => {
+        'Id': id,
+        'Name': name,
+        'Type': type,
+        'Overview': overview,
+        'CommunityRating': communityRating,
+        'PremiereDate': premiereDate,
+        'Genres': genres,
+        'RunTimeTicks': runTimeTicks,
+        'Size': sizeBytes,
+        'Container': container,
+        'ProviderIds': providerIds,
+        'SeriesId': seriesId,
+        'SeriesName': seriesName,
+        'SeasonName': seasonName,
+        'ParentIndexNumber': seasonNumber,
+        'IndexNumber': episodeNumber,
+        'ImageTags': hasImage ? const {'Primary': 'cached'} : const {},
+        'UserData': {
+          'PlaybackPositionTicks': playbackPositionTicks,
+        },
+        'People': people.map((e) => e.toJson()).toList(),
+        'ParentId': parentId,
+      };
 }
 
 class PagedResult<T> {
@@ -166,6 +197,14 @@ class MediaPerson {
         id: json['Id'] as String? ?? '',
         primaryImageTag: json['PrimaryImageTag'] as String?,
       );
+
+  Map<String, dynamic> toJson() => {
+        'Name': name,
+        'Role': role,
+        'Type': type,
+        'Id': id,
+        'PrimaryImageTag': primaryImageTag,
+      };
 }
 
 class ChapterInfo {
