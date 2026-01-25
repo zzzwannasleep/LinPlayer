@@ -2,6 +2,12 @@ name: Publish Latest (Stable)
 
 on:
   workflow_dispatch:
+    inputs:
+      force_retag:
+        description: Force-move the stable tag if it already exists (dangerous; rewrites history for that version tag)
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
   group: latest-release
@@ -16,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      FORCE_RETAG: ${{ github.event.inputs.force_retag }}
     steps:
       - name: Check out code (for tagging)
         uses: actions/checkout@v4
@@ -102,11 +109,19 @@ jobs:
 
           if git rev-parse -q --verify "refs/tags/$STABLE_TAG" >/dev/null; then
             EXISTING_SHA="$(git rev-parse "refs/tags/${STABLE_TAG}^{}")"
-            if [[ "$EXISTING_SHA" != "$NIGHTLY_SHA" ]]; then
-              echo "Tag $STABLE_TAG already exists at $EXISTING_SHA; expected $NIGHTLY_SHA." >&2
-              exit 1
+            if [[ "$EXISTING_SHA" == "$NIGHTLY_SHA" ]]; then
+              echo "Tag $STABLE_TAG already exists; leaving as-is."
+            else
+              if [[ "${FORCE_RETAG:-false}" == "true" ]]; then
+                echo "Tag $STABLE_TAG already exists at $EXISTING_SHA; force-updating to $NIGHTLY_SHA (force_retag=true)."
+                git tag -f "$STABLE_TAG" "$NIGHTLY_SHA"
+                git push -f origin "refs/tags/${STABLE_TAG}"
+              else
+                echo "Tag $STABLE_TAG already exists at $EXISTING_SHA; expected $NIGHTLY_SHA." >&2
+                echo "Either bump BUILD_NAME for a new stable version, or re-run this workflow with force_retag=true." >&2
+                exit 1
+              fi
             fi
-            echo "Tag $STABLE_TAG already exists; leaving as-is."
           else
             git tag "$STABLE_TAG" "$NIGHTLY_SHA"
             git push origin "refs/tags/${STABLE_TAG}"
