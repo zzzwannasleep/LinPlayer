@@ -15,6 +15,7 @@ import 'services/cover_cache_manager.dart';
 import 'services/emby_api.dart';
 import 'state/app_state.dart';
 import 'state/preferences.dart';
+import 'state/route_entries.dart';
 import 'show_detail_page.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/app_components.dart';
@@ -73,10 +74,11 @@ class _HomePageState extends State<HomePage> {
                 .map((d) => DomainInfo(name: d.name, url: d.url))
                 .toList();
             final current = widget.appState.baseUrl;
-            final entries = <({DomainInfo domain, bool isCustom})>[
-              for (final d in customEntries) (domain: d, isCustom: true),
-              for (final d in pluginDomains) (domain: d, isCustom: false),
-            ];
+            final entries = buildRouteEntries(
+              currentUrl: current,
+              customEntries: customEntries,
+              pluginDomains: pluginDomains,
+            );
             return Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Column(
