@@ -2049,10 +2049,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         _episodesCache.clear();
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _seriesLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _seriesLoading = false;
+        });
+      }
     }
   }
 
@@ -2247,7 +2248,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       },
     );
 
-    if (!mounted || selectedEp == null || selectedEp.id.isEmpty) return;
+    if (!mounted || !context.mounted || selectedEp == null || selectedEp.id.isEmpty) return;
     if (selectedEp.id == widget.episode.id) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
