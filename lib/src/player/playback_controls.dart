@@ -30,6 +30,8 @@ class PlaybackControls extends StatefulWidget {
     this.onScrubStart,
     this.onScrubEnd,
     this.onRequestThumbnail,
+    this.onOpenEpisodePicker,
+    this.episodePickerLabel = '选集',
     this.onSwitchCore,
     this.onSwitchVersion,
     this.backgroundColor,
@@ -61,6 +63,10 @@ class PlaybackControls extends StatefulWidget {
   ///
   /// Return encoded image bytes (e.g. JPEG/PNG). Return `null` if unavailable.
   final FutureOr<Uint8List?> Function(Duration position)? onRequestThumbnail;
+
+  /// Optional "Episodes" entry point, typically used when playing a TV episode.
+  final FutureOr<void> Function()? onOpenEpisodePicker;
+  final String episodePickerLabel;
 
   /// Optional extra actions shown in the controls menu.
   final FutureOr<void> Function()? onSwitchCore;
@@ -677,6 +683,38 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                 ],
               ],
             ),
+            if (widget.onOpenEpisodePicker != null) ...[
+              const SizedBox(height: 2),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: !enabled
+                      ? null
+                      : () => _callMaybe(widget.onOpenEpisodePicker),
+                  icon: const Icon(Icons.format_list_numbered, size: 18),
+                  label: Text(
+                    widget.episodePickerLabel,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    backgroundColor: Colors.black.withValues(alpha: 0.18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(999),
+                      side: BorderSide(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 6),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,

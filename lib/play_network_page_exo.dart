@@ -133,6 +133,15 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _reportedStop = false;
   bool _progressReportInFlight = false;
 
+  MediaItem? _episodePickerItem;
+  bool _episodePickerItemLoading = false;
+  bool _episodePickerVisible = false;
+  bool _episodePickerLoading = false;
+  String? _episodePickerError;
+  List<MediaItem> _episodeSeasons = const [];
+  String? _episodeSelectedSeasonId;
+  final Map<String, List<MediaItem>> _episodeEpisodesCache = {};
+
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -169,6 +178,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     // ignore: unawaited_futures
     _exitImmersiveMode();
     _init();
+    // ignore: unawaited_futures
+    _loadEpisodePickerItem();
   }
 
   @override
@@ -244,6 +255,628 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       return '$seriesName $name'.trim();
     }
     return widget.title;
+  }
+
+  bool get _canShowEpisodePickerButton {
+    if (_episodePickerVisible) return true;
+    if (_episodePickerItemLoading) return true;
+    final seriesId = (_episodePickerItem?.seriesId ?? '').trim();
+    return seriesId.isNotEmpty;
+  }
+
+  Future<void> _loadEpisodePickerItem() async {
+    if (_episodePickerItemLoading || _episodePickerItem != null) return;
+    final baseUrl = _baseUrl;
+    final token = _token;
+    final userId = _userId;
+    if (baseUrl == null || token == null || userId == null) return;
+
+    setState(() => _episodePickerItemLoading = true);
+    final api = _embyApi ??
+        EmbyApi(
+          hostOrUrl: baseUrl,
+          preferredScheme: 'https',
+          apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+        );
+    try {
+      final detail = await api.fetchItemDetail(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+        itemId: widget.itemId,
+      );
+      if (!mounted) return;
+      setState(() => _episodePickerItem = detail);
+    } catch (_) {
+      // Optional: if this fails, we simply hide the entry point.
+    } finally {
+      if (!mounted) return;
+      setState(() => _episodePickerItemLoading = false);
+    }
+  }
+
+  String _seasonLabel(MediaItem season, int index) {
+    final name = season.name.trim();
+    final seasonNo = season.seasonNumber ?? season.episodeNumber;
+    return seasonNo != null
+        ? '第$seasonNo季'
+        : (name.isNotEmpty ? name : '第${index + 1}季');
+  }
+
+  Future<void> _toggleEpisodePicker() async {
+    if (_episodePickerVisible) {
+      setState(() => _episodePickerVisible = false);
+      return;
+    }
+
+    _showControls(scheduleHide: false);
+    setState(() {
+      _episodePickerVisible = true;
+      _episodePickerError = null;
+    });
+    await _ensureEpisodePickerLoaded();
+  }
+
+  Future<void> _ensureEpisodePickerLoaded() async {
+    if (_episodePickerLoading) return;
+
+    final baseUrl = _baseUrl;
+    final token = _token;
+    final userId = _userId;
+    if (baseUrl == null || token == null || userId == null) {
+      setState(() => _episodePickerError = '未连接服务器');
+      return;
+    }
+
+    setState(() {
+      _episodePickerLoading = true;
+      _episodePickerError = null;
+    });
+
+    try {
+      await _loadEpisodePickerItem();
+      final detail = _episodePickerItem;
+      final seriesId = (detail?.seriesId ?? '').trim();
+      if (seriesId.isEmpty) {
+        throw Exception('当前不是剧集，无法选集');
+      }
+
+      final api = _embyApi ??
+          EmbyApi(
+            hostOrUrl: baseUrl,
+            preferredScheme: 'https',
+            apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+          );
+
+      final seasons = await api.fetchSeasons(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+        seriesId: seriesId,
+      );
+      final seasonItems =
+          seasons.items.where((s) => s.type.toLowerCase() == 'season').toList();
+      seasonItems.sort((a, b) {
+        final aNo = a.seasonNumber ?? a.episodeNumber ?? 0;
+        final bNo = b.seasonNumber ?? b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+
+      final seasonsForUi = seasonItems.isEmpty
+          ? [
+              MediaItem(
+                id: seriesId,
+                name: '第1季',
+                type: 'Season',
+                overview: '',
+                communityRating: null,
+                premiereDate: null,
+                genres: const [],
+                runTimeTicks: null,
+                sizeBytes: null,
+                container: null,
+                providerIds: const {},
+                seriesId: seriesId,
+                seriesName: (detail?.seriesName ?? '').trim().isNotEmpty
+                    ? detail!.seriesName
+                    : detail?.name ?? '',
+                seasonName: '第1季',
+                seasonNumber: 1,
+                episodeNumber: null,
+                hasImage: detail?.hasImage ?? false,
+                playbackPositionTicks: 0,
+                people: const [],
+                parentId: seriesId,
+              ),
+            ]
+          : seasonItems;
+
+      final previousSelected = _episodeSelectedSeasonId;
+      final currentSeasonId = (detail?.parentId ?? '').trim();
+      final defaultSeasonId = (currentSeasonId.isNotEmpty &&
+              seasonsForUi.any((s) => s.id == currentSeasonId))
+          ? currentSeasonId
+          : (seasonsForUi.isNotEmpty ? seasonsForUi.first.id : '');
+      final selectedSeasonId = (previousSelected != null &&
+              seasonsForUi.any((s) => s.id == previousSelected))
+          ? previousSelected
+          : (defaultSeasonId.isNotEmpty ? defaultSeasonId : null);
+
+      if (!mounted) return;
+      setState(() {
+        _episodeSeasons = seasonsForUi;
+        _episodeSelectedSeasonId = selectedSeasonId;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _episodePickerError = e.toString());
+    } finally {
+      if (!mounted) return;
+      setState(() => _episodePickerLoading = false);
+    }
+  }
+
+  Future<List<MediaItem>> _episodesForSeasonId(String seasonId) async {
+    final cached = _episodeEpisodesCache[seasonId];
+    if (cached != null) return cached;
+
+    final baseUrl = _baseUrl;
+    final token = _token;
+    final userId = _userId;
+    if (baseUrl == null || token == null || userId == null) {
+      throw Exception('未连接服务器');
+    }
+
+    final api = _embyApi ??
+        EmbyApi(
+          hostOrUrl: baseUrl,
+          preferredScheme: 'https',
+          apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+        );
+    final eps = await api.fetchEpisodes(
+      token: token,
+      baseUrl: baseUrl,
+      userId: userId,
+      seasonId: seasonId,
+    );
+    final items = List<MediaItem>.from(eps.items);
+    items.sort((a, b) {
+      final aNo = a.episodeNumber ?? 0;
+      final bNo = b.episodeNumber ?? 0;
+      return aNo.compareTo(bNo);
+    });
+    _episodeEpisodesCache[seasonId] = items;
+    return items;
+  }
+
+  void _playEpisodeFromPicker(MediaItem episode) {
+    if (episode.id == widget.itemId) {
+      setState(() => _episodePickerVisible = false);
+      return;
+    }
+
+    setState(() => _episodePickerVisible = false);
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => ExoPlayNetworkPage(
+          title: episode.name,
+          itemId: episode.id,
+          appState: widget.appState,
+          server: widget.server,
+          isTv: widget.isTv,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEpisodePickerOverlay({required bool enableBlur}) {
+    final size = MediaQuery.sizeOf(context);
+    final drawerWidth = math.min(
+      420.0,
+      size.width * (size.width > size.height ? 0.50 : 0.78),
+    );
+
+    final theme = Theme.of(context);
+    final accent = theme.colorScheme.secondary;
+
+    final baseUrl = _baseUrl;
+    final token = _token;
+    final apiPrefix = widget.server?.apiPrefix ?? widget.appState.apiPrefix;
+
+    final seasons = _episodeSeasons;
+    final selectedSeasonId = _episodeSelectedSeasonId;
+    MediaItem? selectedSeason;
+    if (selectedSeasonId != null && selectedSeasonId.isNotEmpty) {
+      for (final s in seasons) {
+        if (s.id == selectedSeasonId) {
+          selectedSeason = s;
+          break;
+        }
+      }
+    }
+    selectedSeason ??= seasons.isNotEmpty ? seasons.first : null;
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          IgnorePointer(
+            ignoring: !_episodePickerVisible,
+            child: AnimatedOpacity(
+              opacity: _episodePickerVisible ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _episodePickerVisible = false),
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ),
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            top: 0,
+            bottom: 0,
+            right: _episodePickerVisible ? 0 : -drawerWidth,
+            width: drawerWidth,
+            child: IgnorePointer(
+              ignoring: !_episodePickerVisible,
+              child: SafeArea(
+                left: false,
+                child: GlassCard(
+                  enableBlur: enableBlur,
+                  margin: EdgeInsets.zero,
+                  elevation: 0,
+                  shadowColor: Colors.transparent,
+                  surfaceTintColor: Colors.transparent,
+                  color: Colors.black.withValues(alpha: 0.35),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.horizontal(
+                      left: Radius.circular(16),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.format_list_numbered,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              '选集',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              tooltip: '关闭',
+                              icon: const Icon(Icons.close),
+                              color: Colors.white,
+                              onPressed: () =>
+                                  setState(() => _episodePickerVisible = false),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_episodePickerLoading)
+                        const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (_episodePickerError != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                _episodePickerError!,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                onPressed: _ensureEpisodePickerLoaded,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('重试'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (selectedSeason == null)
+                        const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text(
+                            '暂无剧集信息',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        )
+                      else ...[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                          child: Row(
+                            children: [
+                              const Text(
+                                '季度',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Container(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        Colors.black.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.12,
+                                      ),
+                                    ),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: selectedSeason.id,
+                                      isExpanded: true,
+                                      dropdownColor: const Color(0xFF202020),
+                                      iconEnabledColor: Colors.white70,
+                                      style:
+                                          const TextStyle(color: Colors.white),
+                                      items: [
+                                        for (final entry
+                                            in seasons.asMap().entries)
+                                          DropdownMenuItem(
+                                            value: entry.value.id,
+                                            child: Text(
+                                              _seasonLabel(
+                                                entry.value,
+                                                entry.key,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (v) {
+                                        if (v == null || v.isEmpty) return;
+                                        if (v == _episodeSelectedSeasonId) {
+                                          return;
+                                        }
+                                        setState(() {
+                                          _episodeSelectedSeasonId = v;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: FutureBuilder<List<MediaItem>>(
+                            future: _episodesForSeasonId(selectedSeason.id),
+                            builder: (ctx, snapshot) {
+                              if (snapshot.connectionState !=
+                                  ConnectionState.done) {
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              }
+                              if (snapshot.hasError) {
+                                return Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Text(
+                                        '加载失败：${snapshot.error}',
+                                        style: const TextStyle(
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      OutlinedButton.icon(
+                                        onPressed: () => setState(() {}),
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text('重试'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }
+
+                              final eps = snapshot.data ?? const <MediaItem>[];
+                              if (eps.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    '暂无剧集',
+                                    style: TextStyle(color: Colors.white70),
+                                  ),
+                                );
+                              }
+
+                              final columns = drawerWidth >= 360 ? 2 : 1;
+
+                              return GridView.builder(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  0,
+                                  12,
+                                  12,
+                                ),
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: columns,
+                                  crossAxisSpacing: 10,
+                                  mainAxisSpacing: 10,
+                                  childAspectRatio: columns == 1 ? 1.55 : 1.18,
+                                ),
+                                itemCount: eps.length,
+                                itemBuilder: (ctx, index) {
+                                  final e = eps[index];
+                                  final epNo = e.episodeNumber ?? (index + 1);
+                                  final isCurrent = e.id == widget.itemId;
+                                  final img = (baseUrl == null || token == null)
+                                      ? null
+                                      : EmbyApi.imageUrl(
+                                          baseUrl: baseUrl,
+                                          itemId: e.hasImage
+                                              ? e.id
+                                              : selectedSeason!.id,
+                                          token: token,
+                                          apiPrefix: apiPrefix,
+                                          maxWidth: 520,
+                                        );
+
+                                  final borderColor = isCurrent
+                                      ? accent.withValues(alpha: 0.85)
+                                      : Colors.white.withValues(alpha: 0.10);
+
+                                  return Material(
+                                    color: Colors.black.withValues(alpha: 0.18),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(color: borderColor),
+                                    ),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: InkWell(
+                                      onTap: () => _playEpisodeFromPicker(e),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          AspectRatio(
+                                            aspectRatio: 16 / 9,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                if (img != null)
+                                                  Image.network(
+                                                    img,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (_, __, ___) {
+                                                      return const ColoredBox(
+                                                        color:
+                                                            Color(0x22000000),
+                                                        child: Center(
+                                                          child: Icon(
+                                                            Icons
+                                                                .image_not_supported_outlined,
+                                                            color:
+                                                                Colors.white54,
+                                                          ),
+                                                        ),
+                                                      );
+                                                    },
+                                                  )
+                                                else
+                                                  const ColoredBox(
+                                                    color: Color(0x22000000),
+                                                    child: Center(
+                                                      child: Icon(
+                                                        Icons.image_outlined,
+                                                        color: Colors.white54,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                Positioned(
+                                                  left: 6,
+                                                  bottom: 6,
+                                                  child: DecoratedBox(
+                                                    decoration: BoxDecoration(
+                                                      color: const Color(
+                                                        0xAA000000,
+                                                      ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                        6,
+                                                      ),
+                                                    ),
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets
+                                                              .symmetric(
+                                                        horizontal: 6,
+                                                        vertical: 3,
+                                                      ),
+                                                      child: Text(
+                                                        'E$epNo',
+                                                        style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.w700,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (isCurrent)
+                                                  const Positioned(
+                                                    right: 6,
+                                                    top: 6,
+                                                    child: Icon(
+                                                      Icons.play_circle,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                          Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                              8,
+                                              6,
+                                              8,
+                                              8,
+                                            ),
+                                            child: Text(
+                                              e.name.trim().isNotEmpty
+                                                  ? e.name.trim()
+                                                  : '第$epNo集',
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _maybeAutoLoadOnlineDanmaku() {
@@ -2312,6 +2945,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 ),
                               ),
                             ),
+                          _buildEpisodePickerOverlay(enableBlur: enableBlur),
                           Align(
                             alignment: Alignment.bottomCenter,
                             child: SafeArea(
@@ -2341,6 +2975,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                           widget.appState.showBufferSpeed,
                                       buffering: _buffering,
                                       bufferSpeedX: _bufferSpeedX,
+                                      onOpenEpisodePicker:
+                                          _canShowEpisodePickerButton
+                                              ? _toggleEpisodePicker
+                                              : null,
                                       onScrubStart: _onScrubStart,
                                       onScrubEnd: _onScrubEnd,
                                       onSeek: (pos) async {
