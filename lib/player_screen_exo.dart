@@ -25,9 +25,14 @@ import 'src/device/device_type.dart';
 import 'src/ui/glass_blur.dart';
 
 class ExoPlayerScreen extends StatefulWidget {
-  const ExoPlayerScreen({super.key, required this.appState});
+  const ExoPlayerScreen({
+    super.key,
+    required this.appState,
+    this.startFullScreen = false,
+  });
 
   final AppState appState;
+  final bool startFullScreen;
 
   @override
   State<ExoPlayerScreen> createState() => _ExoPlayerScreenState();
@@ -50,6 +55,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   String? _playError;
   DateTime? _lastUiTickAt;
   _OrientationMode _orientationMode = _OrientationMode.auto;
+  String? _lastOrientationKey;
 
   VideoViewType _viewType = VideoViewType.platformView;
 
@@ -93,6 +99,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   double? _longPressBaseRate;
   Offset? _longPressStartPos;
 
+  late final bool _fullScreen = widget.startFullScreen;
+
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -117,7 +125,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           .map(
             (e) => PlatformFile(
               name: e.name,
-              size: 0,
+              size: e.size < 0 ? 0 : e.size,
               path: e.path,
             ),
           )
@@ -144,7 +152,13 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   Future<void> _switchCore() async {
     final playlist = _playlist
         .where((f) => (f.path ?? '').trim().isNotEmpty)
-        .map((f) => LocalPlaybackItem(name: f.name, path: f.path!.trim()))
+        .map(
+          (f) => LocalPlaybackItem(
+            name: f.name,
+            path: f.path!.trim(),
+            size: f.size,
+          ),
+        )
         .toList();
     if (playlist.isNotEmpty) {
       final idx = _currentIndex < 0
@@ -175,6 +189,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _gestureOverlayTimer = null;
     // ignore: unawaited_futures
     _exitOrientationLock();
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _exitImmersiveMode(resetOrientations: true);
+    }
     // ignore: unawaited_futures
     _controller?.dispose();
     _controller = null;
@@ -1149,7 +1167,29 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   bool get _shouldControlSystemUi {
     if (kIsWeb) return false;
+    if (DeviceType.isTv) return false;
     return Platform.isAndroid || Platform.isIOS;
+  }
+
+  Future<void> _enterImmersiveMode() async {
+    if (!_shouldControlSystemUi) return;
+    try {
+      await SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersiveSticky,
+        overlays: const [],
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _exitImmersiveMode({bool resetOrientations = false}) async {
+    if (!_shouldControlSystemUi) return;
+    try {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    } catch (_) {}
+    if (!resetOrientations) return;
+    try {
+      await SystemChrome.setPreferredOrientations(const []);
+    } catch (_) {}
   }
 
   String get _orientationTooltip {
@@ -1206,7 +1246,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   Future<void> _applyOrientationForMode() async {
     if (!_shouldControlSystemUi) return;
 
-    List<DeviceOrientation> orientations;
+    List<DeviceOrientation>? orientations;
     switch (_orientationMode) {
       case _OrientationMode.landscape:
         orientations = const [
@@ -1218,10 +1258,28 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         orientations = const [DeviceOrientation.portraitUp];
         break;
       case _OrientationMode.auto:
-        orientations = const [];
+        final controller = _controller;
+        if (controller == null || !controller.value.isInitialized) return;
+        var aspect = controller.value.aspectRatio;
+        if (aspect <= 0) {
+          final size = controller.value.size;
+          if (size.width > 0 && size.height > 0) {
+            aspect = size.width / size.height;
+          }
+        }
+        if (aspect <= 0) return;
+        orientations = aspect < 1.0
+            ? const [DeviceOrientation.portraitUp]
+            : const [
+                DeviceOrientation.landscapeLeft,
+                DeviceOrientation.landscapeRight,
+              ];
         break;
     }
 
+    final key = orientations.map((o) => o.name).join(',');
+    if (_lastOrientationKey == key) return;
+    _lastOrientationKey = key;
     try {
       await SystemChrome.setPreferredOrientations(orientations);
     } catch (_) {}
@@ -1229,6 +1287,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   Future<void> _exitOrientationLock() async {
     if (!_shouldControlSystemUi) return;
+    _lastOrientationKey = null;
     try {
       await SystemChrome.setPreferredOrientations(const []);
     } catch (_) {}
@@ -1292,6 +1351,11 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       }
     });
 
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _enterImmersiveMode();
+    }
+
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     _uiTimer?.cancel();
@@ -1314,6 +1378,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           : VideoPlayerController.file(File(path), viewType: viewType);
       _controller = controller;
       await controller.initialize();
+      await _applyOrientationForMode();
       if (startPosition != null && startPosition > Duration.zero) {
         final d = controller.value.duration;
         final target =
@@ -1412,6 +1477,11 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     final remoteEnabled = isTv || widget.appState.forceRemoteControlKeys;
 
+    Widget wrapVideo(Widget child) {
+      if (_fullScreen) return Expanded(child: child);
+      return AspectRatio(aspectRatio: 16 / 9, child: child);
+    }
+
     return Focus(
       autofocus: true,
       canRequestFocus: remoteEnabled,
@@ -1442,78 +1512,99 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        appBar: GlassAppBar(
-          enableBlur: enableBlur,
-          child: AppBar(
-            title: Text(fileName),
-            centerTitle: true,
-            actions: [
-              IconButton(
-                tooltip: '选择文件',
-                icon: const Icon(Icons.folder_open),
-                onPressed: _pickFiles,
-              ),
-              IconButton(
-                tooltip: '选集',
-                icon: const Icon(Icons.playlist_play),
-                onPressed: _playlist.isEmpty
-                    ? null
-                    : () {
-                        showModalBottomSheet(
-                          context: context,
-                          builder: (ctx) => ListView.builder(
-                            itemCount: _playlist.length,
-                            itemBuilder: (_, i) {
-                              final f = _playlist[i];
-                              return ListTile(
-                                title: Text(f.name),
-                                trailing: i == _currentIndex
-                                    ? const Icon(Icons.play_arrow)
-                                    : null,
-                                onTap: () {
-                                  Navigator.of(ctx).pop();
-                                  // ignore: unawaited_futures
-                                  _playFile(f, i);
-                                },
+        extendBodyBehindAppBar: _fullScreen,
+        appBar: PreferredSize(
+          preferredSize: _fullScreen
+              ? (_controlsVisible
+                  ? const Size.fromHeight(kToolbarHeight)
+                  : Size.zero)
+              : const Size.fromHeight(kToolbarHeight),
+          child: AnimatedOpacity(
+            opacity: (!_fullScreen || _controlsVisible) ? 1 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: IgnorePointer(
+              ignoring: _fullScreen && !_controlsVisible,
+              child: GlassAppBar(
+                enableBlur: enableBlur,
+                child: AppBar(
+                  backgroundColor: _fullScreen ? Colors.transparent : null,
+                  foregroundColor: _fullScreen ? Colors.white : null,
+                  elevation: _fullScreen ? 0 : null,
+                  scrolledUnderElevation: _fullScreen ? 0 : null,
+                  shadowColor: _fullScreen ? Colors.transparent : null,
+                  surfaceTintColor: _fullScreen ? Colors.transparent : null,
+                  forceMaterialTransparency: _fullScreen,
+                  title: Text(fileName),
+                  centerTitle: true,
+                  actions: [
+                    IconButton(
+                      tooltip: '选择文件',
+                      icon: const Icon(Icons.folder_open),
+                      onPressed: _pickFiles,
+                    ),
+                    IconButton(
+                      tooltip: '选集',
+                      icon: const Icon(Icons.playlist_play),
+                      onPressed: _playlist.isEmpty
+                          ? null
+                          : () {
+                              showModalBottomSheet(
+                                context: context,
+                                builder: (ctx) => ListView.builder(
+                                  itemCount: _playlist.length,
+                                  itemBuilder: (_, i) {
+                                    final f = _playlist[i];
+                                    return ListTile(
+                                      title: Text(f.name),
+                                      trailing: i == _currentIndex
+                                          ? const Icon(Icons.play_arrow)
+                                          : null,
+                                      onTap: () {
+                                        Navigator.of(ctx).pop();
+                                        // ignore: unawaited_futures
+                                        _playFile(f, i);
+                                      },
+                                    );
+                                  },
+                                ),
                               );
                             },
-                          ),
-                        );
-                      },
+                    ),
+                    IconButton(
+                      tooltip: '音轨',
+                      icon: const Icon(Icons.audiotrack),
+                      onPressed: () => _showAudioTracks(context),
+                    ),
+                    IconButton(
+                      tooltip: '字幕',
+                      icon: const Icon(Icons.subtitles),
+                      onPressed: () => _showSubtitleTracks(context),
+                    ),
+                    IconButton(
+                      tooltip: '弹幕',
+                      icon: const Icon(Icons.comment_outlined),
+                      onPressed: _showDanmakuSheet,
+                    ),
+                    IconButton(
+                      tooltip: '软/硬解切换',
+                      icon: const Icon(Icons.memory),
+                      onPressed: () => _showNotSupported('软/硬解切换'),
+                    ),
+                    IconButton(
+                      tooltip: _orientationTooltip,
+                      icon: Icon(_orientationIcon),
+                      onPressed: _cycleOrientationMode,
+                    ),
+                  ],
+                ),
               ),
-              IconButton(
-                tooltip: '音轨',
-                icon: const Icon(Icons.audiotrack),
-                onPressed: () => _showAudioTracks(context),
-              ),
-              IconButton(
-                tooltip: '字幕',
-                icon: const Icon(Icons.subtitles),
-                onPressed: () => _showSubtitleTracks(context),
-              ),
-              IconButton(
-                tooltip: '弹幕',
-                icon: const Icon(Icons.comment_outlined),
-                onPressed: _showDanmakuSheet,
-              ),
-              IconButton(
-                tooltip: '软/硬解切换',
-                icon: const Icon(Icons.memory),
-                onPressed: () => _showNotSupported('软/硬解切换'),
-              ),
-              IconButton(
-                tooltip: _orientationTooltip,
-                icon: Icon(_orientationIcon),
-                onPressed: _cycleOrientationMode,
-              ),
-            ],
+            ),
           ),
         ),
         body: Column(
           children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Container(
+            wrapVideo(
+              Container(
                 color: Colors.black,
                 child: isReady
                     ? Stack(
@@ -1766,34 +1857,36 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                         : const Center(child: Text('选择一个视频播放')),
               ),
             ),
-            const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text(
-                '播放列表',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            if (!_fullScreen) const SizedBox(height: 8),
+            if (!_fullScreen)
+              const Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Text(
+                  '播放列表',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _playlist.length,
-                itemBuilder: (context, index) {
-                  final file = _playlist[index];
-                  final isPlaying = index == _currentIndex;
-                  return ListTile(
-                    leading: Icon(
-                        isPlaying ? Icons.play_circle_filled : Icons.movie),
-                    title: Text(
-                      file.name,
-                      style: TextStyle(
-                        color: isPlaying ? Colors.blue : null,
+            if (!_fullScreen)
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _playlist.length,
+                  itemBuilder: (context, index) {
+                    final file = _playlist[index];
+                    final isPlaying = index == _currentIndex;
+                    return ListTile(
+                      leading: Icon(
+                          isPlaying ? Icons.play_circle_filled : Icons.movie),
+                      title: Text(
+                        file.name,
+                        style: TextStyle(
+                          color: isPlaying ? Colors.blue : null,
+                        ),
                       ),
-                    ),
-                    onTap: () => _playFile(file, index),
-                  );
-                },
+                      onTap: () => _playFile(file, index),
+                    );
+                  },
+                ),
               ),
-            ),
           ],
         ),
       ),

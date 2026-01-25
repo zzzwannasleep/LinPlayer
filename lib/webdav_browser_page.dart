@@ -97,6 +97,45 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     return '$b B';
   }
 
+  bool _isProbablyPlayable(WebDavEntry entry) {
+    final type = (entry.contentType ?? '').trim().toLowerCase();
+    if (type.startsWith('video/') || type.startsWith('audio/')) return true;
+
+    final name = entry.name.toLowerCase();
+    final dot = name.lastIndexOf('.');
+    if (dot < 0 || dot >= name.length - 1) return false;
+    final ext = name.substring(dot + 1);
+
+    const video = <String>{
+      'mp4',
+      'mkv',
+      'avi',
+      'mov',
+      'flv',
+      'ts',
+      'm2ts',
+      'webm',
+      'wmv',
+      'mpg',
+      'mpeg',
+      'm4v',
+      '3gp',
+      'rm',
+      'rmvb',
+    };
+    const audio = <String>{
+      'mp3',
+      'flac',
+      'aac',
+      'm4a',
+      'wav',
+      'ogg',
+      'opus',
+    };
+
+    return video.contains(ext) || audio.contains(ext);
+  }
+
   Future<void> _openEntry(WebDavEntry entry) async {
     if (entry.isDirectory) {
       await Navigator.of(context).push(
@@ -111,19 +150,37 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
       return;
     }
 
-    final local = await WebDavProxyServer.instance.registerFile(
-      remoteUri: entry.uri,
-      username: widget.server.username,
-      password: widget.server.token,
-      fileName: entry.name,
-    );
+    final dirFiles = _entries.where((e) => !e.isDirectory).toList();
+    final mediaFiles = dirFiles.where(_isProbablyPlayable).toList();
+    final playlistFiles = (mediaFiles.isNotEmpty ? mediaFiles : dirFiles);
+
+    var index = playlistFiles.indexWhere((e) => e.uri == entry.uri);
+    if (index < 0) {
+      playlistFiles.add(entry);
+      index = playlistFiles.length - 1;
+    }
+
+    final items = <LocalPlaybackItem>[];
+    for (final f in playlistFiles) {
+      final local = await WebDavProxyServer.instance.registerFile(
+        remoteUri: f.uri,
+        username: widget.server.username,
+        password: widget.server.token,
+        fileName: f.name,
+      );
+      items.add(
+        LocalPlaybackItem(
+          name: f.name,
+          path: local.toString(),
+          size: f.contentLength ?? 0,
+        ),
+      );
+    }
 
     widget.appState.setLocalPlaybackHandoff(
       LocalPlaybackHandoff(
-        playlist: [
-          LocalPlaybackItem(name: entry.name, path: local.toString()),
-        ],
-        index: 0,
+        playlist: items,
+        index: index,
         position: Duration.zero,
         wasPlaying: true,
       ),
@@ -138,8 +195,8 @@ class _WebDavBrowserPageState extends State<WebDavBrowserPage> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => useExoCore
-            ? ExoPlayerScreen(appState: widget.appState)
-            : PlayerScreen(appState: widget.appState),
+            ? ExoPlayerScreen(appState: widget.appState, startFullScreen: true)
+            : PlayerScreen(appState: widget.appState, startFullScreen: true),
       ),
     );
   }

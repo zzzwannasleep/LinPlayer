@@ -29,9 +29,14 @@ import 'state/local_playback_handoff.dart';
 import 'state/preferences.dart';
 
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, this.appState});
+  const PlayerScreen({
+    super.key,
+    this.appState,
+    this.startFullScreen = false,
+  });
 
   final AppState? appState;
+  final bool startFullScreen;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -107,6 +112,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   double? _longPressBaseRate;
   Offset? _longPressStartPos;
 
+  late final bool _fullScreen = widget.startFullScreen;
+
   @override
   void initState() {
     super.initState();
@@ -131,7 +138,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           .map(
             (e) => PlatformFile(
               name: e.name,
-              size: 0,
+              size: e.size < 0 ? 0 : e.size,
               path: e.path,
             ),
           )
@@ -170,6 +177,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferSub?.cancel();
     // ignore: unawaited_futures
     _exitOrientationLock();
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _exitImmersiveMode(resetOrientations: true);
+    }
     final thumb = _thumbnailer;
     _thumbnailer = null;
     if (thumb != null) {
@@ -571,7 +582,13 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     final playlist = _playlist
         .where((f) => (f.path ?? '').trim().isNotEmpty)
-        .map((f) => LocalPlaybackItem(name: f.name, path: f.path!.trim()))
+        .map(
+          (f) => LocalPlaybackItem(
+            name: f.name,
+            path: f.path!.trim(),
+            size: f.size,
+          ),
+        )
         .toList();
     if (playlist.isNotEmpty) {
       final idx = _currentlyPlayingIndex < 0
@@ -651,6 +668,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _danmakuKey.currentState?.clear();
     final isTv = _isTv(context);
     _isTvDevice = isTv;
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _enterImmersiveMode();
+    }
     await _errorSub?.cancel();
     _errorSub = null;
     await _videoParamsSub?.cancel();
@@ -673,24 +694,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     _thumbnailer = null;
 
     try {
-      if (kIsWeb) {
-        await _playerService.initialize(
-          null,
-          networkUrl: file.path ?? '',
-          isTv: isTv,
-          hardwareDecode: _hwdecOn,
-          mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
-          externalMpvPath: widget.appState?.externalMpvPath,
-        );
-      } else {
-        await _playerService.initialize(
-          file.path,
-          isTv: isTv,
-          hardwareDecode: _hwdecOn,
-          mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
-          externalMpvPath: widget.appState?.externalMpvPath,
-        );
-      }
+      final rawPath = (file.path ?? '').trim();
+      final uri = Uri.tryParse(rawPath);
+      final isHttpUrl = uri != null &&
+          (uri.scheme == 'http' || uri.scheme == 'https') &&
+          uri.host.isNotEmpty;
+      final isNetwork = kIsWeb || isHttpUrl;
+
+      await _playerService.initialize(
+        isNetwork ? null : rawPath,
+        networkUrl: isNetwork ? rawPath : null,
+        isTv: isTv,
+        hardwareDecode: _hwdecOn,
+        mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+        unlimitedStreamCache: widget.appState?.unlimitedStreamCache ?? false,
+        networkStreamSizeBytes: (isNetwork && file.size > 0) ? file.size : null,
+        externalMpvPath: widget.appState?.externalMpvPath,
+      );
       if (!mounted) return;
       if (_playerService.isExternalPlayback) {
         setState(() => _playError =
@@ -771,8 +791,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
       _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
       _duration = _playerService.duration;
-      if (!kIsWeb && (file.path ?? '').isNotEmpty) {
-        _thumbnailer = MediaKitThumbnailGenerator(media: Media(file.path!));
+      if (!kIsWeb && rawPath.isNotEmpty) {
+        _thumbnailer = MediaKitThumbnailGenerator(media: Media(rawPath));
       }
       if (startPosition != null && startPosition > Duration.zero) {
         final d = _duration;
@@ -827,6 +847,27 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (kIsWeb) return false;
     if (_isTvDevice) return false;
     return Platform.isAndroid || Platform.isIOS;
+  }
+
+  Future<void> _enterImmersiveMode() async {
+    if (!_shouldControlSystemUi) return;
+    try {
+      await SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersiveSticky,
+        overlays: const [],
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _exitImmersiveMode({bool resetOrientations = false}) async {
+    if (!_shouldControlSystemUi) return;
+    try {
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    } catch (_) {}
+    if (!resetOrientations) return;
+    try {
+      await SystemChrome.setPreferredOrientations(const []);
+    } catch (_) {}
   }
 
   double? _displayAspect(VideoParams p) {
@@ -1330,6 +1371,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     final remoteEnabled =
         _isTvDevice || (widget.appState?.forceRemoteControlKeys ?? false);
 
+    Widget wrapVideo(Widget child) {
+      if (_fullScreen) return Expanded(child: child);
+      return AspectRatio(aspectRatio: 16 / 9, child: child);
+    }
+
     return Focus(
       autofocus: true,
       canRequestFocus: remoteEnabled,
@@ -1360,92 +1406,115 @@ class _PlayerScreenState extends State<PlayerScreen>
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        appBar: GlassAppBar(
-          enableBlur: enableBlur,
-          child: AppBar(
-            title: Text(currentFileName),
-            centerTitle: true,
-            actions: [
-              IconButton(
-                tooltip: '选集',
-                icon: const Icon(Icons.playlist_play),
-                onPressed: () {
-                  showModalBottomSheet(
-                    context: context,
-                    builder: (ctx) => ListView.builder(
-                      itemCount: _playlist.length,
-                      itemBuilder: (_, i) {
-                        final f = _playlist[i];
-                        return ListTile(
-                          title: Text(f.name),
-                          trailing: i == _currentlyPlayingIndex
-                              ? const Icon(Icons.play_arrow)
-                              : null,
-                          onTap: () {
-                            Navigator.of(ctx).pop();
-                            _playFile(f, i);
-                          },
+        extendBodyBehindAppBar: _fullScreen,
+        appBar: PreferredSize(
+          preferredSize: _fullScreen
+              ? (_controlsVisible
+                  ? const Size.fromHeight(kToolbarHeight)
+                  : Size.zero)
+              : const Size.fromHeight(kToolbarHeight),
+          child: AnimatedOpacity(
+            opacity: (!_fullScreen || _controlsVisible) ? 1 : 0,
+            duration: const Duration(milliseconds: 200),
+            child: IgnorePointer(
+              ignoring: _fullScreen && !_controlsVisible,
+              child: GlassAppBar(
+                enableBlur: enableBlur,
+                child: AppBar(
+                  backgroundColor: _fullScreen ? Colors.transparent : null,
+                  foregroundColor: _fullScreen ? Colors.white : null,
+                  elevation: _fullScreen ? 0 : null,
+                  scrolledUnderElevation: _fullScreen ? 0 : null,
+                  shadowColor: _fullScreen ? Colors.transparent : null,
+                  surfaceTintColor: _fullScreen ? Colors.transparent : null,
+                  forceMaterialTransparency: _fullScreen,
+                  title: Text(currentFileName),
+                  centerTitle: true,
+                  actions: [
+                    IconButton(
+                      tooltip: '选集',
+                      icon: const Icon(Icons.playlist_play),
+                      onPressed: () {
+                        showModalBottomSheet(
+                          context: context,
+                          builder: (ctx) => ListView.builder(
+                            itemCount: _playlist.length,
+                            itemBuilder: (_, i) {
+                              final f = _playlist[i];
+                              return ListTile(
+                                title: Text(f.name),
+                                trailing: i == _currentlyPlayingIndex
+                                    ? const Icon(Icons.play_arrow)
+                                    : null,
+                                onTap: () {
+                                  Navigator.of(ctx).pop();
+                                  _playFile(f, i);
+                                },
+                              );
+                            },
+                          ),
                         );
                       },
                     ),
-                  );
-                },
-              ),
-              IconButton(
-                tooltip: _anime4kPreset.isOff
-                    ? 'Anime4K'
-                    : 'Anime4K: ${_anime4kPreset.label}',
-                icon: Icon(
-                  _anime4kPreset.isOff
-                      ? Icons.auto_fix_high_outlined
-                      : Icons.auto_fix_high,
+                    IconButton(
+                      tooltip: _anime4kPreset.isOff
+                          ? 'Anime4K'
+                          : 'Anime4K: ${_anime4kPreset.label}',
+                      icon: Icon(
+                        _anime4kPreset.isOff
+                            ? Icons.auto_fix_high_outlined
+                            : Icons.auto_fix_high,
+                      ),
+                      onPressed: _showAnime4kSheet,
+                    ),
+                    IconButton(
+                      tooltip: '音轨',
+                      icon: const Icon(Icons.audiotrack),
+                      onPressed: () => _showAudioTracks(context),
+                    ),
+                    IconButton(
+                      tooltip: '字幕',
+                      icon: const Icon(Icons.subtitles),
+                      onPressed: () => _showSubtitleTracks(context),
+                    ),
+                    IconButton(
+                      tooltip: '弹幕',
+                      icon: const Icon(Icons.comment_outlined),
+                      onPressed: _showDanmakuSheet,
+                    ),
+                    IconButton(
+                      tooltip: _hwdecOn ? '切换软解' : '切换硬解',
+                      icon: Icon(_hwdecOn
+                          ? Icons.memory
+                          : Icons.settings_backup_restore),
+                      onPressed: () {
+                        setState(() => _hwdecOn = !_hwdecOn);
+                        if (_currentlyPlayingIndex >= 0 &&
+                            _playlist.isNotEmpty) {
+                          _playFile(_playlist[_currentlyPlayingIndex],
+                              _currentlyPlayingIndex);
+                        }
+                      },
+                    ),
+                    IconButton(
+                      tooltip: _orientationTooltip,
+                      icon: Icon(_orientationIcon),
+                      onPressed: _cycleOrientationMode,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.folder_open),
+                      onPressed: _pickFile,
+                    ),
+                  ],
                 ),
-                onPressed: _showAnime4kSheet,
               ),
-              IconButton(
-                tooltip: '音轨',
-                icon: const Icon(Icons.audiotrack),
-                onPressed: () => _showAudioTracks(context),
-              ),
-              IconButton(
-                tooltip: '字幕',
-                icon: const Icon(Icons.subtitles),
-                onPressed: () => _showSubtitleTracks(context),
-              ),
-              IconButton(
-                tooltip: '弹幕',
-                icon: const Icon(Icons.comment_outlined),
-                onPressed: _showDanmakuSheet,
-              ),
-              IconButton(
-                tooltip: _hwdecOn ? '切换软解' : '切换硬解',
-                icon: Icon(
-                    _hwdecOn ? Icons.memory : Icons.settings_backup_restore),
-                onPressed: () {
-                  setState(() => _hwdecOn = !_hwdecOn);
-                  if (_currentlyPlayingIndex >= 0 && _playlist.isNotEmpty) {
-                    _playFile(_playlist[_currentlyPlayingIndex],
-                        _currentlyPlayingIndex);
-                  }
-                },
-              ),
-              IconButton(
-                tooltip: _orientationTooltip,
-                icon: Icon(_orientationIcon),
-                onPressed: _cycleOrientationMode,
-              ),
-              IconButton(
-                icon: const Icon(Icons.folder_open),
-                onPressed: _pickFile,
-              ),
-            ],
+            ),
           ),
         ),
         body: Column(
           children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Container(
+            wrapVideo(
+              Container(
                 color: Colors.black,
                 child: _playerService.isInitialized
                     ? Stack(
@@ -1694,34 +1763,36 @@ class _PlayerScreenState extends State<PlayerScreen>
                         : const Center(child: Text('选择一个视频播放')),
               ),
             ),
-            const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.all(8.0),
-              child: Text(
-                '播放列表',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            if (!_fullScreen) const SizedBox(height: 8),
+            if (!_fullScreen)
+              const Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Text(
+                  '播放列表',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _playlist.length,
-                itemBuilder: (context, index) {
-                  final file = _playlist[index];
-                  final isPlaying = index == _currentlyPlayingIndex;
-                  return ListTile(
-                    leading: Icon(
-                        isPlaying ? Icons.play_circle_filled : Icons.movie),
-                    title: Text(
-                      file.name,
-                      style: TextStyle(
-                        color: isPlaying ? Colors.blue : null,
+            if (!_fullScreen)
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _playlist.length,
+                  itemBuilder: (context, index) {
+                    final file = _playlist[index];
+                    final isPlaying = index == _currentlyPlayingIndex;
+                    return ListTile(
+                      leading: Icon(
+                          isPlaying ? Icons.play_circle_filled : Icons.movie),
+                      title: Text(
+                        file.name,
+                        style: TextStyle(
+                          color: isPlaying ? Colors.blue : null,
+                        ),
                       ),
-                    ),
-                    onTap: () => _playFile(file, index),
-                  );
-                },
+                      onTap: () => _playFile(file, index),
+                    );
+                  },
+                ),
               ),
-            ),
           ],
         ),
       ),

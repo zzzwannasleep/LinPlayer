@@ -1,8 +1,13 @@
 class LocalPlaybackItem {
   final String name;
   final String path;
+  final int size;
 
-  const LocalPlaybackItem({required this.name, required this.path});
+  const LocalPlaybackItem({
+    required this.name,
+    required this.path,
+    this.size = 0,
+  });
 }
 
 class LocalPlaybackHandoff {
@@ -18,4 +23,3 @@ class LocalPlaybackHandoff {
     required this.wasPlaying,
   });
 }
-
