@@ -40,6 +40,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 - Plex 登录（PIN）：支持浏览器授权获取 Token，并从账号资源列表中选择服务器保存（当前仅保存登录信息，暂不支持浏览/播放）。
 - 首页推荐（类似 Emby）：继续观看 / 最新电影 / 最新剧集 横向卡片流，点击即播或进详情。
 - 媒体库分层：库 → Series/Season → Episode；电影可直接播放；搜索支持无限下拉懒加载。
+- 搜索页：支持历史搜索记录（本地持久化），默认显示前 6 条，点击「更多」展开全部。
 - 播放链接更稳：自动携带 `MediaSourceId`，减少 404。
 - 响应式缩放：竖屏平板/手机自动放大 UI（文本/图标/间距），避免 UI 过小。
 - Material 3 双主题：跟随系统明/暗色；桌面/手机轻量毛玻璃；Android TV 默认关闭毛玻璃，减少卡顿。
@@ -63,8 +64,9 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
    - 填写 WebDAV 地址（支持带路径/端口），可选填写账号/密码。
    - 点击「连接并保存」后进入 WebDAV 首页，目录浏览点文件即可播放。
 4. 登录 Emby / Jellyfin 后默认进入首页：继续观看、最新电影/剧集；点击卡片可播放（电影/剧集）或下钻（剧集/合集）。
-5. 媒体库页：显示库海报；点库进入分层列表，可搜索并无限滚动；Episode / Movie 直接播放，Series / Season / Folder 继续下钻。
-6. 本地播放器：底部导航「本地」进入，选择本地文件播放。
+5. 搜索页：首页右上角点「搜索」进入搜索页；搜索框为空时显示历史搜索（前 6 条 +「更多」展开全部）。
+6. 媒体库页：显示库海报；点库进入分层列表，可搜索并无限滚动；Episode / Movie 直接播放，Series / Season / Folder 继续下钻。
+7. 本地播放器：底部导航「本地」进入，选择本地文件播放。
 
 > Plex：在「连接服务器」页选择 Plex，可用「账号登录（推荐）」走浏览器 PIN 授权并选择服务器；或切换到「手动添加」填写服务器地址/端口（默认 32400）+ Plex Token。当前版本仅保存登录信息，暂不支持浏览/播放。
 
@@ -184,6 +186,7 @@ flutter build windows --release
 - `lib/main.dart` 应用入口（初始化、主题、路由）
 - `lib/server_page.dart` 服务器管理/登录入口
 - `lib/home_page.dart` 首页（继续观看、最新电影/剧集）
+- `lib/search_page.dart` 搜索页（历史搜索/搜索结果）
 - `lib/webdav_home_page.dart` WebDAV 首页（WebDAV / 本地 / 设置）
 - `lib/webdav_browser_page.dart` WebDAV 浏览页（目录列表/点播入口）
 - `lib/library_page.dart` 媒体库列表

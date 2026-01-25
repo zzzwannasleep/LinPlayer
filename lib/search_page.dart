@@ -1,14 +1,21 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/emby_api.dart';
 import 'show_detail_page.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/app_components.dart';
+import 'src/ui/app_style.dart';
 import 'src/ui/glass_blur.dart';
 import 'src/ui/ui_scale.dart';
 import 'state/app_state.dart';
+import 'state/preferences.dart';
+
+const _kSearchHistoryPrefsKey = 'search_history_v1';
+const _kSearchHistoryMaxEntries = 50;
+const _kSearchHistoryCollapsedCount = 6;
 
 class SearchPage extends StatefulWidget {
   const SearchPage({
@@ -33,13 +40,18 @@ class _SearchPageState extends State<SearchPage> {
   String? _error;
   List<MediaItem> _results = const [];
 
+  List<String> _searchHistory = const [];
+  bool _historyExpanded = false;
+
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery);
-    if (widget.initialQuery.trim().isNotEmpty) {
-      _scheduleSearch(widget.initialQuery.trim(), immediate: true);
-    }
+
+    unawaited(_loadSearchHistory());
+
+    final initial = widget.initialQuery.trim();
+    if (initial.isNotEmpty) _submitSearch(initial);
   }
 
   @override
@@ -60,6 +72,69 @@ class _SearchPageState extends State<SearchPage> {
     _debounce = Timer(const Duration(milliseconds: 280), () {
       _doSearch(query);
     });
+  }
+
+  Future<void> _loadSearchHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getStringList(_kSearchHistoryPrefsKey) ?? const [];
+      if (!mounted) return;
+
+      setState(() {
+        _searchHistory = _dedupSearchHistory([
+          ..._searchHistory,
+          ...stored,
+        ]);
+      });
+    } catch (_) {
+      // Ignore history read errors.
+    }
+  }
+
+  List<String> _dedupSearchHistory(Iterable<String> items) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final raw in items) {
+      final v = raw.trim();
+      if (v.isEmpty) continue;
+      final key = v.toLowerCase();
+      if (!seen.add(key)) continue;
+      out.add(v);
+      if (out.length >= _kSearchHistoryMaxEntries) break;
+    }
+    return out;
+  }
+
+  void _submitSearch(String raw) {
+    final query = raw.trim();
+    if (query.isEmpty) return;
+
+    _controller.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+
+    unawaited(_addToSearchHistory(query));
+    _scheduleSearch(query, immediate: true);
+  }
+
+  Future<void> _addToSearchHistory(String raw) async {
+    final query = raw.trim();
+    if (query.isEmpty) return;
+
+    final next = _dedupSearchHistory([query, ..._searchHistory]);
+    if (mounted) {
+      setState(() {
+        _searchHistory = next;
+      });
+    }
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kSearchHistoryPrefsKey, next);
+    } catch (_) {
+      // Ignore history write errors.
+    }
   }
 
   Future<void> _doSearch(String raw) async {
@@ -148,7 +223,58 @@ class _SearchPageState extends State<SearchPage> {
 
     Widget content;
     if (query.isEmpty) {
-      content = const Center(child: Text('输入剧名开始搜索'));
+      if (_searchHistory.isEmpty) {
+        content = const Center(child: Text('输入剧名开始搜索'));
+      } else {
+        final theme = Theme.of(context);
+        final visible = _historyExpanded
+            ? _searchHistory
+            : _searchHistory.take(_kSearchHistoryCollapsedCount).toList();
+        final showMore =
+            !_historyExpanded && _searchHistory.length > visible.length;
+        final padding = 16.0 * uiScale;
+        final spacing = 10.0 * uiScale;
+
+        content = SingleChildScrollView(
+          padding: EdgeInsets.all(padding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '历史搜索',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: 12 * uiScale),
+              Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: [
+                  for (final item in visible)
+                    _historyChip(
+                      context,
+                      label: item,
+                      uiScale: uiScale,
+                      onTap: () => _submitSearch(item),
+                    ),
+                  if (showMore)
+                    _historyChip(
+                      context,
+                      label: '更多',
+                      uiScale: uiScale,
+                      onTap: () {
+                        setState(() {
+                          _historyExpanded = true;
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }
     } else if (_error != null) {
       content = Center(child: Text(_error!));
     } else if (_results.isEmpty) {
@@ -172,6 +298,7 @@ class _SearchPageState extends State<SearchPage> {
               item: item,
               appState: widget.appState,
               onTap: () {
+                unawaited(_addToSearchHistory(query));
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => ShowDetailPage(
@@ -215,7 +342,7 @@ class _SearchPageState extends State<SearchPage> {
               ),
               textInputAction: TextInputAction.search,
               onChanged: (v) => _scheduleSearch(v),
-              onSubmitted: (v) => _scheduleSearch(v, immediate: true),
+              onSubmitted: _submitSearch,
             ),
           ),
           actions: [
@@ -231,6 +358,123 @@ class _SearchPageState extends State<SearchPage> {
         ),
       ),
       body: body,
+    );
+  }
+
+  Widget _historyChip(
+    BuildContext context, {
+    required String label,
+    required VoidCallback onTap,
+    required double uiScale,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final style = theme.extension<AppStyle>() ?? const AppStyle();
+    final isDark = scheme.brightness == Brightness.dark;
+
+    final radius = switch (style.template) {
+      UiTemplate.neonHud => 12.0,
+      UiTemplate.pixelArcade => 10.0,
+      UiTemplate.mangaStoryboard => 10.0,
+      _ => 18.0,
+    };
+
+    final (Color bg, Color fg, BorderSide border) = switch (style.template) {
+      UiTemplate.neonHud => (
+          Colors.black.withValues(alpha: isDark ? 0.28 : 0.24),
+          Colors.white,
+          BorderSide(
+            color: scheme.primary.withValues(alpha: isDark ? 0.75 : 0.85),
+            width: 1.1,
+          ),
+        ),
+      UiTemplate.pixelArcade => (
+          Colors.black.withValues(alpha: isDark ? 0.30 : 0.24),
+          Colors.white,
+          BorderSide(
+            color: scheme.secondary.withValues(alpha: isDark ? 0.75 : 0.85),
+            width: 1.2,
+          ),
+        ),
+      UiTemplate.mangaStoryboard => (
+          Colors.white.withValues(alpha: isDark ? 0.24 : 0.88),
+          isDark ? Colors.white : Colors.black,
+          BorderSide(
+            color: (isDark ? Colors.white : Colors.black)
+                .withValues(alpha: isDark ? 0.55 : 0.85),
+            width: 1.2,
+          ),
+        ),
+      UiTemplate.stickerJournal => (
+          Color.lerp(Colors.black, scheme.secondary, 0.18)!.withValues(
+            alpha: isDark ? 0.30 : 0.24,
+          ),
+          Colors.white,
+          BorderSide(
+            color: scheme.secondary.withValues(alpha: isDark ? 0.50 : 0.70),
+            width: 1.0,
+          ),
+        ),
+      UiTemplate.candyGlass => (
+          Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
+            alpha: isDark ? 0.28 : 0.22,
+          ),
+          Colors.white,
+          BorderSide.none,
+        ),
+      UiTemplate.washiWatercolor => (
+          Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
+            alpha: isDark ? 0.26 : 0.20,
+          ),
+          Colors.white,
+          BorderSide.none,
+        ),
+      UiTemplate.proTool => (
+          Colors.black.withValues(alpha: isDark ? 0.28 : 0.22),
+          Colors.white,
+          BorderSide(
+            color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.18),
+            width: 1.0,
+          ),
+        ),
+      UiTemplate.minimalCovers => (
+          Colors.black.withValues(alpha: isDark ? 0.26 : 0.20),
+          Colors.white,
+          BorderSide.none,
+        ),
+    };
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(radius),
+        onTap: onTap,
+        child: Ink(
+          padding: EdgeInsets.symmetric(
+            horizontal: 10 * uiScale,
+            vertical: 7 * uiScale,
+          ),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(radius),
+            border:
+                border == BorderSide.none ? null : Border.fromBorderSide(border),
+          ),
+          child: Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing:
+                      style.template == UiTemplate.neonHud ? 0.2 : null,
+                ) ??
+                TextStyle(
+                  color: fg,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ),
+      ),
     );
   }
 }
