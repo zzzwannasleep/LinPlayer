@@ -217,6 +217,97 @@ jobs:
           name: LinPlayer-Windows-Setup
           path: LinPlayer-Setup-x64.exe
 
+  build-linux:
+    name: Build Linux Tarball (x86_64)
+    runs-on: ubuntu-latest
+    env:
+      PUB_CACHE: /home/runner/.pub-cache
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Cache Flutter pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.PUB_CACHE }}
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - name: Enable Linux desktop support
+        run: flutter config --enable-linux-desktop
+
+      - name: Verify Linux platform scaffolding
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d "linux/flutter" ]]; then
+            echo "linux/flutter is missing. Commit the Linux platform files; do not run flutter create in CI." >&2
+            exit 1
+          fi
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Compute build version
+        shell: bash
+        env:
+          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
+        run: bash .github/scripts/compute_version.sh
+
+      - name: Build Linux app
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build linux --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+
+      - name: Create Linux tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BUNDLE_DIR="build/linux/x64/release/bundle"
+          if [[ ! -d "$BUNDLE_DIR" ]]; then
+            BUNDLE_DIR="$(find build/linux -maxdepth 6 -type d -name bundle 2>/dev/null | grep '/release/' | head -n 1 || true)"
+          fi
+          if [[ -z "${BUNDLE_DIR:-}" || ! -d "$BUNDLE_DIR" ]]; then
+            echo "Could not find Linux build bundle under build/linux." >&2
+            find build/linux -maxdepth 6 -print || true
+            exit 1
+          fi
+
+          STAGING="$RUNNER_TEMP/linplayer-linux"
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING/LinPlayer"
+          cp -a "$BUNDLE_DIR/." "$STAGING/LinPlayer/"
+
+          tar -C "$STAGING" -czf LinPlayer-Linux-x86_64.tar.gz LinPlayer
+          ls -la LinPlayer-Linux-x86_64.tar.gz
+
+      - name: Upload Linux tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinPlayer-Linux-Tarball-x86_64
+          path: LinPlayer-Linux-x86_64.tar.gz
+
   build-ios:
     name: Build iOS Unsigned IPA
     runs-on: macos-latest
@@ -402,6 +493,7 @@ jobs:
     needs:
       - build-android
       - build-windows
+      - build-linux
       - build-ios
       - build-macos
     permissions:
@@ -496,6 +588,7 @@ jobs:
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Android-APKs/app-release.apk#LinPlayer-Android.apk" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Windows-Setup/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+          gh release upload "$PREVIEW_TAG" "dist/LinPlayer-Linux-Tarball-x86_64/LinPlayer-Linux-x86_64.tar.gz#LinPlayer-Linux-x86_64.tar.gz" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-iOS-Unsigned-IPA/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-macOS-DMG-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
           gh release upload "$PREVIEW_TAG" "dist/LinPlayer-macOS-DMG-x86_64/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber
@@ -537,6 +630,7 @@ jobs:
           gh release upload nightly "dist/LinPlayer-Android-APKs/app-armeabi-v7a-release.apk#LinPlayer-Android-armeabi-v7a.apk" --clobber
           gh release upload nightly "dist/LinPlayer-Android-APKs/app-release.apk#LinPlayer-Android.apk" --clobber
           gh release upload nightly "dist/LinPlayer-Windows-Setup/LinPlayer-Setup-x64.exe#LinPlayer-Windows-Setup-x64.exe" --clobber
+          gh release upload nightly "dist/LinPlayer-Linux-Tarball-x86_64/LinPlayer-Linux-x86_64.tar.gz#LinPlayer-Linux-x86_64.tar.gz" --clobber
           gh release upload nightly "dist/LinPlayer-iOS-Unsigned-IPA/LinPlayer-iOS-unsigned.ipa#LinPlayer-iOS-unsigned.ipa" --clobber
           gh release upload nightly "dist/LinPlayer-macOS-DMG-arm64/LinPlayer-macOS-arm64.dmg#LinPlayer-macOS-arm64.dmg" --clobber
           gh release upload nightly "dist/LinPlayer-macOS-DMG-x86_64/LinPlayer-macOS-x86_64.dmg#LinPlayer-macOS-x86_64.dmg" --clobber

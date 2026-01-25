@@ -36,7 +36,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 | Windows (x64) | `LinPlayer-Windows-Setup-x64.exe` | Inno Setup 安装包 |
 | macOS | `LinPlayer-macOS-arm64.dmg`<br/>`LinPlayer-macOS-x86_64.dmg` | Apple Silicon / Intel |
 | iOS | `LinPlayer-iOS-unsigned.ipa` | 未签名 IPA，需要自行签名/侧载 |
-| Linux | （暂无 CI 产物） | 可自行 `flutter build linux` |
+| Linux (x86_64) | `LinPlayer-Linux-x86_64.tar.gz` | 解压后：`cd LinPlayer && ./LinPlayer` |
 
 > 说明：本项目为非官方客户端，与 Emby / Jellyfin / Plex / 弹弹play 无官方隶属关系。
 
