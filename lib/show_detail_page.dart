@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
@@ -1520,7 +1522,10 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
     final token = _token;
     final userId = _userId;
     if (baseUrl == null || token == null || userId == null) {
-      setState(() => _error = '未连接服务器');
+      setState(() {
+        _error = '未连接服务器';
+        _loading = false;
+      });
       return;
     }
 
@@ -1731,6 +1736,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   bool _loading = true;
   MediaItem? _detail;
   List<ChapterInfo> _chapters = [];
+  String? _seriesId;
+  String _seriesName = '';
+  List<MediaItem> _seasons = [];
+  bool _seasonsVirtual = false;
+  String? _selectedSeasonId;
+  final Map<String, List<MediaItem>> _episodesCache = {};
+  String? _seriesError;
+  bool _seriesLoading = false;
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
@@ -1751,7 +1764,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final token = _token;
     final userId = _userId;
     if (baseUrl == null || token == null || userId == null) {
-      setState(() => _error = '未连接服务器');
+      setState(() {
+        _error = '未连接服务器';
+        _loading = false;
+      });
       return;
     }
 
@@ -1767,6 +1783,31 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         userId: userId,
         itemId: widget.episode.id,
       );
+
+      final resolvedSeriesId =
+          (detail.seriesId ?? widget.episode.seriesId ?? '').trim();
+      final resolvedSeriesName = detail.seriesName.trim().isNotEmpty
+          ? detail.seriesName.trim()
+          : widget.episode.seriesName.trim();
+
+      if (resolvedSeriesId.isNotEmpty) {
+        setState(() {
+          _seriesId = resolvedSeriesId;
+          _seriesName = resolvedSeriesName;
+          _seriesLoading = true;
+        });
+        unawaited(
+          _loadSeriesEpisodes(
+            api: api,
+            token: token,
+            baseUrl: baseUrl,
+            userId: userId,
+            episodeDetail: detail,
+            seriesId: resolvedSeriesId,
+            seriesName: resolvedSeriesName,
+          ),
+        );
+      }
       final info = await api.fetchPlaybackInfo(
         token: token,
         baseUrl: baseUrl,
@@ -1870,6 +1911,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         },
                       ),
                       const SizedBox(height: 16),
+                      if ((_seriesId ?? '').trim().isNotEmpty) ...[
+                        _otherEpisodesSection(context),
+                        const SizedBox(height: 16),
+                      ],
                       if (_detail?.people.isNotEmpty == true)
                         _peopleSection(
                           context,
@@ -1901,6 +1946,474 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                     ],
                   ),
                 ),
+    );
+  }
+
+  Future<void> _loadSeriesEpisodes({
+    required EmbyApi api,
+    required String token,
+    required String baseUrl,
+    required String userId,
+    required MediaItem episodeDetail,
+    required String seriesId,
+    required String seriesName,
+  }) async {
+    try {
+      final seasons = await api.fetchSeasons(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+        seriesId: seriesId,
+      );
+      final seasonItems =
+          seasons.items.where((s) => s.type.toLowerCase() == 'season').toList();
+      seasonItems.sort((a, b) {
+        final aNo = a.seasonNumber ?? a.episodeNumber ?? 0;
+        final bNo = b.seasonNumber ?? b.episodeNumber ?? 0;
+        return aNo.compareTo(bNo);
+      });
+
+      final seasonsVirtual = seasonItems.isEmpty;
+      final seasonsForUi = seasonsVirtual
+          ? [
+              MediaItem(
+                id: seriesId,
+                name: '全部剧集',
+                type: 'Season',
+                overview: '',
+                communityRating: null,
+                premiereDate: null,
+                genres: const [],
+                runTimeTicks: null,
+                sizeBytes: null,
+                container: null,
+                providerIds: const {},
+                seriesId: seriesId,
+                seriesName: seriesName,
+                seasonName: '全部剧集',
+                seasonNumber: null,
+                episodeNumber: null,
+                hasImage: episodeDetail.hasImage,
+                playbackPositionTicks: 0,
+                people: const [],
+                parentId: seriesId,
+              ),
+            ]
+          : seasonItems;
+
+      final currentSeasonId =
+          (episodeDetail.parentId ?? widget.episode.parentId ?? '').trim();
+      final previousSeasonId = _selectedSeasonId;
+      final selectedSeasonId = currentSeasonId.isNotEmpty &&
+              seasonsForUi.any((s) => s.id == currentSeasonId)
+          ? currentSeasonId
+          : (previousSeasonId != null &&
+                  seasonsForUi.any((s) => s.id == previousSeasonId))
+              ? previousSeasonId
+              : (seasonsForUi.isNotEmpty ? seasonsForUi.first.id : null);
+
+      final episodesCacheForUi = <String, List<MediaItem>>{};
+      if (selectedSeasonId != null && selectedSeasonId.isNotEmpty) {
+        final eps = await api.fetchEpisodes(
+          token: token,
+          baseUrl: baseUrl,
+          userId: userId,
+          seasonId: selectedSeasonId,
+        );
+        final items = List<MediaItem>.from(eps.items);
+        items.sort((a, b) {
+          final aNo = a.episodeNumber ?? 0;
+          final bNo = b.episodeNumber ?? 0;
+          return aNo.compareTo(bNo);
+        });
+        episodesCacheForUi[selectedSeasonId] = items;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _seasons = seasonsForUi;
+        _seasonsVirtual = seasonsVirtual;
+        _selectedSeasonId = selectedSeasonId;
+        _episodesCache
+          ..clear()
+          ..addAll(episodesCacheForUi);
+        _seriesError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _seriesError = e.toString();
+        _seasons = const [];
+        _seasonsVirtual = false;
+        _selectedSeasonId = null;
+        _episodesCache.clear();
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _seriesLoading = false;
+      });
+    }
+  }
+
+  String _seasonLabel(MediaItem season, int index) {
+    final name = season.name.trim();
+    final seasonNo = season.seasonNumber ?? season.episodeNumber;
+    return seasonNo != null
+        ? '第$seasonNo季'
+        : (name.isNotEmpty ? name : '第${index + 1}季');
+  }
+
+  MediaItem? get _selectedSeason {
+    if (_seasons.isEmpty) return null;
+    final selectedId = _selectedSeasonId;
+    if (selectedId == null || selectedId.isEmpty) return _seasons.first;
+    for (final s in _seasons) {
+      if (s.id == selectedId) return s;
+    }
+    return _seasons.first;
+  }
+
+  String _selectedSeasonLabel() {
+    if (_seasons.isEmpty) return '选择季';
+    final selectedId = _selectedSeasonId;
+    for (int i = 0; i < _seasons.length; i++) {
+      final s = _seasons[i];
+      if (selectedId != null && s.id == selectedId) return _seasonLabel(s, i);
+    }
+    return _seasonLabel(_seasons.first, 0);
+  }
+
+  Future<List<MediaItem>> _episodesForSeason(MediaItem season) async {
+    final cached = _episodesCache[season.id];
+    if (cached != null) return cached;
+    final baseUrl = _baseUrl;
+    final token = _token;
+    final userId = _userId;
+    if (baseUrl == null || token == null || userId == null) return const [];
+
+    final api = EmbyApi(
+      hostOrUrl: baseUrl,
+      preferredScheme: 'https',
+      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+    );
+    final eps = await api.fetchEpisodes(
+      token: token,
+      baseUrl: baseUrl,
+      userId: userId,
+      seasonId: season.id,
+    );
+    final items = List<MediaItem>.from(eps.items);
+    items.sort((a, b) {
+      final aNo = a.episodeNumber ?? 0;
+      final bNo = b.episodeNumber ?? 0;
+      return aNo.compareTo(bNo);
+    });
+    _episodesCache[season.id] = items;
+    return items;
+  }
+
+  Future<void> _pickSeason(BuildContext context) async {
+    if (_seasons.isEmpty) return;
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView(
+            children: [
+              const ListTile(title: Text('季选择')),
+              ..._seasons.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final s = entry.value;
+                final selectedNow = s.id == _selectedSeasonId;
+                return ListTile(
+                  leading: Icon(
+                      selectedNow ? Icons.check_circle : Icons.circle_outlined),
+                  title: Text(_seasonLabel(s, idx)),
+                  onTap: () => Navigator.of(ctx).pop(s.id),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (selected == null || selected.isEmpty || selected == _selectedSeasonId) {
+      return;
+    }
+
+    setState(() {
+      _selectedSeasonId = selected;
+    });
+
+    final season = _selectedSeason;
+    if (season == null) return;
+    try {
+      await _episodesForSeason(season);
+    } catch (_) {
+      // Episode list is optional for the UI.
+    }
+  }
+
+  String _episodeLabel(MediaItem episode, int index) {
+    final epNo = episode.episodeNumber ?? (index + 1);
+    final epName = episode.name.trim();
+    return epName.isNotEmpty ? '$epNo. $epName' : '第$epNo集';
+  }
+
+  Future<void> _pickEpisode(BuildContext context) async {
+    final season = _selectedSeason;
+    if (season == null) return;
+
+    final seasonLabel = _selectedSeasonLabel();
+    final selectedEp = await showModalBottomSheet<MediaItem>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: widget.isTv ? 0.9 : 0.75,
+            minChildSize: 0.4,
+            maxChildSize: 0.95,
+            builder: (ctx, controller) {
+              return FutureBuilder<List<MediaItem>>(
+                future: _episodesForSeason(season),
+                builder: (ctx, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return ListView(
+                      controller: controller,
+                      children: const [
+                        ListTile(title: Text('选集')),
+                        SizedBox(height: 24),
+                        Center(child: CircularProgressIndicator()),
+                      ],
+                    );
+                  }
+                  if (snapshot.hasError) {
+                    return ListView(
+                      controller: controller,
+                      children: [
+                        const ListTile(title: Text('选集')),
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text('加载失败：${snapshot.error}'),
+                        ),
+                      ],
+                    );
+                  }
+                  final eps = snapshot.data ?? const [];
+                  if (eps.isEmpty) {
+                    return ListView(
+                      controller: controller,
+                      children: const [
+                        ListTile(title: Text('选集')),
+                        Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('暂无剧集'),
+                        ),
+                      ],
+                    );
+                  }
+                  return ListView.builder(
+                    controller: controller,
+                    itemCount: eps.length + 1,
+                    itemBuilder: (ctx, idx) {
+                      if (idx == 0) {
+                        return ListTile(title: Text('选集（$seasonLabel）'));
+                      }
+                      final epIndex = idx - 1;
+                      final ep = eps[epIndex];
+                      final isCurrent = ep.id == widget.episode.id;
+                      return ListTile(
+                        leading: Icon(
+                          isCurrent
+                              ? Icons.check_circle
+                              : Icons.play_circle_outline,
+                        ),
+                        title: Text(_episodeLabel(ep, epIndex)),
+                        onTap: () => Navigator.of(ctx).pop(ep),
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+
+    if (!mounted || selectedEp == null || selectedEp.id.isEmpty) return;
+    if (selectedEp.id == widget.episode.id) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => EpisodeDetailPage(
+          episode: selectedEp,
+          appState: widget.appState,
+          server: widget.server,
+          isTv: widget.isTv,
+        ),
+      ),
+    );
+  }
+
+  void _openSeasonEpisodesPage(BuildContext context, MediaItem season) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SeasonEpisodesPage(
+          season: season,
+          appState: widget.appState,
+          server: widget.server,
+          isTv: widget.isTv,
+          isVirtual: _seasonsVirtual,
+        ),
+      ),
+    );
+  }
+
+  Widget _otherEpisodesSection(BuildContext context) {
+    final theme = Theme.of(context);
+    final season = _selectedSeason;
+    final title = (_seriesName).trim().isNotEmpty ? '剧集 · $_seriesName' : '剧集';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        if (_seriesError != null) ...[
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '加载剧集失败：$_seriesError',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ),
+              TextButton(onPressed: _load, child: const Text('重试')),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _seasons.isEmpty ? null : () => _pickSeason(context),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.video_library_outlined, size: 18),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '季：${_selectedSeasonLabel()}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_drop_down),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: season == null ? null : () => _pickEpisode(context),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.format_list_numbered, size: 18),
+                    SizedBox(width: 8),
+                    Text('选集'),
+                    SizedBox(width: 4),
+                    Icon(Icons.arrow_drop_down),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (season == null && _seriesLoading) ...[
+          const SizedBox(height: 8),
+          const Center(child: CircularProgressIndicator()),
+        ],
+        if (season != null) ...[
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => _openSeasonEpisodesPage(context, season),
+              child: const Text('查看全部'),
+            ),
+          ),
+          SizedBox(
+            height: widget.isTv ? 230 : 200,
+            child: FutureBuilder<List<MediaItem>>(
+              future: _episodesForSeason(season),
+              builder: (ctx, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Text('加载剧集失败：${snapshot.error}'));
+                }
+                final eps = snapshot.data ?? const [];
+                if (eps.isEmpty) {
+                  return const Center(child: Text('暂无剧集'));
+                }
+                return ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: eps.length,
+                  padding: const EdgeInsets.only(bottom: 8),
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final e = eps[index];
+                    final isCurrent = e.id == widget.episode.id;
+                    final epNo = e.episodeNumber ?? (index + 1);
+                    final img = EmbyApi.imageUrl(
+                      baseUrl: _baseUrl!,
+                      itemId: e.hasImage ? e.id : season.id,
+                      token: _token!,
+                      apiPrefix:
+                          widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+                      maxWidth: widget.isTv ? 900 : 640,
+                    );
+                    return SizedBox(
+                      width: widget.isTv ? 360 : 260,
+                      child: MediaBackdropTile(
+                        title: _episodeLabel(e, index),
+                        subtitle: isCurrent ? '当前' : '第$epNo集',
+                        badgeText: isCurrent ? '当前' : null,
+                        imageUrl: img,
+                        onTap: () {
+                          if (isCurrent) return;
+                          Navigator.of(context).pushReplacement(
+                            MaterialPageRoute(
+                              builder: (_) => EpisodeDetailPage(
+                                episode: e,
+                                appState: widget.appState,
+                                server: widget.server,
+                                isTv: widget.isTv,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
