@@ -998,8 +998,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   padding:
                                       const EdgeInsets.symmetric(horizontal: 8),
                                   decoration: BoxDecoration(
-                                    color:
-                                        Colors.black.withValues(alpha: 0.18),
+                                    color: Colors.black.withValues(alpha: 0.18),
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(
                                       color: Colors.white.withValues(
@@ -1189,9 +1188,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                                       ),
                                                     ),
                                                     child: Padding(
-                                                      padding:
-                                                          const EdgeInsets
-                                                              .symmetric(
+                                                      padding: const EdgeInsets
+                                                          .symmetric(
                                                         horizontal: 6,
                                                         vertical: 3,
                                                       ),
@@ -2365,7 +2363,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               hostOrUrl: base,
               preferredScheme: 'https',
               apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-              serverType: widget.server?.serverType ?? widget.appState.serverType,
+              serverType:
+                  widget.server?.serverType ?? widget.appState.serverType,
               deviceId: widget.appState.deviceId,
             );
         final info = await api.fetchPlaybackInfo(
@@ -2833,7 +2832,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                 ),
                               ),
                             ),
-                          _buildEpisodePickerOverlay(enableBlur: enableBlur),
                           Align(
                             alignment: Alignment.bottomCenter,
                             child: SafeArea(
@@ -2933,6 +2931,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               ),
                             ),
                           ),
+                          _buildEpisodePickerOverlay(enableBlur: enableBlur),
                         ],
                       )
                     : _playError != null

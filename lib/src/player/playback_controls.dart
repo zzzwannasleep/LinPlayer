@@ -683,69 +683,59 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                 ],
               ],
             ),
-            if (widget.onOpenEpisodePicker != null) ...[
-              const SizedBox(height: 2),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: !enabled
-                      ? null
-                      : () => _callMaybe(widget.onOpenEpisodePicker),
-                  icon: const Icon(Icons.format_list_numbered, size: 18),
-                  label: Text(
-                    widget.episodePickerLabel,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    backgroundColor: Colors.black.withValues(alpha: 0.18),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(999),
-                      side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.12),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
             const SizedBox(height: 6),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  tooltip: '快退 $backSeconds 秒',
-                  icon: Icon(_replayIcon(backSeconds)),
-                  color: Colors.white,
-                  onPressed:
-                      !enabled ? null : () => _call0(widget.onSeekBackward),
-                ),
-                IconButton(
-                  tooltip: widget.isPlaying ? '暂停' : '播放',
-                  icon: Icon(
-                    widget.isPlaying ? Icons.pause_circle : Icons.play_circle,
+                if (widget.onOpenEpisodePicker != null)
+                  const SizedBox(width: 48),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: '快退 $backSeconds 秒',
+                        icon: Icon(_replayIcon(backSeconds)),
+                        color: Colors.white,
+                        onPressed: !enabled
+                            ? null
+                            : () => _call0(widget.onSeekBackward),
+                      ),
+                      IconButton(
+                        tooltip: widget.isPlaying ? '暂停' : '播放',
+                        icon: Icon(
+                          widget.isPlaying
+                              ? Icons.pause_circle
+                              : Icons.play_circle,
+                        ),
+                        iconSize: 44,
+                        color: accent,
+                        onPressed: !enabled
+                            ? null
+                            : () => widget.isPlaying
+                                ? _call0(widget.onPause)
+                                : _call0(widget.onPlay),
+                      ),
+                      IconButton(
+                        tooltip: '快进 $forwardSeconds 秒',
+                        icon: Icon(_forwardIcon(forwardSeconds)),
+                        color: Colors.white,
+                        onPressed: !enabled
+                            ? null
+                            : () => _call0(widget.onSeekForward),
+                      ),
+                    ],
                   ),
-                  iconSize: 44,
-                  color: accent,
-                  onPressed: !enabled
-                      ? null
-                      : () => widget.isPlaying
-                          ? _call0(widget.onPause)
-                          : _call0(widget.onPlay),
                 ),
-                IconButton(
-                  tooltip: '快进 $forwardSeconds 秒',
-                  icon: Icon(_forwardIcon(forwardSeconds)),
-                  color: Colors.white,
-                  onPressed:
-                      !enabled ? null : () => _call0(widget.onSeekForward),
-                ),
+                if (widget.onOpenEpisodePicker != null)
+                  IconButton(
+                    tooltip: widget.episodePickerLabel,
+                    icon: const Icon(Icons.format_list_numbered),
+                    color: Colors.white,
+                    onPressed: !enabled
+                        ? null
+                        : () => _callMaybe(widget.onOpenEpisodePicker),
+                  ),
               ],
             ),
           ],
