@@ -20,6 +20,8 @@ class PlaybackControls extends StatefulWidget {
     required this.onPause,
     required this.onSeekBackward,
     required this.onSeekForward,
+    this.heatmap,
+    this.showHeatmap = false,
     this.seekBackwardSeconds = 10,
     this.seekForwardSeconds = 10,
     this.showSystemTime = false,
@@ -47,6 +49,12 @@ class PlaybackControls extends StatefulWidget {
   final FutureOr<void> Function() onPause;
   final FutureOr<void> Function() onSeekBackward;
   final FutureOr<void> Function() onSeekForward;
+
+  /// Optional heatmap values along the progress bar.
+  ///
+  /// Each value should be within `[0, 1]`.
+  final List<double>? heatmap;
+  final bool showHeatmap;
 
   final int seekBackwardSeconds;
   final int seekForwardSeconds;
@@ -121,6 +129,73 @@ class _RingThumbShape extends SliderComponentShape {
       ..style = PaintingStyle.stroke
       ..strokeWidth = ringWidth;
     canvas.drawCircle(center, radius, ringPaint);
+  }
+}
+
+class _HeatmapSliderTrackShape extends RoundedRectSliderTrackShape {
+  const _HeatmapSliderTrackShape(this.heatmap, {required this.heatColor});
+
+  final List<double> heatmap;
+  final Color heatColor;
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset offset, {
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required Animation<double> enableAnimation,
+    required TextDirection textDirection,
+    required Offset thumbCenter,
+    Offset? secondaryOffset,
+    bool isDiscrete = false,
+    bool isEnabled = false,
+    double additionalActiveTrackHeight = 2,
+  }) {
+    final hm = heatmap;
+    if (hm.isNotEmpty) {
+      final canvas = context.canvas;
+      final trackRect = getPreferredRect(
+        parentBox: parentBox,
+        offset: offset,
+        sliderTheme: sliderTheme,
+        isEnabled: isEnabled,
+        isDiscrete: isDiscrete,
+      );
+
+      final binWidth = trackRect.width / hm.length;
+      final paint = Paint();
+      for (var i = 0; i < hm.length; i++) {
+        final intensity = hm[i].clamp(0.0, 1.0);
+        if (intensity <= 0) continue;
+        paint.color = heatColor.withValues(
+          alpha: (0.08 + 0.62 * intensity).clamp(0.0, 1.0),
+        );
+        canvas.drawRect(
+          Rect.fromLTWH(
+            trackRect.left + i * binWidth,
+            trackRect.top - 1,
+            binWidth,
+            trackRect.height + 2,
+          ),
+          paint,
+        );
+      }
+    }
+
+    super.paint(
+      context,
+      offset,
+      parentBox: parentBox,
+      sliderTheme: sliderTheme,
+      enableAnimation: enableAnimation,
+      textDirection: textDirection,
+      thumbCenter: thumbCenter,
+      secondaryOffset: secondaryOffset,
+      isDiscrete: isDiscrete,
+      isEnabled: isEnabled,
+      additionalActiveTrackHeight: additionalActiveTrackHeight,
+    );
   }
 }
 
@@ -460,11 +535,19 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                       final ringColor = accent.computeLuminance() > 0.6
                           ? Colors.black
                           : Colors.white;
+                      final showHeatmap = widget.showHeatmap &&
+                          (widget.heatmap?.isNotEmpty ?? false);
                       final sliderTheme = SliderTheme.of(context).copyWith(
                         trackHeight: 4,
                         overlayShape: SliderComponentShape.noOverlay,
                         activeTrackColor: accent,
                         thumbColor: accent,
+                        trackShape: showHeatmap
+                            ? _HeatmapSliderTrackShape(
+                                widget.heatmap!,
+                                heatColor: accent,
+                              )
+                            : const RoundedRectSliderTrackShape(),
                         thumbShape: _RingThumbShape(
                           radius: 7,
                           ringWidth: 2,

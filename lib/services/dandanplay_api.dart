@@ -268,6 +268,7 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
   DanmakuChConvert chConvert = DanmakuChConvert.off,
   String appId = '',
   String appSecret = '',
+  bool mergeRelated = true,
   bool throwIfEmpty = false,
 }) async {
   final cleanedName = stripFileExtension(fileName);
@@ -303,7 +304,7 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
       final picked = match.matches.first;
       final comments = await client.getComments(
         episodeId: picked.episodeId,
-        withRelated: true,
+        withRelated: mergeRelated,
         chConvert: chConvert.apiValue,
       );
 

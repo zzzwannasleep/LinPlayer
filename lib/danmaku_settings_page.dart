@@ -20,6 +20,27 @@ class DanmakuSettingsPage extends StatefulWidget {
 
 class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
   static const _openPlatformUrl = 'https://doc.dandanplay.com/open/';
+  static const double _baseDanmakuFontSize = 18.0;
+  static const int _fontSizeMin = 9;
+  static const int _fontSizeMax = 29;
+  static const int _speedUiMin = 1;
+  static const int _speedUiMax = 20;
+  static const double _speedMin = 0.4;
+  static const double _speedMax = 2.5;
+
+  static int _speedUiFromMultiplier(double speed) {
+    final s = speed.clamp(_speedMin, _speedMax).toDouble();
+    final t = (_speedMax - s) / (_speedMax - _speedMin); // 0..1
+    return (_speedUiMin + t * (_speedUiMax - _speedUiMin))
+        .round()
+        .clamp(_speedUiMin, _speedUiMax);
+  }
+
+  static double _speedMultiplierFromUi(double value) {
+    final ui = value.clamp(_speedUiMin.toDouble(), _speedUiMax.toDouble());
+    final t = (ui - _speedUiMin) / (_speedUiMax - _speedUiMin); // 0..1
+    return (_speedMax - t * (_speedMax - _speedMin)).toDouble();
+  }
 
   final TextEditingController _apiUrlCtrl = TextEditingController();
   final TextEditingController _appIdCtrl = TextEditingController();
@@ -178,8 +199,15 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
         final enableBlur = blurAllowed && appState.enableBlurEffects;
 
         final opacity = _opacityDraft ?? appState.danmakuOpacity;
-        final scale = _scaleDraft ?? appState.danmakuScale;
-        final speed = _speedDraft ?? appState.danmakuSpeed;
+        final scale =
+            (_scaleDraft ?? appState.danmakuScale).clamp(0.5, 1.6).toDouble();
+        final speed = (_speedDraft ?? appState.danmakuSpeed)
+            .clamp(_speedMin, _speedMax)
+            .toDouble();
+        final fontSize = (scale * _baseDanmakuFontSize)
+            .round()
+            .clamp(_fontSizeMin, _fontSizeMax);
+        final speedUi = _speedUiFromMultiplier(speed);
 
         final scrollLines =
             (_scrollMaxLinesDraft ?? appState.danmakuMaxLines.toDouble())
@@ -213,7 +241,13 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                     SwitchListTile(
                       value: appState.danmakuEnabled,
                       onChanged: (v) => appState.setDanmakuEnabled(v),
-                      title: const Text('启用弹幕'),
+                      secondary: const Icon(Icons.comment_outlined),
+                      title: const Text('弹幕'),
+                      subtitle: Text(
+                        appState.danmakuLoadMode == DanmakuLoadMode.online
+                            ? '来自 DandanPlay API / 仅包含中文弹幕'
+                            : '本地 XML 弹幕',
+                      ),
                       contentPadding: EdgeInsets.zero,
                     ),
                     const Divider(height: 1),
@@ -239,6 +273,57 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                           },
                         ),
                       ),
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.danmakuShowHeatmap,
+                      onChanged: (v) => appState.setDanmakuShowHeatmap(v),
+                      secondary: const Icon(Icons.whatshot_outlined),
+                      title: const Text('显示热力图'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.danmakuRememberSelectedSource,
+                      onChanged: (v) =>
+                          appState.setDanmakuRememberSelectedSource(v),
+                      secondary: const Icon(Icons.history_outlined),
+                      title: const Text('记忆手动匹配的弹幕'),
+                      subtitle: const Text(
+                        '匹配弹幕时，优先使用该剧集最近一次手动搜索时选择的匹配项',
+                      ),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.translate_outlined),
+                      title: const Text('弹幕简繁转换'),
+                      trailing: DropdownButtonHideUnderline(
+                        child: DropdownButton<DanmakuChConvert>(
+                          value: appState.danmakuChConvert,
+                          items: DanmakuChConvert.values
+                              .map(
+                                (v) => DropdownMenuItem(
+                                  value: v,
+                                  child: Text(v.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            appState.setDanmakuChConvert(v);
+                          },
+                        ),
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.danmakuMergeRelated,
+                      onChanged: (v) => appState.setDanmakuMergeRelated(v),
+                      secondary: const Icon(Icons.call_merge),
+                      title: const Text('合并关联弹幕'),
+                      contentPadding: EdgeInsets.zero,
                     ),
                   ],
                 ),
@@ -268,7 +353,7 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                     const Divider(height: 1),
                     _SliderTile(
                       leading: const Icon(Icons.vertical_align_top_outlined),
-                      title: const Text('顶部弹幕最大行数'),
+                      title: const Text('顶部固定弹幕最大行数'),
                       value: topLines.toDouble(),
                       min: 0,
                       max: 40,
@@ -309,16 +394,37 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                   children: [
                     _SliderTile(
                       leading: const Icon(Icons.format_size),
-                      title: const Text('弹幕缩放'),
-                      value: scale.clamp(0.5, 1.6),
-                      min: 0.5,
-                      max: 1.6,
-                      trailing: Text('${scale.toStringAsFixed(2)}x'),
-                      sliderTheme: _sliderTheme(context),
-                      onChanged: (v) => setState(() => _scaleDraft = v),
+                      title: const Text('弹幕字体大小'),
+                      value: fontSize.toDouble(),
+                      min: _fontSizeMin.toDouble(),
+                      max: _fontSizeMax.toDouble(),
+                      divisions: _fontSizeMax - _fontSizeMin,
+                      trailing: Text('$fontSize'),
+                      sliderTheme: _sliderTheme(context, showTicks: true),
+                      onChanged: (v) =>
+                          setState(() => _scaleDraft = v / _baseDanmakuFontSize),
                       onChangeEnd: (v) async {
                         setState(() => _scaleDraft = null);
-                        await appState.setDanmakuScale(v);
+                        await appState.setDanmakuScale(v / _baseDanmakuFontSize);
+                      },
+                    ),
+                    const Divider(height: 1),
+                    _SliderTile(
+                      leading: const Icon(Icons.speed_outlined),
+                      title: const Text('弹幕滚动速度(数值越小速度越快)'),
+                      value: speedUi.toDouble(),
+                      min: _speedUiMin.toDouble(),
+                      max: _speedUiMax.toDouble(),
+                      divisions: _speedUiMax - _speedUiMin,
+                      trailing: Text('$speedUi'),
+                      sliderTheme: _sliderTheme(context, showTicks: true),
+                      onChanged: (v) => setState(
+                        () => _speedDraft = _speedMultiplierFromUi(v),
+                      ),
+                      onChangeEnd: (v) async {
+                        setState(() => _speedDraft = null);
+                        await appState
+                            .setDanmakuSpeed(_speedMultiplierFromUi(v));
                       },
                     ),
                     const Divider(height: 1),
@@ -334,21 +440,6 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                       onChangeEnd: (v) async {
                         setState(() => _opacityDraft = null);
                         await appState.setDanmakuOpacity(v);
-                      },
-                    ),
-                    const Divider(height: 1),
-                    _SliderTile(
-                      leading: const Icon(Icons.speed_outlined),
-                      title: const Text('弹幕滚动速度'),
-                      value: speed.clamp(0.4, 2.5),
-                      min: 0.4,
-                      max: 2.5,
-                      trailing: Text('${speed.toStringAsFixed(2)}x'),
-                      sliderTheme: _sliderTheme(context),
-                      onChanged: (v) => setState(() => _speedDraft = v),
-                      onChangeEnd: (v) async {
-                        setState(() => _speedDraft = null);
-                        await appState.setDanmakuSpeed(v);
                       },
                     ),
                     const Divider(height: 1),
@@ -368,15 +459,6 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                 child: Column(
                   children: [
                     SwitchListTile(
-                      value: appState.danmakuRememberSelectedSource,
-                      onChanged: (v) =>
-                          appState.setDanmakuRememberSelectedSource(v),
-                      title: const Text('记忆手动选择的弹幕'),
-                      subtitle: const Text('开启后优先加载上次手动选择的弹幕'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    const Divider(height: 1),
-                    SwitchListTile(
                       value: appState.danmakuMergeDuplicates,
                       onChanged: (v) => appState.setDanmakuMergeDuplicates(v),
                       title: const Text('合并重复弹幕'),
@@ -388,15 +470,6 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                       onChanged: (v) => appState.setDanmakuPreventOverlap(v),
                       title: const Text('防止弹幕重叠'),
                       contentPadding: EdgeInsets.zero,
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.block_outlined),
-                      title: const Text('弹幕屏蔽词'),
-                      subtitle: const Text('添加屏蔽词；正则用 /.../ 包裹'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: _showBlockWordsSheet,
                     ),
                     const Divider(height: 1),
                     ListTile(
@@ -421,45 +494,33 @@ class _DanmakuSettingsPageState extends State<DanmakuSettingsPage> {
                         ),
                       ),
                     ),
-                    const Divider(height: 1),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _Section(
+                title: 'Danmaku Blacklist Words',
+                enableBlur: enableBlur,
+                child: Column(
+                  children: [
                     ListTile(
                       contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.translate_outlined),
-                      title: const Text('弹幕简繁体转换'),
-                      trailing: DropdownButtonHideUnderline(
-                        child: DropdownButton<DanmakuChConvert>(
-                          value: appState.danmakuChConvert,
-                          items: DanmakuChConvert.values
-                              .map(
-                                (v) => DropdownMenuItem(
-                                  value: v,
-                                  child: Text(v.label),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            appState.setDanmakuChConvert(v);
-                          },
-                        ),
-                      ),
+                      leading: const Icon(Icons.block_outlined),
+                      title: const Text('弹幕屏蔽词'),
+                      subtitle: const Text('添加屏蔽词；正则用 /.../ 包裹'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _showBlockWordsSheet,
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 12),
               _Section(
-                title: '在线弹幕',
-                subtitle: '支持 dandanplay API v2 兼容服务',
+                title: 'Danmaku API',
+                subtitle: '添加和管理弹幕 API 列表，支持排序',
                 enableBlur: enableBlur,
                 child: Column(
                   children: [
-                    const ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.cloud_outlined),
-                      title: Text('弹幕 API URL'),
-                      subtitle: Text('支持多个，长按拖动调整优先级（越靠前优先尝试）'),
-                    ),
                     Row(
                       children: [
                         Expanded(

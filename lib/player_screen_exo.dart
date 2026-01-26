@@ -72,6 +72,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   int _danmakuTopMaxLines = 10;
   int _danmakuBottomMaxLines = 10;
   bool _danmakuPreventOverlap = true;
+  bool _danmakuShowHeatmap = true;
+  List<double> _danmakuHeatmap = const [];
   int _nextDanmakuIndex = 0;
   bool _danmakuPaused = false;
 
@@ -117,6 +119,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
     _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
     _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+    _danmakuShowHeatmap = widget.appState.danmakuShowHeatmap;
 
     final handoff = widget.appState.takeLocalPlaybackHandoff();
     if (handoff != null && handoff.playlist.isNotEmpty) {
@@ -238,6 +241,23 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _danmakuKey.currentState?.clear();
   }
 
+  void _rebuildDanmakuHeatmap() {
+    if (!_danmakuShowHeatmap) {
+      _danmakuHeatmap = const [];
+      return;
+    }
+    if (_duration <= Duration.zero ||
+        _danmakuSourceIndex < 0 ||
+        _danmakuSourceIndex >= _danmakuSources.length) {
+      _danmakuHeatmap = const [];
+      return;
+    }
+    _danmakuHeatmap = buildDanmakuHeatmap(
+      _danmakuSources[_danmakuSourceIndex].items,
+      duration: _duration,
+    );
+  }
+
   void _drainDanmaku(Duration position) {
     if (!_danmakuEnabled) return;
     if (_danmakuSourceIndex < 0 ||
@@ -328,6 +348,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         videoDurationSeconds: _duration.inSeconds,
         matchMode: appState.danmakuMatchMode,
         chConvert: appState.danmakuChConvert,
+        mergeRelated: appState.danmakuMergeRelated,
         appId: appState.danmakuAppId,
         appSecret: appState.danmakuAppSecret,
         throwIfEmpty: showToast,
@@ -356,6 +377,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
             : _danmakuSources.indexWhere((s) => s.name == desiredName);
         _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
         _danmakuEnabled = true;
+        _rebuildDanmakuHeatmap();
         _syncDanmakuCursor(_position);
       });
 
@@ -413,6 +435,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           : _danmakuSources.indexWhere((s) => s.name == desiredName);
       _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
       _danmakuEnabled = true;
+      _rebuildDanmakuHeatmap();
       _syncDanmakuCursor(_position);
     });
 
@@ -563,6 +586,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                 setState(() {
                                   _danmakuSourceIndex = v;
                                   _danmakuEnabled = true;
+                                  _rebuildDanmakuHeatmap();
                                   _syncDanmakuCursor(_position);
                                 });
                                 if (widget.appState
@@ -604,6 +628,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                             _danmakuSources.clear();
                             _danmakuSourceIndex = -1;
                             _danmakuEnabled = false;
+                            _danmakuHeatmap = const [];
                             _danmakuKey.currentState?.clear();
                           });
                           setSheetState(() {});
@@ -1347,6 +1372,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
         _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
         _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+        _danmakuShowHeatmap = widget.appState.danmakuShowHeatmap;
+        _danmakuHeatmap = const [];
         _danmakuPaused = false;
       }
     });
@@ -1780,6 +1807,9 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                       position: _position,
                                       duration: _duration,
                                       isPlaying: controller.value.isPlaying,
+                                      heatmap: _danmakuHeatmap,
+                                      showHeatmap: _danmakuShowHeatmap &&
+                                          _danmakuHeatmap.isNotEmpty,
                                       seekBackwardSeconds: _seekBackSeconds,
                                       seekForwardSeconds: _seekForwardSeconds,
                                       showSystemTime: widget

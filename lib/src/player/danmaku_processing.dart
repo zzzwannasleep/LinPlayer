@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'danmaku.dart';
 
 class DanmakuTextFilter {
@@ -117,5 +119,34 @@ List<DanmakuSource> processDanmakuSources(
         ),
       )
       .where((s) => s.items.isNotEmpty)
+      .toList(growable: false);
+}
+
+List<double> buildDanmakuHeatmap(
+  List<DanmakuItem> items, {
+  required Duration duration,
+  int bins = 80,
+}) {
+  final totalMs = duration.inMilliseconds;
+  if (items.isEmpty || totalMs <= 0 || bins <= 0) return const [];
+
+  final counts = List<int>.filled(bins, 0, growable: false);
+  for (final item in items) {
+    final ms = item.time.inMilliseconds;
+    if (ms < 0) continue;
+    var idx = ((ms / totalMs) * bins).floor();
+    if (idx < 0) continue;
+    if (idx >= bins) idx = bins - 1;
+    counts[idx]++;
+  }
+
+  var maxCount = 0;
+  for (final c in counts) {
+    if (c > maxCount) maxCount = c;
+  }
+  if (maxCount <= 0) return List<double>.filled(bins, 0, growable: false);
+
+  return counts
+      .map((c) => math.sqrt(c / maxCount).clamp(0.0, 1.0).toDouble())
       .toList(growable: false);
 }

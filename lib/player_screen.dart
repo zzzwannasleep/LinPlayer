@@ -81,6 +81,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   int _danmakuTopMaxLines = 10;
   int _danmakuBottomMaxLines = 10;
   bool _danmakuPreventOverlap = true;
+  bool _danmakuShowHeatmap = true;
+  List<double> _danmakuHeatmap = const [];
   int _nextDanmakuIndex = 0;
   bool _buffering = false;
   bool _danmakuPaused = false;
@@ -130,6 +132,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _danmakuTopMaxLines = appState?.danmakuTopMaxLines ?? 0;
     _danmakuBottomMaxLines = appState?.danmakuBottomMaxLines ?? 0;
     _danmakuPreventOverlap = appState?.danmakuPreventOverlap ?? true;
+    _danmakuShowHeatmap = appState?.danmakuShowHeatmap ?? true;
 
     final handoff = appState?.takeLocalPlaybackHandoff();
     if (handoff != null && handoff.playlist.isNotEmpty) {
@@ -660,6 +663,8 @@ class _PlayerScreenState extends State<PlayerScreen>
       _danmakuTopMaxLines = appState?.danmakuTopMaxLines ?? 0;
       _danmakuBottomMaxLines = appState?.danmakuBottomMaxLines ?? 0;
       _danmakuPreventOverlap = appState?.danmakuPreventOverlap ?? true;
+      _danmakuShowHeatmap = appState?.danmakuShowHeatmap ?? true;
+      _danmakuHeatmap = const [];
       _controlsVisible = true;
       _isScrubbing = false;
     });
@@ -1048,6 +1053,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         videoDurationSeconds: _duration.inSeconds,
         matchMode: appState.danmakuMatchMode,
         chConvert: appState.danmakuChConvert,
+        mergeRelated: appState.danmakuMergeRelated,
         appId: appState.danmakuAppId,
         appSecret: appState.danmakuAppSecret,
         throwIfEmpty: showToast,
@@ -1076,6 +1082,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             : _danmakuSources.indexWhere((s) => s.name == desiredName);
         _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
         _danmakuEnabled = true;
+        _rebuildDanmakuHeatmap();
         _syncDanmakuCursor(_position);
       });
       if (showToast && mounted) {
@@ -1101,6 +1108,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     final items = _danmakuSources[_danmakuSourceIndex].items;
     _nextDanmakuIndex = DanmakuParser.lowerBoundByTime(items, position);
     _danmakuKey.currentState?.clear();
+  }
+
+  void _rebuildDanmakuHeatmap() {
+    if (!_danmakuShowHeatmap) {
+      _danmakuHeatmap = const [];
+      return;
+    }
+    if (_duration <= Duration.zero ||
+        _danmakuSourceIndex < 0 ||
+        _danmakuSourceIndex >= _danmakuSources.length) {
+      _danmakuHeatmap = const [];
+      return;
+    }
+    _danmakuHeatmap = buildDanmakuHeatmap(
+      _danmakuSources[_danmakuSourceIndex].items,
+      duration: _duration,
+    );
   }
 
   void _drainDanmaku(Duration position) {
@@ -1162,6 +1186,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           : _danmakuSources.indexWhere((s) => s.name == desiredName);
       _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
       _danmakuEnabled = true;
+      _rebuildDanmakuHeatmap();
       _syncDanmakuCursor(_position);
     });
   }
@@ -1270,14 +1295,15 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ? null
                             : (v) {
                                 if (v == null) return;
-                                setState(() {
-                                  _danmakuSourceIndex = v;
-                                  _danmakuEnabled = true;
-                                  _syncDanmakuCursor(_position);
-                                });
-                                final appState = widget.appState;
-                                if (appState != null &&
-                                    appState.danmakuRememberSelectedSource &&
+                                 setState(() {
+                                   _danmakuSourceIndex = v;
+                                   _danmakuEnabled = true;
+                                   _rebuildDanmakuHeatmap();
+                                   _syncDanmakuCursor(_position);
+                                 });
+                                 final appState = widget.appState;
+                                 if (appState != null &&
+                                     appState.danmakuRememberSelectedSource &&
                                     v >= 0 &&
                                     v < _danmakuSources.length) {
                                   // ignore: unawaited_futures
@@ -1313,6 +1339,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                             _danmakuSources.clear();
                             _danmakuSourceIndex = -1;
                             _danmakuEnabled = false;
+                            _danmakuHeatmap = const [];
                             _danmakuKey.currentState?.clear();
                           });
                           setSheetState(() {});
@@ -1678,6 +1705,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                                       position: _position,
                                       duration: _duration,
                                       isPlaying: _playerService.isPlaying,
+                                      heatmap: _danmakuHeatmap,
+                                      showHeatmap: _danmakuShowHeatmap &&
+                                          _danmakuHeatmap.isNotEmpty,
                                       seekBackwardSeconds: _seekBackSeconds,
                                       seekForwardSeconds: _seekForwardSeconds,
                                       showSystemTime: widget.appState

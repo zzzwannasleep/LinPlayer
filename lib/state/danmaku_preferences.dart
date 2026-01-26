@@ -110,9 +110,9 @@ extension DanmakuChConvertX on DanmakuChConvert {
       case DanmakuChConvert.off:
         return '关闭';
       case DanmakuChConvert.toSimplified:
-        return '转简体';
+        return '简体';
       case DanmakuChConvert.toTraditional:
-        return '转繁体';
+        return '繁体';
     }
   }
 

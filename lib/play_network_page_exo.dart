@@ -116,6 +116,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   int _danmakuTopMaxLines = 10;
   int _danmakuBottomMaxLines = 10;
   bool _danmakuPreventOverlap = true;
+  bool _danmakuShowHeatmap = true;
+  List<double> _danmakuHeatmap = const [];
   int _nextDanmakuIndex = 0;
   bool _danmakuPaused = false;
 
@@ -174,6 +176,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
     _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
     _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+    _danmakuShowHeatmap = widget.appState.danmakuShowHeatmap;
     _selectedMediaSourceId = widget.mediaSourceId;
     _selectedAudioStreamIndex = widget.audioStreamIndex;
     _selectedSubtitleStreamIndex = widget.subtitleStreamIndex;
@@ -961,6 +964,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         videoDurationSeconds: videoDurationSeconds,
         matchMode: appState.danmakuMatchMode,
         chConvert: appState.danmakuChConvert,
+        mergeRelated: appState.danmakuMergeRelated,
         appId: appState.danmakuAppId,
         appSecret: appState.danmakuAppSecret,
         throwIfEmpty: showToast,
@@ -989,6 +993,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             : _danmakuSources.indexWhere((s) => s.name == desiredName);
         _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
         _danmakuEnabled = true;
+        _rebuildDanmakuHeatmap();
         _syncDanmakuCursor(_position);
       });
 
@@ -1017,6 +1022,23 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final items = _danmakuSources[_danmakuSourceIndex].items;
     _nextDanmakuIndex = DanmakuParser.lowerBoundByTime(items, position);
     _danmakuKey.currentState?.clear();
+  }
+
+  void _rebuildDanmakuHeatmap() {
+    if (!_danmakuShowHeatmap) {
+      _danmakuHeatmap = const [];
+      return;
+    }
+    if (_duration <= Duration.zero ||
+        _danmakuSourceIndex < 0 ||
+        _danmakuSourceIndex >= _danmakuSources.length) {
+      _danmakuHeatmap = const [];
+      return;
+    }
+    _danmakuHeatmap = buildDanmakuHeatmap(
+      _danmakuSources[_danmakuSourceIndex].items,
+      duration: _duration,
+    );
   }
 
   void _drainDanmaku(Duration position) {
@@ -1074,6 +1096,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           : _danmakuSources.indexWhere((s) => s.name == desiredName);
       _danmakuSourceIndex = idx >= 0 ? idx : (_danmakuSources.length - 1);
       _danmakuEnabled = true;
+      _rebuildDanmakuHeatmap();
       _syncDanmakuCursor(_position);
     });
 
@@ -1308,6 +1331,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 setState(() {
                                   _danmakuSourceIndex = v;
                                   _danmakuEnabled = true;
+                                  _rebuildDanmakuHeatmap();
                                   _syncDanmakuCursor(_position);
                                 });
                                 if (widget.appState
@@ -1349,6 +1373,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                             _danmakuSources.clear();
                             _danmakuSourceIndex = -1;
                             _danmakuEnabled = false;
+                            _danmakuHeatmap = const [];
                             _danmakuKey.currentState?.clear();
                           });
                           setSheetState(() {});
@@ -1849,6 +1874,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _danmakuTopMaxLines = widget.appState.danmakuTopMaxLines;
     _danmakuBottomMaxLines = widget.appState.danmakuBottomMaxLines;
     _danmakuPreventOverlap = widget.appState.danmakuPreventOverlap;
+    _danmakuShowHeatmap = widget.appState.danmakuShowHeatmap;
+    _danmakuHeatmap = const [];
     _danmakuPaused = false;
 
     _reportedStart = false;
@@ -2982,6 +3009,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                       position: _position,
                                       duration: _duration,
                                       isPlaying: _isPlaying,
+                                      heatmap: _danmakuHeatmap,
+                                      showHeatmap: _danmakuShowHeatmap &&
+                                          _danmakuHeatmap.isNotEmpty,
                                       seekBackwardSeconds: _seekBackSeconds,
                                       seekForwardSeconds: _seekForwardSeconds,
                                       showSystemTime: widget

@@ -113,10 +113,12 @@ class AppState extends ChangeNotifier {
   static const _kDanmakuLastSelectedSourceNameKey =
       'danmakuLastSelectedSourceName_v1';
   static const _kDanmakuMergeDuplicatesKey = 'danmakuMergeDuplicates_v1';
+  static const _kDanmakuMergeRelatedKey = 'danmakuMergeRelated_v1';
   static const _kDanmakuPreventOverlapKey = 'danmakuPreventOverlap_v1';
   static const _kDanmakuBlockWordsKey = 'danmakuBlockWords_v1';
   static const _kDanmakuMatchModeKey = 'danmakuMatchMode_v1';
   static const _kDanmakuChConvertKey = 'danmakuChConvert_v1';
+  static const _kDanmakuShowHeatmapKey = 'danmakuShowHeatmap_v1';
   static const _kServerIconLibraryUrlsKey = 'serverIconLibraryUrls_v1';
   static const _kShowHomeLibraryQuickAccessKey =
       'showHomeLibraryQuickAccess_v1';
@@ -190,6 +192,8 @@ class AppState extends ChangeNotifier {
   bool _danmakuRememberSelectedSource = false;
   String _danmakuLastSelectedSourceName = '';
   bool _danmakuMergeDuplicates = false;
+  bool _danmakuMergeRelated = true;
+  bool _danmakuShowHeatmap = true;
   bool _danmakuPreventOverlap = true;
   String _danmakuBlockWords = '';
   DanmakuMatchMode _danmakuMatchMode = DanmakuMatchMode.auto;
@@ -571,6 +575,8 @@ class AppState extends ChangeNotifier {
   bool get danmakuRememberSelectedSource => _danmakuRememberSelectedSource;
   String get danmakuLastSelectedSourceName => _danmakuLastSelectedSourceName;
   bool get danmakuMergeDuplicates => _danmakuMergeDuplicates;
+  bool get danmakuMergeRelated => _danmakuMergeRelated;
+  bool get danmakuShowHeatmap => _danmakuShowHeatmap;
   bool get danmakuPreventOverlap => _danmakuPreventOverlap;
   String get danmakuBlockWords => _danmakuBlockWords;
   DanmakuMatchMode get danmakuMatchMode => _danmakuMatchMode;
@@ -715,6 +721,8 @@ class AppState extends ChangeNotifier {
         prefs.getString(_kDanmakuLastSelectedSourceNameKey) ?? '';
     _danmakuMergeDuplicates =
         prefs.getBool(_kDanmakuMergeDuplicatesKey) ?? false;
+    _danmakuMergeRelated = prefs.getBool(_kDanmakuMergeRelatedKey) ?? true;
+    _danmakuShowHeatmap = prefs.getBool(_kDanmakuShowHeatmapKey) ?? true;
     _danmakuPreventOverlap = prefs.getBool(_kDanmakuPreventOverlapKey) ?? true;
     _danmakuBlockWords = prefs.getString(_kDanmakuBlockWordsKey) ?? '';
     _danmakuMatchMode =
@@ -857,6 +865,8 @@ class AppState extends ChangeNotifier {
           'rememberSelectedSource': _danmakuRememberSelectedSource,
           'lastSelectedSourceName': _danmakuLastSelectedSourceName,
           'mergeDuplicates': _danmakuMergeDuplicates,
+          'mergeRelated': _danmakuMergeRelated,
+          'showHeatmap': _danmakuShowHeatmap,
           'preventOverlap': _danmakuPreventOverlap,
           'blockWords': _danmakuBlockWords,
           'matchMode': _danmakuMatchMode.id,
@@ -1193,6 +1203,10 @@ class AppState extends ChangeNotifier {
         (danmakuMap['lastSelectedSourceName'] ?? '').toString().trim();
     final nextDanmakuMergeDuplicates =
         _readBool(danmakuMap['mergeDuplicates'], fallback: false);
+    final nextDanmakuMergeRelated =
+        _readBool(danmakuMap['mergeRelated'], fallback: true);
+    final nextDanmakuShowHeatmap =
+        _readBool(danmakuMap['showHeatmap'], fallback: true);
     final nextDanmakuPreventOverlap =
         _readBool(danmakuMap['preventOverlap'], fallback: true);
     final nextDanmakuBlockWords =
@@ -1300,6 +1314,8 @@ class AppState extends ChangeNotifier {
     _danmakuRememberSelectedSource = nextDanmakuRememberSelectedSource;
     _danmakuLastSelectedSourceName = nextDanmakuLastSelectedSourceName;
     _danmakuMergeDuplicates = nextDanmakuMergeDuplicates;
+    _danmakuMergeRelated = nextDanmakuMergeRelated;
+    _danmakuShowHeatmap = nextDanmakuShowHeatmap;
     _danmakuPreventOverlap = nextDanmakuPreventOverlap;
     _danmakuBlockWords = nextDanmakuBlockWords;
     _danmakuMatchMode = nextDanmakuMatchMode;
@@ -1417,6 +1433,8 @@ class AppState extends ChangeNotifier {
       );
     }
     await prefs.setBool(_kDanmakuMergeDuplicatesKey, _danmakuMergeDuplicates);
+    await prefs.setBool(_kDanmakuMergeRelatedKey, _danmakuMergeRelated);
+    await prefs.setBool(_kDanmakuShowHeatmapKey, _danmakuShowHeatmap);
     await prefs.setBool(_kDanmakuPreventOverlapKey, _danmakuPreventOverlap);
     if (_danmakuBlockWords.trim().isEmpty) {
       await prefs.remove(_kDanmakuBlockWordsKey);
@@ -2831,6 +2849,22 @@ class AppState extends ChangeNotifier {
     _danmakuMergeDuplicates = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kDanmakuMergeDuplicatesKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuMergeRelated(bool enabled) async {
+    if (_danmakuMergeRelated == enabled) return;
+    _danmakuMergeRelated = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDanmakuMergeRelatedKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDanmakuShowHeatmap(bool enabled) async {
+    if (_danmakuShowHeatmap == enabled) return;
+    _danmakuShowHeatmap = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kDanmakuShowHeatmapKey, enabled);
     notifyListeners();
   }
 

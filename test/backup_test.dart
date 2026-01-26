@@ -41,6 +41,8 @@ void main() {
     expect(appState.danmakuApiUrls.first, 'https://api.dandanplay.net');
     expect(appState.danmakuOpacity, closeTo(0.8, 0.0001));
     expect(appState.danmakuMaxLines, 12);
+    expect(appState.danmakuMergeRelated, isFalse);
+    expect(appState.danmakuShowHeatmap, isFalse);
 
     expect(appState.servers.length, 2);
     expect(appState.activeServerId, 'srv_1');
@@ -62,6 +64,8 @@ void main() {
     expect(reloaded.uiScaleFactor, closeTo(1.25, 0.0001));
     expect(reloaded.uiTemplate, UiTemplate.washiWatercolor);
     expect(reloaded.showHomeLibraryQuickAccess, isFalse);
+    expect(reloaded.danmakuMergeRelated, isFalse);
+    expect(reloaded.danmakuShowHeatmap, isFalse);
     expect(reloaded.servers.length, 2);
     expect(reloaded.activeServerId, 'srv_1');
     expect(reloaded.activeServer?.name, 'Home');
@@ -190,6 +194,8 @@ Map<String, dynamic> _sampleBackup() {
         'rememberSelectedSource': true,
         'lastSelectedSourceName': 'dandan',
         'mergeDuplicates': true,
+        'mergeRelated': false,
+        'showHeatmap': false,
         'preventOverlap': false,
         'blockWords': 'foo\\nbar',
         'matchMode': 'fileNameOnly',
