@@ -107,6 +107,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   Timer? _gestureOverlayTimer;
   IconData? _gestureOverlayIcon;
   String? _gestureOverlayText;
+  Offset? _doubleTapDownPosition;
 
   double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
   double _playerVolume = 1.0; // 0..1 (maps to mpv 0..100)
@@ -223,7 +224,25 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
     }
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _exitImmersiveMode();
+    }
     if (scheduleHide) _scheduleControlsHide();
+  }
+
+  void _toggleControls() {
+    if (!_controlsVisible) {
+      _showControls();
+      return;
+    }
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    setState(() => _controlsVisible = false);
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _enterImmersiveMode();
+    }
   }
 
   void _scheduleControlsHide() {
@@ -233,6 +252,10 @@ class _PlayerScreenState extends State<PlayerScreen>
     _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
       if (!mounted || _isScrubbing) return;
       setState(() => _controlsVisible = false);
+      if (_fullScreen) {
+        // ignore: unawaited_futures
+        _enterImmersiveMode();
+      }
     });
   }
 
@@ -1605,12 +1628,18 @@ class _PlayerScreenState extends State<PlayerScreen>
                                         _gestureVolumeEnabled;
                                 return GestureDetector(
                                   behavior: HitTestBehavior.translucent,
-                                  onTapDown: (_) => _showControls(),
+                                  onTap: _toggleControls,
                                   onDoubleTapDown: _gesturesEnabled
-                                      ? (d) => _handleDoubleTap(
-                                            d.localPosition,
-                                            w,
-                                          )
+                                      ? (d) => _doubleTapDownPosition =
+                                          d.localPosition
+                                      : null,
+                                  onDoubleTap: _gesturesEnabled
+                                      ? () {
+                                          final pos = _doubleTapDownPosition ??
+                                              Offset(w / 2, 0);
+                                          // ignore: unawaited_futures
+                                          _handleDoubleTap(pos, w);
+                                        }
                                       : null,
                                   onHorizontalDragStart:
                                       (_gesturesEnabled && _gestureSeekEnabled)
@@ -1713,6 +1742,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                       enabled: _playerService.isInitialized &&
                                           _playError == null,
                                       position: _position,
+                                      buffered: _lastBuffer,
                                       duration: _duration,
                                       isPlaying: _playerService.isPlaying,
                                       heatmap: _danmakuHeatmap,

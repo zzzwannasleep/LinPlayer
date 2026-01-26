@@ -95,6 +95,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   Timer? _gestureOverlayTimer;
   IconData? _gestureOverlayIcon;
   String? _gestureOverlayText;
+  Offset? _doubleTapDownPosition;
 
   double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
   double _playerVolume = 1.0; // 0..1
@@ -658,7 +659,25 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
     }
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _exitImmersiveMode();
+    }
     if (scheduleHide) _scheduleControlsHide();
+  }
+
+  void _toggleControls() {
+    if (!_controlsVisible) {
+      _showControls();
+      return;
+    }
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    setState(() => _controlsVisible = false);
+    if (_fullScreen) {
+      // ignore: unawaited_futures
+      _enterImmersiveMode();
+    }
   }
 
   void _scheduleControlsHide() {
@@ -668,6 +687,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
       if (!mounted || _isScrubbing) return;
       setState(() => _controlsVisible = false);
+      if (_fullScreen) {
+        // ignore: unawaited_futures
+        _enterImmersiveMode();
+      }
     });
   }
 
@@ -2088,12 +2111,18 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                         widget.appState.gestureVolume;
                                 return GestureDetector(
                                   behavior: HitTestBehavior.translucent,
-                                  onTapDown: (_) => _showControls(),
+                                  onTap: _toggleControls,
                                   onDoubleTapDown: controlsEnabled
-                                      ? (d) => _handleDoubleTap(
-                                            d.localPosition,
-                                            w,
-                                          )
+                                      ? (d) => _doubleTapDownPosition =
+                                          d.localPosition
+                                      : null,
+                                  onDoubleTap: controlsEnabled
+                                      ? () {
+                                          final pos = _doubleTapDownPosition ??
+                                              Offset(w / 2, 0);
+                                          // ignore: unawaited_futures
+                                          _handleDoubleTap(pos, w);
+                                        }
                                       : null,
                                   onHorizontalDragStart: (controlsEnabled &&
                                           widget.appState.gestureSeek)
@@ -2193,14 +2222,15 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                   ignoring: !_controlsVisible,
                                   child: Listener(
                                     onPointerDown: (_) => _showControls(),
-                                    child: PlaybackControls(
-                                      enabled: controlsEnabled,
-                                      position: _position,
-                                      duration: _duration,
-                                      isPlaying: controller.value.isPlaying,
-                                      heatmap: _danmakuHeatmap,
-                                      showHeatmap: _danmakuShowHeatmap &&
-                                          _danmakuHeatmap.isNotEmpty,
+                                      child: PlaybackControls(
+                                        enabled: controlsEnabled,
+                                        position: _position,
+                                        buffered: _lastBufferedEnd,
+                                        duration: _duration,
+                                        isPlaying: controller.value.isPlaying,
+                                        heatmap: _danmakuHeatmap,
+                                        showHeatmap: _danmakuShowHeatmap &&
+                                            _danmakuHeatmap.isNotEmpty,
                                       seekBackwardSeconds: _seekBackSeconds,
                                       seekForwardSeconds: _seekForwardSeconds,
                                       showSystemTime: widget

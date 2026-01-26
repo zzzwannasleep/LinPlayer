@@ -119,6 +119,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   Timer? _gestureOverlayTimer;
   IconData? _gestureOverlayIcon;
   String? _gestureOverlayText;
+  Offset? _doubleTapDownPosition;
 
   double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
   double _playerVolume = 1.0; // 0..1 (maps to mpv 0..100)
@@ -171,6 +172,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   List<MediaItem> _episodeSeasons = const [];
   String? _episodeSelectedSeasonId;
   final Map<String, List<MediaItem>> _episodeEpisodesCache = {};
+  final Map<String, Future<List<MediaItem>>> _episodeEpisodesFutureCache = {};
 
   @override
   void initState() {
@@ -845,6 +847,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return items;
   }
 
+  Future<List<MediaItem>> _episodesFutureForSeasonId(String seasonId) {
+    final cachedFuture = _episodeEpisodesFutureCache[seasonId];
+    if (cachedFuture != null) return cachedFuture;
+
+    final cached = _episodeEpisodesCache[seasonId];
+    final future = cached != null
+        ? Future<List<MediaItem>>.value(cached)
+        : _episodesForSeasonId(seasonId);
+    _episodeEpisodesFutureCache[seasonId] = future;
+    return future;
+  }
+
   void _playEpisodeFromPicker(MediaItem episode) {
     if (episode.id == widget.itemId) {
       setState(() => _episodePickerVisible = false);
@@ -1062,7 +1076,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                         ),
                         Expanded(
                           child: FutureBuilder<List<MediaItem>>(
-                            future: _episodesForSeasonId(selectedSeason.id),
+                            future: _episodesFutureForSeasonId(selectedSeason.id),
                             builder: (ctx, snapshot) {
                               if (snapshot.connectionState !=
                                   ConnectionState.done) {
@@ -1086,7 +1100,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       ),
                                       const SizedBox(height: 10),
                                       OutlinedButton.icon(
-                                        onPressed: () => setState(() {}),
+                                        onPressed: () => setState(() {
+                                          _episodeEpisodesCache
+                                              .remove(selectedSeason!.id);
+                                          _episodeEpisodesFutureCache
+                                              .remove(selectedSeason!.id);
+                                        }),
                                         icon: const Icon(Icons.refresh),
                                         label: const Text('重试'),
                                       ),
@@ -2028,6 +2047,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (scheduleHide) _scheduleControlsHide();
   }
 
+  void _toggleControls() {
+    if (!_controlsVisible) {
+      _showControls();
+      return;
+    }
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    setState(() => _controlsVisible = false);
+    // ignore: unawaited_futures
+    _enterImmersiveMode();
+  }
+
   void _scheduleControlsHide() {
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
@@ -2733,12 +2764,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         widget.appState.gestureVolume;
                                 return GestureDetector(
                                   behavior: HitTestBehavior.translucent,
-                                  onTapDown: (_) => _showControls(),
+                                  onTap: _toggleControls,
                                   onDoubleTapDown: controlsEnabled
-                                      ? (d) => _handleDoubleTap(
-                                            d.localPosition,
-                                            w,
-                                          )
+                                      ? (d) => _doubleTapDownPosition =
+                                          d.localPosition
+                                      : null,
+                                  onDoubleTap: controlsEnabled
+                                      ? () {
+                                          final pos = _doubleTapDownPosition ??
+                                              Offset(w / 2, 0);
+                                          // ignore: unawaited_futures
+                                          _handleDoubleTap(pos, w);
+                                        }
                                       : null,
                                   onHorizontalDragStart: (controlsEnabled &&
                                           widget.appState.gestureSeek)
@@ -2883,14 +2920,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   ignoring: !_controlsVisible,
                                   child: Listener(
                                     onPointerDown: (_) => _showControls(),
-                                    child: PlaybackControls(
-                                      enabled: controlsEnabled,
-                                      position: _lastPosition,
-                                      duration: duration,
-                                      isPlaying: isPlaying,
-                                      heatmap: _danmakuHeatmap,
-                                      showHeatmap: _danmakuShowHeatmap &&
-                                          _danmakuHeatmap.isNotEmpty,
+                                      child: PlaybackControls(
+                                        enabled: controlsEnabled,
+                                        position: _lastPosition,
+                                        buffered: _lastBuffer,
+                                        duration: duration,
+                                        isPlaying: isPlaying,
+                                        heatmap: _danmakuHeatmap,
+                                        showHeatmap: _danmakuShowHeatmap &&
+                                            _danmakuHeatmap.isNotEmpty,
                                       seekBackwardSeconds: _seekBackSeconds,
                                       seekForwardSeconds: _seekForwardSeconds,
                                       showSystemTime: widget

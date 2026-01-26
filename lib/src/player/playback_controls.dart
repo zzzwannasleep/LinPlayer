@@ -12,6 +12,7 @@ class PlaybackControls extends StatefulWidget {
   const PlaybackControls({
     super.key,
     required this.position,
+    this.buffered = Duration.zero,
     required this.duration,
     required this.isPlaying,
     required this.enabled,
@@ -40,6 +41,7 @@ class PlaybackControls extends StatefulWidget {
   });
 
   final Duration position;
+  final Duration buffered;
   final Duration duration;
   final bool isPlaying;
   final bool enabled;
@@ -541,6 +543,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                         trackHeight: 4,
                         overlayShape: SliderComponentShape.noOverlay,
                         activeTrackColor: accent,
+                        secondaryActiveTrackColor:
+                            Colors.white.withValues(alpha: 0.30),
                         thumbColor: accent,
                         trackShape: showHeatmap
                             ? _HeatmapSliderTrackShape(
@@ -585,6 +589,10 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                                   max: maxMs
                                       .toDouble()
                                       .clamp(1, double.infinity),
+                                  secondaryTrackValue: math
+                                      .max(0, widget.buffered.inMilliseconds)
+                                      .clamp(0, maxMs)
+                                      .toDouble(),
                                   onChangeStart: !enabled
                                       ? null
                                       : (v) {
