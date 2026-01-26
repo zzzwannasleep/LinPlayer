@@ -42,6 +42,7 @@ class _SettingsPageState extends State<SettingsPage> {
   static const _customSentinel = '__custom__';
   static const _subtitleOff = 'off';
   double? _mpvCacheDraftMb;
+  double? _bufferBackRatioDraft;
   double? _uiScaleDraft;
   bool _checkingUpdate = false;
   String _currentVersionFull = '';
@@ -1070,7 +1071,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.storage_outlined),
-                      title: const Text('MPV 缓存大小'),
+                      title: const Text('播放缓冲大小'),
                       subtitle: Builder(
                         builder: (context) {
                           final cacheMb = (_mpvCacheDraftMb ??
@@ -1100,6 +1101,110 @@ class _SettingsPageState extends State<SettingsPage> {
                           );
                         },
                       ),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.tune_outlined),
+                      title: const Text('缓冲策略'),
+                      subtitle: Builder(
+                        builder: (context) {
+                          final totalMb = (_mpvCacheDraftMb ??
+                                  appState.mpvCacheSizeMb.toDouble())
+                              .round()
+                              .clamp(200, 2048);
+                          final ratio = (_bufferBackRatioDraft ??
+                                  appState.playbackBufferBackRatio)
+                              .clamp(0.0, 0.30)
+                              .toDouble();
+                          final split = PlaybackBufferSplit.from(
+                            totalMb: totalMb,
+                            backRatio: ratio,
+                          );
+                          final backPct = (split.backRatio * 100).round();
+                          final forwardPct = 100 - backPct;
+
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '回退：${split.backMb}MB（$backPct%）  前向：${split.forwardMb}MB（$forwardPct%）',
+                              ),
+                              const SizedBox(height: 8),
+                              SegmentedButton<PlaybackBufferPreset>(
+                                segments: PlaybackBufferPreset.values
+                                    .map(
+                                      (p) => ButtonSegment(
+                                        value: p,
+                                        label: Text(p.label),
+                                      ),
+                                    )
+                                    .toList(growable: false),
+                                selected: {appState.playbackBufferPreset},
+                                onSelectionChanged: (s) async {
+                                  setState(() => _bufferBackRatioDraft = null);
+                                  await appState.setPlaybackBufferPreset(
+                                    s.first,
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '回退比例：$backPct%（0-30%）',
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: appState.playbackBufferPreset ==
+                                                PlaybackBufferPreset.seekFast &&
+                                            (appState.playbackBufferBackRatio -
+                                                        0.05)
+                                                    .abs() <
+                                                0.00001 &&
+                                            _bufferBackRatioDraft == null
+                                        ? null
+                                        : () {
+                                            // ignore: unawaited_futures
+                                            appState.setPlaybackBufferPreset(
+                                              PlaybackBufferPreset.seekFast,
+                                            );
+                                            setState(() =>
+                                                _bufferBackRatioDraft = null);
+                                          },
+                                    child: const Text('重置'),
+                                  ),
+                                ],
+                              ),
+                              Slider(
+                                value: split.backRatio,
+                                min: 0.0,
+                                max: 0.30,
+                                divisions: 30,
+                                label: '$backPct%',
+                                onChanged: (v) => setState(
+                                  () => _bufferBackRatioDraft = v,
+                                ),
+                                onChangeEnd: (v) {
+                                  setState(() => _bufferBackRatioDraft = null);
+                                  // ignore: unawaited_futures
+                                  appState.setPlaybackBufferBackRatio(v);
+                                },
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.flushBufferOnSeek,
+                      onChanged: (v) => appState.setFlushBufferOnSeek(v),
+                      contentPadding: EdgeInsets.zero,
+                      secondary: const Icon(Icons.flash_on_outlined),
+                      title: const Text('跳转时清空旧缓冲（推荐）'),
+                      subtitle: const Text('快进/快退/拖动进度后优先缓冲新位置，起播更快'),
                     ),
                     const Divider(height: 1),
                     if (isDesktop) ...[

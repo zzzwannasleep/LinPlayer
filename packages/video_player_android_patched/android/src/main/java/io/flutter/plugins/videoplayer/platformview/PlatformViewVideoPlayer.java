@@ -12,6 +12,7 @@ import androidx.media3.common.MediaItem;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.exoplayer.ExoPlayer;
 import io.flutter.plugins.videoplayer.ExoPlayerEventListener;
+import io.flutter.plugins.videoplayer.LinPlayerBuffering;
 import io.flutter.plugins.videoplayer.VideoAsset;
 import io.flutter.plugins.videoplayer.VideoPlayer;
 import io.flutter.plugins.videoplayer.VideoPlayerCallbacks;
@@ -61,7 +62,8 @@ public class PlatformViewVideoPlayer extends VideoPlayer {
           ExoPlayer.Builder builder =
               new ExoPlayer.Builder(context)
                   .setTrackSelector(trackSelector)
-                  .setMediaSourceFactory(asset.getMediaSourceFactory(context));
+                  .setMediaSourceFactory(asset.getMediaSourceFactory(context))
+                  .setLoadControl(LinPlayerBuffering.createLoadControl(context));
           return builder.build();
         });
   }

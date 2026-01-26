@@ -89,6 +89,9 @@ class AppState extends ChangeNotifier {
   static const _kAppIconIdKey = 'appIconId_v1';
   static const _kServerListLayoutKey = 'serverListLayout_v1';
   static const _kMpvCacheSizeMbKey = 'mpvCacheSizeMb_v1';
+  static const _kPlaybackBufferPresetKey = 'playbackBufferPreset_v1';
+  static const _kPlaybackBufferBackRatioKey = 'playbackBufferBackRatio_v1';
+  static const _kFlushBufferOnSeekKey = 'flushBufferOnSeek_v1';
   static const _kUnlimitedStreamCacheKey = 'unlimitedStreamCache_v1';
   // Legacy key (<= 1.0.0): was used for "unlimited cover cache", but the intent
   // is actually "unlimited stream cache". We still read it for migration.
@@ -173,6 +176,9 @@ class AppState extends ChangeNotifier {
   String _appIconId = 'default';
   ServerListLayout _serverListLayout = ServerListLayout.grid;
   int _mpvCacheSizeMb = 500;
+  PlaybackBufferPreset _playbackBufferPreset = PlaybackBufferPreset.seekFast;
+  double _playbackBufferBackRatio = 0.05;
+  bool _flushBufferOnSeek = true;
   bool _unlimitedStreamCache = false;
   bool _enableBlurEffects = true;
   bool _showHomeLibraryQuickAccess = true;
@@ -557,6 +563,9 @@ class AppState extends ChangeNotifier {
   String get appIconId => _appIconId;
   ServerListLayout get serverListLayout => _serverListLayout;
   int get mpvCacheSizeMb => _mpvCacheSizeMb;
+  PlaybackBufferPreset get playbackBufferPreset => _playbackBufferPreset;
+  double get playbackBufferBackRatio => _playbackBufferBackRatio;
+  bool get flushBufferOnSeek => _flushBufferOnSeek;
   bool get unlimitedStreamCache => _unlimitedStreamCache;
   bool get enableBlurEffects => _enableBlurEffects;
   bool get showHomeLibraryQuickAccess => _showHomeLibraryQuickAccess;
@@ -674,6 +683,16 @@ class AppState extends ChangeNotifier {
       _mpvCacheSizeMb = _mpvCacheSizeMb.clamp(200, 2048);
       await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
     }
+    _playbackBufferPreset = playbackBufferPresetFromId(
+      prefs.getString(_kPlaybackBufferPresetKey),
+    );
+    final fallbackBackRatio =
+        _playbackBufferPreset.suggestedBackRatio ?? 0.05;
+    _playbackBufferBackRatio =
+        (prefs.getDouble(_kPlaybackBufferBackRatioKey) ?? fallbackBackRatio)
+            .clamp(0.0, 0.30)
+            .toDouble();
+    _flushBufferOnSeek = prefs.getBool(_kFlushBufferOnSeekKey) ?? true;
     final hasNewStreamCacheKey = prefs.containsKey(_kUnlimitedStreamCacheKey);
     _unlimitedStreamCache = hasNewStreamCacheKey
         ? (prefs.getBool(_kUnlimitedStreamCacheKey) ?? false)
@@ -854,6 +873,9 @@ class AppState extends ChangeNotifier {
         'appIconId': _appIconId,
         'serverListLayout': _serverListLayout.id,
         'mpvCacheSizeMb': _mpvCacheSizeMb,
+        'playbackBufferPreset': _playbackBufferPreset.id,
+        'playbackBufferBackRatio': _playbackBufferBackRatio,
+        'flushBufferOnSeek': _flushBufferOnSeek,
         'unlimitedStreamCache': _unlimitedStreamCache,
         'enableBlurEffects': _enableBlurEffects,
         'showHomeLibraryQuickAccess': _showHomeLibraryQuickAccess,
@@ -1159,6 +1181,15 @@ class AppState extends ChangeNotifier {
 
     final nextMpvCacheSizeMb =
         _readInt(data['mpvCacheSizeMb'], fallback: 500).clamp(200, 2048);
+    final nextPlaybackBufferPreset = playbackBufferPresetFromId(
+      data['playbackBufferPreset']?.toString(),
+    );
+    final nextPlaybackBufferBackRatio = _readDouble(
+      data['playbackBufferBackRatio'],
+      fallback: nextPlaybackBufferPreset.suggestedBackRatio ?? 0.05,
+    ).clamp(0.0, 0.30).toDouble();
+    final nextFlushBufferOnSeek =
+        _readBool(data['flushBufferOnSeek'], fallback: true);
     final nextUnlimitedStreamCache = _readBool(
       data.containsKey('unlimitedStreamCache')
           ? data['unlimitedStreamCache']
@@ -1305,6 +1336,9 @@ class AppState extends ChangeNotifier {
     }
     _serverListLayout = nextServerListLayout;
     _mpvCacheSizeMb = nextMpvCacheSizeMb;
+    _playbackBufferPreset = nextPlaybackBufferPreset;
+    _playbackBufferBackRatio = nextPlaybackBufferBackRatio;
+    _flushBufferOnSeek = nextFlushBufferOnSeek;
     _unlimitedStreamCache = nextUnlimitedStreamCache;
     _enableBlurEffects = nextEnableBlurEffects;
     _showHomeLibraryQuickAccess = nextShowHomeLibraryQuickAccess;
@@ -1387,6 +1421,12 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_kAppIconIdKey, _appIconId);
     await prefs.setString(_kServerListLayoutKey, _serverListLayout.id);
     await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
+    await prefs.setString(_kPlaybackBufferPresetKey, _playbackBufferPreset.id);
+    await prefs.setDouble(
+      _kPlaybackBufferBackRatioKey,
+      _playbackBufferBackRatio,
+    );
+    await prefs.setBool(_kFlushBufferOnSeekKey, _flushBufferOnSeek);
     await prefs.setBool(_kUnlimitedStreamCacheKey, _unlimitedStreamCache);
     await prefs.setBool(_kEnableBlurEffectsKey, _enableBlurEffects);
     await prefs.setBool(
@@ -2567,6 +2607,51 @@ class AppState extends ChangeNotifier {
     _mpvCacheSizeMb = v;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_kMpvCacheSizeMbKey, _mpvCacheSizeMb);
+    notifyListeners();
+  }
+
+  Future<void> setPlaybackBufferPreset(PlaybackBufferPreset preset) async {
+    final suggested = preset.suggestedBackRatio;
+    final nextRatio = suggested == null
+        ? _playbackBufferBackRatio
+        : suggested.clamp(0.0, 0.30).toDouble();
+    if (_playbackBufferPreset == preset &&
+        (_playbackBufferBackRatio - nextRatio).abs() < 0.00001) {
+      return;
+    }
+    _playbackBufferPreset = preset;
+    _playbackBufferBackRatio = nextRatio;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPlaybackBufferPresetKey, preset.id);
+    await prefs.setDouble(
+      _kPlaybackBufferBackRatioKey,
+      _playbackBufferBackRatio,
+    );
+    notifyListeners();
+  }
+
+  Future<void> setPlaybackBufferBackRatio(double ratio) async {
+    final v = ratio.clamp(0.0, 0.30).toDouble();
+    if (_playbackBufferPreset == PlaybackBufferPreset.custom &&
+        (_playbackBufferBackRatio - v).abs() < 0.00001) {
+      return;
+    }
+    _playbackBufferPreset = PlaybackBufferPreset.custom;
+    _playbackBufferBackRatio = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kPlaybackBufferPresetKey, _playbackBufferPreset.id);
+    await prefs.setDouble(
+      _kPlaybackBufferBackRatioKey,
+      _playbackBufferBackRatio,
+    );
+    notifyListeners();
+  }
+
+  Future<void> setFlushBufferOnSeek(bool enabled) async {
+    if (_flushBufferOnSeek == enabled) return;
+    _flushBufferOnSeek = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kFlushBufferOnSeekKey, enabled);
     notifyListeners();
   }
 

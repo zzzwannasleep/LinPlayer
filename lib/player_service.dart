@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'services/stream_cache.dart';
 import 'src/external_player/external_mpv_launcher.dart';
+import 'state/preferences.dart';
 
 class PlayerService {
   Player? _player;
@@ -14,6 +15,7 @@ class PlayerService {
 
   bool _externalPlayback = false;
   String? _externalPlaybackMessage;
+  int? _demuxerMaxBackBytes;
 
   Player get player => _player!;
   VideoController get controller => _controller!;
@@ -52,6 +54,7 @@ class PlayerService {
     required bool hardwareDecode,
     required bool isNetwork,
     required int mpvCacheSizeMb,
+    required double bufferBackRatio,
     required bool dolbyVisionMode,
     required bool hdrMode,
     required bool unlimitedStreamCache,
@@ -62,12 +65,12 @@ class PlayerService {
     final isWindows = !kIsWeb && platform == TargetPlatform.windows;
     final useGpuNext = isAndroid && (dolbyVisionMode || hdrMode);
 
-    // Notes:
-    // - `media_kit` maps `bufferSize` to both `demuxer-max-bytes` & `demuxer-max-back-bytes`.
-    //   For network playback we prefer a larger *forward* cache, while keeping the backward
-    //   cache smaller to avoid excessive memory usage.
     final cacheMb = mpvCacheSizeMb.clamp(200, 2048);
-    final bufferSize = _mb(cacheMb);
+    final split = PlaybackBufferSplit.from(
+      totalMb: cacheMb,
+      backRatio: bufferBackRatio,
+    );
+    final bufferSize = split.totalBytes;
 
     final effectiveStreamBytes = (unlimitedStreamCache && isNetwork)
         ? (networkStreamSizeBytes != null && networkStreamSizeBytes > 0
@@ -75,10 +78,9 @@ class PlayerService {
             : _mb(8192))
         : bufferSize;
     final networkDemuxerMaxBytes = effectiveStreamBytes;
-    final networkDemuxerMaxBackBytes = (bufferSize ~/ 4)
-        .clamp(_mb(32), _mb(256))
-        .clamp(0, networkDemuxerMaxBytes)
-        .toInt();
+    final networkDemuxerMaxBackBytes =
+        split.backBytes.clamp(0, networkDemuxerMaxBytes).toInt();
+    _demuxerMaxBackBytes = networkDemuxerMaxBackBytes;
 
     return PlayerConfiguration(
       osc: false,
@@ -116,7 +118,7 @@ class PlayerService {
         // Default: avoid on-disk cache writes for network streams; prefer RAM cache + tuned demuxer buffer.
         if (isNetwork && !unlimitedStreamCache) 'cache-on-disk=no',
         if (isNetwork) 'demuxer-max-bytes=$networkDemuxerMaxBytes',
-        if (isNetwork) 'demuxer-max-back-bytes=$networkDemuxerMaxBackBytes',
+        'demuxer-max-back-bytes=$networkDemuxerMaxBackBytes',
         // Reduce stutter on Windows by forcing a D3D11 GPU context for `vo=gpu`.
         if (isWindows && !dolbyVisionMode) 'gpu-context=d3d11',
       ],
@@ -257,6 +259,7 @@ class PlayerService {
     bool isTv = false,
     bool hardwareDecode = true,
     int mpvCacheSizeMb = 500,
+    double bufferBackRatio = 0.05,
     bool unlimitedStreamCache = false,
     int? networkStreamSizeBytes,
     bool dolbyVisionMode = false,
@@ -293,6 +296,7 @@ class PlayerService {
         hardwareDecode: hardwareDecode,
         isNetwork: isNetwork,
         mpvCacheSizeMb: mpvCacheSizeMb,
+        bufferBackRatio: bufferBackRatio,
         dolbyVisionMode: dolbyVisionMode,
         hdrMode: hdrMode,
         unlimitedStreamCache: unlimitedStreamCache,
@@ -376,6 +380,7 @@ class PlayerService {
               isTv: isTv,
               hardwareDecode: false,
               mpvCacheSizeMb: mpvCacheSizeMb,
+              bufferBackRatio: bufferBackRatio,
               unlimitedStreamCache: unlimitedStreamCache,
               networkStreamSizeBytes: networkStreamSizeBytes,
               dolbyVisionMode: true,
@@ -404,6 +409,7 @@ class PlayerService {
               isTv: isTv,
               hardwareDecode: hardwareDecode,
               mpvCacheSizeMb: mpvCacheSizeMb,
+              bufferBackRatio: bufferBackRatio,
               unlimitedStreamCache: unlimitedStreamCache,
               networkStreamSizeBytes: networkStreamSizeBytes,
               dolbyVisionMode: false,
@@ -421,13 +427,35 @@ class PlayerService {
 
   Future<void> play() => _player!.play();
   Future<void> pause() => _player!.pause();
-  Future<void> seek(Duration pos) => _player!.seek(pos);
+  Future<void> seek(Duration pos, {bool flushBuffer = false}) async {
+    final player = _player;
+    if (player == null) return;
+    if (!flushBuffer) {
+      await player.seek(pos);
+      return;
+    }
+
+    final platform = player.platform as dynamic;
+    try {
+      await platform.setProperty('demuxer-max-back-bytes', '0');
+    } catch (_) {}
+
+    await player.seek(pos);
+
+    final restore = _demuxerMaxBackBytes;
+    if (restore != null) {
+      try {
+        await platform.setProperty('demuxer-max-back-bytes', '$restore');
+      } catch (_) {}
+    }
+  }
 
   Future<void> dispose() async {
     await _errorSub?.cancel();
     _errorSub = null;
     _externalPlayback = false;
     _externalPlaybackMessage = null;
+    _demuxerMaxBackBytes = null;
     final player = _player;
     _player = null;
     _controller = null;

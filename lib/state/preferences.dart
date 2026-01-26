@@ -144,12 +144,34 @@ enum PlayerCore {
   exo,
 }
 
+enum PlaybackBufferPreset {
+  seekFast,
+  balanced,
+  stable,
+  custom,
+}
+
 PlayerCore playerCoreFromId(String? id) {
   switch (id) {
     case 'exo':
       return PlayerCore.exo;
     default:
       return PlayerCore.mpv;
+  }
+}
+
+PlaybackBufferPreset playbackBufferPresetFromId(String? id) {
+  switch ((id ?? '').trim()) {
+    case 'seekFast':
+      return PlaybackBufferPreset.seekFast;
+    case 'balanced':
+      return PlaybackBufferPreset.balanced;
+    case 'stable':
+      return PlaybackBufferPreset.stable;
+    case 'custom':
+      return PlaybackBufferPreset.custom;
+    default:
+      return PlaybackBufferPreset.seekFast;
   }
 }
 
@@ -170,6 +192,87 @@ extension PlayerCoreX on PlayerCore {
       case PlayerCore.exo:
         return 'Exo';
     }
+  }
+}
+
+extension PlaybackBufferPresetX on PlaybackBufferPreset {
+  String get id {
+    switch (this) {
+      case PlaybackBufferPreset.seekFast:
+        return 'seekFast';
+      case PlaybackBufferPreset.balanced:
+        return 'balanced';
+      case PlaybackBufferPreset.stable:
+        return 'stable';
+      case PlaybackBufferPreset.custom:
+        return 'custom';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case PlaybackBufferPreset.seekFast:
+        return '拖动秒开';
+      case PlaybackBufferPreset.balanced:
+        return '均衡';
+      case PlaybackBufferPreset.stable:
+        return '稳定优先';
+      case PlaybackBufferPreset.custom:
+        return '自定义';
+    }
+  }
+
+  double? get suggestedBackRatio {
+    switch (this) {
+      case PlaybackBufferPreset.seekFast:
+        return 0.05;
+      case PlaybackBufferPreset.balanced:
+        return 0.15;
+      case PlaybackBufferPreset.stable:
+        return 0.25;
+      case PlaybackBufferPreset.custom:
+        return null;
+    }
+  }
+}
+
+@immutable
+class PlaybackBufferSplit {
+  final int totalBytes;
+  final int backBytes;
+  final int forwardBytes;
+  final double backRatio;
+
+  const PlaybackBufferSplit._({
+    required this.totalBytes,
+    required this.backBytes,
+    required this.forwardBytes,
+    required this.backRatio,
+  });
+
+  static const int _mb = 1024 * 1024;
+
+  int get totalMb => (totalBytes / _mb).round();
+  int get backMb => (backBytes / _mb).round();
+  int get forwardMb => (forwardBytes / _mb).round();
+
+  static PlaybackBufferSplit from({
+    required int totalMb,
+    required double backRatio,
+    double maxBackRatio = 0.30,
+  }) {
+    final tMb = totalMb.clamp(200, 2048);
+    final r = backRatio.clamp(0.0, maxBackRatio).toDouble();
+    final backMb = (tMb * r).round().clamp(0, tMb);
+    final totalBytes = tMb * _mb;
+    final backBytes = backMb * _mb;
+    final forwardBytes = totalBytes - backBytes;
+    return PlaybackBufferSplit._(
+      totalBytes: totalBytes,
+      backBytes: backBytes,
+      forwardBytes: forwardBytes,
+      backRatio: r,
+    );
   }
 }
 

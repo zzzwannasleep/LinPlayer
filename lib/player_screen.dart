@@ -327,6 +327,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   int get _seekBackSeconds => widget.appState?.seekBackwardSeconds ?? 10;
   int get _seekForwardSeconds => widget.appState?.seekForwardSeconds ?? 20;
+  bool get _flushBufferOnSeek => widget.appState?.flushBufferOnSeek ?? true;
 
   DoubleTapAction get _doubleTapLeft =>
       widget.appState?.doubleTapLeft ?? DoubleTapAction.seekBackward;
@@ -364,7 +365,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (target < Duration.zero) target = Duration.zero;
     if (duration > Duration.zero && target > duration) target = duration;
 
-    await _playerService.seek(target);
+    await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
     _position = target;
     _syncDanmakuCursor(target);
     if (mounted) setState(() {});
@@ -461,7 +462,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _seekGesturePreviewPosition = null;
 
     if (target != null && _gesturesEnabled) {
-      await _playerService.seek(target);
+      await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
       _position = target;
       _syncDanmakuCursor(target);
       if (mounted) setState(() {});
@@ -742,6 +743,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         isTv: isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState?.mpvCacheSizeMb ?? 500,
+        bufferBackRatio: widget.appState?.playbackBufferBackRatio ?? 0.05,
         unlimitedStreamCache: widget.appState?.unlimitedStreamCache ?? false,
         networkStreamSizeBytes: (isNetwork && file.size > 0) ? file.size : null,
         externalMpvPath: widget.appState?.externalMpvPath,
@@ -835,7 +837,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         final d = _duration;
         final target =
             (d > Duration.zero && startPosition > d) ? d : startPosition;
-        await _playerService.seek(target);
+        await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
         _position = target;
         _syncDanmakuCursor(target);
       }
@@ -1773,7 +1775,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                       onScrubStart: _onScrubStart,
                                       onScrubEnd: _onScrubEnd,
                                       onSeek: (pos) async {
-                                        await _playerService.seek(pos);
+                                        await _playerService.seek(
+                                          pos,
+                                          flushBuffer: _flushBufferOnSeek,
+                                        );
                                         _position = pos;
                                         _syncDanmakuCursor(pos);
                                         if (mounted) setState(() {});
@@ -1793,7 +1798,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                         final pos = target < Duration.zero
                                             ? Duration.zero
                                             : target;
-                                        await _playerService.seek(pos);
+                                        await _playerService.seek(
+                                          pos,
+                                          flushBuffer: _flushBufferOnSeek,
+                                        );
                                         _position = pos;
                                         _syncDanmakuCursor(pos);
                                         if (mounted) setState(() {});
@@ -1808,7 +1816,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                             (d > Duration.zero && target > d)
                                                 ? d
                                                 : target;
-                                        await _playerService.seek(pos);
+                                        await _playerService.seek(
+                                          pos,
+                                          flushBuffer: _flushBufferOnSeek,
+                                        );
                                         _position = pos;
                                         _syncDanmakuCursor(pos);
                                         if (mounted) setState(() {});

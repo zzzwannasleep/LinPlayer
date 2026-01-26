@@ -280,6 +280,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         isTv: widget.isTv,
         hardwareDecode: _hwdecOn,
         mpvCacheSizeMb: widget.appState.mpvCacheSizeMb,
+        bufferBackRatio: widget.appState.playbackBufferBackRatio,
         unlimitedStreamCache: widget.appState.unlimitedStreamCache,
         networkStreamSizeBytes: _resolvedStreamSizeBytes,
         externalMpvPath: widget.appState.externalMpvPath,
@@ -306,7 +307,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       if (start != null && start > Duration.zero) {
         final target = _safeSeekTarget(start, _playerService.duration);
         if (resumeImmediately) {
-          await _playerService.seek(target);
+          await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
           _lastPosition = target;
           _syncDanmakuCursor(target);
         } else {
@@ -1710,7 +1711,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     final safeTarget = _safeSeekTarget(target, _playerService.duration);
     try {
-      final seekFuture = _playerService.seek(safeTarget);
+      final seekFuture =
+          _playerService.seek(safeTarget, flushBuffer: _flushBufferOnSeek);
       await seekFuture.timeout(const Duration(seconds: 3));
       _lastPosition = safeTarget;
       _syncDanmakuCursor(safeTarget);
@@ -2114,6 +2116,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   int get _seekBackSeconds => widget.appState.seekBackwardSeconds;
   int get _seekForwardSeconds => widget.appState.seekForwardSeconds;
+  bool get _flushBufferOnSeek => widget.appState.flushBufferOnSeek;
 
   Future<void> _togglePlayPause({bool showOverlay = true}) async {
     if (!_gesturesEnabled) return;
@@ -2143,7 +2146,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (target < Duration.zero) target = Duration.zero;
     if (duration > Duration.zero && target > duration) target = duration;
 
-    await _playerService.seek(target);
+    await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
     _lastPosition = target;
     _syncDanmakuCursor(target);
     _maybeReportPlaybackProgress(target, force: true);
@@ -2241,7 +2244,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _seekGesturePreviewPosition = null;
 
     if (target != null && _gesturesEnabled) {
-      await _playerService.seek(target);
+      await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
       _lastPosition = target;
       _syncDanmakuCursor(target);
       _maybeReportPlaybackProgress(target, force: true);
@@ -2952,7 +2955,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       onScrubStart: _onScrubStart,
                                       onScrubEnd: _onScrubEnd,
                                       onSeek: (pos) async {
-                                        await _playerService.seek(pos);
+                                        await _playerService.seek(
+                                          pos,
+                                          flushBuffer: _flushBufferOnSeek,
+                                        );
                                         _lastPosition = pos;
                                         _syncDanmakuCursor(pos);
                                         _maybeReportPlaybackProgress(
@@ -2976,7 +2982,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         final pos = target < Duration.zero
                                             ? Duration.zero
                                             : target;
-                                        await _playerService.seek(pos);
+                                        await _playerService.seek(
+                                          pos,
+                                          flushBuffer: _flushBufferOnSeek,
+                                        );
                                         _lastPosition = pos;
                                         _syncDanmakuCursor(pos);
                                         _maybeReportPlaybackProgress(
@@ -2995,7 +3004,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                             (d > Duration.zero && target > d)
                                                 ? d
                                                 : target;
-                                        await _playerService.seek(pos);
+                                        await _playerService.seek(
+                                          pos,
+                                          flushBuffer: _flushBufferOnSeek,
+                                        );
                                         _lastPosition = pos;
                                         _syncDanmakuCursor(pos);
                                         _maybeReportPlaybackProgress(
