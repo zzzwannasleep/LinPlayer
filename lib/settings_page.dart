@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'danmaku_settings_page.dart';
 import 'interaction_settings_page.dart';
 import 'server_text_import_sheet.dart';
+import 'services/app_update_flow.dart';
 import 'services/app_update_service.dart';
 import 'services/cover_cache_manager.dart';
 import 'services/stream_cache.dart';
@@ -727,8 +728,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  bool _isTv(BuildContext context) =>
-      DeviceType.isTv;
+  bool _isTv(BuildContext context) => DeviceType.isTv;
 
   List<DropdownMenuItem<String>> _audioLangItems(String current) {
     final base = <MapEntry<String, String>>[
@@ -814,136 +814,7 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _checkingUpdate = true);
 
     try {
-      final svc = AppUpdateService();
-      final result = await svc.checkForUpdate();
-      if (!context.mounted) return;
-
-      final latest = (result.latestVersionFull ?? '').trim();
-      if (latest.isEmpty) {
-        final open = await showDialog<bool>(
-          context: context,
-          builder: (dctx) => AlertDialog(
-            title: const Text('检查更新'),
-            content: const Text('已获取到版本信息，但无法解析版本号。是否打开下载页面？'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dctx).pop(false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dctx).pop(true),
-                child: const Text('打开'),
-              ),
-            ],
-          ),
-        );
-        if (open == true && context.mounted) {
-          final url = result.release.htmlUrl.trim().isNotEmpty
-              ? result.release.htmlUrl.trim()
-              : _repoUrl;
-          final ok = await launchUrlString(url);
-          if (!ok && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('无法打开链接，请检查系统浏览器/网络设置')),
-            );
-          }
-        }
-        return;
-      }
-
-      if (!result.hasUpdate) {
-        final current = result.currentVersionFull.trim();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              current.isEmpty ? '已经是最新版本' : '已经是最新版本（$current）',
-            ),
-          ),
-        );
-        return;
-      }
-
-      final current = result.currentVersionFull.trim();
-      final notes = result.release.body.trim();
-      final platform = AppUpdateService.currentPlatform;
-      final candidates = AppUpdateService.candidateAssetsForPlatform(
-        platform: platform,
-        assets: result.release.assets,
-      );
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dctx) => AlertDialog(
-          title: const Text('发现新版本'),
-          content: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 360),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    current.isEmpty
-                        ? '最新版本：$latest'
-                        : '当前：$current  →  最新：$latest',
-                  ),
-                  if (notes.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text(notes),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dctx).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dctx).pop(true),
-              child: Text(
-                platform == AppUpdatePlatform.windows ? '下载并安装' : '去下载',
-              ),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true || !context.mounted) return;
-
-      if (platform == AppUpdatePlatform.windows) {
-        final asset = candidates.isNotEmpty ? candidates.first : null;
-        if (asset == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('未找到 Windows 安装包资源')),
-          );
-          return;
-        }
-
-        final error = await showDialog<String>(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => _UpdateProgressDialog(asset: asset),
-        );
-        if (error != null && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('更新失败：$error')),
-          );
-        }
-        return;
-      }
-
-      final asset = await _pickAssetIfNeeded(context, candidates);
-      final url = asset?.browserDownloadUrl.trim().isNotEmpty == true
-          ? asset!.browserDownloadUrl.trim()
-          : (result.release.htmlUrl.trim().isNotEmpty
-              ? result.release.htmlUrl.trim()
-              : _repoUrl);
-      final ok = await launchUrlString(url);
-      if (!ok && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法打开链接，请检查系统浏览器/网络设置')),
-        );
-      }
+      await AppUpdateFlow.manualCheck(context, appState: widget.appState);
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -954,50 +825,6 @@ class _SettingsPageState extends State<SettingsPage> {
         setState(() => _checkingUpdate = false);
       }
     }
-  }
-
-  Future<GitHubReleaseAsset?> _pickAssetIfNeeded(
-    BuildContext context,
-    List<GitHubReleaseAsset> candidates,
-  ) async {
-    if (candidates.isEmpty) return null;
-    if (candidates.length == 1) return candidates.first;
-
-    String sizeLabel(int size) {
-      if (size <= 0) return '';
-      final mb = size / (1024 * 1024);
-      return '${mb.toStringAsFixed(1)} MB';
-    }
-
-    return showDialog<GitHubReleaseAsset>(
-      context: context,
-      builder: (dctx) => SimpleDialog(
-        title: const Text('选择下载包'),
-        children: [
-          ...candidates.map(
-            (a) => SimpleDialogOption(
-              onPressed: () => Navigator.of(dctx).pop(a),
-              child: Row(
-                children: [
-                  Expanded(child: Text(a.name)),
-                  const SizedBox(width: 8),
-                  Text(
-                    sizeLabel(a.size),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(dctx).pop(),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -1122,8 +949,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onChanged: (v) =>
                           appState.setShowHomeLibraryQuickAccess(v),
                       title: const Text('首页媒体库快捷栏'),
-                      subtitle:
-                          const Text('在首页“继续观看”下方显示媒体库快速访问栏'),
+                      subtitle: const Text('在首页“继续观看”下方显示媒体库快速访问栏'),
                       contentPadding: EdgeInsets.zero,
                     ),
                     const Divider(height: 1),
@@ -1155,8 +981,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       title: const Text('UI 模板'),
                       subtitle: const Text('不同风格/布局（手机 + 桌面）'),
                       trailing: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(maxWidth: trailingMaxWidth),
+                        constraints: BoxConstraints(maxWidth: trailingMaxWidth),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<UiTemplate>(
                             value: appState.uiTemplate,
@@ -1205,29 +1030,30 @@ class _SettingsPageState extends State<SettingsPage> {
                               BoxConstraints(maxWidth: trailingMaxWidth),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<PlayerCore>(
-                            value: appState.playerCore,
-                            items: [
-                              DropdownMenuItem(
-                                value: PlayerCore.mpv,
-                                child: Text(PlayerCore.mpv.label),
-                              ),
-                              DropdownMenuItem(
-                                value: PlayerCore.exo,
-                                child: Text('${PlayerCore.exo.label}（Android）'),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              if (v == null) return;
-                              // ignore: unawaited_futures
-                              appState.setPlayerCore(v);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('切换内核将在下次开始播放时生效'),
+                              value: appState.playerCore,
+                              items: [
+                                DropdownMenuItem(
+                                  value: PlayerCore.mpv,
+                                  child: Text(PlayerCore.mpv.label),
                                 ),
-                              );
-                            },
+                                DropdownMenuItem(
+                                  value: PlayerCore.exo,
+                                  child:
+                                      Text('${PlayerCore.exo.label}（Android）'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                // ignore: unawaited_futures
+                                appState.setPlayerCore(v);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('切换内核将在下次开始播放时生效'),
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
                         ),
                       ),
                       const Divider(height: 1),
@@ -1319,28 +1145,27 @@ class _SettingsPageState extends State<SettingsPage> {
                       leading: const Icon(Icons.audiotrack),
                       title: const Text('优先音轨'),
                       trailing: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(maxWidth: trailingMaxWidth),
+                        constraints: BoxConstraints(maxWidth: trailingMaxWidth),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                          value: appState.preferredAudioLang,
-                          items: _audioLangItems(appState.preferredAudioLang),
-                          onChanged: (v) async {
-                            if (v == null) return;
-                            if (v == _customSentinel) {
-                              final code = await _askCustomLang(
-                                context,
-                                title: '自定义音轨语言',
-                                initial: appState.preferredAudioLang,
-                              );
-                              if (code == null) return;
-                              await appState.setPreferredAudioLang(code);
-                              return;
-                            }
-                            await appState.setPreferredAudioLang(v);
-                          },
+                            value: appState.preferredAudioLang,
+                            items: _audioLangItems(appState.preferredAudioLang),
+                            onChanged: (v) async {
+                              if (v == null) return;
+                              if (v == _customSentinel) {
+                                final code = await _askCustomLang(
+                                  context,
+                                  title: '自定义音轨语言',
+                                  initial: appState.preferredAudioLang,
+                                );
+                                if (code == null) return;
+                                await appState.setPreferredAudioLang(code);
+                                return;
+                              }
+                              await appState.setPreferredAudioLang(v);
+                            },
+                          ),
                         ),
-                      ),
                       ),
                     ),
                     const Divider(height: 1),
@@ -1349,29 +1174,28 @@ class _SettingsPageState extends State<SettingsPage> {
                       leading: const Icon(Icons.subtitles_outlined),
                       title: const Text('优先字幕'),
                       trailing: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(maxWidth: trailingMaxWidth),
+                        constraints: BoxConstraints(maxWidth: trailingMaxWidth),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                          value: appState.preferredSubtitleLang,
-                          items: _subtitleLangItems(
-                              appState.preferredSubtitleLang),
-                          onChanged: (v) async {
-                            if (v == null) return;
-                            if (v == _customSentinel) {
-                              final code = await _askCustomLang(
-                                context,
-                                title: '自定义字幕语言',
-                                initial: appState.preferredSubtitleLang,
-                              );
-                              if (code == null) return;
-                              await appState.setPreferredSubtitleLang(code);
-                              return;
-                            }
-                            await appState.setPreferredSubtitleLang(v);
-                          },
+                            value: appState.preferredSubtitleLang,
+                            items: _subtitleLangItems(
+                                appState.preferredSubtitleLang),
+                            onChanged: (v) async {
+                              if (v == null) return;
+                              if (v == _customSentinel) {
+                                final code = await _askCustomLang(
+                                  context,
+                                  title: '自定义字幕语言',
+                                  initial: appState.preferredSubtitleLang,
+                                );
+                                if (code == null) return;
+                                await appState.setPreferredSubtitleLang(code);
+                                return;
+                              }
+                              await appState.setPreferredSubtitleLang(v);
+                            },
+                          ),
                         ),
-                      ),
                       ),
                     ),
                     const Divider(height: 1),
@@ -1417,8 +1241,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       leading: const Icon(Icons.video_file_outlined),
                       title: const Text('优先视频版本'),
                       trailing: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(maxWidth: trailingMaxWidth),
+                        constraints: BoxConstraints(maxWidth: trailingMaxWidth),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<VideoVersionPreference>(
                             value: appState.preferredVideoVersion,
@@ -1500,36 +1323,39 @@ class _SettingsPageState extends State<SettingsPage> {
                           ? '切换后可能需要等待桌面刷新'
                           : '仅 Android 支持'),
                       trailing: ConstrainedBox(
-                        constraints:
-                            BoxConstraints(maxWidth: trailingMaxWidth),
+                        constraints: BoxConstraints(maxWidth: trailingMaxWidth),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
-                          value: appState.appIconId,
-                          items: const [
-                            DropdownMenuItem(
-                                value: 'default', child: Text('默认')),
-                            DropdownMenuItem(value: 'pink', child: Text('粉色')),
-                            DropdownMenuItem(
-                                value: 'purple', child: Text('紫色')),
-                            DropdownMenuItem(
-                                value: 'miku', child: Text('初音未来')),
-                          ],
-                          onChanged: !AppIconService.isSupported
-                              ? null
-                              : (v) async {
-                                  if (v == null) return;
-                                  final ok = await AppIconService.setIconId(v);
-                                  if (!ok && context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content: Text('切换失败（可能不支持当前系统/桌面）')),
-                                    );
-                                    return;
-                                  }
-                                  await appState.setAppIconId(v);
-                                },
+                            value: appState.appIconId,
+                            items: const [
+                              DropdownMenuItem(
+                                  value: 'default', child: Text('默认')),
+                              DropdownMenuItem(
+                                  value: 'pink', child: Text('粉色')),
+                              DropdownMenuItem(
+                                  value: 'purple', child: Text('紫色')),
+                              DropdownMenuItem(
+                                  value: 'miku', child: Text('初音未来')),
+                            ],
+                            onChanged: !AppIconService.isSupported
+                                ? null
+                                : (v) async {
+                                    if (v == null) return;
+                                    final ok =
+                                        await AppIconService.setIconId(v);
+                                    if (!ok && context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                            content:
+                                                Text('切换失败（可能不支持当前系统/桌面）')),
+                                      );
+                                      return;
+                                    }
+                                    await appState.setAppIconId(v);
+                                  },
+                          ),
                         ),
-                      ),
                       ),
                     ),
                     const Divider(height: 1),
@@ -1654,6 +1480,26 @@ class _SettingsPageState extends State<SettingsPage> {
                           );
                         }
                       },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      value: appState.autoUpdateEnabled,
+                      onChanged: (v) async {
+                        await appState.setAutoUpdateEnabled(v);
+                        if (v && context.mounted) {
+                          unawaited(
+                            AppUpdateFlow.maybeAutoCheck(
+                              context,
+                              appState: appState,
+                              force: true,
+                            ),
+                          );
+                        }
+                      },
+                      secondary: const Icon(Icons.system_update),
+                      title: const Text('自动更新'),
+                      subtitle: const Text('启动时自动检查新版本，并在发现更新时提示安装'),
+                      contentPadding: EdgeInsets.zero,
                     ),
                     const Divider(height: 1),
                     ListTile(

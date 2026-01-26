@@ -9,6 +9,7 @@ import 'home_page.dart';
 import 'server_page.dart';
 import 'webdav_home_page.dart';
 import 'services/emby_api.dart';
+import 'services/app_update_flow.dart';
 import 'state/app_state.dart';
 import 'state/media_server_type.dart';
 import 'src/device/device_type.dart';
@@ -214,7 +215,13 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                   scale: scale,
                   child: MediaQuery(
                     data: mediaQuery.copyWith(textScaler: textScaler),
-                    child: Theme(data: scaledTheme, child: appChild),
+                    child: Theme(
+                      data: scaledTheme,
+                      child: AppUpdateAutoChecker(
+                        appState: appState,
+                        child: appChild,
+                      ),
+                    ),
                   ),
                 );
               },

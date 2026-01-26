@@ -5,7 +5,8 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
-typedef DownloadProgressCallback = void Function(int receivedBytes, int totalBytes);
+typedef DownloadProgressCallback = void Function(
+    int receivedBytes, int totalBytes);
 
 enum AppUpdatePlatform {
   windows,
@@ -28,8 +29,8 @@ class AppVersionFull implements Comparable<AppVersionFull> {
 
   static AppVersionFull? tryParse(String raw) {
     final trimmed = raw.trim();
-    final match = RegExp(r'^v?([0-9]+(?:\.[0-9]+)*)(?:\+([0-9]+))?$')
-        .firstMatch(trimmed);
+    final match =
+        RegExp(r'^v?([0-9]+(?:\.[0-9]+)*)(?:\+([0-9]+))?$').firstMatch(trimmed);
     if (match == null) return null;
 
     final parts =
@@ -40,7 +41,8 @@ class AppVersionFull implements Comparable<AppVersionFull> {
 
   @override
   int compareTo(AppVersionFull other) {
-    final maxLen = parts.length > other.parts.length ? parts.length : other.parts.length;
+    final maxLen =
+        parts.length > other.parts.length ? parts.length : other.parts.length;
     for (var i = 0; i < maxLen; i++) {
       final a = i < parts.length ? parts[i] : 0;
       final b = i < other.parts.length ? other.parts[i] : 0;
@@ -130,8 +132,8 @@ class AppUpdateService {
   final String owner;
   final String repo;
 
-  Uri get _latestTagReleaseUri =>
-      Uri.parse('https://api.github.com/repos/$owner/$repo/releases/tags/latest');
+  Uri get _latestTagReleaseUri => Uri.parse(
+      'https://api.github.com/repos/$owner/$repo/releases/tags/latest');
 
   Uri get _latestReleaseUri =>
       Uri.parse('https://api.github.com/repos/$owner/$repo/releases/latest');
@@ -157,8 +159,8 @@ class AppUpdateService {
     final fromBody = bodyMatch?.group(1)?.trim();
     if (fromBody != null && fromBody.isNotEmpty) return fromBody;
 
-    final nameMatch = RegExp(r'\(([0-9]+(?:\.[0-9]+)*\+[0-9]+)\)')
-        .firstMatch(releaseName);
+    final nameMatch =
+        RegExp(r'\(([0-9]+(?:\.[0-9]+)*\+[0-9]+)\)').firstMatch(releaseName);
     return nameMatch?.group(1)?.trim();
   }
 
@@ -193,7 +195,8 @@ class AppUpdateService {
     final assets = assetsRaw
         .whereType<Map>()
         .map((e) => GitHubReleaseAsset.fromJson(e.cast<String, dynamic>()))
-        .where((a) => a.name.trim().isNotEmpty && a.browserDownloadUrl.isNotEmpty)
+        .where(
+            (a) => a.name.trim().isNotEmpty && a.browserDownloadUrl.isNotEmpty)
         .toList();
 
     final releaseName = map['name'] as String? ?? '';
@@ -232,8 +235,9 @@ class AppUpdateService {
 
     final release = await fetchLatestRelease(timeout: timeout);
     final latestVersionFull = release.versionFull;
-    final latestParsed =
-        latestVersionFull == null ? null : AppVersionFull.tryParse(latestVersionFull);
+    final latestParsed = latestVersionFull == null
+        ? null
+        : AppVersionFull.tryParse(latestVersionFull);
 
     return AppUpdateCheckResult(
       currentVersionFull: currentVersionFull,
@@ -252,22 +256,28 @@ class AppUpdateService {
 
     switch (platform) {
       case AppUpdatePlatform.windows:
-        final exe = assets.where((a) => lower(a.name).endsWith('.exe')).toList();
-        exe.sort((a, b) => _windowsAssetScore(b).compareTo(_windowsAssetScore(a)));
+        final exe =
+            assets.where((a) => lower(a.name).endsWith('.exe')).toList();
+        exe.sort(
+            (a, b) => _windowsAssetScore(b).compareTo(_windowsAssetScore(a)));
         return exe;
 
       case AppUpdatePlatform.android:
-        final apk = assets.where((a) => lower(a.name).endsWith('.apk')).toList();
-        apk.sort((a, b) => _androidAssetScore(b).compareTo(_androidAssetScore(a)));
+        final apk =
+            assets.where((a) => lower(a.name).endsWith('.apk')).toList();
+        apk.sort(
+            (a, b) => _androidAssetScore(b).compareTo(_androidAssetScore(a)));
         return apk;
 
       case AppUpdatePlatform.macos:
-        final dmg = assets.where((a) => lower(a.name).endsWith('.dmg')).toList();
+        final dmg =
+            assets.where((a) => lower(a.name).endsWith('.dmg')).toList();
         dmg.sort((a, b) => _macAssetScore(b).compareTo(_macAssetScore(a)));
         return dmg;
 
       case AppUpdatePlatform.ios:
-        final ipa = assets.where((a) => lower(a.name).endsWith('.ipa')).toList();
+        final ipa =
+            assets.where((a) => lower(a.name).endsWith('.ipa')).toList();
         return ipa;
 
       case AppUpdatePlatform.linux:
@@ -276,9 +286,12 @@ class AppUpdateService {
               (a) =>
                   lower(a.name).endsWith('.appimage') ||
                   lower(a.name).endsWith('.deb') ||
-                  lower(a.name).endsWith('.rpm'),
+                  lower(a.name).endsWith('.rpm') ||
+                  lower(a.name).endsWith('.tar.gz'),
             )
             .toList();
+        linux
+            .sort((a, b) => _linuxAssetScore(b).compareTo(_linuxAssetScore(a)));
         return linux;
 
       case AppUpdatePlatform.other:
@@ -301,6 +314,8 @@ class AppUpdateService {
     var score = 0;
     if (name.contains('linplayer')) score += 10;
     if (name.contains('android')) score += 10;
+    if (name == 'linplayer-android.apk') score += 20;
+    if (name.contains('universal')) score += 15;
     if (name.contains('arm64') || name.contains('aarch64')) score += 8;
     if (name.contains('armeabi') || name.contains('armv7')) score += 5;
     return score;
@@ -312,6 +327,23 @@ class AppUpdateService {
     if (name.contains('linplayer')) score += 10;
     if (name.contains('macos') || name.contains('mac')) score += 10;
     if (name.contains('arm64')) score += 3;
+    return score;
+  }
+
+  static int _linuxAssetScore(GitHubReleaseAsset a) {
+    final name = a.name.toLowerCase();
+    var score = 0;
+    if (name.contains('linplayer')) score += 10;
+    if (name.contains('linux')) score += 10;
+    if (name.contains('x86_64') ||
+        name.contains('amd64') ||
+        name.contains('x64')) {
+      score += 5;
+    }
+    if (name.endsWith('.appimage')) score += 20;
+    if (name.endsWith('.deb')) score += 15;
+    if (name.endsWith('.rpm')) score += 15;
+    if (name.endsWith('.tar.gz')) score += 5;
     return score;
   }
 
@@ -354,7 +386,11 @@ class AppUpdateService {
 
   Future<void> startWindowsInstaller(
     File installer, {
-    List<String> arguments = const ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'],
+    List<String> arguments = const [
+      '/VERYSILENT',
+      '/SUPPRESSMSGBOXES',
+      '/NORESTART'
+    ],
   }) async {
     if (!Platform.isWindows) {
       throw UnsupportedError('Windows installer is only supported on Windows.');
@@ -383,7 +419,8 @@ class AppUpdateService {
   ) async {
     final psFilePath = _psQuote(installerPath);
     final psArgs = arguments.map(_psQuote).map((a) => "'$a'").join(',');
-    final ps = "Start-Process -FilePath '$psFilePath' -ArgumentList @($psArgs) -Verb RunAs";
+    final ps =
+        "Start-Process -FilePath '$psFilePath' -ArgumentList @($psArgs) -Verb RunAs";
     await Process.start(
       'powershell',
       ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps],

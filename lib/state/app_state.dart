@@ -122,6 +122,8 @@ class AppState extends ChangeNotifier {
   static const _kServerIconLibraryUrlsKey = 'serverIconLibraryUrls_v1';
   static const _kShowHomeLibraryQuickAccessKey =
       'showHomeLibraryQuickAccess_v1';
+  static const _kAutoUpdateEnabledKey = 'autoUpdateEnabled_v1';
+  static const _kAutoUpdateLastCheckedAtMsKey = 'autoUpdateLastCheckedAtMs_v1';
 
   static const _kServerLibrariesCachePrefix = 'serverLibrariesCache_v1:';
   static const _kServerHomeCachePrefix = 'serverHomeCache_v1:';
@@ -174,6 +176,8 @@ class AppState extends ChangeNotifier {
   bool _unlimitedStreamCache = false;
   bool _enableBlurEffects = true;
   bool _showHomeLibraryQuickAccess = true;
+  bool _autoUpdateEnabled = false;
+  int _autoUpdateLastCheckedAtMs = 0;
   String _externalMpvPath = '';
   Anime4kPreset _anime4kPreset = Anime4kPreset.off;
   bool _danmakuEnabled = true;
@@ -556,6 +560,10 @@ class AppState extends ChangeNotifier {
   bool get unlimitedStreamCache => _unlimitedStreamCache;
   bool get enableBlurEffects => _enableBlurEffects;
   bool get showHomeLibraryQuickAccess => _showHomeLibraryQuickAccess;
+  bool get autoUpdateEnabled => _autoUpdateEnabled;
+  DateTime? get autoUpdateLastCheckedAt => _autoUpdateLastCheckedAtMs <= 0
+      ? null
+      : DateTime.fromMillisecondsSinceEpoch(_autoUpdateLastCheckedAtMs);
   String get externalMpvPath => _externalMpvPath;
   Anime4kPreset get anime4kPreset => _anime4kPreset;
   bool get danmakuEnabled => _danmakuEnabled;
@@ -677,6 +685,9 @@ class AppState extends ChangeNotifier {
     _enableBlurEffects = prefs.getBool(_kEnableBlurEffectsKey) ?? true;
     _showHomeLibraryQuickAccess =
         prefs.getBool(_kShowHomeLibraryQuickAccessKey) ?? true;
+    _autoUpdateEnabled = prefs.getBool(_kAutoUpdateEnabledKey) ?? false;
+    _autoUpdateLastCheckedAtMs =
+        prefs.getInt(_kAutoUpdateLastCheckedAtMsKey) ?? 0;
     _externalMpvPath = prefs.getString(_kExternalMpvPathKey) ?? '';
     _anime4kPreset = anime4kPresetFromId(prefs.getString(_kAnime4kPresetKey));
 
@@ -846,6 +857,7 @@ class AppState extends ChangeNotifier {
         'unlimitedStreamCache': _unlimitedStreamCache,
         'enableBlurEffects': _enableBlurEffects,
         'showHomeLibraryQuickAccess': _showHomeLibraryQuickAccess,
+        'autoUpdateEnabled': _autoUpdateEnabled,
         'externalMpvPath': _externalMpvPath,
         'anime4kPreset': _anime4kPreset.id,
         'serverIconLibraryUrls': _serverIconLibraryUrls,
@@ -1157,6 +1169,8 @@ class AppState extends ChangeNotifier {
         _readBool(data['enableBlurEffects'], fallback: true);
     final nextShowHomeLibraryQuickAccess =
         _readBool(data['showHomeLibraryQuickAccess'], fallback: true);
+    final nextAutoUpdateEnabled =
+        _readBool(data['autoUpdateEnabled'], fallback: false);
     final nextExternalMpvPath =
         (data['externalMpvPath'] ?? '').toString().trim();
     final nextAnime4kPreset =
@@ -1294,6 +1308,7 @@ class AppState extends ChangeNotifier {
     _unlimitedStreamCache = nextUnlimitedStreamCache;
     _enableBlurEffects = nextEnableBlurEffects;
     _showHomeLibraryQuickAccess = nextShowHomeLibraryQuickAccess;
+    _autoUpdateEnabled = nextAutoUpdateEnabled;
     _externalMpvPath = nextExternalMpvPath;
     _anime4kPreset = nextAnime4kPreset;
     _serverIconLibraryUrls = nextServerIconLibraryUrls;
@@ -1378,6 +1393,7 @@ class AppState extends ChangeNotifier {
       _kShowHomeLibraryQuickAccessKey,
       _showHomeLibraryQuickAccess,
     );
+    await prefs.setBool(_kAutoUpdateEnabledKey, _autoUpdateEnabled);
 
     if (_externalMpvPath.isEmpty) {
       await prefs.remove(_kExternalMpvPathKey);
@@ -1517,14 +1533,13 @@ class AppState extends ChangeNotifier {
         _error = '当前版本仅支持 Emby/Jellyfin 登录；Plex 请用 Plex 登录入口添加。';
         return;
       }
-      final api =
-          EmbyApi(
-            hostOrUrl: hostOrUrl,
-            preferredScheme: scheme,
-            port: port,
-            serverType: serverType,
-            deviceId: _deviceId,
-          );
+      final api = EmbyApi(
+        hostOrUrl: hostOrUrl,
+        preferredScheme: scheme,
+        port: port,
+        serverType: serverType,
+        deviceId: _deviceId,
+      );
       final auth = await api.authenticate(
         username: fixedUsername,
         password: password,
@@ -2616,6 +2631,22 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kShowHomeLibraryQuickAccessKey, enabled);
     notifyListeners();
+  }
+
+  Future<void> setAutoUpdateEnabled(bool enabled) async {
+    if (_autoUpdateEnabled == enabled) return;
+    _autoUpdateEnabled = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kAutoUpdateEnabledKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setAutoUpdateLastCheckedAt(DateTime at) async {
+    final ms = at.millisecondsSinceEpoch;
+    if (_autoUpdateLastCheckedAtMs == ms) return;
+    _autoUpdateLastCheckedAtMs = ms;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kAutoUpdateLastCheckedAtMsKey, ms);
   }
 
   Future<void> setExternalMpvPath(String path) async {
