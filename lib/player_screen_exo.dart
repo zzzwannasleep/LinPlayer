@@ -1210,7 +1210,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     Future<List<vp_android.ExoPlayerSubtitleTrackData>> fetchTracks() async {
       final data = await api.getSubtitleTracks();
-      return data.exoPlayerTracks ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+      return data.exoPlayerTracks ??
+          const <vp_android.ExoPlayerSubtitleTrackData>[];
     }
 
     late List<vp_android.ExoPlayerSubtitleTrackData> tracks;
@@ -1751,13 +1752,34 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     try {
       final uri = Uri.tryParse(path);
-      final isUri = uri != null && uri.scheme.isNotEmpty;
       // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
       // (Texture-based rendering may show green/purple tint on certain P8 files.)
       final viewType = _isAndroid ? _viewType : VideoViewType.textureView;
-      final controller = isUri
-          ? VideoPlayerController.networkUrl(uri, viewType: viewType)
-          : VideoPlayerController.file(File(path), viewType: viewType);
+
+      late final VideoPlayerController controller;
+      if (uri == null || uri.scheme.isEmpty) {
+        controller = VideoPlayerController.file(File(path), viewType: viewType);
+      } else {
+        final scheme = uri.scheme.toLowerCase();
+        final isHttpUrl = (scheme == 'http' || scheme == 'https') &&
+            uri.host.trim().isNotEmpty;
+        if (isHttpUrl) {
+          controller =
+              VideoPlayerController.networkUrl(uri, viewType: viewType);
+        } else if (scheme == 'content' && _isAndroid) {
+          controller =
+              VideoPlayerController.contentUri(uri, viewType: viewType);
+        } else if (scheme == 'file') {
+          controller = VideoPlayerController.file(
+            File.fromUri(uri),
+            viewType: viewType,
+          );
+        } else {
+          // Fall back to networkUrl for other non-file URI schemes (e.g. rtsp).
+          controller =
+              VideoPlayerController.networkUrl(uri, viewType: viewType);
+        }
+      }
       _controller = controller;
       await controller.initialize();
       await _applyOrientationForMode();
@@ -2221,15 +2243,15 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                   ignoring: !_controlsVisible,
                                   child: Listener(
                                     onPointerDown: (_) => _showControls(),
-                                      child: PlaybackControls(
-                                        enabled: controlsEnabled,
-                                        position: _position,
-                                        buffered: _lastBufferedEnd,
-                                        duration: _duration,
-                                        isPlaying: controller.value.isPlaying,
-                                        heatmap: _danmakuHeatmap,
-                                        showHeatmap: _danmakuShowHeatmap &&
-                                            _danmakuHeatmap.isNotEmpty,
+                                    child: PlaybackControls(
+                                      enabled: controlsEnabled,
+                                      position: _position,
+                                      buffered: _lastBufferedEnd,
+                                      duration: _duration,
+                                      isPlaying: controller.value.isPlaying,
+                                      heatmap: _danmakuHeatmap,
+                                      showHeatmap: _danmakuShowHeatmap &&
+                                          _danmakuHeatmap.isNotEmpty,
                                       seekBackwardSeconds: _seekBackSeconds,
                                       seekForwardSeconds: _seekForwardSeconds,
                                       showSystemTime: widget
