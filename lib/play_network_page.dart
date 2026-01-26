@@ -1101,10 +1101,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       const SizedBox(height: 10),
                                       OutlinedButton.icon(
                                         onPressed: () => setState(() {
-                                          _episodeEpisodesCache
-                                              .remove(selectedSeason!.id);
+                                          final season = selectedSeason;
+                                          if (season == null) return;
+                                          _episodeEpisodesCache.remove(season.id);
                                           _episodeEpisodesFutureCache
-                                              .remove(selectedSeason!.id);
+                                              .remove(season.id);
                                         }),
                                         icon: const Icon(Icons.refresh),
                                         label: const Text('重试'),
