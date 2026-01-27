@@ -2138,15 +2138,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
       final directStreamUrl = (ms?['DirectStreamUrl'] as String?)?.trim();
       final transcodingUrl = (ms?['TranscodingUrl'] as String?)?.trim();
-      final supportsDirectPlay = ms?['SupportsDirectPlay'] == true;
-      final supportsDirectStream = ms?['SupportsDirectStream'] == true;
 
-      if (!supportsDirectPlay &&
-          !supportsDirectStream &&
-          transcodingUrl != null &&
-          transcodingUrl.isNotEmpty) {
-        return resolve(transcodingUrl);
-      }
       if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
         return resolve(directStreamUrl);
       }

@@ -978,8 +978,16 @@ class EmbyApi {
           headers: _jsonHeaders(token: token, userId: userId, deviceId: deviceId),
         );
 
-    http.Response resp = await getReq();
-    if (resp.statusCode >= 500 || resp.statusCode == 404) {
+    // For ExoPlayer we must POST with DeviceProfile, otherwise the server may
+    // return a direct-play URL for an audio codec Exo can't decode (video-only).
+    http.Response resp = exoPlayer ? await postReq() : await getReq();
+    if (exoPlayer && resp.statusCode != 200) {
+      // Some servers/proxies only allow GET on this endpoint.
+      resp = await getReq();
+      if (resp.statusCode >= 500 || resp.statusCode == 404) {
+        resp = await postReq();
+      }
+    } else if (!exoPlayer && (resp.statusCode >= 500 || resp.statusCode == 404)) {
       resp = await postReq();
     }
     if (resp.statusCode != 200) {
