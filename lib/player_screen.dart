@@ -96,6 +96,8 @@ class _PlayerScreenState extends State<PlayerScreen>
   Duration _lastBuffer = Duration.zero;
   DateTime? _lastBufferAt;
   double? _bufferSpeedX;
+  bool _exitInProgress = false;
+  bool _allowRoutePop = false;
 
   static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
   Timer? _controlsHideTimer;
@@ -200,6 +202,79 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
     _playerService.dispose();
     super.dispose();
+  }
+
+  Future<void> _requestExitThenPop() async {
+    if (_exitInProgress) return;
+    _exitInProgress = true;
+
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _gestureOverlayTimer?.cancel();
+    _gestureOverlayTimer = null;
+
+    final cancels = <Future<void>>[];
+    final posSub = _posSub;
+    _posSub = null;
+    if (posSub != null) cancels.add(posSub.cancel().catchError((_) {}));
+    final errorSub = _errorSub;
+    _errorSub = null;
+    if (errorSub != null) cancels.add(errorSub.cancel().catchError((_) {}));
+    final videoParamsSub = _videoParamsSub;
+    _videoParamsSub = null;
+    if (videoParamsSub != null) {
+      cancels.add(videoParamsSub.cancel().catchError((_) {}));
+    }
+    final playingSub = _playingSub;
+    _playingSub = null;
+    if (playingSub != null) cancels.add(playingSub.cancel().catchError((_) {}));
+    final bufferingSub = _bufferingSub;
+    _bufferingSub = null;
+    if (bufferingSub != null) {
+      cancels.add(bufferingSub.cancel().catchError((_) {}));
+    }
+    final bufferSub = _bufferSub;
+    _bufferSub = null;
+    if (bufferSub != null) cancels.add(bufferSub.cancel().catchError((_) {}));
+    if (cancels.isNotEmpty) await Future.wait(cancels);
+
+    await _exitOrientationLock();
+    if (_fullScreen) {
+      await _exitImmersiveMode(resetOrientations: true);
+    }
+
+    final thumb = _thumbnailer;
+    _thumbnailer = null;
+
+    final disposeFuture = _playerService.dispose();
+    if (mounted) {
+      setState(() {
+        _controlsVisible = false;
+        _gestureOverlayIcon = null;
+        _gestureOverlayText = null;
+      });
+    }
+    try {
+      await disposeFuture;
+    } catch (_) {}
+
+    if (thumb != null) {
+      try {
+        await thumb.dispose();
+      } catch (_) {}
+    }
+
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (_) {}
+
+    if (!mounted) return;
+    setState(() => _allowRoutePop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!Navigator.of(context).canPop()) return;
+      Navigator.of(context).pop();
+    });
   }
 
   @override
@@ -1435,7 +1510,22 @@ class _PlayerScreenState extends State<PlayerScreen>
       return AspectRatio(aspectRatio: 16 / 9, child: child);
     }
 
-    return Focus(
+    final isAndroid =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final canPopRoute = Navigator.of(context).canPop();
+    final needsSafeExit = isAndroid &&
+        canPopRoute &&
+        !_allowRoutePop &&
+        _playerService.isInitialized &&
+        !_playerService.isExternalPlayback;
+
+    return PopScope(
+      canPop: !needsSafeExit,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !needsSafeExit) return;
+        unawaited(_requestExitThenPop());
+      },
+      child: Focus(
       autofocus: true,
       canRequestFocus: remoteEnabled,
       onKeyEvent: (node, event) {
@@ -1463,9 +1553,9 @@ class _PlayerScreenState extends State<PlayerScreen>
         }
         return KeyEventResult.ignored;
       },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        extendBodyBehindAppBar: _fullScreen,
+       child: Scaffold(
+         backgroundColor: Colors.black,
+         extendBodyBehindAppBar: _fullScreen,
         appBar: PreferredSize(
           preferredSize: _fullScreen
               ? (_controlsVisible
@@ -1875,6 +1965,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           ],
         ),
       ),
+    ),
     );
   }
 

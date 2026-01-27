@@ -45,6 +45,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   VideoPlayerController? _controller;
   Timer? _uiTimer;
+  bool _exitInProgress = false;
+  bool _allowRoutePop = false;
 
   bool _buffering = false;
   Duration _lastBufferedEnd = Duration.zero;
@@ -209,6 +211,58 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _controller?.dispose();
     _controller = null;
     super.dispose();
+  }
+
+  Future<void> _requestExitThenPop() async {
+    if (_exitInProgress) return;
+    _exitInProgress = true;
+
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _uiTimer?.cancel();
+    _uiTimer = null;
+    _gestureOverlayTimer?.cancel();
+    _gestureOverlayTimer = null;
+
+    final controller = _controller;
+    _controller = null;
+    if (mounted) {
+      setState(() {
+        _buffering = false;
+        _controlsVisible = false;
+        _isScrubbing = false;
+        _gestureOverlayIcon = null;
+        _gestureOverlayText = null;
+      });
+    }
+
+    if (controller != null) {
+      try {
+        if (controller.value.isInitialized && controller.value.isPlaying) {
+          await controller.pause();
+        }
+      } catch (_) {}
+      try {
+        await controller.dispose();
+      } catch (_) {}
+    }
+
+    await _exitOrientationLock();
+    if (_fullScreen) {
+      await _exitImmersiveMode(resetOrientations: true);
+    }
+
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (_) {}
+
+    if (!mounted) return;
+    setState(() => _allowRoutePop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!Navigator.of(context).canPop()) return;
+      Navigator.of(context).pop();
+    });
   }
 
   @override
@@ -1890,7 +1944,19 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       return AspectRatio(aspectRatio: 16 / 9, child: child);
     }
 
-    return Focus(
+    final canPopRoute = Navigator.of(context).canPop();
+    final needsSafeExit = canPopRoute &&
+        !_allowRoutePop &&
+        controller != null &&
+        _viewType == VideoViewType.platformView;
+
+    return PopScope(
+      canPop: !needsSafeExit,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !needsSafeExit) return;
+        unawaited(_requestExitThenPop());
+      },
+      child: Focus(
       autofocus: true,
       canRequestFocus: remoteEnabled,
       onKeyEvent: (node, event) {
@@ -2362,6 +2428,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
           ],
         ),
       ),
+    ),
     );
   }
 }
