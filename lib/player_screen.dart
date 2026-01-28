@@ -100,6 +100,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _danmakuPaused = false;
   Duration _lastBuffer = Duration.zero;
   DateTime? _lastBufferAt;
+  Duration _lastBufferSample = Duration.zero;
   double? _bufferSpeedX;
   bool _exitInProgress = false;
   bool _allowRoutePop = false;
@@ -837,6 +838,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     _bufferSub = null;
     _lastBuffer = Duration.zero;
     _lastBufferAt = null;
+    _lastBufferSample = Duration.zero;
     _bufferSpeedX = null;
     try {
       await _playerService.dispose();
@@ -910,35 +912,44 @@ class _PlayerScreenState extends State<PlayerScreen>
       _bufferingSub = _playerService.player.stream.buffering.listen((value) {
         if (!mounted) return;
         _buffering = value;
-        if (!_buffering) {
-          _bufferSpeedX = null;
-          _lastBufferAt = null;
-        }
+        _bufferSpeedX = null;
+        _lastBufferAt = null;
+        _lastBufferSample = _lastBuffer;
         _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
         setState(() {});
       });
       _bufferSub = _playerService.player.stream.buffer.listen((value) {
-        final now = DateTime.now();
-        final prevAt = _lastBufferAt;
-        final prevBuffer = _lastBuffer;
-        _lastBufferAt = now;
         _lastBuffer = value;
 
-        if (prevAt != null) {
-          final dtMs = now.difference(prevAt).inMilliseconds;
-          if (dtMs > 0) {
-            final deltaMs = (value - prevBuffer).inMilliseconds;
-            if (deltaMs >= 0) {
-              _bufferSpeedX = deltaMs / dtMs;
-            }
-          }
+        final appState = widget.appState;
+        final show = (appState?.showBufferSpeed ?? false);
+        if (!show || !_buffering) return;
+
+        final now = DateTime.now();
+        final refreshSeconds = (appState?.bufferSpeedRefreshSeconds ?? 0.5)
+            .clamp(0.1, 3.0)
+            .toDouble();
+        final refreshMs = (refreshSeconds * 1000).round();
+
+        final prevAt = _lastBufferAt;
+        if (prevAt == null) {
+          _bufferSpeedX = null;
+          _lastBufferAt = now;
+          _lastBufferSample = value;
+          if (mounted) setState(() {});
+          return;
         }
 
+        final dtMs = now.difference(prevAt).inMilliseconds;
+        if (dtMs < refreshMs) return;
+
+        final deltaMs = (value - _lastBufferSample).inMilliseconds;
+        _lastBufferAt = now;
+        _lastBufferSample = value;
+        _bufferSpeedX = (dtMs > 0 && deltaMs >= 0) ? (deltaMs / dtMs) : null;
+
         if (!mounted) return;
-        final appState = widget.appState;
-        if ((appState?.showBufferSpeed ?? false) && _buffering) {
-          setState(() {});
-        }
+        setState(() {});
       });
       _playingSub = _playerService.player.stream.playing.listen((playing) {
         if (!mounted) return;
@@ -1762,11 +1773,31 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 ),
                               ),
                             if (_buffering)
-                              const Positioned.fill(
+                              Positioned.fill(
                                 child: ColoredBox(
                                   color: Colors.black54,
                                   child: Center(
-                                      child: CircularProgressIndicator()),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const CircularProgressIndicator(),
+                                        if ((widget.appState?.showBufferSpeed ??
+                                                false))
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 12),
+                                            child: Text(
+                                              _bufferSpeedX == null
+                                                  ? '缓冲速度：—'
+                                                  : '缓冲速度：${_bufferSpeedX!.clamp(0.0, 99.0).toStringAsFixed(1)}x',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               ),
                             Positioned.fill(

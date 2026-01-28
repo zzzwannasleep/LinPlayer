@@ -22,6 +22,7 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
   bool get _isTv => DeviceType.isTv;
 
   double? _longPressMultiplierDraft;
+  double? _bufferSpeedRefreshSecondsDraft;
   double? _seekBackwardDraft;
   double? _seekForwardDraft;
 
@@ -65,6 +66,11 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
             (_seekForwardDraft ?? appState.seekForwardSeconds.toDouble())
                 .round()
                 .clamp(1, 120);
+        final bufferSpeedRefreshSeconds =
+            (_bufferSpeedRefreshSecondsDraft ??
+                    appState.bufferSpeedRefreshSeconds)
+                .clamp(0.1, 3.0)
+                .toDouble();
 
         return Scaffold(
           appBar: GlassAppBar(
@@ -211,6 +217,26 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
                       onChanged: (v) => appState.setShowBufferSpeed(v),
                       title: const Text('显示缓冲速度'),
                       contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    _SliderTile(
+                      leading: const Icon(Icons.timer_outlined),
+                      title: const Text('缓冲速度刷新间隔 (秒)'),
+                      subtitle: const Text('0.1 - 3.0，默认 0.5'),
+                      value: bufferSpeedRefreshSeconds,
+                      min: 0.1,
+                      max: 3.0,
+                      divisions: 29,
+                      trailing:
+                          Text('${bufferSpeedRefreshSeconds.toStringAsFixed(1)}s'),
+                      sliderTheme: _sliderTheme(context),
+                      onChanged: (v) =>
+                          setState(() => _bufferSpeedRefreshSecondsDraft = v),
+                      onChangeEnd: (v) async {
+                        final seconds = (v * 10).round() / 10.0;
+                        setState(() => _bufferSpeedRefreshSecondsDraft = null);
+                        await appState.setBufferSpeedRefreshSeconds(seconds);
+                      },
                     ),
                     const Divider(height: 1),
                     SwitchListTile(

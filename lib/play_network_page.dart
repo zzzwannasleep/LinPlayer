@@ -91,6 +91,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   double? _bufferingPct;
   Duration _lastBuffer = Duration.zero;
   DateTime? _lastBufferAt;
+  Duration _lastBufferSample = Duration.zero;
   double? _bufferSpeedX;
   bool _appliedAudioPref = false;
   bool _appliedSubtitlePref = false;
@@ -249,6 +250,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _lastOrientationKey = null;
     _lastBuffer = Duration.zero;
     _lastBufferAt = null;
+    _lastBufferSample = Duration.zero;
     _bufferSpeedX = null;
     _appliedAudioPref = false;
     _appliedSubtitlePref = false;
@@ -352,10 +354,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _bufferingSub = _playerService.player.stream.buffering.listen((value) {
         if (!mounted) return;
         _buffering = value;
-        if (!_buffering) {
-          _bufferSpeedX = null;
-          _lastBufferAt = null;
-        }
+        _bufferSpeedX = null;
+        _lastBufferAt = null;
+        _lastBufferSample = _lastBuffer;
         _applyDanmakuPauseState(_buffering || !_playerService.isPlaying);
         setState(() {});
       });
@@ -365,26 +366,36 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         setState(() => _bufferingPct = value);
       });
       _bufferSub = _playerService.player.stream.buffer.listen((value) {
-        final now = DateTime.now();
-        final prevAt = _lastBufferAt;
-        final prevBuffer = _lastBuffer;
-        _lastBufferAt = now;
         _lastBuffer = value;
 
-        if (prevAt != null) {
-          final dtMs = now.difference(prevAt).inMilliseconds;
-          if (dtMs > 0) {
-            final deltaMs = (value - prevBuffer).inMilliseconds;
-            if (deltaMs >= 0) {
-              _bufferSpeedX = deltaMs / dtMs;
-            }
-          }
+        final show = widget.appState.showBufferSpeed;
+        if (!show || !_buffering) return;
+
+        final now = DateTime.now();
+        final refreshSeconds = widget.appState.bufferSpeedRefreshSeconds
+            .clamp(0.1, 3.0)
+            .toDouble();
+        final refreshMs = (refreshSeconds * 1000).round();
+
+        final prevAt = _lastBufferAt;
+        if (prevAt == null) {
+          _bufferSpeedX = null;
+          _lastBufferAt = now;
+          _lastBufferSample = value;
+          if (mounted) setState(() {});
+          return;
         }
 
+        final dtMs = now.difference(prevAt).inMilliseconds;
+        if (dtMs < refreshMs) return;
+
+        final deltaMs = (value - _lastBufferSample).inMilliseconds;
+        _lastBufferAt = now;
+        _lastBufferSample = value;
+        _bufferSpeedX = (dtMs > 0 && deltaMs >= 0) ? (deltaMs / dtMs) : null;
+
         if (!mounted) return;
-        if (widget.appState.showBufferSpeed && _buffering) {
-          setState(() {});
-        }
+        setState(() {});
       });
       _posSub = _playerService.player.stream.position.listen((pos) {
         if (!mounted) return;
@@ -3030,6 +3041,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         '缓冲中 ${(_bufferingPct! <= 1 ? _bufferingPct! * 100 : _bufferingPct!).clamp(0, 100).toStringAsFixed(0)}%',
                                         style: const TextStyle(
                                             color: Colors.white),
+                                      ),
+                                    ),
+                                  if (widget.appState.showBufferSpeed)
+                                    Padding(
+                                      padding: EdgeInsets.only(
+                                        top: _bufferingPct != null ? 6 : 12,
+                                      ),
+                                      child: Text(
+                                        _bufferSpeedX == null
+                                            ? '缓冲速度：—'
+                                            : '缓冲速度：${_bufferSpeedX!.clamp(0.0, 99.0).toStringAsFixed(1)}x',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                        ),
                                       ),
                                     ),
                                 ],

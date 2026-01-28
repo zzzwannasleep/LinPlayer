@@ -68,6 +68,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   bool _buffering = false;
   Duration _lastBufferedEnd = Duration.zero;
   DateTime? _lastBufferedAt;
+  Duration _bufferSpeedSampleEnd = Duration.zero;
   double? _bufferSpeedX;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -1992,6 +1993,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _buffering = false;
     _lastBufferedEnd = Duration.zero;
     _lastBufferedAt = null;
+    _bufferSpeedSampleEnd = Duration.zero;
     _bufferSpeedX = null;
     _nextDanmakuIndex = 0;
     _danmakuKey.currentState?.clear();
@@ -2091,31 +2093,39 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         _position = v.position;
         _duration = v.duration;
 
+        var bufferedEnd = Duration.zero;
+        for (final r in v.buffered) {
+          if (r.end > bufferedEnd) bufferedEnd = r.end;
+        }
+        _lastBufferedEnd = bufferedEnd;
+
         if (widget.appState.showBufferSpeed) {
-          var bufferedEnd = Duration.zero;
-          for (final r in v.buffered) {
-            if (r.end > bufferedEnd) bufferedEnd = r.end;
-          }
-
           if (_buffering) {
-            final prevAt = _lastBufferedAt;
-            final prevEnd = _lastBufferedEnd;
-            _lastBufferedAt = now;
-            _lastBufferedEnd = bufferedEnd;
+            final refreshSeconds = widget.appState.bufferSpeedRefreshSeconds
+                .clamp(0.1, 3.0)
+                .toDouble();
+            final refreshMs = (refreshSeconds * 1000).round();
 
-            if (prevAt != null) {
+            final prevAt = _lastBufferedAt;
+            if (prevAt == null) {
+              _bufferSpeedX = null;
+              _lastBufferedAt = now;
+              _bufferSpeedSampleEnd = bufferedEnd;
+            } else {
               final dtMs = now.difference(prevAt).inMilliseconds;
-              if (dtMs > 0) {
-                final deltaMs = (bufferedEnd - prevEnd).inMilliseconds;
-                if (deltaMs >= 0) {
-                  _bufferSpeedX = deltaMs / dtMs;
-                }
+              if (dtMs >= refreshMs) {
+                final deltaMs =
+                    (bufferedEnd - _bufferSpeedSampleEnd).inMilliseconds;
+                _lastBufferedAt = now;
+                _bufferSpeedSampleEnd = bufferedEnd;
+                _bufferSpeedX =
+                    (dtMs > 0 && deltaMs >= 0) ? (deltaMs / dtMs) : null;
               }
             }
           } else {
             _bufferSpeedX = null;
             _lastBufferedAt = null;
-            _lastBufferedEnd = bufferedEnd;
+            _bufferSpeedSampleEnd = bufferedEnd;
           }
         } else {
           _bufferSpeedX = null;
@@ -3551,11 +3561,30 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                               ),
                             ),
                           if (_buffering)
-                            const Positioned.fill(
+                            Positioned.fill(
                               child: ColoredBox(
                                 color: Colors.black26,
-                                child:
-                                    Center(child: CircularProgressIndicator()),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const CircularProgressIndicator(),
+                                      if (widget.appState.showBufferSpeed)
+                                        Padding(
+                                          padding:
+                                              const EdgeInsets.only(top: 12),
+                                          child: Text(
+                                            _bufferSpeedX == null
+                                                ? '缓冲速度：—'
+                                                : '缓冲速度：${_bufferSpeedX!.clamp(0.0, 99.0).toStringAsFixed(1)}x',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
                               ),
                             ),
                           Positioned.fill(

@@ -197,6 +197,7 @@ class AppState extends ChangeNotifier {
   static const _kReturnHomeBehaviorKey = 'returnHomeBehavior_v1';
   static const _kShowSystemTimeInControlsKey = 'showSystemTimeInControls_v1';
   static const _kShowBufferSpeedKey = 'showBufferSpeed_v1';
+  static const _kBufferSpeedRefreshSecondsKey = 'bufferSpeedRefreshSeconds_v1';
   static const _kShowBatteryInControlsKey = 'showBatteryInControls_v1';
   static const _kSeekBackwardSecondsKey = 'seekBackwardSeconds_v1';
   static const _kSeekForwardSecondsKey = 'seekForwardSeconds_v1';
@@ -275,6 +276,7 @@ class AppState extends ChangeNotifier {
   ReturnHomeBehavior _returnHomeBehavior = ReturnHomeBehavior.pause;
   bool _showSystemTimeInControls = false;
   bool _showBufferSpeed = true;
+  double _bufferSpeedRefreshSeconds = 0.5;
   bool _showBatteryInControls = false;
   int _seekBackwardSeconds = 10;
   int _seekForwardSeconds = 20;
@@ -666,6 +668,7 @@ class AppState extends ChangeNotifier {
   ReturnHomeBehavior get returnHomeBehavior => _returnHomeBehavior;
   bool get showSystemTimeInControls => _showSystemTimeInControls;
   bool get showBufferSpeed => _showBufferSpeed;
+  double get bufferSpeedRefreshSeconds => _bufferSpeedRefreshSeconds;
   bool get showBatteryInControls => _showBatteryInControls;
   int get seekBackwardSeconds => _seekBackwardSeconds;
   int get seekForwardSeconds => _seekForwardSeconds;
@@ -877,6 +880,10 @@ class AppState extends ChangeNotifier {
     _showSystemTimeInControls =
         prefs.getBool(_kShowSystemTimeInControlsKey) ?? false;
     _showBufferSpeed = prefs.getBool(_kShowBufferSpeedKey) ?? true;
+    _bufferSpeedRefreshSeconds =
+        (prefs.getDouble(_kBufferSpeedRefreshSecondsKey) ?? 0.5)
+            .clamp(0.1, 3.0)
+            .toDouble();
     _showBatteryInControls = prefs.getBool(_kShowBatteryInControlsKey) ?? false;
     _seekBackwardSeconds =
         (prefs.getInt(_kSeekBackwardSecondsKey) ?? 10).clamp(1, 120);
@@ -1041,6 +1048,7 @@ class AppState extends ChangeNotifier {
           'returnHomeBehavior': _returnHomeBehavior.id,
           'showSystemTimeInControls': _showSystemTimeInControls,
           'showBufferSpeed': _showBufferSpeed,
+          'bufferSpeedRefreshSeconds': _bufferSpeedRefreshSeconds,
           'showBatteryInControls': _showBatteryInControls,
           'seekBackwardSeconds': _seekBackwardSeconds,
           'seekForwardSeconds': _seekForwardSeconds,
@@ -1440,6 +1448,10 @@ class AppState extends ChangeNotifier {
         _readBool(interactionMap['showSystemTimeInControls'], fallback: false);
     final nextShowBufferSpeed =
         _readBool(interactionMap['showBufferSpeed'], fallback: true);
+    final nextBufferSpeedRefreshSeconds =
+        _readDouble(interactionMap['bufferSpeedRefreshSeconds'], fallback: 0.5)
+            .clamp(0.1, 3.0)
+            .toDouble();
     final nextShowBatteryInControls =
         _readBool(interactionMap['showBatteryInControls'], fallback: false);
     final nextSeekBackwardSeconds =
@@ -1532,6 +1544,7 @@ class AppState extends ChangeNotifier {
     _returnHomeBehavior = nextReturnHomeBehavior;
     _showSystemTimeInControls = nextShowSystemTimeInControls;
     _showBufferSpeed = nextShowBufferSpeed;
+    _bufferSpeedRefreshSeconds = nextBufferSpeedRefreshSeconds;
     _showBatteryInControls = nextShowBatteryInControls;
     _seekBackwardSeconds = nextSeekBackwardSeconds;
     _seekForwardSeconds = nextSeekForwardSeconds;
@@ -1667,6 +1680,10 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(
         _kShowSystemTimeInControlsKey, _showSystemTimeInControls);
     await prefs.setBool(_kShowBufferSpeedKey, _showBufferSpeed);
+    await prefs.setDouble(
+      _kBufferSpeedRefreshSecondsKey,
+      _bufferSpeedRefreshSeconds,
+    );
     await prefs.setBool(_kShowBatteryInControlsKey, _showBatteryInControls);
     await prefs.setInt(_kSeekBackwardSecondsKey, _seekBackwardSeconds);
     await prefs.setInt(_kSeekForwardSecondsKey, _seekForwardSeconds);
@@ -3269,6 +3286,15 @@ class AppState extends ChangeNotifier {
     _showBufferSpeed = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kShowBufferSpeedKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setBufferSpeedRefreshSeconds(double seconds) async {
+    final v = seconds.clamp(0.1, 3.0).toDouble();
+    if ((_bufferSpeedRefreshSeconds - v).abs() < 0.0001) return;
+    _bufferSpeedRefreshSeconds = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kBufferSpeedRefreshSecondsKey, v);
     notifyListeners();
   }
 
