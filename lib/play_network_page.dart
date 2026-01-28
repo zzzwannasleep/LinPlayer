@@ -3016,6 +3016,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                         buffered: _lastBuffer,
                                         duration: duration,
                                         isPlaying: isPlaying,
+                                        playbackRate:
+                                            _playerService.player.state.rate,
+                                        onSetPlaybackRate: (rate) async {
+                                          _showControls();
+                                          if (!_playerService.isInitialized) {
+                                            return;
+                                          }
+                                          await _playerService.player
+                                              .setRate(rate);
+                                          if (mounted) setState(() {});
+                                        },
                                         heatmap: _danmakuHeatmap,
                                         showHeatmap: _danmakuShowHeatmap &&
                                             _danmakuHeatmap.isNotEmpty,

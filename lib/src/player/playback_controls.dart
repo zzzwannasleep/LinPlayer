@@ -16,6 +16,8 @@ class PlaybackControls extends StatefulWidget {
     required this.duration,
     required this.isPlaying,
     required this.enabled,
+    this.playbackRate,
+    this.onSetPlaybackRate,
     required this.onSeek,
     required this.onPlay,
     required this.onPause,
@@ -46,6 +48,14 @@ class PlaybackControls extends StatefulWidget {
   final Duration duration;
   final bool isPlaying;
   final bool enabled;
+
+  /// Current playback rate (e.g. `1.0`).
+  ///
+  /// If provided with [onSetPlaybackRate], a speed selector button will be shown.
+  final double? playbackRate;
+
+  /// Updates playback rate (e.g. via `Player.setRate` / `controller.setPlaybackSpeed`).
+  final FutureOr<void> Function(double rate)? onSetPlaybackRate;
 
   final FutureOr<void> Function(Duration position) onSeek;
   final FutureOr<void> Function() onPlay;
@@ -233,6 +243,15 @@ class _PlaybackControlsState extends State<PlaybackControls> {
     return '${two(t.hour)}:${two(t.minute)}';
   }
 
+  static String _fmtRate(double v) {
+    final r = v.clamp(0.1, 8.0).toDouble();
+    final whole = (r - r.roundToDouble()).abs() < 0.001;
+    if (whole) return r.toStringAsFixed(0);
+    final oneDecimal = (r * 10 - (r * 10).roundToDouble()).abs() < 0.001;
+    if (oneDecimal) return r.toStringAsFixed(1);
+    return r.toStringAsFixed(2);
+  }
+
   static IconData _replayIcon(int seconds) {
     return switch (seconds) {
       5 => Icons.replay_5,
@@ -261,6 +280,80 @@ class _PlaybackControlsState extends State<PlaybackControls> {
 
   Future<void> _callMaybe(FutureOr<void> Function()? fn) =>
       fn == null ? Future<void>.value() : Future<void>.sync(fn);
+
+  Widget _buildSpeedButton({
+    required bool enabled,
+    required Color accent,
+  }) {
+    final current = (widget.playbackRate ?? 1.0).clamp(0.1, 8.0).toDouble();
+    return PopupMenuButton<double>(
+      tooltip: '倍速',
+      enabled: enabled,
+      initialValue: current,
+      color: const Color(0xFF202020),
+      onSelected: (rate) async {
+        final cb = widget.onSetPlaybackRate;
+        if (cb == null) return;
+        await cb(rate);
+      },
+      itemBuilder: (context) {
+        const rates = <double>[
+          0.5,
+          0.75,
+          1.0,
+          1.25,
+          1.5,
+          2.0,
+        ];
+        return rates
+            .map(
+              (r) => PopupMenuItem<double>(
+                value: r,
+                child: Row(
+                  children: [
+                    Icon(
+                      (current - r).abs() < 0.01 ? Icons.check : Icons.speed,
+                      color: (current - r).abs() < 0.01
+                          ? accent
+                          : Colors.white.withValues(alpha: 0.8),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '${_fmtRate(r)}x',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.speed, size: 16, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(
+              '${_fmtRate(current)}x',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   static int _quantizeMs(int ms) => (ms ~/ 2000) * 2000;
 
@@ -460,6 +553,8 @@ class _PlaybackControlsState extends State<PlaybackControls> {
     final enabled = widget.enabled;
     final backSeconds = widget.seekBackwardSeconds.clamp(1, 120);
     final forwardSeconds = widget.seekForwardSeconds.clamp(1, 120);
+    final showSpeedButton =
+        widget.playbackRate != null && widget.onSetPlaybackRate != null;
 
     final statusChips = <Widget>[];
     Widget chip({required IconData icon, required String text}) {
@@ -729,6 +824,10 @@ class _PlaybackControlsState extends State<PlaybackControls> {
                   _fmt(widget.duration),
                   style: const TextStyle(color: Colors.white),
                 ),
+                if (showSpeedButton) ...[
+                  const SizedBox(width: 8),
+                  _buildSpeedButton(enabled: enabled, accent: accent),
+                ],
                 if (widget.onSwitchCore != null ||
                     widget.onSwitchVersion != null) ...[
                   const SizedBox(width: 2),

@@ -2406,6 +2406,15 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                           buffered: _lastBufferedEnd,
                                           duration: _duration,
                                           isPlaying: controller.value.isPlaying,
+                                          playbackRate:
+                                              controller.value.playbackSpeed,
+                                          onSetPlaybackRate: (rate) async {
+                                            _showControls();
+                                            await controller.setPlaybackSpeed(
+                                              rate,
+                                            );
+                                            if (mounted) setState(() {});
+                                          },
                                           heatmap: _danmakuHeatmap,
                                           showHeatmap: _danmakuShowHeatmap &&
                                               _danmakuHeatmap.isNotEmpty,

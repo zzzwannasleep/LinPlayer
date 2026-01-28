@@ -485,7 +485,7 @@ class _HomePageState extends State<HomePage> {
             loading: _loading,
             onRefresh: () => _load(forceRefresh: true),
             isTv: isTv,
-            showSearchBar: true,
+            showSearchBar: false,
           ),
           AggregateServicePage(appState: widget.appState),
           useExoCore

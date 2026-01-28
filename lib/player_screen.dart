@@ -1924,6 +1924,17 @@ class _PlayerScreenState extends State<PlayerScreen>
                                           buffered: _lastBuffer,
                                           duration: _duration,
                                           isPlaying: _playerService.isPlaying,
+                                          playbackRate:
+                                              _playerService.player.state.rate,
+                                          onSetPlaybackRate: (rate) async {
+                                            _showControls();
+                                            if (!_playerService.isInitialized) {
+                                              return;
+                                            }
+                                            await _playerService.player
+                                                .setRate(rate);
+                                            if (mounted) setState(() {});
+                                          },
                                           heatmap: _danmakuHeatmap,
                                           showHeatmap: _danmakuShowHeatmap &&
                                               _danmakuHeatmap.isNotEmpty,

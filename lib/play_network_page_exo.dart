@@ -3539,6 +3539,15 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                         buffered: _lastBufferedEnd,
                                         duration: _duration,
                                         isPlaying: _isPlaying,
+                                        playbackRate:
+                                            controller.value.playbackSpeed,
+                                        onSetPlaybackRate: (rate) async {
+                                          _showControls();
+                                          await controller.setPlaybackSpeed(
+                                            rate,
+                                          );
+                                          if (mounted) setState(() {});
+                                        },
                                         heatmap: _danmakuHeatmap,
                                         showHeatmap: _danmakuShowHeatmap &&
                                             _danmakuHeatmap.isNotEmpty,
