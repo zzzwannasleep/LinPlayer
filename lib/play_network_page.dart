@@ -263,18 +263,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _progressReportInFlight = false;
     _nextDanmakuIndex = 0;
     _danmakuKey.currentState?.clear();
-      _lastUiTickAt = null;
-      _resumeHintTimer?.cancel();
-      _resumeHintTimer = null;
-      _resumeHintPosition = null;
-      _showResumeHint = false;
-      _startOverHintTimer?.cancel();
-      _startOverHintTimer = null;
-      _startOverHintPosition = null;
-      _showStartOverHint = false;
-      _deferProgressReporting = false;
-      _controlsVisible = true;
-      _isScrubbing = false;
+    _lastUiTickAt = null;
+    _resumeHintTimer?.cancel();
+    _resumeHintTimer = null;
+    _resumeHintPosition = null;
+    _showResumeHint = false;
+    _startOverHintTimer?.cancel();
+    _startOverHintTimer = null;
+    _startOverHintPosition = null;
+    _showStartOverHint = false;
+    _deferProgressReporting = false;
+    _controlsVisible = true;
+    _isScrubbing = false;
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     try {
@@ -330,18 +330,27 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _overrideResumeImmediately = false;
       if (start != null && start > Duration.zero) {
         final target = _safeSeekTarget(start, _playerService.duration);
+        _deferProgressReporting = true;
         if (resumeImmediately) {
           await _playerService.seek(target, flushBuffer: _flushBufferOnSeek);
-          _lastPosition = target;
-          _syncDanmakuCursor(target);
-          if (target > Duration.zero) {
-            _startOverHintPosition = target;
-            _showStartOverHint = true;
+          final applied = _playerService.position;
+          _lastPosition = applied;
+          _syncDanmakuCursor(applied);
+
+          final ok = (applied - target).inMilliseconds.abs() <= 1000;
+          if (ok) {
+            _deferProgressReporting = false;
+            if (applied > Duration.zero) {
+              _startOverHintPosition = applied;
+              _showStartOverHint = true;
+            }
+          } else {
+            _resumeHintPosition = target;
+            _showResumeHint = true;
           }
         } else {
           _resumeHintPosition = target;
           _showResumeHint = true;
-          _deferProgressReporting = true;
         }
       }
       _tracks = _playerService.player.state.tracks;
@@ -910,7 +919,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     setState(() => _episodePickerVisible = false);
     final ticks = episode.playbackPositionTicks;
-    final start = ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
+    final start =
+        ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
     final episodeSeriesId = (episode.seriesId ?? '').trim();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -920,7 +930,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           appState: widget.appState,
           server: widget.server,
           isTv: widget.isTv,
-          seriesId: episodeSeriesId.isNotEmpty ? episodeSeriesId : widget.seriesId,
+          seriesId:
+              episodeSeriesId.isNotEmpty ? episodeSeriesId : widget.seriesId,
           startPosition: start,
           resumeImmediately: true,
           audioStreamIndex: _selectedAudioStreamIndex,
@@ -939,6 +950,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     final theme = Theme.of(context);
     final accent = theme.colorScheme.secondary;
+    final showCover = widget.appState.episodePickerShowCover;
 
     final baseUrl = _baseUrl;
     final token = _token;
@@ -1017,7 +1029,78 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            const Spacer(),
+                            const SizedBox(width: 8),
+                            if (selectedSeason != null)
+                              Expanded(
+                                child: Container(
+                                  height: 36,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.12),
+                                    ),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: selectedSeason.id,
+                                      isExpanded: true,
+                                      isDense: true,
+                                      dropdownColor: const Color(0xFF202020),
+                                      iconEnabledColor: Colors.white70,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                      items: [
+                                        for (final entry
+                                            in seasons.asMap().entries)
+                                          DropdownMenuItem(
+                                            value: entry.value.id,
+                                            child: Text(
+                                              _seasonLabel(
+                                                entry.value,
+                                                entry.key,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (v) {
+                                        if (v == null || v.isEmpty) return;
+                                        if (v == _episodeSelectedSeasonId) {
+                                          return;
+                                        }
+                                        setState(() {
+                                          _episodeSelectedSeasonId = v;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              const Spacer(),
+                            IconButton(
+                              tooltip: showCover ? '隐藏封面' : '显示封面',
+                              icon: Icon(
+                                showCover
+                                    ? Icons.image_outlined
+                                    : Icons.format_list_bulleted,
+                              ),
+                              color: Colors.white,
+                              onPressed: () {
+                                final next =
+                                    !widget.appState.episodePickerShowCover;
+                                // ignore: unawaited_futures
+                                widget.appState.setEpisodePickerShowCover(next);
+                                setState(() {});
+                              },
+                            ),
                             IconButton(
                               tooltip: '关闭',
                               icon: const Icon(Icons.close),
@@ -1061,70 +1144,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                           ),
                         )
                       else ...[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                          child: Row(
-                            children: [
-                              const Text(
-                                '季度',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                    ),
-                                  ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<String>(
-                                      value: selectedSeason.id,
-                                      isExpanded: true,
-                                      dropdownColor: const Color(0xFF202020),
-                                      iconEnabledColor: Colors.white70,
-                                      style:
-                                          const TextStyle(color: Colors.white),
-                                      items: [
-                                        for (final entry
-                                            in seasons.asMap().entries)
-                                          DropdownMenuItem(
-                                            value: entry.value.id,
-                                            child: Text(
-                                              _seasonLabel(
-                                                entry.value,
-                                                entry.key,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                      ],
-                                      onChanged: (v) {
-                                        if (v == null || v.isEmpty) return;
-                                        if (v == _episodeSelectedSeasonId) {
-                                          return;
-                                        }
-                                        setState(() {
-                                          _episodeSelectedSeasonId = v;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                         Expanded(
                           child: FutureBuilder<List<MediaItem>>(
                             future:
@@ -1179,6 +1198,96 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               }
 
                               final columns = drawerWidth >= 360 ? 2 : 1;
+
+                              if (!showCover) {
+                                return ListView.separated(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    0,
+                                    12,
+                                    12,
+                                  ),
+                                  itemCount: eps.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(height: 10),
+                                  itemBuilder: (ctx, index) {
+                                    final e = eps[index];
+                                    final epNo = e.episodeNumber ?? (index + 1);
+                                    final isCurrent = e.id == widget.itemId;
+                                    final borderColor = isCurrent
+                                        ? accent.withValues(alpha: 0.85)
+                                        : Colors.white.withValues(alpha: 0.10);
+                                    final title = e.name.trim().isNotEmpty
+                                        ? e.name.trim()
+                                        : '第$epNo集';
+                                    return Material(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.18),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        side: BorderSide(color: borderColor),
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: InkWell(
+                                        onTap: () => _playEpisodeFromPicker(e),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 10,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xAA000000),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: Padding(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 3,
+                                                  ),
+                                                  child: Text(
+                                                    'E$epNo',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  title,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (isCurrent)
+                                                const Icon(
+                                                  Icons.play_circle,
+                                                  color: Colors.white,
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                );
+                              }
 
                               return GridView.builder(
                                 padding: const EdgeInsets.fromLTRB(
@@ -2839,147 +2948,151 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             duration: const Duration(milliseconds: 200),
             child: IgnorePointer(
               ignoring: !_controlsVisible,
-              child: GlassAppBar(
-                enableBlur: enableBlur,
-                child: AppBar(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  scrolledUnderElevation: 0,
-                  shadowColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  forceMaterialTransparency: true,
-                  title: Text(widget.title),
-                  centerTitle: true,
-                  actions: [
-                    IconButton(
-                      tooltip: '重新加载',
-                      icon: const Icon(Icons.refresh),
-                      onPressed: _loading
-                          ? null
-                          : () async {
-                              setState(() {
-                                _loading = true;
-                                _playError = null;
-                              });
-                              await _init();
-                            },
-                    ),
-                    if (_resolvedStream != null)
+              child: SafeArea(
+                top: false,
+                bottom: false,
+                child: GlassAppBar(
+                  enableBlur: enableBlur,
+                  child: AppBar(
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    shadowColor: Colors.transparent,
+                    surfaceTintColor: Colors.transparent,
+                    forceMaterialTransparency: true,
+                    title: Text(widget.title),
+                    centerTitle: true,
+                    actions: [
                       IconButton(
-                        tooltip: '复制链接',
-                        icon: const Icon(Icons.link),
+                        tooltip: '重新加载',
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _loading
+                            ? null
+                            : () async {
+                                setState(() {
+                                  _loading = true;
+                                  _playError = null;
+                                });
+                                await _init();
+                              },
+                      ),
+                      if (_resolvedStream != null)
+                        IconButton(
+                          tooltip: '复制链接',
+                          icon: const Icon(Icons.link),
+                          onPressed: () async {
+                            final text = _resolvedStream;
+                            if (text == null || text.isEmpty) return;
+                            await Clipboard.setData(ClipboardData(text: text));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('已复制播放链接')),
+                            );
+                          },
+                        ),
+                      IconButton(
+                        tooltip: '音轨',
+                        icon: const Icon(Icons.audiotrack),
+                        onPressed: () => _showAudioTracks(context),
+                      ),
+                      IconButton(
+                        tooltip: '字幕',
+                        icon: const Icon(Icons.subtitles),
+                        onPressed: () => _showSubtitleTracks(context),
+                      ),
+                      IconButton(
+                        tooltip: '弹幕',
+                        icon: const Icon(Icons.comment_outlined),
+                        onPressed: _showDanmakuSheet,
+                      ),
+                      IconButton(
+                        tooltip: '软硬解切换（当前：${_hwdecOn ? '硬解' : '软解'}）',
+                        icon: const Icon(Icons.memory),
                         onPressed: () async {
-                          final text = _resolvedStream;
-                          if (text == null || text.isEmpty) return;
-                          await Clipboard.setData(ClipboardData(text: text));
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('已复制播放链接')),
-                          );
+                          setState(() {
+                            _hwdecOn = !_hwdecOn;
+                            _loading = true;
+                            _playError = null;
+                          });
+                          await _init();
                         },
                       ),
-                    IconButton(
-                      tooltip: '音轨',
-                      icon: const Icon(Icons.audiotrack),
-                      onPressed: () => _showAudioTracks(context),
-                    ),
-                    IconButton(
-                      tooltip: '字幕',
-                      icon: const Icon(Icons.subtitles),
-                      onPressed: () => _showSubtitleTracks(context),
-                    ),
-                    IconButton(
-                      tooltip: '弹幕',
-                      icon: const Icon(Icons.comment_outlined),
-                      onPressed: _showDanmakuSheet,
-                    ),
-                    IconButton(
-                      tooltip: '软硬解切换（当前：${_hwdecOn ? '硬解' : '软解'}）',
-                      icon: const Icon(Icons.memory),
-                      onPressed: () async {
-                        setState(() {
-                          _hwdecOn = !_hwdecOn;
-                          _loading = true;
-                          _playError = null;
-                        });
-                        await _init();
-                      },
-                    ),
-                    IconButton(
-                      tooltip: _orientationTooltip,
-                      icon: Icon(_orientationIcon),
-                      onPressed: _cycleOrientationMode,
-                    ),
-                    PopupMenuButton<_PlayerMenuAction>(
-                      tooltip: '更多',
-                      icon: const Icon(Icons.more_vert),
-                      color: const Color(0xFF202020),
-                      onSelected: (action) async {
-                        switch (action) {
-                          case _PlayerMenuAction.anime4k:
-                            await _showAnime4kSheet();
-                            break;
-                          case _PlayerMenuAction.switchCore:
-                            await _switchCore();
-                            break;
-                          case _PlayerMenuAction.switchVersion:
-                            await _switchVersion();
-                            break;
-                        }
-                      },
-                      itemBuilder: (ctx) {
-                        final scheme = Theme.of(ctx).colorScheme;
-                        return [
-                          PopupMenuItem(
-                            value: _PlayerMenuAction.anime4k,
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.auto_fix_high,
-                                  color: scheme.primary,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  'Anime4K：${_anime4kPreset.label}',
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: _PlayerMenuAction.switchVersion,
-                            child: Row(
-                              children: [
-                                Icon(Icons.video_file_outlined,
-                                    color: scheme.primary),
-                                const SizedBox(width: 10),
-                                const Text(
-                                  '版本选择',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (!kIsWeb &&
-                              defaultTargetPlatform == TargetPlatform.android)
+                      IconButton(
+                        tooltip: _orientationTooltip,
+                        icon: Icon(_orientationIcon),
+                        onPressed: _cycleOrientationMode,
+                      ),
+                      PopupMenuButton<_PlayerMenuAction>(
+                        tooltip: '更多',
+                        icon: const Icon(Icons.more_vert),
+                        color: const Color(0xFF202020),
+                        onSelected: (action) async {
+                          switch (action) {
+                            case _PlayerMenuAction.anime4k:
+                              await _showAnime4kSheet();
+                              break;
+                            case _PlayerMenuAction.switchCore:
+                              await _switchCore();
+                              break;
+                            case _PlayerMenuAction.switchVersion:
+                              await _switchVersion();
+                              break;
+                          }
+                        },
+                        itemBuilder: (ctx) {
+                          final scheme = Theme.of(ctx).colorScheme;
+                          return [
                             PopupMenuItem(
-                              value: _PlayerMenuAction.switchCore,
+                              value: _PlayerMenuAction.anime4k,
                               child: Row(
                                 children: [
-                                  Icon(Icons.tune, color: scheme.secondary),
+                                  Icon(
+                                    Icons.auto_fix_high,
+                                    color: scheme.primary,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Anime4K：${_anime4kPreset.label}',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _PlayerMenuAction.switchVersion,
+                              child: Row(
+                                children: [
+                                  Icon(Icons.video_file_outlined,
+                                      color: scheme.primary),
                                   const SizedBox(width: 10),
                                   const Text(
-                                    '切换内核',
+                                    '版本选择',
                                     style: TextStyle(color: Colors.white),
                                   ),
                                 ],
                               ),
                             ),
-                        ];
-                      },
-                    ),
-                  ],
+                            if (!kIsWeb &&
+                                defaultTargetPlatform == TargetPlatform.android)
+                              PopupMenuItem(
+                                value: _PlayerMenuAction.switchCore,
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.tune, color: scheme.secondary),
+                                    const SizedBox(width: 10),
+                                    const Text(
+                                      '切换内核',
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ];
+                        },
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -3001,12 +3114,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                 _subtitleViewConfiguration,
                           ),
                           Positioned.fill(
-                            child: DanmakuStage(
+                              child: DanmakuStage(
                               key: _danmakuKey,
                               enabled: _danmakuEnabled,
                               opacity: _danmakuOpacity,
                               scale: _danmakuScale,
                               speed: _danmakuSpeed,
+                              timeScale: _playerService.player.state.rate,
                               bold: _danmakuBold,
                               scrollMaxLines: _danmakuMaxLines,
                               topMaxLines: _danmakuTopMaxLines,
@@ -3259,8 +3373,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                                 vertical: 6,
                                               ),
                                               decoration: BoxDecoration(
-                                                color: Colors.white.withValues(
-                                                    alpha: 0.18),
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.18),
                                                 borderRadius:
                                                     BorderRadius.circular(999),
                                               ),
@@ -3297,8 +3411,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                             alignment: Alignment.bottomCenter,
                             child: SafeArea(
                               top: false,
-                              left: false,
-                              right: false,
                               minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                               child: AnimatedOpacity(
                                 opacity: _controlsVisible ? 1 : 0,

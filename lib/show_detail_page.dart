@@ -2353,7 +2353,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         ),
                       if (_playInfo != null) ...[
                         const SizedBox(height: 16),
-                        _mediaInfo(context, _playInfo!),
+                        _mediaInfo(
+                          context,
+                          _playInfo!,
+                          selectedMediaSourceId: _selectedMediaSourceId,
+                        ),
                       ],
                       if (_chapters.isNotEmpty) ...[
                         const SizedBox(height: 16),
@@ -3207,9 +3211,15 @@ Widget _peopleSection(
   );
 }
 
-Widget _mediaInfo(BuildContext context, PlaybackInfoResult info) {
-  final map = info.mediaSources.first as Map<String, dynamic>;
-  final streams = (map['MediaStreams'] as List?) ?? [];
+Widget _mediaInfo(
+  BuildContext context,
+  PlaybackInfoResult info, {
+  String? selectedMediaSourceId,
+}) {
+  final map =
+      _ShowDetailPageState._findMediaSource(info, selectedMediaSourceId) ??
+          (info.mediaSources.first as Map<String, dynamic>);
+  final streams = (map['MediaStreams'] as List?) ?? const [];
   final video = streams
       .where((e) => (e as Map)['Type'] == 'Video')
       .map((e) => e as Map)
@@ -3230,8 +3240,19 @@ Widget _mediaInfo(BuildContext context, PlaybackInfoResult info) {
           _infoCard(
               '视频',
               video
-                  .map((v) => '${v['DisplayTitle'] ?? ''}\n${v['Codec'] ?? ''}')
-                  .join('\n')),
+                  .map((v) {
+                    final title = (v['DisplayTitle'] ?? '').toString().trim();
+                    final codec = (v['Codec'] ?? '').toString().trim();
+                    final aspect =
+                        _formatVideoAspectRatio(v.cast<String, dynamic>());
+                    final parts = <String>[
+                      if (title.isNotEmpty) title,
+                      if (codec.isNotEmpty) codec,
+                      if (aspect != null) '视频比例：$aspect',
+                    ];
+                    return parts.join('\n');
+                  })
+                  .join('\n\n')),
           _infoCard(
               '音频',
               audio
@@ -3241,6 +3262,73 @@ Widget _mediaInfo(BuildContext context, PlaybackInfoResult info) {
       ),
     ],
   );
+}
+
+String? _formatVideoAspectRatio(Map<String, dynamic> stream) {
+  final raw = stream['AspectRatio'];
+  if (raw is String) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.contains(':')) return trimmed;
+    final n = double.tryParse(trimmed);
+    if (n != null && n.isFinite && n > 0) return _formatAspectRatioValue(n);
+    return trimmed;
+  }
+
+  final width = _ShowDetailPageState._asInt(stream['Width']);
+  final height = _ShowDetailPageState._asInt(stream['Height']);
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    return null;
+  }
+  return _formatAspectRatioValue(width / height, width: width, height: height);
+}
+
+String _formatAspectRatioValue(
+  double ratio, {
+  int? width,
+  int? height,
+}) {
+  const known = <String, double>{
+    '1:1': 1.0,
+    '4:3': 4 / 3,
+    '3:2': 3 / 2,
+    '16:9': 16 / 9,
+    '21:9': 21 / 9,
+    '2:1': 2.0,
+    '1.85:1': 1.85,
+    '2.39:1': 2.39,
+  };
+  const tol = 0.03;
+  for (final e in known.entries) {
+    if ((ratio - e.value).abs() <= tol) return e.key;
+  }
+
+  if (width != null &&
+      height != null &&
+      width > 0 &&
+      height > 0 &&
+      width < 100000 &&
+      height < 100000) {
+    final g = _gcd(width, height);
+    if (g > 0) {
+      final a = (width / g).round();
+      final b = (height / g).round();
+      if (a > 0 && b > 0 && a <= 100 && b <= 100) return '$a:$b';
+    }
+  }
+
+  return ratio.toStringAsFixed(2);
+}
+
+int _gcd(int a, int b) {
+  var x = a.abs();
+  var y = b.abs();
+  while (y != 0) {
+    final t = x % y;
+    x = y;
+    y = t;
+  }
+  return x;
 }
 
 Widget _infoCard(String title, String body) => SizedBox(

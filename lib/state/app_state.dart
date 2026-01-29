@@ -202,6 +202,7 @@ class AppState extends ChangeNotifier {
   static const _kSeekBackwardSecondsKey = 'seekBackwardSeconds_v1';
   static const _kSeekForwardSecondsKey = 'seekForwardSeconds_v1';
   static const _kForceRemoteControlKeysKey = 'forceRemoteControlKeys_v1';
+  static const _kEpisodePickerShowCoverKey = 'episodePickerShowCover_v1';
 
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
@@ -281,6 +282,7 @@ class AppState extends ChangeNotifier {
   int _seekBackwardSeconds = 10;
   int _seekForwardSeconds = 20;
   bool _forceRemoteControlKeys = false;
+  bool _episodePickerShowCover = true;
   LocalPlaybackHandoff? _localPlaybackHandoff;
   bool _loading = false;
   String? _error;
@@ -289,8 +291,8 @@ class AppState extends ChangeNotifier {
   Future<void>? _homeInFlight;
   final Map<String, int> _seriesEpisodeCountCache = {};
   final Map<String, Future<int?>> _seriesEpisodeCountInFlight = {};
-  final Map<String, Map<String, SeriesPlaybackOverride>> _seriesPlaybackOverrides =
-      {};
+  final Map<String, Map<String, SeriesPlaybackOverride>>
+      _seriesPlaybackOverrides = {};
 
   static String _librariesCacheKey(String serverId) =>
       '$_kServerLibrariesCachePrefix$serverId';
@@ -673,6 +675,7 @@ class AppState extends ChangeNotifier {
   int get seekBackwardSeconds => _seekBackwardSeconds;
   int get seekForwardSeconds => _seekForwardSeconds;
   bool get forceRemoteControlKeys => _forceRemoteControlKeys;
+  bool get episodePickerShowCover => _episodePickerShowCover;
 
   SeriesPlaybackOverride? seriesPlaybackOverride({
     required String serverId,
@@ -778,8 +781,7 @@ class AppState extends ChangeNotifier {
     _playbackBufferPreset = playbackBufferPresetFromId(
       prefs.getString(_kPlaybackBufferPresetKey),
     );
-    final fallbackBackRatio =
-        _playbackBufferPreset.suggestedBackRatio ?? 0.05;
+    final fallbackBackRatio = _playbackBufferPreset.suggestedBackRatio ?? 0.05;
     _playbackBufferBackRatio =
         (prefs.getDouble(_kPlaybackBufferBackRatioKey) ?? fallbackBackRatio)
             .clamp(0.0, 0.30)
@@ -891,6 +893,8 @@ class AppState extends ChangeNotifier {
         (prefs.getInt(_kSeekForwardSecondsKey) ?? 20).clamp(1, 120);
     _forceRemoteControlKeys =
         prefs.getBool(_kForceRemoteControlKeysKey) ?? false;
+    _episodePickerShowCover =
+        prefs.getBool(_kEpisodePickerShowCoverKey) ?? true;
 
     _seriesPlaybackOverrides.clear();
     final rawSeriesOverrides = prefs.getString(_kSeriesPlaybackOverridesKey);
@@ -1053,6 +1057,7 @@ class AppState extends ChangeNotifier {
           'seekBackwardSeconds': _seekBackwardSeconds,
           'seekForwardSeconds': _seekForwardSeconds,
           'forceRemoteControlKeys': _forceRemoteControlKeys,
+          'episodePickerShowCover': _episodePickerShowCover,
         },
         'seriesPlaybackOverrides': _seriesPlaybackOverrides.map(
           (serverId, seriesMap) => MapEntry(
@@ -1462,6 +1467,8 @@ class AppState extends ChangeNotifier {
             .clamp(1, 120);
     final nextForceRemoteControlKeys =
         _readBool(interactionMap['forceRemoteControlKeys'], fallback: false);
+    final nextEpisodePickerShowCover =
+        _readBool(interactionMap['episodePickerShowCover'], fallback: true);
 
     final nextServers = <ServerProfile>[];
     final rawServers = data['servers'];
@@ -1549,6 +1556,7 @@ class AppState extends ChangeNotifier {
     _seekBackwardSeconds = nextSeekBackwardSeconds;
     _seekForwardSeconds = nextSeekForwardSeconds;
     _forceRemoteControlKeys = nextForceRemoteControlKeys;
+    _episodePickerShowCover = nextEpisodePickerShowCover;
     _seriesPlaybackOverrides
       ..clear()
       ..addAll(nextSeriesPlaybackOverrides);
@@ -1688,6 +1696,7 @@ class AppState extends ChangeNotifier {
     await prefs.setInt(_kSeekBackwardSecondsKey, _seekBackwardSeconds);
     await prefs.setInt(_kSeekForwardSecondsKey, _seekForwardSeconds);
     await prefs.setBool(_kForceRemoteControlKeysKey, _forceRemoteControlKeys);
+    await prefs.setBool(_kEpisodePickerShowCoverKey, _episodePickerShowCover);
     await _persistSeriesPlaybackOverrides(prefs);
 
     await _persistServers(prefs);
@@ -3329,6 +3338,14 @@ class AppState extends ChangeNotifier {
     _forceRemoteControlKeys = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kForceRemoteControlKeysKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setEpisodePickerShowCover(bool enabled) async {
+    if (_episodePickerShowCover == enabled) return;
+    _episodePickerShowCover = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kEpisodePickerShowCoverKey, enabled);
     notifyListeners();
   }
 

@@ -2068,78 +2068,82 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
               duration: const Duration(milliseconds: 200),
               child: IgnorePointer(
                 ignoring: _fullScreen && !_controlsVisible,
-                child: GlassAppBar(
-                  enableBlur: false,
-                  child: AppBar(
-                    backgroundColor: _fullScreen ? Colors.transparent : null,
-                    foregroundColor: _fullScreen ? Colors.white : null,
-                    elevation: _fullScreen ? 0 : null,
-                    scrolledUnderElevation: _fullScreen ? 0 : null,
-                    shadowColor: _fullScreen ? Colors.transparent : null,
-                    surfaceTintColor: _fullScreen ? Colors.transparent : null,
-                    forceMaterialTransparency: _fullScreen,
-                    title: Text(fileName),
-                    centerTitle: true,
-                    actions: [
-                      IconButton(
-                        tooltip: '选择文件',
-                        icon: const Icon(Icons.folder_open),
-                        onPressed: _pickFiles,
-                      ),
-                      IconButton(
-                        tooltip: '选集',
-                        icon: const Icon(Icons.playlist_play),
-                        onPressed: _playlist.isEmpty
-                            ? null
-                            : () {
-                                showModalBottomSheet(
-                                  context: context,
-                                  builder: (ctx) => ListView.builder(
-                                    itemCount: _playlist.length,
-                                    itemBuilder: (_, i) {
-                                      final f = _playlist[i];
-                                      return ListTile(
-                                        title: Text(f.name),
-                                        trailing: i == _currentIndex
-                                            ? const Icon(Icons.play_arrow)
-                                            : null,
-                                        onTap: () {
-                                          Navigator.of(ctx).pop();
-                                          // ignore: unawaited_futures
-                                          _playFile(f, i);
-                                        },
-                                      );
-                                    },
-                                  ),
-                                );
-                              },
-                      ),
-                      IconButton(
-                        tooltip: '音轨',
-                        icon: const Icon(Icons.audiotrack),
-                        onPressed: () => _showAudioTracks(context),
-                      ),
-                      IconButton(
-                        tooltip: '字幕',
-                        icon: const Icon(Icons.subtitles),
-                        onPressed: () => _showSubtitleTracks(context),
-                      ),
-                      IconButton(
-                        tooltip: '弹幕',
-                        icon: const Icon(Icons.comment_outlined),
-                        onPressed: _showDanmakuSheet,
-                      ),
-                      IconButton(
-                        tooltip: '软/硬解切换',
-                        icon: const Icon(Icons.memory),
-                        onPressed: () => _showNotSupported('软/硬解切换'),
-                      ),
-                      IconButton(
-                        tooltip: _orientationTooltip,
-                        icon: Icon(_orientationIcon),
-                        onPressed: _cycleOrientationMode,
-                      ),
-                    ],
+                child: SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: GlassAppBar(
+                    enableBlur: false,
+                    child: AppBar(
+                      backgroundColor: _fullScreen ? Colors.transparent : null,
+                      foregroundColor: _fullScreen ? Colors.white : null,
+                      elevation: _fullScreen ? 0 : null,
+                      scrolledUnderElevation: _fullScreen ? 0 : null,
+                      shadowColor: _fullScreen ? Colors.transparent : null,
+                      surfaceTintColor: _fullScreen ? Colors.transparent : null,
+                      forceMaterialTransparency: _fullScreen,
+                      title: Text(fileName),
+                      centerTitle: true,
+                      actions: [
+                        IconButton(
+                          tooltip: '选择文件',
+                          icon: const Icon(Icons.folder_open),
+                          onPressed: _pickFiles,
+                        ),
+                        IconButton(
+                          tooltip: '选集',
+                          icon: const Icon(Icons.playlist_play),
+                          onPressed: _playlist.isEmpty
+                              ? null
+                              : () {
+                                  showModalBottomSheet(
+                                    context: context,
+                                    builder: (ctx) => ListView.builder(
+                                      itemCount: _playlist.length,
+                                      itemBuilder: (_, i) {
+                                        final f = _playlist[i];
+                                        return ListTile(
+                                          title: Text(f.name),
+                                          trailing: i == _currentIndex
+                                              ? const Icon(Icons.play_arrow)
+                                              : null,
+                                          onTap: () {
+                                            Navigator.of(ctx).pop();
+                                            // ignore: unawaited_futures
+                                            _playFile(f, i);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                        ),
+                        IconButton(
+                          tooltip: '音轨',
+                          icon: const Icon(Icons.audiotrack),
+                          onPressed: () => _showAudioTracks(context),
+                        ),
+                        IconButton(
+                          tooltip: '字幕',
+                          icon: const Icon(Icons.subtitles),
+                          onPressed: () => _showSubtitleTracks(context),
+                        ),
+                        IconButton(
+                          tooltip: '弹幕',
+                          icon: const Icon(Icons.comment_outlined),
+                          onPressed: _showDanmakuSheet,
+                        ),
+                        IconButton(
+                          tooltip: '软/硬解切换',
+                          icon: const Icon(Icons.memory),
+                          onPressed: () => _showNotSupported('软/硬解切换'),
+                        ),
+                        IconButton(
+                          tooltip: _orientationTooltip,
+                          icon: Icon(_orientationIcon),
+                          onPressed: _cycleOrientationMode,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -2169,6 +2173,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                 opacity: _danmakuOpacity,
                                 scale: _danmakuScale,
                                 speed: _danmakuSpeed,
+                                timeScale: controller.value.playbackSpeed,
                                 bold: _danmakuBold,
                                 scrollMaxLines: _danmakuMaxLines,
                                 topMaxLines: _danmakuTopMaxLines,
@@ -2393,8 +2398,6 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                               alignment: Alignment.bottomCenter,
                               child: SafeArea(
                                 top: false,
-                                left: false,
-                                right: false,
                                 minimum:
                                     const EdgeInsets.fromLTRB(12, 0, 12, 12),
                                 child: AnimatedOpacity(

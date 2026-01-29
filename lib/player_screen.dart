@@ -1638,94 +1638,98 @@ class _PlayerScreenState extends State<PlayerScreen>
               duration: const Duration(milliseconds: 200),
               child: IgnorePointer(
                 ignoring: _fullScreen && !_controlsVisible,
-                child: GlassAppBar(
-                  enableBlur: false,
-                  child: AppBar(
-                    backgroundColor: _fullScreen ? Colors.transparent : null,
-                    foregroundColor: _fullScreen ? Colors.white : null,
-                    elevation: _fullScreen ? 0 : null,
-                    scrolledUnderElevation: _fullScreen ? 0 : null,
-                    shadowColor: _fullScreen ? Colors.transparent : null,
-                    surfaceTintColor: _fullScreen ? Colors.transparent : null,
-                    forceMaterialTransparency: _fullScreen,
-                    title: Text(currentFileName),
-                    centerTitle: true,
-                    actions: [
-                      IconButton(
-                        tooltip: '选集',
-                        icon: const Icon(Icons.playlist_play),
-                        onPressed: () {
-                          showModalBottomSheet(
-                            context: context,
-                            builder: (ctx) => ListView.builder(
-                              itemCount: _playlist.length,
-                              itemBuilder: (_, i) {
-                                final f = _playlist[i];
-                                return ListTile(
-                                  title: Text(f.name),
-                                  trailing: i == _currentlyPlayingIndex
-                                      ? const Icon(Icons.play_arrow)
-                                      : null,
-                                  onTap: () {
-                                    Navigator.of(ctx).pop();
-                                    _playFile(f, i);
-                                  },
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                      IconButton(
-                        tooltip: _anime4kPreset.isOff
-                            ? 'Anime4K'
-                            : 'Anime4K: ${_anime4kPreset.label}',
-                        icon: Icon(
-                          _anime4kPreset.isOff
-                              ? Icons.auto_fix_high_outlined
-                              : Icons.auto_fix_high,
+                child: SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: GlassAppBar(
+                    enableBlur: false,
+                    child: AppBar(
+                      backgroundColor: _fullScreen ? Colors.transparent : null,
+                      foregroundColor: _fullScreen ? Colors.white : null,
+                      elevation: _fullScreen ? 0 : null,
+                      scrolledUnderElevation: _fullScreen ? 0 : null,
+                      shadowColor: _fullScreen ? Colors.transparent : null,
+                      surfaceTintColor: _fullScreen ? Colors.transparent : null,
+                      forceMaterialTransparency: _fullScreen,
+                      title: Text(currentFileName),
+                      centerTitle: true,
+                      actions: [
+                        IconButton(
+                          tooltip: '选集',
+                          icon: const Icon(Icons.playlist_play),
+                          onPressed: () {
+                            showModalBottomSheet(
+                              context: context,
+                              builder: (ctx) => ListView.builder(
+                                itemCount: _playlist.length,
+                                itemBuilder: (_, i) {
+                                  final f = _playlist[i];
+                                  return ListTile(
+                                    title: Text(f.name),
+                                    trailing: i == _currentlyPlayingIndex
+                                        ? const Icon(Icons.play_arrow)
+                                        : null,
+                                    onTap: () {
+                                      Navigator.of(ctx).pop();
+                                      _playFile(f, i);
+                                    },
+                                  );
+                                },
+                              ),
+                            );
+                          },
                         ),
-                        onPressed: _showAnime4kSheet,
-                      ),
-                      IconButton(
-                        tooltip: '音轨',
-                        icon: const Icon(Icons.audiotrack),
-                        onPressed: () => _showAudioTracks(context),
-                      ),
-                      IconButton(
-                        tooltip: '字幕',
-                        icon: const Icon(Icons.subtitles),
-                        onPressed: () => _showSubtitleTracks(context),
-                      ),
-                      IconButton(
-                        tooltip: '弹幕',
-                        icon: const Icon(Icons.comment_outlined),
-                        onPressed: _showDanmakuSheet,
-                      ),
-                      IconButton(
-                        tooltip: _hwdecOn ? '切换软解' : '切换硬解',
-                        icon: Icon(_hwdecOn
-                            ? Icons.memory
-                            : Icons.settings_backup_restore),
-                        onPressed: () {
-                          setState(() => _hwdecOn = !_hwdecOn);
-                          if (_currentlyPlayingIndex >= 0 &&
-                              _playlist.isNotEmpty) {
-                            _playFile(_playlist[_currentlyPlayingIndex],
-                                _currentlyPlayingIndex);
-                          }
-                        },
-                      ),
-                      IconButton(
-                        tooltip: _orientationTooltip,
-                        icon: Icon(_orientationIcon),
-                        onPressed: _cycleOrientationMode,
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.folder_open),
-                        onPressed: _pickFile,
-                      ),
-                    ],
+                        IconButton(
+                          tooltip: _anime4kPreset.isOff
+                              ? 'Anime4K'
+                              : 'Anime4K: ${_anime4kPreset.label}',
+                          icon: Icon(
+                            _anime4kPreset.isOff
+                                ? Icons.auto_fix_high_outlined
+                                : Icons.auto_fix_high,
+                          ),
+                          onPressed: _showAnime4kSheet,
+                        ),
+                        IconButton(
+                          tooltip: '音轨',
+                          icon: const Icon(Icons.audiotrack),
+                          onPressed: () => _showAudioTracks(context),
+                        ),
+                        IconButton(
+                          tooltip: '字幕',
+                          icon: const Icon(Icons.subtitles),
+                          onPressed: () => _showSubtitleTracks(context),
+                        ),
+                        IconButton(
+                          tooltip: '弹幕',
+                          icon: const Icon(Icons.comment_outlined),
+                          onPressed: _showDanmakuSheet,
+                        ),
+                        IconButton(
+                          tooltip: _hwdecOn ? '切换软解' : '切换硬解',
+                          icon: Icon(_hwdecOn
+                              ? Icons.memory
+                              : Icons.settings_backup_restore),
+                          onPressed: () {
+                            setState(() => _hwdecOn = !_hwdecOn);
+                            if (_currentlyPlayingIndex >= 0 &&
+                                _playlist.isNotEmpty) {
+                              _playFile(_playlist[_currentlyPlayingIndex],
+                                  _currentlyPlayingIndex);
+                            }
+                          },
+                        ),
+                        IconButton(
+                          tooltip: _orientationTooltip,
+                          icon: Icon(_orientationIcon),
+                          onPressed: _cycleOrientationMode,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.folder_open),
+                          onPressed: _pickFile,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -1753,6 +1757,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 opacity: _danmakuOpacity,
                                 scale: _danmakuScale,
                                 speed: _danmakuSpeed,
+                                timeScale: _playerService.player.state.rate,
                                 bold: _danmakuBold,
                                 scrollMaxLines: _danmakuMaxLines,
                                 topMaxLines: _danmakuTopMaxLines,
@@ -1782,7 +1787,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                                       children: [
                                         const CircularProgressIndicator(),
                                         if ((widget.appState?.showBufferSpeed ??
-                                                false))
+                                            false))
                                           Padding(
                                             padding:
                                                 const EdgeInsets.only(top: 12),
@@ -1911,8 +1916,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                               alignment: Alignment.bottomCenter,
                               child: SafeArea(
                                 top: false,
-                                left: false,
-                                right: false,
                                 minimum:
                                     const EdgeInsets.fromLTRB(12, 0, 12, 12),
                                 child: AnimatedOpacity(

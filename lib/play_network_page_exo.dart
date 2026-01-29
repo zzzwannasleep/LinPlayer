@@ -515,7 +515,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     setState(() => _episodePickerVisible = false);
     final ticks = episode.playbackPositionTicks;
-    final start = ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
+    final start =
+        ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
     final episodeSeriesId = (episode.seriesId ?? '').trim();
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -525,7 +526,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           appState: widget.appState,
           server: widget.server,
           isTv: widget.isTv,
-          seriesId: episodeSeriesId.isNotEmpty ? episodeSeriesId : widget.seriesId,
+          seriesId:
+              episodeSeriesId.isNotEmpty ? episodeSeriesId : widget.seriesId,
           startPosition: start,
           resumeImmediately: true,
           audioStreamIndex: _selectedAudioStreamIndex,
@@ -544,6 +546,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     final theme = Theme.of(context);
     final accent = theme.colorScheme.secondary;
+    final showCover = widget.appState.episodePickerShowCover;
 
     final baseUrl = _baseUrl;
     final token = _token;
@@ -622,7 +625,78 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            const Spacer(),
+                            const SizedBox(width: 8),
+                            if (selectedSeason != null)
+                              Expanded(
+                                child: Container(
+                                  height: 36,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color:
+                                          Colors.white.withValues(alpha: 0.12),
+                                    ),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: selectedSeason.id,
+                                      isExpanded: true,
+                                      isDense: true,
+                                      dropdownColor: const Color(0xFF202020),
+                                      iconEnabledColor: Colors.white70,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                      items: [
+                                        for (final entry
+                                            in seasons.asMap().entries)
+                                          DropdownMenuItem(
+                                            value: entry.value.id,
+                                            child: Text(
+                                              _seasonLabel(
+                                                entry.value,
+                                                entry.key,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (v) {
+                                        if (v == null || v.isEmpty) return;
+                                        if (v == _episodeSelectedSeasonId) {
+                                          return;
+                                        }
+                                        setState(() {
+                                          _episodeSelectedSeasonId = v;
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else
+                              const Spacer(),
+                            IconButton(
+                              tooltip: showCover ? '隐藏封面' : '显示封面',
+                              icon: Icon(
+                                showCover
+                                    ? Icons.image_outlined
+                                    : Icons.format_list_bulleted,
+                              ),
+                              color: Colors.white,
+                              onPressed: () {
+                                final next =
+                                    !widget.appState.episodePickerShowCover;
+                                // ignore: unawaited_futures
+                                widget.appState.setEpisodePickerShowCover(next);
+                                setState(() {});
+                              },
+                            ),
                             IconButton(
                               tooltip: '关闭',
                               icon: const Icon(Icons.close),
@@ -666,70 +740,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                           ),
                         )
                       else ...[
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                          child: Row(
-                            children: [
-                              const Text(
-                                '季度',
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.12,
-                                      ),
-                                    ),
-                                  ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<String>(
-                                      value: selectedSeason.id,
-                                      isExpanded: true,
-                                      dropdownColor: const Color(0xFF202020),
-                                      iconEnabledColor: Colors.white70,
-                                      style:
-                                          const TextStyle(color: Colors.white),
-                                      items: [
-                                        for (final entry
-                                            in seasons.asMap().entries)
-                                          DropdownMenuItem(
-                                            value: entry.value.id,
-                                            child: Text(
-                                              _seasonLabel(
-                                                entry.value,
-                                                entry.key,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                      ],
-                                      onChanged: (v) {
-                                        if (v == null || v.isEmpty) return;
-                                        if (v == _episodeSelectedSeasonId) {
-                                          return;
-                                        }
-                                        setState(() {
-                                          _episodeSelectedSeasonId = v;
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                         Expanded(
                           child: FutureBuilder<List<MediaItem>>(
                             future:
@@ -784,6 +794,96 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                               }
 
                               final columns = drawerWidth >= 360 ? 2 : 1;
+
+                              if (!showCover) {
+                                return ListView.separated(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    0,
+                                    12,
+                                    12,
+                                  ),
+                                  itemCount: eps.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(height: 10),
+                                  itemBuilder: (ctx, index) {
+                                    final e = eps[index];
+                                    final epNo = e.episodeNumber ?? (index + 1);
+                                    final isCurrent = e.id == widget.itemId;
+                                    final borderColor = isCurrent
+                                        ? accent.withValues(alpha: 0.85)
+                                        : Colors.white.withValues(alpha: 0.10);
+                                    final title = e.name.trim().isNotEmpty
+                                        ? e.name.trim()
+                                        : '第$epNo集';
+                                    return Material(
+                                      color:
+                                          Colors.black.withValues(alpha: 0.18),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                        side: BorderSide(color: borderColor),
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: InkWell(
+                                        onTap: () => _playEpisodeFromPicker(e),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 10,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color:
+                                                      const Color(0xAA000000),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: Padding(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 3,
+                                                  ),
+                                                  child: Text(
+                                                    'E$epNo',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  title,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (isCurrent)
+                                                const Icon(
+                                                  Icons.play_circle,
+                                                  color: Colors.white,
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                );
+                              }
 
                               return GridView.builder(
                                 padding: const EdgeInsets.fromLTRB(
@@ -2069,17 +2169,25 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _overrideResumeImmediately = false;
       if (start != null && start > Duration.zero) {
         final target = _safeSeekTarget(start, controller.value.duration);
+        _deferProgressReporting = true;
         if (resumeImmediately) {
-          await controller.seekTo(target);
-          _position = target;
-          if (target > Duration.zero) {
-            _startOverHintPosition = target;
-            _showStartOverHint = true;
+          final ok = await _seekToPositionBestEffort(controller, target);
+          final applied = controller.value.position;
+          _position = applied;
+          _syncDanmakuCursor(applied);
+          if (ok) {
+            _deferProgressReporting = false;
+            if (applied > Duration.zero) {
+              _startOverHintPosition = applied;
+              _showStartOverHint = true;
+            }
+          } else {
+            _resumeHintPosition = target;
+            _showResumeHint = true;
           }
         } else {
           _resumeHintPosition = target;
           _showResumeHint = true;
-          _deferProgressReporting = true;
         }
       }
       await controller.play();
@@ -2454,6 +2562,46 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (target < total) return target;
     final rewind = total - const Duration(seconds: 5);
     return rewind > Duration.zero ? rewind : Duration.zero;
+  }
+
+  static const Duration _kResumeSeekTolerance = Duration(seconds: 1);
+
+  bool _seekCloseEnough(Duration position, Duration target) {
+    return (position - target).inMilliseconds.abs() <=
+        _kResumeSeekTolerance.inMilliseconds;
+  }
+
+  Future<bool> _seekToPositionBestEffort(
+      VideoPlayerController controller, Duration target) async {
+    if (!controller.value.isInitialized) return false;
+    if (target <= Duration.zero) return true;
+
+    Future<void> attemptSeek() async {
+      try {
+        final seekFuture = controller.seekTo(target);
+        await seekFuture.timeout(const Duration(seconds: 3));
+      } catch (_) {}
+    }
+
+    await attemptSeek();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (_seekCloseEnough(controller.value.position, target)) return true;
+
+    // Some streams (e.g., certain HLS transcodes) only allow seeking after playback starts.
+    if (!controller.value.isPlaying) {
+      try {
+        await controller.play();
+      } catch (_) {}
+    }
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await attemptSeek();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      if (_seekCloseEnough(controller.value.position, target)) return true;
+    }
+
+    return _seekCloseEnough(controller.value.position, target);
   }
 
   void _startResumeHintTimer() {
@@ -3355,109 +3503,114 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             duration: const Duration(milliseconds: 200),
             child: IgnorePointer(
               ignoring: !_controlsVisible,
-              child: GlassAppBar(
-                enableBlur: enableBlur,
-                child: AppBar(
-                  backgroundColor: Colors.transparent,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  scrolledUnderElevation: 0,
-                  shadowColor: Colors.transparent,
-                  surfaceTintColor: Colors.transparent,
-                  forceMaterialTransparency: true,
-                  title: Text(widget.title),
-                  centerTitle: true,
-                  actions: [
-                    IconButton(
-                      tooltip: '重新加载',
-                      icon: const Icon(Icons.refresh),
-                      onPressed: _loading ? null : _init,
-                    ),
-                    if (stream != null && stream.isNotEmpty)
+              child: SafeArea(
+                top: false,
+                bottom: false,
+                child: GlassAppBar(
+                  enableBlur: enableBlur,
+                  child: AppBar(
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    scrolledUnderElevation: 0,
+                    shadowColor: Colors.transparent,
+                    surfaceTintColor: Colors.transparent,
+                    forceMaterialTransparency: true,
+                    title: Text(widget.title),
+                    centerTitle: true,
+                    actions: [
                       IconButton(
-                        tooltip: '复制链接',
-                        icon: const Icon(Icons.link),
-                        onPressed: () async {
-                          await Clipboard.setData(ClipboardData(text: stream));
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('已复制播放链接')),
-                          );
+                        tooltip: '重新加载',
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _loading ? null : _init,
+                      ),
+                      if (stream != null && stream.isNotEmpty)
+                        IconButton(
+                          tooltip: '复制链接',
+                          icon: const Icon(Icons.link),
+                          onPressed: () async {
+                            await Clipboard.setData(
+                                ClipboardData(text: stream));
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('已复制播放链接')),
+                            );
+                          },
+                        ),
+                      IconButton(
+                        tooltip: '音轨',
+                        icon: const Icon(Icons.audiotrack),
+                        onPressed: () => _showAudioTracks(context),
+                      ),
+                      IconButton(
+                        tooltip: '字幕',
+                        icon: const Icon(Icons.subtitles),
+                        onPressed: () => _showSubtitleTracks(context),
+                      ),
+                      IconButton(
+                        tooltip: '弹幕',
+                        icon: const Icon(Icons.comment_outlined),
+                        onPressed: _showDanmakuSheet,
+                      ),
+                      IconButton(
+                        tooltip: '软/硬解切换',
+                        icon: const Icon(Icons.memory),
+                        onPressed: () => _showNotSupported('软/硬解切换'),
+                      ),
+                      IconButton(
+                        tooltip: _orientationTooltip,
+                        icon: Icon(_orientationIcon),
+                        onPressed: _cycleOrientationMode,
+                      ),
+                      PopupMenuButton<_PlayerMenuAction>(
+                        tooltip: '更多',
+                        icon: const Icon(Icons.more_vert),
+                        color: const Color(0xFF202020),
+                        onSelected: (action) async {
+                          switch (action) {
+                            case _PlayerMenuAction.switchCore:
+                              await _switchCore();
+                              break;
+                            case _PlayerMenuAction.switchVersion:
+                              await _switchVersion();
+                              break;
+                          }
+                        },
+                        itemBuilder: (ctx) {
+                          final scheme = Theme.of(ctx).colorScheme;
+                          return [
+                            PopupMenuItem(
+                              value: _PlayerMenuAction.switchVersion,
+                              child: Row(
+                                children: [
+                                  Icon(Icons.video_file_outlined,
+                                      color: scheme.primary),
+                                  const SizedBox(width: 10),
+                                  const Text(
+                                    '版本选择',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: _PlayerMenuAction.switchCore,
+                              child: Row(
+                                children: [
+                                  Icon(Icons.tune, color: scheme.secondary),
+                                  const SizedBox(width: 10),
+                                  const Text(
+                                    '切换内核',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ];
                         },
                       ),
-                    IconButton(
-                      tooltip: '音轨',
-                      icon: const Icon(Icons.audiotrack),
-                      onPressed: () => _showAudioTracks(context),
-                    ),
-                    IconButton(
-                      tooltip: '字幕',
-                      icon: const Icon(Icons.subtitles),
-                      onPressed: () => _showSubtitleTracks(context),
-                    ),
-                    IconButton(
-                      tooltip: '弹幕',
-                      icon: const Icon(Icons.comment_outlined),
-                      onPressed: _showDanmakuSheet,
-                    ),
-                    IconButton(
-                      tooltip: '软/硬解切换',
-                      icon: const Icon(Icons.memory),
-                      onPressed: () => _showNotSupported('软/硬解切换'),
-                    ),
-                    IconButton(
-                      tooltip: _orientationTooltip,
-                      icon: Icon(_orientationIcon),
-                      onPressed: _cycleOrientationMode,
-                    ),
-                    PopupMenuButton<_PlayerMenuAction>(
-                      tooltip: '更多',
-                      icon: const Icon(Icons.more_vert),
-                      color: const Color(0xFF202020),
-                      onSelected: (action) async {
-                        switch (action) {
-                          case _PlayerMenuAction.switchCore:
-                            await _switchCore();
-                            break;
-                          case _PlayerMenuAction.switchVersion:
-                            await _switchVersion();
-                            break;
-                        }
-                      },
-                      itemBuilder: (ctx) {
-                        final scheme = Theme.of(ctx).colorScheme;
-                        return [
-                          PopupMenuItem(
-                            value: _PlayerMenuAction.switchVersion,
-                            child: Row(
-                              children: [
-                                Icon(Icons.video_file_outlined,
-                                    color: scheme.primary),
-                                const SizedBox(width: 10),
-                                const Text(
-                                  '版本选择',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: _PlayerMenuAction.switchCore,
-                            child: Row(
-                              children: [
-                                Icon(Icons.tune, color: scheme.secondary),
-                                const SizedBox(width: 10),
-                                const Text(
-                                  '切换内核',
-                                  style: TextStyle(color: Colors.white),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ];
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -3487,6 +3640,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                               opacity: _danmakuOpacity,
                               scale: _danmakuScale,
                               speed: _danmakuSpeed,
+                              timeScale: controller.value.playbackSpeed,
                               bold: _danmakuBold,
                               scrollMaxLines: _danmakuMaxLines,
                               topMaxLines: _danmakuTopMaxLines,
@@ -3786,8 +3940,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                                 vertical: 6,
                                               ),
                                               decoration: BoxDecoration(
-                                                color: Colors.white.withValues(
-                                                    alpha: 0.18),
+                                                color: Colors.white
+                                                    .withValues(alpha: 0.18),
                                                 borderRadius:
                                                     BorderRadius.circular(999),
                                               ),
@@ -3824,8 +3978,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                             alignment: Alignment.bottomCenter,
                             child: SafeArea(
                               top: false,
-                              left: false,
-                              right: false,
                               minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                               child: AnimatedOpacity(
                                 opacity: _controlsVisible ? 1 : 0,
