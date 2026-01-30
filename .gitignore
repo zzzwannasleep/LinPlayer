@@ -4,6 +4,9 @@
 *.pyc
 *.swp
 .DS_Store
+.codex/
+api.postman_collection.json
+emya.postman_collection.json
 .atom/
 .buildlog/
 .history
