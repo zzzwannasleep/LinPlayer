@@ -9,13 +9,10 @@ import 'app_config/app_product.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'server_text_import_sheet.dart';
-import 'services/emby_api.dart';
-import 'services/emos_api.dart';
-import 'services/emos_auth_flow.dart';
+import 'services/emos_sign_in_service.dart';
 import 'services/plex_api.dart';
 import 'services/website_metadata.dart';
 import 'state/app_state.dart';
-import 'state/emos_session.dart';
 import 'state/media_server_type.dart';
 import 'state/preferences.dart';
 import 'state/server_profile.dart';
@@ -46,70 +43,10 @@ class _ServerPageState extends State<ServerPage> {
 
     setState(() => _emosSigningIn = true);
     try {
-      final auth = await EmosAuthFlow.signIn(
+      await EmosSignInService.signInAndBootstrap(
+        appState: widget.appState,
         baseUrl: baseUrl,
         appName: config.displayName,
-      );
-
-      await widget.appState.setEmosSession(
-        EmosSession(
-          token: auth.token,
-          userId: auth.userId,
-          username: auth.username,
-          avatarUrl: auth.avatar,
-        ),
-      );
-
-      final api = EmosApi(baseUrl: baseUrl, token: auth.token);
-      final user = await api.fetchUser();
-
-      final emyaUrl = user.emyaUrl.trim();
-      if (emyaUrl.isEmpty) throw StateError('Missing emya_url');
-
-      var emyaPassword = user.emyaPassword.trim();
-      if (emyaPassword.isEmpty) {
-        final oneTime = await api.fetchEmyaLoginPassword();
-        emyaPassword = oneTime.password.trim();
-      }
-      if (emyaPassword.isEmpty) throw StateError('Missing emya password');
-
-      final emyaScheme =
-          Uri.tryParse(emyaUrl)?.scheme.trim().toLowerCase() ?? 'https';
-      final usernameCandidates = <String>{user.username.trim(), user.userId.trim()}
-        ..removeWhere((e) => e.isEmpty);
-
-      String chosenUsername = usernameCandidates.isNotEmpty
-          ? usernameCandidates.first
-          : user.username.trim();
-      for (final candidate in usernameCandidates) {
-        try {
-          final probe = EmbyApi(
-            hostOrUrl: emyaUrl,
-            preferredScheme: emyaScheme,
-            serverType: MediaServerType.emby,
-            deviceId: widget.appState.deviceId,
-          );
-          await probe.authenticate(
-            username: candidate,
-            password: emyaPassword,
-            deviceId: widget.appState.deviceId,
-            serverType: MediaServerType.emby,
-          );
-          chosenUsername = candidate;
-          break;
-        } catch (_) {
-          // try next
-        }
-      }
-
-      await widget.appState.addServer(
-        hostOrUrl: emyaUrl,
-        scheme: emyaScheme == 'http' ? 'http' : 'https',
-        serverType: MediaServerType.emby,
-        username: chosenUsername,
-        password: emyaPassword,
-        displayName: 'Emos Emya',
-        activate: true,
       );
     } catch (e) {
       if (!mounted) return;

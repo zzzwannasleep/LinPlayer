@@ -10,12 +10,15 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import 'app_config/app_config_scope.dart';
+import 'app_config/app_product.dart';
 import 'danmaku_settings_page.dart';
+import 'emos/emos_console_page.dart';
 import 'interaction_settings_page.dart';
 import 'server_text_import_sheet.dart';
 import 'services/app_update_flow.dart';
 import 'services/app_update_service.dart';
 import 'services/cover_cache_manager.dart';
+import 'services/emos_sign_in_service.dart';
 import 'services/stream_cache.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/app_icon_service.dart';
@@ -842,6 +845,7 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context, _) {
         final appConfig = AppConfigScope.of(context);
         final appState = widget.appState;
+        final isEmos = appConfig.product == AppProduct.emos;
         final blurAllowed = !isTv;
         final enableBlur = blurAllowed && appState.enableBlurEffects;
         final trailingMaxWidth = (MediaQuery.sizeOf(context).width * 0.45)
@@ -859,6 +863,74 @@ class _SettingsPageState extends State<SettingsPage> {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
+              if (isEmos)
+                _Section(
+                  title: 'Emos',
+                  subtitle: appState.hasEmosSession
+                      ? 'Signed in as ${appState.emosSession?.username ?? ''}'
+                      : 'Not signed in',
+                  enableBlur: enableBlur,
+                  child: Column(
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.dashboard_outlined),
+                        title: const Text('Emos Console'),
+                        subtitle: Text('Base URL: ${appConfig.emosBaseUrl}'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  EmosConsolePage(appState: widget.appState),
+                            ),
+                          );
+                        },
+                      ),
+                      const Divider(height: 1),
+                      if (appState.hasEmosSession)
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.logout_outlined),
+                          title: const Text('Sign out'),
+                          onTap: () async {
+                            await appState.clearEmosSession();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Signed out')),
+                            );
+                          },
+                        )
+                      else
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.login_outlined),
+                          title: const Text('Sign in'),
+                          onTap: () async {
+                            try {
+                              await _runWithBlockingDialog(
+                                context,
+                                () => EmosSignInService.signInAndBootstrap(
+                                  appState: appState,
+                                  baseUrl: appConfig.emosBaseUrl,
+                                  appName: appConfig.displayName,
+                                ),
+                                title: 'Emos sign-in',
+                                subtitle: 'Please finish sign-in in browser...',
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Emos sign-in failed: $e'),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                    ],
+                  ),
+                ),
               _Section(
                 title: '外观',
                 subtitle: blurAllowed
