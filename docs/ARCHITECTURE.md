@@ -76,7 +76,7 @@
     - `authenticate(username, password, deviceId)`：
       - 尝试 http/https + 可选端口组合（`_candidates()`），命中后返回 `token/userId/baseUrlUsed`。
     - `fetchDomains(token, baseUrl)`：
-      - 拉取扩展线路：`/emby/System/Ext/ServerDomains`（允许失败，失败即返回空；可配合 `https://github.com/uhdnow/emby_ext_domains` 部署/使用）。
+      - 拉取扩展线路：`/emby/System/Ext/ServerDomains`（允许失败，失败即返回空；可配合 `emby_ext_domains` 等实现部署/使用）。
     - `fetchLibraries(token, baseUrl, userId)`：
       - 拉取媒体库视图：`/emby/Users/{userId}/Views`。
     - `fetchItems(...)`：

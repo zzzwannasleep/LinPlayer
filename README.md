@@ -17,7 +17,8 @@
     <a href="#quickstart">快速上手</a> ·
     <a href="#tv">TV 使用说明</a> ·
     <a href="#build">构建与运行</a> ·
-    <a href="docs/ARCHITECTURE.md">源码导览</a>
+    <a href="docs/ARCHITECTURE.md">源码导览</a> ·
+    <a href="docs/TV_PROXY_ROADMAP.md">TV 代理路线图</a>
   </p>
 </div>
 
@@ -261,16 +262,11 @@ flutter build linux --release
 - `lib/src/player/danmaku_stage.dart` 弹幕渲染（覆盖层）
 - `lib/state/app_state.dart` 状态/登录/缓存
 
-## TODO（多产品 + TV 内置代理）
-- [x] 产品轴：`APP_PRODUCT` + `AppConfig`（标题 / UA / repo）
-- [x] Server Adapter（骨架）：接口 + factory + Lin/Emos/UHD adapter 占位
-- [x] Feature Flags（骨架）：每产品允许的服务器类型
-- [ ] Server Adapter（收口）：UI 不再直接依赖具体 API（只依赖 adapter/interface）
+## TODO（TV 内置代理）
 - [ ] TV 形态：设置页 TV 专区 + 遥控/焦点优化（`DeviceType.isTv`）
 - [ ] TV 内置代理 MVP：mihomo start/stop/status（仅 Android TV）
 - [ ] 代理面板：metacubexd 打包/解压 + 本地 WebView 打开
 - [ ] 走代理：App HTTP（`HttpClientFactory`）+ 播放器网络流（mpv 参数注入）
-- [ ] 构建产物：Android flavors（lin/emos/uhd）+ 其他平台 `--dart-define`
 - [ ] 合规：确认 mihomo / metacubexd 许可证与分发声明
 
 ## 鸣谢与参考
@@ -283,7 +279,7 @@ flutter build linux --release
 - NipaPlay Reload：https://github.com/MCDFsteve/NipaPlay-Reload
 
 ### 可配合使用的服务
-- Emby 扩展线路：`emby_ext_domains`（参考/服务实现：`https://github.com/uhdnow/emby_ext_domains`）
+- Emby 扩展线路：`emby_ext_domains`（可自行部署/使用相关开源实现）
 - 在线弹幕兼容服务：`https://github.com/huangxd-/danmu_api`、`https://github.com/l429609201/misaka_danmu_server`
 
 ### 文档
