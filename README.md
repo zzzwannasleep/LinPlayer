@@ -1,7 +1,8 @@
 <div align="center">
   <img src="assets/app_icon.jpg" width="120" alt="LinPlayer" />
   <h1>LinPlayer （半成品 没有完工！ 不建议现在下载！）
-  如果想要体验可以去releases里面的nightly找最新的安装包体验！</h1>
+  如果想要体验可以去releases里面的nightly找最新的安装包体验！
+  最近重构ing 不会发版</h1>
   <p>跨平台（Windows / macOS / Linux / Android / Android TV）本地 + Emby/Jellyfin + WebDAV 媒体播放器（含 Plex PIN 登录）</p>
   <p>
     <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white" />
