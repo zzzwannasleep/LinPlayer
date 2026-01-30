@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/backup_crypto.dart';
 import '../services/emby_api.dart';
 import '../services/webdav_api.dart';
+import '../server_adapters/server_adapter_factory.dart';
 import 'anime4k_preferences.dart';
 import 'danmaku_preferences.dart';
 import 'interaction_preferences.dart';
@@ -1767,31 +1768,21 @@ class AppState extends ChangeNotifier {
         _error = '当前版本仅支持 Emby/Jellyfin 登录；Plex 请用 Plex 登录入口添加。';
         return;
       }
-      final api = EmbyApi(
-        hostOrUrl: hostOrUrl,
-        preferredScheme: scheme,
-        port: port,
+      final adapter = ServerAdapterFactory.forLogin(
         serverType: serverType,
         deviceId: _deviceId,
       );
-      final auth = await api.authenticate(
+      final auth = await adapter.authenticate(
+        hostOrUrl: hostOrUrl,
+        scheme: scheme,
+        port: port,
         username: fixedUsername,
         password: password,
-        deviceId: _deviceId,
-        serverType: serverType,
-      );
-      final apiForServer = EmbyApi(
-        hostOrUrl: auth.baseUrlUsed,
-        preferredScheme: scheme,
-        apiPrefix: auth.apiPrefixUsed,
-        serverType: serverType,
-        deviceId: _deviceId,
       );
 
       String? serverName;
       try {
-        serverName = await apiForServer.fetchServerName(auth.baseUrlUsed,
-            token: auth.token);
+        serverName = await adapter.fetchServerName(auth);
       } catch (_) {
         // best-effort
       }
@@ -1800,10 +1791,10 @@ class AppState extends ChangeNotifier {
           ? fixedDisplayName
           : ((serverName ?? '').trim().isNotEmpty
               ? serverName!.trim()
-              : _suggestServerName(auth.baseUrlUsed));
+              : _suggestServerName(auth.baseUrl));
 
       final existingIndex = _servers.indexWhere(
-        (s) => s.baseUrl == auth.baseUrlUsed && s.serverType == serverType,
+        (s) => s.baseUrl == auth.baseUrl && s.serverType == serverType,
       );
 
       final resolvedIconUrl = switch (fixedIconUrl) {
@@ -1817,10 +1808,10 @@ class AppState extends ChangeNotifier {
         name: name,
         remark: fixedRemark.isEmpty ? null : fixedRemark,
         iconUrl: resolvedIconUrl,
-        baseUrl: auth.baseUrlUsed,
+        baseUrl: auth.baseUrl,
         token: auth.token,
         userId: auth.userId,
-        apiPrefix: auth.apiPrefixUsed,
+        apiPrefix: auth.apiPrefix,
         lastErrorCode: null,
         lastErrorMessage: null,
         hiddenLibraries:
@@ -1847,16 +1838,8 @@ class AppState extends ChangeNotifier {
       if (!activate) return;
 
       try {
-        final lines = await apiForServer.fetchDomains(
-          auth.token,
-          auth.baseUrlUsed,
-          allowFailure: true,
-        );
-        final libs = await apiForServer.fetchLibraries(
-          token: auth.token,
-          baseUrl: auth.baseUrlUsed,
-          userId: auth.userId,
-        );
+        final lines = await adapter.fetchDomains(auth, allowFailure: true);
+        final libs = await adapter.fetchLibraries(auth);
 
         _activeServerId = server.id;
         _domains = lines;

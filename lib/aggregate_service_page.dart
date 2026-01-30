@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'services/cover_cache_manager.dart';
 import 'services/emby_api.dart';
+import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/app_components.dart';
@@ -122,20 +123,23 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
       return;
     }
 
+    final access =
+        resolveServerAccess(appState: widget.appState, server: server);
+    if (access == null) {
+      if (!mounted || seq != _loadSeq) return;
+      setState(() {
+        _stateByServer[server.id] = const _ServerContinueWatchingState(
+          loading: false,
+          error: 'Unsupported server',
+          items: [],
+        );
+      });
+      return;
+    }
+
     try {
-      final api = EmbyApi(
-        hostOrUrl: baseUrl,
-        preferredScheme: 'https',
-        apiPrefix: server.apiPrefix,
-        serverType: server.serverType,
-        deviceId: widget.appState.deviceId,
-      );
-      final res = await api.fetchContinueWatching(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-        limit: _limit,
-      );
+      final res =
+          await access.adapter.fetchContinueWatching(access.auth, limit: _limit);
       if (!mounted || seq != _loadSeq) return;
       setState(() {
         _stateByServer[server.id] = _ServerContinueWatchingState(
@@ -562,17 +566,12 @@ class _AggregateSearchTabStatefulState
     final userId = server.userId.trim();
     if (baseUrl.isEmpty || token.isEmpty || userId.isEmpty) return null;
 
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: server.apiPrefix,
-      serverType: server.serverType,
-      deviceId: widget.appState.deviceId,
-    );
-    final res = await api.fetchItems(
-      token: token,
-      baseUrl: baseUrl,
-      userId: userId,
+    final access =
+        resolveServerAccess(appState: widget.appState, server: server);
+    if (access == null) return null;
+
+    final res = await access.adapter.fetchItems(
+      access.auth,
       parentId: seriesId,
       includeItemTypes: 'Episode',
       recursive: true,
@@ -669,17 +668,15 @@ class _AggregateSearchTabStatefulState
           return;
         }
         try {
-          final api = EmbyApi(
-            hostOrUrl: baseUrl,
-            preferredScheme: 'https',
-            apiPrefix: server.apiPrefix,
-            serverType: server.serverType,
-            deviceId: widget.appState.deviceId,
-          );
-          final res = await api.fetchItems(
-            token: token,
-            baseUrl: baseUrl,
-            userId: userId,
+          final access =
+              resolveServerAccess(appState: widget.appState, server: server);
+          if (access == null) {
+            serverErrors[server.id] = 'Unsupported server';
+            return;
+          }
+
+          final res = await access.adapter.fetchItems(
+            access.auth,
             searchTerm: query,
             includeItemTypes: 'Series,Movie',
             recursive: true,

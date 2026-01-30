@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'app_config/app_config_scope.dart';
 import 'player_service.dart';
 import 'services/dandanplay_api.dart';
 import 'src/player/danmaku.dart';
@@ -1622,7 +1623,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   Widget build(BuildContext context) {
     final currentFileName = _currentlyPlayingIndex != -1
         ? _playlist[_currentlyPlayingIndex].name
-        : 'LinPlayer';
+        : AppConfigScope.of(context).displayName;
 
     _isTvDevice = _isTv(context);
 

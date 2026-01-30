@@ -9,6 +9,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+import 'app_config/app_config_scope.dart';
 import 'danmaku_settings_page.dart';
 import 'interaction_settings_page.dart';
 import 'server_text_import_sheet.dart';
@@ -38,7 +39,6 @@ enum _BackupIoAction { file, clipboard }
 
 class _SettingsPageState extends State<SettingsPage> {
   static const _donateUrl = 'https://afdian.com/a/zzzwannasleep';
-  static const _repoUrl = 'https://github.com/zzzwannasleep/LinPlayer';
   static const _customSentinel = '__custom__';
   static const _subtitleOff = 'off';
   double? _mpvCacheDraftMb;
@@ -840,6 +840,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
+        final appConfig = AppConfigScope.of(context);
         final appState = widget.appState;
         final blurAllowed = !isTv;
         final enableBlur = blurAllowed && appState.enableBlurEffects;
@@ -1638,10 +1639,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.info_outline),
                       title: const Text('关于'),
-                      subtitle: const Text(_repoUrl),
+                      subtitle: Text('${appConfig.displayName} (${appConfig.repoUrl})'),
                       trailing: const Icon(Icons.open_in_new),
                       onTap: () async {
-                        final ok = await launchUrlString(_repoUrl);
+                        final ok = await launchUrlString(appConfig.repoUrl);
                         if (!ok && context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(

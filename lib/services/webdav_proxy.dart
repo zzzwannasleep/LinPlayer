@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'emby_api.dart';
 import 'webdav_api.dart';
 
 class WebDavProxyServer {
@@ -14,7 +15,7 @@ class WebDavProxyServer {
   final Map<String, _WebDavProxyEntry> _entries = {};
 
   final HttpClient _client = HttpClient()
-    ..userAgent = 'LinPlayer'
+    ..userAgent = EmbyApi.userAgent
     ..badCertificateCallback = (_, __, ___) => true;
 
   Future<Uri> ensureStarted() async {

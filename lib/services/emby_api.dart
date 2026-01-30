@@ -233,8 +233,20 @@ class PlaybackInfoResult {
 
 class EmbyApi {
   static String appVersion = '1.0.0';
+  static String userAgentProduct = 'LinPlayer';
+  static String defaultClientName = 'LinPlayer';
 
-  static String get userAgent => 'LinPlayer/$appVersion';
+  static String get userAgent => '$userAgentProduct/$appVersion';
+
+  static void setUserAgentProduct(String product) {
+    final v = product.trim();
+    if (v.isNotEmpty) userAgentProduct = v;
+  }
+
+  static void setDefaultClientName(String name) {
+    final v = name.trim();
+    if (v.isNotEmpty) defaultClientName = v;
+  }
 
   static void setAppVersion(String version) {
     final v = version.trim();
@@ -244,7 +256,7 @@ class EmbyApi {
   static String _authorizationValue({
     required MediaServerType serverType,
     required String deviceId,
-    String client = 'LinPlayer',
+    String? client,
     String device = 'Flutter',
     String? version,
     String? userId,
@@ -257,10 +269,14 @@ class EmbyApi {
     final scheme =
         serverType == MediaServerType.jellyfin ? 'MediaBrowser' : 'Emby';
 
+    final clientName = (client == null || client.trim().isEmpty)
+        ? defaultClientName
+        : client.trim();
+
     final parts = <String>[
       if (userId != null && userId.trim().isNotEmpty)
         'UserId="${userId.trim()}"',
-      'Client="$client"',
+      'Client="$clientName"',
       'Device="$device"',
       'DeviceId="$deviceId"',
       'Version="$v"',
@@ -272,7 +288,7 @@ class EmbyApi {
   static Map<String, String> buildAuthorizationHeaders({
     required MediaServerType serverType,
     required String deviceId,
-    String client = 'LinPlayer',
+    String? client,
     String device = 'Flutter',
     String? version,
     String? userId,
@@ -308,8 +324,8 @@ class EmbyApi {
     String apiPrefix = 'emby',
     this.serverType = MediaServerType.emby,
     String? deviceId,
-    String clientName = 'LinPlayer',
-    String deviceName = 'Flutter',
+    String? clientName,
+    String? deviceName,
     http.Client? client,
   })  : _hostOrUrl = hostOrUrl.trim(),
         _preferredScheme = preferredScheme,
@@ -318,8 +334,12 @@ class EmbyApi {
         deviceId = (deviceId == null || deviceId.trim().isEmpty)
             ? _randomId()
             : deviceId.trim(),
-        clientName = clientName.trim().isEmpty ? 'LinPlayer' : clientName.trim(),
-        deviceName = deviceName.trim().isEmpty ? 'Flutter' : deviceName.trim(),
+        clientName = (clientName == null || clientName.trim().isEmpty)
+            ? defaultClientName
+            : clientName.trim(),
+        deviceName = (deviceName == null || deviceName.trim().isEmpty)
+            ? 'Flutter'
+            : deviceName.trim(),
         _client = client ??
             IOClient(
               HttpClient()
@@ -916,9 +936,10 @@ class EmbyApi {
     required String itemId,
     bool exoPlayer = false,
   }) async {
+    final profileName = exoPlayer ? '$clientName-Exo' : clientName;
     final deviceProfile = exoPlayer
         ? {
-            "Name": "LinPlayer-Exo",
+            "Name": profileName,
             "MaxStreamingBitrate": 120000000,
             "DirectPlayProfiles": [
               {
@@ -945,7 +966,7 @@ class EmbyApi {
             "DeviceId": deviceId,
           }
         : {
-            "Name": "LinPlayer",
+            "Name": profileName,
             "MaxStreamingBitrate": 120000000,
             "DirectPlayProfiles": [
               {"Container": "mp4,mkv,mov,avi,ts,flv,webm", "Type": "Video"},

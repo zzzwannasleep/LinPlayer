@@ -13,6 +13,7 @@ import 'player_service.dart';
 import 'play_network_page_exo.dart';
 import 'services/dandanplay_api.dart';
 import 'services/emby_api.dart';
+import 'server_adapters/server_access.dart';
 import 'state/app_state.dart';
 import 'state/anime4k_preferences.dart';
 import 'state/danmaku_preferences.dart';
@@ -65,7 +66,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     with WidgetsBindingObserver {
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
-  EmbyApi? _embyApi;
+  ServerAccess? _serverAccess;
   bool _loading = true;
   String? _playError;
   late bool _hwdecOn;
@@ -193,16 +194,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final baseUrl = _baseUrl;
-    if (baseUrl != null && baseUrl.trim().isNotEmpty) {
-      _embyApi = EmbyApi(
-        hostOrUrl: baseUrl,
-        preferredScheme: 'https',
-        apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-        serverType: widget.server?.serverType ?? widget.appState.serverType,
-        deviceId: widget.appState.deviceId,
-      );
-    }
+    _serverAccess =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
     _hwdecOn = widget.appState.preferHardwareDecode;
     _anime4kPreset = widget.appState.anime4kPreset;
     _danmakuEnabled = widget.appState.danmakuEnabled;
@@ -542,24 +535,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     int fileSizeBytes = 0;
     int videoDurationSeconds = 0;
     try {
-      final api = EmbyApi(
-        hostOrUrl: appState.baseUrl!,
-        preferredScheme: 'https',
-        apiPrefix: appState.apiPrefix,
-        serverType: appState.serverType,
-        deviceId: appState.deviceId,
-      );
-      final item = await api.fetchItemDetail(
-        token: appState.token!,
-        baseUrl: appState.baseUrl!,
-        userId: appState.userId!,
-        itemId: widget.itemId,
-      );
-      fileName = _buildDanmakuMatchName(item);
-      fileSizeBytes = item.sizeBytes ?? 0;
-      final ticks = item.runTimeTicks ?? 0;
-      if (ticks > 0) {
-        videoDurationSeconds = (ticks / 10000000).round().clamp(0, 1 << 31);
+      final access =
+          resolveServerAccess(appState: appState, server: widget.server);
+      if (access != null) {
+        final item = await access.adapter
+            .fetchItemDetail(access.auth, itemId: widget.itemId);
+        fileName = _buildDanmakuMatchName(item);
+        fileSizeBytes = item.sizeBytes ?? 0;
+        final ticks = item.runTimeTicks ?? 0;
+        if (ticks > 0) {
+          videoDurationSeconds = (ticks / 10000000).round().clamp(0, 1 << 31);
+        }
       }
     } catch (_) {}
 
@@ -725,21 +711,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (baseUrl == null || token == null || userId == null) return;
 
     setState(() => _episodePickerItemLoading = true);
-    final api = _embyApi ??
-        EmbyApi(
-          hostOrUrl: baseUrl,
-          preferredScheme: 'https',
-          apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-          serverType: widget.server?.serverType ?? widget.appState.serverType,
-          deviceId: widget.appState.deviceId,
-        );
+    final access = _serverAccess;
+    if (access == null) {
+      if (mounted) {
+        setState(() => _episodePickerItemLoading = false);
+      }
+      return;
+    }
     try {
-      final detail = await api.fetchItemDetail(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-        itemId: widget.itemId,
-      );
+      final detail = await access.adapter
+          .fetchItemDetail(access.auth, itemId: widget.itemId);
       if (!mounted) return;
       setState(() => _episodePickerItem = detail);
     } catch (_) {
@@ -797,21 +778,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         throw Exception('当前不是剧集，无法选集');
       }
 
-      final api = _embyApi ??
-          EmbyApi(
-            hostOrUrl: baseUrl,
-            preferredScheme: 'https',
-            apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-            serverType: widget.server?.serverType ?? widget.appState.serverType,
-            deviceId: widget.appState.deviceId,
-          );
+      final access = _serverAccess;
+      if (access == null) {
+        throw Exception('Not connected');
+      }
 
-      final seasons = await api.fetchSeasons(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-        seriesId: seriesId,
-      );
+      final seasons =
+          await access.adapter.fetchSeasons(access.auth, seriesId: seriesId);
       final seasonItems =
           seasons.items.where((s) => s.type.toLowerCase() == 'season').toList();
       seasonItems.sort((a, b) {
@@ -887,20 +860,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       throw Exception('未连接服务器');
     }
 
-    final api = _embyApi ??
-        EmbyApi(
-          hostOrUrl: baseUrl,
-          preferredScheme: 'https',
-          apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-          serverType: widget.server?.serverType ?? widget.appState.serverType,
-          deviceId: widget.appState.deviceId,
-        );
-    final eps = await api.fetchEpisodes(
-      token: token,
-      baseUrl: baseUrl,
-      userId: userId,
-      seasonId: seasonId,
-    );
+    final access = _serverAccess;
+    if (access == null) {
+      throw Exception('Not connected');
+    }
+
+    final eps =
+        await access.adapter.fetchEpisodes(access.auth, seasonId: seasonId);
     final items = List<MediaItem>.from(eps.items);
     items.sort((a, b) {
       final aNo = a.episodeNumber ?? 0;
@@ -1747,21 +1713,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
 
     try {
-      final api = _embyApi ??
-          EmbyApi(
-            hostOrUrl: base,
-            preferredScheme: 'https',
-            apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-            serverType: widget.server?.serverType ?? widget.appState.serverType,
-            deviceId: widget.appState.deviceId,
-          );
-      final info = await api.fetchPlaybackInfo(
-        token: token,
-        baseUrl: base,
-        userId: userId,
-        deviceId: widget.appState.deviceId,
-        itemId: widget.itemId,
-      );
+      final access = _serverAccess;
+      if (access == null) throw Exception('Not connected');
+      final info =
+          await access.adapter.fetchPlaybackInfo(access.auth, itemId: widget.itemId);
       final sources = info.mediaSources.cast<Map<String, dynamic>>();
       _availableMediaSources = List<Map<String, dynamic>>.from(sources);
       Map<String, dynamic>? ms;
@@ -2067,14 +2022,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   Future<void> _reportPlaybackStartBestEffort() async {
     if (_reportedStart || _reportedStop) return;
-    final api = _embyApi;
-    if (api == null) return;
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || baseUrl.isEmpty || token == null || token.isEmpty) {
-      return;
-    }
+    final access = _serverAccess;
+    if (access == null) return;
+    if (access.auth.baseUrl.isEmpty || access.auth.token.isEmpty) return;
 
     _reportedStart = true;
     final posTicks = _toTicks(_lastPosition);
@@ -2083,16 +2033,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final ps = _playSessionId;
       final ms = _mediaSourceId;
       if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-        await api.reportPlaybackStart(
-          token: token,
-          baseUrl: baseUrl,
-          deviceId: widget.appState.deviceId,
+        await access.adapter.reportPlaybackStart(
+          access.auth,
           itemId: widget.itemId,
           mediaSourceId: ms,
           playSessionId: ps,
           positionTicks: posTicks,
           isPaused: paused,
-          userId: userId,
         );
       }
     } catch (_) {}
@@ -2102,14 +2049,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (_reportedStop) return;
     if (_deferProgressReporting) return;
     if (_progressReportInFlight) return;
-    final api = _embyApi;
-    if (api == null) return;
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || baseUrl.isEmpty || token == null || token.isEmpty) {
-      return;
-    }
+    final access = _serverAccess;
+    if (access == null) return;
+    if (access.auth.baseUrl.isEmpty || access.auth.token.isEmpty) return;
 
     final now = DateTime.now();
     final paused = !_playerService.isPlaying;
@@ -2135,22 +2077,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         final ps = _playSessionId;
         final ms = _mediaSourceId;
         if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-          await api.reportPlaybackProgress(
-            token: token,
-            baseUrl: baseUrl,
-            deviceId: widget.appState.deviceId,
+          await access.adapter.reportPlaybackProgress(
+            access.auth,
             itemId: widget.itemId,
             mediaSourceId: ms,
             playSessionId: ps,
             positionTicks: ticks,
             isPaused: paused,
-            userId: userId,
           );
-        } else if (userId != null && userId.isNotEmpty) {
-          await api.updatePlaybackPosition(
-            token: token,
-            baseUrl: baseUrl,
-            userId: userId,
+        } else if (access.auth.userId.isNotEmpty) {
+          await access.adapter.updatePlaybackPosition(
+            access.auth,
             itemId: widget.itemId,
             positionTicks: ticks,
           );
@@ -2166,14 +2103,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (_reportedStop) return;
     _reportedStop = true;
 
-    final api = _embyApi;
-    if (api == null) return;
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || baseUrl.isEmpty || token == null || token.isEmpty) {
-      return;
-    }
+    final access = _serverAccess;
+    if (access == null) return;
+    if (access.auth.baseUrl.isEmpty || access.auth.token.isEmpty) return;
 
     final pos =
         _playerService.isInitialized ? _playerService.position : _lastPosition;
@@ -2186,25 +2118,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       final ps = _playSessionId;
       final ms = _mediaSourceId;
       if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-        await api.reportPlaybackStopped(
-          token: token,
-          baseUrl: baseUrl,
-          deviceId: widget.appState.deviceId,
+        await access.adapter.reportPlaybackStopped(
+          access.auth,
           itemId: widget.itemId,
           mediaSourceId: ms,
           playSessionId: ps,
           positionTicks: ticks,
-          userId: userId,
         );
       }
     } catch (_) {}
 
     try {
-      if (userId != null && userId.isNotEmpty) {
-        await api.updatePlaybackPosition(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
+      if (access.auth.userId.isNotEmpty) {
+        await access.adapter.updatePlaybackPosition(
+          access.auth,
           itemId: widget.itemId,
           positionTicks: ticks,
           played: played,
@@ -2852,25 +2779,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     var sources = _availableMediaSources;
     if (sources.isEmpty) {
       try {
-        final base = _baseUrl!;
-        final token = _token!;
-        final userId = _userId!;
-        final api = _embyApi ??
-            EmbyApi(
-              hostOrUrl: base,
-              preferredScheme: 'https',
-              apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-              serverType:
-                  widget.server?.serverType ?? widget.appState.serverType,
-              deviceId: widget.appState.deviceId,
-            );
-        final info = await api.fetchPlaybackInfo(
-          token: token,
-          baseUrl: base,
-          userId: userId,
-          deviceId: widget.appState.deviceId,
-          itemId: widget.itemId,
-        );
+        final access = _serverAccess;
+        if (access == null) throw Exception('Not connected');
+        final info =
+            await access.adapter.fetchPlaybackInfo(access.auth, itemId: widget.itemId);
         sources = info.mediaSources.cast<Map<String, dynamic>>();
         _availableMediaSources = List<Map<String, dynamic>>.from(sources);
       } catch (_) {

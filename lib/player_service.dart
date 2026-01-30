@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'app_config/app_config.dart';
 import 'services/stream_cache.dart';
 import 'src/external_player/external_mpv_launcher.dart';
 import 'state/preferences.dart';
@@ -85,7 +86,7 @@ class PlayerService {
 
     return PlayerConfiguration(
       osc: false,
-      title: 'LinPlayer',
+      title: AppConfig.current.displayName,
       logLevel: MPVLogLevel.warn,
       bufferSize: bufferSize,
       protocolWhitelist: const [

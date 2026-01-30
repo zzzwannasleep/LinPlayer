@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'app_config/app_config_scope.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'server_text_import_sheet.dart';
@@ -826,7 +827,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   PlexApi _buildPlexApi() {
     return PlexApi(
       clientIdentifier: widget.appState.deviceId,
-      product: 'LinPlayer',
+      product: AppConfigScope.of(context).displayName,
       device: 'Flutter',
       platform: 'Flutter',
       version: '1.0.0',
@@ -1005,6 +1006,10 @@ class _AddServerSheetState extends State<_AddServerSheet> {
   @override
   Widget build(BuildContext context) {
     final viewInsets = MediaQuery.of(context).viewInsets;
+    final config = AppConfigScope.of(context);
+    final serverTypes = MediaServerType.values
+        .where(config.features.allowedServerTypes.contains)
+        .toList(growable: false);
     final loading = widget.appState.isLoading;
     final showHostFields = _serverType.isEmbyLike ||
         _serverType == MediaServerType.webdav ||
@@ -1050,7 +1055,7 @@ class _AddServerSheetState extends State<_AddServerSheet> {
                     ),
                     const SizedBox(height: 12),
                     SegmentedButton<MediaServerType>(
-                      segments: MediaServerType.values
+                      segments: serverTypes
                           .map(
                             (t) => ButtonSegment<MediaServerType>(
                               value: t,
