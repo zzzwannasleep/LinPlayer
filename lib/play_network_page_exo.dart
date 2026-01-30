@@ -23,7 +23,13 @@ import 'src/player/danmaku.dart';
 import 'src/player/danmaku_processing.dart';
 import 'src/player/danmaku_stage.dart';
 import 'src/player/playback_controls.dart';
+import 'src/player/features/player_gestures.dart';
 import 'src/player/net_speed.dart';
+import 'src/player/network/emby_media_source_utils.dart';
+import 'src/player/network/network_playback_backend.dart';
+import 'src/player/network/network_playback_reporter.dart';
+import 'src/player/shared/player_types.dart';
+import 'src/player/shared/system_ui.dart';
 import 'src/ui/glass_blur.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
@@ -32,6 +38,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
     required this.title,
     required this.itemId,
     required this.appState,
+    this.playbackBackend,
     this.server,
     this.isTv = false,
     this.seriesId,
@@ -45,6 +52,7 @@ class ExoPlayNetworkPage extends StatefulWidget {
   final String title;
   final String itemId;
   final AppState appState;
+  final NetworkPlaybackBackend? playbackBackend;
   final ServerProfile? server;
   final bool isTv;
   final String? seriesId;
@@ -61,6 +69,8 @@ class ExoPlayNetworkPage extends StatefulWidget {
 class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     with WidgetsBindingObserver {
   ServerAccess? _serverAccess;
+  late final NetworkPlaybackBackend _playbackBackend;
+  Map<String, String> _httpHeaders = const {};
   VideoPlayerController? _controller;
   Timer? _uiTimer;
 
@@ -85,25 +95,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Timer? _startOverHintTimer;
   bool _deferProgressReporting = false;
 
-  static const Duration _gestureOverlayAutoHideDelay =
-      Duration(milliseconds: 800);
-  Timer? _gestureOverlayTimer;
-  IconData? _gestureOverlayIcon;
-  String? _gestureOverlayText;
-  Offset? _doubleTapDownPosition;
-
-  double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
-  double _playerVolume = 1.0; // 0..1
-
-  _GestureMode _gestureMode = _GestureMode.none;
-  Offset? _gestureStartPos;
-  Duration _seekGestureStartPosition = Duration.zero;
-  Duration? _seekGesturePreviewPosition;
-  double _gestureStartBrightness = 1.0;
-  double _gestureStartVolume = 1.0;
-
-  double? _longPressBaseRate;
-  Offset? _longPressStartPos;
+  late final PlayerGestureController _gestureController;
 
   static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
   Timer? _controlsHideTimer;
@@ -152,11 +144,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   int? _selectedSubtitleStreamIndex;
   Duration? _overrideStartPosition;
   bool _overrideResumeImmediately = false;
-  DateTime? _lastProgressReportAt;
-  bool _lastProgressReportPaused = false;
-  bool _reportedStart = false;
-  bool _reportedStop = false;
-  bool _progressReportInFlight = false;
+  late final NetworkPlaybackReporter _playbackReporter;
 
   MediaItem? _episodePickerItem;
   bool _episodePickerItemLoading = false;
@@ -181,8 +169,19 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _gestureController = PlayerGestureController();
     _serverAccess =
         resolveServerAccess(appState: widget.appState, server: widget.server);
+    _playbackReporter = NetworkPlaybackReporter(itemId: widget.itemId);
+    _playbackBackend = widget.playbackBackend ??
+        EmbyLikeNetworkPlaybackBackend(
+          access: _serverAccess,
+          baseUrl: _baseUrl!,
+          token: _token!,
+          userId: _userId!,
+          deviceId: widget.appState.deviceId,
+          serverType: widget.server?.serverType ?? widget.appState.serverType,
+        );
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
     _danmakuScale = widget.appState.danmakuScale;
@@ -222,8 +221,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _resumeHintTimer = null;
     _startOverHintTimer?.cancel();
     _startOverHintTimer = null;
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = null;
+    _gestureController.dispose();
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
@@ -1232,15 +1230,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     await _ensureDanmakuVisible();
   }
 
-  Map<String, String> _embyHeaders() => {
-        'X-Emby-Token': _token!,
-        ...EmbyApi.buildAuthorizationHeaders(
-          serverType: widget.server?.serverType ?? widget.appState.serverType,
-          deviceId: widget.appState.deviceId,
-          userId: _userId,
-        ),
-      };
-
   Future<void> _ensureDanmakuVisible() async {
     if (!_isAndroid) return;
     if (_viewType == VideoViewType.textureView) return;
@@ -1298,7 +1287,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     final controller = VideoPlayerController.networkUrl(
       Uri.parse(stream),
-      httpHeaders: _embyHeaders(),
+      httpHeaders: _httpHeaders,
       viewType: next,
     );
     _controller = controller;
@@ -1337,7 +1326,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
       _maybeReportPlaybackProgress(_position);
 
-      if (!_reportedStop &&
+      if (!_playbackReporter.isStopped &&
           _duration > Duration.zero &&
           !_buffering &&
           !v.isPlaying &&
@@ -1605,31 +1594,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _scheduleControlsHide();
   }
 
-  void _setGestureOverlay({required IconData icon, required String text}) {
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = null;
-    if (!mounted) {
-      _gestureOverlayIcon = icon;
-      _gestureOverlayText = text;
-      return;
-    }
-    setState(() {
-      _gestureOverlayIcon = icon;
-      _gestureOverlayText = text;
-    });
-  }
-
-  void _hideGestureOverlay([Duration delay = _gestureOverlayAutoHideDelay]) {
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = Timer(delay, () {
-      if (!mounted) return;
-      setState(() {
-        _gestureOverlayIcon = null;
-        _gestureOverlayText = null;
-      });
-    });
-  }
-
   bool get _gesturesEnabled {
     final controller = _controller;
     return controller != null &&
@@ -1650,8 +1614,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _applyDanmakuPauseState(true);
       _maybeReportPlaybackProgress(controller.value.position, force: true);
       if (showOverlay) {
-        _setGestureOverlay(icon: Icons.pause, text: '暂停');
-        _hideGestureOverlay();
+        _gestureController.showOverlay(icon: Icons.pause, text: '暂停');
       }
       if (mounted) setState(() {});
       return;
@@ -1660,8 +1623,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _applyDanmakuPauseState(false);
     _maybeReportPlaybackProgress(controller.value.position, force: true);
     if (showOverlay) {
-      _setGestureOverlay(icon: Icons.play_arrow, text: '播放');
-      _hideGestureOverlay();
+      _gestureController.showOverlay(icon: Icons.play_arrow, text: '播放');
     }
     if (mounted) setState(() {});
   }
@@ -1683,248 +1645,21 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     if (showOverlay) {
       final absSeconds = delta.inSeconds.abs();
-      _setGestureOverlay(
+      _gestureController.showOverlay(
         icon: delta.isNegative ? Icons.fast_rewind : Icons.fast_forward,
         text: '${delta.isNegative ? '快退' : '快进'} ${absSeconds}s',
       );
-      _hideGestureOverlay();
     }
   }
 
-  Future<void> _handleDoubleTap(Offset localPos, double width) async {
+  Future<void> _seekTo(Duration target) async {
     if (!_gesturesEnabled) return;
-
-    final region = width <= 0
-        ? 1
-        : (localPos.dx < width / 3)
-            ? 0
-            : (localPos.dx < width * 2 / 3)
-                ? 1
-                : 2;
-
-    final action = switch (region) {
-      0 => widget.appState.doubleTapLeft,
-      1 => widget.appState.doubleTapCenter,
-      _ => widget.appState.doubleTapRight,
-    };
-
-    switch (action) {
-      case DoubleTapAction.none:
-        return;
-      case DoubleTapAction.playPause:
-        await _togglePlayPause();
-        return;
-      case DoubleTapAction.seekBackward:
-        await _seekRelative(Duration(seconds: -_seekBackSeconds));
-        return;
-      case DoubleTapAction.seekForward:
-        await _seekRelative(Duration(seconds: _seekForwardSeconds));
-        return;
-    }
-  }
-
-  void _onSeekDragStart(DragStartDetails details) {
-    if (!_gesturesEnabled) return;
-    if (!widget.appState.gestureSeek) return;
-    _gestureMode = _GestureMode.seek;
-    _gestureStartPos = details.localPosition;
-    _seekGestureStartPosition = _position;
-    _seekGesturePreviewPosition = _position;
-    _showControls(scheduleHide: false);
-    _setGestureOverlay(icon: Icons.swap_horiz, text: _fmtClock(_position));
-  }
-
-  void _onSeekDragUpdate(
-    DragUpdateDetails details, {
-    required double width,
-    required Duration duration,
-  }) {
-    if (_gestureMode != _GestureMode.seek) return;
-    if (_gestureStartPos == null) return;
-    if (width <= 0) return;
-    if (!_gesturesEnabled) return;
-
-    final dx = details.localPosition.dx - _gestureStartPos!.dx;
-    final d = duration;
-    if (d <= Duration.zero) return;
-
-    final maxSeekSeconds = math.min(d.inSeconds.toDouble(), 300.0);
-    if (maxSeekSeconds <= 0) return;
-
-    final deltaSeconds = (dx / width) * maxSeekSeconds;
-    final delta = Duration(seconds: deltaSeconds.round());
-    var target = _seekGestureStartPosition + delta;
-    if (target < Duration.zero) target = Duration.zero;
-    if (d > Duration.zero && target > d) target = d;
-    _seekGesturePreviewPosition = target;
-
-    _setGestureOverlay(
-      icon: delta.isNegative ? Icons.fast_rewind : Icons.fast_forward,
-      text:
-          '${_fmtClock(target)}（${delta.isNegative ? '-' : '+'}${delta.inSeconds.abs()}s）',
-    );
-
+    final controller = _controller!;
+    await controller.seekTo(target);
+    _position = target;
+    _maybeReportPlaybackProgress(controller.value.position, force: true);
+    _syncDanmakuCursor(target);
     if (mounted) setState(() {});
-  }
-
-  Future<void> _onSeekDragEnd(DragEndDetails details) async {
-    if (_gestureMode != _GestureMode.seek) return;
-    final target = _seekGesturePreviewPosition;
-    _gestureMode = _GestureMode.none;
-    _gestureStartPos = null;
-    _seekGesturePreviewPosition = null;
-
-    if (target != null && _gesturesEnabled) {
-      final controller = _controller!;
-      await controller.seekTo(target);
-      _position = target;
-      _maybeReportPlaybackProgress(controller.value.position, force: true);
-      _syncDanmakuCursor(target);
-      if (mounted) setState(() {});
-    }
-
-    _hideGestureOverlay();
-    _scheduleControlsHide();
-  }
-
-  void _onSideDragStart(DragStartDetails details, {required double width}) {
-    if (!_gesturesEnabled) return;
-    _gestureStartPos = details.localPosition;
-    final isLeft = width <= 0 ? true : details.localPosition.dx < width / 2;
-    if (isLeft && widget.appState.gestureBrightness) {
-      _gestureMode = _GestureMode.brightness;
-      _gestureStartBrightness = _screenBrightness;
-      _setGestureOverlay(
-        icon: Icons.brightness_6_outlined,
-        text: '亮度 ${(100 * _screenBrightness).round()}%',
-      );
-      return;
-    }
-    if (!isLeft && widget.appState.gestureVolume) {
-      _gestureMode = _GestureMode.volume;
-      _gestureStartVolume = _playerVolume;
-      _setGestureOverlay(
-        icon: Icons.volume_up,
-        text: '音量 ${(100 * _playerVolume).round()}%',
-      );
-      return;
-    }
-    _gestureMode = _GestureMode.none;
-  }
-
-  void _onSideDragUpdate(
-    DragUpdateDetails details, {
-    required double height,
-  }) {
-    if (!_gesturesEnabled) return;
-    if (_gestureStartPos == null) return;
-    if (height <= 0) return;
-    if (_gestureMode != _GestureMode.brightness &&
-        _gestureMode != _GestureMode.volume) {
-      return;
-    }
-
-    final dy = details.localPosition.dy - _gestureStartPos!.dy;
-    final delta = (-dy / height).clamp(-1.0, 1.0);
-
-    switch (_gestureMode) {
-      case _GestureMode.brightness:
-        final v = (_gestureStartBrightness + delta).clamp(0.2, 1.0).toDouble();
-        if (v == _screenBrightness) return;
-        setState(() => _screenBrightness = v);
-        _setGestureOverlay(
-          icon: Icons.brightness_6_outlined,
-          text: '亮度 ${(100 * v).round()}%',
-        );
-        break;
-      case _GestureMode.volume:
-        final v = (_gestureStartVolume + delta).clamp(0.0, 1.0).toDouble();
-        _playerVolume = v;
-        final controller = _controller;
-        if (controller != null) {
-          // ignore: unawaited_futures
-          controller.setVolume(v);
-        }
-        _setGestureOverlay(
-          icon: v == 0 ? Icons.volume_off : Icons.volume_up,
-          text: '音量 ${(100 * v).round()}%',
-        );
-        break;
-      default:
-        break;
-    }
-  }
-
-  void _onSideDragEnd(DragEndDetails details) {
-    if (_gestureMode == _GestureMode.brightness ||
-        _gestureMode == _GestureMode.volume) {
-      _hideGestureOverlay();
-    }
-    _gestureMode = _GestureMode.none;
-    _gestureStartPos = null;
-  }
-
-  void _onLongPressStart(LongPressStartDetails details) {
-    if (!_gesturesEnabled) return;
-    if (!widget.appState.gestureLongPressSpeed) return;
-
-    final controller = _controller;
-    if (controller == null) return;
-    _gestureMode = _GestureMode.speed;
-    _longPressStartPos = details.localPosition;
-    _longPressBaseRate = controller.value.playbackSpeed;
-    final targetRate =
-        (_longPressBaseRate! * widget.appState.longPressSpeedMultiplier)
-            .clamp(0.1, 4.0)
-            .toDouble();
-    // ignore: unawaited_futures
-    controller.setPlaybackSpeed(targetRate);
-    _setGestureOverlay(
-      icon: Icons.speed,
-      text: '倍速 ×${(targetRate / _longPressBaseRate!).toStringAsFixed(2)}',
-    );
-  }
-
-  void _onLongPressMoveUpdate(
-    LongPressMoveUpdateDetails details, {
-    required double height,
-  }) {
-    if (_gestureMode != _GestureMode.speed) return;
-    if (!_gesturesEnabled) return;
-    if (!widget.appState.longPressSlideSpeed) return;
-    if (_longPressBaseRate == null || _longPressStartPos == null) return;
-    if (height <= 0) return;
-
-    final dy = details.localPosition.dy - _longPressStartPos!.dy;
-    final delta = (-dy / height) * 2.0;
-    final multiplier = (widget.appState.longPressSpeedMultiplier + delta)
-        .clamp(1.0, 4.0)
-        .toDouble();
-    final targetRate =
-        (_longPressBaseRate! * multiplier).clamp(0.1, 4.0).toDouble();
-    final controller = _controller;
-    if (controller != null) {
-      // ignore: unawaited_futures
-      controller.setPlaybackSpeed(targetRate);
-    }
-    _setGestureOverlay(
-      icon: Icons.speed,
-      text: '倍速 ×${multiplier.toStringAsFixed(2)}',
-    );
-  }
-
-  void _onLongPressEnd(LongPressEndDetails details) {
-    if (_gestureMode != _GestureMode.speed) return;
-    final base = _longPressBaseRate;
-    _gestureMode = _GestureMode.none;
-    _longPressBaseRate = null;
-    _longPressStartPos = null;
-    final controller = _controller;
-    if (base != null && controller != null) {
-      // ignore: unawaited_futures
-      controller.setPlaybackSpeed(base);
-    }
-    _hideGestureOverlay();
   }
 
   Future<void> _switchCore() async {
@@ -2071,11 +1806,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _danmakuHeatmap = const [];
     _danmakuPaused = false;
 
-    _reportedStart = false;
-    _reportedStop = false;
-    _progressReportInFlight = false;
-    _lastProgressReportAt = null;
-    _lastProgressReportPaused = false;
+    _playbackReporter.reset();
 
     _playSessionId = null;
     _mediaSourceId = null;
@@ -2109,11 +1840,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (!_isAndroid) {
         throw Exception('Exo 内核仅支持 Android');
       }
-      final streamUrl = await _buildStreamUrl();
-      _resolvedStream = streamUrl;
+      final resolved = await _buildStream();
+      _resolvedStream = resolved.streamUrl;
+      _httpHeaders = resolved.httpHeaders;
       final controller = VideoPlayerController.networkUrl(
-        Uri.parse(streamUrl),
-        httpHeaders: _embyHeaders(),
+        Uri.parse(_resolvedStream!),
+        httpHeaders: _httpHeaders,
         // Use platform view on Android to avoid color issues with some HDR/Dolby Vision sources.
         // (Texture-based rendering may show green/purple tint on certain P8 files.)
         viewType: _viewType,
@@ -2216,7 +1948,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
         _maybeReportPlaybackProgress(_position);
 
-        if (!_reportedStop &&
+        if (!_playbackReporter.isStopped &&
             _duration > Duration.zero &&
             !_buffering &&
             !v.isPlaying &&
@@ -2259,115 +1991,40 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
   }
 
-  Future<String> _buildStreamUrl() async {
-    final base = _baseUrl!;
-    final token = _token!;
-    final userId = _userId!;
+  Future<NetworkStreamResolution> _buildStream() async {
     _playSessionId = null;
     _mediaSourceId = null;
+    final sid = (widget.seriesId ?? '').trim();
+    final serverId = widget.server?.id ?? widget.appState.activeServerId;
+    final seriesMediaSourceIndex =
+        (serverId != null && serverId.isNotEmpty && sid.isNotEmpty)
+            ? widget.appState
+                .seriesMediaSourceIndex(serverId: serverId, seriesId: sid)
+            : null;
 
-    String applyQueryPrefs(String url) {
-      final uri = Uri.parse(url);
-      final params = Map<String, String>.from(uri.queryParameters);
-      if (!params.containsKey('api_key')) params['api_key'] = token;
-      if (_selectedAudioStreamIndex != null) {
-        params['AudioStreamIndex'] = _selectedAudioStreamIndex.toString();
-      }
-      if (_selectedSubtitleStreamIndex != null &&
-          _selectedSubtitleStreamIndex! >= 0) {
-        params['SubtitleStreamIndex'] = _selectedSubtitleStreamIndex.toString();
-      }
-      return uri.replace(queryParameters: params).toString();
-    }
-
-    String resolve(String candidate) {
-      final resolved = Uri.parse(base).resolve(candidate).toString();
-      return applyQueryPrefs(resolved);
-    }
-
-    try {
-      final access = _serverAccess;
-      if (access == null) throw StateError('No server access');
-      final info = await access.adapter.fetchPlaybackInfo(
-        access.auth,
-        itemId: widget.itemId,
-        exoPlayer: true,
-      );
-      final sources = info.mediaSources.cast<Map<String, dynamic>>();
-      _availableMediaSources = List<Map<String, dynamic>>.from(sources);
-      Map<String, dynamic>? ms;
-      if (sources.isNotEmpty) {
-        var selectedId = (_selectedMediaSourceId ?? '').trim();
-        if (selectedId.isEmpty) {
-          final sid = (widget.seriesId ?? '').trim();
-          final serverId = widget.server?.id ?? widget.appState.activeServerId;
-          if (serverId != null && serverId.isNotEmpty && sid.isNotEmpty) {
-            final idx = widget.appState
-                .seriesMediaSourceIndex(serverId: serverId, seriesId: sid);
-            if (idx != null && idx >= 0 && idx < sources.length) {
-              selectedId = (sources[idx]['Id'] as String? ?? '').trim();
-            }
-          }
-        }
-        if (selectedId.isEmpty) {
-          final preferredId = _pickPreferredMediaSourceId(
-            sources,
-            widget.appState.preferredVideoVersion,
-          );
-          if (preferredId != null && preferredId.trim().isNotEmpty) {
-            selectedId = preferredId.trim();
-          }
-        }
-        if (selectedId.isNotEmpty) {
-          ms = sources.firstWhere(
-            (s) => (s['Id'] as String? ?? '') == selectedId,
-            orElse: () => sources.first,
-          );
-          _selectedMediaSourceId = selectedId;
-        } else {
-          ms = sources.first;
-        }
-      }
-      _playSessionId = info.playSessionId;
-      _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
-      final directStreamUrl = (ms?['DirectStreamUrl'] as String?)?.trim();
-      final transcodingUrl = (ms?['TranscodingUrl'] as String?)?.trim();
-
-      if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
-        return resolve(directStreamUrl);
-      }
-      if (transcodingUrl != null && transcodingUrl.isNotEmpty) {
-        return resolve(transcodingUrl);
-      }
-      final mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
-      return applyQueryPrefs(
-        '$base/emby/Videos/${widget.itemId}/stream?static=true&MediaSourceId=$mediaSourceId'
-        '&PlaySessionId=${info.playSessionId}&UserId=$userId&DeviceId=${widget.appState.deviceId}'
-        '&api_key=$token',
-      );
-    } catch (_) {
-      return applyQueryPrefs(
-        '$base/emby/Videos/${widget.itemId}/stream?static=true&UserId=$userId'
-        '&DeviceId=${widget.appState.deviceId}&api_key=$token',
-      );
-    }
+    final res = await _playbackBackend.resolveStream(
+      itemId: widget.itemId,
+      selectedMediaSourceId: _selectedMediaSourceId,
+      seriesMediaSourceIndex: seriesMediaSourceIndex,
+      audioStreamIndex: _selectedAudioStreamIndex,
+      subtitleStreamIndex: _selectedSubtitleStreamIndex,
+      preferredVideoVersion: widget.appState.preferredVideoVersion,
+      allowTranscoding: true,
+      exoPlayer: true,
+    );
+    _availableMediaSources = res.mediaSources;
+    _selectedMediaSourceId = res.selectedMediaSourceId;
+    _playSessionId = res.playSessionId;
+    _mediaSourceId = res.mediaSourceId;
+    return res;
   }
 
-  int _toTicks(Duration d) => d.inMicroseconds * 10;
-
   static String _fmtClock(Duration d) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60);
-    final s = d.inSeconds.remainder(60);
-    return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
+    return formatClock(d);
   }
 
   static int? _asInt(dynamic value) {
-    if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value);
-    return null;
+    return embyAsInt(value);
   }
 
   int? _currentMediaSourceBitrateBitsPerSecond() {
@@ -2387,156 +2044,16 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     return bitrate;
   }
 
-  static List<Map<String, dynamic>> _streamsOfType(
-      Map<String, dynamic> ms, String type) {
-    final streams = (ms['MediaStreams'] as List?) ?? const [];
-    return streams
-        .where((e) => (e as Map)['Type'] == type)
-        .map((e) => e as Map<String, dynamic>)
-        .toList();
-  }
-
   static String _mediaSourceTitle(Map<String, dynamic> ms) {
-    return (ms['Name'] as String?) ?? (ms['Container'] as String?) ?? '默认版本';
-  }
-
-  static String? _pickPreferredMediaSourceId(
-    List<Map<String, dynamic>> sources,
-    VideoVersionPreference pref,
-  ) {
-    if (sources.isEmpty) return null;
-    if (pref == VideoVersionPreference.defaultVersion) return null;
-
-    int heightOf(Map<String, dynamic> ms) {
-      final videos = _streamsOfType(ms, 'Video');
-      final video = videos.isNotEmpty ? videos.first : null;
-      return _asInt(video?['Height']) ?? 0;
-    }
-
-    int bitrateOf(Map<String, dynamic> ms) => _asInt(ms['Bitrate']) ?? 0;
-
-    String videoCodecOf(Map<String, dynamic> ms) {
-      final msCodec = (ms['VideoCodec'] as String?)?.trim();
-      if (msCodec != null && msCodec.isNotEmpty) return msCodec.toLowerCase();
-      final videos = _streamsOfType(ms, 'Video');
-      final v = videos.isNotEmpty ? videos.first : null;
-      final codec = (v?['Codec'] as String?)?.trim() ?? '';
-      return codec.toLowerCase();
-    }
-
-    bool isHevc(Map<String, dynamic> ms) {
-      final c = videoCodecOf(ms);
-      return c.contains('hevc') ||
-          c.contains('h265') ||
-          c.contains('h.265') ||
-          c.contains('x265');
-    }
-
-    bool isAvc(Map<String, dynamic> ms) {
-      final c = videoCodecOf(ms);
-      return c.contains('avc') ||
-          c.contains('h264') ||
-          c.contains('h.264') ||
-          c.contains('x264');
-    }
-
-    Map<String, dynamic>? pickBest(
-      List<Map<String, dynamic>> list, {
-      required int Function(Map<String, dynamic> ms) primary,
-      required int Function(Map<String, dynamic> ms) secondary,
-      required bool higherIsBetter,
-    }) {
-      if (list.isEmpty) return null;
-      Map<String, dynamic> chosen = list.first;
-      var bestPrimary = primary(chosen);
-      var bestSecondary = secondary(chosen);
-      for (final ms in list.skip(1)) {
-        final p = primary(ms);
-        final s = secondary(ms);
-        final better = higherIsBetter
-            ? (p > bestPrimary || (p == bestPrimary && s > bestSecondary))
-            : (p < bestPrimary || (p == bestPrimary && s < bestSecondary));
-        if (better) {
-          chosen = ms;
-          bestPrimary = p;
-          bestSecondary = s;
-        }
-      }
-      return chosen;
-    }
-
-    Map<String, dynamic>? chosen;
-    switch (pref) {
-      case VideoVersionPreference.highestResolution:
-        chosen = pickBest(
-          sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.lowestBitrate:
-        chosen = pickBest(
-          sources,
-          primary: (ms) => bitrateOf(ms) == 0 ? 1 << 30 : bitrateOf(ms),
-          secondary: heightOf,
-          higherIsBetter: false,
-        );
-        break;
-      case VideoVersionPreference.preferHevc:
-        final hevc = sources.where(isHevc).toList();
-        chosen = pickBest(
-          hevc.isNotEmpty ? hevc : sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.preferAvc:
-        final avc = sources.where(isAvc).toList();
-        chosen = pickBest(
-          avc.isNotEmpty ? avc : sources,
-          primary: heightOf,
-          secondary: bitrateOf,
-          higherIsBetter: true,
-        );
-        break;
-      case VideoVersionPreference.defaultVersion:
-        break;
-    }
-
-    final id = chosen?['Id']?.toString();
-    return (id == null || id.trim().isEmpty) ? null : id.trim();
+    return embyMediaSourceTitle(ms);
   }
 
   static String _mediaSourceSubtitle(Map<String, dynamic> ms) {
-    final size = ms['Size'];
-    final sizeGb =
-        size is num ? (size / (1024 * 1024 * 1024)).toStringAsFixed(1) : null;
-    final bitrate = _asInt(ms['Bitrate']);
-    final bitrateMbps =
-        bitrate != null ? (bitrate / 1000000).toStringAsFixed(1) : null;
-
-    final videoStreams = _streamsOfType(ms, 'Video');
-    final video = videoStreams.isNotEmpty ? videoStreams.first : null;
-    final height = _asInt(video?['Height']);
-    final vCodec =
-        (ms['VideoCodec'] as String?) ?? (video?['Codec'] as String?);
-
-    final parts = <String>[];
-    if (height != null) parts.add('${height}p');
-    if (vCodec != null && vCodec.isNotEmpty) parts.add(vCodec.toUpperCase());
-    if (sizeGb != null) parts.add('$sizeGb GB');
-    if (bitrateMbps != null) parts.add('$bitrateMbps Mbps');
-    return parts.isEmpty ? '直连播放' : parts.join(' / ');
+    return embyMediaSourceSubtitle(ms);
   }
 
   Duration _safeSeekTarget(Duration target, Duration total) {
-    if (target <= Duration.zero) return Duration.zero;
-    if (total <= Duration.zero) return target;
-    if (target < total) return target;
-    final rewind = total - const Duration(seconds: 5);
-    return rewind > Duration.zero ? rewind : Duration.zero;
+    return safeSeekTarget(target, total);
   }
 
   static const Duration _kResumeSeekTolerance = Duration(seconds: 1);
@@ -2656,145 +2173,46 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Future<void> _reportPlaybackStartBestEffort() async {
-    if (_reportedStart || _reportedStop) return;
-    final access = _serverAccess;
-    if (access == null) return;
-
-    _reportedStart = true;
-    final posTicks = _toTicks(_position);
-    final paused = !_isPlaying;
-    try {
-      final ps = _playSessionId;
-      final ms = _mediaSourceId;
-      if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-        await access.adapter.reportPlaybackStart(
-          access.auth,
-          itemId: widget.itemId,
-          mediaSourceId: ms,
-          playSessionId: ps,
-          positionTicks: posTicks,
-          isPaused: paused,
-        );
-      }
-    } catch (_) {}
+    await _playbackReporter.reportPlaybackStartBestEffort(
+      access: _serverAccess,
+      playSessionId: _playSessionId,
+      mediaSourceId: _mediaSourceId,
+      position: _position,
+      paused: !_isPlaying,
+    );
   }
 
   void _maybeReportPlaybackProgress(Duration position, {bool force = false}) {
-    if (_reportedStop) return;
     if (_deferProgressReporting) return;
-    if (_progressReportInFlight) return;
-    final access = _serverAccess;
-    if (access == null) return;
-
-    final now = DateTime.now();
-    final paused = !_isPlaying;
-
-    final due = _lastProgressReportAt == null ||
-        now.difference(_lastProgressReportAt!) >= const Duration(seconds: 15);
-    final pausedChanged = paused != _lastProgressReportPaused &&
-        (_lastProgressReportAt == null ||
-            now.difference(_lastProgressReportAt!) >=
-                const Duration(seconds: 1));
-    final shouldReport = force || due || pausedChanged;
-    if (!shouldReport) return;
-
-    _lastProgressReportAt = now;
-    _lastProgressReportPaused = paused;
-    _progressReportInFlight = true;
-
-    final ticks = _toTicks(position);
-
-    // ignore: unawaited_futures
-    () async {
-      try {
-        final ps = _playSessionId;
-        final ms = _mediaSourceId;
-        if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-          await access.adapter.reportPlaybackProgress(
-            access.auth,
-            itemId: widget.itemId,
-            mediaSourceId: ms,
-            playSessionId: ps,
-            positionTicks: ticks,
-            isPaused: paused,
-          );
-        } else {
-          await access.adapter.updatePlaybackPosition(
-            access.auth,
-            itemId: widget.itemId,
-            positionTicks: ticks,
-          );
-        }
-      } finally {
-        _progressReportInFlight = false;
-      }
-    }();
+    _playbackReporter.maybeReportPlaybackProgressBestEffort(
+      access: _serverAccess,
+      playSessionId: _playSessionId,
+      mediaSourceId: _mediaSourceId,
+      position: position,
+      paused: !_isPlaying,
+      force: force,
+    );
   }
 
   Future<void> _reportPlaybackStoppedBestEffort(
       {bool completed = false}) async {
-    if (_reportedStop) return;
-    _reportedStop = true;
+    await _playbackReporter.reportPlaybackStoppedBestEffort(
+      access: _serverAccess,
+      playSessionId: _playSessionId,
+      mediaSourceId: _mediaSourceId,
+      position: _position,
+      duration: _duration,
+      completed: completed,
+    );
+  }
 
-    final access = _serverAccess;
-    if (access == null) return;
+  Future<void> _enterImmersiveMode() => enterImmersiveMode(isTv: widget.isTv);
 
-    final pos = _position;
-    final dur = _duration;
-    final played = completed ||
-        (dur > Duration.zero && pos >= dur - const Duration(seconds: 20));
-    final ticks = _toTicks(pos);
-
-    try {
-      final ps = _playSessionId;
-      final ms = _mediaSourceId;
-      if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-        await access.adapter.reportPlaybackStopped(
-          access.auth,
-          itemId: widget.itemId,
-          mediaSourceId: ms,
-          playSessionId: ps,
-          positionTicks: ticks,
-        );
-      }
-    } catch (_) {}
-
-    try {
-      await access.adapter.updatePlaybackPosition(
-        access.auth,
-        itemId: widget.itemId,
-        positionTicks: ticks,
-        played: played,
+  Future<void> _exitImmersiveMode({bool resetOrientations = false}) =>
+      exitImmersiveMode(
+        isTv: widget.isTv,
+        resetOrientations: resetOrientations,
       );
-    } catch (_) {}
-  }
-
-  bool get _shouldControlSystemUi {
-    if (kIsWeb) return false;
-    if (widget.isTv) return false;
-    return Platform.isAndroid || Platform.isIOS;
-  }
-
-  Future<void> _enterImmersiveMode() async {
-    if (!_shouldControlSystemUi) return;
-    try {
-      await SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.immersiveSticky,
-        overlays: const [],
-      );
-    } catch (_) {}
-  }
-
-  Future<void> _exitImmersiveMode({bool resetOrientations = false}) async {
-    if (!_shouldControlSystemUi) return;
-    try {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    } catch (_) {}
-    if (!resetOrientations) return;
-    try {
-      await SystemChrome.setPreferredOrientations(const []);
-    } catch (_) {}
-  }
 
   void _showNotSupported(String feature) {
     if (!mounted) return;
@@ -3354,7 +2772,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   Future<void> _applyOrientationForMode() async {
-    if (!_shouldControlSystemUi) return;
+    if (!canControlSystemUi(isTv: widget.isTv)) return;
 
     List<DeviceOrientation>? orientations;
     switch (_orientationMode) {
@@ -3644,18 +3062,25 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 ),
                               ),
                             ),
-                          if (_screenBrightness < 0.999)
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: ColoredBox(
-                                  color: Colors.black.withValues(
-                                    alpha: (1.0 - _screenBrightness)
-                                        .clamp(0.0, 0.8)
-                                        .toDouble(),
-                                  ),
-                                ),
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: AnimatedBuilder(
+                                animation: _gestureController,
+                                builder: (context, _) {
+                                  final alpha =
+                                      (1.0 - _gestureController.brightness)
+                                          .clamp(0.0, 0.8)
+                                          .toDouble();
+                                  if (alpha <= 0) {
+                                    return const SizedBox.expand();
+                                  }
+                                  return ColoredBox(
+                                    color: Colors.black.withValues(alpha: alpha),
+                                  );
+                                },
                               ),
                             ),
+                          ),
                           if (_buffering)
                             Positioned.fill(
                               child: ColoredBox(
@@ -3695,112 +3120,52 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                               ),
                             ),
                           Positioned.fill(
-                            child: LayoutBuilder(
-                              builder: (ctx, constraints) {
-                                final w = constraints.maxWidth;
-                                final h = constraints.maxHeight;
-                                final sideDragEnabled =
-                                    widget.appState.gestureBrightness ||
-                                        widget.appState.gestureVolume;
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _toggleControls,
-                                  onDoubleTapDown: controlsEnabled
-                                      ? (d) => _doubleTapDownPosition =
-                                          d.localPosition
-                                      : null,
-                                  onDoubleTap: controlsEnabled
-                                      ? () {
-                                          final pos = _doubleTapDownPosition ??
-                                              Offset(w / 2, 0);
-                                          // ignore: unawaited_futures
-                                          _handleDoubleTap(pos, w);
-                                        }
-                                      : null,
-                                  onHorizontalDragStart: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? _onSeekDragStart
-                                      : null,
-                                  onHorizontalDragUpdate: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? (d) => _onSeekDragUpdate(
-                                            d,
-                                            width: w,
-                                            duration: controller.value.duration,
-                                          )
-                                      : null,
-                                  onHorizontalDragEnd: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? _onSeekDragEnd
-                                      : null,
-                                  onVerticalDragStart:
-                                      (controlsEnabled && sideDragEnabled)
-                                          ? (d) => _onSideDragStart(d, width: w)
-                                          : null,
-                                  onVerticalDragUpdate: (controlsEnabled &&
-                                          sideDragEnabled)
-                                      ? (d) => _onSideDragUpdate(d, height: h)
-                                      : null,
-                                  onVerticalDragEnd:
-                                      (controlsEnabled && sideDragEnabled)
-                                          ? _onSideDragEnd
-                                          : null,
-                                  onLongPressStart: (controlsEnabled &&
-                                          widget.appState.gestureLongPressSpeed)
-                                      ? _onLongPressStart
-                                      : null,
-                                  onLongPressMoveUpdate: (controlsEnabled &&
-                                          widget
-                                              .appState.gestureLongPressSpeed &&
-                                          widget.appState.longPressSlideSpeed)
-                                      ? (d) => _onLongPressMoveUpdate(
-                                            d,
-                                            height: h,
-                                          )
-                                      : null,
-                                  onLongPressEnd: (controlsEnabled &&
-                                          widget.appState.gestureLongPressSpeed)
-                                      ? _onLongPressEnd
-                                      : null,
-                                  child: const SizedBox.expand(),
-                                );
-                              },
+                            child: PlayerGestureDetectorLayer(
+                              controller: _gestureController,
+                              enabled: controlsEnabled,
+                              position: _position,
+                              duration: controller.value.duration,
+                              onToggleControls: _toggleControls,
+                              onTogglePlayPause: () => _togglePlayPause(),
+                              onSeekRelative: (d) => _seekRelative(d),
+                              onSeekTo: _seekTo,
+                              doubleTapLeft: widget.appState.doubleTapLeft,
+                              doubleTapCenter: widget.appState.doubleTapCenter,
+                              doubleTapRight: widget.appState.doubleTapRight,
+                              seekBackwardSeconds: _seekBackSeconds,
+                              seekForwardSeconds: _seekForwardSeconds,
+                              gestureSeekEnabled: widget.appState.gestureSeek,
+                              gestureBrightnessEnabled:
+                                  widget.appState.gestureBrightness,
+                              gestureVolumeEnabled: widget.appState.gestureVolume,
+                              gestureLongPressEnabled:
+                                  widget.appState.gestureLongPressSpeed,
+                              longPressSlideEnabled:
+                                  widget.appState.longPressSlideSpeed,
+                              longPressSpeedMultiplier:
+                                  widget.appState.longPressSpeedMultiplier,
+                              getPlaybackRate: controlsEnabled
+                                  ? () => controller.value.playbackSpeed
+                                  : null,
+                              onSetPlaybackRate: controlsEnabled
+                                  ? (rate) async {
+                                      await controller.setPlaybackSpeed(rate);
+                                      if (mounted) setState(() {});
+                                    }
+                                  : null,
+                              onSetVolume: controlsEnabled
+                                  ? (volume) => controller.setVolume(volume)
+                                  : null,
+                              clampSeekTarget: (target, duration) =>
+                                  safeSeekTarget(
+                                    target,
+                                    duration,
+                                    rewind: Duration.zero,
+                                  ),
+                              onShowControls: _showControls,
+                              onScheduleControlsHide: _scheduleControlsHide,
                             ),
                           ),
-                          if (_gestureOverlayText != null)
-                            Center(
-                              child: IgnorePointer(
-                                child: Material(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 10,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          _gestureOverlayIcon ??
-                                              Icons.info_outline,
-                                          size: 20,
-                                          color: Colors.white,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _gestureOverlayText!,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
                           if (controlsEnabled &&
                               _showResumeHint &&
                               _resumeHintPosition != null)
@@ -4092,6 +3457,4 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
 enum _PlayerMenuAction { switchCore, switchVersion }
 
-enum _OrientationMode { auto, landscape, portrait }
-
-enum _GestureMode { none, brightness, volume, seek, speed }
+typedef _OrientationMode = OrientationMode;

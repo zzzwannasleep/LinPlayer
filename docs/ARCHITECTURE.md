@@ -121,6 +121,22 @@
     - Windows 上设置 `gpu-context=d3d11`，降低 `vo=gpu` 的卡顿概率。
   - 注意：该配置依赖 `packages/media_kit_patched` 暴露的 `extraMpvOptions`（用于传入 mpv 原生参数）。
 
+#### 1.1) 播放器共享模块（为多内核/后续扩展做拆分）
+- `lib/src/player/shared/player_types.dart`
+  - 角色：播放器 UI 共享的枚举与工具方法（例如方向/手势模式、时间格式化、seek 目标裁剪）。
+- `lib/src/player/shared/system_ui.dart`
+  - 角色：对沉浸模式/系统 UI 控制做平台封装（统一判断是否支持 + enter/exit）。
+- `lib/src/player/network/emby_stream_resolver.dart`
+  - 角色：把 Emby/Jellyfin 的 playbackInfo + mediaSource 选择逻辑封装为 `resolveEmbyStreamUrl(...)`，供 MPV/Exo 等不同播放内核复用。
+- `lib/src/player/network/network_playback_backend.dart`
+  - 角色：网络播放“后端”抽象（resolve URL + headers），当前默认实现为 Emby-like（Emby/Jellyfin）。
+- `lib/src/player/network/network_playback_reporter.dart`
+  - 角色：把 Emby 的播放上报（start/progress/stop + updatePosition）节流封装为 `NetworkPlaybackReporter`，不同内核只需提供 position/duration/paused 状态即可复用。
+- `lib/src/player/network/emby_media_source_utils.dart`
+  - 角色：mediaSource 元信息解析与展示（版本标题/副标题、按偏好选择版本等）。
+- `lib/src/player/network/emby_http_headers.dart`
+  - 角色：集中构造 Emby/Jellyfin 鉴权请求头，供网络播放复用。
+
 #### 1.5) 画质增强（Anime4K）
 - `lib/src/player/anime4k.dart`：通过 mpv `glsl-shaders` 管线加载 Anime4K 预设（仅 MPV 内核）。
 - Shader 资源位于 `assets/shaders/anime4k/`（来自 Anime4K：`https://github.com/bloc97/Anime4K`；具体版本与 License 见该目录 `README.md` / `LICENSE`）。
@@ -137,12 +153,13 @@
 #### 3) Emby 在线播放（网络）
 - `lib/play_network_page.dart`
   - 流程：
-    1. `_buildStreamUrl()`：根据 `itemId` 以及（可选）`mediaSourceId/audioStreamIndex/subtitleStreamIndex` 构造可播放 URL。
+    1. `_buildStream()`：通过 `NetworkPlaybackBackend` 解析出可播放 URL + headers（内部会复用 `resolveEmbyStreamUrl(...)`）。
     2. `PlayerService.initialize(networkUrl, httpHeaders)`：
        - 关键 Header：`X-Emby-Token`、`X-Emby-Authorization`（以及 User-Agent）。
     3. 监听 buffering / error / tracks：
        - UI 展示缓冲进度。
        - 初始音轨/字幕偏好只应用一次（避免 tracks 更新时反复覆盖）。
+    4. 播放上报：通过 `NetworkPlaybackReporter` 做节流上报（start/progress/stop + updatePosition）。
   - 弹幕：
     - `Video` 上方叠加 `DanmakuStage`（覆盖层渲染）。
     - 在线匹配默认仅使用标题/文件名（无法获取文件 Hash 时准确度可能下降）。
@@ -157,6 +174,7 @@
     - 字幕：通过本项目对 `video_player_android` 的补丁接口（支持枚举/选择/关闭）。
 - 在线播放：`lib/play_network_page_exo.dart`
   - 仍通过 Emby 的 `AudioStreamIndex/SubtitleStreamIndex` 把“默认音轨/字幕”写入 URL；播放过程中也可再次切换。
+  - 播放 URL + headers 构造通过 `NetworkPlaybackBackend`，播放上报通过 `NetworkPlaybackReporter`（便于未来接入更多“网络播放后端/播放内核”）。
 - 实现与维护：
   - `packages/video_player_android_patched/lib/exo_tracks.dart`：对外暴露 Pigeon 生成的 Exo 字幕相关 API，避免直接 `import` 依赖包的 `lib/src`。
   - `packages/video_player_android_patched/android/.../PlatformVideoView.java`：Android 侧监听 `Player.Listener.onCues` 并叠加 `TextView` 显示字幕。

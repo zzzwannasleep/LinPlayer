@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
@@ -21,6 +20,9 @@ import 'src/player/danmaku.dart';
 import 'src/player/danmaku_processing.dart';
 import 'src/player/danmaku_stage.dart';
 import 'src/player/playback_controls.dart';
+import 'src/player/features/player_gestures.dart';
+import 'src/player/shared/player_types.dart';
+import 'src/player/shared/system_ui.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/glass_blur.dart';
 
@@ -98,25 +100,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   bool _controlsVisible = true;
   bool _isScrubbing = false;
 
-  static const Duration _gestureOverlayAutoHideDelay =
-      Duration(milliseconds: 800);
-  Timer? _gestureOverlayTimer;
-  IconData? _gestureOverlayIcon;
-  String? _gestureOverlayText;
-  Offset? _doubleTapDownPosition;
-
-  double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
-  double _playerVolume = 1.0; // 0..1
-
-  _GestureMode _gestureMode = _GestureMode.none;
-  Offset? _gestureStartPos;
-  Duration _seekGestureStartPosition = Duration.zero;
-  Duration? _seekGesturePreviewPosition;
-  double _gestureStartBrightness = 1.0;
-  double _gestureStartVolume = 1.0;
-
-  double? _longPressBaseRate;
-  Offset? _longPressStartPos;
+  late final PlayerGestureController _gestureController;
 
   late final bool _fullScreen = widget.startFullScreen;
 
@@ -127,6 +111,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _gestureController = PlayerGestureController();
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
     _danmakuScale = widget.appState.danmakuScale;
@@ -205,8 +190,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _controlsHideTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = null;
+    _gestureController.dispose();
     // ignore: unawaited_futures
     _exitOrientationLock();
     if (_fullScreen) {
@@ -229,8 +213,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _controlsHideTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = null;
+    _gestureController.hideOverlay(Duration.zero);
 
     final controller = _controller;
     _controller = null;
@@ -239,8 +222,6 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         _buffering = false;
         _controlsVisible = false;
         _isScrubbing = false;
-        _gestureOverlayIcon = null;
-        _gestureOverlayText = null;
       });
     }
 
@@ -803,45 +784,6 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _scheduleControlsHide();
   }
 
-  void _setGestureOverlay({required IconData icon, required String text}) {
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = null;
-    if (!mounted) {
-      _gestureOverlayIcon = icon;
-      _gestureOverlayText = text;
-      return;
-    }
-    setState(() {
-      _gestureOverlayIcon = icon;
-      _gestureOverlayText = text;
-    });
-  }
-
-  void _hideGestureOverlay([Duration delay = _gestureOverlayAutoHideDelay]) {
-    _gestureOverlayTimer?.cancel();
-    _gestureOverlayTimer = Timer(delay, () {
-      if (!mounted) return;
-      setState(() {
-        _gestureOverlayIcon = null;
-        _gestureOverlayText = null;
-      });
-    });
-  }
-
-  static String _fmtClock(Duration d) {
-    String two(int v) => v.toString().padLeft(2, '0');
-    final h = d.inHours;
-    final m = d.inMinutes.remainder(60);
-    final s = d.inSeconds.remainder(60);
-    return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
-  }
-
-  static Duration _safeSeekTarget(Duration target, Duration duration) {
-    if (target < Duration.zero) return Duration.zero;
-    if (duration > Duration.zero && target > duration) return duration;
-    return target;
-  }
-
   bool get _gesturesEnabled {
     final controller = _controller;
     return controller != null &&
@@ -860,8 +802,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       await controller.pause();
       _applyDanmakuPauseState(true);
       if (showOverlay) {
-        _setGestureOverlay(icon: Icons.pause, text: '暂停');
-        _hideGestureOverlay();
+        _gestureController.showOverlay(icon: Icons.pause, text: '暂停');
       }
       if (mounted) setState(() {});
       return;
@@ -869,8 +810,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     await controller.play();
     _applyDanmakuPauseState(false);
     if (showOverlay) {
-      _setGestureOverlay(icon: Icons.play_arrow, text: '播放');
-      _hideGestureOverlay();
+      _gestureController.showOverlay(icon: Icons.play_arrow, text: '播放');
     }
     if (mounted) setState(() {});
   }
@@ -891,245 +831,20 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
     if (showOverlay) {
       final absSeconds = delta.inSeconds.abs();
-      _setGestureOverlay(
+      _gestureController.showOverlay(
         icon: delta.isNegative ? Icons.fast_rewind : Icons.fast_forward,
         text: '${delta.isNegative ? '快退' : '快进'} ${absSeconds}s',
       );
-      _hideGestureOverlay();
     }
   }
 
-  Future<void> _handleDoubleTap(Offset localPos, double width) async {
+  Future<void> _seekTo(Duration pos) async {
     if (!_gesturesEnabled) return;
-
-    final region = width <= 0
-        ? 1
-        : (localPos.dx < width / 3)
-            ? 0
-            : (localPos.dx < width * 2 / 3)
-                ? 1
-                : 2;
-
-    final action = switch (region) {
-      0 => widget.appState.doubleTapLeft,
-      1 => widget.appState.doubleTapCenter,
-      _ => widget.appState.doubleTapRight,
-    };
-
-    switch (action) {
-      case DoubleTapAction.none:
-        return;
-      case DoubleTapAction.playPause:
-        await _togglePlayPause();
-        return;
-      case DoubleTapAction.seekBackward:
-        await _seekRelative(Duration(seconds: -_seekBackSeconds));
-        return;
-      case DoubleTapAction.seekForward:
-        await _seekRelative(Duration(seconds: _seekForwardSeconds));
-        return;
-    }
-  }
-
-  void _onSeekDragStart(DragStartDetails details) {
-    if (!_gesturesEnabled) return;
-    if (!widget.appState.gestureSeek) return;
-    _gestureMode = _GestureMode.seek;
-    _gestureStartPos = details.localPosition;
-    _seekGestureStartPosition = _position;
-    _seekGesturePreviewPosition = _position;
-    _showControls(scheduleHide: false);
-    _setGestureOverlay(icon: Icons.swap_horiz, text: _fmtClock(_position));
-  }
-
-  void _onSeekDragUpdate(
-    DragUpdateDetails details, {
-    required double width,
-    required Duration duration,
-  }) {
-    if (_gestureMode != _GestureMode.seek) return;
-    if (_gestureStartPos == null) return;
-    if (width <= 0) return;
-    if (!_gesturesEnabled) return;
-
-    final dx = details.localPosition.dx - _gestureStartPos!.dx;
-    final d = duration;
-    if (d <= Duration.zero) return;
-
-    final maxSeekSeconds = math.min(d.inSeconds.toDouble(), 300.0);
-    if (maxSeekSeconds <= 0) return;
-
-    final deltaSeconds = (dx / width) * maxSeekSeconds;
-    final delta = Duration(seconds: deltaSeconds.round());
-    final target = _safeSeekTarget(_seekGestureStartPosition + delta, d);
-    _seekGesturePreviewPosition = target;
-
-    _setGestureOverlay(
-      icon: delta.isNegative ? Icons.fast_rewind : Icons.fast_forward,
-      text:
-          '${_fmtClock(target)}（${delta.isNegative ? '-' : '+'}${delta.inSeconds.abs()}s）',
-    );
-
+    final controller = _controller!;
+    await controller.seekTo(pos);
+    _position = pos;
+    _syncDanmakuCursor(pos);
     if (mounted) setState(() {});
-  }
-
-  Future<void> _onSeekDragEnd(DragEndDetails details) async {
-    if (_gestureMode != _GestureMode.seek) return;
-    final target = _seekGesturePreviewPosition;
-    _gestureMode = _GestureMode.none;
-    _gestureStartPos = null;
-    _seekGesturePreviewPosition = null;
-
-    if (target != null && _gesturesEnabled) {
-      final controller = _controller!;
-      await controller.seekTo(target);
-      _position = target;
-      _syncDanmakuCursor(target);
-      if (mounted) setState(() {});
-    }
-
-    _hideGestureOverlay();
-    _scheduleControlsHide();
-  }
-
-  void _onSideDragStart(DragStartDetails details, {required double width}) {
-    if (!_gesturesEnabled) return;
-    _gestureStartPos = details.localPosition;
-    final isLeft = width <= 0 ? true : details.localPosition.dx < width / 2;
-    if (isLeft && widget.appState.gestureBrightness) {
-      _gestureMode = _GestureMode.brightness;
-      _gestureStartBrightness = _screenBrightness;
-      _setGestureOverlay(
-        icon: Icons.brightness_6_outlined,
-        text: '亮度 ${(100 * _screenBrightness).round()}%',
-      );
-      return;
-    }
-    if (!isLeft && widget.appState.gestureVolume) {
-      _gestureMode = _GestureMode.volume;
-      _gestureStartVolume = _playerVolume;
-      _setGestureOverlay(
-        icon: Icons.volume_up,
-        text: '音量 ${(100 * _playerVolume).round()}%',
-      );
-      return;
-    }
-    _gestureMode = _GestureMode.none;
-  }
-
-  void _onSideDragUpdate(
-    DragUpdateDetails details, {
-    required double height,
-  }) {
-    if (!_gesturesEnabled) return;
-    if (_gestureStartPos == null) return;
-    if (height <= 0) return;
-    if (_gestureMode != _GestureMode.brightness &&
-        _gestureMode != _GestureMode.volume) {
-      return;
-    }
-
-    final dy = details.localPosition.dy - _gestureStartPos!.dy;
-    final delta = (-dy / height).clamp(-1.0, 1.0);
-
-    switch (_gestureMode) {
-      case _GestureMode.brightness:
-        final v = (_gestureStartBrightness + delta).clamp(0.2, 1.0).toDouble();
-        if (v == _screenBrightness) return;
-        setState(() => _screenBrightness = v);
-        _setGestureOverlay(
-          icon: Icons.brightness_6_outlined,
-          text: '亮度 ${(100 * v).round()}%',
-        );
-        break;
-      case _GestureMode.volume:
-        final v = (_gestureStartVolume + delta).clamp(0.0, 1.0).toDouble();
-        _playerVolume = v;
-        final controller = _controller;
-        if (controller != null) {
-          // ignore: unawaited_futures
-          controller.setVolume(v);
-        }
-        _setGestureOverlay(
-          icon: v == 0 ? Icons.volume_off : Icons.volume_up,
-          text: '音量 ${(100 * v).round()}%',
-        );
-        break;
-      default:
-        break;
-    }
-  }
-
-  void _onSideDragEnd(DragEndDetails details) {
-    if (_gestureMode == _GestureMode.brightness ||
-        _gestureMode == _GestureMode.volume) {
-      _hideGestureOverlay();
-    }
-    _gestureMode = _GestureMode.none;
-    _gestureStartPos = null;
-  }
-
-  void _onLongPressStart(LongPressStartDetails details) {
-    if (!_gesturesEnabled) return;
-    if (!widget.appState.gestureLongPressSpeed) return;
-
-    final controller = _controller;
-    if (controller == null) return;
-    _gestureMode = _GestureMode.speed;
-    _longPressStartPos = details.localPosition;
-    _longPressBaseRate = controller.value.playbackSpeed;
-    final targetRate =
-        (_longPressBaseRate! * widget.appState.longPressSpeedMultiplier)
-            .clamp(0.1, 4.0)
-            .toDouble();
-    // ignore: unawaited_futures
-    controller.setPlaybackSpeed(targetRate);
-    _setGestureOverlay(
-      icon: Icons.speed,
-      text: '倍速 ×${(targetRate / _longPressBaseRate!).toStringAsFixed(2)}',
-    );
-  }
-
-  void _onLongPressMoveUpdate(
-    LongPressMoveUpdateDetails details, {
-    required double height,
-  }) {
-    if (_gestureMode != _GestureMode.speed) return;
-    if (!_gesturesEnabled) return;
-    if (!widget.appState.longPressSlideSpeed) return;
-    if (_longPressBaseRate == null || _longPressStartPos == null) return;
-    if (height <= 0) return;
-
-    final dy = details.localPosition.dy - _longPressStartPos!.dy;
-    final delta = (-dy / height) * 2.0;
-    final multiplier = (widget.appState.longPressSpeedMultiplier + delta)
-        .clamp(1.0, 4.0)
-        .toDouble();
-    final targetRate =
-        (_longPressBaseRate! * multiplier).clamp(0.1, 4.0).toDouble();
-    final controller = _controller;
-    if (controller != null) {
-      // ignore: unawaited_futures
-      controller.setPlaybackSpeed(targetRate);
-    }
-    _setGestureOverlay(
-      icon: Icons.speed,
-      text: '倍速 ×${multiplier.toStringAsFixed(2)}',
-    );
-  }
-
-  void _onLongPressEnd(LongPressEndDetails details) {
-    if (_gestureMode != _GestureMode.speed) return;
-    final base = _longPressBaseRate;
-    _gestureMode = _GestureMode.none;
-    _longPressBaseRate = null;
-    _longPressStartPos = null;
-    final controller = _controller;
-    if (base != null && controller != null) {
-      // ignore: unawaited_futures
-      controller.setPlaybackSpeed(base);
-    }
-    _hideGestureOverlay();
   }
 
   void _showNotSupported(String feature) {
@@ -1641,32 +1356,14 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     );
   }
 
-  bool get _shouldControlSystemUi {
-    if (kIsWeb) return false;
-    if (DeviceType.isTv) return false;
-    return Platform.isAndroid || Platform.isIOS;
-  }
+  Future<void> _enterImmersiveMode() =>
+      enterImmersiveMode(isTv: DeviceType.isTv);
 
-  Future<void> _enterImmersiveMode() async {
-    if (!_shouldControlSystemUi) return;
-    try {
-      await SystemChrome.setEnabledSystemUIMode(
-        SystemUiMode.immersiveSticky,
-        overlays: const [],
+  Future<void> _exitImmersiveMode({bool resetOrientations = false}) =>
+      exitImmersiveMode(
+        isTv: DeviceType.isTv,
+        resetOrientations: resetOrientations,
       );
-    } catch (_) {}
-  }
-
-  Future<void> _exitImmersiveMode({bool resetOrientations = false}) async {
-    if (!_shouldControlSystemUi) return;
-    try {
-      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    } catch (_) {}
-    if (!resetOrientations) return;
-    try {
-      await SystemChrome.setPreferredOrientations(const []);
-    } catch (_) {}
-  }
 
   String get _orientationTooltip {
     switch (_orientationMode) {
@@ -1691,7 +1388,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _cycleOrientationMode() async {
-    if (!_shouldControlSystemUi) {
+    if (!canControlSystemUi(isTv: DeviceType.isTv)) {
       _showNotSupported('旋转锁定');
       return;
     }
@@ -1720,7 +1417,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _applyOrientationForMode() async {
-    if (!_shouldControlSystemUi) return;
+    if (!canControlSystemUi(isTv: DeviceType.isTv)) return;
 
     List<DeviceOrientation>? orientations;
     switch (_orientationMode) {
@@ -1762,7 +1459,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 
   Future<void> _exitOrientationLock() async {
-    if (!_shouldControlSystemUi) return;
+    if (!canControlSystemUi(isTv: DeviceType.isTv)) return;
     _lastOrientationKey = null;
     try {
       await SystemChrome.setPreferredOrientations(const []);
@@ -2236,18 +1933,26 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                   ),
                                 ),
                               ),
-                            if (_screenBrightness < 0.999)
-                              Positioned.fill(
-                                child: IgnorePointer(
-                                  child: ColoredBox(
-                                    color: Colors.black.withValues(
-                                      alpha: (1.0 - _screenBrightness)
-                                          .clamp(0.0, 0.8)
-                                          .toDouble(),
-                                    ),
-                                  ),
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: AnimatedBuilder(
+                                  animation: _gestureController,
+                                  builder: (context, _) {
+                                    final alpha = (1.0 -
+                                            _gestureController.brightness)
+                                        .clamp(0.0, 0.8)
+                                        .toDouble();
+                                    if (alpha <= 0) {
+                                      return const SizedBox.expand();
+                                    }
+                                    return ColoredBox(
+                                      color:
+                                          Colors.black.withValues(alpha: alpha),
+                                    );
+                                  },
                                 ),
                               ),
+                            ),
                             if (_buffering)
                               Positioned.fill(
                                 child: ColoredBox(
@@ -2285,115 +1990,52 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
                                 ),
                               ),
                             Positioned.fill(
-                              child: LayoutBuilder(
-                                builder: (ctx, constraints) {
-                                  final w = constraints.maxWidth;
-                                  final h = constraints.maxHeight;
-                                  final sideDragEnabled =
-                                      widget.appState.gestureBrightness ||
-                                          widget.appState.gestureVolume;
-                                  return GestureDetector(
-                                    behavior: HitTestBehavior.translucent,
-                                    onTap: _toggleControls,
-                                    onDoubleTapDown: controlsEnabled
-                                        ? (d) => _doubleTapDownPosition =
-                                            d.localPosition
-                                        : null,
-                                    onDoubleTap: controlsEnabled
-                                        ? () {
-                                            final pos =
-                                                _doubleTapDownPosition ??
-                                                    Offset(w / 2, 0);
-                                            // ignore: unawaited_futures
-                                            _handleDoubleTap(pos, w);
-                                          }
-                                        : null,
-                                    onHorizontalDragStart: (controlsEnabled &&
-                                            widget.appState.gestureSeek)
-                                        ? _onSeekDragStart
-                                        : null,
-                                    onHorizontalDragUpdate: (controlsEnabled &&
-                                            widget.appState.gestureSeek)
-                                        ? (d) => _onSeekDragUpdate(
-                                              d,
-                                              width: w,
-                                              duration: _duration,
-                                            )
-                                        : null,
-                                    onHorizontalDragEnd: (controlsEnabled &&
-                                            widget.appState.gestureSeek)
-                                        ? _onSeekDragEnd
-                                        : null,
-                                    onVerticalDragStart: (controlsEnabled &&
-                                            sideDragEnabled)
-                                        ? (d) => _onSideDragStart(d, width: w)
-                                        : null,
-                                    onVerticalDragUpdate: (controlsEnabled &&
-                                            sideDragEnabled)
-                                        ? (d) => _onSideDragUpdate(d, height: h)
-                                        : null,
-                                    onVerticalDragEnd:
-                                        (controlsEnabled && sideDragEnabled)
-                                            ? _onSideDragEnd
-                                            : null,
-                                    onLongPressStart: (controlsEnabled &&
-                                            widget
-                                                .appState.gestureLongPressSpeed)
-                                        ? _onLongPressStart
-                                        : null,
-                                    onLongPressMoveUpdate: (controlsEnabled &&
-                                            widget.appState
-                                                .gestureLongPressSpeed &&
-                                            widget.appState.longPressSlideSpeed)
-                                        ? (d) => _onLongPressMoveUpdate(
-                                              d,
-                                              height: h,
-                                            )
-                                        : null,
-                                    onLongPressEnd: (controlsEnabled &&
-                                            widget
-                                                .appState.gestureLongPressSpeed)
-                                        ? _onLongPressEnd
-                                        : null,
-                                    child: const SizedBox.expand(),
-                                  );
-                                },
+                              child: PlayerGestureDetectorLayer(
+                                controller: _gestureController,
+                                enabled: controlsEnabled,
+                                position: _position,
+                                duration: _duration,
+                                onToggleControls: _toggleControls,
+                                onTogglePlayPause: () => _togglePlayPause(),
+                                onSeekRelative: (d) => _seekRelative(d),
+                                onSeekTo: _seekTo,
+                                doubleTapLeft: widget.appState.doubleTapLeft,
+                                doubleTapCenter: widget.appState.doubleTapCenter,
+                                doubleTapRight: widget.appState.doubleTapRight,
+                                seekBackwardSeconds: _seekBackSeconds,
+                                seekForwardSeconds: _seekForwardSeconds,
+                                gestureSeekEnabled: widget.appState.gestureSeek,
+                                gestureBrightnessEnabled:
+                                    widget.appState.gestureBrightness,
+                                gestureVolumeEnabled: widget.appState.gestureVolume,
+                                gestureLongPressEnabled:
+                                    widget.appState.gestureLongPressSpeed,
+                                longPressSlideEnabled:
+                                    widget.appState.longPressSlideSpeed,
+                                longPressSpeedMultiplier:
+                                    widget.appState.longPressSpeedMultiplier,
+                                getPlaybackRate: controlsEnabled
+                                    ? () => controller.value.playbackSpeed
+                                    : null,
+                                onSetPlaybackRate: controlsEnabled
+                                    ? (rate) async {
+                                        await controller.setPlaybackSpeed(rate);
+                                        if (mounted) setState(() {});
+                                      }
+                                    : null,
+                                onSetVolume: controlsEnabled
+                                    ? (volume) => controller.setVolume(volume)
+                                    : null,
+                                clampSeekTarget: (target, duration) =>
+                                    safeSeekTarget(
+                                      target,
+                                      duration,
+                                      rewind: Duration.zero,
+                                    ),
+                                onShowControls: _showControls,
+                                onScheduleControlsHide: _scheduleControlsHide,
                               ),
                             ),
-                            if (_gestureOverlayText != null)
-                              Center(
-                                child: IgnorePointer(
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 14,
-                                        vertical: 10,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            _gestureOverlayIcon ??
-                                                Icons.info_outline,
-                                            size: 20,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            _gestureOverlayText!,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
                             Align(
                               alignment: Alignment.bottomCenter,
                               child: SafeArea(
@@ -2570,6 +2212,4 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   }
 }
 
-enum _OrientationMode { auto, landscape, portrait }
-
-enum _GestureMode { none, brightness, volume, seek, speed }
+typedef _OrientationMode = OrientationMode;
