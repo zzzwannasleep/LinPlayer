@@ -6,7 +6,9 @@ import '../app_config/app_config_scope.dart';
 import '../app_config/app_product.dart';
 import '../services/emos_sign_in_service.dart';
 import '../state/app_state.dart';
+import 'emos_carrot_page.dart';
 import 'emos_proxy_lines_page.dart';
+import 'emos_rank_page.dart';
 import 'emos_upload_page.dart';
 import 'emos_user_invite_page.dart';
 import 'emos_video_manager_page.dart';
@@ -192,14 +194,34 @@ class _EmosConsolePageState extends State<EmosConsolePage> {
                       leading: const Icon(Icons.leaderboard_outlined),
                       title: const Text('Rank'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: _busy ? null : () => _openPlaceholder('Rank'),
+                      onTap: _busy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => EmosRankPage(
+                                    appState: widget.appState,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.local_florist_outlined),
                       title: const Text('Carrot'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: _busy ? null : () => _openPlaceholder('Carrot'),
+                      onTap: _busy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => EmosCarrotPage(
+                                    appState: widget.appState,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                     const Divider(height: 1),
                     ListTile(
