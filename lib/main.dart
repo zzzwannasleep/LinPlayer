@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'app_config/app_config.dart';
+import 'app_config/app_config_scope.dart';
 import 'home_page.dart';
 import 'server_page.dart';
 import 'webdav_home_page.dart';
@@ -26,6 +28,10 @@ void main() async {
   MediaKit.ensureInitialized();
   await DeviceType.init();
 
+  final appConfig = AppConfig.current;
+  EmbyApi.setUserAgentProduct(appConfig.userAgentProduct);
+  EmbyApi.setDefaultClientName(appConfig.displayName);
+
   try {
     final info = await PackageInfo.fromPlatform();
     EmbyApi.setAppVersion('${info.version}+${info.buildNumber}');
@@ -41,7 +47,10 @@ void main() async {
   // Best-effort: keep launcher icon in sync with settings (Android only).
   // ignore: unawaited_futures
   AppIconService.setIconId(appState.appIconId);
-  runApp(LinPlayerApp(appState: appState));
+  runApp(AppConfigScope(
+    config: appConfig,
+    child: LinPlayerApp(appState: appState),
+  ));
 }
 
 class LinPlayerApp extends StatefulWidget {
@@ -79,6 +88,7 @@ class _LinPlayerAppState extends State<LinPlayerApp>
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
+        final appConfig = AppConfigScope.of(context);
         final appState = widget.appState;
         final active = appState.activeServer;
         final home = switch (active?.serverType) {
@@ -95,7 +105,7 @@ class _LinPlayerAppState extends State<LinPlayerApp>
             final useDynamic = appState.useDynamicColor;
             return MaterialApp(
               key: ValueKey<String>('nav:${appState.activeServerId ?? 'none'}'),
-              title: 'LinPlayer',
+              title: appConfig.displayName,
               debugShowCheckedModeBanner: false,
               themeMode: appState.themeMode,
               theme: AppTheme.light(

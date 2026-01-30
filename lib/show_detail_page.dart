@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'services/emby_api.dart';
+import 'server_adapters/server_access.dart';
 import 'state/app_state.dart';
 import 'state/server_profile.dart';
 import 'state/preferences.dart';
@@ -63,18 +64,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
   Future<void> _refreshProgressAfterReturn(
       {Duration delay = const Duration(milliseconds: 350)}) async {
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) return;
-
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) return;
 
     final before = _detail?.playbackPositionTicks;
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -85,12 +77,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       }
 
       try {
-        final detail = await api.fetchItemDetail(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
-          itemId: widget.itemId,
-        );
+        final detail =
+            await access.adapter.fetchItemDetail(access.auth, itemId: widget.itemId);
         if (!mounted) return;
         setState(() => _detail = detail);
         if (before == null || detail.playbackPositionTicks != before) return;
@@ -115,27 +103,25 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       return;
     }
 
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) {
+      setState(() {
+        _error = 'Unsupported server';
+        _loading = false;
+      });
+      return;
+    }
     try {
-      final detail = await api.fetchItemDetail(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
+      final detail = await access.adapter.fetchItemDetail(
+        access.auth,
         itemId: widget.itemId,
       );
       final isSeries = detail.type.toLowerCase() == 'series';
 
       final seasons = isSeries
-          ? await api.fetchSeasons(
-              token: token,
-              baseUrl: baseUrl,
-              userId: userId,
+          ? await access.adapter.fetchSeasons(
+              access.auth,
               seriesId: widget.itemId,
             )
           : PagedResult<MediaItem>(const [], 0);
@@ -195,10 +181,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
         if (selectedSeasonId.isNotEmpty) {
           try {
-            final eps = await api.fetchEpisodes(
-              token: token,
-              baseUrl: baseUrl,
-              userId: userId,
+            final eps = await access.adapter.fetchEpisodes(
+              access.auth,
               seasonId: selectedSeasonId,
             );
             final items = List<MediaItem>.from(eps.items);
@@ -214,13 +198,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       }
       PagedResult<MediaItem> similar = PagedResult(const [], 0);
       try {
-        similar = await api.fetchSimilar(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
-          itemId: widget.itemId,
-          limit: 12,
-        );
+        similar = await access.adapter
+            .fetchSimilar(access.auth, itemId: widget.itemId, limit: 12);
       } catch (_) {}
 
       PlaybackInfoResult? playInfo;
@@ -230,13 +209,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       int? selectedSubtitleStreamIndex = _selectedSubtitleStreamIndex;
       if (!isSeries) {
         try {
-          playInfo = await api.fetchPlaybackInfo(
-            token: token,
-            baseUrl: baseUrl,
-            userId: userId,
-            deviceId: widget.appState.deviceId,
-            itemId: widget.itemId,
-          );
+          playInfo = await access.adapter
+              .fetchPlaybackInfo(access.auth, itemId: widget.itemId);
           final sources = playInfo.mediaSources.cast<Map<String, dynamic>>();
           if (sources.isNotEmpty) {
             final validSelection = selectedMediaSourceId != null &&
@@ -256,12 +230,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           // PlaybackInfo is optional for the detail UI.
         }
         try {
-          chaps = await api.fetchChapters(
-            token: token,
-            baseUrl: baseUrl,
-            userId: userId,
-            itemId: widget.itemId,
-          );
+          chaps =
+              await access.adapter.fetchChapters(access.auth, itemId: widget.itemId);
         } catch (_) {
           // Chapters are optional; hide section when unavailable.
         }
@@ -271,7 +241,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           baseUrl: baseUrl,
           itemId: widget.itemId,
           token: token,
-          apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+          apiPrefix: access.auth.apiPrefix,
           imageType: 'Primary',
           maxWidth: 800,
         ),
@@ -279,7 +249,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           baseUrl: baseUrl,
           itemId: widget.itemId,
           token: token,
-          apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+          apiPrefix: access.auth.apiPrefix,
           imageType: 'Backdrop',
           maxWidth: 1200,
         ),
@@ -340,22 +310,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   Future<List<MediaItem>> _episodesForSeason(MediaItem season) async {
     final cached = _episodesCache[season.id];
     if (cached != null) return cached;
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) return const [];
 
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
-    final eps = await api.fetchEpisodes(
-      token: token,
-      baseUrl: baseUrl,
-      userId: userId,
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) return const [];
+
+    final eps = await access.adapter.fetchEpisodes(
+      access.auth,
       seasonId: season.id,
     );
     final items = List<MediaItem>.from(eps.items);
@@ -1575,18 +1536,18 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
       return;
     }
 
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) {
+      setState(() {
+        _error = 'Unsupported server';
+        _loading = false;
+      });
+      return;
+    }
     try {
-      final eps = await api.fetchEpisodes(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
+      final eps = await access.adapter.fetchEpisodes(
+        access.auth,
         seasonId: widget.season.id,
       );
       final items = List<MediaItem>.from(eps.items);
@@ -1598,10 +1559,8 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
       MediaItem? detail;
       if (!widget.isVirtual) {
         try {
-          detail = await api.fetchItemDetail(
-            token: token,
-            baseUrl: baseUrl,
-            userId: userId,
+          detail = await access.adapter.fetchItemDetail(
+            access.auth,
             itemId: widget.season.id,
           );
         } catch (_) {}
@@ -1807,18 +1766,9 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   Future<void> _refreshProgressAfterReturn(
       {Duration delay = const Duration(milliseconds: 350)}) async {
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) return;
-
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) return;
 
     final before = _detail?.playbackPositionTicks;
     for (var attempt = 0; attempt < 3; attempt++) {
@@ -1829,12 +1779,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       }
 
       try {
-        final detail = await api.fetchItemDetail(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
-          itemId: widget.episode.id,
-        );
+        final detail = await access.adapter
+            .fetchItemDetail(access.auth, itemId: widget.episode.id);
         if (!mounted) return;
         setState(() => _detail = detail);
         if (before == null || detail.playbackPositionTicks != before) return;
@@ -1860,20 +1806,18 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       return;
     }
 
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) {
+      setState(() {
+        _error = 'Unsupported server';
+        _loading = false;
+      });
+      return;
+    }
     try {
-      final detail = await api.fetchItemDetail(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-        itemId: widget.episode.id,
-      );
+      final detail = await access.adapter
+          .fetchItemDetail(access.auth, itemId: widget.episode.id);
 
       final resolvedSeriesId =
           (detail.seriesId ?? widget.episode.seriesId ?? '').trim();
@@ -1889,23 +1833,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         });
         unawaited(
           _loadSeriesEpisodes(
-            api: api,
-            token: token,
-            baseUrl: baseUrl,
-            userId: userId,
+            access: access,
             episodeDetail: detail,
             seriesId: resolvedSeriesId,
             seriesName: resolvedSeriesName,
           ),
         );
       }
-      final info = await api.fetchPlaybackInfo(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-        deviceId: widget.appState.deviceId,
-        itemId: widget.episode.id,
-      );
+      final info = await access.adapter
+          .fetchPlaybackInfo(access.auth, itemId: widget.episode.id);
       final sources = info.mediaSources.cast<Map<String, dynamic>>();
       final preferred = sources.isEmpty
           ? null
@@ -1952,12 +1888,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       }
       List<ChapterInfo> chaps = const [];
       try {
-        chaps = await api.fetchChapters(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
-          itemId: widget.episode.id,
-        );
+        chaps =
+            await access.adapter.fetchChapters(access.auth, itemId: widget.episode.id);
       } catch (_) {
         // Chapters are optional; hide section when unavailable.
       }
@@ -2381,21 +2313,14 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   }
 
   Future<void> _loadSeriesEpisodes({
-    required EmbyApi api,
-    required String token,
-    required String baseUrl,
-    required String userId,
+    required ServerAccess access,
     required MediaItem episodeDetail,
     required String seriesId,
     required String seriesName,
   }) async {
     try {
-      final seasons = await api.fetchSeasons(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
-        seriesId: seriesId,
-      );
+      final seasons =
+          await access.adapter.fetchSeasons(access.auth, seriesId: seriesId);
       final seasonItems =
           seasons.items.where((s) => s.type.toLowerCase() == 'season').toList();
       seasonItems.sort((a, b) {
@@ -2445,10 +2370,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
       final episodesCacheForUi = <String, List<MediaItem>>{};
       if (selectedSeasonId != null && selectedSeasonId.isNotEmpty) {
-        final eps = await api.fetchEpisodes(
-          token: token,
-          baseUrl: baseUrl,
-          userId: userId,
+        final eps = await access.adapter.fetchEpisodes(
+          access.auth,
           seasonId: selectedSeasonId,
         );
         final items = List<MediaItem>.from(eps.items);
@@ -2519,22 +2442,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   Future<List<MediaItem>> _episodesForSeason(MediaItem season) async {
     final cached = _episodesCache[season.id];
     if (cached != null) return cached;
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) return const [];
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) return const [];
 
-    final api = EmbyApi(
-      hostOrUrl: baseUrl,
-      preferredScheme: 'https',
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      serverType: widget.server?.serverType ?? widget.appState.serverType,
-      deviceId: widget.appState.deviceId,
-    );
-    final eps = await api.fetchEpisodes(
-      token: token,
-      baseUrl: baseUrl,
-      userId: userId,
+    final eps = await access.adapter.fetchEpisodes(
+      access.auth,
       seasonId: season.id,
     );
     final items = List<MediaItem>.from(eps.items);

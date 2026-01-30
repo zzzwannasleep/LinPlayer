@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+import '../app_config/app_config.dart';
 import '../state/app_state.dart';
 import 'app_update_service.dart';
 
@@ -64,7 +65,7 @@ class _AppUpdateAutoCheckerState extends State<AppUpdateAutoChecker> {
 }
 
 class AppUpdateFlow {
-  static const String repoUrl = 'https://github.com/zzzwannasleep/LinPlayer';
+  static String get repoUrl => AppConfig.current.repoUrl;
   static const Duration _autoCheckInterval = Duration(hours: 24);
   static bool _inProgress = false;
 

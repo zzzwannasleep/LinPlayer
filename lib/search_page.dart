@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/emby_api.dart';
+import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
 import 'src/device/device_type.dart';
 import 'src/ui/app_components.dart';
@@ -168,17 +169,12 @@ class _SearchPageState extends State<SearchPage> {
     });
 
     try {
-      final api = EmbyApi(
-        hostOrUrl: baseUrl,
-        preferredScheme: 'https',
-        apiPrefix: widget.appState.apiPrefix,
-        serverType: widget.appState.serverType,
-        deviceId: widget.appState.deviceId,
-      );
-      final fetched = await api.fetchItems(
-        token: token,
-        baseUrl: baseUrl,
-        userId: userId,
+      final access = resolveServerAccess(appState: widget.appState);
+      if (access == null) {
+        throw Exception('鏈繛鎺ユ湇鍔″櫒');
+      }
+      final fetched = await access.adapter.fetchItems(
+        access.auth,
         searchTerm: query,
         includeItemTypes: 'Series,Movie',
         recursive: true,

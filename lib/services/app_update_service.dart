@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'emby_api.dart';
+
 typedef DownloadProgressCallback = void Function(
     int receivedBytes, int totalBytes);
 
@@ -169,7 +171,7 @@ class AppUpdateService {
   }) async {
     final headers = <String, String>{
       'Accept': 'application/vnd.github+json',
-      'User-Agent': 'LinPlayer',
+      'User-Agent': EmbyApi.userAgent,
     };
 
     Future<http.Response> get(Uri uri) =>
@@ -353,7 +355,7 @@ class AppUpdateService {
     Duration timeout = const Duration(minutes: 10),
   }) async {
     final request = http.Request('GET', Uri.parse(asset.browserDownloadUrl));
-    request.headers['User-Agent'] = 'LinPlayer';
+    request.headers['User-Agent'] = EmbyApi.userAgent;
     final streamed = await _client.send(request).timeout(timeout);
     if (streamed.statusCode != 200) {
       throw Exception('Download failed: HTTP ${streamed.statusCode}');

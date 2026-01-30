@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'app_config/app_config_scope.dart';
 import 'aggregate_service_page.dart';
 import 'library_page.dart';
 import 'library_items_page.dart';
@@ -506,7 +507,8 @@ class _HomePageState extends State<HomePage> {
                 title: _ServerGlassButton(
                   enableBlur: enableBlur,
                   useGlass: usesGlassSurfaces,
-                  serverName: widget.appState.activeServer?.name ?? 'LinPlayer',
+                  serverName: widget.appState.activeServer?.name ??
+                      AppConfigScope.of(context).displayName,
                   iconUrl: widget.appState.activeServer?.iconUrl,
                   onTap: widget.appState.hasActiveServer ? _switchServer : null,
                 ),
