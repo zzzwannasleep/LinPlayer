@@ -24,6 +24,41 @@ flutter run ^
   --dart-define=APP_EMOS_BASE_URL=https://emos.best
 ```
 
+### 1.3 单独构建（Release）
+
+Android APK：
+
+```bash
+flutter build apk --release ^
+  --dart-define=APP_PRODUCT=emos ^
+  --dart-define=APP_EMOS_BASE_URL=https://emos.best
+```
+
+其他平台同理（示例）：
+
+```bash
+flutter build windows --release --dart-define=APP_PRODUCT=emos
+flutter build macos   --release --dart-define=APP_PRODUCT=emos
+flutter build linux   --release --dart-define=APP_PRODUCT=emos
+flutter build ios     --release --dart-define=APP_PRODUCT=emos
+```
+
+### 1.4 App 名称（不共存）
+
+本仓库的 `emos` 分支已把各平台展示名统一改为 **EmosPlayer**（Android/iOS/Windows/macOS/Linux）。  
+因此不再追求“同机共存 LinPlayer/UPlayer”，只保留 EmosPlayer 这一套名字与产物。
+
+### 1.5 GitHub Actions：两个独立工作流
+
+对应文件：
+- 直接构建：`.github/workflows/emos-build.yml`（`Build EmosPlayer`）
+- 同步主分支后构建：`.github/workflows/emos-sync-and-build.yml`（`Sync main -> emos & Build EmosPlayer`）
+
+工作流说明：
+- `Build EmosPlayer`：直接基于当前 `emos` 分支构建 Android APK（产物在 Artifacts：`EmosPlayer-Android-APKs`）
+- `Sync main -> emos & Build EmosPlayer`：先把 `origin/main` 合并进 `emos` 并推送，再构建 APK（如有冲突会失败，需要你本地解决后 push）
+- 两个工作流都支持在手动触发时填写 `APP_EMOS_BASE_URL`（默认 `https://emos.best`）
+
 ---
 
 ## 2. 登录与会话（Emos Sign-in）
@@ -191,4 +226,3 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 
 ### 6.2 为什么代码里有部分中文显示乱码？
 仓库中已有部分历史字符串存在编码问题（mojibake），本分支尽量避免在这些行上做大规模重写，减少 patch 冲突与风险。
-
