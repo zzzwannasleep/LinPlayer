@@ -1,37 +1,64 @@
 # EmosPlayer（`APP_PRODUCT=emos`）使用与开发说明
 
-本文面向本仓库的 `emos` 分支：说明 **EmosPlayer** 的运行方式、登录/会话机制、已落地功能入口、以及已知限制与后续扩展点。
+本文面向本仓库的 `emos` 产品（`AppProduct.emos`）：说明 **EmosPlayer** 的运行/构建方式、登录与会话机制、Emya(Emby) 接入策略、已落地功能入口，以及已知限制与后续扩展点。
 
-> 说明：你导出的 Postman JSON（`api.postman_collection.json`、`emya.postman_collection.json`）不需要提交到仓库，本分支已把接口封装进 `EmosApi`，并用现有 `EmbyApi` 承接播放侧。
+> 提示：Postman 导出的 collection（如 `api.postman_collection.json` / `emya.postman_collection.json`）仅用于本地联调，不需要提交到仓库；客户端侧已将接口封装为 `EmosApi`，播放与媒体库继续复用 `EmbyApi`。
 
 ---
 
-## 1. 如何启动 EmosPlayer
+## 0. 快速开始（TL;DR）
 
-### 1.1 通过 `--dart-define`（推荐）
+运行：
 
 ```bash
 flutter run --dart-define=APP_PRODUCT=emos
 ```
 
-### 1.2 指定 Emos 服务器地址（可选）
-
-默认 `APP_EMOS_BASE_URL=https://emos.best`。
+自定义 Emos 服务端地址：
 
 ```bash
-flutter run ^
-  --dart-define=APP_PRODUCT=emos ^
-  --dart-define=APP_EMOS_BASE_URL=https://emos.best
+flutter run --dart-define=APP_PRODUCT=emos --dart-define=APP_EMOS_BASE_URL=https://emos.best
 ```
 
-### 1.3 单独构建（Release）
+构建 Release APK：
+
+```bash
+flutter build apk --release --dart-define=APP_PRODUCT=emos --dart-define=APP_EMOS_BASE_URL=https://emos.best
+```
+
+---
+
+## 1. 运行与构建
+
+### 1.1 配置项（`--dart-define`）
+
+| Key | 说明 | 默认值 |
+| --- | --- | --- |
+| `APP_PRODUCT` | 产品开关（必须为 `emos` 才会启用 Emos 相关入口） | `lin` |
+| `APP_EMOS_BASE_URL` | Emos 服务端 Base URL（需要包含 `http/https`） | `https://emos.best` |
+| `APP_GITHUB_OWNER` | 用于“关于/更新”等场景的仓库 owner（可选） | `zzzwannasleep` |
+| `APP_GITHUB_REPO` | 用于“关于/更新”等场景的仓库 repo（可选） | `LinPlayer` |
+
+> 建议：本地调试时优先显式传 `APP_PRODUCT=emos`，避免误用默认值导致入口/功能不显示。
+
+### 1.2 启动（Debug/Profile）
+
+```bash
+flutter run --dart-define=APP_PRODUCT=emos
+```
+
+### 1.3 指定 Emos 服务端地址（可选）
+
+```bash
+flutter run --dart-define=APP_PRODUCT=emos --dart-define=APP_EMOS_BASE_URL=https://emos.best
+```
+
+### 1.4 构建（Release）
 
 Android APK：
 
 ```bash
-flutter build apk --release ^
-  --dart-define=APP_PRODUCT=emos ^
-  --dart-define=APP_EMOS_BASE_URL=https://emos.best
+flutter build apk --release --dart-define=APP_PRODUCT=emos --dart-define=APP_EMOS_BASE_URL=https://emos.best
 ```
 
 其他平台同理（示例）：
@@ -43,12 +70,12 @@ flutter build linux   --release --dart-define=APP_PRODUCT=emos
 flutter build ios     --release --dart-define=APP_PRODUCT=emos
 ```
 
-### 1.4 App 名称（不共存）
+### 1.5 App 名称（不共存）
 
-本仓库的 `emos` 分支已把各平台展示名统一改为 **EmosPlayer**（Android/iOS/Windows/macOS/Linux）。  
-因此不再追求“同机共存 LinPlayer/UPlayer”，只保留 EmosPlayer 这一套名字与产物。
+`emos` 产品在各平台展示名统一为 **EmosPlayer**（Android/iOS/Windows/macOS/Linux）。  
+该分支不再追求“同机共存 LinPlayer/UPlayer”，只保留 EmosPlayer 这一套名字与产物。
 
-### 1.5 GitHub Actions：两个独立工作流
+### 1.6 GitHub Actions：两个独立工作流
 
 对应文件：
 - 直接构建：`.github/workflows/emos-build.yml`（`Build EmosPlayer`）
@@ -65,7 +92,7 @@ flutter build ios     --release --dart-define=APP_PRODUCT=emos
 
 ### 2.1 入口
 
-- App 内：设置页 → **Emos** 区块 → `Emos Console` 或 `Sign in`
+- App 内：设置页 → **Emos** 区块 → `Emos Console`
 - 服务器列表页（`ServerPage`）右上角 `+`：当且仅当产品为 `emos` 时，会触发 Emos 登录流程并自动添加 Emya(Emby) 服务器
 
 ### 2.2 登录方式（Loopback 回调）
@@ -73,29 +100,46 @@ flutter build ios     --release --dart-define=APP_PRODUCT=emos
 当前实现为“浏览器登录 + 本机回环回调”模式：
 
 1. App 启动本地回调服务：`127.0.0.1:<port>/emos_callback`
-2. 打开浏览器访问 Emos `/link`，并把回调 URL 作为参数
+2. 拉起浏览器访问 Emos `/link`，并把回调 URL 作为参数
 3. 浏览器登录后，Emos 服务端回跳到本机回调地址，携带 `token/user_id/username/avatar` 等信息
 4. App 捕获回调并写入本地会话
 
 对应实现：
 - 登录编排：`lib/services/emos_sign_in_service.dart`
-- 回调服务器：`lib/services/emos_auth_flow.dart`
+- 回调服务：`lib/services/emos_auth_flow.dart`
 
-### 2.3 会话持久化
+### 2.3 常见排障
 
-会话保存在本地（SharedPreferences），包含：
+- **Web 平台无法登录**：Web 不支持本机 `127.0.0.1` 回调的 `HttpServer`（见 FAQ）。
+- **桌面端首次登录无回调**：检查系统防火墙/安全软件是否拦截本地端口监听；必要时允许应用监听回环地址。
+- **`APP_EMOS_BASE_URL` 不可用**：确认 Base URL 可在设备浏览器直接访问；建议显式带上 `https://` 或 `http://`。
+
+### 2.4 会话持久化与退出登录
+
+会话保存在本地（SharedPreferences），字段包含：
 - `token`
 - `userId`
 - `username`
 - `avatarUrl`（可空）
 
-对应实现：
-- `lib/state/emos_session.dart`
-- `lib/state/app_state.dart`
+对应代码：
+- 数据结构：`lib/state/emos_session.dart`
+- 持久化：`lib/state/app_state.dart`（Key：`emosToken_v1/emosUserId_v1/emosUsername_v1/emosAvatarUrl_v1`）
+
+退出登录：
+- 设置页 → Emos → `Sign out`（内部调用 `AppState.clearEmosSession()`）
+- 或在 `Emos Console` 顶部卡片点击 `Sign out`
 
 ---
 
 ## 3. Emya（Emby）接入策略（用于播放/媒体库）
+
+### 3.1 总体思路
+
+- **播放与媒体库**：继续走现有 `EmbyApi`（保持稳定，复用现有播放器链路）
+- **Emos 业务能力**（片单/反代/求片/上传等）：走 `EmosApi`
+
+### 3.2 自动添加 Emya(Emby) 服务器
 
 Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 - `emya_url`：Emya 服务器地址（Emby）
@@ -103,22 +147,22 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 
 然后 App 会用现有 `EmbyApi` 进行 Emby 侧鉴权，最终调用 `AppState.addServer(...)` 把 Emya 服务器加入服务器列表并激活。
 
-核心点：
-- 播放与媒体库仍走 `EmbyApi`（保持稳定/复用现有播放器链路）
-- Emos 的业务能力（片单/反代/求片/上传等）走 `EmosApi`
+### 3.3 关键代码位置
 
-对应实现：
-- Emos 业务 API：`lib/services/emos_api.dart`
+- Emos 业务 API（Bearer token）：`lib/services/emos_api.dart`
 - Emos 适配器（Emby-backed）：`lib/server_adapters/emos/emos_adapter.dart`
-- 自动添加 Emya：`lib/services/emos_sign_in_service.dart`
+- 登录并引导添加 Emya：`lib/services/emos_sign_in_service.dart`
+
+### 3.4 HTTP/鉴权细节（实现现状）
+
+- Emos 侧鉴权：`Authorization: Bearer <token>`（由 `EmosApi` 统一注入）。
+- `EmosApi` 当前默认接受自签/无效 TLS 证书（`badCertificateCallback: true`），联调用起来更省事；如需严格校验，请按你的安全要求调整实现。
 
 ---
 
 ## 4. 已落地功能与入口（Emos Console）
 
 入口：设置页 → Emos → `Emos Console`（`lib/emos/emos_console_page.dart`）
-
-目前已做的模块：
 
 ### 4.1 User & Invite
 
@@ -152,7 +196,7 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 
 页面：`lib/emos/emos_watchlists_page.dart`
 
-> 说明：片单视频的“搜索/增删改排序”等接口已在 `EmosApi` 中封装；若你希望我们把“片单视频管理”做成完整 UI，可以继续扩展该页面。
+> 说明：片单视频的“搜索/增删改排序”等接口已在 `EmosApi` 中封装；若你希望把“片单视频管理”做成完整 UI，可继续扩展该页面。
 
 ### 4.4 Video Manager（视频管理 + 目录树 + 资源/字幕）
 
@@ -195,6 +239,18 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 
 页面：`lib/emos/emos_carrot_page.dart`
 
+### 4.8 扩展指南（新增 Emos 模块）
+
+推荐落地路径：
+1. 在 `lib/services/emos_api.dart` 增加接口封装（优先“薄封装”，统一走 `_getAny/_postJson/_putJson/...`）。
+2. 在 `lib/emos/` 新增页面（按现有页面模式：从 `AppConfigScope` 读取 `emosBaseUrl`，从 `appState.emosSession` 取 token）。
+3. 在 `lib/emos/emos_console_page.dart` 增加入口 `ListTile`。
+4. 如需在“播放/媒体库”等通用页面复用 Emos 能力，优先从 `lib/server_adapters/emos/emos_adapter.dart` 走适配层，避免 UI 直接依赖具体实现。
+
+注意事项：
+- 大多数 Emos API 需要登录 token；建议在页面入口处判断 `appState.hasEmosSession`，无会话时引导用户 Sign in。
+- token 失效/过期时通常需要重新登录（Sign in）。
+
 ---
 
 ## 5. 求片（Seek）状态：已评估，暂未实现 UI
@@ -204,7 +260,7 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 - UI 暂未接入（按你的要求：先评估再决定做不做）
 
 接口能力概览：
-- 列表：`POST /api/seek`（支持筛选：`video_type/status/upload_self/video_title/with_user`，排序：`sort_by/sort_order`）
+- 列表：`POST /api/seek`（支持筛选：`video_type/status/upload_self/video_title/with_user`；排序：`sort_by/sort_order`）
 - 轮询未认领：`GET /api/seek/poll`
 - 求片/取消：`PUT /api/seek/apply?item_type=...&item_id=...`
 - 查询认领状态：`GET /api/seek/query?seek_id=...`
@@ -212,7 +268,7 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 - 认领/取消认领：`PUT /api/seek/claim {seek_id,type}`
 - 催更（加萝卜）：`PUT /api/seek/urge {seek_id,carrot}`
 
-如果你决定要做，我建议实现顺序：
+如果你决定要做，建议实现顺序：
 1) Seek 列表（带筛选/排序）
 2) Seek 详情页（含 query/history）
 3) 在视频/剧集资源页加“一键求片/取消/认领/催更”按钮
@@ -222,7 +278,9 @@ Emos 登录成功后会自动拉取用户信息 `GET /api/user`：
 ## 6. 常见问题（FAQ）
 
 ### 6.1 Web 平台为什么不能登录？
+
 当前登录依赖本机 `127.0.0.1` 回调 `HttpServer`，Web 平台不支持该方式。
 
 ### 6.2 为什么代码里有部分中文显示乱码？
+
 仓库中已有部分历史字符串存在编码问题（mojibake），本分支尽量避免在这些行上做大规模重写，减少 patch 冲突与风险。
