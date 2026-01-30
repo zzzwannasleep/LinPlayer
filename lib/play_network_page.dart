@@ -28,7 +28,9 @@ import 'src/player/network/network_playback_backend.dart';
 import 'src/player/thumbnail_generator.dart';
 import 'src/player/track_preferences.dart';
 import 'src/player/features/episode_picker.dart';
+import 'src/player/features/core_switch_flow.dart';
 import 'src/player/features/player_gestures.dart';
+import 'src/player/features/subtitle_style.dart';
 import 'src/player/network/emby_media_source_utils.dart';
 import 'src/player/network/network_playback_reporter.dart';
 import 'src/player/shared/player_types.dart';
@@ -202,8 +204,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       fetchEpisodes: (seasonId) async {
         final access = _serverAccess;
         if (access == null) throw Exception('Not connected');
-        final eps = await access.adapter
-            .fetchEpisodes(access.auth, seasonId: seasonId);
+        final eps =
+            await access.adapter.fetchEpisodes(access.auth, seasonId: seasonId);
         return eps.items;
       },
     )..addListener(() {
@@ -2019,17 +2021,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Future<void> _switchCore() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Exo 内核仅支持 Android')),
-      );
-      return;
-    }
-
     final pos = _lastPosition;
     _maybeReportPlaybackProgress(pos, force: true);
-    await widget.appState.setPlayerCore(PlayerCore.exo);
+    final ok = await switchPlayerCoreOrToast(
+      context: context,
+      appState: widget.appState,
+      target: PlayerCore.exo,
+    );
+    if (!ok) return;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -2398,7 +2397,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                     return const SizedBox.expand();
                                   }
                                   return ColoredBox(
-                                    color: Colors.black.withValues(alpha: alpha),
+                                    color:
+                                        Colors.black.withValues(alpha: alpha),
                                   );
                                 },
                               ),
@@ -2467,7 +2467,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               gestureSeekEnabled: widget.appState.gestureSeek,
                               gestureBrightnessEnabled:
                                   widget.appState.gestureBrightness,
-                              gestureVolumeEnabled: widget.appState.gestureVolume,
+                              gestureVolumeEnabled:
+                                  widget.appState.gestureVolume,
                               gestureLongPressEnabled:
                                   widget.appState.gestureLongPressSpeed,
                               longPressSlideEnabled:
@@ -2489,10 +2490,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   : null,
                               clampSeekTarget: (target, duration) =>
                                   safeSeekTarget(
-                                    target,
-                                    duration,
-                                    rewind: Duration.zero,
-                                  ),
+                                target,
+                                duration,
+                                rewind: Duration.zero,
+                              ),
                               onShowControls: _showControls,
                               onScheduleControlsHide: _scheduleControlsHide,
                             ),
@@ -3206,39 +3207,23 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return parts.join('  ');
   }
 
-  SubtitleViewConfiguration get _subtitleViewConfiguration {
-    const base = SubtitleViewConfiguration();
-    final bottom =
-        (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
-    return SubtitleViewConfiguration(
-      visible: base.visible,
-      style: base.style.copyWith(
-        fontSize: _subtitleFontSize.clamp(12.0, 60.0),
-        fontWeight: _subtitleBold ? FontWeight.w600 : FontWeight.normal,
-      ),
-      textAlign: base.textAlign,
-      textScaler: base.textScaler,
-      padding: base.padding.copyWith(bottom: bottom),
-    );
-  }
+  SubtitleViewConfiguration get _subtitleViewConfiguration =>
+      buildMpvSubtitleViewConfiguration(
+        fontSize: _subtitleFontSize,
+        positionStep: _subtitlePositionStep,
+        bold: _subtitleBold,
+      );
 
   Future<void> _applyMpvSubtitleOptions() async {
     if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
       return;
     }
     final platform = _playerService.player.platform as dynamic;
-    try {
-      await platform.setProperty(
-        'sub-delay',
-        _subtitleDelaySeconds.toStringAsFixed(3),
-      );
-    } catch (_) {}
-    try {
-      await platform.setProperty(
-        'sub-ass-override',
-        _subtitleAssOverrideForce ? 'force' : 'no',
-      );
-    } catch (_) {}
+    await applyMpvSubtitleOptions(
+      platform: platform,
+      delaySeconds: _subtitleDelaySeconds,
+      assOverrideForce: _subtitleAssOverrideForce,
+    );
   }
 }
 

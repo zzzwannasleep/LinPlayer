@@ -22,8 +22,10 @@ import 'src/player/danmaku.dart';
 import 'src/player/danmaku_processing.dart';
 import 'src/player/danmaku_stage.dart';
 import 'src/player/playback_controls.dart';
+import 'src/player/features/core_switch_flow.dart';
 import 'src/player/features/episode_picker.dart';
 import 'src/player/features/player_gestures.dart';
+import 'src/player/features/subtitle_style.dart';
 import 'src/player/net_speed.dart';
 import 'src/player/network/emby_media_source_utils.dart';
 import 'src/player/network/network_playback_backend.dart';
@@ -1513,7 +1515,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<void> _switchCore() async {
     final pos = _position;
     _maybeReportPlaybackProgress(pos, force: true);
-    await widget.appState.setPlayerCore(PlayerCore.mpv);
+    final ok = await switchPlayerCoreOrToast(
+      context: context,
+      appState: widget.appState,
+      target: PlayerCore.mpv,
+    );
+    if (!ok) return;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -2173,7 +2180,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   double get _subtitleBottomPadding =>
-      (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
+      subtitleBottomPaddingPx(_subtitlePositionStep);
 
   Future<void> _applyExoSubtitleOptions() async {
     final controller = _controller;
@@ -2181,24 +2188,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     // ignore: invalid_use_of_visible_for_testing_member
     final playerId = controller.playerId;
-
-    final api = vp_android.VideoPlayerInstanceApi(
-      messageChannelSuffix: playerId.toString(),
+    await applyExoSubtitleOptions(
+      playerId: playerId,
+      delaySeconds: _subtitleDelaySeconds,
+      fontSize: _subtitleFontSize,
+      positionStep: _subtitlePositionStep,
+      bold: _subtitleBold,
     );
-
-    try {
-      await api.setSubtitleDelay((_subtitleDelaySeconds * 1000).round());
-    } catch (_) {}
-
-    try {
-      await api.setSubtitleStyle(
-        vp_android.SubtitleStyleMessage(
-          fontSize: _subtitleFontSize.clamp(8.0, 96.0),
-          bottomPadding: _subtitleBottomPadding,
-          bold: _subtitleBold,
-        ),
-      );
-    } catch (_) {}
   }
 
   Future<void> _pollSubtitleText() async {
@@ -2885,23 +2881,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                         child: Text(
                                           _subtitleText.trim(),
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
-                                            height: 1.4,
-                                            fontSize: _subtitleFontSize.clamp(
-                                              12.0,
-                                              60.0,
-                                            ),
-                                            fontWeight: _subtitleBold
-                                                ? FontWeight.w600
-                                                : FontWeight.normal,
-                                            color: Colors.white,
-                                            shadows: const [
-                                              Shadow(
-                                                blurRadius: 6,
-                                                offset: Offset(2, 2),
-                                                color: Colors.black,
-                                              ),
-                                            ],
+                                          style: buildSubtitleOverlayTextStyle(
+                                            fontSize: _subtitleFontSize,
+                                            bold: _subtitleBold,
                                           ),
                                         ),
                                       ),
@@ -2923,7 +2905,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                     return const SizedBox.expand();
                                   }
                                   return ColoredBox(
-                                    color: Colors.black.withValues(alpha: alpha),
+                                    color:
+                                        Colors.black.withValues(alpha: alpha),
                                   );
                                 },
                               ),
@@ -2985,7 +2968,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                               gestureSeekEnabled: widget.appState.gestureSeek,
                               gestureBrightnessEnabled:
                                   widget.appState.gestureBrightness,
-                              gestureVolumeEnabled: widget.appState.gestureVolume,
+                              gestureVolumeEnabled:
+                                  widget.appState.gestureVolume,
                               gestureLongPressEnabled:
                                   widget.appState.gestureLongPressSpeed,
                               longPressSlideEnabled:
@@ -3006,10 +2990,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   : null,
                               clampSeekTarget: (target, duration) =>
                                   safeSeekTarget(
-                                    target,
-                                    duration,
-                                    rewind: Duration.zero,
-                                  ),
+                                target,
+                                duration,
+                                rewind: Duration.zero,
+                              ),
                               onShowControls: _showControls,
                               onScheduleControlsHide: _scheduleControlsHide,
                             ),

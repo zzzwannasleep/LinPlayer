@@ -136,6 +136,10 @@
   - 角色：mediaSource 元信息解析与展示（版本标题/副标题、按偏好选择版本等）。
 - `lib/src/player/network/emby_http_headers.dart`
   - 角色：集中构造 Emby/Jellyfin 鉴权请求头，供网络播放复用。
+- `lib/src/player/features/**`
+  - 角色：把“手势/选集/字幕样式/切核”等高层能力拆成可复用模块（便于多内核复用）。
+
+> 播放器拆分的更多细节与后续路线：`docs/PLAYER_MODULARIZATION.md`。
 
 #### 1.5) 画质增强（Anime4K）
 - `lib/src/player/anime4k.dart`：通过 mpv `glsl-shaders` 管线加载 Anime4K 预设（仅 MPV 内核）。

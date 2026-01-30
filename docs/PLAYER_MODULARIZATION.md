@@ -41,6 +41,21 @@
 - `lib/src/player/network/network_playback_reporter.dart`
   - `NetworkPlaybackReporter`：把 start/progress/stop + updatePosition 做节流封装，页面只需提供 position/duration/paused。
 
+### 1.4 功能特性模块（Features）
+
+- `lib/src/player/features/player_gestures.dart`
+  - `PlayerGestureController`：手势运行时状态（亮度/音量/快进快退/倍速）与 overlay 提示。
+  - `PlayerGestureDetectorLayer`：统一手势识别与回调封装。
+- `lib/src/player/features/episode_picker.dart`
+  - `EpisodePickerController`：选集数据加载/缓存/状态管理（season/episode）。
+  - `EpisodePickerOverlay`：选集抽屉 UI（封面/列表两种视图）。
+- `lib/src/player/features/subtitle_style.dart`
+  - 字幕样式公共计算：bottom padding、overlay `TextStyle`、MPV `SubtitleViewConfiguration`。
+  - 字幕参数应用：`applyMpvSubtitleOptions(...)` / `applyExoSubtitleOptions(...)`。
+- `lib/src/player/features/core_switch_flow.dart`
+  - 切核校验与提示：`switchPlayerCoreOrToast(...)`（Exo 仅 Android）。
+  - 本地播放切核交接：`buildLocalPlaybackHandoffFromPlatformFiles(...)`。
+
 ---
 
 ## 2. 如何新增一个“网络播放后端”
@@ -66,5 +81,5 @@
 
 1. **播放内核抽象**：把 MPV(media_kit) 与 Exo(video_player) 的差异封装成统一接口（open/play/pause/seek/state streams）。
 2. **功能模块化**：把弹幕/手势/字幕样式/缩略图/倍速/选集/切核等拆成 `Feature`（模块挂载到一个 Player Host 上）。
+   - 已下沉：手势、选集、字幕样式、切核流程（见 `lib/src/player/features/**`）。
 3. **页面瘦身**：`PlayerHost` 只负责布局（视频层 + overlays + controls），所有能力都来自模块。
-

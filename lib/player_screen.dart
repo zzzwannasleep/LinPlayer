@@ -20,7 +20,9 @@ import 'src/player/anime4k.dart';
 import 'src/player/thumbnail_generator.dart';
 import 'src/player/net_speed.dart';
 import 'src/player/track_preferences.dart';
+import 'src/player/features/core_switch_flow.dart';
 import 'src/player/features/player_gestures.dart';
+import 'src/player/features/subtitle_style.dart';
 import 'src/player/shared/player_types.dart';
 import 'src/player/shared/system_ui.dart';
 import 'src/device/device_type.dart';
@@ -29,7 +31,6 @@ import 'state/app_state.dart';
 import 'state/anime4k_preferences.dart';
 import 'state/danmaku_preferences.dart';
 import 'state/interaction_preferences.dart';
-import 'state/local_playback_handoff.dart';
 import 'state/preferences.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -510,40 +511,21 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _switchCore() async {
     final appState = widget.appState;
     if (appState == null) return;
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Exo 内核仅支持 Android')),
-      );
-      return;
+    final handoff = buildLocalPlaybackHandoffFromPlatformFiles(
+      playlist: _playlist,
+      currentIndex: _currentlyPlayingIndex,
+      position: _position,
+      wasPlaying: _playerService.isPlaying,
+    );
+    if (handoff != null) {
+      appState.setLocalPlaybackHandoff(handoff);
     }
 
-    final playlist = _playlist
-        .where((f) => (f.path ?? '').trim().isNotEmpty)
-        .map(
-          (f) => LocalPlaybackItem(
-            name: f.name,
-            path: f.path!.trim(),
-            size: f.size,
-          ),
-        )
-        .toList();
-    if (playlist.isNotEmpty) {
-      final idx = _currentlyPlayingIndex < 0
-          ? 0
-          : _currentlyPlayingIndex >= playlist.length
-              ? playlist.length - 1
-              : _currentlyPlayingIndex;
-      appState.setLocalPlaybackHandoff(
-        LocalPlaybackHandoff(
-          playlist: playlist,
-          index: idx,
-          position: _position,
-          wasPlaying: _playerService.isPlaying,
-        ),
-      );
-    }
-    await appState.setPlayerCore(PlayerCore.exo);
+    await switchPlayerCoreOrToast(
+      context: context,
+      appState: appState,
+      target: PlayerCore.exo,
+    );
   }
 
   void _applyDanmakuPauseState(bool pause) {
@@ -1551,10 +1533,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 child: AnimatedBuilder(
                                   animation: _gestureController,
                                   builder: (context, _) {
-                                    final alpha = (1.0 -
-                                            _gestureController.brightness)
-                                        .clamp(0.0, 0.8)
-                                        .toDouble();
+                                    final alpha =
+                                        (1.0 - _gestureController.brightness)
+                                            .clamp(0.0, 0.8)
+                                            .toDouble();
                                     if (alpha <= 0) {
                                       return const SizedBox.expand();
                                     }
@@ -1626,32 +1608,30 @@ class _PlayerScreenState extends State<PlayerScreen>
                                 gestureBrightnessEnabled:
                                     _gestureBrightnessEnabled,
                                 gestureVolumeEnabled: _gestureVolumeEnabled,
-                                gestureLongPressEnabled: _gestureLongPressEnabled,
+                                gestureLongPressEnabled:
+                                    _gestureLongPressEnabled,
                                 longPressSlideEnabled: _longPressSlideEnabled,
                                 longPressSpeedMultiplier: _longPressMultiplier,
-                                getPlaybackRate:
-                                    _gesturesEnabled
-                                        ? () => _playerService.player.state.rate
-                                        : null,
-                                onSetPlaybackRate:
-                                    _gesturesEnabled
-                                        ? (rate) async {
-                                            await _playerService.player
-                                                .setRate(rate);
-                                            if (mounted) setState(() {});
-                                          }
-                                        : null,
-                                onSetVolume:
-                                    _gesturesEnabled
-                                        ? (volume) => _playerService.player
-                                            .setVolume(volume * 100)
-                                        : null,
+                                getPlaybackRate: _gesturesEnabled
+                                    ? () => _playerService.player.state.rate
+                                    : null,
+                                onSetPlaybackRate: _gesturesEnabled
+                                    ? (rate) async {
+                                        await _playerService.player
+                                            .setRate(rate);
+                                        if (mounted) setState(() {});
+                                      }
+                                    : null,
+                                onSetVolume: _gesturesEnabled
+                                    ? (volume) => _playerService.player
+                                        .setVolume(volume * 100)
+                                    : null,
                                 clampSeekTarget: (target, duration) =>
                                     safeSeekTarget(
-                                      target,
-                                      duration,
-                                      rewind: Duration.zero,
-                                    ),
+                                  target,
+                                  duration,
+                                  rewind: Duration.zero,
+                                ),
                                 onShowControls: _showControls,
                                 onScheduleControlsHide: _scheduleControlsHide,
                               ),
@@ -2265,39 +2245,23 @@ class _PlayerScreenState extends State<PlayerScreen>
     return parts.join('  ');
   }
 
-  SubtitleViewConfiguration get _subtitleViewConfiguration {
-    const base = SubtitleViewConfiguration();
-    final bottom =
-        (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
-    return SubtitleViewConfiguration(
-      visible: base.visible,
-      style: base.style.copyWith(
-        fontSize: _subtitleFontSize.clamp(12.0, 60.0),
-        fontWeight: _subtitleBold ? FontWeight.w600 : FontWeight.normal,
-      ),
-      textAlign: base.textAlign,
-      textScaler: base.textScaler,
-      padding: base.padding.copyWith(bottom: bottom),
-    );
-  }
+  SubtitleViewConfiguration get _subtitleViewConfiguration =>
+      buildMpvSubtitleViewConfiguration(
+        fontSize: _subtitleFontSize,
+        positionStep: _subtitlePositionStep,
+        bold: _subtitleBold,
+      );
 
   Future<void> _applyMpvSubtitleOptions() async {
     if (!_playerService.isInitialized || _playerService.isExternalPlayback) {
       return;
     }
     final platform = _playerService.player.platform as dynamic;
-    try {
-      await platform.setProperty(
-        'sub-delay',
-        _subtitleDelaySeconds.toStringAsFixed(3),
-      );
-    } catch (_) {}
-    try {
-      await platform.setProperty(
-        'sub-ass-override',
-        _subtitleAssOverrideForce ? 'force' : 'no',
-      );
-    } catch (_) {}
+    await applyMpvSubtitleOptions(
+      platform: platform,
+      delaySeconds: _subtitleDelaySeconds,
+      assOverrideForce: _subtitleAssOverrideForce,
+    );
   }
 }
 

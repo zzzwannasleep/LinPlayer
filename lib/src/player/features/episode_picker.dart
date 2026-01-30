@@ -6,7 +6,8 @@ import '../../../services/emby_api.dart';
 import '../../ui/glass_blur.dart';
 import 'player_gestures.dart';
 
-typedef EpisodePickerFetchItemDetail = Future<MediaItem> Function(String itemId);
+typedef EpisodePickerFetchItemDetail = Future<MediaItem> Function(
+    String itemId);
 
 typedef EpisodePickerFetchSeasons = Future<List<MediaItem>> Function(
   String seriesId,
@@ -111,13 +112,15 @@ class EpisodePickerController extends ChangeNotifier {
     } catch (_) {
       // Optional: if this fails, we simply hide the entry point.
     } finally {
-      if (_disposed) return;
       _itemLoading = false;
-      notifyListeners();
+      if (!_disposed) {
+        notifyListeners();
+      }
     }
   }
 
-  Future<void> toggle({required ControlsVisibilityCallback showControls}) async {
+  Future<void> toggle(
+      {required ControlsVisibilityCallback showControls}) async {
     if (_visible) {
       hide();
       return;
@@ -204,9 +207,10 @@ class EpisodePickerController extends ChangeNotifier {
       _error = e.toString();
       notifyListeners();
     } finally {
-      if (_disposed) return;
       _loading = false;
-      notifyListeners();
+      if (!_disposed) {
+        notifyListeners();
+      }
     }
   }
 
@@ -652,8 +656,8 @@ class EpisodePickerOverlay extends StatelessWidget {
                                         horizontal: 8,
                                       ),
                                       decoration: BoxDecoration(
-                                        color:
-                                            Colors.black.withValues(alpha: 0.18),
+                                        color: Colors.black
+                                            .withValues(alpha: 0.18),
                                         borderRadius: BorderRadius.circular(10),
                                         border: Border.all(
                                           color: Colors.white
@@ -665,8 +669,8 @@ class EpisodePickerOverlay extends StatelessWidget {
                                           value: selectedSeason.id,
                                           isExpanded: true,
                                           isDense: true,
-                                          dropdownColor:
-                                              Colors.black.withValues(alpha: 0.9),
+                                          dropdownColor: Colors.black
+                                              .withValues(alpha: 0.9),
                                           icon: const Icon(
                                             Icons.expand_more,
                                             color: Colors.white,
