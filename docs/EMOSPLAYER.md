@@ -19,9 +19,7 @@ flutter run --dart-define=APP_PRODUCT=emos
 默认 `APP_EMOS_BASE_URL=https://emos.best`。
 
 ```bash
-flutter run ^
-  --dart-define=APP_PRODUCT=emos ^
-  --dart-define=APP_EMOS_BASE_URL=https://emos.best
+flutter run --dart-define=APP_PRODUCT=emos --dart-define=APP_EMOS_BASE_URL=https://emos.best
 ```
 
 ### 1.3 单独构建（Release）
@@ -29,9 +27,7 @@ flutter run ^
 Android APK：
 
 ```bash
-flutter build apk --release ^
-  --dart-define=APP_PRODUCT=emos ^
-  --dart-define=APP_EMOS_BASE_URL=https://emos.best
+flutter build apk --release --dart-define=APP_PRODUCT=emos --dart-define=APP_EMOS_BASE_URL=https://emos.best
 ```
 
 其他平台同理（示例）：
