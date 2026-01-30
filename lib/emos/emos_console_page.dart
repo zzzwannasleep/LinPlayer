@@ -6,6 +6,7 @@ import '../app_config/app_config_scope.dart';
 import '../app_config/app_product.dart';
 import '../services/emos_sign_in_service.dart';
 import '../state/app_state.dart';
+import 'emos_user_invite_page.dart';
 
 class EmosConsolePage extends StatefulWidget {
   const EmosConsolePage({super.key, required this.appState});
@@ -102,7 +103,17 @@ class _EmosConsolePageState extends State<EmosConsolePage> {
                       leading: const Icon(Icons.person_outline),
                       title: const Text('User & Invite'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: _busy ? null : () => _openPlaceholder('User & Invite'),
+                      onTap: _busy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => EmosUserInvitePage(
+                                    appState: widget.appState,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                     const Divider(height: 1),
                     ListTile(
@@ -179,4 +190,3 @@ class _EmosPlaceholderPage extends StatelessWidget {
     );
   }
 }
-
