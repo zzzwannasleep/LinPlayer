@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -706,199 +704,17 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   bool get _canShowEpisodePickerButton => _episodePicker.canShowButton;
 
-  Future<void> _loadEpisodePickerItem() async {
-    if (_episodePickerItemLoading || _episodePickerItem != null) return;
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) return;
-
-    setState(() => _episodePickerItemLoading = true);
-    final access = _serverAccess;
-    if (access == null) {
-      if (mounted) {
-        setState(() => _episodePickerItemLoading = false);
-      }
-      return;
-    }
-    try {
-      final detail = await access.adapter
-          .fetchItemDetail(access.auth, itemId: widget.itemId);
-      if (!mounted) return;
-      setState(() => _episodePickerItem = detail);
-    } catch (_) {
-      // Optional: if this fails, we simply hide the entry point.
-    } finally {
-      if (mounted) {
-        setState(() => _episodePickerItemLoading = false);
-      }
-    }
-  }
-
-  String _seasonLabel(MediaItem season, int index) {
-    final name = season.name.trim();
-    final seasonNo = season.seasonNumber ?? season.episodeNumber;
-    return seasonNo != null
-        ? '第$seasonNo季'
-        : (name.isNotEmpty ? name : '第${index + 1}季');
-  }
-
   Future<void> _toggleEpisodePicker() async {
-    if (_episodePickerVisible) {
-      setState(() => _episodePickerVisible = false);
-      return;
-    }
-
-    _showControls(scheduleHide: false);
-    setState(() {
-      _episodePickerVisible = true;
-      _episodePickerError = null;
-    });
-    await _ensureEpisodePickerLoaded();
-  }
-
-  Future<void> _ensureEpisodePickerLoaded() async {
-    if (_episodePickerLoading) return;
-
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) {
-      setState(() => _episodePickerError = '未连接服务器');
-      return;
-    }
-
-    setState(() {
-      _episodePickerLoading = true;
-      _episodePickerError = null;
-    });
-
-    try {
-      await _loadEpisodePickerItem();
-      final detail = _episodePickerItem;
-      final seriesId = (detail?.seriesId ?? '').trim();
-      if (seriesId.isEmpty) {
-        throw Exception('当前不是剧集，无法选集');
-      }
-
-      final access = _serverAccess;
-      if (access == null) {
-        throw Exception('Not connected');
-      }
-
-      final seasons =
-          await access.adapter.fetchSeasons(access.auth, seriesId: seriesId);
-      final seasonItems =
-          seasons.items.where((s) => s.type.toLowerCase() == 'season').toList();
-      seasonItems.sort((a, b) {
-        final aNo = a.seasonNumber ?? a.episodeNumber ?? 0;
-        final bNo = b.seasonNumber ?? b.episodeNumber ?? 0;
-        return aNo.compareTo(bNo);
-      });
-
-      final seasonsVirtual = seasonItems.isEmpty;
-      final seasonsForUi = seasonsVirtual
-          ? [
-              MediaItem(
-                id: seriesId,
-                name: '第1季',
-                type: 'Season',
-                overview: '',
-                communityRating: null,
-                premiereDate: null,
-                genres: const [],
-                runTimeTicks: null,
-                sizeBytes: null,
-                container: null,
-                providerIds: const {},
-                seriesId: seriesId,
-                seriesName: (detail?.seriesName ?? '').trim().isNotEmpty
-                    ? detail!.seriesName
-                    : detail?.name ?? '',
-                seasonName: '第1季',
-                seasonNumber: 1,
-                episodeNumber: null,
-                hasImage: detail?.hasImage ?? false,
-                playbackPositionTicks: 0,
-                people: const [],
-                parentId: seriesId,
-              ),
-            ]
-          : seasonItems;
-
-      final previousSelected = _episodeSelectedSeasonId;
-      final currentSeasonId = (detail?.parentId ?? '').trim();
-      final defaultSeasonId = (currentSeasonId.isNotEmpty &&
-              seasonsForUi.any((s) => s.id == currentSeasonId))
-          ? currentSeasonId
-          : (seasonsForUi.isNotEmpty ? seasonsForUi.first.id : '');
-      final selectedSeasonId = (previousSelected != null &&
-              seasonsForUi.any((s) => s.id == previousSelected))
-          ? previousSelected
-          : (defaultSeasonId.isNotEmpty ? defaultSeasonId : null);
-
-      if (!mounted) return;
-      setState(() {
-        _episodeSeasons = seasonsForUi;
-        _episodeSelectedSeasonId = selectedSeasonId;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _episodePickerError = e.toString());
-    } finally {
-      if (mounted) {
-        setState(() => _episodePickerLoading = false);
-      }
-    }
-  }
-
-  Future<List<MediaItem>> _episodesForSeasonId(String seasonId) async {
-    final cached = _episodeEpisodesCache[seasonId];
-    if (cached != null) return cached;
-
-    final baseUrl = _baseUrl;
-    final token = _token;
-    final userId = _userId;
-    if (baseUrl == null || token == null || userId == null) {
-      throw Exception('未连接服务器');
-    }
-
-    final access = _serverAccess;
-    if (access == null) {
-      throw Exception('Not connected');
-    }
-
-    final eps =
-        await access.adapter.fetchEpisodes(access.auth, seasonId: seasonId);
-    final items = List<MediaItem>.from(eps.items);
-    items.sort((a, b) {
-      final aNo = a.episodeNumber ?? 0;
-      final bNo = b.episodeNumber ?? 0;
-      return aNo.compareTo(bNo);
-    });
-    _episodeEpisodesCache[seasonId] = items;
-    return items;
-  }
-
-  Future<List<MediaItem>> _episodesFutureForSeasonId(String seasonId) {
-    final cachedFuture = _episodeEpisodesFutureCache[seasonId];
-    if (cachedFuture != null) return cachedFuture;
-
-    final cached = _episodeEpisodesCache[seasonId];
-    final future = cached != null
-        ? Future<List<MediaItem>>.value(cached)
-        : _episodesForSeasonId(seasonId);
-    _episodeEpisodesFutureCache[seasonId] = future;
-    return future;
+    await _episodePicker.toggle(showControls: _showControls);
   }
 
   void _playEpisodeFromPicker(MediaItem episode) {
     if (episode.id == widget.itemId) {
-      setState(() => _episodePickerVisible = false);
+      _episodePicker.hide();
       return;
     }
 
-    setState(() => _episodePickerVisible = false);
+    _episodePicker.hide();
     final ticks = episode.playbackPositionTicks;
     final start =
         ticks > 0 ? Duration(microseconds: (ticks / 10).round()) : null;
@@ -923,6 +739,22 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   Widget _buildEpisodePickerOverlay({required bool enableBlur}) {
+    return EpisodePickerOverlay(
+      controller: _episodePicker,
+      enableBlur: enableBlur,
+      showCover: widget.appState.episodePickerShowCover,
+      onToggleShowCover: () {
+        final next = !widget.appState.episodePickerShowCover;
+        // ignore: unawaited_futures
+        widget.appState.setEpisodePickerShowCover(next);
+      },
+      currentItemId: widget.itemId,
+      onPlayEpisode: _playEpisodeFromPicker,
+      baseUrl: _baseUrl,
+      token: _token,
+      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
+    );
+    /*
     final size = MediaQuery.sizeOf(context);
     final drawerWidth = math.min(
       420.0,
@@ -1434,6 +1266,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         ],
       ),
     );
+    */
   }
 
   void _syncDanmakuCursor(Duration position) {
