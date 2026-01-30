@@ -7,7 +7,9 @@ import '../app_config/app_product.dart';
 import '../services/emos_sign_in_service.dart';
 import '../state/app_state.dart';
 import 'emos_proxy_lines_page.dart';
+import 'emos_upload_page.dart';
 import 'emos_user_invite_page.dart';
+import 'emos_video_manager_page.dart';
 import 'emos_watchlists_page.dart';
 
 class EmosConsolePage extends StatefulWidget {
@@ -156,15 +158,34 @@ class _EmosConsolePageState extends State<EmosConsolePage> {
                       leading: const Icon(Icons.video_library_outlined),
                       title: const Text('Video Manager'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap:
-                          _busy ? null : () => _openPlaceholder('Video Manager'),
+                      onTap: _busy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => EmosVideoManagerPage(
+                                    appState: widget.appState,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                     const Divider(height: 1),
                     ListTile(
                       leading: const Icon(Icons.cloud_upload_outlined),
                       title: const Text('Upload'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: _busy ? null : () => _openPlaceholder('Upload'),
+                      onTap: _busy
+                          ? null
+                          : () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => EmosUploadPage(
+                                    appState: widget.appState,
+                                  ),
+                                ),
+                              );
+                            },
                     ),
                     const Divider(height: 1),
                     ListTile(
