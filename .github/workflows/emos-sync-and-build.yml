@@ -1,0 +1,120 @@
+# Sync latest `main` into `emos` branch, then build EmosPlayer.
+#
+# Notes:
+# - This workflow pushes the merge commit back to `emos`.
+# - If merge conflicts occur, the workflow will fail and you'll need to resolve manually.
+
+name: Sync main -> emos & Build EmosPlayer
+
+on:
+  workflow_dispatch:
+    inputs:
+      emos_base_url:
+        description: "APP_EMOS_BASE_URL (default: https://emos.best)"
+        required: false
+        default: "https://emos.best"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: emos-sync-build
+  cancel-in-progress: true
+
+jobs:
+  sync-and-build:
+    name: Sync and Build (Android)
+    runs-on: ubuntu-latest
+    env:
+      PUB_CACHE: /home/runner/.pub-cache
+      EMOS_BASE_URL: ${{ github.event.inputs.emos_base_url || 'https://emos.best' }}
+    steps:
+      - name: Check out `emos` (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: emos
+          fetch-depth: 0
+
+      - name: Merge origin/main into emos
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch origin main
+          # Create a merge commit even if it could fast-forward, so we can mark it.
+          git merge --no-ff origin/main -m "chore(sync): merge main into emos [sync-main]" || {
+            echo "Merge failed (likely conflicts). Resolve locally and push to emos." >&2
+            exit 1
+          }
+
+          git push origin HEAD:emos
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Cache Flutter pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.PUB_CACHE }}
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Flutter analyze
+        run: flutter analyze
+
+      - name: Flutter tests
+        run: flutter test
+
+      - name: Build APKs (split + universal)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "EMOS_BASE_URL=$EMOS_BASE_URL"
+
+          OUT_DIR="build/ci-android-apks"
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR"
+
+          flutter build apk --release --split-per-abi \
+            --dart-define=APP_PRODUCT=emos \
+            --dart-define=APP_EMOS_BASE_URL="$EMOS_BASE_URL"
+
+          for f in build/app/outputs/flutter-apk/app-*-release.apk; do
+            abi="$(basename "$f" | sed -n 's/^app-\(.*\)-release\.apk$/\1/p')"
+            cp -v "$f" "$OUT_DIR/EmosPlayer-Android-${abi}.apk"
+          done
+
+          flutter build apk --release \
+            --dart-define=APP_PRODUCT=emos \
+            --dart-define=APP_EMOS_BASE_URL="$EMOS_BASE_URL"
+
+          cp -v build/app/outputs/flutter-apk/app-release.apk "$OUT_DIR/EmosPlayer-Android-universal.apk"
+
+          echo "--- Staged APKs ---"
+          ls -la "$OUT_DIR"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EmosPlayer-Android-APKs
+          path: build/ci-android-apks/*.apk
+

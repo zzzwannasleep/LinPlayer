@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="LinPlayer"
+        android:label="EmosPlayer"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
@@ -36,7 +36,7 @@
             android:enabled="true"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
-            android:label="LinPlayer"
+            android:label="EmosPlayer"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -49,7 +49,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_pink"
-            android:label="LinPlayer"
+            android:label="EmosPlayer"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -62,7 +62,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_purple"
-            android:label="LinPlayer"
+            android:label="EmosPlayer"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -75,7 +75,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_miku"
-            android:label="LinPlayer"
+            android:label="EmosPlayer"
             android:targetActivity=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

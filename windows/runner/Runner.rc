@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "LinPlayer" "\0"
+            VALUE "FileDescription", "EmosPlayer" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "LinPlayer" "\0"
+            VALUE "InternalName", "EmosPlayer" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "LinPlayer.exe" "\0"
-            VALUE "ProductName", "LinPlayer" "\0"
+            VALUE "OriginalFilename", "EmosPlayer.exe" "\0"
+            VALUE "ProductName", "EmosPlayer" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
