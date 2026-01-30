@@ -15,6 +15,7 @@ import 'interaction_preferences.dart';
 import 'local_playback_handoff.dart';
 import 'media_server_type.dart';
 import 'preferences.dart';
+import 'emos_session.dart';
 import 'server_profile.dart';
 
 enum BackupServerSecretMode {
@@ -184,6 +185,11 @@ class AppState extends ChangeNotifier {
   static const _kAutoUpdateEnabledKey = 'autoUpdateEnabled_v1';
   static const _kAutoUpdateLastCheckedAtMsKey = 'autoUpdateLastCheckedAtMs_v1';
 
+  static const _kEmosTokenKey = 'emosToken_v1';
+  static const _kEmosUserIdKey = 'emosUserId_v1';
+  static const _kEmosUsernameKey = 'emosUsername_v1';
+  static const _kEmosAvatarUrlKey = 'emosAvatarUrl_v1';
+
   static const _kServerLibrariesCachePrefix = 'serverLibrariesCache_v1:';
   static const _kServerHomeCachePrefix = 'serverHomeCache_v1:';
 
@@ -209,6 +215,8 @@ class AppState extends ChangeNotifier {
 
   final List<ServerProfile> _servers = [];
   String? _activeServerId;
+
+  EmosSession? _emosSession;
 
   List<DomainInfo> _domains = [];
   List<LibraryInfo> _libraries = [];
@@ -567,6 +575,10 @@ class AppState extends ChangeNotifier {
   String? get activeServerId => _activeServerId;
   ServerProfile? get activeServer =>
       _servers.firstWhereOrNull((s) => s.id == _activeServerId);
+
+  EmosSession? get emosSession => _emosSession;
+  bool get hasEmosSession =>
+      _emosSession != null && _emosSession!.token.trim().isNotEmpty;
 
   /// Whether there is an active server profile selected (any type).
   bool get hasActiveServerProfile => activeServer != null && baseUrl != null;
@@ -985,6 +997,24 @@ class AppState extends ChangeNotifier {
     final serverId = _activeServerId;
     if (serverId != null && activeServer?.serverType.isEmbyLike == true) {
       _restoreServerCaches(prefs, serverId);
+    }
+
+    final emosToken = (prefs.getString(_kEmosTokenKey) ?? '').trim();
+    final emosUserId = (prefs.getString(_kEmosUserIdKey) ?? '').trim();
+    final emosUsername = (prefs.getString(_kEmosUsernameKey) ?? '').trim();
+    final emosAvatarUrl =
+        (prefs.getString(_kEmosAvatarUrlKey) ?? '').trim().isEmpty
+            ? null
+            : (prefs.getString(_kEmosAvatarUrlKey) ?? '').trim();
+    if (emosToken.isNotEmpty && emosUserId.isNotEmpty && emosUsername.isNotEmpty) {
+      _emosSession = EmosSession(
+        token: emosToken,
+        userId: emosUserId,
+        username: emosUsername,
+        avatarUrl: emosAvatarUrl,
+      );
+    } else {
+      _emosSession = null;
     }
 
     notifyListeners();
@@ -1738,6 +1768,30 @@ class AppState extends ChangeNotifier {
     _resetPerServerCaches();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_kActiveServerIdKey);
+    notifyListeners();
+  }
+
+  Future<void> setEmosSession(EmosSession session) async {
+    _emosSession = session;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kEmosTokenKey, session.token);
+    await prefs.setString(_kEmosUserIdKey, session.userId);
+    await prefs.setString(_kEmosUsernameKey, session.username);
+    if ((session.avatarUrl ?? '').trim().isNotEmpty) {
+      await prefs.setString(_kEmosAvatarUrlKey, session.avatarUrl!.trim());
+    } else {
+      await prefs.remove(_kEmosAvatarUrlKey);
+    }
+    notifyListeners();
+  }
+
+  Future<void> clearEmosSession() async {
+    _emosSession = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kEmosTokenKey);
+    await prefs.remove(_kEmosUserIdKey);
+    await prefs.remove(_kEmosUsernameKey);
+    await prefs.remove(_kEmosAvatarUrlKey);
     notifyListeners();
   }
 

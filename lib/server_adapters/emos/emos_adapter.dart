@@ -11,6 +11,16 @@ class EmosServerAdapter implements MediaServerAdapter {
   @override
   final String deviceId;
 
+  EmbyApi _apiFor(ServerAuthSession auth) {
+    return EmbyApi(
+      hostOrUrl: auth.baseUrl,
+      preferredScheme: auth.preferredScheme,
+      apiPrefix: auth.apiPrefix,
+      serverType: serverType,
+      deviceId: deviceId,
+    );
+  }
+
   @override
   Future<ServerAuthSession> authenticate({
     required String hostOrUrl,
@@ -19,12 +29,34 @@ class EmosServerAdapter implements MediaServerAdapter {
     required String username,
     required String password,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.authenticate');
+    final api = EmbyApi(
+      hostOrUrl: hostOrUrl,
+      preferredScheme: scheme,
+      port: port,
+      serverType: serverType,
+      deviceId: deviceId,
+    );
+    return api
+        .authenticate(
+          username: username,
+          password: password,
+          deviceId: deviceId,
+          serverType: serverType,
+        )
+        .then(
+          (auth) => ServerAuthSession(
+            token: auth.token,
+            baseUrl: auth.baseUrlUsed,
+            userId: auth.userId,
+            apiPrefix: auth.apiPrefixUsed,
+            preferredScheme: scheme,
+          ),
+        );
   }
 
   @override
   Future<String?> fetchServerName(ServerAuthSession auth) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchServerName');
+    return _apiFor(auth).fetchServerName(auth.baseUrl, token: auth.token);
   }
 
   @override
@@ -32,12 +64,20 @@ class EmosServerAdapter implements MediaServerAdapter {
     ServerAuthSession auth, {
     required bool allowFailure,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchDomains');
+    return _apiFor(auth).fetchDomains(
+      auth.token,
+      auth.baseUrl,
+      allowFailure: allowFailure,
+    );
   }
 
   @override
   Future<List<LibraryInfo>> fetchLibraries(ServerAuthSession auth) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchLibraries');
+    return _apiFor(auth).fetchLibraries(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+    );
   }
 
   @override
@@ -54,7 +94,21 @@ class EmosServerAdapter implements MediaServerAdapter {
     String sortOrder = 'Descending',
     String? fields,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchItems');
+    return _apiFor(auth).fetchItems(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      parentId: parentId,
+      startIndex: startIndex,
+      limit: limit,
+      includeItemTypes: includeItemTypes,
+      searchTerm: searchTerm,
+      recursive: recursive,
+      excludeFolders: excludeFolders,
+      sortBy: sortBy,
+      sortOrder: sortOrder,
+      fields: fields,
+    );
   }
 
   @override
@@ -62,8 +116,11 @@ class EmosServerAdapter implements MediaServerAdapter {
     ServerAuthSession auth, {
     int limit = 30,
   }) {
-    throw UnimplementedError(
-      'TODO: implement EmosServerAdapter.fetchContinueWatching',
+    return _apiFor(auth).fetchContinueWatching(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      limit: limit,
     );
   }
 
@@ -72,7 +129,12 @@ class EmosServerAdapter implements MediaServerAdapter {
     ServerAuthSession auth, {
     required String itemId,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchItemDetail');
+    return _apiFor(auth).fetchItemDetail(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      itemId: itemId,
+    );
   }
 
   @override
@@ -80,7 +142,12 @@ class EmosServerAdapter implements MediaServerAdapter {
     ServerAuthSession auth, {
     required String seriesId,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchSeasons');
+    return _apiFor(auth).fetchSeasons(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      seriesId: seriesId,
+    );
   }
 
   @override
@@ -88,7 +155,12 @@ class EmosServerAdapter implements MediaServerAdapter {
     ServerAuthSession auth, {
     required String seasonId,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchEpisodes');
+    return _apiFor(auth).fetchEpisodes(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      seasonId: seasonId,
+    );
   }
 
   @override
@@ -97,7 +169,13 @@ class EmosServerAdapter implements MediaServerAdapter {
     required String itemId,
     int limit = 10,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchSimilar');
+    return _apiFor(auth).fetchSimilar(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      itemId: itemId,
+      limit: limit,
+    );
   }
 
   @override
@@ -106,7 +184,14 @@ class EmosServerAdapter implements MediaServerAdapter {
     required String itemId,
     bool exoPlayer = false,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchPlaybackInfo');
+    return _apiFor(auth).fetchPlaybackInfo(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      deviceId: deviceId,
+      itemId: itemId,
+      exoPlayer: exoPlayer,
+    );
   }
 
   @override
@@ -114,7 +199,12 @@ class EmosServerAdapter implements MediaServerAdapter {
     ServerAuthSession auth, {
     required String itemId,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.fetchChapters');
+    return _apiFor(auth).fetchChapters(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      itemId: itemId,
+    );
   }
 
   @override
@@ -126,7 +216,17 @@ class EmosServerAdapter implements MediaServerAdapter {
     required int positionTicks,
     bool isPaused = false,
   }) {
-    throw UnimplementedError('TODO: implement EmosServerAdapter.reportPlaybackStart');
+    return _apiFor(auth).reportPlaybackStart(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      deviceId: deviceId,
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      playSessionId: playSessionId,
+      positionTicks: positionTicks,
+      isPaused: isPaused,
+      userId: auth.userId,
+    );
   }
 
   @override
@@ -138,8 +238,16 @@ class EmosServerAdapter implements MediaServerAdapter {
     required int positionTicks,
     bool isPaused = false,
   }) {
-    throw UnimplementedError(
-      'TODO: implement EmosServerAdapter.reportPlaybackProgress',
+    return _apiFor(auth).reportPlaybackProgress(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      deviceId: deviceId,
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      playSessionId: playSessionId,
+      positionTicks: positionTicks,
+      isPaused: isPaused,
+      userId: auth.userId,
     );
   }
 
@@ -151,8 +259,15 @@ class EmosServerAdapter implements MediaServerAdapter {
     required String playSessionId,
     required int positionTicks,
   }) {
-    throw UnimplementedError(
-      'TODO: implement EmosServerAdapter.reportPlaybackStopped',
+    return _apiFor(auth).reportPlaybackStopped(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      deviceId: deviceId,
+      itemId: itemId,
+      mediaSourceId: mediaSourceId,
+      playSessionId: playSessionId,
+      positionTicks: positionTicks,
+      userId: auth.userId,
     );
   }
 
@@ -163,8 +278,13 @@ class EmosServerAdapter implements MediaServerAdapter {
     required int positionTicks,
     bool? played,
   }) {
-    throw UnimplementedError(
-      'TODO: implement EmosServerAdapter.updatePlaybackPosition',
+    return _apiFor(auth).updatePlaybackPosition(
+      token: auth.token,
+      baseUrl: auth.baseUrl,
+      userId: auth.userId,
+      itemId: itemId,
+      positionTicks: positionTicks,
+      played: played,
     );
   }
 }
