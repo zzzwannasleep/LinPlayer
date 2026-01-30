@@ -278,6 +278,8 @@ flutter build linux --release
 - 线路列表为空：未部署 `emby_ext_domains` 时属正常，不影响媒体库与播放。
 
 ## 目录导航
+
+### App（Flutter / `lib/`）
 - `lib/main.dart` 应用入口（初始化、主题、路由）
 - `lib/server_page.dart` 服务器管理/登录入口
 - `lib/home_page.dart` 首页（继续观看、最新电影/剧集）
@@ -291,14 +293,17 @@ flutter build linux --release
 - `lib/play_network_page.dart` Emby 在线播放
 - `lib/player_screen.dart` 本地播放器
 - `lib/player_service.dart` 播放器封装（mpv 参数、硬解/软解）
-- `packages/lin_player_server_api/lib/services/emby_api.dart` Emby API 封装
-- `packages/lin_player_server_api/lib/services/webdav_api.dart` WebDAV API（PROPFIND/鉴权解析）
-- `packages/lin_player_server_api/lib/services/webdav_proxy.dart` WebDAV 本地回环代理（Range 转发）
-- `packages/lin_player_server_api/lib/services/plex_api.dart` Plex PIN 登录/资源列表 API 封装
 - `lib/services/dandanplay_api.dart` 在线弹幕（弹弹play API v2）封装
 - `lib/src/player/danmaku.dart` 弹幕解析（本地 XML / 在线列表）
 - `lib/src/player/danmaku_stage.dart` 弹幕渲染（覆盖层）
 - `lib/state/app_state.dart` 状态/登录/缓存
+
+### 模块（`packages/`）
+- `packages/lin_player_core/README.md` 核心定义（AppConfig / FeatureFlags / MediaServerType 等）
+- `packages/lin_player_server_api/README.md` 服务端/网络 API（Emby/WebDAV/Plex）
+- `packages/lin_player_server_adapters/README.md` Server Adapter 适配层（UI 只依赖接口）
+- `packages/media_kit_patched/` mpv/media_kit 的本地改造版本
+- `packages/video_player_android_patched/` Exo/video_player_android 的本地改造版本
 
 ## TODO（重构路线图）
 - [x] 模块化（基础拆分）：提取 `lin_player_core` / `lin_player_server_api` / `lin_player_server_adapters`（见 `packages/`）
