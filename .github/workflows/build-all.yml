@@ -82,12 +82,77 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -n "${ANDROID_KEYSTORE_BASE64:-}" ]]; then
-            # GitHub Secrets can preserve CRLF/newlines depending on how the value was pasted.
-            # Normalize the string before decoding to avoid "base64: invalid input".
-            if ! printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d $' \t\r\n' | base64 --decode > android/release.keystore; then
-              echo "Failed to decode ANDROID_KEYSTORE_BASE64 (expected raw base64 of the keystore file)." >&2
-              exit 1
-            fi
+            # Decode keystore from GitHub Secrets.
+            #
+            # A surprising number of copy/paste flows introduce:
+            # - Unicode whitespace (NBSP, line separators, etc.)
+            # - surrounding quotes
+            # - literal "\n" sequences
+            #
+            # GNU `base64` is strict about non-base64 bytes, so do normalization in Python.
+            python3 - <<'PY'
+          import base64
+          import os
+          import re
+          import sys
+          
+          raw = os.environ.get("ANDROID_KEYSTORE_BASE64", "")
+          raw_len = len(raw)
+          if not raw:
+            sys.stderr.write("ANDROID_KEYSTORE_BASE64 is empty.\n")
+            sys.exit(1)
+          
+          s = raw.strip()
+          
+          # Strip a single pair of surrounding quotes if present.
+          if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            s = s[1:-1]
+          
+          # Strip common wrappers.
+          m = re.match(r"^data:.*?;base64,(.*)$", s, flags=re.DOTALL)
+          if m:
+            s = m.group(1)
+          s = re.sub(r"-{5}BEGIN [^-]+-{5}", "", s)
+          s = re.sub(r"-{5}END [^-]+-{5}", "", s)
+          
+          # Handle literal backslash escapes (common when pasting from JSON/env files).
+          s = s.replace("\\n", "").replace("\\r", "")
+          
+          # Remove all whitespace + common zero-width copy/paste characters.
+          zero_width = {"\u200b", "\u200c", "\u200d", "\ufeff", "\u2060"}
+          s = "".join(ch for ch in s if (not ch.isspace()) and (ch not in zero_width))
+          
+          # Support base64url just in case.
+          s = s.replace("-", "+").replace("_", "/")
+
+          # Add padding if missing.
+          clean_len = len(s)
+          pad_needed = (-clean_len) % 4
+          s += "=" * pad_needed
+
+          if re.search(r"[^A-Za-z0-9+/=]", s):
+            sys.stderr.write(f"ANDROID_KEYSTORE_BASE64 normalization stats: raw_len={raw_len}, clean_len={clean_len}, pad={pad_needed}\n")
+            sys.stderr.write(
+              "ANDROID_KEYSTORE_BASE64 contains non-base64 characters after normalization. "
+              "Re-generate the secret from the raw keystore bytes and paste the plain base64 string.\n"
+            )
+            sys.exit(1)
+
+          try:
+            data = base64.b64decode(s, validate=True)
+          except Exception as e:
+            sys.stderr.write(f"ANDROID_KEYSTORE_BASE64 normalization stats: raw_len={raw_len}, clean_len={clean_len}, pad={pad_needed}\n")
+            sys.stderr.write(f"Failed to decode ANDROID_KEYSTORE_BASE64 ({type(e).__name__}: {e}).\n")
+            sys.exit(1)
+          
+          if len(data) < 32:
+            sys.stderr.write("Decoded keystore is unexpectedly small; refusing to continue.\n")
+            sys.exit(1)
+          
+          os.makedirs("android", exist_ok=True)
+          with open("android/release.keystore", "wb") as f:
+            f.write(data)
+          PY
 
             # key.properties is read from android/app via rootProject.file("key.properties"),
             # and storeFile is resolved relative to android/app (Gradle ':app' module).

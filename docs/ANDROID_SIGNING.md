@@ -17,6 +17,12 @@ Android 的“覆盖安装升级”（直接安装新版本 APK，不丢数据�
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
+如果你安装了 GitHub CLI（`gh`），建议用文件直接写入 Secrets，避免粘贴引入不可见字符：
+
+```bash
+gh secret set ANDROID_KEYSTORE_BASE64 --body-file android/release.keystore.base64.txt
+```
+
 工作流会将 keystore 写入 `android/release.keystore`，并在 CI 里生成 `android/key.properties`（不入库）供 Gradle 读取。
 > `key.properties` 里的 `storeFile` 路径是从 `android/app/`（Gradle 的 `:app` 模块目录）解析的，所以通常应填写 `../release.keystore`。
 
