@@ -161,6 +161,29 @@ jobs:
               "$ANDROID_KEY_PASSWORD" \
               "$ANDROID_KEY_ALIAS" \
               > android/key.properties
+
+            # Fail fast with a clear error if the keystore/password/alias don't actually work,
+            # instead of spending minutes on a build just to fail at :app:packageRelease.
+            "$JAVA_HOME/bin/keytool" -list \
+              -keystore android/release.keystore \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -alias "$ANDROID_KEY_ALIAS" \
+              >/dev/null
+
+            TMP_DIR="$(mktemp -d)"
+            echo "ok" > "$TMP_DIR/ok.txt"
+            "$JAVA_HOME/bin/jar" cf "$TMP_DIR/ok.jar" -C "$TMP_DIR" ok.txt
+            "$JAVA_HOME/bin/jarsigner" \
+              -keystore android/release.keystore \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -keypass "$ANDROID_KEY_PASSWORD" \
+              "$TMP_DIR/ok.jar" \
+              "$ANDROID_KEY_ALIAS" \
+              >/dev/null
+            "$JAVA_HOME/bin/jarsigner" -verify "$TMP_DIR/ok.jar" >/dev/null
+            rm -rf "$TMP_DIR"
+
+            echo "Android signing keystore verified (alias=$ANDROID_KEY_ALIAS)."
           else
             if [[ "${LINPLAYER_ALLOW_CI_DEBUG_SIGNING:-}" =~ ^(1|true|yes)$ ]]; then
               echo "No ANDROID_KEYSTORE_BASE64 secret set; proceeding with debug signing (NOT OTA-safe)."
