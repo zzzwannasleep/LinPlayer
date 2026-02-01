@@ -5,22 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-
-import 'app_config/app_config_scope.dart';
 import 'home_page.dart';
 import 'server_page.dart';
 import 'webdav_home_page.dart';
 import 'services/app_update_flow.dart';
-import 'state/app_state.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_theme.dart';
-import 'src/ui/app_icon_service.dart';
-import 'src/ui/app_style.dart';
-import 'src/ui/glass_background.dart';
-import 'src/ui/high_refresh_rate.dart';
-import 'src/ui/ui_scale.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,12 +21,19 @@ void main() async {
   await DeviceType.init();
 
   final appConfig = AppConfig.current;
-  EmbyApi.setUserAgentProduct(appConfig.userAgentProduct);
-  EmbyApi.setDefaultClientName(appConfig.displayName);
+  ServerApiBootstrap.configure(
+    userAgentProduct: appConfig.userAgentProduct,
+    defaultClientName: appConfig.displayName,
+    appVersion: '1.0.0',
+  );
 
   try {
     final info = await PackageInfo.fromPlatform();
-    EmbyApi.setAppVersion('${info.version}+${info.buildNumber}');
+    ServerApiBootstrap.configure(
+      userAgentProduct: appConfig.userAgentProduct,
+      defaultClientName: appConfig.displayName,
+      appVersion: '${info.version}+${info.buildNumber}',
+    );
   } catch (_) {
     // PackageInfo is best-effort; keep default version if unavailable.
   }

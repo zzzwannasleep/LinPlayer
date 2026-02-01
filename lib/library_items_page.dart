@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 
-import 'package:lin_player_server_api/services/emby_api.dart';
-import 'state/app_state.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'show_detail_page.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/glass_blur.dart';
-import 'src/ui/ui_scale.dart';
+import 'server_adapters/server_access.dart';
 
 class LibraryItemsPage extends StatefulWidget {
   const LibraryItemsPage({
@@ -76,6 +74,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
   @override
   Widget build(BuildContext context) {
     final items = widget.appState.getItems(widget.parentId);
+    final access = resolveServerAccess(appState: widget.appState);
     final uiScale = context.uiScale;
     final isTv = _isTv(context);
     final enableBlur = !isTv && widget.appState.enableBlurEffects;
@@ -109,6 +108,7 @@ class _LibraryItemsPageState extends State<LibraryItemsPage> {
                   return _GridItem(
                     item: item,
                     appState: widget.appState,
+                    access: access,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -133,11 +133,13 @@ class _GridItem extends StatelessWidget {
   const _GridItem({
     required this.item,
     required this.appState,
+    required this.access,
     required this.onTap,
   });
 
   final MediaItem item;
   final AppState appState;
+  final ServerAccess? access;
   final VoidCallback onTap;
 
   String _yearOf() {
@@ -150,12 +152,11 @@ class _GridItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = item.hasImage
-        ? EmbyApi.imageUrl(
-            baseUrl: appState.baseUrl!,
+    final access = this.access;
+    final image = item.hasImage && access != null
+        ? access.adapter.imageUrl(
+            access.auth,
             itemId: item.id,
-            token: appState.token!,
-            apiPrefix: appState.apiPrefix,
             imageType: 'Primary',
             maxWidth: 320,
           )

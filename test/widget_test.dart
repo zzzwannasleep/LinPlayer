@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:lin_player/app_config/app_config_scope.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:lin_player/main.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
-import 'package:lin_player/state/app_state.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
-import 'package:lin_player/state/server_profile.dart';
+import 'package:lin_player_state/app_state.dart';
+import 'package:lin_player_state/server_profile.dart';
 
 void main() {
   testWidgets('Shows server screen by default', (WidgetTester tester) async {

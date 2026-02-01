@@ -1,3 +1,7 @@
+/// Shared preference definitions for LinPlayer.
+///
+/// This package hosts settings enums, ids/labels, and small value objects used
+/// across `state / ui / player` without creating circular dependencies.
 library lin_player_prefs;
 
 export 'anime4k_preferences.dart';

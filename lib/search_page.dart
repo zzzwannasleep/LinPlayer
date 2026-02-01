@@ -1,18 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/app_style.dart';
-import 'src/ui/glass_blur.dart';
-import 'src/ui/ui_scale.dart';
-import 'state/app_state.dart';
-import 'state/preferences.dart';
 
 const _kSearchHistoryPrefsKey = 'search_history_v1';
 const _kSearchHistoryMaxEntries = 50;
@@ -216,6 +212,7 @@ class _SearchPageState extends State<SearchPage> {
     final isTv = _isTv(context);
     final enableBlur = !isTv && widget.appState.enableBlurEffects;
     final maxCrossAxisExtent = (isTv ? 160.0 : 180.0) * uiScale;
+    final access = resolveServerAccess(appState: widget.appState);
 
     final query = _controller.text.trim();
 
@@ -295,6 +292,7 @@ class _SearchPageState extends State<SearchPage> {
             return _SearchGridItem(
               item: item,
               appState: widget.appState,
+              access: access,
               onTap: () {
                 unawaited(_addToSearchHistory(query));
                 Navigator.of(context).push(
@@ -455,8 +453,9 @@ class _SearchPageState extends State<SearchPage> {
           decoration: BoxDecoration(
             color: bg,
             borderRadius: BorderRadius.circular(radius),
-            border:
-                border == BorderSide.none ? null : Border.fromBorderSide(border),
+            border: border == BorderSide.none
+                ? null
+                : Border.fromBorderSide(border),
           ),
           child: Text(
             label,
@@ -481,11 +480,13 @@ class _SearchGridItem extends StatelessWidget {
   const _SearchGridItem({
     required this.item,
     required this.appState,
+    required this.access,
     required this.onTap,
   });
 
   final MediaItem item;
   final AppState appState;
+  final ServerAccess? access;
   final VoidCallback onTap;
 
   String _yearOf() {
@@ -498,12 +499,11 @@ class _SearchGridItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = item.hasImage
-        ? EmbyApi.imageUrl(
-            baseUrl: appState.baseUrl!,
+    final access = this.access;
+    final image = item.hasImage && access != null
+        ? access.adapter.imageUrl(
+            access.auth,
             itemId: item.id,
-            token: appState.token!,
-            apiPrefix: appState.apiPrefix,
             imageType: 'Primary',
             maxWidth: 320,
           )

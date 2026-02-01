@@ -4,8 +4,11 @@ import 'dart:ui' show ImageFilter;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
-import 'app_config/app_config_scope.dart';
 import 'aggregate_service_page.dart';
 import 'library_page.dart';
 import 'library_items_page.dart';
@@ -13,17 +16,8 @@ import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'search_page.dart';
 import 'settings_page.dart';
-import 'services/cover_cache_manager.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
-import 'state/app_state.dart';
-import 'state/preferences.dart';
-import 'state/route_entries.dart';
+import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/episode_count_badge.dart';
-import 'src/ui/glass_blur.dart';
-import 'src/ui/theme_sheet.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.appState});
@@ -435,10 +429,8 @@ class _HomePageState extends State<HomePage> {
                               await widget.appState.setBaseUrl(d.url);
                               // Best-effort: reload content after line switch.
                               // ignore: unawaited_futures
-                              widget.appState
-                                  .refreshLibraries()
-                                  .then((_) => widget.appState
-                                      .loadHome(forceRefresh: true));
+                              widget.appState.refreshLibraries().then((_) =>
+                                  widget.appState.loadHome(forceRefresh: true));
                               if (ctx.mounted) Navigator.of(ctx).pop();
                             },
                           );
@@ -825,7 +817,7 @@ class _ServerIconAvatar extends StatelessWidget {
     return CachedNetworkImage(
       imageUrl: url,
       cacheManager: CoverCacheManager.instance,
-      httpHeaders: {'User-Agent': EmbyApi.userAgent},
+      httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
       imageBuilder: (_, provider) => CircleAvatar(
         radius: radius,
         backgroundColor: backgroundColor,
@@ -1398,6 +1390,7 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
           builder: (context, constraints) {
             const padding = 14.0;
             const spacing = 10.0;
+            final access = resolveServerAccess(appState: widget.appState);
             final compact = constraints.maxWidth < 600;
             final titleMaxLines = compact ? 2 : 1;
             final visible = (constraints.maxWidth / 280).clamp(1.4, 4.5);
@@ -1466,12 +1459,10 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
                             if (pos > Duration.zero) '观看到 ${_fmt(pos)}',
                           ].join(' · ');
 
-                          final img = item.hasImage
-                              ? EmbyApi.imageUrl(
-                                  baseUrl: widget.appState.baseUrl!,
+                          final img = item.hasImage && access != null
+                              ? access.adapter.imageUrl(
+                                  access.auth,
                                   itemId: item.id,
-                                  token: widget.appState.token!,
-                                  apiPrefix: widget.appState.apiPrefix,
                                   imageType: 'Primary',
                                   maxWidth: 640,
                                 )
@@ -1512,7 +1503,9 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection> {
                                               cacheManager:
                                                   CoverCacheManager.instance,
                                               httpHeaders: {
-                                                'User-Agent': EmbyApi.userAgent
+                                                'User-Agent':
+                                                    LinHttpClientFactory
+                                                        .userAgent
                                               },
                                               fit: BoxFit.cover,
                                               placeholder: (_, __) =>
@@ -1667,6 +1660,7 @@ class _LibraryQuickAccessSectionState
       builder: (context, constraints) {
         const padding = 14.0;
         const spacing = 10.0;
+        final access = resolveServerAccess(appState: widget.appState);
         final visible = (constraints.maxWidth / 240).clamp(1.8, 6.0);
         final itemWidth =
             (constraints.maxWidth - padding * 2 - spacing * (visible - 1)) /
@@ -1707,13 +1701,13 @@ class _LibraryQuickAccessSectionState
                     separatorBuilder: (_, __) => const SizedBox(width: spacing),
                     itemBuilder: (context, index) {
                       final lib = libs[index];
-                      final imageUrl = EmbyApi.imageUrl(
-                        baseUrl: baseUrl,
-                        itemId: lib.id,
-                        token: token,
-                        apiPrefix: widget.appState.apiPrefix,
-                        maxWidth: 640,
-                      );
+                      final imageUrl = access == null
+                          ? ''
+                          : access.adapter.imageUrl(
+                              access.auth,
+                              itemId: lib.id,
+                              maxWidth: 640,
+                            );
                       return SizedBox(
                         width: itemWidth,
                         child: MediaBackdropTile(
@@ -1796,10 +1790,8 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
   }
 
   Future<List<MediaItem>> _fetch({bool forceRefresh = false}) async {
-    final baseUrl = widget.appState.baseUrl;
-    final token = widget.appState.token;
-    final userId = widget.appState.userId;
-    if (baseUrl == null || token == null || userId == null) return const [];
+    final access = resolveServerAccess(appState: widget.appState);
+    if (access == null) return const [];
 
     final picked = await widget.appState.loadRandomRecommendations(
       forceRefresh: forceRefresh,
@@ -1809,21 +1801,17 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
     final urls = <String>{};
     for (final item in picked) {
       urls.add(
-        EmbyApi.imageUrl(
-          baseUrl: baseUrl,
+        access.adapter.imageUrl(
+          access.auth,
           itemId: item.id,
-          token: token,
-          apiPrefix: widget.appState.apiPrefix,
           imageType: 'Backdrop',
           maxWidth: 1280,
         ),
       );
       urls.add(
-        EmbyApi.imageUrl(
-          baseUrl: baseUrl,
+        access.adapter.imageUrl(
+          access.auth,
           itemId: item.id,
-          token: token,
-          apiPrefix: widget.appState.apiPrefix,
           imageType: 'Primary',
           maxWidth: 720,
         ),
@@ -1837,7 +1825,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
         CachedNetworkImageProvider(
           url,
           cacheManager: CoverCacheManager.instance,
-          headers: {'User-Agent': EmbyApi.userAgent},
+          headers: {'User-Agent': LinHttpClientFactory.userAgent},
         ),
         context,
       );
@@ -1854,7 +1842,7 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
         CachedNetworkImageProvider(
           url,
           cacheManager: CoverCacheManager.instance,
-          headers: {'User-Agent': EmbyApi.userAgent},
+          headers: {'User-Agent': LinHttpClientFactory.userAgent},
         ),
       );
     }
@@ -1933,23 +1921,19 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
 
         if (items.isEmpty) return const SizedBox.shrink();
 
-        final baseUrl = widget.appState.baseUrl!;
-        final token = widget.appState.token!;
+        final access = resolveServerAccess(appState: widget.appState);
+        if (access == null) return const SizedBox.shrink();
 
         Widget bannerImage(MediaItem item) {
-          final backdrop = EmbyApi.imageUrl(
-            baseUrl: baseUrl,
+          final backdrop = access.adapter.imageUrl(
+            access.auth,
             itemId: item.id,
-            token: token,
-            apiPrefix: widget.appState.apiPrefix,
             imageType: 'Backdrop',
             maxWidth: 1280,
           );
-          final primary = EmbyApi.imageUrl(
-            baseUrl: baseUrl,
+          final primary = access.adapter.imageUrl(
+            access.auth,
             itemId: item.id,
-            token: token,
-            apiPrefix: widget.appState.apiPrefix,
             imageType: 'Primary',
             maxWidth: 720,
           );
@@ -1967,13 +1951,13 @@ class _RandomRecommendSectionState extends State<_RandomRecommendSection> {
           return CachedNetworkImage(
             imageUrl: backdrop,
             cacheManager: CoverCacheManager.instance,
-            httpHeaders: {'User-Agent': EmbyApi.userAgent},
+            httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
             fit: BoxFit.cover,
             placeholder: (_, __) => placeholder(),
             errorWidget: (_, __, ___) => CachedNetworkImage(
               imageUrl: primary,
               cacheManager: CoverCacheManager.instance,
-              httpHeaders: {'User-Agent': EmbyApi.userAgent},
+              httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
               fit: BoxFit.cover,
               placeholder: (_, __) => placeholder(),
               errorWidget: (_, __, ___) => broken(),
@@ -2560,12 +2544,11 @@ class _HomeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = item.hasImage
-        ? EmbyApi.imageUrl(
-            baseUrl: appState.baseUrl!,
+    final access = resolveServerAccess(appState: appState);
+    final image = item.hasImage && access != null
+        ? access.adapter.imageUrl(
+            access.auth,
             itemId: item.id,
-            token: appState.token!,
-            apiPrefix: appState.apiPrefix,
             maxWidth: isTv ? 320 : 240,
           )
         : null;

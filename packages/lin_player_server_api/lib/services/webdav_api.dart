@@ -7,7 +7,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:xml/xml.dart';
 
-import 'emby_api.dart';
+import '../network/lin_http_client.dart';
 
 class WebDavEntry {
   final String name;
@@ -42,10 +42,7 @@ class WebDavApi {
     required this.username,
     required this.password,
     HttpClient? client,
-  })  : _client = client ??
-            (HttpClient()
-              ..userAgent = EmbyApi.userAgent
-              ..badCertificateCallback = (_, __, ___) => true),
+  })  : _client = client ?? LinHttpClientFactory.createHttpClient(),
         _auth = WebDavAuth(username: username, password: password);
 
   final Uri baseUri;

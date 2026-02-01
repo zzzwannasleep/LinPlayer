@@ -21,6 +21,25 @@ abstract class MediaServerAdapter {
   MediaServerType get serverType;
   String get deviceId;
 
+  /// Headers suitable for streaming (mpv/exo) or other authenticated requests.
+  ///
+  /// For emby-like servers this includes `X-Emby-Token` and the Emby/Jellyfin
+  /// Authorization headers.
+  Map<String, String> buildStreamHeaders(ServerAuthSession auth);
+
+  String imageUrl(
+    ServerAuthSession auth, {
+    required String itemId,
+    String imageType = 'Primary',
+    int? maxWidth,
+  });
+
+  String personImageUrl(
+    ServerAuthSession auth, {
+    required String personId,
+    int? maxWidth,
+  });
+
   Future<ServerAuthSession> authenticate({
     required String hostOrUrl,
     required String scheme,
@@ -122,4 +141,3 @@ abstract class MediaServerAdapter {
     bool? played,
   });
 }
-

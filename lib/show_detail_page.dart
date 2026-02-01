@@ -2,18 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:url_launcher/url_launcher_string.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
 import 'server_adapters/server_access.dart';
-import 'state/app_state.dart';
-import 'state/server_profile.dart';
-import 'state/preferences.dart';
 import 'play_network_page.dart';
 import 'play_network_page_exo.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/app_style.dart';
-import 'src/ui/frosted_card.dart';
-import 'src/ui/glass_blur.dart';
 
 class ShowDetailPage extends StatefulWidget {
   const ShowDetailPage({
@@ -77,8 +73,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       }
 
       try {
-        final detail =
-            await access.adapter.fetchItemDetail(access.auth, itemId: widget.itemId);
+        final detail = await access.adapter
+            .fetchItemDetail(access.auth, itemId: widget.itemId);
         if (!mounted) return;
         setState(() => _detail = detail);
         if (before == null || detail.playbackPositionTicks != before) return;
@@ -230,26 +226,22 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           // PlaybackInfo is optional for the detail UI.
         }
         try {
-          chaps =
-              await access.adapter.fetchChapters(access.auth, itemId: widget.itemId);
+          chaps = await access.adapter
+              .fetchChapters(access.auth, itemId: widget.itemId);
         } catch (_) {
           // Chapters are optional; hide section when unavailable.
         }
       }
       _album = [
-        EmbyApi.imageUrl(
-          baseUrl: baseUrl,
+        access.adapter.imageUrl(
+          access.auth,
           itemId: widget.itemId,
-          token: token,
-          apiPrefix: access.auth.apiPrefix,
           imageType: 'Primary',
           maxWidth: 800,
         ),
-        EmbyApi.imageUrl(
-          baseUrl: baseUrl,
+        access.adapter.imageUrl(
+          access.auth,
           itemId: widget.itemId,
-          token: token,
-          apiPrefix: access.auth.apiPrefix,
           imageType: 'Backdrop',
           maxWidth: 1200,
         ),
@@ -997,6 +989,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       );
     }
     final item = _detail!;
+    final access = resolveServerAccess(
+      appState: widget.appState,
+      server: widget.server,
+    );
     final isSeries = item.type.toLowerCase() == 'series';
     final playInfo = _playInfo;
     final showFloatingSettings = !widget.isTv &&
@@ -1006,14 +1002,14 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final runtime = item.runTimeTicks != null
         ? Duration(microseconds: item.runTimeTicks! ~/ 10)
         : null;
-    final hero = EmbyApi.imageUrl(
-      baseUrl: _baseUrl!,
-      itemId: item.id,
-      token: _token!,
-      apiPrefix: widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-      imageType: 'Primary',
-      maxWidth: 1200,
-    );
+    final hero = (access == null)
+        ? ''
+        : access.adapter.imageUrl(
+            access.auth,
+            itemId: item.id,
+            imageType: 'Primary',
+            maxWidth: 1200,
+          );
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final style = theme.extension<AppStyle>() ?? const AppStyle();
@@ -1087,12 +1083,15 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         ? Colors.black
         : Colors.white;
 
-    Widget heroImage = Image.network(
-      hero,
-      fit: BoxFit.cover,
-      headers: {'User-Agent': EmbyApi.userAgent},
-      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black26),
-    );
+    Widget heroImage = hero.isEmpty
+        ? const ColoredBox(color: Colors.black26)
+        : Image.network(
+            hero,
+            fit: BoxFit.cover,
+            headers: {'User-Agent': LinHttpClientFactory.userAgent},
+            errorBuilder: (_, __, ___) =>
+                const ColoredBox(color: Colors.black26),
+          );
     if (heroFilter != null) {
       heroImage = ColorFiltered(colorFilter: heroFilter, child: heroImage);
     }
@@ -1297,14 +1296,11 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           _chaptersSection(context, _chapters),
                           const SizedBox(height: 16),
                         ],
-                        if (item.people.isNotEmpty) ...[
+                        if (item.people.isNotEmpty && access != null) ...[
                           _peopleSection(
                             context,
                             item.people,
-                            baseUrl: _baseUrl!,
-                            token: _token!,
-                            apiPrefix: widget.server?.apiPrefix ??
-                                widget.appState.apiPrefix,
+                            access: access,
                           ),
                           const SizedBox(height: 16),
                         ],
@@ -1328,7 +1324,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                     width: 220,
                                     height: 140,
                                     fit: BoxFit.cover,
-                                    headers: {'User-Agent': EmbyApi.userAgent},
+                                    headers: {
+                                      'User-Agent':
+                                          LinHttpClientFactory.userAgent,
+                                    },
                                     errorBuilder: (_, __, ___) =>
                                         const SizedBox(
                                       width: 220,
@@ -1356,14 +1355,13 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               itemBuilder: (context, index) {
                                 final s = _seasons[index];
                                 final label = _seasonLabel(s, index);
-                                final img = EmbyApi.imageUrl(
-                                  baseUrl: _baseUrl!,
-                                  itemId: s.hasImage ? s.id : item.id,
-                                  token: _token!,
-                                  apiPrefix: widget.server?.apiPrefix ??
-                                      widget.appState.apiPrefix,
-                                  maxWidth: widget.isTv ? 600 : 400,
-                                );
+                                final img = access == null
+                                    ? null
+                                    : access.adapter.imageUrl(
+                                        access.auth,
+                                        itemId: s.hasImage ? s.id : item.id,
+                                        maxWidth: widget.isTv ? 600 : 400,
+                                      );
                                 return SizedBox(
                                   width: widget.isTv ? 200 : 140,
                                   child: MediaPosterTile(
@@ -1402,13 +1400,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                   const SizedBox(width: 12),
                               itemBuilder: (context, index) {
                                 final s = _similar[index];
-                                final img = s.hasImage
-                                    ? EmbyApi.imageUrl(
-                                        baseUrl: _baseUrl!,
+                                final img = s.hasImage && access != null
+                                    ? access.adapter.imageUrl(
+                                        access.auth,
                                         itemId: s.id,
-                                        token: _token!,
-                                        apiPrefix: widget.server?.apiPrefix ??
-                                            widget.appState.apiPrefix,
                                         maxWidth: 400,
                                       )
                                     : null;
@@ -1580,6 +1575,8 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
   Widget build(BuildContext context) {
     final seasonName = _detailSeason?.name ?? widget.season.name;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
     return Scaffold(
       appBar: GlassAppBar(
         enableBlur: enableBlur,
@@ -1606,14 +1603,13 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
                             ? Duration(
                                 microseconds: (e.runTimeTicks! / 10).round())
                             : null;
-                        final img = EmbyApi.imageUrl(
-                          baseUrl: _baseUrl!,
-                          itemId: e.hasImage ? e.id : widget.season.id,
-                          token: _token!,
-                          apiPrefix: widget.server?.apiPrefix ??
-                              widget.appState.apiPrefix,
-                          maxWidth: widget.isTv ? 900 : 700,
-                        );
+                        final img = access == null
+                            ? ''
+                            : access.adapter.imageUrl(
+                                access.auth,
+                                itemId: e.hasImage ? e.id : widget.season.id,
+                                maxWidth: widget.isTv ? 900 : 700,
+                              );
                         return Card(
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
@@ -1649,7 +1645,9 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
                                               img,
                                               fit: BoxFit.cover,
                                               headers: {
-                                                'User-Agent': EmbyApi.userAgent
+                                                'User-Agent':
+                                                    LinHttpClientFactory
+                                                        .userAgent
                                               },
                                               errorBuilder: (_, __, ___) =>
                                                   const ColoredBox(
@@ -1859,8 +1857,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
           serverId.trim().isNotEmpty &&
           seriesId.isNotEmpty &&
           sources.isNotEmpty) {
-        final idx = widget.appState
-            .seriesMediaSourceIndex(serverId: serverId.trim(), seriesId: seriesId);
+        final idx = widget.appState.seriesMediaSourceIndex(
+            serverId: serverId.trim(), seriesId: seriesId);
         if (idx != null && idx >= 0 && idx < sources.length) {
           selectedMediaSourceId = sources[idx]['Id']?.toString();
         }
@@ -1879,17 +1877,18 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       if (serverId != null &&
           serverId.trim().isNotEmpty &&
           seriesId.isNotEmpty) {
-        selectedAudioStreamIndex ??= widget.appState
-            .seriesAudioStreamIndex(serverId: serverId.trim(), seriesId: seriesId);
-        selectedSubtitleStreamIndex ??= widget.appState.seriesSubtitleStreamIndex(
+        selectedAudioStreamIndex ??= widget.appState.seriesAudioStreamIndex(
+            serverId: serverId.trim(), seriesId: seriesId);
+        selectedSubtitleStreamIndex ??=
+            widget.appState.seriesSubtitleStreamIndex(
           serverId: serverId.trim(),
           seriesId: seriesId,
         );
       }
       List<ChapterInfo> chaps = const [];
       try {
-        chaps =
-            await access.adapter.fetchChapters(access.auth, itemId: widget.episode.id);
+        chaps = await access.adapter
+            .fetchChapters(access.auth, itemId: widget.episode.id);
       } catch (_) {
         // Chapters are optional; hide section when unavailable.
       }
@@ -1932,7 +1931,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   Widget _episodePlaybackOptionsCard(
       BuildContext context, PlaybackInfoResult info) {
-    final ms = _ShowDetailPageState._findMediaSource(info, _selectedMediaSourceId);
+    final ms =
+        _ShowDetailPageState._findMediaSource(info, _selectedMediaSourceId);
     if (ms == null) return const SizedBox.shrink();
 
     final audioStreams = _ShowDetailPageState._streamsOfType(ms, 'Audio');
@@ -1942,7 +1942,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final selectedAudio = _selectedAudioStreamIndex != null
         ? audioStreams.firstWhere(
             (s) =>
-                _ShowDetailPageState._asInt(s['Index']) == _selectedAudioStreamIndex,
+                _ShowDetailPageState._asInt(s['Index']) ==
+                _selectedAudioStreamIndex,
             orElse: () => defaultAudio ?? const <String, dynamic>{},
           )
         : defaultAudio;
@@ -1954,7 +1955,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     } else if (_selectedSubtitleStreamIndex != null) {
       selectedSub = subtitleStreams.firstWhere(
         (s) =>
-            _ShowDetailPageState._asInt(s['Index']) == _selectedSubtitleStreamIndex,
+            _ShowDetailPageState._asInt(s['Index']) ==
+            _selectedSubtitleStreamIndex,
         orElse: () => defaultSub ?? const <String, dynamic>{},
       );
     } else {
@@ -1965,13 +1967,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final subtitleText = _selectedSubtitleStreamIndex == -1
         ? '关闭'
         : selectedSub != null && selectedSub.isNotEmpty
-            ? _ShowDetailPageState._streamLabel(selectedSub, includeCodec: false)
+            ? _ShowDetailPageState._streamLabel(selectedSub,
+                includeCodec: false)
             : hasSubs
                 ? '默认'
                 : '关闭';
 
     final audioText = selectedAudio != null && selectedAudio.isNotEmpty
-        ? _ShowDetailPageState._streamLabel(selectedAudio, includeCodec: false) +
+        ? _ShowDetailPageState._streamLabel(selectedAudio,
+                includeCodec: false) +
             (selectedAudio == defaultAudio ? ' (默认)' : '')
         : '默认';
 
@@ -1980,7 +1984,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2062,8 +2067,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final serverId = widget.server?.id ?? widget.appState.activeServerId;
     final sid = (_seriesId ?? '').trim();
     if (serverId == null || serverId.trim().isEmpty || sid.isEmpty) return;
-    final idx =
-        sources.indexWhere((ms) => (ms['Id']?.toString() ?? '').trim() == picked);
+    final idx = sources
+        .indexWhere((ms) => (ms['Id']?.toString() ?? '').trim() == picked);
     if (idx < 0) return;
     unawaited(
       widget.appState.setSeriesMediaSourceIndex(
@@ -2097,7 +2102,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               ),
               ...audioStreams.map((s) {
                 final idx = _ShowDetailPageState._asInt(s['Index']);
-                final selectedNow = idx != null && idx == _selectedAudioStreamIndex;
+                final selectedNow =
+                    idx != null && idx == _selectedAudioStreamIndex;
                 final title =
                     _ShowDetailPageState._streamLabel(s, includeCodec: false);
                 return ListTile(
@@ -2198,6 +2204,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   Widget build(BuildContext context) {
     final ep = widget.episode;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
+    final access = resolveServerAccess(
+      appState: widget.appState,
+      server: widget.server,
+    );
     return Scaffold(
       appBar: GlassAppBar(
         enableBlur: enableBlur,
@@ -2246,7 +2256,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       seriesId: _seriesId,
                                       startPosition: start,
                                       mediaSourceId: _selectedMediaSourceId,
-                                      audioStreamIndex: _selectedAudioStreamIndex,
+                                      audioStreamIndex:
+                                          _selectedAudioStreamIndex,
                                       subtitleStreamIndex:
                                           _selectedSubtitleStreamIndex,
                                     )
@@ -2259,7 +2270,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       seriesId: _seriesId,
                                       startPosition: start,
                                       mediaSourceId: _selectedMediaSourceId,
-                                      audioStreamIndex: _selectedAudioStreamIndex,
+                                      audioStreamIndex:
+                                          _selectedAudioStreamIndex,
                                       subtitleStreamIndex:
                                           _selectedSubtitleStreamIndex,
                                     ),
@@ -2274,14 +2286,11 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                         _otherEpisodesSection(context),
                         const SizedBox(height: 16),
                       ],
-                      if (_detail?.people.isNotEmpty == true)
+                      if (_detail?.people.isNotEmpty == true && access != null)
                         _peopleSection(
                           context,
                           _detail!.people,
-                          baseUrl: _baseUrl!,
-                          token: _token!,
-                          apiPrefix: widget.server?.apiPrefix ??
-                              widget.appState.apiPrefix,
+                          access: access,
                         ),
                       if (_playInfo != null) ...[
                         const SizedBox(height: 16),
@@ -2594,7 +2603,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       },
     );
 
-    if (!mounted || !context.mounted || selectedEp == null || selectedEp.id.isEmpty) return;
+    if (!mounted ||
+        !context.mounted ||
+        selectedEp == null ||
+        selectedEp.id.isEmpty) return;
     if (selectedEp.id == widget.episode.id) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
@@ -2724,14 +2736,17 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                     final e = eps[index];
                     final isCurrent = e.id == widget.episode.id;
                     final epNo = e.episodeNumber ?? (index + 1);
-                    final img = EmbyApi.imageUrl(
-                      baseUrl: _baseUrl!,
-                      itemId: e.hasImage ? e.id : season.id,
-                      token: _token!,
-                      apiPrefix:
-                          widget.server?.apiPrefix ?? widget.appState.apiPrefix,
-                      maxWidth: widget.isTv ? 900 : 640,
+                    final access = resolveServerAccess(
+                      appState: widget.appState,
+                      server: widget.server,
                     );
+                    final img = access == null
+                        ? ''
+                        : access.adapter.imageUrl(
+                            access.auth,
+                            itemId: e.hasImage ? e.id : season.id,
+                            maxWidth: widget.isTv ? 900 : 640,
+                          );
                     return SizedBox(
                       width: widget.isTv ? 360 : 260,
                       child: MediaBackdropTile(
@@ -3078,9 +3093,7 @@ Widget _playButton(BuildContext context,
 Widget _peopleSection(
   BuildContext context,
   List<MediaPerson> people, {
-  required String baseUrl,
-  required String token,
-  required String apiPrefix,
+  required ServerAccess access,
 }) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -3095,11 +3108,9 @@ Widget _peopleSection(
           separatorBuilder: (_, __) => const SizedBox(width: 12),
           itemBuilder: (context, index) {
             final p = people[index];
-            final img = EmbyApi.personImageUrl(
-              baseUrl: baseUrl,
+            final img = access.adapter.personImageUrl(
+              access.auth,
               personId: p.id,
-              token: token,
-              apiPrefix: apiPrefix,
               maxWidth: 200,
             );
             return Column(
@@ -3152,20 +3163,18 @@ Widget _mediaInfo(
         children: [
           _infoCard(
               '视频',
-              video
-                  .map((v) {
-                    final title = (v['DisplayTitle'] ?? '').toString().trim();
-                    final codec = (v['Codec'] ?? '').toString().trim();
-                    final aspect =
-                        _formatVideoAspectRatio(v.cast<String, dynamic>());
-                    final parts = <String>[
-                      if (title.isNotEmpty) title,
-                      if (codec.isNotEmpty) codec,
-                      if (aspect != null) '视频比例：$aspect',
-                    ];
-                    return parts.join('\n');
-                  })
-                  .join('\n\n')),
+              video.map((v) {
+                final title = (v['DisplayTitle'] ?? '').toString().trim();
+                final codec = (v['Codec'] ?? '').toString().trim();
+                final aspect =
+                    _formatVideoAspectRatio(v.cast<String, dynamic>());
+                final parts = <String>[
+                  if (title.isNotEmpty) title,
+                  if (codec.isNotEmpty) codec,
+                  if (aspect != null) '视频比例：$aspect',
+                ];
+                return parts.join('\n');
+              }).join('\n\n')),
           _infoCard(
               '音频',
               audio

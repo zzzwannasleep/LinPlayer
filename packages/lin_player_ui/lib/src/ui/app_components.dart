@@ -4,7 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../services/cover_cache_manager.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_api/network/lin_http_client.dart';
 import 'package:lin_player_prefs/preferences.dart';
 import 'app_style.dart';
 import 'frosted_card.dart';
@@ -190,7 +190,8 @@ class MediaLabelBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(8),
-        border: border == BorderSide.none ? null : Border.fromBorderSide(border),
+        border:
+            border == BorderSide.none ? null : Border.fromBorderSide(border),
       ),
       child: Text(
         text,
@@ -295,7 +296,7 @@ class MediaPosterTile extends StatelessWidget {
         ? CachedNetworkImage(
             imageUrl: imageUrl!,
             cacheManager: CoverCacheManager.instance,
-            httpHeaders: {'User-Agent': EmbyApi.userAgent},
+            httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
             fit: BoxFit.cover,
             placeholder: (_, __) => const ColoredBox(color: Colors.black12),
             errorWidget: (_, __, ___) =>
@@ -371,8 +372,7 @@ class MediaPosterTile extends StatelessWidget {
             title,
             style: theme.textTheme.bodySmall?.copyWith(
               fontWeight: FontWeight.w700,
-              letterSpacing:
-                  style.template == UiTemplate.neonHud ? 0.15 : null,
+              letterSpacing: style.template == UiTemplate.neonHud ? 0.15 : null,
             ),
             textAlign: TextAlign.center,
             maxLines: math.max(1, titleMaxLines),
@@ -468,7 +468,7 @@ class MediaBackdropTile extends StatelessWidget {
     final image = CachedNetworkImage(
       imageUrl: imageUrl,
       cacheManager: CoverCacheManager.instance,
-      httpHeaders: {'User-Agent': EmbyApi.userAgent},
+      httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
       fit: BoxFit.cover,
       placeholder: (_, __) => const ColoredBox(
         color: Colors.black12,
@@ -519,8 +519,7 @@ class MediaBackdropTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(
               fontWeight: FontWeight.w800,
-              letterSpacing:
-                  style.template == UiTemplate.neonHud ? 0.15 : null,
+              letterSpacing: style.template == UiTemplate.neonHud ? 0.15 : null,
             ),
           ),
           if ((subtitle ?? '').trim().isNotEmpty) ...[
@@ -604,7 +603,8 @@ class _HudFramePainter extends CustomPainter {
       ..strokeCap = StrokeCap.square;
 
     final inset = width / 2;
-    final r = Rect.fromLTWH(inset, inset, size.width - width, size.height - width);
+    final r =
+        Rect.fromLTWH(inset, inset, size.width - width, size.height - width);
     const corner = 14.0;
     const leg = 18.0;
 

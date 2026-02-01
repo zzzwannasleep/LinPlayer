@@ -1,11 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
 
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'settings_page.dart';
-import 'state/app_state.dart';
-import 'state/preferences.dart';
 import 'webdav_browser_page.dart';
 
 class WebDavHomePage extends StatefulWidget {

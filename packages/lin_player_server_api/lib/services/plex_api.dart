@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
+
+import '../network/lin_http_client.dart';
 
 class PlexPin {
   final int id;
@@ -93,7 +93,8 @@ class PlexResource {
     );
   }
 
-  bool get isServer => provides.split(',').map((e) => e.trim()).contains('server');
+  bool get isServer =>
+      provides.split(',').map((e) => e.trim()).contains('server');
 
   String? pickBestConnectionUri() {
     if (connections.isEmpty) return null;
@@ -121,10 +122,7 @@ class PlexApi {
     this.platform = 'Flutter',
     this.version = '1.0.0',
     http.Client? client,
-  }) : _client = client ??
-            IOClient(
-              HttpClient()..badCertificateCallback = (_, __, ___) => true,
-            );
+  }) : _client = client ?? LinHttpClientFactory.createClient();
 
   final String clientIdentifier;
   final String product;
@@ -140,7 +138,8 @@ class PlexApi {
         'X-Plex-Version': version,
         'X-Plex-Device': device,
         'X-Plex-Platform': platform,
-        if (token != null && token.trim().isNotEmpty) 'X-Plex-Token': token.trim(),
+        if (token != null && token.trim().isNotEmpty)
+          'X-Plex-Token': token.trim(),
       };
 
   Future<PlexPin> createPin({bool strong = true}) async {
@@ -210,4 +209,3 @@ class PlexApi {
         .toList(growable: false);
   }
 }
-

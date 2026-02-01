@@ -5,7 +5,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
-import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_api/network/lin_http_client.dart';
 
 typedef DownloadProgressCallback = void Function(
     int receivedBytes, int totalBytes);
@@ -128,7 +128,7 @@ class AppUpdateService {
     http.Client? client,
     this.owner = 'zzzwannasleep',
     this.repo = 'LinPlayer',
-  }) : _client = client ?? http.Client();
+  }) : _client = client ?? LinHttpClientFactory.createClient();
 
   final http.Client _client;
   final String owner;
@@ -171,7 +171,7 @@ class AppUpdateService {
   }) async {
     final headers = <String, String>{
       'Accept': 'application/vnd.github+json',
-      'User-Agent': EmbyApi.userAgent,
+      'User-Agent': LinHttpClientFactory.userAgent,
     };
 
     Future<http.Response> get(Uri uri) =>
@@ -355,7 +355,7 @@ class AppUpdateService {
     Duration timeout = const Duration(minutes: 10),
   }) async {
     final request = http.Request('GET', Uri.parse(asset.browserDownloadUrl));
-    request.headers['User-Agent'] = EmbyApi.userAgent;
+    request.headers['User-Agent'] = LinHttpClientFactory.userAgent;
     final streamed = await _client.send(request).timeout(timeout);
     if (streamed.statusCode != 200) {
       throw Exception('Download failed: HTTP ${streamed.statusCode}');

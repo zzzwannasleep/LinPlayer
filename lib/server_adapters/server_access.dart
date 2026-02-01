@@ -1,5 +1,4 @@
-import '../state/app_state.dart';
-import '../state/server_profile.dart';
+import 'package:lin_player_state/lin_player_state.dart';
 
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';

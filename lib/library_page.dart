@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 
-import 'package:lin_player_server_api/services/emby_api.dart';
-import 'state/app_state.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'library_items_page.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/glass_blur.dart';
-import 'src/ui/ui_scale.dart';
+import 'server_adapters/server_access.dart';
 
 class LibraryPage extends StatefulWidget {
   const LibraryPage({super.key, required this.appState});
@@ -29,6 +27,7 @@ class _LibraryPageState extends State<LibraryPage> {
       animation: widget.appState,
       builder: (context, _) {
         final enableBlur = !_isTv(context) && widget.appState.enableBlurEffects;
+        final access = resolveServerAccess(appState: widget.appState);
         final libs = widget.appState.libraries
             .where((l) =>
                 _showHidden ? true : !widget.appState.isLibraryHidden(l.id))
@@ -75,13 +74,13 @@ class _LibraryPageState extends State<LibraryPage> {
                         itemCount: libs.length,
                         itemBuilder: (context, index) {
                           final LibraryInfo lib = libs[index];
-                          final imageUrl = EmbyApi.imageUrl(
-                            baseUrl: widget.appState.baseUrl!,
-                            itemId: lib.id,
-                            token: widget.appState.token!,
-                            apiPrefix: widget.appState.apiPrefix,
-                            maxWidth: 400,
-                          );
+                          final imageUrl = access == null
+                              ? ''
+                              : access.adapter.imageUrl(
+                                  access.auth,
+                                  itemId: lib.id,
+                                  maxWidth: 400,
+                                );
                           return MediaBackdropTile(
                             title: lib.name,
                             imageUrl: imageUrl,

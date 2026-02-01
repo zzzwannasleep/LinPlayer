@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 
 import 'package:lin_player_core/state/media_server_type.dart';
+import '../network/lin_http_client.dart';
 
 class DomainInfo {
   final String name;
@@ -236,11 +236,18 @@ class EmbyApi {
   static String userAgentProduct = 'LinPlayer';
   static String defaultClientName = 'LinPlayer';
 
-  static String get userAgent => '$userAgentProduct/$appVersion';
+  static String get userAgent => LinHttpClientFactory.userAgent;
+
+  static void _syncUserAgent() {
+    LinHttpClientFactory.setUserAgent('$userAgentProduct/$appVersion');
+  }
 
   static void setUserAgentProduct(String product) {
     final v = product.trim();
-    if (v.isNotEmpty) userAgentProduct = v;
+    if (v.isNotEmpty) {
+      userAgentProduct = v;
+      _syncUserAgent();
+    }
   }
 
   static void setDefaultClientName(String name) {
@@ -250,7 +257,10 @@ class EmbyApi {
 
   static void setAppVersion(String version) {
     final v = version.trim();
-    if (v.isNotEmpty) appVersion = v;
+    if (v.isNotEmpty) {
+      appVersion = v;
+      _syncUserAgent();
+    }
   }
 
   static String _authorizationValue({
@@ -340,12 +350,7 @@ class EmbyApi {
         deviceName = (deviceName == null || deviceName.trim().isEmpty)
             ? 'Flutter'
             : deviceName.trim(),
-        _client = client ??
-            IOClient(
-              HttpClient()
-                ..userAgent = userAgent
-                ..badCertificateCallback = (_, __, ___) => true,
-            );
+        _client = client ?? LinHttpClientFactory.createClient();
 
   final String _hostOrUrl;
   final String _preferredScheme;
@@ -697,8 +702,8 @@ class EmbyApi {
     for (final path in candidates) {
       try {
         final url = Uri.parse(_apiUrl(baseUrl, path));
-        final resp =
-            await _client.get(url, headers: _jsonHeaders(token: token, userId: userId));
+        final resp = await _client.get(url,
+            headers: _jsonHeaders(token: token, userId: userId));
         lastResp = resp;
         if (resp.statusCode != 200) continue;
         final map = jsonDecode(resp.body) as Map<String, dynamic>;
@@ -751,8 +756,8 @@ class EmbyApi {
     }
     final url =
         Uri.parse(_apiUrl(baseUrl, 'Users/$userId/Items?${params.join('&')}'));
-    final resp =
-        await _client.get(url, headers: _jsonHeaders(token: token, userId: userId));
+    final resp = await _client.get(url,
+        headers: _jsonHeaders(token: token, userId: userId));
     if (resp.statusCode != 200) {
       throw Exception('拉取媒体列表失败（${resp.statusCode}）');
     }
@@ -839,8 +844,8 @@ class EmbyApi {
         '&Fields=Overview,ParentId,SeriesId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData',
       ),
     );
-    final resp =
-        await _client.get(url, headers: _jsonHeaders(token: token, userId: userId));
+    final resp = await _client.get(url,
+        headers: _jsonHeaders(token: token, userId: userId));
     if (resp.statusCode != 200) {
       throw Exception('获取继续观看失败（${resp.statusCode}）');
     }
@@ -996,7 +1001,8 @@ class EmbyApi {
               'Items/$itemId/PlaybackInfo?UserId=$userId&DeviceId=$deviceId',
             ),
           ),
-          headers: _jsonHeaders(token: token, userId: userId, deviceId: deviceId),
+          headers:
+              _jsonHeaders(token: token, userId: userId, deviceId: deviceId),
         );
 
     // For ExoPlayer we must POST with DeviceProfile, otherwise the server may
@@ -1008,7 +1014,8 @@ class EmbyApi {
       if (resp.statusCode >= 500 || resp.statusCode == 404) {
         resp = await postReq();
       }
-    } else if (!exoPlayer && (resp.statusCode >= 500 || resp.statusCode == 404)) {
+    } else if (!exoPlayer &&
+        (resp.statusCode >= 500 || resp.statusCode == 404)) {
       resp = await postReq();
     }
     if (resp.statusCode != 200) {
@@ -1188,8 +1195,8 @@ class EmbyApi {
         '?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container',
       ),
     );
-    final resp =
-        await _client.get(url, headers: _jsonHeaders(token: token, userId: userId));
+    final resp = await _client.get(url,
+        headers: _jsonHeaders(token: token, userId: userId));
     if (resp.statusCode != 200) {
       throw Exception('获取详情失败(${resp.statusCode})');
     }
@@ -1235,8 +1242,8 @@ class EmbyApi {
     String? userId,
   }) async {
     final url = Uri.parse(_apiUrl(baseUrl, 'Items/$itemId/Chapters'));
-    final resp =
-        await _client.get(url, headers: _jsonHeaders(token: token, userId: userId));
+    final resp = await _client.get(url,
+        headers: _jsonHeaders(token: token, userId: userId));
     // 404 means the item has no chapters on many servers.
     if (resp.statusCode == 404) {
       return const [];
@@ -1263,8 +1270,8 @@ class EmbyApi {
         'Users/$userId/Items/$itemId/Similar?Limit=$limit&Fields=Overview,ImageTags,ProviderIds,CommunityRating,Genres,ProductionYear',
       ),
     );
-    final resp =
-        await _client.get(url, headers: _jsonHeaders(token: token, userId: userId));
+    final resp = await _client.get(url,
+        headers: _jsonHeaders(token: token, userId: userId));
     if (resp.statusCode == 404) {
       return PagedResult(const [], 0);
     }

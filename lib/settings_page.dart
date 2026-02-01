@@ -6,25 +6,18 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
-import 'app_config/app_config_scope.dart';
 import 'danmaku_settings_page.dart';
 import 'interaction_settings_page.dart';
 import 'server_text_import_sheet.dart';
 import 'services/app_update_flow.dart';
 import 'services/app_update_service.dart';
-import 'services/cover_cache_manager.dart';
-import 'services/stream_cache.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_icon_service.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/glass_blur.dart';
-import 'state/app_state.dart';
-import 'state/danmaku_preferences.dart';
-import 'state/preferences.dart';
-import 'state/server_profile.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.appState});

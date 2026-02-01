@@ -1,12 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-
-import 'src/device/device_type.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/glass_blur.dart';
-import 'state/app_state.dart';
-import 'state/interaction_preferences.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
 class InteractionSettingsPage extends StatefulWidget {
   const InteractionSettingsPage({super.key, required this.appState});

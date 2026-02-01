@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
-import 'emby_api.dart';
+import '../network/lin_http_client.dart';
 import 'webdav_api.dart';
 
 class WebDavProxyServer {
@@ -14,9 +14,7 @@ class WebDavProxyServer {
   Uri? _baseUri;
   final Map<String, _WebDavProxyEntry> _entries = {};
 
-  final HttpClient _client = HttpClient()
-    ..userAgent = EmbyApi.userAgent
-    ..badCertificateCallback = (_, __, ___) => true;
+  final HttpClient _client = LinHttpClientFactory.createHttpClient();
 
   Future<Uri> ensureStarted() async {
     final existing = _baseUri;

@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  lin_player_core:
+    path: ../lin_player_core
   cached_network_image: ^3.4.1
   flutter_cache_manager: ^3.4.1
   flutter_displaymode: ^0.7.0
@@ -18,4 +20,3 @@ dependencies:
     path: ../lin_player_prefs
   lin_player_server_api:
     path: ../lin_player_server_api
-

@@ -6,29 +6,16 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import 'player_service.dart';
 import 'play_network_page_exo.dart';
-import 'services/dandanplay_api.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
 import 'server_adapters/server_access.dart';
-import 'state/app_state.dart';
-import 'state/anime4k_preferences.dart';
-import 'state/danmaku_preferences.dart';
-import 'state/interaction_preferences.dart';
-import 'state/preferences.dart';
-import 'state/server_profile.dart';
-import 'src/player/anime4k.dart';
-import 'src/player/danmaku.dart';
-import 'src/player/danmaku_processing.dart';
-import 'src/player/playback_controls.dart';
-import 'src/player/danmaku_stage.dart';
-import 'src/player/net_speed.dart';
-import 'src/player/thumbnail_generator.dart';
-import 'src/player/track_preferences.dart';
-import 'src/ui/glass_blur.dart';
 
 class PlayNetworkPage extends StatefulWidget {
   const PlayNetworkPage({
@@ -285,14 +272,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     try {
       final streamUrl = await _buildStreamUrl();
       _resolvedStream = streamUrl;
-      final embyHeaders = {
-        'X-Emby-Token': _token!,
-        ...EmbyApi.buildAuthorizationHeaders(
-          serverType: widget.server?.serverType ?? widget.appState.serverType,
-          deviceId: widget.appState.deviceId,
-          userId: _userId,
-        ),
-      };
+      final access = _serverAccess;
+      if (access == null) {
+        _playError = 'Unsupported server';
+        return;
+      }
+      final embyHeaders = access.adapter.buildStreamHeaders(access.auth);
       if (!kIsWeb && streamUrl.isNotEmpty) {
         _thumbnailer = MediaKitThumbnailGenerator(
           media: Media(streamUrl, httpHeaders: embyHeaders),
@@ -1286,15 +1271,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   final e = eps[index];
                                   final epNo = e.episodeNumber ?? (index + 1);
                                   final isCurrent = e.id == widget.itemId;
-                                  final img = (baseUrl == null || token == null)
+                                  final access = _serverAccess;
+                                  final img = access == null
                                       ? null
-                                      : EmbyApi.imageUrl(
-                                          baseUrl: baseUrl,
+                                      : access.adapter.imageUrl(
+                                          access.auth,
                                           itemId: e.hasImage
                                               ? e.id
                                               : selectedSeason!.id,
-                                          token: token,
-                                          apiPrefix: apiPrefix,
                                           maxWidth: 520,
                                         );
 
@@ -1715,8 +1699,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     try {
       final access = _serverAccess;
       if (access == null) throw Exception('Not connected');
-      final info =
-          await access.adapter.fetchPlaybackInfo(access.auth, itemId: widget.itemId);
+      final info = await access.adapter
+          .fetchPlaybackInfo(access.auth, itemId: widget.itemId);
       final sources = info.mediaSources.cast<Map<String, dynamic>>();
       _availableMediaSources = List<Map<String, dynamic>>.from(sources);
       Map<String, dynamic>? ms;
@@ -2781,8 +2765,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       try {
         final access = _serverAccess;
         if (access == null) throw Exception('Not connected');
-        final info =
-            await access.adapter.fetchPlaybackInfo(access.auth, itemId: widget.itemId);
+        final info = await access.adapter
+            .fetchPlaybackInfo(access.auth, itemId: widget.itemId);
         sources = info.mediaSources.cast<Map<String, dynamic>>();
         _availableMediaSources = List<Map<String, dynamic>>.from(sources);
       } catch (_) {
@@ -3092,7 +3076,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                 _subtitleViewConfiguration,
                           ),
                           Positioned.fill(
-                              child: DanmakuStage(
+                            child: DanmakuStage(
                               key: _danmakuKey,
                               enabled: _danmakuEnabled,
                               opacity: _danmakuOpacity,

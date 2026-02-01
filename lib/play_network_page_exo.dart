@@ -6,25 +6,17 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
 import 'play_network_page.dart';
-import 'services/dandanplay_api.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
 import 'server_adapters/server_access.dart';
-import 'state/app_state.dart';
-import 'state/danmaku_preferences.dart';
-import 'state/interaction_preferences.dart';
-import 'state/preferences.dart';
-import 'state/server_profile.dart';
-import 'src/player/danmaku.dart';
-import 'src/player/danmaku_processing.dart';
-import 'src/player/danmaku_stage.dart';
-import 'src/player/playback_controls.dart';
-import 'src/player/net_speed.dart';
-import 'src/ui/glass_blur.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
   const ExoPlayNetworkPage({
@@ -879,15 +871,14 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   final e = eps[index];
                                   final epNo = e.episodeNumber ?? (index + 1);
                                   final isCurrent = e.id == widget.itemId;
-                                  final img = (baseUrl == null || token == null)
+                                  final access = _serverAccess;
+                                  final img = access == null
                                       ? null
-                                      : EmbyApi.imageUrl(
-                                          baseUrl: baseUrl,
+                                      : access.adapter.imageUrl(
+                                          access.auth,
                                           itemId: e.hasImage
                                               ? e.id
                                               : selectedSeason!.id,
-                                          token: token,
-                                          apiPrefix: apiPrefix,
                                           maxWidth: 520,
                                         );
 
@@ -1232,14 +1223,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     await _ensureDanmakuVisible();
   }
 
-  Map<String, String> _embyHeaders() => {
-        'X-Emby-Token': _token!,
-        ...EmbyApi.buildAuthorizationHeaders(
-          serverType: widget.server?.serverType ?? widget.appState.serverType,
-          deviceId: widget.appState.deviceId,
-          userId: _userId,
-        ),
-      };
+  Map<String, String> _embyHeaders() {
+    final access = _serverAccess;
+    if (access == null) return const <String, String>{};
+    return access.adapter.buildStreamHeaders(access.auth);
+  }
 
   Future<void> _ensureDanmakuVisible() async {
     if (!_isAndroid) return;

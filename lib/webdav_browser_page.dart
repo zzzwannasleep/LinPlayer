@@ -2,17 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'package:lin_player_server_api/services/webdav_api.dart';
 import 'package:lin_player_server_api/services/webdav_proxy.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/glass_blur.dart';
-import 'state/app_state.dart';
-import 'state/local_playback_handoff.dart';
-import 'state/preferences.dart';
-import 'state/server_profile.dart';
 
 class WebDavBrowserPage extends StatefulWidget {
   const WebDavBrowserPage({

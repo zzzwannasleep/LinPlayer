@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../services/cover_cache_manager.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_api/network/lin_http_client.dart';
 import '../services/server_icon_library.dart';
 
 class ServerIconAvatar extends StatelessWidget {
@@ -38,7 +38,7 @@ class ServerIconAvatar extends StatelessWidget {
     return CachedNetworkImage(
       imageUrl: url,
       cacheManager: CoverCacheManager.instance,
-      httpHeaders: {'User-Agent': EmbyApi.userAgent},
+      httpHeaders: {'User-Agent': LinHttpClientFactory.userAgent},
       imageBuilder: (_, provider) => CircleAvatar(
         radius: radius,
         backgroundColor: backgroundColor,
@@ -132,14 +132,13 @@ class _ServerIconLibrarySheetState extends State<ServerIconLibrarySheet> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) =>
-          _ServerIconLibraryManagerSheet(
-            urlsListenable: widget.urlsListenable,
-            getLibraryUrls: widget.getLibraryUrls,
-            addLibraryUrl: widget.addLibraryUrl,
-            removeLibraryUrlAt: widget.removeLibraryUrlAt,
-            reorderLibraryUrls: widget.reorderLibraryUrls,
-          ),
+      builder: (ctx) => _ServerIconLibraryManagerSheet(
+        urlsListenable: widget.urlsListenable,
+        getLibraryUrls: widget.getLibraryUrls,
+        addLibraryUrl: widget.addLibraryUrl,
+        removeLibraryUrlAt: widget.removeLibraryUrlAt,
+        reorderLibraryUrls: widget.reorderLibraryUrls,
+      ),
     );
   }
 
@@ -154,9 +153,8 @@ class _ServerIconLibrarySheetState extends State<ServerIconLibrarySheet> {
         builder: (context, snapshot) {
           final libs = snapshot.data;
           final sources = libs?.sources ?? const <ServerIconLibrarySource>[];
-          final available = sources
-              .where((s) => s.library != null)
-              .toList(growable: false);
+          final available =
+              sources.where((s) => s.library != null).toList(growable: false);
           final errorCount = sources.where((s) => s.error != null).length;
 
           final validIds = {
@@ -302,16 +300,14 @@ class _ServerIconLibrarySheetState extends State<ServerIconLibrarySheet> {
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Text('加载图标库失败：${snapshot.error}'),
                 )
-                  else if (icons.isEmpty)
+              else if (icons.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        widget.getLibraryUrls().isEmpty
-                            ? '尚未添加图标库'
-                            : '图标库为空',
+                        widget.getLibraryUrls().isEmpty ? '尚未添加图标库' : '图标库为空',
                       ),
                       if (widget.getLibraryUrls().isEmpty) ...[
                         const SizedBox(height: 10),

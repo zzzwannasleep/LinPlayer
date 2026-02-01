@@ -2,22 +2,16 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'app_config/app_config_scope.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'server_text_import_sheet.dart';
 import 'package:lin_player_server_api/services/plex_api.dart';
-import 'services/website_metadata.dart';
-import 'state/app_state.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
-import 'state/preferences.dart';
-import 'state/server_profile.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/server_icon_picker.dart';
-import 'src/ui/theme_sheet.dart';
-import 'src/ui/ui_scale.dart';
 
 class ServerPage extends StatefulWidget {
   const ServerPage({super.key, required this.appState});

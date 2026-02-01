@@ -316,9 +316,9 @@ flutter build linux --release
 
 ## TODO（重构路线图）
 - [x] 模块化（基础拆分）：提取 `lin_player_core` / `lin_player_server_api` / `lin_player_server_adapters`（见 `packages/`）
-- [ ] 模块化（下一步）：继续抽离 state / player / UI 基建等通用能力（已拆分出 `lin_player_prefs` / `lin_player_ui` / `lin_player_player` / `lin_player_state`）
-- [ ] Server Adapter（收口）：UI 不再直接依赖具体 API（只依赖 adapter/interface）
-- [ ] 网络收口：统一 HTTP client 创建入口（为代理/证书/重试/超时等打基础）
+- [x] 模块化（下一步）：继续抽离 state / player / UI 基建等通用能力（已拆分出 `lin_player_prefs` / `lin_player_ui` / `lin_player_player` / `lin_player_state`）
+- [x] Server Adapter（收口）：UI 不再直接依赖具体 API（只依赖 adapter/interface）
+- [x] 网络收口：统一 HTTP client 创建入口（为代理/证书/重试/超时等打基础）
 - [ ] TV 形态：设置页 TV 专区 + 遥控/焦点优化（`DeviceType.isTv`）
 - [ ] TV 内置代理 MVP：mihomo start/stop/status（仅 Android TV）
 - [ ] 代理面板：metacubexd 打包/解压 + 本地 WebView 打开

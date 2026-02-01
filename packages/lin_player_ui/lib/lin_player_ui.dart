@@ -1,5 +1,10 @@
+/// Reusable UI foundations for LinPlayer.
+///
+/// Includes theme/style, "glass" components, icon library utilities, and small
+/// platform helpers used across pages.
 library lin_player_ui;
 
+export 'src/app_config/app_config_scope.dart';
 export 'src/device/device_type.dart';
 export 'src/services/cover_cache_manager.dart';
 export 'src/services/server_icon_library.dart';

@@ -7,22 +7,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
-
-import 'services/dandanplay_api.dart';
-import 'state/app_state.dart';
-import 'state/danmaku_preferences.dart';
-import 'state/interaction_preferences.dart';
-import 'state/local_playback_handoff.dart';
-import 'state/preferences.dart';
-import 'src/player/danmaku.dart';
-import 'src/player/danmaku_processing.dart';
-import 'src/player/danmaku_stage.dart';
-import 'src/player/playback_controls.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/glass_blur.dart';
 
 class ExoPlayerScreen extends StatefulWidget {
   const ExoPlayerScreen({

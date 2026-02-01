@@ -13,6 +13,51 @@ class LinEmbyAdapter implements MediaServerAdapter {
   final String deviceId;
 
   @override
+  Map<String, String> buildStreamHeaders(ServerAuthSession auth) {
+    return {
+      'User-Agent': EmbyApi.userAgent,
+      'X-Emby-Token': auth.token,
+      ...EmbyApi.buildAuthorizationHeaders(
+        serverType: serverType,
+        deviceId: deviceId,
+        userId: auth.userId,
+      ),
+    };
+  }
+
+  @override
+  String imageUrl(
+    ServerAuthSession auth, {
+    required String itemId,
+    String imageType = 'Primary',
+    int? maxWidth,
+  }) {
+    return EmbyApi.imageUrl(
+      baseUrl: auth.baseUrl,
+      itemId: itemId,
+      token: auth.token,
+      apiPrefix: auth.apiPrefix,
+      imageType: imageType,
+      maxWidth: maxWidth,
+    );
+  }
+
+  @override
+  String personImageUrl(
+    ServerAuthSession auth, {
+    required String personId,
+    int? maxWidth,
+  }) {
+    return EmbyApi.personImageUrl(
+      baseUrl: auth.baseUrl,
+      personId: personId,
+      token: auth.token,
+      apiPrefix: auth.apiPrefix,
+      maxWidth: maxWidth,
+    );
+  }
+
+  @override
   Future<ServerAuthSession> authenticate({
     required String hostOrUrl,
     required String scheme,
@@ -286,4 +331,3 @@ class LinEmbyAdapter implements MediaServerAdapter {
     );
   }
 }
-

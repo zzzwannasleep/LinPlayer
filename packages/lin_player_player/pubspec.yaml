@@ -16,8 +16,9 @@ dependencies:
     path: ../lin_player_core
   lin_player_prefs:
     path: ../lin_player_prefs
+  lin_player_server_api:
+    path: ../lin_player_server_api
   lin_player_ui:
     path: ../lin_player_ui
   media_kit: ^1.1.11
   media_kit_video: ^1.1.11
-

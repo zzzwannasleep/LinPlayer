@@ -2,17 +2,12 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 
-import 'services/cover_cache_manager.dart';
-import 'package:lin_player_server_api/services/emby_api.dart';
 import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/app_components.dart';
-import 'src/ui/glass_blur.dart';
-import 'src/ui/server_icon_picker.dart';
-import 'state/app_state.dart';
-import 'state/server_profile.dart';
 
 class AggregateServicePage extends StatefulWidget {
   const AggregateServicePage({super.key, required this.appState});
@@ -138,8 +133,8 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
     }
 
     try {
-      final res =
-          await access.adapter.fetchContinueWatching(access.auth, limit: _limit);
+      final res = await access.adapter
+          .fetchContinueWatching(access.auth, limit: _limit);
       if (!mounted || seq != _loadSeq) return;
       setState(() {
         _stateByServer[server.id] = _ServerContinueWatchingState(
@@ -297,16 +292,18 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                     ];
                     final subtitle = subParts.join(' · ');
 
-                     final img = item.hasImage
-                         ? EmbyApi.imageUrl(
-                             baseUrl: server.baseUrl,
-                             itemId: item.id,
-                             token: server.token,
-                             apiPrefix: server.apiPrefix,
-                             imageType: 'Primary',
-                             maxWidth: 320,
-                           )
-                         : '';
+                    final access = resolveServerAccess(
+                      appState: widget.appState,
+                      server: server,
+                    );
+                    final img = item.hasImage && access != null
+                        ? access.adapter.imageUrl(
+                            access.auth,
+                            itemId: item.id,
+                            imageType: 'Primary',
+                            maxWidth: 320,
+                          )
+                        : '';
 
                     return Card(
                       clipBehavior: Clip.antiAlias,
@@ -323,7 +320,8 @@ class _AggregateWatchHistoryTabState extends State<_AggregateWatchHistoryTab> {
                                   imageUrl: img,
                                   cacheManager: CoverCacheManager.instance,
                                   httpHeaders: {
-                                    'User-Agent': EmbyApi.userAgent,
+                                    'User-Agent':
+                                        LinHttpClientFactory.userAgent,
                                   },
                                   width: 56,
                                   height: 56,
@@ -822,16 +820,22 @@ class _AggregateSearchTabStatefulState
               break;
             }
           }
-          final posterUrl = posterHit == null
-              ? ''
-               : EmbyApi.imageUrl(
-                   baseUrl: posterHit.server.baseUrl,
-                   itemId: posterHit.item.id,
-                   token: posterHit.server.token,
-                   apiPrefix: posterHit.server.apiPrefix,
-                   imageType: 'Primary',
-                   maxWidth: 320,
-                 );
+          final posterAccess = posterHit == null
+              ? null
+              : resolveServerAccess(
+                  appState: widget.appState,
+                  server: posterHit.server,
+                );
+          final posterUrl = (posterHit != null &&
+                  posterAccess != null &&
+                  posterHit.item.hasImage)
+              ? posterAccess.adapter.imageUrl(
+                  posterAccess.auth,
+                  itemId: posterHit.item.id,
+                  imageType: 'Primary',
+                  maxWidth: 320,
+                )
+              : '';
 
           final shownHits = hits.length <= 3 ? hits : hits.take(3).toList();
 
@@ -871,7 +875,9 @@ class _AggregateSearchTabStatefulState
                           : CachedNetworkImage(
                               imageUrl: posterUrl,
                               cacheManager: CoverCacheManager.instance,
-                              httpHeaders: {'User-Agent': EmbyApi.userAgent},
+                              httpHeaders: {
+                                'User-Agent': LinHttpClientFactory.userAgent,
+                              },
                               width: 72,
                               height: 104,
                               fit: BoxFit.cover,

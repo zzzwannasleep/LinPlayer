@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
+import 'package:lin_player_server_api/network/lin_http_client.dart';
 
 import 'src/player/danmaku.dart';
 import 'package:lin_player_prefs/danmaku_preferences.dart';
@@ -89,7 +90,7 @@ class DandanplayApiClient {
     this.appId = '',
     this.appSecret = '',
     http.Client? client,
-  }) : _client = client ?? http.Client();
+  }) : _client = client ?? LinHttpClientFactory.createClient();
 
   final String baseUrl;
   final String appId;

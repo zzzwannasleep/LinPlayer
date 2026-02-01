@@ -3,9 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:lin_player_server_api/services/emby_api.dart';
-import 'package:lin_player/state/app_state.dart';
-import 'package:lin_player/state/preferences.dart';
-import 'package:lin_player/state/server_profile.dart';
+import 'package:lin_player_prefs/preferences.dart';
+import 'package:lin_player_state/app_state.dart';
+import 'package:lin_player_state/server_profile.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

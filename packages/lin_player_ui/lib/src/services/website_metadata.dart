@@ -6,7 +6,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
-import 'package:lin_player_server_api/services/emby_api.dart';
+import 'package:lin_player_server_api/network/lin_http_client.dart';
 
 class WebsiteMetadata {
   const WebsiteMetadata({
@@ -22,11 +22,7 @@ class WebsiteMetadataService {
   WebsiteMetadataService._(this._client);
 
   static final WebsiteMetadataService instance = WebsiteMetadataService._(
-    IOClient(
-      HttpClient()
-        ..userAgent = EmbyApi.userAgent
-        ..badCertificateCallback = (_, __, ___) => true,
-    ),
+    LinHttpClientFactory.createClient(),
   );
 
   final http.Client _client;
@@ -43,7 +39,7 @@ class WebsiteMetadataService {
     final resolvedUrl = url.replace(fragment: '');
     final request = http.Request('GET', resolvedUrl)
       ..headers.addAll({
-        'User-Agent': EmbyApi.userAgent,
+        'User-Agent': LinHttpClientFactory.userAgent,
         'Accept':
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       });
@@ -150,7 +146,9 @@ class WebsiteMetadataService {
 
   static String? _fallbackFavicon(Uri baseUrl) {
     try {
-      return baseUrl.replace(path: '/favicon.ico', query: '', fragment: '').toString();
+      return baseUrl
+          .replace(path: '/favicon.ico', query: '', fragment: '')
+          .toString();
     } catch (_) {
       return null;
     }
@@ -193,10 +191,9 @@ class WebsiteMetadataService {
       final raw = m.group(1);
       if (raw == null || raw.isEmpty) return m.group(0) ?? '';
       try {
-        final value =
-            raw.startsWith('x') || raw.startsWith('X')
-                ? int.parse(raw.substring(1), radix: 16)
-                : int.parse(raw, radix: 10);
+        final value = raw.startsWith('x') || raw.startsWith('X')
+            ? int.parse(raw.substring(1), radix: 16)
+            : int.parse(raw, radix: 10);
         return String.fromCharCode(value);
       } catch (_) {
         return m.group(0) ?? '';

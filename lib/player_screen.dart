@@ -7,28 +7,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lin_player_player/lin_player_player.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
+import 'package:lin_player_state/lin_player_state.dart';
+import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-
-import 'app_config/app_config_scope.dart';
-import 'player_service.dart';
-import 'services/dandanplay_api.dart';
-import 'src/player/danmaku.dart';
-import 'src/player/danmaku_processing.dart';
-import 'src/player/playback_controls.dart';
-import 'src/player/danmaku_stage.dart';
-import 'src/player/anime4k.dart';
-import 'src/player/thumbnail_generator.dart';
-import 'src/player/net_speed.dart';
-import 'src/player/track_preferences.dart';
-import 'src/device/device_type.dart';
-import 'src/ui/glass_blur.dart';
-import 'state/app_state.dart';
-import 'state/anime4k_preferences.dart';
-import 'state/danmaku_preferences.dart';
-import 'state/interaction_preferences.dart';
-import 'state/local_playback_handoff.dart';
-import 'state/preferences.dart';
 
 class PlayerScreen extends StatefulWidget {
   const PlayerScreen({
