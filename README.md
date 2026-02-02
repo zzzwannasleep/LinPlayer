@@ -4,11 +4,25 @@
   <p>跨平台媒体播放器：本地 / Emby / Jellyfin / WebDAV（含 Plex PIN 登录）</p>
   <p><sub>Windows / macOS / Linux / Android / Android TV · 重构中 / WIP</sub></p>
   <p>
-    <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white" />
-    <img alt="Platforms" src="https://img.shields.io/badge/Platforms-Windows%20%7C%20macOS%20%7C%20Android%20%7C%20Android%20TV-informational" />
-    <img alt="Sources" src="https://img.shields.io/badge/Sources-Local%20%7C%20Emby%2FJellyfin%20%7C%20WebDAV-informational" />
-    <img alt="Player" src="https://img.shields.io/badge/Player-MPV%20%7C%20Exo-informational" />
-    <img alt="Danmaku" src="https://img.shields.io/badge/Danmaku-Local%20XML%20%7C%20Dandanplay-informational" />
+    <img alt="Flutter" src="https://img.shields.io/badge/Flutter-3.x-02569B?style=flat-square&logo=flutter&logoColor=white" />
+    <img alt="Platforms" src="https://img.shields.io/badge/Platforms-Windows%20%7C%20macOS%20%7C%20Android%20%7C%20Android%20TV-informational?style=flat-square" />
+    <img alt="Sources" src="https://img.shields.io/badge/Sources-Local%20%7C%20Emby%2FJellyfin%20%7C%20WebDAV-informational?style=flat-square" />
+    <img alt="Player" src="https://img.shields.io/badge/Player-MPV%20%7C%20Exo-informational?style=flat-square" />
+    <img alt="Danmaku" src="https://img.shields.io/badge/Danmaku-Local%20XML%20%7C%20Dandanplay-informational?style=flat-square" />
+  </p>
+  <p>
+    <a href="../../releases/latest">
+      <img alt="Release" src="https://img.shields.io/github/v/release/zzzwannasleep/LinPlayer?style=flat-square&display_name=tag&label=Release" />
+    </a>
+    <a href="../../releases">
+      <img alt="Downloads" src="https://img.shields.io/github/downloads/zzzwannasleep/LinPlayer/total?style=flat-square&label=Downloads" />
+    </a>
+    <a href="../../stargazers">
+      <img alt="Stars" src="https://img.shields.io/github/stars/zzzwannasleep/LinPlayer?style=flat-square&label=Stars" />
+    </a>
+    <a href="https://t.me/MikuContactGroup">
+      <img alt="Telegram Group" src="https://img.shields.io/badge/Telegram-Group-26A5E4?style=flat-square&logo=telegram&logoColor=white" />
+    </a>
   </p>
   <p>
     <a href="#refactor">重构说明</a> ·
@@ -16,6 +30,7 @@
     <a href="#features">特性</a> ·
     <a href="#quickstart">快速上手</a> ·
     <a href="#tv">TV 使用说明</a> ·
+    <a href="#star-history">Star History</a> ·
     <a href="#build">构建与运行</a> ·
     <a href="docs/SERVER_IMPORT.md">批量导入</a> ·
     <a href="docs/ANDROID_SIGNING.md">Android 签名</a> ·
@@ -40,6 +55,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 - [特性](#features)
 - [快速上手](#quickstart)
 - [Android TV 使用说明](#tv)
+- [Star History](#star-history)
 - [构建与运行](#build)
 
 </details>
@@ -384,53 +400,22 @@ flutter build linux --release
 - 批量导入解析不到服务器地址：请确认分享文本里包含 http(s) URL 或域名/IP（支持无 scheme，如 `example.com 443`；也支持 `端口: 443` 的全局端口行）；非线路链接（Telegram/仓库等）会默认不勾选。
 - 网速不显示：到「设置 → 交互」开启「显示网速」；网速仅对网络播放有效，显示位置在底部控制栏（随控制栏显隐）。
 
-## 目录导航
-
-<details>
-<summary><b>展开：App / packages 目录索引</b></summary>
-
-### App（Flutter / `lib/`）
-- `lib/main.dart` 应用入口（初始化、主题、路由）
-- `lib/server_page.dart` 服务器管理/登录入口
-- `lib/home_page.dart` 首页（继续观看、最新电影/剧集）
-- `lib/search_page.dart` 搜索页（历史搜索/搜索结果）
-- `lib/webdav_home_page.dart` WebDAV 首页（WebDAV / 本地 / 设置）
-- `lib/webdav_browser_page.dart` WebDAV 浏览页（目录列表/点播入口）
-- `lib/library_page.dart` 媒体库列表
-- `lib/library_items_page.dart` 分层/搜索/播放列表
-- `lib/show_detail_page.dart` 详情页（Series/Season/Episode；单集详情含选季/选集与同剧剧集栏）
-- `lib/danmaku_settings_page.dart` 弹幕设置页（本地/在线、样式、在线源管理）
-- `lib/play_network_page.dart` Emby 在线播放
-- `lib/player_screen.dart` 本地播放器
-- `packages/lin_player_player/lib/player_service.dart` 播放器封装（mpv 参数、硬解/软解）
-- `packages/lin_player_player/lib/dandanplay_api.dart` 在线弹幕（弹弹play API v2）封装
-- `packages/lin_player_player/lib/src/player/danmaku.dart` 弹幕解析（本地 XML / 在线列表）
-- `packages/lin_player_player/lib/src/player/danmaku_stage.dart` 弹幕渲染（覆盖层）
-- `packages/lin_player_state/lib/app_state.dart` 状态/登录/缓存
-
-### 模块（`packages/`）
-- `packages/lin_player_core/README.md` 核心定义（AppConfig / FeatureFlags / MediaServerType 等）
-- `packages/lin_player_prefs/README.md` 偏好设置定义（UI 模板/播放器设置枚举等）
-- `packages/lin_player_server_api/README.md` 服务端/网络 API（Emby/WebDAV/Plex）
-- `packages/lin_player_server_adapters/README.md` Server Adapter 适配层（UI 只依赖接口）
-- `packages/lin_player_ui/README.md` UI 基建（主题/样式/玻璃效果/图标库等）
-- `packages/lin_player_player/README.md` 播放器模块（PlayerService/弹幕/播放控制等）
-- `packages/lin_player_state/README.md` 全局状态与持久化（AppState/ServerProfile/备份等）
-- `packages/media_kit_patched/` mpv/media_kit 的本地改造版本
-- `packages/video_player_android_patched/` Exo/video_player_android 的本地改造版本
-
-</details>
-
 ## TODO（重构路线图）
 - [x] 模块化（基础拆分）：提取 `lin_player_core` / `lin_player_server_api` / `lin_player_server_adapters`（见 `packages/`）
 - [x] 模块化（下一步）：继续抽离 state / player / UI 基建等通用能力（已拆分出 `lin_player_prefs` / `lin_player_ui` / `lin_player_player` / `lin_player_state`）
 - [x] Server Adapter（收口）：UI 不再直接依赖具体 API（只依赖 adapter/interface）
 - [x] 网络收口：统一 HTTP client 创建入口（为代理/证书/重试/超时等打基础）
-- [x] TV 形态：设置页 TV 专区 + 遥控/焦点优化（`DeviceType.isTv`）
+- [x] TV 形态：TV 首页（TV-first）+ TV 配对（扫码添加服务器/手机遥控）+ 遥控/焦点优化（`DeviceType.isTv`）
 - [x] TV 内置代理 MVP：mihomo start/stop/status（仅 Android TV）
 - [x] 代理面板：metacubexd 打包/解压 + 本地 WebView 打开
 - [x] 走代理：App HTTP + 播放器网络流（mpv 参数注入）
 - [ ] 合规：确认 mihomo / metacubexd 许可证与分发声明
+
+## Star History
+
+<a href="https://star-history.com/#zzzwannasleep/LinPlayer&Date">
+  <img alt="Star History" src="https://api.star-history.com/svg?repos=zzzwannasleep/LinPlayer&type=Date" width="100%" />
+</a>
 
 ## 鸣谢与参考
 
