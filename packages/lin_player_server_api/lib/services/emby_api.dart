@@ -72,6 +72,7 @@ class MediaItem {
   final bool hasImage;
   final String? parentId;
   final int playbackPositionTicks;
+  final bool played;
   final List<MediaPerson> people;
   MediaItem({
     required this.id,
@@ -92,6 +93,7 @@ class MediaItem {
     required this.episodeNumber,
     required this.hasImage,
     required this.playbackPositionTicks,
+    this.played = false,
     required this.people,
     this.parentId,
   });
@@ -119,6 +121,7 @@ class MediaItem {
         hasImage: (json['ImageTags'] as Map?)?.isNotEmpty == true,
         playbackPositionTicks:
             (json['UserData'] as Map?)?['PlaybackPositionTicks'] as int? ?? 0,
+        played: (json['UserData'] as Map?)?['Played'] == true,
         people: (json['People'] as List?)
                 ?.map((e) => MediaPerson.fromJson(e as Map<String, dynamic>))
                 .toList() ??
@@ -146,6 +149,7 @@ class MediaItem {
         'ImageTags': hasImage ? const {'Primary': 'cached'} : const {},
         'UserData': {
           'PlaybackPositionTicks': playbackPositionTicks,
+          'Played': played,
         },
         'People': people.map((e) => e.toJson()).toList(),
         'ParentId': parentId,

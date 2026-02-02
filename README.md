@@ -108,12 +108,15 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 
 ### 播放与体验
 - 播放器：默认 MPV（`media_kit`），Android 可选 Exo（Media3 / ExoPlayer）。
+- 字幕：MPV 默认启用 libass（ASS/SSA 样式更完整）；Exo 仍以文本字幕渲染为主。
 - 播放链接更稳：自动携带 `MediaSourceId`，减少 404。
 - 缓冲策略：总预算（200–2048MB）+ 预设（拖动秒开/均衡/稳定优先）+ 自定义回退比例（0–30%）+ 跳转时清空旧缓冲。
 - Anime4K（MPV shader）：内置 Anime4K GLSL 预设，播放页一键开关/切换（仅 MPV 内核有效）。
 
 ### UI 与交互
 - 首页推荐：继续观看 / 最新电影 / 最新剧集 卡片流；点击即播或进详情。
+- 单集详情：播放键旁可标记「已播放 / 未播放」。
+- 选集列表：支持条形（封面 + 标题）/ 网格（仅集数）两种显示（设置 → 播放 → 选集列表显示标题）。
 - 媒体库与缓存：自动刷新并缓存，减少偶发不显示；浏览首页时后台渐进更新。
 - 搜索：历史搜索记录本地持久化；支持无限下拉懒加载。
 - 自适应缩放：竖屏平板/手机自动放大 UI（文本/图标/间距）。
@@ -121,6 +124,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 
 ### Android TV
 - 遥控器方向键/确认键完整可用（播放页支持快进/快退与控制栏聚焦）。
+- 长按确认键：临时倍速播放（松开恢复；倍率 0.25–5×，默认 2×，可在「设置 → 交互」调整）。
 - 手机扫码输入：设置 → TV 专区 → 开启「手机扫码控制」，扫码后可在手机端填写服务器地址/账号/密码并直接添加到 TV。
 - TV 内置代理：设置 → TV 专区 → 内置代理（mihomo）+ 代理面板（metacubexd），并让 App HTTP + MPV 走代理（路线图见 `docs/TV_PROXY_ROADMAP.md`）。
 
@@ -181,6 +185,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 ### 播放页（本地播放 / Emby 在线播放）
 - 焦点在视频画面时：
   - 确认：播放/暂停
+  - 长按确认：临时倍速播放（松开恢复；需在「设置 → 交互」开启「长按加速」）
   - ← / →：快退/快进（秒数可在「设置 → 交互」调整）
   - ↑：呼出控制栏并自动聚焦到「播放/暂停」
 - 焦点在控制栏时：
@@ -197,6 +202,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 ## 播放器内核（MPV / Exo）
 
 - 默认：MPV（`media_kit`），跨平台可用。
+- MPV 字幕：默认启用 libass（更好支持 ASS/SSA 样式字幕；Android 读取系统字体）。
 - Android 可选：Exo（Media3 / ExoPlayer，基于 `video_player`），在「设置 → 播放 → 播放器内核」切换。
 - Exo 更适合部分杜比视界 P8 片源（在 MPV 下可能出现偏紫/偏绿问题），并默认使用 `VideoViewType.platformView` 渲染。
 - Exo 内核支持音轨切换与字幕选择/关闭（本地播放与 Emby 在线播放均支持）。

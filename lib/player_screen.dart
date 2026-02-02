@@ -109,6 +109,11 @@ class _PlayerScreenState extends State<PlayerScreen>
   String? _gestureOverlayText;
   Offset? _doubleTapDownPosition;
 
+  static const Duration _tvOkLongPressDelay = Duration(milliseconds: 420);
+  Timer? _tvOkLongPressTimer;
+  bool _tvOkLongPressTriggered = false;
+  double? _tvOkLongPressBaseRate;
+
   double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
   double _playerVolume = 1.0; // 0..1 (maps to mpv 0..100)
 
@@ -180,6 +185,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _controlsHideTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
     _netSpeedTimer?.cancel();
     _netSpeedTimer = null;
     _posSub?.cancel();
@@ -268,6 +275,8 @@ class _PlayerScreenState extends State<PlayerScreen>
     _controlsHideTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
 
     final cancels = <Future<void>>[];
     final posSub = _posSub;
@@ -489,7 +498,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       widget.appState?.longPressSlideSpeed ?? true;
 
   double get _longPressMultiplier =>
-      widget.appState?.longPressSpeedMultiplier ?? 2.5;
+      widget.appState?.longPressSpeedMultiplier ?? 2.0;
 
   int get _seekBackSeconds => widget.appState?.seekBackwardSeconds ?? 10;
   int get _seekForwardSeconds => widget.appState?.seekForwardSeconds ?? 20;
@@ -723,7 +732,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final player = _playerService.player;
     _longPressBaseRate = player.state.rate;
     final targetRate =
-        (_longPressBaseRate! * _longPressMultiplier).clamp(0.1, 4.0).toDouble();
+        (_longPressBaseRate! * _longPressMultiplier).clamp(0.25, 5.0).toDouble();
     // ignore: unawaited_futures
     player.setRate(targetRate);
     _setGestureOverlay(
@@ -745,9 +754,9 @@ class _PlayerScreenState extends State<PlayerScreen>
     final dy = details.localPosition.dy - _longPressStartPos!.dy;
     final delta = (-dy / height) * 2.0;
     final multiplier =
-        (_longPressMultiplier + delta).clamp(1.0, 4.0).toDouble();
+        (_longPressMultiplier + delta).clamp(0.25, 5.0).toDouble();
     final targetRate =
-        (_longPressBaseRate! * multiplier).clamp(0.1, 4.0).toDouble();
+        (_longPressBaseRate! * multiplier).clamp(0.25, 5.0).toDouble();
     // ignore: unawaited_futures
     _playerService.player.setRate(targetRate);
     _setGestureOverlay(
@@ -1669,31 +1678,90 @@ class _PlayerScreenState extends State<PlayerScreen>
         onKeyEvent: (node, event) {
           if (!remoteEnabled) return KeyEventResult.ignored;
           if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
           final key = event.logicalKey;
-          if (key == LogicalKeyboardKey.arrowUp) {
-            _showControls(scheduleHide: false);
-            _focusTvPlayPause();
-            return KeyEventResult.handled;
-          }
-          if (key == LogicalKeyboardKey.arrowDown) {
-            if (_controlsVisible) {
-              _hideControlsForRemote();
+
+          if (event is KeyDownEvent) {
+            if (key == LogicalKeyboardKey.arrowUp) {
+              _showControls(scheduleHide: false);
+              _focusTvPlayPause();
               return KeyEventResult.handled;
             }
-            return KeyEventResult.ignored;
+            if (key == LogicalKeyboardKey.arrowDown) {
+              if (_controlsVisible) {
+                _hideControlsForRemote();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            }
           }
 
           if (!_gesturesEnabled) return KeyEventResult.ignored;
 
-          if (key == LogicalKeyboardKey.space ||
+          final isOkKey = key == LogicalKeyboardKey.space ||
               key == LogicalKeyboardKey.enter ||
-              key == LogicalKeyboardKey.select) {
-            // ignore: unawaited_futures
-            _togglePlayPause();
-            return KeyEventResult.handled;
+              key == LogicalKeyboardKey.select;
+          if (isOkKey) {
+            // If long-press speed is disabled, keep original behavior (toggle on key-down).
+            if (!_gestureLongPressEnabled) {
+              if (event is KeyDownEvent) {
+                // ignore: unawaited_futures
+                _togglePlayPause();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            }
+
+            if (event is KeyDownEvent) {
+              if (_tvOkLongPressTimer != null) return KeyEventResult.handled;
+              _tvOkLongPressTriggered = false;
+              _tvOkLongPressBaseRate = _playerService.player.state.rate;
+              _tvOkLongPressTimer = Timer(_tvOkLongPressDelay, () {
+                if (!mounted) return;
+                if (!_playerService.isInitialized) return;
+                final base =
+                    _tvOkLongPressBaseRate ?? _playerService.player.state.rate;
+                final targetRate = (base * _longPressMultiplier)
+                    .clamp(0.25, 5.0)
+                    .toDouble();
+                _tvOkLongPressTriggered = true;
+                // ignore: unawaited_futures
+                _playerService.player.setRate(targetRate);
+                _setGestureOverlay(
+                  icon: Icons.speed,
+                  text: '倍速 ×${(targetRate / base).toStringAsFixed(2)}',
+                );
+              });
+              return KeyEventResult.handled;
+            }
+
+            if (event is KeyUpEvent) {
+              final t = _tvOkLongPressTimer;
+              _tvOkLongPressTimer = null;
+              t?.cancel();
+
+              if (_tvOkLongPressTriggered) {
+                final base = _tvOkLongPressBaseRate;
+                _tvOkLongPressTriggered = false;
+                _tvOkLongPressBaseRate = null;
+                if (base != null && _playerService.isInitialized) {
+                  // ignore: unawaited_futures
+                  _playerService.player.setRate(base);
+                }
+                _hideGestureOverlay();
+                return KeyEventResult.handled;
+              }
+
+              _tvOkLongPressBaseRate = null;
+              // ignore: unawaited_futures
+              _togglePlayPause();
+              return KeyEventResult.handled;
+            }
+
+            return KeyEventResult.ignored;
           }
+
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
           if (key == LogicalKeyboardKey.arrowLeft) {
             // ignore: unawaited_futures
             _seekRelative(Duration(seconds: -_seekBackSeconds));
@@ -1704,6 +1772,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             _seekRelative(Duration(seconds: _seekForwardSeconds));
             return KeyEventResult.handled;
           }
+
           return KeyEventResult.ignored;
         },
         child: Scaffold(
@@ -1883,20 +1952,6 @@ class _PlayerScreenState extends State<PlayerScreen>
                                           ),
                                       ],
                                     ),
-                                  ),
-                                ),
-                              ),
-                            // Net speed is rendered inside PlaybackControls so it hides with controls.
-                            if (false)
-                              Positioned(
-                                left: 12,
-                                bottom: _controlsVisible ? 88 : 12,
-                                child: SafeArea(
-                                  top: false,
-                                  right: false,
-                                  child: NetSpeedBadge(
-                                    text:
-                                        '网速 ${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
                                   ),
                                 ),
                               ),
@@ -2619,6 +2674,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   SubtitleViewConfiguration get _subtitleViewConfiguration {
+    if (!kIsWeb) {
+      // MPV libass subtitles are rendered by mpv itself (native), hide Flutter overlay to avoid duplicates.
+      return const SubtitleViewConfiguration(visible: false);
+    }
     const base = SubtitleViewConfiguration();
     final bottom =
         (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
@@ -2644,6 +2703,32 @@ class _PlayerScreenState extends State<PlayerScreen>
         'sub-delay',
         _subtitleDelaySeconds.toStringAsFixed(3),
       );
+    } catch (_) {}
+    try {
+      await platform.setProperty(
+        'sub-font-size',
+        _subtitleFontSize.clamp(12.0, 60.0),
+      );
+    } catch (_) {}
+    try {
+      await platform.setProperty(
+        'sub-margin-y',
+        (_subtitlePositionStep.clamp(0, 20) * 5.0)
+            .clamp(0.0, 200.0)
+            .round(),
+      );
+    } catch (_) {}
+    try {
+      await platform.setProperty(
+        'sub-bold',
+        _subtitleBold ? 'yes' : 'no',
+      );
+    } catch (_) {}
+    try {
+      await platform.setProperty('sub-border-size', 2.2);
+    } catch (_) {}
+    try {
+      await platform.setProperty('sub-shadow-offset', 1.0);
     } catch (_) {}
     try {
       await platform.setProperty(

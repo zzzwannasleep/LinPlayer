@@ -1452,6 +1452,19 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       const Divider(height: 1),
                     ],
+                    SwitchListTile(
+                      value: appState.episodePickerShowTitle,
+                      onChanged: (v) => appState.setEpisodePickerShowTitle(v),
+                      title: const Text('选集列表显示标题'),
+                      subtitle: Text(
+                        appState.episodePickerShowTitle
+                            ? '条形显示标题和封面'
+                            : '网格状仅显示集数',
+                      ),
+                      secondary: const Icon(Icons.format_list_numbered),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.storage_outlined),

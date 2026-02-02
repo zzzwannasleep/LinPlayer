@@ -1749,6 +1749,49 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   final Map<String, List<MediaItem>> _episodesCache = {};
   String? _seriesError;
   bool _seriesLoading = false;
+  bool _markBusy = false;
+
+  Future<void> _toggleEpisodePlayedMark() async {
+    if (_markBusy) return;
+    final access =
+        resolveServerAccess(appState: widget.appState, server: widget.server);
+    if (access == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('未连接服务器')),
+      );
+      return;
+    }
+
+    final currentPlayed = _detail?.played ?? false;
+    final nextPlayed = !currentPlayed;
+
+    setState(() => _markBusy = true);
+    try {
+      await access.adapter.updatePlaybackPosition(
+        access.auth,
+        itemId: widget.episode.id,
+        positionTicks: 0,
+        played: nextPlayed,
+      );
+
+      final detail = await access.adapter
+          .fetchItemDetail(access.auth, itemId: widget.episode.id);
+      if (!mounted) return;
+      setState(() => _detail = detail);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(nextPlayed ? '已标记为已播放' : '已标记为未播放')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('标记失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _markBusy = false);
+    }
+  }
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
@@ -2229,54 +2272,92 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                       if (_playInfo != null)
                         _episodePlaybackOptionsCard(context, _playInfo!),
                       const SizedBox(height: 12),
-                      _playButton(
-                        context,
-                        label: (_detail?.playbackPositionTicks ?? 0) > 0
-                            ? '继续播放（${_fmtClock(_ticksToDuration(_detail!.playbackPositionTicks))}）'
-                            : '播放',
-                        onTap: () async {
-                          final start = (_detail?.playbackPositionTicks ?? 0) >
-                                  0
-                              ? _ticksToDuration(_detail!.playbackPositionTicks)
-                              : null;
-                          final useExoCore = !kIsWeb &&
-                              defaultTargetPlatform == TargetPlatform.android &&
-                              widget.appState.playerCore == PlayerCore.exo;
-                          await Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => useExoCore
-                                  ? ExoPlayNetworkPage(
-                                      title: ep.name,
-                                      itemId: ep.id,
-                                      appState: widget.appState,
-                                      server: widget.server,
-                                      isTv: widget.isTv,
-                                      seriesId: _seriesId,
-                                      startPosition: start,
-                                      mediaSourceId: _selectedMediaSourceId,
-                                      audioStreamIndex:
-                                          _selectedAudioStreamIndex,
-                                      subtitleStreamIndex:
-                                          _selectedSubtitleStreamIndex,
-                                    )
-                                  : PlayNetworkPage(
-                                      title: ep.name,
-                                      itemId: ep.id,
-                                      appState: widget.appState,
-                                      server: widget.server,
-                                      isTv: widget.isTv,
-                                      seriesId: _seriesId,
-                                      startPosition: start,
-                                      mediaSourceId: _selectedMediaSourceId,
-                                      audioStreamIndex:
-                                          _selectedAudioStreamIndex,
-                                      subtitleStreamIndex:
-                                          _selectedSubtitleStreamIndex,
-                                    ),
-                            ),
+                      Builder(
+                        builder: (context) {
+                          final played = _detail?.played ?? false;
+                          final ticks = _detail?.playbackPositionTicks ?? 0;
+                          final hasResume = ticks > 0 && !played;
+                          final playLabel = hasResume
+                              ? '继续播放（${_fmtClock(_ticksToDuration(ticks))}）'
+                              : (played ? '重播' : '播放');
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: _playButton(
+                                  context,
+                                  label: playLabel,
+                                  onTap: () async {
+                                    final start =
+                                        hasResume ? _ticksToDuration(ticks) : null;
+                                    final useExoCore = !kIsWeb &&
+                                        defaultTargetPlatform ==
+                                            TargetPlatform.android &&
+                                        widget.appState.playerCore ==
+                                            PlayerCore.exo;
+                                    await Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => useExoCore
+                                            ? ExoPlayNetworkPage(
+                                                title: ep.name,
+                                                itemId: ep.id,
+                                                appState: widget.appState,
+                                                server: widget.server,
+                                                isTv: widget.isTv,
+                                                seriesId: _seriesId,
+                                                startPosition: start,
+                                                mediaSourceId:
+                                                    _selectedMediaSourceId,
+                                                audioStreamIndex:
+                                                    _selectedAudioStreamIndex,
+                                                subtitleStreamIndex:
+                                                    _selectedSubtitleStreamIndex,
+                                              )
+                                            : PlayNetworkPage(
+                                                title: ep.name,
+                                                itemId: ep.id,
+                                                appState: widget.appState,
+                                                server: widget.server,
+                                                isTv: widget.isTv,
+                                                seriesId: _seriesId,
+                                                startPosition: start,
+                                                mediaSourceId:
+                                                    _selectedMediaSourceId,
+                                                audioStreamIndex:
+                                                    _selectedAudioStreamIndex,
+                                                subtitleStreamIndex:
+                                                    _selectedSubtitleStreamIndex,
+                                              ),
+                                      ),
+                                    );
+                                    if (!mounted) return;
+                                    await _refreshProgressAfterReturn();
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                                SizedBox(
+                                  width: widget.isTv ? 170 : 140,
+                                  child: OutlinedButton.icon(
+                                    onPressed:
+                                        _markBusy ? null : _toggleEpisodePlayedMark,
+                                    icon: _markBusy
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Icon(
+                                          played
+                                              ? Icons.check_circle_outline
+                                              : Icons.radio_button_unchecked,
+                                        ),
+                                  label: Text(played ? '已播放' : '未播放'),
+                                ),
+                              ),
+                            ],
                           );
-                          if (!mounted) return;
-                          await _refreshProgressAfterReturn();
                         },
                       ),
                       const SizedBox(height: 16),

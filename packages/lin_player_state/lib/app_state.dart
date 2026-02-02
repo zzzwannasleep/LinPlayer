@@ -208,6 +208,8 @@ class AppState extends ChangeNotifier {
   // TV-only features.
   static const _kTvRemoteEnabledKey = 'tvRemoteEnabled_v1';
   static const _kTvBuiltInProxyEnabledKey = 'tvBuiltInProxyEnabled_v1';
+  static const _kEpisodePickerShowTitleKey = 'episodePickerShowTitle_v1';
+  // Legacy: migrated to [_kEpisodePickerShowTitleKey].
   static const _kEpisodePickerShowCoverKey = 'episodePickerShowCover_v1';
 
   final List<ServerProfile> _servers = [];
@@ -276,7 +278,7 @@ class AppState extends ChangeNotifier {
   bool _gestureVolume = true;
   bool _gestureSeek = true;
   bool _gestureLongPressSpeed = true;
-  double _longPressSpeedMultiplier = 2.5;
+  double _longPressSpeedMultiplier = 2.0;
   bool _longPressSlideSpeed = true;
   DoubleTapAction _doubleTapLeft = DoubleTapAction.seekBackward;
   DoubleTapAction _doubleTapCenter = DoubleTapAction.playPause;
@@ -291,7 +293,7 @@ class AppState extends ChangeNotifier {
   bool _forceRemoteControlKeys = false;
   bool _tvRemoteEnabled = false;
   bool _tvBuiltInProxyEnabled = false;
-  bool _episodePickerShowCover = true;
+  bool _episodePickerShowTitle = true;
   LocalPlaybackHandoff? _localPlaybackHandoff;
   bool _loading = false;
   String? _error;
@@ -687,7 +689,7 @@ class AppState extends ChangeNotifier {
   bool get forceRemoteControlKeys => _forceRemoteControlKeys;
   bool get tvRemoteEnabled => _tvRemoteEnabled;
   bool get tvBuiltInProxyEnabled => _tvBuiltInProxyEnabled;
-  bool get episodePickerShowCover => _episodePickerShowCover;
+  bool get episodePickerShowTitle => _episodePickerShowTitle;
 
   SeriesPlaybackOverride? seriesPlaybackOverride({
     required String serverId,
@@ -873,8 +875,8 @@ class AppState extends ChangeNotifier {
     _gestureSeek = prefs.getBool(_kGestureSeekKey) ?? true;
     _gestureLongPressSpeed = prefs.getBool(_kGestureLongPressSpeedKey) ?? true;
     _longPressSpeedMultiplier =
-        (prefs.getDouble(_kLongPressSpeedMultiplierKey) ?? 2.5)
-            .clamp(1.0, 4.0)
+        (prefs.getDouble(_kLongPressSpeedMultiplierKey) ?? 2.0)
+            .clamp(0.25, 5.0)
             .toDouble();
     _longPressSlideSpeed = prefs.getBool(_kLongPressSlideSpeedKey) ?? true;
 
@@ -910,8 +912,9 @@ class AppState extends ChangeNotifier {
     _tvRemoteEnabled = prefs.getBool(_kTvRemoteEnabledKey) ?? false;
     _tvBuiltInProxyEnabled =
         prefs.getBool(_kTvBuiltInProxyEnabledKey) ?? false;
-    _episodePickerShowCover =
-        prefs.getBool(_kEpisodePickerShowCoverKey) ?? true;
+    _episodePickerShowTitle = prefs.getBool(_kEpisodePickerShowTitleKey) ??
+        prefs.getBool(_kEpisodePickerShowCoverKey) ??
+        true;
 
     _seriesPlaybackOverrides.clear();
     final rawSeriesOverrides = prefs.getString(_kSeriesPlaybackOverridesKey);
@@ -1075,7 +1078,9 @@ class AppState extends ChangeNotifier {
           'seekBackwardSeconds': _seekBackwardSeconds,
           'seekForwardSeconds': _seekForwardSeconds,
           'forceRemoteControlKeys': _forceRemoteControlKeys,
-          'episodePickerShowCover': _episodePickerShowCover,
+          'episodePickerShowTitle': _episodePickerShowTitle,
+          // Legacy key for older backups.
+          'episodePickerShowCover': _episodePickerShowTitle,
         },
         'tv': {
           'remoteEnabled': _tvRemoteEnabled,
@@ -1458,8 +1463,8 @@ class AppState extends ChangeNotifier {
     final nextGestureLongPressSpeed =
         _readBool(interactionMap['gestureLongPressSpeed'], fallback: true);
     final nextLongPressSpeedMultiplier =
-        _readDouble(interactionMap['longPressSpeedMultiplier'], fallback: 2.5)
-            .clamp(1.0, 4.0)
+        _readDouble(interactionMap['longPressSpeedMultiplier'], fallback: 2.0)
+            .clamp(0.25, 5.0)
             .toDouble();
     final nextLongPressSlideSpeed =
         _readBool(interactionMap['longPressSlideSpeed'], fallback: true);
@@ -1496,8 +1501,11 @@ class AppState extends ChangeNotifier {
         _readBool(tvMap['remoteEnabled'], fallback: false);
     final nextTvBuiltInProxyEnabled =
         _readBool(tvMap['builtInProxyEnabled'], fallback: false);
-    final nextEpisodePickerShowCover =
-        _readBool(interactionMap['episodePickerShowCover'], fallback: true);
+    final nextEpisodePickerShowTitle = _readBool(
+      interactionMap['episodePickerShowTitle'] ??
+          interactionMap['episodePickerShowCover'],
+      fallback: true,
+    );
 
     final nextServers = <ServerProfile>[];
     final rawServers = data['servers'];
@@ -1588,7 +1596,7 @@ class AppState extends ChangeNotifier {
     _forceRemoteControlKeys = nextForceRemoteControlKeys;
     _tvRemoteEnabled = nextTvRemoteEnabled;
     _tvBuiltInProxyEnabled = nextTvBuiltInProxyEnabled;
-    _episodePickerShowCover = nextEpisodePickerShowCover;
+    _episodePickerShowTitle = nextEpisodePickerShowTitle;
     _seriesPlaybackOverrides
       ..clear()
       ..addAll(nextSeriesPlaybackOverrides);
@@ -1734,7 +1742,9 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_kForceRemoteControlKeysKey, _forceRemoteControlKeys);
     await prefs.setBool(_kTvRemoteEnabledKey, _tvRemoteEnabled);
     await prefs.setBool(_kTvBuiltInProxyEnabledKey, _tvBuiltInProxyEnabled);
-    await prefs.setBool(_kEpisodePickerShowCoverKey, _episodePickerShowCover);
+    await prefs.setBool(_kEpisodePickerShowTitleKey, _episodePickerShowTitle);
+    // Legacy key for older builds.
+    await prefs.setBool(_kEpisodePickerShowCoverKey, _episodePickerShowTitle);
     await _persistSeriesPlaybackOverrides(prefs);
 
     await _persistServers(prefs);
@@ -3266,7 +3276,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> setLongPressSpeedMultiplier(double multiplier) async {
-    final v = multiplier.clamp(1.0, 4.0).toDouble();
+    final v = multiplier.clamp(0.25, 5.0).toDouble();
     if (_longPressSpeedMultiplier == v) return;
     _longPressSpeedMultiplier = v;
     final prefs = await SharedPreferences.getInstance();
@@ -3389,10 +3399,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setEpisodePickerShowCover(bool enabled) async {
-    if (_episodePickerShowCover == enabled) return;
-    _episodePickerShowCover = enabled;
+  Future<void> setEpisodePickerShowTitle(bool enabled) async {
+    if (_episodePickerShowTitle == enabled) return;
+    _episodePickerShowTitle = enabled;
     final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kEpisodePickerShowTitleKey, enabled);
+    // Legacy key for older builds.
     await prefs.setBool(_kEpisodePickerShowCoverKey, enabled);
     notifyListeners();
   }

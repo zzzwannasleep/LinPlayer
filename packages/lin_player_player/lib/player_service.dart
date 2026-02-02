@@ -89,6 +89,7 @@ class PlayerService {
       osc: false,
       title: AppConfig.current.displayName,
       logLevel: MPVLogLevel.warn,
+      libass: !kIsWeb,
       bufferSize: bufferSize,
       protocolWhitelist: const [
         'udp',
@@ -109,6 +110,7 @@ class PlayerService {
       ],
       extraMpvOptions: [
         'tls-verify=no',
+        if (isAndroid) 'sub-fonts-dir=/system/fonts',
         if (isNetwork && (httpProxy ?? '').trim().isNotEmpty)
           'http-proxy=${httpProxy!.trim()}',
         if (useGpuNext) 'gpu-context=android',

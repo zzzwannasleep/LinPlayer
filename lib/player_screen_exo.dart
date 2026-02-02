@@ -97,6 +97,11 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
   String? _gestureOverlayText;
   Offset? _doubleTapDownPosition;
 
+  static const Duration _tvOkLongPressDelay = Duration(milliseconds: 420);
+  Timer? _tvOkLongPressTimer;
+  bool _tvOkLongPressTriggered = false;
+  double? _tvOkLongPressBaseRate;
+
   double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
   double _playerVolume = 1.0; // 0..1
 
@@ -199,6 +204,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _uiTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
     // ignore: unawaited_futures
     _exitOrientationLock();
     if (_fullScreen) {
@@ -223,6 +230,8 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _uiTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
 
     final controller = _controller;
     _controller = null;
@@ -1072,7 +1081,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     _longPressBaseRate = controller.value.playbackSpeed;
     final targetRate =
         (_longPressBaseRate! * widget.appState.longPressSpeedMultiplier)
-            .clamp(0.1, 4.0)
+            .clamp(0.25, 5.0)
             .toDouble();
     // ignore: unawaited_futures
     controller.setPlaybackSpeed(targetRate);
@@ -1095,10 +1104,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     final dy = details.localPosition.dy - _longPressStartPos!.dy;
     final delta = (-dy / height) * 2.0;
     final multiplier = (widget.appState.longPressSpeedMultiplier + delta)
-        .clamp(1.0, 4.0)
+        .clamp(0.25, 5.0)
         .toDouble();
     final targetRate =
-        (_longPressBaseRate! * multiplier).clamp(0.1, 4.0).toDouble();
+        (_longPressBaseRate! * multiplier).clamp(0.25, 5.0).toDouble();
     final controller = _controller;
     if (controller != null) {
       // ignore: unawaited_futures
@@ -2024,31 +2033,105 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
         onKeyEvent: (node, event) {
           if (!remoteEnabled) return KeyEventResult.ignored;
           if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
           final key = event.logicalKey;
-          if (key == LogicalKeyboardKey.arrowUp) {
-            _showControls(scheduleHide: false);
-            _focusTvPlayPause();
-            return KeyEventResult.handled;
-          }
-          if (key == LogicalKeyboardKey.arrowDown) {
-            if (_controlsVisible) {
-              _hideControlsForRemote();
+
+          if (event is KeyDownEvent) {
+            if (key == LogicalKeyboardKey.arrowUp) {
+              _showControls(scheduleHide: false);
+              _focusTvPlayPause();
               return KeyEventResult.handled;
             }
-            return KeyEventResult.ignored;
+            if (key == LogicalKeyboardKey.arrowDown) {
+              if (_controlsVisible) {
+                _hideControlsForRemote();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            }
           }
 
           if (!controlsEnabled) return KeyEventResult.ignored;
 
-          if (key == LogicalKeyboardKey.space ||
+          final isOkKey = key == LogicalKeyboardKey.space ||
               key == LogicalKeyboardKey.enter ||
-              key == LogicalKeyboardKey.select) {
-            // ignore: unawaited_futures
-            _togglePlayPause();
-            return KeyEventResult.handled;
+              key == LogicalKeyboardKey.select;
+          if (isOkKey) {
+            // If long-press speed is disabled, keep original behavior (toggle on key-down).
+            if (!widget.appState.gestureLongPressSpeed) {
+              if (event is KeyDownEvent) {
+                // ignore: unawaited_futures
+                _togglePlayPause();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            }
+
+            if (event is KeyDownEvent) {
+              if (_tvOkLongPressTimer != null) return KeyEventResult.handled;
+              final controller = _controller;
+              if (controller == null || !controller.value.isInitialized) {
+                return KeyEventResult.ignored;
+              }
+              _tvOkLongPressTriggered = false;
+              _tvOkLongPressBaseRate = controller.value.playbackSpeed;
+              _tvOkLongPressTimer = Timer(_tvOkLongPressDelay, () {
+                if (!mounted) return;
+                final controller = _controller;
+                if (controller == null || !controller.value.isInitialized) return;
+
+                final base =
+                    _tvOkLongPressBaseRate ?? controller.value.playbackSpeed;
+                final targetRate =
+                    (base * widget.appState.longPressSpeedMultiplier)
+                        .clamp(0.25, 5.0)
+                        .toDouble();
+                _tvOkLongPressTriggered = true;
+                // ignore: unawaited_futures
+                controller.setPlaybackSpeed(targetRate);
+                _setGestureOverlay(
+                  icon: Icons.speed,
+                  text:
+                      '倍速 ×${(targetRate / base).toStringAsFixed(2)}',
+                );
+              });
+              return KeyEventResult.handled;
+            }
+
+            if (event is KeyUpEvent) {
+              final t = _tvOkLongPressTimer;
+              _tvOkLongPressTimer = null;
+              t?.cancel();
+
+              final controller = _controller;
+              if (controller == null || !controller.value.isInitialized) {
+                _tvOkLongPressBaseRate = null;
+                _tvOkLongPressTriggered = false;
+                return KeyEventResult.ignored;
+              }
+
+              if (_tvOkLongPressTriggered) {
+                final base = _tvOkLongPressBaseRate;
+                _tvOkLongPressTriggered = false;
+                _tvOkLongPressBaseRate = null;
+                if (base != null) {
+                  // ignore: unawaited_futures
+                  controller.setPlaybackSpeed(base);
+                }
+                _hideGestureOverlay();
+                return KeyEventResult.handled;
+              }
+
+              _tvOkLongPressBaseRate = null;
+              // ignore: unawaited_futures
+              _togglePlayPause();
+              return KeyEventResult.handled;
+            }
+
+            return KeyEventResult.ignored;
           }
+
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
           if (key == LogicalKeyboardKey.arrowLeft) {
             // ignore: unawaited_futures
             _seekRelative(Duration(seconds: -_seekBackSeconds));
@@ -2059,6 +2142,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
             _seekRelative(Duration(seconds: _seekForwardSeconds));
             return KeyEventResult.handled;
           }
+
           return KeyEventResult.ignored;
         },
         child: Scaffold(

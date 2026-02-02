@@ -121,9 +121,9 @@ class _InteractionSettingsPageState extends State<InteractionSettingsPage> {
                       title: const Text('长按时的速度倍率'),
                       subtitle: const Text('会基于当前播放速率调整倍率'),
                       value: longPressMultiplier,
-                      min: 1.0,
-                      max: 4.0,
-                      divisions: 12,
+                      min: 0.25,
+                      max: 5.0,
+                      divisions: 19,
                       trailing: Text(longPressMultiplier.toStringAsFixed(2)),
                       sliderTheme: _sliderTheme(context),
                       onChanged: (v) =>

@@ -86,6 +86,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   String? _gestureOverlayText;
   Offset? _doubleTapDownPosition;
 
+  static const Duration _tvOkLongPressDelay = Duration(milliseconds: 420);
+  Timer? _tvOkLongPressTimer;
+  bool _tvOkLongPressTriggered = false;
+  double? _tvOkLongPressBaseRate;
+
   double _screenBrightness = 1.0; // 0.2..1.0 (visual overlay only)
   double _playerVolume = 1.0; // 0..1
 
@@ -218,6 +223,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _startOverHintTimer = null;
     _gestureOverlayTimer?.cancel();
     _gestureOverlayTimer = null;
+    _tvOkLongPressTimer?.cancel();
+    _tvOkLongPressTimer = null;
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
@@ -515,7 +522,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     final theme = Theme.of(context);
     final accent = theme.colorScheme.secondary;
-    final showCover = widget.appState.episodePickerShowCover;
+    final showTitle = widget.appState.episodePickerShowTitle;
 
     final seasons = _episodeSeasons;
     final selectedSeasonId = _episodeSelectedSeasonId;
@@ -647,18 +654,18 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                             else
                               const Spacer(),
                             IconButton(
-                              tooltip: showCover ? '隐藏封面' : '显示封面',
+                              tooltip: showTitle ? '仅显示集数' : '显示标题+封面',
                               icon: Icon(
-                                showCover
-                                    ? Icons.image_outlined
-                                    : Icons.format_list_bulleted,
+                                showTitle
+                                    ? Icons.grid_view_outlined
+                                    : Icons.view_agenda_outlined,
                               ),
                               color: Colors.white,
                               onPressed: () {
                                 final next =
-                                    !widget.appState.episodePickerShowCover;
+                                    !widget.appState.episodePickerShowTitle;
                                 // ignore: unawaited_futures
-                                widget.appState.setEpisodePickerShowCover(next);
+                                widget.appState.setEpisodePickerShowTitle(next);
                                 setState(() {});
                               },
                             ),
@@ -758,9 +765,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                 );
                               }
 
-                              final columns = drawerWidth >= 360 ? 2 : 1;
-
-                              if (!showCover) {
+                              if (showTitle) {
                                 return ListView.separated(
                                   padding: const EdgeInsets.fromLTRB(
                                     12,
@@ -778,6 +783,14 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                     final borderColor = isCurrent
                                         ? accent.withValues(alpha: 0.85)
                                         : Colors.white.withValues(alpha: 0.10);
+                                    final access = _serverAccess;
+                                    final img = access?.adapter.imageUrl(
+                                      access.auth,
+                                      itemId: e.hasImage
+                                          ? e.id
+                                          : selectedSeason!.id,
+                                      maxWidth: 520,
+                                    );
                                     final title = e.name.trim().isNotEmpty
                                         ? e.name.trim()
                                         : '第$epNo集';
@@ -792,37 +805,103 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                       child: InkWell(
                                         onTap: () => _playEpisodeFromPicker(e),
                                         child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 10,
-                                          ),
+                                          padding: const EdgeInsets.all(10),
                                           child: Row(
                                             children: [
-                                              DecoratedBox(
-                                                decoration: BoxDecoration(
-                                                  color:
-                                                      const Color(0xAA000000),
-                                                  borderRadius:
-                                                      BorderRadius.circular(6),
-                                                ),
-                                                child: Padding(
-                                                  padding: const EdgeInsets
-                                                      .symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 3,
-                                                  ),
-                                                  child: Text(
-                                                    'E$epNo',
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 11,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
+                                              ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                child: SizedBox(
+                                                  width: 110,
+                                                  height: 62,
+                                                  child: Stack(
+                                                    fit: StackFit.expand,
+                                                    children: [
+                                                      if (img != null)
+                                                        Image.network(
+                                                          img,
+                                                          fit: BoxFit.cover,
+                                                          errorBuilder:
+                                                              (_, __, ___) {
+                                                            return const ColoredBox(
+                                                              color: Color(
+                                                                0x22000000,
+                                                              ),
+                                                              child: Center(
+                                                                child: Icon(
+                                                                  Icons
+                                                                      .image_not_supported_outlined,
+                                                                  color: Colors
+                                                                      .white54,
+                                                                ),
+                                                              ),
+                                                            );
+                                                          },
+                                                        )
+                                                      else
+                                                        const ColoredBox(
+                                                          color:
+                                                              Color(0x22000000),
+                                                          child: Center(
+                                                            child: Icon(
+                                                              Icons
+                                                                  .image_outlined,
+                                                              color: Colors
+                                                                  .white54,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      Positioned(
+                                                        left: 6,
+                                                        bottom: 6,
+                                                        child: DecoratedBox(
+                                                          decoration:
+                                                              BoxDecoration(
+                                                            color: const Color(
+                                                              0xAA000000,
+                                                            ),
+                                                            borderRadius:
+                                                                BorderRadius
+                                                                    .circular(
+                                                              6,
+                                                            ),
+                                                          ),
+                                                          child: Padding(
+                                                            padding:
+                                                                const EdgeInsets
+                                                                    .symmetric(
+                                                              horizontal: 6,
+                                                              vertical: 3,
+                                                            ),
+                                                            child: Text(
+                                                              'E$epNo',
+                                                              style:
+                                                                  const TextStyle(
+                                                                color: Colors
+                                                                    .white,
+                                                                fontSize: 11,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      if (isCurrent)
+                                                        const Positioned(
+                                                          right: 6,
+                                                          top: 6,
+                                                          child: Icon(
+                                                            Icons.play_circle,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                    ],
                                                   ),
                                                 ),
                                               ),
-                                              const SizedBox(width: 10),
+                                              const SizedBox(width: 12),
                                               Expanded(
                                                 child: Text(
                                                   title,
@@ -836,11 +915,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                                   ),
                                                 ),
                                               ),
-                                              if (isCurrent)
-                                                const Icon(
-                                                  Icons.play_circle,
-                                                  color: Colors.white,
-                                                ),
                                             ],
                                           ),
                                         ),
@@ -849,6 +923,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   },
                                 );
                               }
+
+                              final columns = drawerWidth >= 360 ? 4 : 3;
 
                               return GridView.builder(
                                 padding: const EdgeInsets.fromLTRB(
@@ -862,22 +938,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                   crossAxisCount: columns,
                                   crossAxisSpacing: 10,
                                   mainAxisSpacing: 10,
-                                  childAspectRatio: columns == 1 ? 1.55 : 1.18,
+                                  childAspectRatio: 2.2,
                                 ),
                                 itemCount: eps.length,
                                 itemBuilder: (ctx, index) {
                                   final e = eps[index];
                                   final epNo = e.episodeNumber ?? (index + 1);
                                   final isCurrent = e.id == widget.itemId;
-                                  final access = _serverAccess;
-                                  final img = access?.adapter.imageUrl(
-                                          access.auth,
-                                          itemId: e.hasImage
-                                              ? e.id
-                                              : selectedSeason!.id,
-                                          maxWidth: 520,
-                                        );
-
                                   final borderColor = isCurrent
                                       ? accent.withValues(alpha: 0.85)
                                       : Colors.white.withValues(alpha: 0.10);
@@ -891,107 +958,29 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                     clipBehavior: Clip.antiAlias,
                                     child: InkWell(
                                       onTap: () => _playEpisodeFromPicker(e),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                      child: Stack(
+                                        fit: StackFit.expand,
                                         children: [
-                                          AspectRatio(
-                                            aspectRatio: 16 / 9,
-                                            child: Stack(
-                                              fit: StackFit.expand,
-                                              children: [
-                                                if (img != null)
-                                                  Image.network(
-                                                    img,
-                                                    fit: BoxFit.cover,
-                                                    errorBuilder: (_, __, ___) {
-                                                      return const ColoredBox(
-                                                        color:
-                                                            Color(0x22000000),
-                                                        child: Center(
-                                                          child: Icon(
-                                                            Icons
-                                                                .image_not_supported_outlined,
-                                                            color:
-                                                                Colors.white54,
-                                                          ),
-                                                        ),
-                                                      );
-                                                    },
-                                                  )
-                                                else
-                                                  const ColoredBox(
-                                                    color: Color(0x22000000),
-                                                    child: Center(
-                                                      child: Icon(
-                                                        Icons.image_outlined,
-                                                        color: Colors.white54,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                Positioned(
-                                                  left: 6,
-                                                  bottom: 6,
-                                                  child: DecoratedBox(
-                                                    decoration: BoxDecoration(
-                                                      color: const Color(
-                                                        0xAA000000,
-                                                      ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                        6,
-                                                      ),
-                                                    ),
-                                                    child: Padding(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                        horizontal: 6,
-                                                        vertical: 3,
-                                                      ),
-                                                      child: Text(
-                                                        'E$epNo',
-                                                        style: const TextStyle(
-                                                          color: Colors.white,
-                                                          fontSize: 11,
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                                if (isCurrent)
-                                                  const Positioned(
-                                                    right: 6,
-                                                    top: 6,
-                                                    child: Icon(
-                                                      Icons.play_circle,
-                                                      color: Colors.white,
-                                                    ),
-                                                  ),
-                                              ],
-                                            ),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              8,
-                                              6,
-                                              8,
-                                              8,
-                                            ),
+                                          Center(
                                             child: Text(
-                                              e.name.trim().isNotEmpty
-                                                  ? e.name.trim()
-                                                  : '第$epNo集',
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
+                                              'E$epNo',
                                               style: const TextStyle(
                                                 color: Colors.white,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w600,
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.w800,
+                                                letterSpacing: 0.2,
                                               ),
                                             ),
                                           ),
+                                          if (isCurrent)
+                                            const Positioned(
+                                              right: 6,
+                                              top: 6,
+                                              child: Icon(
+                                                Icons.play_circle,
+                                                color: Colors.white,
+                                              ),
+                                            ),
                                         ],
                                       ),
                                     ),
@@ -1859,7 +1848,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _longPressBaseRate = controller.value.playbackSpeed;
     final targetRate =
         (_longPressBaseRate! * widget.appState.longPressSpeedMultiplier)
-            .clamp(0.1, 4.0)
+            .clamp(0.25, 5.0)
             .toDouble();
     // ignore: unawaited_futures
     controller.setPlaybackSpeed(targetRate);
@@ -1882,10 +1871,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final dy = details.localPosition.dy - _longPressStartPos!.dy;
     final delta = (-dy / height) * 2.0;
     final multiplier = (widget.appState.longPressSpeedMultiplier + delta)
-        .clamp(1.0, 4.0)
+        .clamp(0.25, 5.0)
         .toDouble();
     final targetRate =
-        (_longPressBaseRate! * multiplier).clamp(0.1, 4.0).toDouble();
+        (_longPressBaseRate! * multiplier).clamp(0.25, 5.0).toDouble();
     final controller = _controller;
     if (controller != null) {
       // ignore: unawaited_futures
@@ -3444,31 +3433,106 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       onKeyEvent: (node, event) {
         if (!remoteEnabled) return KeyEventResult.ignored;
         if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
-        if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
         final key = event.logicalKey;
-        if (key == LogicalKeyboardKey.arrowUp) {
-          _showControls(scheduleHide: false);
-          _focusTvPlayPause();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowDown) {
-          if (_controlsVisible) {
-            _hideControlsForRemote();
+
+        if (event is KeyDownEvent) {
+          if (key == LogicalKeyboardKey.arrowUp) {
+            _showControls(scheduleHide: false);
+            _focusTvPlayPause();
             return KeyEventResult.handled;
           }
-          return KeyEventResult.ignored;
+          if (key == LogicalKeyboardKey.arrowDown) {
+            if (_controlsVisible) {
+              _hideControlsForRemote();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          }
         }
 
         if (!controlsEnabled) return KeyEventResult.ignored;
 
-        if (key == LogicalKeyboardKey.space ||
+        final isOkKey = key == LogicalKeyboardKey.space ||
             key == LogicalKeyboardKey.enter ||
-            key == LogicalKeyboardKey.select) {
-          // ignore: unawaited_futures
-          _togglePlayPause();
-          return KeyEventResult.handled;
+            key == LogicalKeyboardKey.select;
+        if (isOkKey) {
+          // If long-press speed is disabled, keep original behavior (toggle on key-down).
+          if (!widget.appState.gestureLongPressSpeed) {
+            if (event is KeyDownEvent) {
+              // ignore: unawaited_futures
+              _togglePlayPause();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          }
+
+          if (event is KeyDownEvent) {
+            if (_tvOkLongPressTimer != null) return KeyEventResult.handled;
+            final controller = _controller;
+            if (controller == null || !controller.value.isInitialized) {
+              return KeyEventResult.ignored;
+            }
+
+            _tvOkLongPressTriggered = false;
+            _tvOkLongPressBaseRate = controller.value.playbackSpeed;
+            _tvOkLongPressTimer = Timer(_tvOkLongPressDelay, () {
+              if (!mounted) return;
+              final controller = _controller;
+              if (controller == null || !controller.value.isInitialized) return;
+
+              final base =
+                  _tvOkLongPressBaseRate ?? controller.value.playbackSpeed;
+              final targetRate =
+                  (base * widget.appState.longPressSpeedMultiplier)
+                      .clamp(0.25, 5.0)
+                      .toDouble();
+              _tvOkLongPressTriggered = true;
+              // ignore: unawaited_futures
+              controller.setPlaybackSpeed(targetRate);
+              _setGestureOverlay(
+                icon: Icons.speed,
+                text:
+                    '倍速 ×${(targetRate / base).toStringAsFixed(2)}',
+              );
+            });
+            return KeyEventResult.handled;
+          }
+
+          if (event is KeyUpEvent) {
+            final t = _tvOkLongPressTimer;
+            _tvOkLongPressTimer = null;
+            t?.cancel();
+
+            final controller = _controller;
+            if (controller == null || !controller.value.isInitialized) {
+              _tvOkLongPressBaseRate = null;
+              _tvOkLongPressTriggered = false;
+              return KeyEventResult.ignored;
+            }
+
+            if (_tvOkLongPressTriggered) {
+              final base = _tvOkLongPressBaseRate;
+              _tvOkLongPressTriggered = false;
+              _tvOkLongPressBaseRate = null;
+              if (base != null) {
+                // ignore: unawaited_futures
+                controller.setPlaybackSpeed(base);
+              }
+              _hideGestureOverlay();
+              return KeyEventResult.handled;
+            }
+
+            _tvOkLongPressBaseRate = null;
+            // ignore: unawaited_futures
+            _togglePlayPause();
+            return KeyEventResult.handled;
+          }
+
+          return KeyEventResult.ignored;
         }
+
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
         if (key == LogicalKeyboardKey.arrowLeft) {
           // ignore: unawaited_futures
           _seekRelative(Duration(seconds: -_seekBackSeconds));
@@ -3479,6 +3543,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           _seekRelative(Duration(seconds: _seekForwardSeconds));
           return KeyEventResult.handled;
         }
+
         return KeyEventResult.ignored;
       },
       child: Scaffold(
@@ -3726,20 +3791,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                                         ),
                                     ],
                                   ),
-                                ),
-                              ),
-                            ),
-                          // Net speed is rendered inside PlaybackControls so it hides with controls.
-                          if (false)
-                            Positioned(
-                              left: 12,
-                              bottom: _controlsVisible ? 88 : 12,
-                              child: SafeArea(
-                                top: false,
-                                right: false,
-                                child: NetSpeedBadge(
-                                  text:
-                                      '网速 ${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
                                 ),
                               ),
                             ),
