@@ -1,5 +1,7 @@
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.Properties
+import java.util.zip.GZIPInputStream
 
 plugins {
     id("com.android.application")
@@ -92,3 +94,37 @@ android {
 flutter {
     source = "../.."
 }
+
+// Bundle mihomo as a native library executable (libmihomo.so) so it can run on ROMs that mount
+// app-private storage as "noexec" (executing binaries from filesDir will fail with Permission denied).
+val repoRootDir = project.rootDir.parentFile
+val mihomoAssetsDir = File(repoRootDir, "assets/tv_proxy/mihomo/android")
+val generatedMihomoJniLibsDir = File(project.buildDir, "generated/mihomoJniLibs")
+
+tasks.register("prepareMihomoJniLibs") {
+    inputs.dir(mihomoAssetsDir)
+    outputs.dir(generatedMihomoJniLibsDir)
+    doLast {
+        val mappings =
+            listOf(
+                "arm64-v8a",
+                "armeabi-v7a",
+                "x86_64",
+                "x86",
+            )
+        for (abi in mappings) {
+            val src = File(mihomoAssetsDir, "$abi/mihomo.gz")
+            if (!src.exists()) continue
+            val dst = File(generatedMihomoJniLibsDir, "$abi/libmihomo.so")
+            dst.parentFile.mkdirs()
+            GZIPInputStream(FileInputStream(src)).use { input ->
+                FileOutputStream(dst).use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+    }
+}
+
+android.sourceSets.getByName("main").jniLibs.srcDir(generatedMihomoJniLibsDir)
+tasks.named("preBuild").configure { dependsOn("prepareMihomoJniLibs") }

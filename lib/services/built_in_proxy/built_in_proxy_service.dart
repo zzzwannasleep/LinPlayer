@@ -56,6 +56,7 @@ class BuiltInProxyService extends ChangeNotifier {
 
   static const int mixedPort = 7890;
   static const int controllerPort = 9090;
+  static const String _nativeMihomoSoName = 'libmihomo.so';
 
   static const Duration _startupTimeout = Duration(seconds: 2);
   static const Duration _shutdownTimeout = Duration(seconds: 2);
@@ -138,8 +139,7 @@ class BuiltInProxyService extends ChangeNotifier {
 
     if (_process != null) return;
 
-    final exe = await _exeFile();
-    await _ensureMihomoInstalled(exe);
+    var exe = await _resolveMihomoExecutableForStart();
 
     final uiRoot = await _ensureMetacubexdReady();
     await _ensureConfigPatched(externalUiDir: uiRoot);
@@ -161,12 +161,46 @@ class BuiltInProxyService extends ChangeNotifier {
 
     try {
       final workDir = (await _baseDir()).path;
-      final process = await Process.start(
-        exe.path,
-        ['-d', workDir],
-        workingDirectory: workDir,
-        runInShell: false,
-      );
+      Process process;
+      try {
+        process = await Process.start(
+          exe.path,
+          ['-d', workDir],
+          workingDirectory: workDir,
+          runInShell: false,
+        );
+      } on ProcessException catch (e) {
+        // Some Android TV ROMs mount app data dirs as "noexec", causing Permission denied.
+        // In that case, try running the bundled native-lib executable instead.
+        final message = e.toString().toLowerCase();
+        final nativeExe = await _nativeMihomoFile();
+        final canFallback = nativeExe != null &&
+            nativeExe.path != exe.path &&
+            await nativeExe.exists() &&
+            message.contains('permission denied');
+        if (!canFallback) rethrow;
+
+        exe = nativeExe;
+        _status = BuiltInProxyStatus(
+          state: BuiltInProxyState.starting,
+          message: '启动中…',
+          executablePath: exe.path,
+          configPath: (await _configFile()).path,
+          uiPath: uiRoot?.path,
+          mixedPort: mixedPort,
+          controllerPort: controllerPort,
+          lastExitCode: _lastExitCode,
+          lastError: _lastError,
+        );
+        notifyListeners();
+
+        process = await Process.start(
+          exe.path,
+          ['-d', workDir],
+          workingDirectory: workDir,
+          runInShell: false,
+        );
+      }
       _process = process;
 
       process.stdout
@@ -252,6 +286,7 @@ class BuiltInProxyService extends ChangeNotifier {
     }
 
     final exe = await _exeFile();
+    final nativeExe = await _nativeMihomoFile();
     final cfg = await _configFile();
     final uiPath = () async {
       try {
@@ -266,8 +301,15 @@ class BuiltInProxyService extends ChangeNotifier {
       }
     }();
 
-    final installed = await exe.exists();
-    if (!installed) {
+    final exeExists = await exe.exists();
+    final nativeExists = nativeExe != null && await nativeExe.exists();
+    final effectiveExe = exeExists
+        ? exe
+        : nativeExists
+            ? nativeExe
+            : null;
+
+    if (effectiveExe == null) {
       return BuiltInProxyStatus(
         state: BuiltInProxyState.notInstalled,
         message: '未安装 mihomo（启用后会自动安装；如失败可手动导入）',
@@ -285,7 +327,7 @@ class BuiltInProxyService extends ChangeNotifier {
       return BuiltInProxyStatus(
         state: BuiltInProxyState.running,
         message: '运行中（mixed: 127.0.0.1:$mixedPort）',
-        executablePath: exe.path,
+        executablePath: effectiveExe.path,
         configPath: cfg.path,
         uiPath: await uiPath,
         mixedPort: mixedPort,
@@ -299,7 +341,7 @@ class BuiltInProxyService extends ChangeNotifier {
       return BuiltInProxyStatus(
         state: BuiltInProxyState.error,
         message: '启动失败：${_lastError!.trim()}',
-        executablePath: exe.path,
+        executablePath: effectiveExe.path,
         configPath: cfg.path,
         uiPath: await uiPath,
         mixedPort: mixedPort,
@@ -313,7 +355,7 @@ class BuiltInProxyService extends ChangeNotifier {
     return BuiltInProxyStatus(
       state: BuiltInProxyState.stopped,
       message: '未运行$suffix',
-      executablePath: exe.path,
+      executablePath: effectiveExe.path,
       configPath: cfg.path,
       uiPath: await uiPath,
       mixedPort: mixedPort,
@@ -337,6 +379,27 @@ class BuiltInProxyService extends ChangeNotifier {
     return File('${dir.path}/mihomo');
   }
 
+  Future<File?> _nativeMihomoFile() async {
+    if (!isSupported) return null;
+    final dir = await DeviceType.nativeLibraryDir();
+    final base = (dir ?? '').trim();
+    if (base.isEmpty) return null;
+    return File('$base/$_nativeMihomoSoName');
+  }
+
+  Future<File> _resolveMihomoExecutableForStart() async {
+    // 1) User imported binary (preferred so users can pin versions).
+    final exe = await _exeFile();
+    if (await exe.exists()) return exe;
+
+    // 2) Bundled native lib (works on devices that disallow exec from app data dirs).
+    final nativeExe = await _nativeMihomoFile();
+    if (nativeExe != null && await nativeExe.exists()) return nativeExe;
+
+    // 3) Fallback: extract from Flutter assets.
+    await _ensureMihomoInstalled(exe);
+    return exe;
+  }
   Future<File> _configFile() async {
     final dir = await _baseDir();
     return File('${dir.path}/config.yaml');
@@ -387,11 +450,35 @@ class BuiltInProxyService extends ChangeNotifier {
   }
 
   Future<void> _chmodExecutable(String path) async {
+    // Best-effort; some ROMs may still block execve from app data.
     try {
-      await Process.run('chmod', ['700', path], runInShell: false);
-    } catch (_) {
-      // Best-effort; if it fails, start() will surface the error.
+      final ok = await DeviceType.setExecutable(path);
+      if (ok) return;
+    } catch (_) {}
+
+    final attempts = <String>[
+      'platform=setExecutable(false)',
+    ];
+
+    Future<bool> tryRun(String cmd, List<String> args) async {
+      try {
+        final res = await Process.run(cmd, args, runInShell: false);
+        if (res.exitCode == 0) return true;
+        attempts.add('$cmd exit=${res.exitCode}');
+        return false;
+      } catch (e) {
+        attempts.add('$cmd error=$e');
+        return false;
+      }
     }
+
+    if (await tryRun('chmod', ['700', path])) return;
+    if (await tryRun('/system/bin/chmod', ['700', path])) return;
+    if (await tryRun('/system/bin/toybox', ['chmod', '700', path])) return;
+    if (await tryRun('/system/bin/toolbox', ['chmod', '700', path])) return;
+
+    // Keep error around for user-facing diagnosis if start() fails later.
+    _lastError ??= '无法设置 mihomo 可执行权限：${attempts.join(', ')}';
   }
 
   static Future<bool> _waitForPort(
@@ -585,6 +672,23 @@ class BuiltInProxyService extends ChangeNotifier {
     LinHttpClientFactory.setRuntimeProxyResolver(
       shouldEnable ? _httpProxyResolver : null,
     );
+
+    // ExoPlayer (video_player) uses HttpURLConnection internally; route it through a process-level
+    // ProxySelector so only this app is affected (per-app proxy, not system VPN).
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        DeviceType.isTv) {
+      unawaited(() async {
+        if (shouldEnable) {
+          await DeviceType.setHttpProxy(
+            host: '127.0.0.1',
+            port: mixedPort,
+          );
+        } else {
+          await DeviceType.clearHttpProxy();
+        }
+      }());
+    }
   }
 }
 
