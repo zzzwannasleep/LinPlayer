@@ -787,22 +787,32 @@ class BuiltInProxyService extends ChangeNotifier {
     //
     // Fix by renaming the group and updating the MATCH rule.
     final hasBrokenGroup = RegExp(
-      r'(?m)^\s*-\s*name\s*:\s*DIRECT\s*$[\s\S]*?^\s*proxies\s*:\s*$[\s\S]*?^\s*-\s*DIRECT\s*$',
+      r'^\s*-\s*name\s*:\s*DIRECT\s*$[\s\S]*?^\s*proxies\s*:\s*$[\s\S]*?^\s*-\s*DIRECT\s*$',
+      multiLine: true,
     ).hasMatch(raw);
     if (!hasBrokenGroup) return raw;
 
     // Avoid clobbering user configs that already define a PROXY group.
-    final targetName = RegExp(r'(?m)^\s*-\s*name\s*:\s*PROXY\s*$').hasMatch(raw)
+    final targetName = RegExp(
+      r'^\s*-\s*name\s*:\s*PROXY\s*$',
+      multiLine: true,
+    ).hasMatch(raw)
         ? 'LP-PROXY'
         : 'PROXY';
 
     String out = raw;
     out = out.replaceAll(
-      RegExp(r'(?m)^(\s*-\s*name\s*:\s*)DIRECT(\s*)$'),
+      RegExp(
+        r'^(\s*-\s*name\s*:\s*)DIRECT(\s*)$',
+        multiLine: true,
+      ),
       r'$1' + targetName + r'$2',
     );
     out = out.replaceAll(
-      RegExp(r'(?m)^(\s*-\s*MATCH\s*,\s*)DIRECT(\s*)$'),
+      RegExp(
+        r'^(\s*-\s*MATCH\s*,\s*)DIRECT(\s*)$',
+        multiLine: true,
+      ),
       r'$1' + targetName + r'$2',
     );
     return out;
@@ -1057,7 +1067,8 @@ class _SubscriptionPatterns {
   );
 
   static final RegExp lowRate = RegExp(
-    r'(?i)(^|[^0-9.])0\.[0-9]{1,3} *(x|倍|倍率)?($|[^0-9.])',
+    r'(^|[^0-9.])0\.[0-9]{1,3} *(x|倍|倍率)?($|[^0-9.])',
+    caseSensitive: false,
   );
 }
 

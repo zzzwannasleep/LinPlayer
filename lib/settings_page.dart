@@ -1255,7 +1255,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       await BuiltInProxyService.instance.setSubscriptionUrl(next);
       await BuiltInProxyService.instance.prepareConfig();
-      if (!mounted) return;
+      if (!context.mounted) return;
       setState(() => _tvProxySubscriptionUrl = next);
 
       final effective = next.trim();
