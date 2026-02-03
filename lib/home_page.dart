@@ -15,6 +15,7 @@ import 'library_items_page.dart';
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
 import 'search_page.dart';
+import 'server_page.dart';
 import 'settings_page.dart';
 import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
@@ -459,7 +460,13 @@ class _HomePageState extends State<HomePage> {
         setUiTemplate: widget.appState.setUiTemplate,
       );
 
-  Future<void> _switchServer() => widget.appState.leaveServer();
+  Future<void> _openServerPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ServerPage(appState: widget.appState),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -536,7 +543,7 @@ class _HomePageState extends State<HomePage> {
                           AppConfigScope.of(context).displayName,
                       iconUrl: widget.appState.activeServer?.iconUrl,
                       onTapServer: widget.appState.hasActiveServer
-                          ? _switchServer
+                          ? _openServerPage
                           : null,
                     ),
                   ),
@@ -568,7 +575,8 @@ class _HomePageState extends State<HomePage> {
                   serverName: widget.appState.activeServer?.name ??
                       AppConfigScope.of(context).displayName,
                   iconUrl: widget.appState.activeServer?.iconUrl,
-                  onTap: widget.appState.hasActiveServer ? _switchServer : null,
+                  onTap:
+                      widget.appState.hasActiveServer ? _openServerPage : null,
                 ),
                 actions: [
                   _GlassActionIconButton(

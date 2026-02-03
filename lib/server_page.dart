@@ -213,8 +213,18 @@ class _ServerPageState extends State<ServerPage> {
                                               );
                                               return;
                                             }
+                                            if (server.id ==
+                                                widget
+                                                    .appState.activeServerId) {
+                                              await Navigator.of(context)
+                                                  .maybePop();
+                                              return;
+                                            }
                                             await widget.appState
                                                 .enterServer(server.id);
+                                            if (!context.mounted) return;
+                                            await Navigator.of(context)
+                                                .maybePop();
                                           },
                                     onLongPress: () =>
                                         _showEditServerSheet(server),
@@ -255,8 +265,16 @@ class _ServerPageState extends State<ServerPage> {
                                           );
                                           return;
                                         }
+                                        if (server.id ==
+                                            widget.appState.activeServerId) {
+                                          await Navigator.of(context)
+                                              .maybePop();
+                                          return;
+                                        }
                                         await widget.appState
                                             .enterServer(server.id);
+                                        if (!context.mounted) return;
+                                        await Navigator.of(context).maybePop();
                                       },
                                 onLongPress: () => _showEditServerSheet(server),
                               );
