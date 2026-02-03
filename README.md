@@ -113,7 +113,7 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 ### 亮点
 - 本地 + Emby/Jellyfin + WebDAV：一套 UI 统一体验
 - 播放器：MPV（跨平台）+ Android 可切换 Exo（Media3）
-- Android TV：TV 首页（TV-first）+ 手机扫码添加服务器 + 手机遥控
+- Android TV：TV 首页（TV-first）+ 手机扫码添加服务器/遥控/设置
 - TV 内置代理：mihomo + metacubexd 面板（App HTTP + MPV 可按需走代理）
 - 弹幕：本地 XML + 在线弹幕（弹弹play API v2）
 
@@ -145,8 +145,11 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 - TV 首页（TV-first）：大卡片分区；无服务器时启动即进入「TV 配对」并显示二维码。
 - 遥控器方向键/确认键完整可用（播放页支持快进/快退与控制栏聚焦）。
 - 长按确认键：临时倍速播放（松开恢复；倍率 0.25–5×，默认 2×，可在「设置 → 交互」调整）。
+- 服务器切换：媒体首页左上角「选择服务器/服务器名」进入服务器页；当前服务器会高亮，按确认切换后自动返回。
 - 手机扫码添加服务器：TV 配对页扫码 → 手机选择「添加服务器」→ 填写 Emby/Jellyfin/WebDAV → 一键添加到 TV（无需遥控器输入长文本）。
 - 手机遥控 TV：TV 配对页扫码 → 手机选择「遥控 TV」→ 支持 ↑↓←→ / OK / 返回 / Home（同一局域网）。
+- 手机设置 TV：TV 配对页扫码 → 手机选择「设置」→ 可调整 TV 端设置（背景/缩放/紧凑模式/TV 专区开关等）。
+- TV 自定义背景：设置 → 外观 → 背景模式（纯色/图片/随机 API；默认 Bing `https://bing.img.run/rand.php`）。
 - TV 内置代理：设置 → TV 专区 → 内置代理（mihomo）+ 代理面板（metacubexd），并让 App HTTP + MPV 走代理（路线图见 `docs/TV_PROXY_ROADMAP.md`）。
 
 ### 弹幕
@@ -185,6 +188,9 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 - ↑ ↓ ← →：移动焦点（高亮）
 - 确认键（OK / Enter）：点击/选择当前焦点项
 
+### 切换服务器（媒体首页）
+- 在媒体首页左上角「选择服务器/服务器名」进入服务器页；当前服务器会高亮，按确认切换后自动返回。
+
 ### TV 首页（TV-first）
 - 启动后默认进入 TV 首页（大卡片分区）。
 - 无服务器：会自动进入「TV 配对」页并显示二维码。
@@ -197,7 +203,12 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 - 手机扫码后会打开配对主页（包含一次性 token，请勿外泄），可选择：
   - 「添加服务器」：填写 Emby/Jellyfin/WebDAV 的地址/账号/密码/端口/显示名/备注/图标（可选），提交后 TV 会自动添加服务器（并可设为当前服务器）。
   - 「遥控 TV」：方向键 / OK / 返回 / Home（同一局域网）。
+  - 「设置」：调整 TV 端设置（背景/缩放/紧凑模式/TV 专区开关等），无需遥控器输入长文本。
 - 如需“开机就能随时扫码遥控”，在「设置 → TV 专区」开启「手机扫码控制」；关闭后仍可在需要时进入「TV 配对」页使用。
+
+### TV 自定义背景
+- 进入「设置 → 外观」设置背景模式：纯色 / 图片 / 随机背景 API（默认 Bing `https://bing.img.run/rand.php`）。
+- 选择「随机背景 API」后可点「换一张」刷新背景；手机扫码后的「设置」页也可以做同样的调整。
 
 ### TV 内置代理（mihomo）+ 面板（metacubexd）
 - 进入「设置 → TV 专区」
@@ -284,11 +295,14 @@ A cross-platform local & Emby/Jellyfin & WebDAV media player built with Flutter 
 
 > Android release 签名（保证 APK 可覆盖安装升级）见 `docs/ANDROID_SIGNING.md`。
 
-> 构建/更新 TV 内置代理资源（mihomo + metacubexd）（可选，仅 Android TV 用）：
+> 构建/更新 TV 内置代理资源（mihomo + metacubexd）（Android TV 用）：
+> - CI 构建会自动执行；本地从源码构建如需更新/确保资源齐全，可运行：
 >
 > ```powershell
 > powershell -NoProfile -ExecutionPolicy Bypass -File tool/fetch_tv_proxy_assets.ps1
 > ```
+>
+> - 如遇 GitHub API 限流，可设置 `GITHUB_TOKEN` 或 `GH_TOKEN`。
 
 ```bash
 # 依赖

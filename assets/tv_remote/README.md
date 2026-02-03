@@ -9,4 +9,4 @@ Sources / attribution:
 LinPlayer customizations:
 - Replaced the Node + Socket.IO transport with a lightweight WebSocket endpoint implemented in Dart.
 - Added a "Setup" page for adding Emby/Jellyfin/WebDAV servers directly to the TV via the local network.
-
+- Added a "Settings" page for adjusting TV settings from the phone (e.g. background, UI scale, TV-only toggles).
