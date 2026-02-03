@@ -43,7 +43,8 @@ class BuiltInProxyStatus {
   });
 
   bool get isSupported => state != BuiltInProxyState.unsupported;
-  bool get isInstalled => state != BuiltInProxyState.unsupported && executablePath != null;
+  bool get isInstalled =>
+      state != BuiltInProxyState.unsupported && executablePath != null;
   bool get isRunning =>
       state == BuiltInProxyState.starting || state == BuiltInProxyState.running;
 }
@@ -269,7 +270,7 @@ class BuiltInProxyService extends ChangeNotifier {
     if (!installed) {
       return BuiltInProxyStatus(
         state: BuiltInProxyState.notInstalled,
-        message: '未安装 mihomo（未找到内置资源时可手动导入）',
+        message: '未安装 mihomo（启用后会自动安装；如失败可手动导入）',
         executablePath: null,
         configPath: cfg.path,
         uiPath: await uiPath,
@@ -373,7 +374,8 @@ class BuiltInProxyService extends ChangeNotifier {
     content = upsert(content, 'socks-port', '${mixedPort + 1}');
     content = upsert(content, 'allow-lan', 'false');
     content = upsert(content, 'bind-address', '127.0.0.1');
-    content = upsert(content, 'external-controller', '127.0.0.1:$controllerPort');
+    content =
+        upsert(content, 'external-controller', '127.0.0.1:$controllerPort');
     content = upsert(content, 'secret', '""');
 
     if (externalUiDir != null) {
@@ -454,6 +456,8 @@ class BuiltInProxyService extends ChangeNotifier {
     if (v.isEmpty) return null;
     if (v.contains('arm64')) return 'arm64-v8a';
     if (v.contains('armeabi') || v.contains('armv7')) return 'armeabi-v7a';
+    if (v.contains('x86_64') || v.contains('amd64')) return 'x86_64';
+    if (v.contains('x86') || v.contains('386')) return 'x86';
     return null;
   }
 
@@ -477,7 +481,8 @@ class BuiltInProxyService extends ChangeNotifier {
 
     ByteData data;
     try {
-      data = await rootBundle.load('assets/tv_proxy/metacubexd/compressed-dist.tgz');
+      data = await rootBundle
+          .load('assets/tv_proxy/metacubexd/compressed-dist.tgz');
     } catch (_) {
       // UI assets are optional; proxy can still run without panel.
       return null;

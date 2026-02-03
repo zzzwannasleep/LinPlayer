@@ -4,6 +4,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -540,11 +541,11 @@ class _HomePageState extends State<HomePage> {
                         });
                       },
                       serverName: widget.appState.activeServer?.name ??
-                          AppConfigScope.of(context).displayName,
+                          (widget.appState.servers.isNotEmpty
+                              ? '选择服务器'
+                              : AppConfigScope.of(context).displayName),
                       iconUrl: widget.appState.activeServer?.iconUrl,
-                      onTapServer: widget.appState.hasActiveServer
-                          ? _openServerPage
-                          : null,
+                      onTapServer: _openServerPage,
                     ),
                   ),
                 ),
@@ -573,10 +574,11 @@ class _HomePageState extends State<HomePage> {
                   enableBlur: enableBlur,
                   useGlass: usesGlassSurfaces,
                   serverName: widget.appState.activeServer?.name ??
-                      AppConfigScope.of(context).displayName,
+                      (widget.appState.servers.isNotEmpty
+                          ? '选择服务器'
+                          : AppConfigScope.of(context).displayName),
                   iconUrl: widget.appState.activeServer?.iconUrl,
-                  onTap:
-                      widget.appState.hasActiveServer ? _openServerPage : null,
+                  onTap: _openServerPage,
                 ),
                 actions: [
                   _GlassActionIconButton(
@@ -849,6 +851,22 @@ class _TvTopNavItemState extends State<_TvTopNavItem> {
     return FocusableActionDetector(
       autofocus: widget.autofocus,
       onFocusChange: _onFocusChange,
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.accept): ActivateIntent(),
+      },
+      actions: <Type, Action<Intent>>{
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) => widget.onTap(),
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (_) => widget.onTap(),
+        ),
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         curve: Curves.easeOut,
@@ -950,7 +968,7 @@ class _GlassActionIconButton extends StatelessWidget {
   }
 }
 
-class _ServerGlassButton extends StatelessWidget {
+class _ServerGlassButton extends StatefulWidget {
   const _ServerGlassButton({
     required this.serverName,
     required this.iconUrl,
@@ -966,11 +984,29 @@ class _ServerGlassButton extends StatelessWidget {
   final bool useGlass;
 
   @override
+  State<_ServerGlassButton> createState() => _ServerGlassButtonState();
+}
+
+class _ServerGlassButtonState extends State<_ServerGlassButton> {
+  bool _focused = false;
+  bool _hovered = false;
+
+  void _setFocused(bool v) {
+    if (_focused == v) return;
+    setState(() => _focused = v);
+  }
+
+  void _setHovered(bool v) {
+    if (_hovered == v) return;
+    setState(() => _hovered = v);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = scheme.brightness == Brightness.dark;
-    final enabled = onTap != null;
+    final enabled = widget.onTap != null;
 
     final bg =
         scheme.surfaceContainerHigh.withValues(alpha: isDark ? 0.74 : 0.94);
@@ -979,42 +1015,80 @@ class _ServerGlassButton extends StatelessWidget {
     final shadowColor = scheme.shadow.withValues(alpha: isDark ? 0.30 : 0.16);
     final radius = BorderRadius.circular(999);
 
-    Widget child = Material(
-      color: bg,
-      shape: const StadiumBorder(),
-      elevation: enabled ? 10 : 0,
-      shadowColor: shadowColor,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _ServerIconAvatar(iconUrl: iconUrl, name: serverName, radius: 12),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  serverName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: fg,
+    final highlighted = _focused || _hovered;
+    final borderColor = highlighted
+        ? scheme.primary.withValues(alpha: _focused ? 0.9 : 0.55)
+        : Colors.transparent;
+
+    Widget child = FocusableActionDetector(
+      enabled: enabled,
+      onShowFocusHighlight: _setFocused,
+      onShowHoverHighlight: _setHovered,
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.accept): ActivateIntent(),
+      },
+      actions: <Type, Action<Intent>>{
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (_) => widget.onTap?.call(),
+        ),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+          onInvoke: (_) => widget.onTap?.call(),
+        ),
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: borderColor, width: 2),
+        ),
+        child: Material(
+          color: bg,
+          shape: const StadiumBorder(),
+          elevation: enabled ? 10 : 0,
+          shadowColor: shadowColor,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _ServerIconAvatar(
+                    iconUrl: widget.iconUrl,
+                    name: widget.serverName,
+                    radius: 12,
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      widget.serverName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.swap_horiz, size: 18, color: fg),
+                ],
               ),
-              const SizedBox(width: 4),
-              Icon(Icons.swap_horiz, size: 18, color: fg),
-            ],
+            ),
           ),
         ),
       ),
     );
 
-    if (useGlass && enableBlur) {
+    if (widget.useGlass && widget.enableBlur) {
       child = ClipRRect(
         borderRadius: radius,
         child: BackdropFilter(

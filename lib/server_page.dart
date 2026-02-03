@@ -123,22 +123,23 @@ class _ServerPageState extends State<ServerPage> {
                               ? Icons.grid_view_outlined
                               : Icons.view_list_outlined),
                         ),
-                        IconButton(
-                          tooltip: '主题',
-                          onPressed: () => showThemeSheet(
-                            context,
-                            listenable: widget.appState,
-                            themeMode: () => widget.appState.themeMode,
-                            setThemeMode: widget.appState.setThemeMode,
-                            useDynamicColor: () =>
-                                widget.appState.useDynamicColor,
-                            setUseDynamicColor:
-                                widget.appState.setUseDynamicColor,
-                            uiTemplate: () => widget.appState.uiTemplate,
-                            setUiTemplate: widget.appState.setUiTemplate,
+                        if (!isTv)
+                          IconButton(
+                            tooltip: '主题',
+                            onPressed: () => showThemeSheet(
+                              context,
+                              listenable: widget.appState,
+                              themeMode: () => widget.appState.themeMode,
+                              setThemeMode: widget.appState.setThemeMode,
+                              useDynamicColor: () =>
+                                  widget.appState.useDynamicColor,
+                              setUseDynamicColor:
+                                  widget.appState.setUseDynamicColor,
+                              uiTemplate: () => widget.appState.uiTemplate,
+                              setUiTemplate: widget.appState.setUiTemplate,
+                            ),
+                            icon: const Icon(Icons.palette_outlined),
                           ),
-                          icon: const Icon(Icons.palette_outlined),
-                        ),
                         IconButton(
                           tooltip: '添加服务器',
                           onPressed: loading ? null : _showAddServerSheet,
@@ -195,12 +196,13 @@ class _ServerPageState extends State<ServerPage> {
                                   padding: EdgeInsets.only(
                                       bottom:
                                           index == servers.length - 1 ? 0 : 10),
-                                  child: _ServerListTile(
-                                    server: server,
-                                    active: isActive,
-                                    onTap: loading
-                                        ? null
-                                        : () async {
+                                   child: _ServerListTile(
+                                     server: server,
+                                     active: isActive,
+                                     autofocus: isTv && isActive,
+                                     onTap: loading
+                                         ? null
+                                         : () async {
                                             if (server.serverType ==
                                                 MediaServerType.plex) {
                                               ScaffoldMessenger.of(context)
@@ -250,6 +252,7 @@ class _ServerPageState extends State<ServerPage> {
                               return _ServerCard(
                                 server: server,
                                 active: isActive,
+                                autofocus: isTv && isActive,
                                 onTap: loading
                                     ? null
                                     : () async {
@@ -294,12 +297,14 @@ class _ServerCard extends StatefulWidget {
   const _ServerCard({
     required this.server,
     required this.active,
+    this.autofocus = false,
     required this.onTap,
     required this.onLongPress,
   });
 
   final ServerProfile server;
   final bool active;
+  final bool autofocus;
   final VoidCallback? onTap;
   final VoidCallback onLongPress;
 
@@ -332,6 +337,7 @@ class _ServerCardState extends State<_ServerCard> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
+      autofocus: widget.autofocus,
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       onFocusChange: (v) => setState(() => _focused = v),
@@ -419,12 +425,14 @@ class _ServerListTile extends StatefulWidget {
   const _ServerListTile({
     required this.server,
     required this.active,
+    this.autofocus = false,
     required this.onTap,
     required this.onLongPress,
   });
 
   final ServerProfile server;
   final bool active;
+  final bool autofocus;
   final VoidCallback? onTap;
   final VoidCallback onLongPress;
 
@@ -457,6 +465,7 @@ class _ServerListTileState extends State<_ServerListTile> {
 
     return InkWell(
       borderRadius: BorderRadius.circular(14),
+      autofocus: widget.autofocus,
       onTap: widget.onTap,
       onLongPress: widget.onLongPress,
       onFocusChange: (v) => setState(() => _focused = v),

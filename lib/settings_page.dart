@@ -955,6 +955,155 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _pickTvBackgroundColor(BuildContext context) async {
+    const presets = <MapEntry<String, int>>[
+      MapEntry('深黑（默认）', 0xFF0B0B0B),
+      MapEntry('石墨灰', 0xFF141414),
+      MapEntry('深蓝', 0xFF0B1020),
+      MapEntry('深紫', 0xFF130B20),
+      MapEntry('墨绿', 0xFF0B2014),
+      MapEntry('深红', 0xFF200B0B),
+    ];
+
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (dctx) => SimpleDialog(
+        title: const Text('选择背景颜色'),
+        children: presets
+            .map(
+              (p) => SimpleDialogOption(
+                onPressed: () => Navigator.of(dctx).pop(p.value),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 10,
+                      backgroundColor: Color(p.value),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(p.key)),
+                  ],
+                ),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+
+    if (selected == null) return;
+    await widget.appState.setTvBackgroundColor(selected);
+  }
+
+  Future<void> _editTvBackgroundImage(BuildContext context) async {
+    final controller =
+        TextEditingController(text: widget.appState.tvBackgroundImage);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('背景图片'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: '图片 URL 或本地路径',
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: () async {
+                  final result = await FilePicker.platform.pickFiles(
+                    dialogTitle: '选择背景图片',
+                    allowMultiple: false,
+                    type: FileType.image,
+                    withData: false,
+                  );
+                  final path = result?.files.single.path;
+                  if (path == null || path.trim().isEmpty) return;
+                  controller.text = path.trim();
+                },
+                icon: const Icon(Icons.folder_open_outlined),
+                label: const Text('选择本地图片'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(''),
+            child: const Text('清空'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    await widget.appState.setTvBackgroundImage(result);
+  }
+
+  Future<void> _editTvBackgroundRandomApi(BuildContext context) async {
+    final defaultApi = widget.appState.tvBackgroundRandomApiUrl.trim().isEmpty
+        ? 'https://bing.img.run/rand.php'
+        : widget.appState.tvBackgroundRandomApiUrl.trim();
+    final controller = TextEditingController(text: defaultApi);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('随机背景 API'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: '例如：https://bing.img.run/rand.php',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '提示：URL 应直接返回图片（或 302 跳转到图片）。',
+                style: Theme.of(dctx).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(dctx).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    final next =
+        result.trim().isEmpty ? 'https://bing.img.run/rand.php' : result;
+    await widget.appState.setTvBackgroundRandomApiUrl(next);
+    await widget.appState.bumpTvBackgroundRandomNonce();
+  }
+
   Future<void> _setTvBuiltInProxyEnabled(
     BuildContext context,
     bool enabled,
@@ -1236,24 +1385,130 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
               _Section(
                 title: '外观',
-                subtitle: blurAllowed
-                    ? (enableBlur ? '手机/桌面启用毛玻璃等特效' : '已关闭毛玻璃特效（更流畅）')
-                    : 'TV 端自动关闭高开销特效',
+                subtitle: isTv
+                    ? '自定义背景 / UI 缩放 / 紧凑模式'
+                    : blurAllowed
+                        ? (enableBlur ? '手机/桌面启用毛玻璃等特效' : '已关闭毛玻璃特效（更流畅）')
+                        : 'TV 端自动关闭高开销特效',
                 enableBlur: enableBlur,
                 child: Column(
                   children: [
-                    SegmentedButton<ThemeMode>(
-                      segments: const [
-                        ButtonSegment(
-                            value: ThemeMode.system, label: Text('系统')),
-                        ButtonSegment(
-                            value: ThemeMode.light, label: Text('浅色')),
-                        ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
-                      ],
-                      selected: {appState.themeMode},
-                      onSelectionChanged: (s) => appState.setThemeMode(s.first),
-                    ),
-                    const SizedBox(height: 10),
+                    if (isTv) ...[
+                      SegmentedButton<TvBackgroundMode>(
+                        segments: TvBackgroundMode.values
+                            .map(
+                              (m) => ButtonSegment(
+                                value: m,
+                                label: Text(m.label),
+                              ),
+                            )
+                            .toList(growable: false),
+                        selected: {appState.tvBackgroundMode},
+                        onSelectionChanged: (s) {
+                          final next = s.first;
+                          // ignore: unawaited_futures
+                          appState.setTvBackgroundMode(next);
+                          if (next == TvBackgroundMode.randomApi) {
+                            // ignore: unawaited_futures
+                            appState.bumpTvBackgroundRandomNonce();
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      Builder(
+                        builder: (context) {
+                          switch (appState.tvBackgroundMode) {
+                            case TvBackgroundMode.none:
+                              return const SizedBox.shrink();
+                            case TvBackgroundMode.solidColor:
+                              final v = appState.tvBackgroundColor
+                                  .toRadixString(16)
+                                  .padLeft(8, '0')
+                                  .toUpperCase();
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(
+                                    Icons.format_color_fill_outlined),
+                                title: const Text('背景颜色'),
+                                subtitle: Text('#$v'),
+                                trailing: CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor:
+                                      Color(appState.tvBackgroundColor),
+                                ),
+                                onTap: () => _pickTvBackgroundColor(context),
+                              );
+                            case TvBackgroundMode.image:
+                              final img = appState.tvBackgroundImage.trim();
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const Icon(Icons.image_outlined),
+                                title: const Text('背景图片'),
+                                subtitle: Text(
+                                  img.isEmpty ? '未设置' : img,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: FilledButton(
+                                  onPressed: () =>
+                                      _editTvBackgroundImage(context),
+                                  child: const Text('设置'),
+                                ),
+                                onTap: () => _editTvBackgroundImage(context),
+                              );
+                            case TvBackgroundMode.randomApi:
+                              final api =
+                                  appState.tvBackgroundRandomApiUrl.trim();
+                              return Column(
+                                children: [
+                                  ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: const Icon(Icons.public_outlined),
+                                    title: const Text('随机背景 API'),
+                                    subtitle: Text(
+                                      api.isEmpty ? '未设置' : api,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    trailing: FilledButton(
+                                      onPressed: () =>
+                                          _editTvBackgroundRandomApi(context),
+                                      child: const Text('修改'),
+                                    ),
+                                    onTap: () =>
+                                        _editTvBackgroundRandomApi(context),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: FilledButton.tonal(
+                                      onPressed: () => appState
+                                          .bumpTvBackgroundRandomNonce(),
+                                      child: const Text('换一张'),
+                                    ),
+                                  ),
+                                ],
+                              );
+                          }
+                        },
+                      ),
+                      const Divider(height: 1),
+                    ],
+                    if (!isTv) ...[
+                      SegmentedButton<ThemeMode>(
+                        segments: const [
+                          ButtonSegment(
+                              value: ThemeMode.system, label: Text('系统')),
+                          ButtonSegment(
+                              value: ThemeMode.light, label: Text('浅色')),
+                          ButtonSegment(
+                              value: ThemeMode.dark, label: Text('深色')),
+                        ],
+                        selected: {appState.themeMode},
+                        onSelectionChanged: (s) =>
+                            appState.setThemeMode(s.first),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.zoom_out_map),
@@ -1352,42 +1607,45 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       contentPadding: EdgeInsets.zero,
                     ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      value: appState.useDynamicColor,
-                      onChanged: (v) => appState.setUseDynamicColor(v),
-                      title: const Text('莫奈取色（Material You）'),
-                      subtitle: const Text('Android 12+ 生效，其它平台自动回退'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    const Divider(height: 1),
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.dashboard_customize_outlined),
-                      title: const Text('UI 模板'),
-                      subtitle: const Text('不同风格/布局（手机 + 桌面）'),
-                      trailing: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: trailingMaxWidth),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<UiTemplate>(
-                            value: appState.uiTemplate,
-                            isExpanded: true,
-                            items: UiTemplate.values
-                                .map(
-                                  (t) => DropdownMenuItem(
-                                    value: t,
-                                    child: Text(t.label),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (v) {
-                              if (v == null) return;
-                              appState.setUiTemplate(v);
-                            },
+                    if (!isTv) ...[
+                      const Divider(height: 1),
+                      SwitchListTile(
+                        value: appState.useDynamicColor,
+                        onChanged: (v) => appState.setUseDynamicColor(v),
+                        title: const Text('莫奈取色（Material You）'),
+                        subtitle: const Text('Android 12+ 生效，其它平台自动回退'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.dashboard_customize_outlined),
+                        title: const Text('UI 模板'),
+                        subtitle: const Text('不同风格/布局（手机 + 桌面）'),
+                        trailing: ConstrainedBox(
+                          constraints:
+                              BoxConstraints(maxWidth: trailingMaxWidth),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<UiTemplate>(
+                              value: appState.uiTemplate,
+                              isExpanded: true,
+                              items: UiTemplate.values
+                                  .map(
+                                    (t) => DropdownMenuItem(
+                                      value: t,
+                                      child: Text(t.label),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (v) {
+                                if (v == null) return;
+                                appState.setUiTemplate(v);
+                              },
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),

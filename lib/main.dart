@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -16,6 +17,7 @@ import 'services/app_update_flow.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'services/tv_remote/tv_remote_command_dispatcher.dart';
 import 'services/tv_remote/tv_remote_service.dart';
+import 'tv/tv_background.dart';
 import 'tv/tv_shell.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -238,15 +240,29 @@ class _LinPlayerAppState extends State<LinPlayerApp>
                 final backgroundIntensity = (!hasBackdrop || isTv)
                     ? 0.0
                     : (appState.enableBlurEffects ? 1.0 : 0.65);
-                final appChild = backgroundIntensity <= 0
-                    ? child
-                    : Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          GlassBackground(intensity: backgroundIntensity),
-                          child,
-                        ],
-                      );
+
+                final tvBackgroundEnabled =
+                    isTv && appState.tvBackgroundMode != TvBackgroundMode.none;
+
+                final appChild = isTv
+                    ? (tvBackgroundEnabled
+                        ? Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              TvBackground(appState: appState),
+                              child,
+                            ],
+                          )
+                        : child)
+                    : (backgroundIntensity <= 0
+                        ? child
+                        : Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              GlassBackground(intensity: backgroundIntensity),
+                              child,
+                            ],
+                          ));
 
                 return UiScaleScope(
                   scale: scale,

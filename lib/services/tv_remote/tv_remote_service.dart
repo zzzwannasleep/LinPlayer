@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
@@ -601,17 +600,6 @@ class TvRemoteService extends ChangeNotifier {
       return {'ok': false, 'error': 'app not ready'};
     }
 
-    String encodeThemeMode(ThemeMode mode) {
-      switch (mode) {
-        case ThemeMode.system:
-          return 'system';
-        case ThemeMode.light:
-          return 'light';
-        case ThemeMode.dark:
-          return 'dark';
-      }
-    }
-
     final proxy = BuiltInProxyService.instance.status;
 
     return {
@@ -619,6 +607,11 @@ class TvRemoteService extends ChangeNotifier {
       'values': {
         'tvRemoteEnabled': appState.tvRemoteEnabled,
         'tvBuiltInProxyEnabled': appState.tvBuiltInProxyEnabled,
+        'tvBackgroundMode': appState.tvBackgroundMode.id,
+        'tvBackgroundColor': appState.tvBackgroundColor,
+        'tvBackgroundImage': appState.tvBackgroundImage,
+        'tvBackgroundRandomApiUrl': appState.tvBackgroundRandomApiUrl,
+        'tvBackgroundRandomNonce': appState.tvBackgroundRandomNonce,
         'builtInProxySupported': proxy.isSupported,
         'builtInProxyStatus': {
           'state': proxy.state.name,
@@ -629,20 +622,12 @@ class TvRemoteService extends ChangeNotifier {
           'controllerPort': proxy.controllerPort,
         },
         'forceRemoteControlKeys': appState.forceRemoteControlKeys,
-        'themeMode': encodeThemeMode(appState.themeMode),
         'uiScaleFactor': appState.uiScaleFactor,
-        'uiTemplate': appState.uiTemplate.id,
         'compactMode': appState.compactMode,
-        'useDynamicColor': appState.useDynamicColor,
       },
       'options': {
-        'themeMode': const [
-          {'id': 'system', 'label': '绯荤粺'},
-          {'id': 'light', 'label': '娴呰壊'},
-          {'id': 'dark', 'label': '娣辫壊'},
-        ],
-        'uiTemplate': UiTemplate.values
-            .map((t) => {'id': t.id, 'label': t.label})
+        'tvBackgroundMode': TvBackgroundMode.values
+            .map((m) => {'id': m.id, 'label': m.label})
             .toList(growable: false),
       },
       'constraints': const {
@@ -679,18 +664,33 @@ class TvRemoteService extends ChangeNotifier {
       return null;
     }
 
-    ThemeMode? parseThemeMode(dynamic v) {
-      final s = (v ?? '').toString().trim().toLowerCase();
-      switch (s) {
-        case 'system':
-          return ThemeMode.system;
-        case 'light':
-          return ThemeMode.light;
-        case 'dark':
-          return ThemeMode.dark;
-        default:
+    int? readInt(dynamic v) {
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v.trim());
+      return null;
+    }
+
+    int? readColor(dynamic v) {
+      if (v is String) {
+        final s = v.trim();
+        if (s.startsWith('#')) {
+          final hex = s.substring(1);
+          final parsed = int.tryParse(hex, radix: 16);
+          if (parsed == null) return null;
+          if (hex.length == 6) return 0xFF000000 | parsed;
+          if (hex.length == 8) return parsed;
           return null;
+        }
+        if (s.startsWith('0x') || s.startsWith('0X')) {
+          return int.tryParse(s.substring(2), radix: 16);
+        }
       }
+
+      final parsed = readInt(v);
+      if (parsed == null) return null;
+      if (parsed >= 0 && parsed <= 0xFFFFFF) return 0xFF000000 | parsed;
+      return parsed;
     }
 
     bool stopTvRemote = false;
@@ -725,27 +725,12 @@ class TvRemoteService extends ChangeNotifier {
                 readBool(value, fallback: appState.forceRemoteControlKeys);
             await appState.setForceRemoteControlKeys(enabled);
             break;
-          case 'themeMode':
-            final mode = parseThemeMode(value);
-            if (mode == null) {
-              return {'ok': false, 'error': 'invalid themeMode'};
-            }
-            await appState.setThemeMode(mode);
-            break;
           case 'uiScaleFactor':
             final factor = readDouble(value);
             if (factor == null) {
               return {'ok': false, 'error': 'invalid uiScaleFactor'};
             }
             await appState.setUiScaleFactor(factor);
-            break;
-          case 'uiTemplate':
-            final id = (value ?? '').toString().trim();
-            if (id.isEmpty) {
-              return {'ok': false, 'error': 'invalid uiTemplate'};
-            }
-            final template = uiTemplateFromId(id);
-            await appState.setUiTemplate(template);
             break;
           case 'compactMode':
             if (appState.uiTemplate == UiTemplate.proTool) {
@@ -754,9 +739,33 @@ class TvRemoteService extends ChangeNotifier {
             final enabled = readBool(value, fallback: appState.compactMode);
             await appState.setCompactMode(enabled);
             break;
-          case 'useDynamicColor':
-            final enabled = readBool(value, fallback: appState.useDynamicColor);
-            await appState.setUseDynamicColor(enabled);
+          case 'tvBackgroundMode':
+            final mode =
+                tvBackgroundModeFromId((value ?? '').toString().trim());
+            await appState.setTvBackgroundMode(mode);
+            if (mode == TvBackgroundMode.randomApi) {
+              await appState.bumpTvBackgroundRandomNonce();
+            }
+            break;
+          case 'tvBackgroundColor':
+            final color = readColor(value);
+            if (color == null) {
+              return {'ok': false, 'error': 'invalid tvBackgroundColor'};
+            }
+            await appState.setTvBackgroundColor(color);
+            break;
+          case 'tvBackgroundImage':
+            await appState.setTvBackgroundImage((value ?? '').toString());
+            break;
+          case 'tvBackgroundRandomApiUrl':
+            await appState
+                .setTvBackgroundRandomApiUrl((value ?? '').toString());
+            await appState.bumpTvBackgroundRandomNonce();
+            break;
+          case 'tvBackgroundRandomNext':
+            if (readBool(value, fallback: false)) {
+              await appState.bumpTvBackgroundRandomNonce();
+            }
             break;
           default:
             return {'ok': false, 'error': 'unknown key: $key'};

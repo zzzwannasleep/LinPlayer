@@ -65,19 +65,48 @@
       </div>
     </div>
 
-    <h2>外观</h2>
+    <h2>背景</h2>
     <div class="grid">
       <div>
-        <label>主题</label>
-        <select id="themeMode"></select>
+        <label>模式</label>
+        <select id="tvBackgroundMode"></select>
       </div>
-      <div>
-        <label>UI 模板</label>
-        <select id="uiTemplate"></select>
-        <div class="hint" id="templateHint"></div>
+      <div id="bgColorWrap">
+        <label>纯色（#RRGGBB / #AARRGGBB）</label>
+        <div class="grid" style="grid-template-columns: 120px 1fr;">
+          <input type="color" id="tvBackgroundColorPicker" value="#0b0b0b" />
+          <input id="tvBackgroundColorHex" placeholder="#FF0B0B0B" />
+        </div>
+        <div class="hint">改颜色会立即生效</div>
       </div>
     </div>
 
+    <div class="row" id="bgImageRow">
+      <div class="label">
+        <div class="title">图片 URL / 本地路径</div>
+        <div class="desc">示例：https://example.com/bg.jpg</div>
+      </div>
+      <div class="control" style="width: 360px;">
+        <input id="tvBackgroundImage" placeholder="留空=清空" />
+        <button type="button" id="saveBgImageBtn" style="margin-top: 8px;">保存</button>
+      </div>
+    </div>
+
+    <div class="row" id="bgApiRow">
+      <div class="label">
+        <div class="title">随机背景 API</div>
+        <div class="desc">默认：Bing https://bing.img.run/rand.php</div>
+      </div>
+      <div class="control" style="width: 360px;">
+        <input id="tvBackgroundRandomApiUrl" placeholder="https://bing.img.run/rand.php" />
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px;">
+          <button type="button" id="saveBgApiBtn">保存</button>
+          <button type="button" id="nextBgBtn">换一张</button>
+        </div>
+      </div>
+    </div>
+
+    <h2>外观</h2>
     <div class="row">
       <div class="label">
         <div class="title">紧凑模式</div>
@@ -90,16 +119,6 @@
 
     <label>UI 缩放：<span id="uiScaleLabel">1.00x</span></label>
     <input type="range" id="uiScaleFactor" min="0.25" max="2.0" step="0.05" />
-
-    <div class="row">
-      <div class="label">
-        <div class="title">动态取色（Android 12+）</div>
-        <div class="desc">从系统壁纸提取配色（不支持设备会自动忽略）</div>
-      </div>
-      <div class="control small">
-        <input type="checkbox" id="useDynamicColor" />
-      </div>
-    </div>
 
     <h2>交互</h2>
     <div class="row">
@@ -162,14 +181,21 @@
       tvRemoteEnabled: document.getElementById('tvRemoteEnabled'),
       tvBuiltInProxyEnabled: document.getElementById('tvBuiltInProxyEnabled'),
       proxyDesc: document.getElementById('proxyDesc'),
-      themeMode: document.getElementById('themeMode'),
-      uiTemplate: document.getElementById('uiTemplate'),
-      templateHint: document.getElementById('templateHint'),
+      tvBackgroundMode: document.getElementById('tvBackgroundMode'),
+      bgColorWrap: document.getElementById('bgColorWrap'),
+      tvBackgroundColorPicker: document.getElementById('tvBackgroundColorPicker'),
+      tvBackgroundColorHex: document.getElementById('tvBackgroundColorHex'),
+      bgImageRow: document.getElementById('bgImageRow'),
+      tvBackgroundImage: document.getElementById('tvBackgroundImage'),
+      saveBgImageBtn: document.getElementById('saveBgImageBtn'),
+      bgApiRow: document.getElementById('bgApiRow'),
+      tvBackgroundRandomApiUrl: document.getElementById('tvBackgroundRandomApiUrl'),
+      saveBgApiBtn: document.getElementById('saveBgApiBtn'),
+      nextBgBtn: document.getElementById('nextBgBtn'),
       compactMode: document.getElementById('compactMode'),
       compactDesc: document.getElementById('compactDesc'),
       uiScaleFactor: document.getElementById('uiScaleFactor'),
       uiScaleLabel: document.getElementById('uiScaleLabel'),
-      useDynamicColor: document.getElementById('useDynamicColor'),
       forceRemoteControlKeys: document.getElementById('forceRemoteControlKeys'),
     };
 
@@ -212,11 +238,26 @@
         els.tvBuiltInProxyEnabled.disabled = !proxySupported;
         els.proxyDesc.textContent = proxySupported ? (proxyStatus.message || '支持') : '仅 Android TV 支持';
 
-        setSelectOptions(els.themeMode, options.themeMode || []);
-        els.themeMode.value = String(values.themeMode || 'system');
+        setSelectOptions(els.tvBackgroundMode, options.tvBackgroundMode || []);
+        const bgMode = String(values.tvBackgroundMode || 'none');
+        els.tvBackgroundMode.value = bgMode;
 
-        setSelectOptions(els.uiTemplate, options.uiTemplate || []);
-        els.uiTemplate.value = String(values.uiTemplate || '');
+        const showColor = bgMode === 'solid';
+        const showImage = bgMode === 'image';
+        const showApi = bgMode === 'random';
+        els.bgColorWrap.style.display = showColor ? '' : 'none';
+        els.bgImageRow.style.display = showImage ? '' : 'none';
+        els.bgApiRow.style.display = showApi ? '' : 'none';
+
+        const argbRaw = Number(values.tvBackgroundColor != null ? values.tvBackgroundColor : 0xFF0B0B0B);
+        const argb = Number.isFinite(argbRaw) ? (argbRaw >>> 0) : 0xFF0B0B0B;
+        const hex8 = '#' + argb.toString(16).padStart(8, '0').toUpperCase();
+        const rgb6 = '#' + (argb & 0xFFFFFF).toString(16).padStart(6, '0');
+        els.tvBackgroundColorHex.value = hex8;
+        els.tvBackgroundColorPicker.value = rgb6;
+
+        els.tvBackgroundImage.value = String(values.tvBackgroundImage || '');
+        els.tvBackgroundRandomApiUrl.value = String(values.tvBackgroundRandomApiUrl || '');
 
         els.compactMode.checked = !!values.compactMode;
         if (meta.compactModeLocked) {
@@ -226,8 +267,6 @@
           els.compactMode.disabled = false;
           els.compactDesc.textContent = '缩小控件间距与高度';
         }
-
-        els.useDynamicColor.checked = !!values.useDynamicColor;
         els.forceRemoteControlKeys.checked = !!values.forceRemoteControlKeys;
 
         const min = Number(constraints.min != null ? constraints.min : 0.25);
@@ -240,9 +279,6 @@
         els.uiScaleFactor.value = String(uiScale);
         els.uiScaleLabel.textContent = uiScale.toFixed(2) + 'x';
 
-        els.templateHint.textContent = (els.uiTemplate.value === 'pro')
-          ? '专业工具模板：会强制开启紧凑模式'
-          : '';
       } catch (e) {
         log('读取设置失败：' + e);
       }
@@ -283,11 +319,28 @@
     els.tvBuiltInProxyEnabled.addEventListener('change', async (e) => {
       await save({ tvBuiltInProxyEnabled: !!e.target.checked });
     });
-    els.themeMode.addEventListener('change', async (e) => {
-      await save({ themeMode: String(e.target.value || 'system') });
+    els.tvBackgroundMode.addEventListener('change', async (e) => {
+      await save({ tvBackgroundMode: String(e.target.value || 'none') });
     });
-    els.uiTemplate.addEventListener('change', async (e) => {
-      await save({ uiTemplate: String(e.target.value || '') });
+    els.tvBackgroundColorPicker.addEventListener('change', async (e) => {
+      const hex = String(e.target.value || '').trim();
+      if (!hex) return;
+      els.tvBackgroundColorHex.value = '#FF' + hex.replace('#', '').toUpperCase();
+      await save({ tvBackgroundColor: hex });
+    });
+    els.tvBackgroundColorHex.addEventListener('change', async (e) => {
+      const hex = String(e.target.value || '').trim();
+      if (!hex) return;
+      await save({ tvBackgroundColor: hex });
+    });
+    els.saveBgImageBtn.addEventListener('click', async () => {
+      await save({ tvBackgroundImage: String(els.tvBackgroundImage.value || '').trim() });
+    });
+    els.saveBgApiBtn.addEventListener('click', async () => {
+      await save({ tvBackgroundRandomApiUrl: String(els.tvBackgroundRandomApiUrl.value || '').trim() });
+    });
+    els.nextBgBtn.addEventListener('click', async () => {
+      await save({ tvBackgroundRandomNext: true });
     });
     els.compactMode.addEventListener('change', async (e) => {
       await save({ compactMode: !!e.target.checked });
@@ -301,9 +354,6 @@
       const v = Number(e.target.value);
       if (!Number.isFinite(v)) return;
       await save({ uiScaleFactor: v });
-    });
-    els.useDynamicColor.addEventListener('change', async (e) => {
-      await save({ useDynamicColor: !!e.target.checked });
     });
     els.forceRemoteControlKeys.addEventListener('change', async (e) => {
       await save({ forceRemoteControlKeys: !!e.target.checked });

@@ -90,6 +90,12 @@ jobs:
       - name: Flutter tests
         run: flutter test
 
+      - name: Fetch TV proxy assets (mihomo + metacubexd)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./tool/fetch_tv_proxy_assets.ps1
+
       - name: Configure Android release signing (OTA-safe)
         shell: bash
         env:

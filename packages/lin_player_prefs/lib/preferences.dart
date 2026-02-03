@@ -11,6 +11,54 @@ enum UiTemplate {
   proTool,
 }
 
+enum TvBackgroundMode {
+  none,
+  solidColor,
+  image,
+  randomApi,
+}
+
+TvBackgroundMode tvBackgroundModeFromId(String? id) {
+  switch ((id ?? '').trim().toLowerCase()) {
+    case 'solid':
+      return TvBackgroundMode.solidColor;
+    case 'image':
+      return TvBackgroundMode.image;
+    case 'random':
+      return TvBackgroundMode.randomApi;
+    default:
+      return TvBackgroundMode.none;
+  }
+}
+
+extension TvBackgroundModeX on TvBackgroundMode {
+  String get id {
+    switch (this) {
+      case TvBackgroundMode.none:
+        return 'none';
+      case TvBackgroundMode.solidColor:
+        return 'solid';
+      case TvBackgroundMode.image:
+        return 'image';
+      case TvBackgroundMode.randomApi:
+        return 'random';
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case TvBackgroundMode.none:
+        return '无';
+      case TvBackgroundMode.solidColor:
+        return '纯色';
+      case TvBackgroundMode.image:
+        return '图片';
+      case TvBackgroundMode.randomApi:
+        return '随机 API';
+    }
+  }
+}
+
 UiTemplate uiTemplateFromId(String? id) {
   switch (id) {
     // Legacy ids (<= early versions).

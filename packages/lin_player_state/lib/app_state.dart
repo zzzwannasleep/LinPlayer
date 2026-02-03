@@ -209,6 +209,11 @@ class AppState extends ChangeNotifier {
   // TV-only features.
   static const _kTvRemoteEnabledKey = 'tvRemoteEnabled_v1';
   static const _kTvBuiltInProxyEnabledKey = 'tvBuiltInProxyEnabled_v1';
+  static const _kTvBackgroundModeKey = 'tvBackgroundMode_v1';
+  static const _kTvBackgroundColorKey = 'tvBackgroundColor_v1';
+  static const _kTvBackgroundImageKey = 'tvBackgroundImage_v1';
+  static const _kTvBackgroundRandomApiUrlKey = 'tvBackgroundRandomApiUrl_v1';
+  static const _kTvBackgroundRandomNonceKey = 'tvBackgroundRandomNonce_v1';
   static const _kEpisodePickerShowTitleKey = 'episodePickerShowTitle_v1';
   // Legacy: migrated to [_kEpisodePickerShowTitleKey].
   static const _kEpisodePickerShowCoverKey = 'episodePickerShowCover_v1';
@@ -295,6 +300,11 @@ class AppState extends ChangeNotifier {
   bool _forceRemoteControlKeys = false;
   bool _tvRemoteEnabled = false;
   bool _tvBuiltInProxyEnabled = false;
+  TvBackgroundMode _tvBackgroundMode = TvBackgroundMode.none;
+  int _tvBackgroundColor = 0xFF0B0B0B;
+  String _tvBackgroundImage = '';
+  String _tvBackgroundRandomApiUrl = 'https://bing.img.run/rand.php';
+  int _tvBackgroundRandomNonce = 0;
   bool _episodePickerShowTitle = true;
   LocalPlaybackHandoff? _localPlaybackHandoff;
   bool _loading = false;
@@ -692,6 +702,11 @@ class AppState extends ChangeNotifier {
   bool get forceRemoteControlKeys => _forceRemoteControlKeys;
   bool get tvRemoteEnabled => _tvRemoteEnabled;
   bool get tvBuiltInProxyEnabled => _tvBuiltInProxyEnabled;
+  TvBackgroundMode get tvBackgroundMode => _tvBackgroundMode;
+  int get tvBackgroundColor => _tvBackgroundColor;
+  String get tvBackgroundImage => _tvBackgroundImage;
+  String get tvBackgroundRandomApiUrl => _tvBackgroundRandomApiUrl;
+  int get tvBackgroundRandomNonce => _tvBackgroundRandomNonce;
   bool get episodePickerShowTitle => _episodePickerShowTitle;
 
   SeriesPlaybackOverride? seriesPlaybackOverride({
@@ -914,8 +929,17 @@ class AppState extends ChangeNotifier {
     _forceRemoteControlKeys =
         prefs.getBool(_kForceRemoteControlKeysKey) ?? false;
     _tvRemoteEnabled = prefs.getBool(_kTvRemoteEnabledKey) ?? false;
-    _tvBuiltInProxyEnabled =
-        prefs.getBool(_kTvBuiltInProxyEnabledKey) ?? false;
+    _tvBuiltInProxyEnabled = prefs.getBool(_kTvBuiltInProxyEnabledKey) ?? false;
+    _tvBackgroundMode =
+        tvBackgroundModeFromId(prefs.getString(_kTvBackgroundModeKey));
+    _tvBackgroundColor =
+        prefs.getInt(_kTvBackgroundColorKey) ?? _tvBackgroundColor;
+    _tvBackgroundImage = prefs.getString(_kTvBackgroundImageKey) ?? '';
+    _tvBackgroundRandomApiUrl =
+        prefs.getString(_kTvBackgroundRandomApiUrlKey) ??
+            _tvBackgroundRandomApiUrl;
+    _tvBackgroundRandomNonce =
+        prefs.getInt(_kTvBackgroundRandomNonceKey) ?? _tvBackgroundRandomNonce;
     _episodePickerShowTitle = prefs.getBool(_kEpisodePickerShowTitleKey) ??
         prefs.getBool(_kEpisodePickerShowCoverKey) ??
         true;
@@ -1090,6 +1114,11 @@ class AppState extends ChangeNotifier {
         'tv': {
           'remoteEnabled': _tvRemoteEnabled,
           'builtInProxyEnabled': _tvBuiltInProxyEnabled,
+          'backgroundMode': _tvBackgroundMode.id,
+          'backgroundColor': _tvBackgroundColor,
+          'backgroundImage': _tvBackgroundImage,
+          'backgroundRandomApiUrl': _tvBackgroundRandomApiUrl,
+          'backgroundRandomNonce': _tvBackgroundRandomNonce,
         },
         'seriesPlaybackOverrides': _seriesPlaybackOverrides.map(
           (serverId, seriesMap) => MapEntry(
@@ -1507,6 +1536,16 @@ class AppState extends ChangeNotifier {
         _readBool(tvMap['remoteEnabled'], fallback: false);
     final nextTvBuiltInProxyEnabled =
         _readBool(tvMap['builtInProxyEnabled'], fallback: false);
+    final nextTvBackgroundMode = tvMap.containsKey('backgroundMode')
+        ? tvBackgroundModeFromId(tvMap['backgroundMode']?.toString())
+        : TvBackgroundMode.none;
+    final nextTvBackgroundColor =
+        _readInt(tvMap['backgroundColor'], fallback: 0xFF0B0B0B);
+    final nextTvBackgroundImage = tvMap['backgroundImage']?.toString() ?? '';
+    final nextTvBackgroundRandomApiUrl =
+        tvMap['backgroundRandomApiUrl']?.toString() ?? '';
+    final nextTvBackgroundRandomNonce =
+        _readInt(tvMap['backgroundRandomNonce'], fallback: 0);
     final nextEpisodePickerShowTitle = _readBool(
       interactionMap['episodePickerShowTitle'] ??
           interactionMap['episodePickerShowCover'],
@@ -1603,6 +1642,13 @@ class AppState extends ChangeNotifier {
     _forceRemoteControlKeys = nextForceRemoteControlKeys;
     _tvRemoteEnabled = nextTvRemoteEnabled;
     _tvBuiltInProxyEnabled = nextTvBuiltInProxyEnabled;
+    _tvBackgroundMode = nextTvBackgroundMode;
+    _tvBackgroundColor = nextTvBackgroundColor;
+    _tvBackgroundImage = nextTvBackgroundImage;
+    _tvBackgroundRandomApiUrl = nextTvBackgroundRandomApiUrl.trim().isEmpty
+        ? _tvBackgroundRandomApiUrl
+        : nextTvBackgroundRandomApiUrl.trim();
+    _tvBackgroundRandomNonce = nextTvBackgroundRandomNonce;
     _episodePickerShowTitle = nextEpisodePickerShowTitle;
     _seriesPlaybackOverrides
       ..clear()
@@ -1750,6 +1796,12 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_kForceRemoteControlKeysKey, _forceRemoteControlKeys);
     await prefs.setBool(_kTvRemoteEnabledKey, _tvRemoteEnabled);
     await prefs.setBool(_kTvBuiltInProxyEnabledKey, _tvBuiltInProxyEnabled);
+    await prefs.setString(_kTvBackgroundModeKey, _tvBackgroundMode.id);
+    await prefs.setInt(_kTvBackgroundColorKey, _tvBackgroundColor);
+    await prefs.setString(_kTvBackgroundImageKey, _tvBackgroundImage);
+    await prefs.setString(
+        _kTvBackgroundRandomApiUrlKey, _tvBackgroundRandomApiUrl);
+    await prefs.setInt(_kTvBackgroundRandomNonceKey, _tvBackgroundRandomNonce);
     await prefs.setBool(_kEpisodePickerShowTitleKey, _episodePickerShowTitle);
     // Legacy key for older builds.
     await prefs.setBool(_kEpisodePickerShowCoverKey, _episodePickerShowTitle);
@@ -3419,6 +3471,52 @@ class AppState extends ChangeNotifier {
     _tvBuiltInProxyEnabled = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kTvBuiltInProxyEnabledKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setTvBackgroundMode(TvBackgroundMode mode) async {
+    if (_tvBackgroundMode == mode) return;
+    _tvBackgroundMode = mode;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kTvBackgroundModeKey, mode.id);
+    notifyListeners();
+  }
+
+  Future<void> setTvBackgroundColor(int argb) async {
+    if (_tvBackgroundColor == argb) return;
+    _tvBackgroundColor = argb;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kTvBackgroundColorKey, argb);
+    notifyListeners();
+  }
+
+  Future<void> setTvBackgroundImage(String image) async {
+    final v = image.trim();
+    if (_tvBackgroundImage == v) return;
+    _tvBackgroundImage = v;
+    final prefs = await SharedPreferences.getInstance();
+    if (v.isEmpty) {
+      await prefs.remove(_kTvBackgroundImageKey);
+    } else {
+      await prefs.setString(_kTvBackgroundImageKey, v);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setTvBackgroundRandomApiUrl(String url) async {
+    final v = url.trim();
+    if (v.isEmpty) return;
+    if (_tvBackgroundRandomApiUrl == v) return;
+    _tvBackgroundRandomApiUrl = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kTvBackgroundRandomApiUrlKey, v);
+    notifyListeners();
+  }
+
+  Future<void> bumpTvBackgroundRandomNonce() async {
+    _tvBackgroundRandomNonce = (_tvBackgroundRandomNonce + 1) % 1000000000;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kTvBackgroundRandomNonceKey, _tvBackgroundRandomNonce);
     notifyListeners();
   }
 
