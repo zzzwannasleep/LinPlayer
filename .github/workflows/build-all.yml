@@ -55,18 +55,6 @@ jobs:
           BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
-      
-      - name: Write build summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "### Android build"
-            echo ""
-            echo "- Version: \`${VERSION_FULL}\`"
-            echo "- Build name: \`${BUILD_NAME}\`"
-            echo "- Build number: \`${BUILD_NUMBER}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache Flutter pub packages
         uses: actions/cache@v4
@@ -195,18 +183,6 @@ jobs:
           BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: .github/scripts/compute_version.ps1
-      
-      - name: Write build summary
-        shell: pwsh
-        run: |
-          $lines = @(
-            '### Windows build',
-            '',
-            ('- Version: `{0}`' -f $env:VERSION_FULL),
-            ('- Build name: `{0}`' -f $env:BUILD_NAME),
-            ('- Build number: `{0}`' -f $env:BUILD_NUMBER)
-          )
-          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
       - name: Enable Windows desktop support
         run: flutter config --enable-windows-desktop
@@ -362,18 +338,6 @@ jobs:
           BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
-      
-      - name: Write build summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "### Linux build"
-            echo ""
-            echo "- Version: \`${VERSION_FULL}\`"
-            echo "- Build name: \`${BUILD_NAME}\`"
-            echo "- Build number: \`${BUILD_NUMBER}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Linux app
         shell: bash
@@ -450,18 +414,6 @@ jobs:
           BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
-      
-      - name: Write build summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "### iOS build"
-            echo ""
-            echo "- Version: \`${VERSION_FULL}\`"
-            echo "- Build name: \`${BUILD_NAME}\`"
-            echo "- Build number: \`${BUILD_NUMBER}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build iOS app (no codesign)
         shell: bash
@@ -580,18 +532,6 @@ jobs:
           BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
-      
-      - name: Write build summary
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "### macOS build (${{ matrix.arch }})"
-            echo ""
-            echo "- Version: \`${VERSION_FULL}\`"
-            echo "- Build name: \`${BUILD_NAME}\`"
-            echo "- Build number: \`${BUILD_NUMBER}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build macOS app
         run: flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
@@ -634,11 +574,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          {
-            echo "### Apple TV (tvOS)"
-            echo ""
-            echo "- Status: disabled (\`build_appletv=false\`)"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Apple TV (tvOS) build disabled (build_appletv=false)."
 
       - name: Check out code
         if: ${{ matrix.enabled }}
@@ -672,19 +608,6 @@ jobs:
           BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
           BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
-      
-      - name: Write build summary
-        if: ${{ matrix.enabled }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            echo "### Apple TV (tvOS) build"
-            echo ""
-            echo "- Version: \`${VERSION_FULL}\`"
-            echo "- Build name: \`${BUILD_NAME}\`"
-            echo "- Build number: \`${BUILD_NUMBER}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify tvOS scaffold exists
         if: ${{ matrix.enabled }}
