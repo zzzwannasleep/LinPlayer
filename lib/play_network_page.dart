@@ -16,6 +16,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import 'play_network_page_exo.dart';
 import 'server_adapters/server_access.dart';
+import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 
 class PlayNetworkPage extends StatefulWidget {
@@ -51,7 +52,7 @@ class PlayNetworkPage extends StatefulWidget {
 }
 
 class _PlayNetworkPageState extends State<PlayNetworkPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
   ServerAccess? _serverAccess;
@@ -87,6 +88,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   double? _netSpeedBytesPerSecond;
   bool _appliedAudioPref = false;
   bool _appliedSubtitlePref = false;
+  PageRoute<dynamic>? _route;
   String? _playSessionId;
   String? _mediaSourceId;
   List<Map<String, dynamic>> _availableMediaSources = const [];
@@ -221,6 +223,28 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _init();
     // ignore: unawaited_futures
     _loadEpisodePickerItem();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute && route != _route) {
+      if (_route != null) appRouteObserver.unsubscribe(this);
+      _route = route;
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPushNext() {
+    // User navigated away from the playback page: stop playback & buffering.
+    _netSpeedTimer?.cancel();
+    _netSpeedTimer = null;
+    // ignore: unawaited_futures
+    _reportPlaybackStoppedBestEffort();
+    // ignore: unawaited_futures
+    _playerService.dispose();
   }
 
   Future<void> _init() async {
@@ -2420,6 +2444,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   @override
   void dispose() {
+    if (_route != null) {
+      appRouteObserver.unsubscribe(this);
+      _route = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
@@ -4240,10 +4268,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   }
 
   SubtitleViewConfiguration get _subtitleViewConfiguration {
-    if (!kIsWeb) {
-      // MPV libass subtitles are rendered by mpv itself (native), hide Flutter overlay to avoid duplicates.
-      return const SubtitleViewConfiguration(visible: false);
-    }
     const base = SubtitleViewConfiguration();
     final bottom =
         (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();

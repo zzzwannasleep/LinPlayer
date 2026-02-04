@@ -15,6 +15,8 @@ import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
+import 'services/app_route_observer.dart';
+
 class ExoPlayerScreen extends StatefulWidget {
   const ExoPlayerScreen({
     super.key,
@@ -30,12 +32,13 @@ class ExoPlayerScreen extends StatefulWidget {
 }
 
 class _ExoPlayerScreenState extends State<ExoPlayerScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   final List<PlatformFile> _playlist = [];
   int _currentIndex = -1;
 
   VideoPlayerController? _controller;
   Timer? _uiTimer;
+  PageRoute<dynamic>? _route;
   bool _exitInProgress = false;
   bool _allowRoutePop = false;
 
@@ -166,6 +169,29 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute && route != _route) {
+      if (_route != null) appRouteObserver.unsubscribe(this);
+      _route = route;
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPushNext() {
+    // User navigated away from the playback page: stop playback & buffering.
+    _controlsHideTimer?.cancel();
+    _controlsHideTimer = null;
+    _uiTimer?.cancel();
+    _uiTimer = null;
+    // ignore: unawaited_futures
+    _controller?.dispose();
+    _controller = null;
+  }
+
   Future<void> _switchCore() async {
     final playlist = _playlist
         .where((f) => (f.path ?? '').trim().isNotEmpty)
@@ -197,6 +223,10 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
 
   @override
   void dispose() {
+    if (_route != null) {
+      appRouteObserver.unsubscribe(this);
+      _route = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
@@ -1270,6 +1300,73 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
     } catch (_) {}
   }
 
+  Future<void> _maybeAutoSelectSubtitleTrack(VideoPlayerController controller) async {
+    if (!_isAndroid) return;
+
+    final prefRaw = widget.appState.preferredSubtitleLang.trim();
+    final shouldOff = isSubtitleOffPreference(prefRaw);
+
+    // ignore: invalid_use_of_visible_for_testing_member
+    final playerId = controller.playerId;
+    final api = vp_android.VideoPlayerInstanceApi(
+      messageChannelSuffix: playerId.toString(),
+    );
+
+    if (shouldOff) {
+      try {
+        await api.deselectSubtitleTrack();
+      } catch (_) {}
+      return;
+    }
+
+    late final List<vp_android.ExoPlayerSubtitleTrackData> tracks;
+    try {
+      final data = await api.getSubtitleTracks();
+      tracks = data.exoPlayerTracks ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+    } catch (_) {
+      return;
+    }
+
+    if (tracks.isEmpty) return;
+    if (tracks.any((t) => t.isSelected)) return;
+
+    final isDefaultPref =
+        prefRaw.isEmpty || prefRaw.toLowerCase() == 'default';
+    final primaryPref = isDefaultPref ? 'zhs' : prefRaw;
+
+    vp_android.ExoPlayerSubtitleTrackData? picked;
+    if (primaryPref.isNotEmpty) {
+      for (final t in tracks) {
+        if (matchesPreferredLanguage(
+          preference: primaryPref,
+          language: t.language,
+          title: t.label,
+        )) {
+          picked = t;
+          break;
+        }
+      }
+    }
+
+    if (picked == null && isDefaultPref) {
+      for (final t in tracks) {
+        if (matchesPreferredLanguage(
+          preference: 'chi',
+          language: t.language,
+          title: t.label,
+        )) {
+          picked = t;
+          break;
+        }
+      }
+    }
+
+    if (picked == null) return;
+    try {
+      await api.selectSubtitleTrack(picked.groupIndex, picked.trackIndex);
+    } catch (_) {}
+  }
+
   Future<void> _pollSubtitleText() async {
     if (_subtitlePollInFlight) return;
     final controller = _controller;
@@ -1888,6 +1985,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       await controller.initialize();
       await _applyOrientationForMode();
       await _applyExoSubtitleOptions();
+      await _maybeAutoSelectSubtitleTrack(controller);
       if (startPosition != null && startPosition > Duration.zero) {
         final d = controller.value.duration;
         final target =

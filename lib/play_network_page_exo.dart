@@ -17,6 +17,7 @@ import 'package:video_player_platform_interface/video_player_platform_interface.
 
 import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
+import 'services/app_route_observer.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
   const ExoPlayNetworkPage({
@@ -51,10 +52,11 @@ class ExoPlayNetworkPage extends StatefulWidget {
 }
 
 class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
   Timer? _uiTimer;
+  PageRoute<dynamic>? _route;
 
   bool _loading = true;
   String? _playError;
@@ -216,7 +218,34 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute && route != _route) {
+      if (_route != null) appRouteObserver.unsubscribe(this);
+      _route = route;
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPushNext() {
+    // User navigated away from the playback page: stop playback & buffering.
+    _uiTimer?.cancel();
+    _uiTimer = null;
+    // ignore: unawaited_futures
+    _reportPlaybackStoppedBestEffort();
+    // ignore: unawaited_futures
+    _controller?.dispose();
+    _controller = null;
+  }
+
+  @override
   void dispose() {
+    if (_route != null) {
+      appRouteObserver.unsubscribe(this);
+      _route = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
@@ -1397,6 +1426,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _controller = controller;
     await controller.initialize();
     await _applyExoSubtitleOptions();
+    await _maybeAutoSelectSubtitleTrack(controller);
 
     final target = _safeSeekTarget(pos, controller.value.duration);
     if (target > Duration.zero) {
@@ -2219,6 +2249,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       await controller.initialize();
       await _applyOrientationForMode();
       await _applyExoSubtitleOptions();
+      await _maybeAutoSelectSubtitleTrack(controller);
       final start = _overrideStartPosition ?? widget.startPosition;
       final resumeImmediately =
           _overrideResumeImmediately || widget.resumeImmediately;
@@ -3073,6 +3104,75 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           bold: _subtitleBold,
         ),
       );
+    } catch (_) {}
+  }
+
+  Future<void> _maybeAutoSelectSubtitleTrack(VideoPlayerController controller) async {
+    if (!_isAndroid) return;
+
+    final prefRaw = widget.appState.preferredSubtitleLang.trim();
+    final shouldOff =
+        _selectedSubtitleStreamIndex == -1 || isSubtitleOffPreference(prefRaw);
+
+    // ignore: invalid_use_of_visible_for_testing_member
+    final playerId = controller.playerId;
+    final api = vp_android.VideoPlayerInstanceApi(
+      messageChannelSuffix: playerId.toString(),
+    );
+
+    if (shouldOff) {
+      try {
+        await api.deselectSubtitleTrack();
+      } catch (_) {}
+      return;
+    }
+
+    late final List<vp_android.ExoPlayerSubtitleTrackData> tracks;
+    try {
+      final data = await api.getSubtitleTracks();
+      tracks = data.exoPlayerTracks ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+    } catch (_) {
+      return;
+    }
+
+    if (tracks.isEmpty) return;
+    if (tracks.any((t) => t.isSelected)) return;
+
+    final isDefaultPref =
+        prefRaw.isEmpty || prefRaw.toLowerCase() == 'default';
+    final primaryPref = isDefaultPref ? 'zhs' : prefRaw;
+
+    vp_android.ExoPlayerSubtitleTrackData? picked;
+    if (primaryPref.isNotEmpty) {
+      for (final t in tracks) {
+        if (matchesPreferredLanguage(
+          preference: primaryPref,
+          language: t.language,
+          title: t.label,
+        )) {
+          picked = t;
+          break;
+        }
+      }
+    }
+
+    // Default fallback: any Chinese subtitle if Simplified isn't available.
+    if (picked == null && isDefaultPref) {
+      for (final t in tracks) {
+        if (matchesPreferredLanguage(
+          preference: 'chi',
+          language: t.language,
+          title: t.label,
+        )) {
+          picked = t;
+          break;
+        }
+      }
+    }
+
+    if (picked == null) return;
+    try {
+      await api.selectSubtitleTrack(picked.groupIndex, picked.trackIndex);
     } catch (_) {}
   }
 

@@ -530,6 +530,9 @@ class PlayerService {
     _player = null;
     _controller = null;
     if (player != null) {
+      try {
+        await player.stop();
+      } catch (_) {}
       await player.dispose();
     }
   }

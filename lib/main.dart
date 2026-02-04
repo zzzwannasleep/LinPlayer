@@ -15,6 +15,7 @@ import 'server_page.dart';
 import 'webdav_home_page.dart';
 import 'services/app_update_flow.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
+import 'services/app_route_observer.dart';
 import 'services/tv_remote/tv_remote_command_dispatcher.dart';
 import 'services/tv_remote/tv_remote_service.dart';
 import 'tv/tv_background.dart';
@@ -132,6 +133,7 @@ class _LinPlayerAppState extends State<LinPlayerApp>
             final useDynamic = appState.useDynamicColor;
             return MaterialApp(
               navigatorKey: _rootNavigatorKey,
+              navigatorObservers: [appRouteObserver],
               key: ValueKey<String>('nav:${appState.activeServerId ?? 'none'}'),
               title: appConfig.displayName,
               debugShowCheckedModeBanner: false,

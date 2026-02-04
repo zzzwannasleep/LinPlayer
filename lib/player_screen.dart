@@ -14,6 +14,7 @@ import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -31,7 +32,7 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   final PlayerService _playerService = getPlayerService();
   MediaKitThumbnailGenerator? _thumbnailer;
   final List<PlatformFile> _playlist = [];
@@ -57,6 +58,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   late bool _hwdecOn;
   late Anime4kPreset _anime4kPreset;
   Tracks _tracks = const Tracks();
+  PageRoute<dynamic>? _route;
   DateTime? _lastPositionUiUpdate;
   bool _appliedAudioPref = false;
   bool _appliedSubtitlePref = false;
@@ -180,6 +182,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   @override
   void dispose() {
+    if (_route != null) {
+      appRouteObserver.unsubscribe(this);
+      _route = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
@@ -843,6 +849,24 @@ class _PlayerScreenState extends State<PlayerScreen>
         _playFile(_playlist.first, 0);
       }
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route is PageRoute && route != _route) {
+      if (_route != null) appRouteObserver.unsubscribe(this);
+      _route = route;
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPushNext() {
+    // User navigated away from the playback page: stop playback & buffering.
+    // ignore: unawaited_futures
+    _playerService.dispose();
   }
 
   Future<void> _playFile(
@@ -2674,10 +2698,6 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   SubtitleViewConfiguration get _subtitleViewConfiguration {
-    if (!kIsWeb) {
-      // MPV libass subtitles are rendered by mpv itself (native), hide Flutter overlay to avoid duplicates.
-      return const SubtitleViewConfiguration(visible: false);
-    }
     const base = SubtitleViewConfiguration();
     final bottom =
         (_subtitlePositionStep.clamp(0, 20) * 5.0).clamp(0.0, 200.0).toDouble();
