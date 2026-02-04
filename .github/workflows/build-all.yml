@@ -767,3 +767,93 @@ jobs:
           if [[ -f "dist/LinPlayer-AppleTV-unsigned.ipa" ]]; then
             gh release upload nightly "dist/LinPlayer-AppleTV-unsigned.ipa" --clobber
           fi
+
+      - name: Remove stale/duplicate nightly assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Keep only the latest asset for each expected filename, and remove any older/stale
+          # LinPlayer-* assets that may have been left behind by previous workflow versions.
+          expected_assets=(
+            "LinPlayer-Android-arm64-v8a.apk"
+            "LinPlayer-Android-TV.apk"
+            "LinPlayer-Android.apk"
+            "LinPlayer-Windows-Setup-x64.exe"
+            "LinPlayer-Linux-x86_64.tar.gz"
+            "LinPlayer-iOS-unsigned.ipa"
+            "LinPlayer-macOS-arm64.dmg"
+            "LinPlayer-macOS-x86_64.dmg"
+          )
+          if [[ -f "dist/LinPlayer-AppleTV-unsigned.ipa" ]]; then
+            expected_assets+=("LinPlayer-AppleTV-unsigned.ipa")
+          fi
+
+          declare -A expected=()
+          for name in "${expected_assets[@]}"; do
+            expected["$name"]=1
+          done
+
+          # Fetch current nightly release assets (id, name, created_at).
+          mapfile -t assets < <(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/nightly" \
+              --jq '.assets[] | "\(.id)\t\(.name)\t\(.created_at)"'
+          )
+
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "No nightly assets found; nothing to clean."
+            exit 0
+          fi
+
+          # Determine which asset id to keep for each expected name (newest created_at).
+          declare -A keep_id=()
+          declare -A keep_ts=()
+          for line in "${assets[@]}"; do
+            id="${line%%$'\t'*}"
+            rest="${line#*$'\t'}"
+            name="${rest%%$'\t'*}"
+            ts="${rest#*$'\t'}"
+
+            if [[ -z "${expected[$name]+x}" ]]; then
+              continue
+            fi
+
+            if [[ -z "${keep_ts[$name]+x}" || "$ts" > "${keep_ts[$name]}" ]]; then
+              keep_ts["$name"]="$ts"
+              keep_id["$name"]="$id"
+            fi
+          done
+
+          # Delete any stale LinPlayer-* assets not in expected list.
+          for line in "${assets[@]}"; do
+            id="${line%%$'\t'*}"
+            rest="${line#*$'\t'}"
+            name="${rest%%$'\t'*}"
+
+            if [[ "$name" != LinPlayer-* ]]; then
+              continue
+            fi
+            if [[ -n "${expected[$name]+x}" ]]; then
+              continue
+            fi
+
+            echo "Deleting stale asset: $name ($id)"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
+          done
+
+          # Delete duplicates for expected assets, keeping only the newest one per name.
+          for line in "${assets[@]}"; do
+            id="${line%%$'\t'*}"
+            rest="${line#*$'\t'}"
+            name="${rest%%$'\t'*}"
+
+            if [[ -z "${expected[$name]+x}" ]]; then
+              continue
+            fi
+            if [[ "${keep_id[$name]}" == "$id" ]]; then
+              continue
+            fi
+
+            echo "Deleting duplicate asset: $name ($id)"
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
+          done
