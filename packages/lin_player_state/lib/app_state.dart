@@ -260,7 +260,7 @@ class AppState extends ChangeNotifier {
   String _externalMpvPath = '';
   Anime4kPreset _anime4kPreset = Anime4kPreset.off;
   bool _danmakuEnabled = true;
-  DanmakuLoadMode _danmakuLoadMode = DanmakuLoadMode.local;
+  DanmakuLoadMode _danmakuLoadMode = DanmakuLoadMode.online;
   List<String> _danmakuApiUrls = ['https://api.dandanplay.net'];
   List<String> _serverIconLibraryUrls = const [];
   String _danmakuAppId = '';
@@ -846,8 +846,9 @@ class AppState extends ChangeNotifier {
     _anime4kPreset = anime4kPresetFromId(prefs.getString(_kAnime4kPresetKey));
 
     _danmakuEnabled = prefs.getBool(_kDanmakuEnabledKey) ?? true;
-    _danmakuLoadMode =
-        danmakuLoadModeFromId(prefs.getString(_kDanmakuLoadModeKey));
+    _danmakuLoadMode = prefs.containsKey(_kDanmakuLoadModeKey)
+        ? danmakuLoadModeFromId(prefs.getString(_kDanmakuLoadModeKey))
+        : DanmakuLoadMode.online;
     final rawUrls = prefs.getStringList(_kDanmakuApiUrlsKey);
     if (rawUrls != null) {
       _danmakuApiUrls = rawUrls

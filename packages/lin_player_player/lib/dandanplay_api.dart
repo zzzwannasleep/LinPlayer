@@ -126,39 +126,15 @@ class DandanplayApiClient {
     };
   }
 
-  Map<String, String> _credentialHeaders() {
-    if (!_hasAuth) return const {};
-    return {
-      'X-AppId': appId,
-      'X-AppSecret': appSecret,
-    };
-  }
-
-  bool _shouldRetryWithCredentials(http.Response resp) {
-    if (resp.statusCode != 403) return false;
-    final msg = (resp.headers['x-error-message'] ?? '').toLowerCase();
-    return msg.contains('authentication') || msg.contains('signature');
-  }
-
   Future<http.Response> _postJson(Uri uri, Object body) async {
     final headers = <String, String>{
       'Accept': 'application/json',
       'Content-Type': 'application/json',
       ..._signatureHeaders(uri),
     };
-    var resp = await _client
+    final resp = await _client
         .post(uri, headers: headers, body: jsonEncode(body))
         .timeout(_timeout);
-    if (_shouldRetryWithCredentials(resp)) {
-      final retryHeaders = <String, String>{
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        ..._credentialHeaders(),
-      };
-      resp = await _client
-          .post(uri, headers: retryHeaders, body: jsonEncode(body))
-          .timeout(_timeout);
-    }
     return resp;
   }
 
@@ -167,14 +143,7 @@ class DandanplayApiClient {
       'Accept': 'application/json',
       ..._signatureHeaders(uri),
     };
-    var resp = await _client.get(uri, headers: headers).timeout(_timeout);
-    if (_shouldRetryWithCredentials(resp)) {
-      final retryHeaders = <String, String>{
-        'Accept': 'application/json',
-        ..._credentialHeaders(),
-      };
-      resp = await _client.get(uri, headers: retryHeaders).timeout(_timeout);
-    }
+    final resp = await _client.get(uri, headers: headers).timeout(_timeout);
     return resp;
   }
 
