@@ -4,12 +4,7 @@ name: Build Nightly (All Packages)
 run-name: Nightly (Run #${{ github.run_number }})
 
 on:
-  workflow_dispatch:
-    inputs:
-      dandanplay_proxy_url:
-        description: "弹弹Play 代理后端地址（可选，例如 https://danmuverify.902541.xyz）"
-        required: false
-        default: ""
+  workflow_dispatch: {}
 concurrency:
   group: nightly-release
   cancel-in-progress: true
@@ -20,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUB_CACHE: /home/runner/.pub-cache
-      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
+      DANDANPLAY_PROXY_URL: ${{ secrets.DANDANPLAY_PROXY_URL }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -135,7 +130,7 @@ jobs:
     runs-on: windows-latest
     env:
       PUB_CACHE: C:\Users\runneradmin\AppData\Local\Pub\Cache
-      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
+      DANDANPLAY_PROXY_URL: ${{ secrets.DANDANPLAY_PROXY_URL }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -275,7 +270,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUB_CACHE: /home/runner/.pub-cache
-      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
+      DANDANPLAY_PROXY_URL: ${{ secrets.DANDANPLAY_PROXY_URL }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -368,7 +363,7 @@ jobs:
     runs-on: macos-latest
     env:
       PUB_CACHE: /Users/runner/.pub-cache
-      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
+      DANDANPLAY_PROXY_URL: ${{ secrets.DANDANPLAY_PROXY_URL }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -485,7 +480,7 @@ jobs:
             runner: macos-15-intel
     env:
       PUB_CACHE: /Users/runner/.pub-cache
-      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
+      DANDANPLAY_PROXY_URL: ${{ secrets.DANDANPLAY_PROXY_URL }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
