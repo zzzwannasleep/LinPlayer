@@ -1,13 +1,31 @@
 $ErrorActionPreference = 'Stop'
 
 $buildName = $env:BUILD_NAME_INPUT
-if ([string]::IsNullOrWhiteSpace($buildName)) {
-  throw 'Missing build_name input.'
+$buildNumber = $env:BUILD_NUMBER_INPUT
+
+$rawVersion = ''
+if (Test-Path 'pubspec.yaml') {
+  $versionLine = Get-Content 'pubspec.yaml' | Where-Object { $_ -match '^\s*version:\s*' } | Select-Object -First 1
+  if ($versionLine) {
+    $rawVersion = ($versionLine -replace '^\s*version:\s*', '').Trim()
+  }
 }
 
-$buildNumber = $env:BUILD_NUMBER_INPUT
+if ([string]::IsNullOrWhiteSpace($buildName) -and -not [string]::IsNullOrWhiteSpace($rawVersion)) {
+  $buildName = ($rawVersion -split '\+')[0]
+}
+if ([string]::IsNullOrWhiteSpace($buildName)) {
+  $buildName = '0.1.0'
+}
+
+if ([string]::IsNullOrWhiteSpace($buildNumber) -and -not [string]::IsNullOrWhiteSpace($rawVersion) -and ($rawVersion -match '\+')) {
+  $buildNumber = ($rawVersion -split '\+')[-1]
+}
 if ([string]::IsNullOrWhiteSpace($buildNumber)) {
-  throw 'Missing build_number input.'
+  $buildNumber = $env:GITHUB_RUN_NUMBER
+}
+if ([string]::IsNullOrWhiteSpace($buildNumber)) {
+  $buildNumber = '1'
 }
 if ($buildNumber -notmatch '^[0-9]+$') {
   throw "build_number must be an integer (got: $buildNumber)"

@@ -1,43 +1,25 @@
 # Build all platform packages and publish a nightly release in one workflow run.
 
 name: Build Nightly (All Packages)
-run-name: Nightly (${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+run-name: Nightly (Run #${{ github.run_number }})
 
 on:
   workflow_dispatch:
     inputs:
-      build_name:
-        description: Version name (e.g. 1.2.3)
-        required: true
-      build_number:
-        description: Build number (integer)
-        required: true
-      build_appletv:
-        description: Build Apple TV (tvOS) package (experimental; requires custom tvOS host app/engine)
-        type: boolean
-        required: false
-        default: false
-      allow_debug_signing:
-        description: Allow Android debug signing in CI (NOT OTA-safe). Only use if ANDROID_KEYSTORE_* secrets are not configured yet.
-        type: boolean
-        required: false
-        default: false
       dandanplay_proxy_url:
-        description: Optional Cloudflare Worker base URL for built-in DandanPlay proxy routing (e.g. https://danmuverify.902541.xyz)
+        description: "弹弹Play 代理后端地址（可选，例如 https://danmuverify.902541.xyz）"
         required: false
         default: ""
-
 concurrency:
   group: nightly-release
   cancel-in-progress: true
 
 jobs:
   build-android:
-    name: Build Android APK (v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+    name: Build Android APK
     runs-on: ubuntu-latest
     env:
       PUB_CACHE: /home/runner/.pub-cache
-      LINPLAYER_ALLOW_CI_DEBUG_SIGNING: ${{ github.event.inputs.allow_debug_signing }}
       DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Check out code
@@ -56,9 +38,6 @@ jobs:
 
       - name: Compute build version
         shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
 
       - name: Cache Flutter pub packages
@@ -117,14 +96,9 @@ jobs:
               "$ANDROID_KEY_PASSWORD" \
               "$ANDROID_KEY_ALIAS"
           else
-            if [[ "${LINPLAYER_ALLOW_CI_DEBUG_SIGNING:-}" =~ ^(1|true|yes)$ ]]; then
-              echo "No ANDROID_KEYSTORE_BASE64 secret set; proceeding with debug signing (NOT OTA-safe)."
-            else
-              echo "No ANDROID_KEYSTORE_BASE64 secret set; refusing to build release APKs in CI." >&2
-              echo "OTA upgrades require a stable signing key. Configure ANDROID_KEYSTORE_* secrets/env vars," >&2
-              echo "or re-run this workflow with allow_debug_signing=true to force debug signing (not OTA-safe)." >&2
-              exit 1
-            fi
+            echo "No ANDROID_KEYSTORE_BASE64 secret set; refusing to build release APKs in CI." >&2
+            echo "OTA upgrades require a stable signing key. Configure ANDROID_KEYSTORE_* secrets/env vars." >&2
+            exit 1
           fi
 
       - name: Build APKs (split + universal)
@@ -157,7 +131,7 @@ jobs:
           path: build/ci-android-apks/*.apk
 
   build-windows:
-    name: Build Windows Setup (x64, v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+    name: Build Windows Setup (x64)
     runs-on: windows-latest
     env:
       PUB_CACHE: C:\Users\runneradmin\AppData\Local\Pub\Cache
@@ -190,9 +164,6 @@ jobs:
 
       - name: Compute build version
         shell: pwsh
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: .github/scripts/compute_version.ps1
 
       - name: Enable Windows desktop support
@@ -300,7 +271,7 @@ jobs:
           path: LinPlayer-Windows-Setup-x64.exe
 
   build-linux:
-    name: Build Linux Tarball (x86_64, v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+    name: Build Linux Tarball (x86_64)
     runs-on: ubuntu-latest
     env:
       PUB_CACHE: /home/runner/.pub-cache
@@ -351,9 +322,6 @@ jobs:
 
       - name: Compute build version
         shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
 
       - name: Build Linux app
@@ -396,7 +364,7 @@ jobs:
           path: LinPlayer-Linux-x86_64.tar.gz
 
   build-ios:
-    name: Build iOS Unsigned IPA (v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+    name: Build iOS Unsigned IPA
     runs-on: macos-latest
     env:
       PUB_CACHE: /Users/runner/.pub-cache
@@ -432,9 +400,6 @@ jobs:
 
       - name: Compute build version
         shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
 
       - name: Build iOS app (no codesign)
@@ -508,7 +473,7 @@ jobs:
           path: LinPlayer-iOS-unsigned.ipa
 
   build-macos:
-    name: Build macOS DMG (${{ matrix.arch }}, v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+    name: Build macOS DMG (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -555,9 +520,6 @@ jobs:
 
       - name: Compute build version
         shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
 
       - name: Build macOS app
@@ -595,132 +557,8 @@ jobs:
           name: LinPlayer-macOS-DMG-${{ matrix.arch }}-${{ env.VERSION_FULL }}
           path: LinPlayer-macOS-${{ matrix.arch }}.dmg
   
-  build-appletv:
-    name: Build Apple TV (tvOS) (v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(github.event.inputs.build_appletv == 'true' && '[{"runner":"macos-latest","enabled":true}]' || '[{"runner":"ubuntu-latest","enabled":false}]') }}
-    env:
-      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
-    steps:
-      - name: Apple TV build disabled
-        if: ${{ !matrix.enabled }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Apple TV (tvOS) build disabled (build_appletv=false)."
-
-      - name: Check out code
-        if: ${{ matrix.enabled }}
-        uses: actions/checkout@v4
-
-      - name: Harden curl downloads (macOS)
-        if: ${{ matrix.enabled }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/ci-bin"
-          cat > "$RUNNER_TEMP/ci-bin/curl" <<'EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          exec /usr/bin/curl --retry-all-errors --http1.1 "$@"
-          EOF
-          chmod +x "$RUNNER_TEMP/ci-bin/curl"
-          echo "PATH=$RUNNER_TEMP/ci-bin:$PATH" >> "$GITHUB_ENV"
-
-      - name: Set up Flutter
-        if: ${{ matrix.enabled }}
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Compute build version
-        if: ${{ matrix.enabled }}
-        shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
-        run: bash .github/scripts/compute_version.sh
-
-      - name: Verify tvOS scaffold exists
-        if: ${{ matrix.enabled }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ ! -d "tvos" ]]; then
-            echo "Missing tvOS scaffold: expected a top-level tvos/ directory." >&2
-            echo "Flutter stable does not ship tvOS support; you must provide a custom tvOS host app/engine to build Apple TV." >&2
-            exit 1
-          fi
-
-      - name: Build Apple TV app (no codesign)
-        if: ${{ matrix.enabled }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          DART_DEFINE_ARGS=()
-          if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
-            DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
-          fi
-
-          if [[ -d "ios" ]]; then
-            mv ios ios-iphone
-          fi
-          mv tvos ios
-          restore() {
-            if [[ -d "ios" ]]; then
-              mv ios tvos
-            fi
-            if [[ -d "ios-iphone" ]]; then
-              mv ios-iphone ios
-            fi
-          }
-          trap restore EXIT
-
-          flutter pub get
-          dart run flutter_launcher_icons
-
-          # Note: Flutter stable does not officially support tvOS. This build requires a custom
-          # tvOS host app + engine setup under tvos/ that can be built via flutter build ios.
-          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
-
-      - name: Package unsigned IPA
-        if: ${{ matrix.enabled }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APP_PATH="$(find build/ios -maxdepth 6 -type d -name '*.app' 2>/dev/null | grep -v RunnerTests | head -n 1 || true)"
-          if [[ -z "${APP_PATH:-}" ]]; then
-            ARCHIVE_PATH="$(find build/ios -maxdepth 6 -type d -name '*.xcarchive' 2>/dev/null | head -n 1 || true)"
-            if [[ -n "${ARCHIVE_PATH:-}" ]]; then
-              APP_PATH="$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -type d -name '*.app' 2>/dev/null | head -n 1 || true)"
-            fi
-          fi
-
-          if [[ -z "${APP_PATH:-}" || ! -d "$APP_PATH" ]]; then
-            echo "Could not find built .app under build/ios." >&2
-            find build/ios -maxdepth 4 -print || true
-            exit 1
-          fi
-
-          rm -rf Payload
-          mkdir -p Payload
-          cp -R "$APP_PATH" Payload/
-          /usr/bin/zip -qry LinPlayer-AppleTV-unsigned.ipa Payload
-
-      - name: Upload unsigned IPA artifact
-        if: ${{ matrix.enabled }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: LinPlayer-AppleTV-Unsigned-IPA-${{ env.VERSION_FULL }}
-          path: LinPlayer-AppleTV-unsigned.ipa
-
   publish-nightly:
-    name: Publish Nightly Release (v${{ github.event.inputs.build_name }}+${{ github.event.inputs.build_number }})
+    name: Publish Nightly Release
     runs-on: ubuntu-latest
     needs:
       - build-android
@@ -728,7 +566,6 @@ jobs:
       - build-linux
       - build-ios
       - build-macos
-      - build-appletv
     permissions:
       contents: write
     env:
@@ -756,9 +593,6 @@ jobs:
 
       - name: Compute build version
         shell: bash
-        env:
-          BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
-          BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
         run: bash .github/scripts/compute_version.sh
 
       - name: Update nightly tag
@@ -897,3 +731,4 @@ jobs:
             echo "Deleting duplicate asset: $name ($id)"
             gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id"
           done
+

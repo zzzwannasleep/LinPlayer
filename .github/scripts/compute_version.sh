@@ -2,15 +2,21 @@
 set -euo pipefail
 
 build_name="${BUILD_NAME_INPUT:-}"
+build_number="${BUILD_NUMBER_INPUT:-}"
+
+raw_version="$(awk '$1 == "version:" { print $2; exit }' pubspec.yaml 2>/dev/null || true)"
+if [[ -z "${build_name:-}" && -n "${raw_version:-}" ]]; then
+  build_name="${raw_version%%+*}"
+fi
 if [[ -z "${build_name:-}" ]]; then
-  echo "Missing build_name input."
-  exit 1
+  build_name="0.1.0"
 fi
 
-build_number="${BUILD_NUMBER_INPUT:-}"
+if [[ -z "${build_number:-}" && -n "${raw_version:-}" && "${raw_version}" == *"+"* ]]; then
+  build_number="${raw_version##*+}"
+fi
 if [[ -z "${build_number:-}" ]]; then
-  echo "Missing build_number input."
-  exit 1
+  build_number="${GITHUB_RUN_NUMBER:-1}"
 fi
 
 if ! [[ "$build_number" =~ ^[0-9]+$ ]]; then
