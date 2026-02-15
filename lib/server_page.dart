@@ -9,20 +9,30 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'player_screen.dart';
 import 'player_screen_exo.dart';
+import 'settings_page.dart';
 import 'server_text_import_sheet.dart';
 import 'package:lin_player_server_api/services/plex_api.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 
 class ServerPage extends StatefulWidget {
-  const ServerPage({super.key, required this.appState});
+  const ServerPage({
+    super.key,
+    required this.appState,
+    this.desktopLayout = false,
+    this.showInlineLocalEntry = true,
+  });
 
   final AppState appState;
+  final bool desktopLayout;
+  final bool showInlineLocalEntry;
 
   @override
   State<ServerPage> createState() => _ServerPageState();
 }
 
 class _ServerPageState extends State<ServerPage> {
+  int _desktopTabIndex = 0;
+
   bool _isTv(BuildContext context) => DeviceType.isTv;
 
   Future<void> _openLocalPlayer() async {
@@ -83,9 +93,82 @@ class _ServerPageState extends State<ServerPage> {
         final loading = widget.appState.isLoading;
         final uiScale = context.uiScale;
         final isTv = _isTv(context);
+        final useDesktopLayout = widget.desktopLayout && !isTv;
         final listLayout = widget.appState.serverListLayout;
         final isList = listLayout == ServerListLayout.list;
         final maxCrossAxisExtent = (isTv ? 160.0 : 180.0) * uiScale;
+
+        if (useDesktopLayout) {
+          final useExoCore = !kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.android &&
+              widget.appState.playerCore == PlayerCore.exo;
+          final railExtended = MediaQuery.of(context).size.width >= 1280;
+          final pages = [
+            ServerPage(
+              appState: widget.appState,
+              showInlineLocalEntry: false,
+            ),
+            useExoCore
+                ? ExoPlayerScreen(appState: widget.appState)
+                : PlayerScreen(appState: widget.appState),
+            SettingsPage(appState: widget.appState),
+          ];
+
+          return Scaffold(
+            body: SafeArea(
+              child: Row(
+                children: [
+                  NavigationRail(
+                    selectedIndex: _desktopTabIndex,
+                    onDestinationSelected: (i) =>
+                        setState(() => _desktopTabIndex = i),
+                    extended: railExtended,
+                    minExtendedWidth: 220,
+                    leading: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.dns_outlined),
+                          if (railExtended) ...[
+                            const SizedBox(width: 10),
+                            Text(
+                              'Servers',
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.storage_outlined),
+                        selectedIcon: Icon(Icons.storage),
+                        label: Text('Servers'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.folder_open_outlined),
+                        selectedIcon: Icon(Icons.folder_open),
+                        label: Text('Local'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.settings_outlined),
+                        selectedIcon: Icon(Icons.settings),
+                        label: Text('Settings'),
+                      ),
+                    ],
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(
+                    child: IndexedStack(
+                      index: _desktopTabIndex,
+                      children: pages,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
 
         return Scaffold(
           body: SafeArea(
@@ -156,7 +239,7 @@ class _ServerPageState extends State<ServerPage> {
                       child: LinearProgressIndicator(),
                     ),
                   ),
-                if (!isTv)
+                if (!isTv && widget.showInlineLocalEntry)
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(16, 6, 16, 4),

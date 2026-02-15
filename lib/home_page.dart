@@ -22,9 +22,14 @@ import 'server_adapters/server_access.dart';
 import 'show_detail_page.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key, required this.appState});
+  const HomePage({
+    super.key,
+    required this.appState,
+    this.desktopLayout = false,
+  });
 
   final AppState appState;
+  final bool desktopLayout;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -489,8 +494,10 @@ class _HomePageState extends State<HomePage> {
             template == UiTemplate.stickerJournal ||
             template == UiTemplate.neonHud ||
             template == UiTemplate.washiWatercolor;
-        final useRail = isDesktop &&
-            (template == UiTemplate.proTool || template == UiTemplate.neonHud);
+        final useRail = widget.desktopLayout ||
+            (isDesktop &&
+                (template == UiTemplate.proTool ||
+                    template == UiTemplate.neonHud));
         final pages = [
           _HomeBody(
             appState: widget.appState,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:lin_player_prefs/preferences.dart';
@@ -24,6 +25,25 @@ Future<void> showThemeSheet(
           final mode = themeMode();
           final dynamicColor = useDynamicColor();
           final template = uiTemplate();
+          final isDesktopBinaryTheme = !kIsWeb &&
+              (defaultTargetPlatform == TargetPlatform.windows ||
+                  defaultTargetPlatform == TargetPlatform.macOS);
+          final modeSegments = isDesktopBinaryTheme
+              ? const <ButtonSegment<ThemeMode>>[
+                  ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
+                  ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
+                ]
+              : const <ButtonSegment<ThemeMode>>[
+                  ButtonSegment(value: ThemeMode.system, label: Text('系统')),
+                  ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
+                  ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
+                ];
+          final selectedMode = isDesktopBinaryTheme && mode == ThemeMode.system
+              ? (Theme.of(context).brightness == Brightness.dark
+                  ? ThemeMode.dark
+                  : ThemeMode.light)
+              : mode;
+
           return Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: Column(
@@ -33,20 +53,18 @@ Future<void> showThemeSheet(
                 Text('主题', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 12),
                 SegmentedButton<ThemeMode>(
-                  segments: const [
-                    ButtonSegment(value: ThemeMode.system, label: Text('系统')),
-                    ButtonSegment(value: ThemeMode.light, label: Text('浅色')),
-                    ButtonSegment(value: ThemeMode.dark, label: Text('深色')),
-                  ],
-                  selected: {mode},
+                  segments: modeSegments,
+                  selected: {selectedMode},
                   onSelectionChanged: (s) => setThemeMode(s.first),
                 ),
                 const SizedBox(height: 10),
                 SwitchListTile(
                   value: dynamicColor,
                   onChanged: (v) => setUseDynamicColor(v),
-                  title: const Text('莫奈取色（Material You）'),
-                  subtitle: const Text('Android 12+ 生效，其它平台自动回退'),
+                  title: const Text('动态取色（Material You）'),
+                  subtitle: const Text(
+                    'Android 12+ 生效，其他平台自动回退。',
+                  ),
                   contentPadding: EdgeInsets.zero,
                 ),
                 const Divider(height: 1),

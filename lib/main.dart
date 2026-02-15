@@ -10,6 +10,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'desktop_ui/desktop_shell.dart';
 import 'home_page.dart';
 import 'server_page.dart';
 import 'webdav_home_page.dart';
@@ -49,6 +50,11 @@ void main() async {
 
   final appState = AppState();
   await appState.loadFromStorage();
+  if (DesktopShell.isDesktopTarget) {
+    await appState.applyDesktopThemeFromSystemIfNeeded(
+      systemBrightness: WidgetsBinding.instance.platformDispatcher.platformBrightness,
+    );
+  }
 
   TvRemoteCommandDispatcher.instance.bindNavigatorKey(_rootNavigatorKey);
 
@@ -119,15 +125,18 @@ class _LinPlayerAppState extends State<LinPlayerApp>
         final active = appState.activeServer;
         final home = DeviceType.isTv
             ? TvShell(appState: appState)
-            : switch (active?.serverType) {
-                null => ServerPage(appState: appState),
-                _ when !appState.hasActiveServerProfile =>
-                  ServerPage(appState: appState),
-                _ when active!.serverType == MediaServerType.webdav =>
-                  WebDavHomePage(appState: appState),
-                _ when appState.hasActiveServer => HomePage(appState: appState),
-                _ => ServerPage(appState: appState),
-              };
+            : (DesktopShell.isDesktopTarget
+                ? DesktopShell(appState: appState)
+                : switch (active?.serverType) {
+                    null => ServerPage(appState: appState),
+                    _ when !appState.hasActiveServerProfile =>
+                      ServerPage(appState: appState),
+                    _ when active!.serverType == MediaServerType.webdav =>
+                      WebDavHomePage(appState: appState),
+                    _ when appState.hasActiveServer =>
+                      HomePage(appState: appState),
+                    _ => ServerPage(appState: appState),
+                  });
         return DynamicColorBuilder(
           builder: (lightDynamic, darkDynamic) {
             final useDynamic = appState.useDynamicColor;

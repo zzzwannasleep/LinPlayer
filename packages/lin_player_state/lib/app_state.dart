@@ -2822,6 +2822,31 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> applyDesktopThemeFromSystemIfNeeded({
+    required Brightness systemBrightness,
+  }) async {
+    if (kIsWeb) return;
+    final platform = defaultTargetPlatform;
+    final isDesktopTarget = platform == TargetPlatform.windows ||
+        platform == TargetPlatform.macOS;
+    if (!isDesktopTarget) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final storedRaw = prefs.getString(_kThemeModeKey);
+    final storedMode = _decodeThemeMode(storedRaw);
+    final hasStoredTheme = storedRaw != null && storedRaw.trim().isNotEmpty;
+
+    if (hasStoredTheme && storedMode != ThemeMode.system) {
+      return;
+    }
+
+    final nextMode =
+        systemBrightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light;
+    _themeMode = nextMode;
+    await prefs.setString(_kThemeModeKey, _encodeThemeMode(nextMode));
+    notifyListeners();
+  }
+
   Future<void> setUiScaleFactor(double factor) async {
     final v = factor.clamp(0.25, 2.0).toDouble();
     if (_uiScaleFactor == v) return;

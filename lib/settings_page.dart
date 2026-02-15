@@ -1280,6 +1280,9 @@ class _SettingsPageState extends State<SettingsPage> {
         (defaultTargetPlatform == TargetPlatform.windows ||
             defaultTargetPlatform == TargetPlatform.linux ||
             defaultTargetPlatform == TargetPlatform.macOS);
+    final isDesktopBinaryTheme = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS);
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
@@ -1714,18 +1717,41 @@ class _SettingsPageState extends State<SettingsPage> {
                       const Divider(height: 1),
                     ],
                     if (!isTv) ...[
-                      SegmentedButton<ThemeMode>(
-                        segments: const [
-                          ButtonSegment(
-                              value: ThemeMode.system, label: Text('系统')),
-                          ButtonSegment(
-                              value: ThemeMode.light, label: Text('浅色')),
-                          ButtonSegment(
-                              value: ThemeMode.dark, label: Text('深色')),
-                        ],
-                        selected: {appState.themeMode},
-                        onSelectionChanged: (s) =>
-                            appState.setThemeMode(s.first),
+                      Builder(
+                        builder: (context) {
+                          final segments = isDesktopBinaryTheme
+                              ? const <ButtonSegment<ThemeMode>>[
+                                  ButtonSegment(
+                                      value: ThemeMode.light,
+                                      label: Text('浅色')),
+                                  ButtonSegment(
+                                      value: ThemeMode.dark,
+                                      label: Text('深色')),
+                                ]
+                              : const <ButtonSegment<ThemeMode>>[
+                                  ButtonSegment(
+                                      value: ThemeMode.system,
+                                      label: Text('系统')),
+                                  ButtonSegment(
+                                      value: ThemeMode.light,
+                                      label: Text('浅色')),
+                                  ButtonSegment(
+                                      value: ThemeMode.dark,
+                                      label: Text('深色')),
+                                ];
+                          final selectedMode = isDesktopBinaryTheme &&
+                                  appState.themeMode == ThemeMode.system
+                              ? (Theme.of(context).brightness == Brightness.dark
+                                  ? ThemeMode.dark
+                                  : ThemeMode.light)
+                              : appState.themeMode;
+                          return SegmentedButton<ThemeMode>(
+                            segments: segments,
+                            selected: {selectedMode},
+                            onSelectionChanged: (s) =>
+                                appState.setThemeMode(s.first),
+                          );
+                        },
                       ),
                       const SizedBox(height: 10),
                     ],

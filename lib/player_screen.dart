@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
@@ -103,9 +104,15 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _allowRoutePop = false;
 
   static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
+  static const List<String> _desktopRecommendationTabs = <String>[
+    'Watch Next',
+    'Trending',
+    'Recommended',
+  ];
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
   bool _isScrubbing = false;
+  int _desktopRecommendationTabIndex = 0;
 
   static const Duration _gestureOverlayAutoHideDelay =
       Duration(milliseconds: 800);
@@ -1824,6 +1831,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final useDesktopCinematic = !kIsWeb &&
+        !_fullScreen &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS);
     final canPopRoute = Navigator.of(context).canPop();
     final needsSafeExit = isAndroid &&
         canPopRoute &&
@@ -1942,9 +1953,13 @@ class _PlayerScreenState extends State<PlayerScreen>
           return KeyEventResult.ignored;
         },
         child: Scaffold(
-          backgroundColor: Colors.black,
-          extendBodyBehindAppBar: _fullScreen,
-          appBar: PreferredSize(
+          backgroundColor: useDesktopCinematic
+              ? Colors.transparent
+              : Colors.black,
+          extendBodyBehindAppBar: _fullScreen && !useDesktopCinematic,
+          appBar: useDesktopCinematic
+              ? null
+              : PreferredSize(
             preferredSize: _fullScreen
                 ? (_controlsVisible
                     ? const Size.fromHeight(kToolbarHeight)
@@ -1974,27 +1989,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                         IconButton(
                           tooltip: '选集',
                           icon: const Icon(Icons.playlist_play),
-                          onPressed: () {
-                            showModalBottomSheet(
-                              context: context,
-                              builder: (ctx) => ListView.builder(
-                                itemCount: _playlist.length,
-                                itemBuilder: (_, i) {
-                                  final f = _playlist[i];
-                                  return ListTile(
-                                    title: Text(f.name),
-                                    trailing: i == _currentlyPlayingIndex
-                                        ? const Icon(Icons.play_arrow)
-                                        : null,
-                                    onTap: () {
-                                      Navigator.of(ctx).pop();
-                                      _playFile(f, i);
-                                    },
-                                  );
-                                },
-                              ),
-                            );
-                          },
+                          onPressed: () => _showPlaylistSheet(context),
                         ),
                         IconButton(
                           tooltip: _anime4kPreset.isOff
@@ -2027,14 +2022,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           icon: Icon(_hwdecOn
                               ? Icons.memory
                               : Icons.settings_backup_restore),
-                          onPressed: () {
-                            setState(() => _hwdecOn = !_hwdecOn);
-                            if (_currentlyPlayingIndex >= 0 &&
-                                _playlist.isNotEmpty) {
-                              _playFile(_playlist[_currentlyPlayingIndex],
-                                  _currentlyPlayingIndex);
-                            }
-                          },
+                          onPressed: _toggleHardwareDecode,
                         ),
                         IconButton(
                           tooltip: _orientationTooltip,
@@ -2052,7 +2040,12 @@ class _PlayerScreenState extends State<PlayerScreen>
               ),
             ),
           ),
-          body: Column(
+          body: useDesktopCinematic
+              ? _buildDesktopCinematicBody(
+                  context,
+                  currentFileName: currentFileName,
+                )
+              : Column(
             children: [
               wrapVideo(
                 Container(
@@ -2424,6 +2417,1360 @@ class _PlayerScreenState extends State<PlayerScreen>
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildDesktopCinematicBody(
+    BuildContext context, {
+    required String currentFileName,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shellColor = isDark ? const Color(0xA3141416) : const Color(0xCCFFFFFF);
+    final shellBorder = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.08);
+
+    return SafeArea(
+      child: Stack(
+        children: [
+          Positioned.fill(child: _buildDesktopBackdrop(isDark: isDark)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 86, 20, 20),
+            child: _buildDesktopGlassPanel(
+              context: context,
+              blurSigma: 12,
+              color: shellColor,
+              borderRadius: BorderRadius.circular(30),
+              borderColor: shellBorder,
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final showRightPanel = constraints.maxWidth >= 1120;
+                    final panelWidth = showRightPanel
+                        ? (constraints.maxWidth * 0.28)
+                            .clamp(320.0, 420.0)
+                            .toDouble()
+                        : constraints.maxWidth;
+                    final playerHeight = (constraints.maxHeight *
+                            (showRightPanel ? 0.72 : 0.62))
+                        .clamp(240.0, showRightPanel ? 680.0 : 560.0)
+                        .toDouble();
+                    final compactPanelHeight =
+                        constraints.maxHeight - playerHeight - 16;
+                    final showCompactPanel =
+                        !showRightPanel && compactPanelHeight > 180;
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              SizedBox(
+                                height: playerHeight,
+                                child:
+                                    _buildDesktopVideoSurface(context, isDark: isDark),
+                              ),
+                              if (showCompactPanel) ...[
+                                const SizedBox(height: 16),
+                                SizedBox(
+                                  height: compactPanelHeight,
+                                  child: _buildDesktopRecommendationPanel(
+                                    context,
+                                    isDark: isDark,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (showRightPanel) ...[
+                          const SizedBox(width: 20),
+                          SizedBox(
+                            width: panelWidth,
+                            height: playerHeight,
+                            child: _buildDesktopRecommendationPanel(
+                              context,
+                              isDark: isDark,
+                            ),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.topCenter,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _buildDesktopTopPill(
+                context,
+                isDark: isDark,
+                currentFileName: currentFileName,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopBackdrop({required bool isDark}) {
+    final background = isDark ? const Color(0xFF060607) : const Color(0xFFF2F4F7);
+    final centerGlowA = isDark
+        ? const Color(0xFF3A4F7C).withValues(alpha: 0.42)
+        : const Color(0xFFA8BCE8).withValues(alpha: 0.52);
+    final centerGlowB = isDark
+        ? const Color(0xFF5A3148).withValues(alpha: 0.35)
+        : const Color(0xFFF4C5DA).withValues(alpha: 0.48);
+    final cornerGlow = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.black.withValues(alpha: 0.04);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(color: background),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(-0.2, -0.45),
+                radius: 1.2,
+                colors: [
+                  centerGlowA,
+                  centerGlowB,
+                  background,
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            left: -120,
+            top: -80,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: cornerGlow,
+              ),
+            ),
+          ),
+          Positioned(
+            right: -90,
+            bottom: -130,
+            child: Container(
+              width: 340,
+              height: 340,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: cornerGlow,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopTopPill(
+    BuildContext context, {
+    required bool isDark,
+    required String currentFileName,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    final panelColor = isDark ? const Color(0xCC1E1E1E) : const Color(0xE6FFFFFF);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.black.withValues(alpha: 0.08);
+    final titleColor = isDark ? Colors.white : Colors.black87;
+    final subtitleColor = isDark ? Colors.white60 : Colors.black54;
+    final badgeBg = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.05);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final targetWidth =
+            (constraints.maxWidth * 0.76).clamp(380.0, 1060.0).toDouble();
+        final width =
+            targetWidth > constraints.maxWidth ? constraints.maxWidth : targetWidth;
+        return _buildDesktopGlassPanel(
+          context: context,
+          blurSigma: 18,
+          color: panelColor,
+          borderRadius: BorderRadius.circular(30),
+          borderColor: panelBorder,
+          child: SizedBox(
+            width: width,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.play_circle_outline,
+                    color: titleColor,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      currentFileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        color: titleColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _desktopTopActionChip(
+                            context,
+                            isDark: isDark,
+                            icon: Icons.playlist_play,
+                            label: 'Playlist',
+                            onTap: () => _showPlaylistSheet(context),
+                          ),
+                          const SizedBox(width: 8),
+                          _desktopTopActionChip(
+                            context,
+                            isDark: isDark,
+                            icon: Icons.audiotrack,
+                            label: 'Audio',
+                            onTap: () => _showAudioTracks(context),
+                          ),
+                          const SizedBox(width: 8),
+                          _desktopTopActionChip(
+                            context,
+                            isDark: isDark,
+                            icon: Icons.subtitles,
+                            label: 'Subtitles',
+                            onTap: () => _showSubtitleTracks(context),
+                          ),
+                          const SizedBox(width: 8),
+                          _desktopTopActionChip(
+                            context,
+                            isDark: isDark,
+                            icon: Icons.comment_outlined,
+                            label: 'Danmaku',
+                            onTap: () => unawaited(_showDanmakuSheet()),
+                          ),
+                          const SizedBox(width: 8),
+                          _desktopTopActionChip(
+                            context,
+                            isDark: isDark,
+                            icon: Icons.folder_open_outlined,
+                            label: 'Open',
+                            onTap: _pickFile,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: badgeBg,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
+                          size: 16,
+                          color: subtitleColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isDark ? 'Dark' : 'Light',
+                          style: textTheme.labelMedium?.copyWith(
+                            color: subtitleColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _desktopTopActionChip(
+    BuildContext context, {
+    required bool isDark,
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+  }) {
+    final fg = isDark ? Colors.white70 : Colors.black54;
+    final bg = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.05);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopVideoSurface(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    final panelColor = isDark ? const Color(0x99121214) : const Color(0xD9FFFFFF);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.08);
+    final chipColor = isDark
+        ? Colors.black.withValues(alpha: 0.36)
+        : Colors.white.withValues(alpha: 0.75);
+    final chipTextColor = isDark ? Colors.white : Colors.black87;
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 14,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(30),
+      borderColor: panelBorder,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(30),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(color: Colors.black),
+          child: _playerService.isInitialized
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Video(
+                      controller: _playerService.controller,
+                      controls: NoVideoControls,
+                      subtitleViewConfiguration: _subtitleViewConfiguration,
+                    ),
+                    Positioned.fill(
+                      child: DanmakuStage(
+                        key: _danmakuKey,
+                        enabled: _danmakuEnabled,
+                        opacity: _danmakuOpacity,
+                        scale: _danmakuScale,
+                        speed: _danmakuSpeed,
+                        timeScale: _playerService.player.state.rate,
+                        bold: _danmakuBold,
+                        scrollMaxLines: _danmakuMaxLines,
+                        topMaxLines: _danmakuTopMaxLines,
+                        bottomMaxLines: _danmakuBottomMaxLines,
+                        preventOverlap: _danmakuPreventOverlap,
+                      ),
+                    ),
+                    if (_screenBrightness < 0.999)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(
+                            color: Colors.black.withValues(
+                              alpha: (1.0 - _screenBrightness)
+                                  .clamp(0.0, 0.8)
+                                  .toDouble(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (_buffering)
+                      Positioned.fill(
+                        child: ColoredBox(
+                          color: Colors.black54,
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const CircularProgressIndicator(),
+                                if ((widget.appState?.showBufferSpeed ?? false) &&
+                                    _isNetworkPlayback)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 12),
+                                    child: Text(
+                                      'Network: ${_netSpeedBytesPerSecond == null ? '--' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: LayoutBuilder(
+                        builder: (ctx, constraints) {
+                          final w = constraints.maxWidth;
+                          final h = constraints.maxHeight;
+                          final sideDragEnabled =
+                              _gestureBrightnessEnabled || _gestureVolumeEnabled;
+                          return GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _toggleControls,
+                            onDoubleTapDown: _gesturesEnabled
+                                ? (d) => _doubleTapDownPosition = d.localPosition
+                                : null,
+                            onDoubleTap: _gesturesEnabled
+                                ? () {
+                                    final pos =
+                                        _doubleTapDownPosition ?? Offset(w / 2, 0);
+                                    // ignore: unawaited_futures
+                                    _handleDoubleTap(pos, w);
+                                  }
+                                : null,
+                            onHorizontalDragStart:
+                                (_gesturesEnabled && _gestureSeekEnabled)
+                                    ? _onSeekDragStart
+                                    : null,
+                            onHorizontalDragUpdate:
+                                (_gesturesEnabled && _gestureSeekEnabled)
+                                    ? (d) => _onSeekDragUpdate(
+                                          d,
+                                          width: w,
+                                          duration: _duration,
+                                        )
+                                    : null,
+                            onHorizontalDragEnd:
+                                (_gesturesEnabled && _gestureSeekEnabled)
+                                    ? _onSeekDragEnd
+                                    : null,
+                            onVerticalDragStart: (_gesturesEnabled && sideDragEnabled)
+                                ? (d) => _onSideDragStart(d, width: w)
+                                : null,
+                            onVerticalDragUpdate:
+                                (_gesturesEnabled && sideDragEnabled)
+                                    ? (d) => _onSideDragUpdate(d, height: h)
+                                    : null,
+                            onVerticalDragEnd: (_gesturesEnabled && sideDragEnabled)
+                                ? _onSideDragEnd
+                                : null,
+                            onLongPressStart:
+                                (_gesturesEnabled && _gestureLongPressEnabled)
+                                    ? _onLongPressStart
+                                    : null,
+                            onLongPressMoveUpdate: (_gesturesEnabled &&
+                                    _gestureLongPressEnabled &&
+                                    _longPressSlideEnabled)
+                                ? (d) => _onLongPressMoveUpdate(d, height: h)
+                                : null,
+                            onLongPressEnd:
+                                (_gesturesEnabled && _gestureLongPressEnabled)
+                                    ? _onLongPressEnd
+                                    : null,
+                            child: const SizedBox.expand(),
+                          );
+                        },
+                      ),
+                    ),
+                    if (_gestureOverlayText != null)
+                      Center(
+                        child: IgnorePointer(
+                          child: Material(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(12),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _gestureOverlayIcon ?? Icons.info_outline,
+                                    size: 20,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _gestureOverlayText!,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      left: 22,
+                      top: 18,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: chipColor,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.play_arrow_rounded,
+                              size: 16,
+                              color: chipTextColor,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Now Playing',
+                              style: textTheme.labelMedium?.copyWith(
+                                color: chipTextColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.bottomCenter,
+                      child: SafeArea(
+                        top: false,
+                        minimum: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                        child: AnimatedOpacity(
+                          opacity: _controlsVisible ? 1 : 0,
+                          duration: const Duration(milliseconds: 200),
+                          child: IgnorePointer(
+                            ignoring: !_controlsVisible,
+                            child: Listener(
+                              onPointerDown: (_) => _showControls(),
+                              child: _buildDesktopPlaybackControls(
+                                context,
+                                isDark: isDark,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : _playError != null
+                  ? Center(
+                      child: Text(
+                        'Playback failed: $_playError',
+                        style: const TextStyle(color: Colors.redAccent),
+                      ),
+                    )
+                  : Center(
+                      child: Text(
+                        'Open a media file to start playback',
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopPlaybackControls(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final enabled = _playerService.isInitialized && _playError == null;
+    final hasCurrent = _currentlyPlayingIndex >= 0 &&
+        _currentlyPlayingIndex < _playlist.length;
+    final currentFileName = hasCurrent ? _playlist[_currentlyPlayingIndex].name : '';
+    final subtitle = hasCurrent
+        ? 'Playlist ${_currentlyPlayingIndex + 1}/${_playlist.length}'
+        : 'No file selected';
+    final sliderMaxMs = math.max(_duration.inMilliseconds, 1);
+    final sliderValueMs = _position.inMilliseconds.clamp(0, sliderMaxMs);
+    final sliderEnabled = enabled && _duration > Duration.zero;
+    final hue = (((hasCurrent ? currentFileName.hashCode : 29).abs()) % 360)
+        .toDouble();
+    final thumbA = HSLColor.fromAHSL(
+      1,
+      hue,
+      isDark ? 0.45 : 0.58,
+      isDark ? 0.42 : 0.74,
+    ).toColor();
+    final thumbB = HSLColor.fromAHSL(
+      1,
+      (hue + 36) % 360,
+      isDark ? 0.52 : 0.62,
+      isDark ? 0.58 : 0.84,
+    ).toColor();
+    final panelColor = isDark ? const Color(0xD9101011) : const Color(0xE6FFFFFF);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.08);
+    final timelineInactive = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.1);
+    final titleColor = isDark ? Colors.white : Colors.black87;
+    final subtitleColor = isDark ? Colors.white60 : Colors.black54;
+    final iconColor = isDark ? Colors.white70 : Colors.black54;
+    final dividerColor = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.1);
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 18,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(24),
+      borderColor: panelBorder,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                inactiveTrackColor: timelineInactive,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                min: 0,
+                max: sliderMaxMs.toDouble(),
+                value: sliderValueMs.toDouble(),
+                onChangeStart: sliderEnabled ? (_) => _onScrubStart() : null,
+                onChanged: sliderEnabled
+                    ? (value) => setState(() {
+                          _position = Duration(milliseconds: value.round());
+                        })
+                    : null,
+                onChangeEnd: sliderEnabled
+                    ? (value) async {
+                        final target = Duration(milliseconds: value.round());
+                        await _playerService.seek(
+                          target,
+                          flushBuffer: _flushBufferOnSeek,
+                        );
+                        _position = target;
+                        _syncDanmakuCursor(target);
+                        _onScrubEnd();
+                        if (mounted) setState(() {});
+                      }
+                    : null,
+              ),
+            ),
+            Row(
+              children: [
+                _desktopControlButton(
+                  context,
+                  isDark: isDark,
+                  icon: Icons.fast_rewind_rounded,
+                  tooltip: 'Rewind',
+                  onTap: enabled
+                      ? () async {
+                          _showControls();
+                          await _seekRelative(
+                            Duration(seconds: -_seekBackSeconds),
+                            showOverlay: false,
+                          );
+                        }
+                      : null,
+                ),
+                const SizedBox(width: 6),
+                _desktopControlButton(
+                  context,
+                  isDark: isDark,
+                  icon: _playerService.isPlaying
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded,
+                  tooltip: _playerService.isPlaying ? 'Pause' : 'Play',
+                  emphasized: true,
+                  onTap: enabled
+                      ? () => _togglePlayPause(showOverlay: false)
+                      : null,
+                ),
+                const SizedBox(width: 6),
+                _desktopControlButton(
+                  context,
+                  isDark: isDark,
+                  icon: Icons.fast_forward_rounded,
+                  tooltip: 'Fast Forward',
+                  onTap: enabled
+                      ? () async {
+                          _showControls();
+                          await _seekRelative(
+                            Duration(seconds: _seekForwardSeconds),
+                            showOverlay: false,
+                          );
+                        }
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Container(width: 1, height: 34, color: dividerColor),
+                const SizedBox(width: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: [thumbA, thumbB]),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hasCurrent ? currentFileName : 'No media selected',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: titleColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_fmtClock(_position)} / ${_fmtClock(_duration)}  |  $subtitle',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: subtitleColor,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'More',
+                  onPressed: () => _showDesktopQuickActionsSheet(context),
+                  icon: Icon(Icons.more_horiz, color: iconColor),
+                ),
+                const SizedBox(width: 4),
+                Container(width: 1, height: 34, color: dividerColor),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Subtitles',
+                  onPressed: enabled ? () => _showSubtitleTracks(context) : null,
+                  icon: Icon(Icons.closed_caption_outlined, color: iconColor),
+                ),
+                IconButton(
+                  tooltip: 'Playlist',
+                  onPressed: () => _showPlaylistSheet(context),
+                  icon: Icon(Icons.playlist_play, color: iconColor),
+                ),
+                IconButton(
+                  tooltip: 'Volume',
+                  onPressed: enabled ? () => _showVolumeSheet(context) : null,
+                  icon: Icon(Icons.volume_up_outlined, color: titleColor),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _desktopControlButton(
+    BuildContext context, {
+    required bool isDark,
+    required IconData icon,
+    required String tooltip,
+    required FutureOr<void> Function()? onTap,
+    bool emphasized = false,
+  }) {
+    final bg = emphasized
+        ? (isDark
+            ? Colors.white.withValues(alpha: 0.22)
+            : Colors.black.withValues(alpha: 0.12))
+        : (isDark
+            ? Colors.white.withValues(alpha: 0.1)
+            : Colors.black.withValues(alpha: 0.06));
+    final fg = emphasized
+        ? (isDark ? Colors.white : Colors.black87)
+        : (isDark ? Colors.white70 : Colors.black54);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap == null
+              ? null
+              : () {
+                  final result = onTap();
+                  if (result is Future<void>) {
+                    unawaited(result);
+                  }
+                },
+          child: Ink(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: fg),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopRecommendationPanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final orderedIndexes = _desktopRecommendationIndexes();
+    final textTheme = Theme.of(context).textTheme;
+    final panelColor = isDark ? const Color(0xA61A1A1C) : const Color(0xD9FFFFFF);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.08);
+    final tabPanelColor =
+        isDark ? const Color(0xB31C1C1F) : const Color(0xF2FFFFFF);
+    final tabPanelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.06);
+    final activeTabBg = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.08);
+    final activeText = isDark ? Colors.white : Colors.black87;
+    final inactiveText = isDark ? Colors.white54 : Colors.black54;
+    final cardBg = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.white.withValues(alpha: 0.78);
+    final selectedCardBorder = isDark
+        ? Colors.white.withValues(alpha: 0.34)
+        : Colors.black.withValues(alpha: 0.2);
+    final normalCardBorder = isDark
+        ? Colors.white.withValues(alpha: 0.09)
+        : Colors.black.withValues(alpha: 0.08);
+    final metaColor = isDark ? Colors.white54 : Colors.black54;
+    final bodyColor = isDark ? Colors.white : Colors.black87;
+    final subColor = isDark ? Colors.white60 : Colors.black54;
+    final durationBg = Colors.black.withValues(alpha: 0.66);
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 14,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(26),
+      borderColor: panelBorder,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+        child: Column(
+          children: [
+            _buildDesktopGlassPanel(
+              context: context,
+              blurSigma: 12,
+              color: tabPanelColor,
+              borderRadius: BorderRadius.circular(16),
+              borderColor: tabPanelBorder,
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Row(
+                  children: [
+                    for (var i = 0; i < _desktopRecommendationTabs.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 6),
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => setState(
+                            () => _desktopRecommendationTabIndex = i,
+                          ),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: i == _desktopRecommendationTabIndex
+                                  ? activeTabBg
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: Text(
+                                _desktopRecommendationTabs[i],
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: i == _desktopRecommendationTabIndex
+                                      ? activeText
+                                      : inactiveText,
+                                  fontWeight: i == _desktopRecommendationTabIndex
+                                      ? FontWeight.w600
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: orderedIndexes.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'No playlist yet',
+                            style: textTheme.titleMedium?.copyWith(
+                              color: bodyColor,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Open local media to build recommendations.',
+                            style: textTheme.bodySmall?.copyWith(color: metaColor),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: _pickFile,
+                            icon: const Icon(Icons.folder_open_outlined),
+                            label: const Text('Open File'),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: math.min(orderedIndexes.length, 8),
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, orderIndex) {
+                        final playlistIndex = orderedIndexes[orderIndex];
+                        final file = _playlist[playlistIndex];
+                        final selected = playlistIndex == _currentlyPlayingIndex;
+                        final hue = ((file.name.hashCode.abs()) % 360).toDouble();
+                        final thumbA = HSLColor.fromAHSL(
+                          1,
+                          hue,
+                          isDark ? 0.45 : 0.56,
+                          isDark ? 0.36 : 0.7,
+                        ).toColor();
+                        final thumbB = HSLColor.fromAHSL(
+                          1,
+                          (hue + 28) % 360,
+                          isDark ? 0.58 : 0.62,
+                          isDark ? 0.56 : 0.82,
+                        ).toColor();
+
+                        return InkWell(
+                          onTap: () => _playFile(file, playlistIndex),
+                          borderRadius: BorderRadius.circular(16),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 140),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: cardBg,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color:
+                                    selected ? selectedCardBorder : normalCardBorder,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: SizedBox(
+                                    width: 126,
+                                    height: 82,
+                                    child: Stack(
+                                      fit: StackFit.expand,
+                                      children: [
+                                        DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [thumbA, thumbB],
+                                            ),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          right: 6,
+                                          bottom: 6,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: durationBg,
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                            child: Text(
+                                              _desktopRecommendationDurationFor(
+                                                playlistIndex,
+                                              ),
+                                              style: textTheme.labelSmall?.copyWith(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _desktopRecommendationMetaFor(playlistIndex),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: textTheme.labelSmall?.copyWith(
+                                          color: metaColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        file.name,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: textTheme.bodyMedium?.copyWith(
+                                          color: bodyColor,
+                                          fontWeight: FontWeight.w600,
+                                          height: 1.22,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _desktopRecommendationSeasonFor(playlistIndex),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: textTheme.bodySmall?.copyWith(
+                                          color: subColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<int> _desktopRecommendationIndexes() {
+    if (_playlist.isEmpty) return const <int>[];
+    final base = List<int>.generate(_playlist.length, (i) => i);
+    switch (_desktopRecommendationTabIndex) {
+      case 1:
+        return base.reversed.toList();
+      case 2:
+        final current =
+            _currentlyPlayingIndex.clamp(0, base.length - 1).toInt();
+        return List<int>.generate(
+          base.length,
+          (offset) => base[(current + offset) % base.length],
+        );
+      default:
+        return base;
+    }
+  }
+
+  String _desktopRecommendationMetaFor(int index) {
+    const months = <String>[
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final month = months[index % months.length];
+    final year = 2022 + (index % 5);
+    final views = (3.84 - index * 0.27).clamp(0.19, 9.99).toDouble();
+    return '${views.toStringAsFixed(2)}M views | $month $year';
+  }
+
+  String _desktopRecommendationSeasonFor(int index) {
+    final season = (index % 4) + 1;
+    final episode = (index % 12) + 1;
+    return 'Season $season | Episode $episode';
+  }
+
+  String _desktopRecommendationDurationFor(int index) {
+    if (index == _currentlyPlayingIndex && _duration > Duration.zero) {
+      return _fmtClock(_duration);
+    }
+    final minutes = 6 + (index % 11);
+    final seconds = (11 + index * 17) % 60;
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  Widget _buildDesktopGlassPanel({
+    required BuildContext context,
+    required Widget child,
+    required double blurSigma,
+    required Color color,
+    required BorderRadius borderRadius,
+    required Color borderColor,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: borderRadius,
+            border: Border.all(color: borderColor),
+            boxShadow: [
+              BoxShadow(
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.35)
+                    : Colors.black.withValues(alpha: 0.12),
+                blurRadius: 24,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  void _showPlaylistSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        if (_playlist.isEmpty) {
+          return const SafeArea(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('No playlist items'),
+            ),
+          );
+        }
+        return SafeArea(
+          child: ListView.builder(
+            itemCount: _playlist.length,
+            itemBuilder: (_, i) {
+              final f = _playlist[i];
+              return ListTile(
+                title: Text(f.name),
+                trailing:
+                    i == _currentlyPlayingIndex ? const Icon(Icons.play_arrow) : null,
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _playFile(f, i);
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  void _toggleHardwareDecode() {
+    setState(() => _hwdecOn = !_hwdecOn);
+    if (_currentlyPlayingIndex >= 0 && _playlist.isNotEmpty) {
+      _playFile(_playlist[_currentlyPlayingIndex], _currentlyPlayingIndex);
+    }
+  }
+
+  void _showDesktopQuickActionsSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.playlist_play),
+                title: const Text('Playlist'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showPlaylistSheet(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.audiotrack),
+                title: const Text('Audio Track'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showAudioTracks(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.subtitles),
+                title: const Text('Subtitle Track'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showSubtitleTracks(context);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  _hwdecOn ? Icons.memory : Icons.settings_backup_restore,
+                ),
+                title: Text(_hwdecOn
+                    ? 'Switch to Software Decode'
+                    : 'Switch to Hardware Decode'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _toggleHardwareDecode();
+                },
+              ),
+              ListTile(
+                leading: Icon(_orientationIcon),
+                title: Text(_orientationTooltip),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _cycleOrientationMode();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_fix_high_outlined),
+                title: const Text('Anime4K'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _showAnime4kSheet();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_open_outlined),
+                title: const Text('Open Local File'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _pickFile();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showVolumeSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        double value = _playerService.player.state.volume.clamp(0, 100).toDouble();
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Volume',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Icon(Icons.volume_up_outlined),
+                        Expanded(
+                          child: Slider(
+                            min: 0,
+                            max: 100,
+                            value: value,
+                            onChanged: (v) {
+                              value = v;
+                              setSheetState(() {});
+                              _playerVolume = (v / 100).clamp(0.0, 1.0);
+                              // ignore: unawaited_futures
+                              _playerService.player.setVolume(v);
+                            },
+                          ),
+                        ),
+                        SizedBox(
+                          width: 48,
+                          child: Text(
+                            '${value.round()}%',
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
