@@ -22,6 +22,10 @@ on:
         type: boolean
         required: false
         default: false
+      dandanplay_proxy_url:
+        description: Optional Cloudflare Worker base URL for built-in DandanPlay proxy routing (e.g. https://danmuverify.902541.xyz)
+        required: false
+        default: ""
 
 concurrency:
   group: nightly-release
@@ -34,6 +38,7 @@ jobs:
     env:
       PUB_CACHE: /home/runner/.pub-cache
       LINPLAYER_ALLOW_CI_DEBUG_SIGNING: ${{ github.event.inputs.allow_debug_signing }}
+      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -130,11 +135,16 @@ jobs:
           rm -rf "$OUT_DIR"
           mkdir -p "$OUT_DIR"
 
-          flutter build apk --release --split-per-abi --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          DART_DEFINE_ARGS=()
+          if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
+            DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
+          fi
+
+          flutter build apk --release --split-per-abi --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
           cp -v build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$OUT_DIR/LinPlayer-Android-arm64-v8a.apk"
           cp -v build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "$OUT_DIR/LinPlayer-Android-TV.apk"
 
-          flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
           cp -v build/app/outputs/flutter-apk/app-release.apk "$OUT_DIR/LinPlayer-Android.apk"
 
           echo "--- Staged APKs ---"
@@ -151,6 +161,7 @@ jobs:
     runs-on: windows-latest
     env:
       PUB_CACHE: C:\Users\runneradmin\AppData\Local\Pub\Cache
+      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -196,7 +207,12 @@ jobs:
 
       - name: Build Windows executable
         shell: pwsh
-        run: flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:BUILD_NUMBER
+        run: |
+          $dartDefineArgs = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:DANDANPLAY_PROXY_URL)) {
+            $dartDefineArgs += "--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL=$env:DANDANPLAY_PROXY_URL"
+          }
+          flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:BUILD_NUMBER @dartDefineArgs
 
       - name: Copy MSVC runtime DLLs
         shell: pwsh
@@ -288,6 +304,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUB_CACHE: /home/runner/.pub-cache
+      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -343,7 +360,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          flutter build linux --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          DART_DEFINE_ARGS=()
+          if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
+            DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
+          fi
+          flutter build linux --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
 
       - name: Create Linux tarball
         shell: bash
@@ -379,6 +400,7 @@ jobs:
     runs-on: macos-latest
     env:
       PUB_CACHE: /Users/runner/.pub-cache
+      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -419,13 +441,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          DART_DEFINE_ARGS=()
+          if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
+            DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
+          fi
 
           # flutter build ios --no-codesign can return a non-zero exit code on CI
           # with the generic "select a Development Team" message, even though the
           # Xcode build already produced a usable .app. Treat it as a soft-fail
           # when build output exists, so we can still package an unsigned IPA.
           set +e
-          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
           status=$?
           set -e
 
@@ -494,6 +520,7 @@ jobs:
             runner: macos-15-intel
     env:
       PUB_CACHE: /Users/runner/.pub-cache
+      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -534,7 +561,14 @@ jobs:
         run: bash .github/scripts/compute_version.sh
 
       - name: Build macOS app
-        run: flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+        shell: bash
+        run: |
+          set -euo pipefail
+          DART_DEFINE_ARGS=()
+          if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
+            DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
+          fi
+          flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
 
       - name: Create DMG installer
         shell: bash
@@ -568,6 +602,8 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(github.event.inputs.build_appletv == 'true' && '[{"runner":"macos-latest","enabled":true}]' || '[{"runner":"ubuntu-latest","enabled":false}]') }}
+    env:
+      DANDANPLAY_PROXY_URL: ${{ github.event.inputs.dandanplay_proxy_url }}
     steps:
       - name: Apple TV build disabled
         if: ${{ !matrix.enabled }}
@@ -625,6 +661,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          DART_DEFINE_ARGS=()
+          if [[ -n "${DANDANPLAY_PROXY_URL:-}" ]]; then
+            DART_DEFINE_ARGS+=(--dart-define=LINPLAYER_DANDANPLAY_PROXY_URL="${DANDANPLAY_PROXY_URL}")
+          fi
 
           if [[ -d "ios" ]]; then
             mv ios ios-iphone
@@ -645,7 +685,7 @@ jobs:
 
           # Note: Flutter stable does not officially support tvOS. This build requires a custom
           # tvOS host app + engine setup under tvos/ that can be built via flutter build ios.
-          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
+          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
 
       - name: Package unsigned IPA
         if: ${{ matrix.enabled }}
