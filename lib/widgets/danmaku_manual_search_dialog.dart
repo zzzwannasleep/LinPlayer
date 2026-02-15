@@ -11,9 +11,9 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
 }) async {
   final keywordController = TextEditingController(text: initialKeyword.trim());
   final episodeController = TextEditingController(
-    text: initialEpisodeHint == null || initialEpisodeHint <= 0
-        ? ''
-        : initialEpisodeHint.toString(),
+    text: (initialEpisodeHint != null && initialEpisodeHint > 0)
+        ? initialEpisodeHint.toString()
+        : '',
   );
 
   var searching = false;
@@ -36,9 +36,9 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
       return;
     }
 
-    final episodeHint = int.tryParse(episodeController.text.trim() == ''
-        ? '0'
-        : episodeController.text.trim());
+    final rawEpisode = episodeController.text.trim();
+    final episodeHint = rawEpisode.isEmpty ? null : int.tryParse(rawEpisode);
+
     setDialogState(() {
       searching = true;
       searched = true;
@@ -49,8 +49,7 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
       final results = await searchOnlineDanmakuCandidates(
         apiUrls: apiUrls,
         keyword: keyword,
-        episodeHint:
-            (episodeHint != null && episodeHint > 0) ? episodeHint : null,
+        episodeHint: (episodeHint != null && episodeHint > 0) ? episodeHint : null,
         appId: appId,
         appSecret: appSecret,
       );
@@ -112,7 +111,7 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(
                       labelText: '集数（可选）',
-                      hintText: '不填则按名称搜索全部集',
+                      hintText: '不填则按番剧名称搜索全部剧集',
                     ),
                     onSubmitted: (_) => doSearch(setDialogState, dialogContext),
                   ),

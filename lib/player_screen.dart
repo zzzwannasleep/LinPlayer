@@ -1428,7 +1428,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       appId: appState.danmakuAppId,
       appSecret: appState.danmakuAppSecret,
       initialKeyword: hint.keyword.isEmpty ? stripFileExtension(currentName) : hint.keyword,
-      initialEpisodeHint: hint.episodeHint,
+      initialEpisodeHint: null,
     );
     if (!mounted || candidate == null) return;
 

@@ -305,28 +305,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   String _buildDanmakuMatchName(MediaItem item) {
     final seriesName = item.seriesName.trim();
+    if (seriesName.isNotEmpty) return seriesName;
     final name = item.name.trim();
-    final season = item.seasonNumber ?? 0;
-    final episode = item.episodeNumber ?? 0;
-
-    final base = seriesName.isNotEmpty
-        ? seriesName
-        : (name.isNotEmpty ? name : widget.title);
-    final extra = (name.isNotEmpty && name != base) ? ' $name' : '';
-
-    if (season > 0 && episode > 0) {
-      final s = season.toString().padLeft(2, '0');
-      final e = episode.toString().padLeft(2, '0');
-      return '$base S${s}E$e$extra'.trim();
-    }
-    if (episode > 0) {
-      final e = episode.toString().padLeft(2, '0');
-      return '$base EP$e$extra'.trim();
-    }
-    if (seriesName.isNotEmpty && name.isNotEmpty && name != seriesName) {
-      return '$seriesName $name'.trim();
-    }
-    return widget.title;
+    final raw = name.isNotEmpty ? name : widget.title;
+    final hint = suggestDandanplaySearchInput(stripFileExtension(raw));
+    return hint.keyword.isNotEmpty ? hint.keyword : raw;
   }
 
   bool get _canShowEpisodePickerButton {
@@ -1271,7 +1254,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     }
 
     var matchName = widget.title;
-    int? episodeHint;
     try {
       final access = _serverAccess;
       if (access != null) {
@@ -1280,9 +1262,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
           itemId: widget.itemId,
         );
         matchName = _buildDanmakuMatchName(item);
-        if ((item.episodeNumber ?? 0) > 0) {
-          episodeHint = item.episodeNumber;
-        }
       }
     } catch (_) {}
 
@@ -1295,8 +1274,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       appId: appState.danmakuAppId,
       appSecret: appState.danmakuAppSecret,
       initialKeyword: hint.keyword.isEmpty ? fallbackKeyword : hint.keyword,
-      initialEpisodeHint:
-          (episodeHint != null && episodeHint > 0) ? episodeHint : hint.episodeHint,
+      initialEpisodeHint: null,
     );
     if (!mounted || candidate == null) return;
 

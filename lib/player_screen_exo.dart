@@ -514,7 +514,7 @@ class _ExoPlayerScreenState extends State<ExoPlayerScreen>
       appId: appState.danmakuAppId,
       appSecret: appState.danmakuAppSecret,
       initialKeyword: hint.keyword.isEmpty ? fallbackKeyword : hint.keyword,
-      initialEpisodeHint: hint.episodeHint,
+      initialEpisodeHint: null,
     );
     if (!mounted || candidate == null) return;
 

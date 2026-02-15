@@ -320,7 +320,13 @@ class DandanplayApiClient {
 
     final uri = _buildUri('/api/v2/search/episodes', query: query);
     final resp = await _get(uri);
-    if (resp.statusCode != 200) return const [];
+    if (resp.statusCode != 200) {
+      final err = resp.headers['x-error-message'];
+      throw Exception(
+        'Search episodes failed (${resp.statusCode})'
+        '${err == null || err.isEmpty ? '' : ': $err'}',
+      );
+    }
 
     final decoded = jsonDecode(resp.body);
     return _extractSearchEpisodes(decoded);
@@ -443,30 +449,59 @@ class _SearchHint {
 _SearchHint _buildSearchHint(String inputName) {
   final normalized = inputName.replaceAll('_', ' ').trim();
   int? episodeHint;
+  int? markerStart;
 
-  final se = RegExp(
-    r'\bS\d{1,2}\s*E(\d{1,3})\b',
-    caseSensitive: false,
-  ).firstMatch(normalized);
-  if (se != null) {
-    episodeHint = int.tryParse(se.group(1)!);
-  } else {
-    final ep = RegExp(
-      r'\bEP?\s*\.?-?\s*(\d{1,3})\b',
-      caseSensitive: false,
-    ).firstMatch(normalized);
-    if (ep != null) {
-      episodeHint = int.tryParse(ep.group(1)!);
+  void pickMarker(Match? m) {
+    if (m == null) return;
+    if (markerStart == null || m.start < markerStart!) {
+      markerStart = m.start;
     }
   }
 
-  var keyword = normalized
+  final sePattern = RegExp(
+    r'\bS\d{1,2}\s*E(\d{1,3})\b',
+    caseSensitive: false,
+  );
+  final epPattern = RegExp(
+    r'\bEP?\s*\.?-?\s*(\d{1,3})\b',
+    caseSensitive: false,
+  );
+  final zhPattern = RegExp(
+    r'第\s*(\d{1,3})\s*[话話集]',
+    caseSensitive: false,
+  );
+
+  final se = sePattern.firstMatch(normalized);
+  final ep = epPattern.firstMatch(normalized);
+  final zh = zhPattern.firstMatch(normalized);
+
+  if (se != null) {
+    episodeHint = int.tryParse(se.group(1)!);
+  } else if (ep != null) {
+    episodeHint = int.tryParse(ep.group(1)!);
+  } else if (zh != null) {
+    episodeHint = int.tryParse(zh.group(1)!);
+  }
+
+  pickMarker(se);
+  pickMarker(ep);
+  pickMarker(zh);
+
+  final keywordSeed = (markerStart != null && markerStart! > 0)
+      ? normalized.substring(0, markerStart!).trim()
+      : normalized;
+
+  var keyword = keywordSeed
       .replaceAll(
         RegExp(r'\bS\d{1,2}\s*E\d{1,3}\b', caseSensitive: false),
         ' ',
       )
       .replaceAll(
         RegExp(r'\bEP?\s*\.?-?\s*\d{1,3}\b', caseSensitive: false),
+        ' ',
+      )
+      .replaceAll(
+        RegExp(r'第\s*\d{1,3}\s*[话話集]', caseSensitive: false),
         ' ',
       )
       .replaceAll(RegExp(r'\[[^\]]*]'), ' ')
@@ -482,6 +517,9 @@ _SearchHint _buildSearchHint(String inputName) {
       .trim();
   if (keyword.length > 80) {
     keyword = keyword.substring(0, 80).trim();
+  }
+  if (keyword.isEmpty) {
+    keyword = stripFileExtension(normalized);
   }
 
   return _SearchHint(keyword: keyword, episodeHint: episodeHint);
@@ -504,6 +542,19 @@ DandanplaySearchEpisodeResult _pickSearchCandidate(
   return candidates.first;
 }
 
+Future<List<DandanplaySearchEpisodeResult>> _searchEpisodesSmart({
+  required DandanplayApiClient client,
+  required String keyword,
+  int? episodeHint,
+}) async {
+  final byAnimeOnly = await client.searchEpisodes(anime: keyword);
+  if (byAnimeOnly.isNotEmpty) return byAnimeOnly;
+  if (episodeHint != null && episodeHint > 0) {
+    return client.searchEpisodes(anime: keyword, episode: episodeHint);
+  }
+  return const [];
+}
+
 Future<List<DandanplaySearchCandidate>> searchOnlineDanmakuCandidates({
   required List<String> apiUrls,
   required String keyword,
@@ -516,6 +567,7 @@ Future<List<DandanplaySearchCandidate>> searchOnlineDanmakuCandidates({
 
   final out = <DandanplaySearchCandidate>[];
   final dedupe = <String>{};
+  Object? lastError;
 
   for (final rawUrl in apiUrls) {
     final inputBaseUrl = rawUrl.trim();
@@ -543,9 +595,10 @@ Future<List<DandanplaySearchCandidate>> searchOnlineDanmakuCandidates({
       appSecret: effectiveAppSecret,
     );
     try {
-      final episodes = await client.searchEpisodes(
-        anime: q,
-        episode: (episodeHint != null && episodeHint > 0) ? episodeHint : null,
+      final episodes = await _searchEpisodesSmart(
+        client: client,
+        keyword: q,
+        episodeHint: episodeHint,
       );
       for (final ep in episodes) {
         if (ep.episodeId <= 0) continue;
@@ -562,11 +615,15 @@ Future<List<DandanplaySearchCandidate>> searchOnlineDanmakuCandidates({
           ),
         );
       }
-    } catch (_) {
-      // Ignore a single source failure and continue searching others.
+    } catch (e) {
+      lastError = e;
     } finally {
       client.close();
     }
+  }
+
+  if (out.isEmpty && lastError != null) {
+    throw Exception(lastError.toString());
   }
 
   return out;
@@ -694,9 +751,10 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
       } else {
         final hint = _buildSearchHint(cleanedName);
         if (hint.keyword.isNotEmpty) {
-          final candidates = await client.searchEpisodes(
-            anime: hint.keyword,
-            episode: hint.episodeHint,
+          final candidates = await _searchEpisodesSmart(
+            client: client,
+            keyword: hint.keyword,
+            episodeHint: hint.episodeHint,
           );
           if (candidates.isNotEmpty) {
             pickedFromSearch = _pickSearchCandidate(candidates, hint.episodeHint);
