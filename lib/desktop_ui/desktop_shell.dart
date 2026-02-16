@@ -90,11 +90,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   ThemeData _withDesktopTheme(ThemeData base) {
     final current = base.extension<DesktopThemeExtension>();
     if (current != null) return base;
+    final extensions = base.extensions.values.toList();
+    extensions.add(DesktopThemeExtension.fallback(base.brightness));
+
     return base.copyWith(
-      extensions: <ThemeExtension<dynamic>>[
-        ...base.extensions.values,
-        DesktopThemeExtension.fallback(base.brightness),
-      ],
+      extensions: extensions,
     );
   }
 
