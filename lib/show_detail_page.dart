@@ -6,6 +6,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'server_adapters/server_access.dart';
 import 'play_network_page.dart';
@@ -47,6 +48,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   String? _selectedMediaSourceId;
   int? _selectedAudioStreamIndex; // null = default
   int? _selectedSubtitleStreamIndex; // null = default, -1 = off
+  bool _localFavorite = false;
+  bool _favoriteLoaded = false;
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
@@ -55,7 +58,47 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
   @override
   void initState() {
     super.initState();
+    _loadLocalFavorite();
     _load();
+  }
+
+  String get _localFavoriteKey {
+    final serverKey = (_baseUrl ?? 'default').replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    return 'show_detail_local_favorite_${serverKey}_${widget.itemId}';
+  }
+
+  Future<void> _loadLocalFavorite() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      setState(() {
+        _localFavorite = prefs.getBool(_localFavoriteKey) ?? false;
+        _favoriteLoaded = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _favoriteLoaded = true);
+    }
+  }
+
+  Future<void> _toggleLocalFavorite() async {
+    final next = !_localFavorite;
+    setState(() => _localFavorite = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_localFavoriteKey, next);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(next
+              ? 'Added to local favorites'
+              : 'Removed from local favorites'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _localFavorite = !next);
+    }
   }
 
   Future<void> _refreshProgressAfterReturn(
@@ -469,6 +512,204 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           isTv: widget.isTv,
         ),
       ),
+    );
+  }
+
+  Future<void> _openEpisode(BuildContext context, MediaItem episode) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EpisodeDetailPage(
+          episode: episode,
+          appState: widget.appState,
+          server: widget.server,
+          isTv: widget.isTv,
+        ),
+      ),
+    );
+  }
+
+  Widget _unwatchedEpisodesSection(
+    BuildContext context, {
+    required MediaItem seriesItem,
+    required ServerAccess? access,
+  }) {
+    final season = _selectedSeason;
+    if (season == null) return const SizedBox.shrink();
+
+    return FutureBuilder<List<MediaItem>>(
+      future: _episodesForSeason(season),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const SizedBox(
+            height: 200,
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return Text(
+            'Failed to load episodes: ${snapshot.error}',
+            style: Theme.of(context).textTheme.bodySmall,
+          );
+        }
+
+        final episodes = snapshot.data ?? const <MediaItem>[];
+        final unwatched = episodes.where((ep) => !ep.played).toList();
+        if (unwatched.isEmpty) {
+          return Text(
+            'All episodes are watched.',
+            style: Theme.of(context).textTheme.bodySmall,
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Unwatched',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 204,
+              child: _withHorizontalEdgeFade(
+                context,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  itemCount: unwatched.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final ep = unwatched[index];
+                    final epNo = ep.episodeNumber ?? (index + 1);
+                    final seasonNo = ep.seasonNumber ?? season.seasonNumber ?? 1;
+                    final imageUrl = access == null
+                        ? ''
+                        : access.adapter.imageUrl(
+                            access.auth,
+                            itemId: ep.hasImage
+                                ? ep.id
+                                : (season.id.isNotEmpty ? season.id : seriesItem.id),
+                            maxWidth: 640,
+                          );
+                    return _HoverScale(
+                      child: SizedBox(
+                        width: 264,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => _openEpisode(context, ep),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest
+                                    .withValues(alpha: 0.28),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .outlineVariant
+                                      .withValues(alpha: 0.35),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(12),
+                                    ),
+                                    child: AspectRatio(
+                                      aspectRatio: 16 / 9,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          imageUrl.isEmpty
+                                              ? const ColoredBox(
+                                                  color: Colors.black26,
+                                                )
+                                              : Image.network(
+                                                  imageUrl,
+                                                  fit: BoxFit.cover,
+                                                  headers: {
+                                                    'User-Agent':
+                                                        LinHttpClientFactory
+                                                            .userAgent,
+                                                  },
+                                                  errorBuilder: (_, __, ___) =>
+                                                      const ColoredBox(
+                                                    color: Colors.black26,
+                                                  ),
+                                                ),
+                                          Align(
+                                            alignment: Alignment.bottomCenter,
+                                            child: DecoratedBox(
+                                              decoration: BoxDecoration(
+                                                gradient: LinearGradient(
+                                                  begin: Alignment.topCenter,
+                                                  end: Alignment.bottomCenter,
+                                                  colors: [
+                                                    Colors.transparent,
+                                                    Colors.black.withValues(
+                                                        alpha: 0.78),
+                                                  ],
+                                                ),
+                                              ),
+                                              child: const SizedBox(
+                                                width: double.infinity,
+                                                height: 52,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        10, 8, 10, 10),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'S$seasonNo:E$epNo',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .labelMedium,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          ep.name.trim().isNotEmpty
+                                              ? ep.name.trim()
+                                              : 'Episode $epNo',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1182,6 +1423,52 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                             ],
                           ),
                         ),
+                        Positioned(
+                          right: 16,
+                          top: MediaQuery.of(context).padding.top + 16,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (item.communityRating != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withValues(alpha: 0.85),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    item.communityRating!.toStringAsFixed(1),
+                                    style: theme.textTheme.labelMedium?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              const SizedBox(height: 8),
+                              Material(
+                                color: Colors.black.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(999),
+                                child: IconButton(
+                                  onPressed: _favoriteLoaded
+                                      ? _toggleLocalFavorite
+                                      : null,
+                                  tooltip: _localFavorite
+                                      ? 'Remove local favorite'
+                                      : 'Add local favorite',
+                                  icon: Icon(
+                                    _localFavorite
+                                        ? Icons.star
+                                        : Icons.star_border_rounded,
+                                    color: _localFavorite
+                                        ? Colors.pinkAccent
+                                        : Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1319,6 +1606,14 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           const SizedBox(height: 12),
                         ] else
                           const SizedBox(height: 12),
+                        if (isSeries) ...[
+                          _unwatchedEpisodesSection(
+                            context,
+                            seriesItem: item,
+                            access: access,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         Text(item.overview,
                             style: Theme.of(context).textTheme.bodyMedium),
                         const SizedBox(height: 16),
@@ -1340,33 +1635,39 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           const SizedBox(height: 8),
                           SizedBox(
                             height: 140,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _album.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 10),
-                              itemBuilder: (context, index) {
-                                final url = _album[index];
-                                return ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    url,
-                                    width: 220,
-                                    height: 140,
-                                    fit: BoxFit.cover,
-                                    headers: {
-                                      'User-Agent':
-                                          LinHttpClientFactory.userAgent,
-                                    },
-                                    errorBuilder: (_, __, ___) =>
-                                        const SizedBox(
-                                      width: 220,
-                                      height: 140,
-                                      child: ColoredBox(color: Colors.black26),
+                            child: _withHorizontalEdgeFade(
+                              context,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: _album.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(width: 10),
+                                itemBuilder: (context, index) {
+                                  final url = _album[index];
+                                  return _HoverScale(
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Image.network(
+                                        url,
+                                        width: 220,
+                                        height: 140,
+                                        fit: BoxFit.cover,
+                                        headers: {
+                                          'User-Agent':
+                                              LinHttpClientFactory.userAgent,
+                                        },
+                                        errorBuilder: (_, __, ___) =>
+                                            const SizedBox(
+                                          width: 220,
+                                          height: 140,
+                                          child:
+                                              ColoredBox(color: Colors.black26),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  );
+                                },
+                              ),
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -1377,40 +1678,45 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           const SizedBox(height: 8),
                           SizedBox(
                             height: 220,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _seasons.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 12),
-                              itemBuilder: (context, index) {
-                                final s = _seasons[index];
-                                final label = _seasonLabel(s, index);
-                                final img = access?.adapter.imageUrl(
-                                  access.auth,
-                                  itemId: s.hasImage ? s.id : item.id,
-                                  maxWidth: 400,
-                                );
-                                return SizedBox(
-                                  width: 140,
-                                  child: MediaPosterTile(
-                                    title: label,
-                                    imageUrl: img,
-                                    onTap: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => SeasonEpisodesPage(
-                                            season: s,
-                                            appState: widget.appState,
-                                            server: widget.server,
-                                            isTv: widget.isTv,
-                                            isVirtual: _seasonsVirtual,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                );
-                              },
+                            child: _withHorizontalEdgeFade(
+                              context,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: _seasons.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(width: 12),
+                                itemBuilder: (context, index) {
+                                  final s = _seasons[index];
+                                  final label = _seasonLabel(s, index);
+                                  final img = access?.adapter.imageUrl(
+                                    access.auth,
+                                    itemId: s.hasImage ? s.id : item.id,
+                                    maxWidth: 400,
+                                  );
+                                  return _HoverScale(
+                                    child: SizedBox(
+                                      width: 140,
+                                      child: MediaPosterTile(
+                                        title: label,
+                                        imageUrl: img,
+                                        onTap: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => SeasonEpisodesPage(
+                                                season: s,
+                                                appState: widget.appState,
+                                                server: widget.server,
+                                                isTv: widget.isTv,
+                                                isVirtual: _seasonsVirtual,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -1421,7 +1727,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           const SizedBox(height: 8),
                           SizedBox(
                             height: 240,
-                            child: ListView.separated(
+                            child: _withHorizontalEdgeFade(
+                              context,
+                              child: ListView.separated(
                               scrollDirection: Axis.horizontal,
                               itemCount: _similar.length,
                               separatorBuilder: (_, __) =>
@@ -1448,31 +1756,34 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                                     ? '电影'
                                     : (s.type == 'Series' ? '剧集' : '');
 
-                                return SizedBox(
-                                  width: 140,
-                                  child: MediaPosterTile(
-                                    title: s.name,
-                                    titleMaxLines: 2,
-                                    imageUrl: img,
-                                    year: year,
-                                    rating: s.communityRating,
-                                    badgeText: badge,
-                                    onTap: () {
-                                      Navigator.of(context).push(
-                                        MaterialPageRoute(
-                                          builder: (_) => ShowDetailPage(
-                                            itemId: s.id,
-                                            title: s.name,
-                                            appState: widget.appState,
-                                            server: widget.server,
-                                            isTv: widget.isTv,
+                                return _HoverScale(
+                                  child: SizedBox(
+                                    width: 140,
+                                    child: MediaPosterTile(
+                                      title: s.name,
+                                      titleMaxLines: 2,
+                                      imageUrl: img,
+                                      year: year,
+                                      rating: s.communityRating,
+                                      badgeText: badge,
+                                      onTap: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => ShowDetailPage(
+                                              itemId: s.id,
+                                              title: s.name,
+                                              appState: widget.appState,
+                                              server: widget.server,
+                                              isTv: widget.isTv,
+                                            ),
                                           ),
-                                        ),
-                                      );
-                                    },
+                                        );
+                                      },
+                                    ),
                                   ),
                                 );
                               },
+                            ),
                             ),
                           ),
                         ],
@@ -3206,6 +3517,98 @@ Widget _playButton(BuildContext context,
   );
 }
 
+Widget _withHorizontalEdgeFade(
+  BuildContext context, {
+  required Widget child,
+  double fadeWidth = 18,
+}) {
+  final background = Theme.of(context).scaffoldBackgroundColor;
+  return Stack(
+    children: [
+      Positioned.fill(child: child),
+      Positioned.fill(
+        child: IgnorePointer(
+          child: Row(
+            children: [
+              Container(
+                width: fadeWidth,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      background,
+                      background.withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                width: fadeWidth,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      background.withValues(alpha: 0),
+                      background,
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+class _HoverScale extends StatefulWidget {
+  const _HoverScale({
+    required this.child,
+  });
+
+  final Widget child;
+
+  @override
+  State<_HoverScale> createState() => _HoverScaleState();
+}
+
+class _HoverScaleState extends State<_HoverScale> {
+  bool _hovered = false;
+
+  bool get _supportsHover {
+    if (kIsWeb) return true;
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+        return true;
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+      case TargetPlatform.fuchsia:
+        return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_supportsHover) return widget.child;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: AnimatedScale(
+        scale: _hovered ? 1.05 : 1,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 Widget _peopleSection(
   BuildContext context,
   List<MediaPerson> people, {
@@ -3218,33 +3621,38 @@ Widget _peopleSection(
       const SizedBox(height: 8),
       SizedBox(
         height: 150,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: people.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (context, index) {
-            final p = people[index];
-            final img = access.adapter.personImageUrl(
-              access.auth,
-              personId: p.id,
-              maxWidth: 200,
-            );
-            return Column(
-              children: [
-                CircleAvatar(
-                  radius: 42,
-                  backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
-                  backgroundColor: Colors.white24,
-                  child: img.isEmpty
-                      ? Text(p.name.isNotEmpty ? p.name[0] : '?')
-                      : null,
+        child: _withHorizontalEdgeFade(
+          context,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: people.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final p = people[index];
+              final img = access.adapter.personImageUrl(
+                access.auth,
+                personId: p.id,
+                maxWidth: 200,
+              );
+              return _HoverScale(
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 42,
+                      backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
+                      backgroundColor: Colors.white24,
+                      child: img.isEmpty
+                          ? Text(p.name.isNotEmpty ? p.name[0] : '?')
+                          : null,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text(p.role, style: Theme.of(context).textTheme.bodySmall),
+                  ],
                 ),
-                const SizedBox(height: 6),
-                Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(p.role, style: Theme.of(context).textTheme.bodySmall),
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     ],
@@ -3386,37 +3794,72 @@ Widget _infoCard(String title, String body) => SizedBox(
       ),
     );
 
+String _providerId(MediaItem item, List<String> providerKeys) {
+  for (final entry in item.providerIds.entries) {
+    final key = entry.key.toLowerCase();
+    if (providerKeys.any((k) => key.contains(k))) {
+      final value = entry.value.trim();
+      if (value.isNotEmpty) return value;
+    }
+  }
+  return '';
+}
+
 Widget _externalLinksSection(
     BuildContext context, MediaItem item, AppState appState) {
-  final tmdbId = item.providerIds.entries
-      .firstWhere((e) => e.key.toLowerCase().contains('tmdb'),
-          orElse: () => const MapEntry('', ''))
-      .value;
-  if (tmdbId.isEmpty) return const SizedBox.shrink();
   final isSeries = item.type.toLowerCase() == 'series';
-  final url = isSeries
-      ? 'https://www.themoviedb.org/tv/$tmdbId'
-      : 'https://www.themoviedb.org/movie/$tmdbId';
+  final tmdbId = _providerId(item, const ['tmdb']);
+  final imdbId = _providerId(item, const ['imdb']);
+  final traktId = _providerId(item, const ['trakt']);
+
+  final tmdbUrl = tmdbId.isEmpty
+      ? ''
+      : (isSeries
+          ? 'https://www.themoviedb.org/tv/$tmdbId'
+          : 'https://www.themoviedb.org/movie/$tmdbId');
+  final imdbUrl = imdbId.isEmpty ? '' : 'https://www.imdb.com/title/$imdbId';
+  final traktUrl = traktId.isNotEmpty
+      ? (isSeries
+          ? 'https://trakt.tv/shows/$traktId'
+          : 'https://trakt.tv/movies/$traktId')
+      : (imdbId.isNotEmpty
+          ? 'https://trakt.tv/search/imdb/$imdbId'
+          : (tmdbId.isNotEmpty ? 'https://trakt.tv/search/tmdb/$tmdbId' : ''));
+
+  final links = <({String label, String url, IconData icon})>[
+    if (imdbUrl.isNotEmpty) (label: 'IMDb', url: imdbUrl, icon: Icons.movie),
+    if (tmdbUrl.isNotEmpty)
+      (label: 'TMDB', url: tmdbUrl, icon: Icons.local_movies),
+    if (traktUrl.isNotEmpty) (label: 'Trakt', url: traktUrl, icon: Icons.link),
+  ];
+  if (links.isEmpty) return const SizedBox.shrink();
+
+  Future<void> openExternal(String url) async {
+    final opened = await launchUrlString(url);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法打开链接')),
+      );
+    }
+  }
+
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text('外部链接', style: Theme.of(context).textTheme.titleMedium),
+      Text('数据库链接', style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 8),
       Wrap(
         spacing: 8,
-        children: [
-          ActionChip(
-            avatar: const Icon(Icons.link),
-            label: const Text('TMDB'),
-            onPressed: () async {
-              final opened = await launchUrlString(url);
-              if (!opened && context.mounted) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text('无法打开链接')));
-              }
-            },
-          ),
-        ],
+        runSpacing: 8,
+        children: links
+            .map(
+              (link) => ActionChip(
+                avatar: Icon(link.icon, size: 18),
+                label: Text(link.label),
+                onPressed: () => openExternal(link.url),
+              ),
+            )
+            .toList(),
       )
     ],
   );
