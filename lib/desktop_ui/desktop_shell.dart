@@ -4,9 +4,12 @@ import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
+import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
+import '../play_network_page.dart';
+import '../play_network_page_exo.dart';
 import '../server_page.dart';
 import '../settings_page.dart';
 import 'pages/desktop_detail_page.dart';
@@ -127,6 +130,72 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     unawaited(next.load(forceRefresh: true));
   }
 
+  void _onPlayCurrentDetail() {
+    unawaited(_playCurrentDetail());
+  }
+
+  Future<void> _playCurrentDetail() async {
+    final vm = _detailViewModel;
+    if (vm == null) return;
+
+    final playable = _resolvePlayableItem(vm);
+    if (playable == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No playable media found for this item'),
+        ),
+      );
+      return;
+    }
+
+    final start = playable.playbackPositionTicks > 0
+        ? _ticksToDuration(playable.playbackPositionTicks)
+        : null;
+    final useExoCore = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        widget.appState.playerCore == PlayerCore.exo;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => useExoCore
+            ? ExoPlayNetworkPage(
+                title: playable.name,
+                itemId: playable.id,
+                appState: widget.appState,
+                server: vm.server,
+                startPosition: start,
+              )
+            : PlayNetworkPage(
+                title: playable.name,
+                itemId: playable.id,
+                appState: widget.appState,
+                server: vm.server,
+                startPosition: start,
+              ),
+      ),
+    );
+
+    if (!mounted) return;
+    await vm.load(forceRefresh: true);
+  }
+
+  MediaItem? _resolvePlayableItem(DesktopDetailViewModel vm) {
+    final detail = vm.detail;
+    final type = detail.type.trim().toLowerCase();
+    if (type == 'series' || type == 'season') {
+      if (vm.episodes.isEmpty) return null;
+      return vm.episodes.firstWhere(
+        (item) => item.playbackPositionTicks > 0,
+        orElse: () => vm.episodes.first,
+      );
+    }
+    return detail;
+  }
+
+  Duration _ticksToDuration(int ticks) =>
+      Duration(microseconds: (ticks / 10).round());
+
   void _refreshCurrentPage() {
     setState(() => _refreshSignal += 1);
     if (_section == _DesktopSection.detail && _detailViewModel != null) {
@@ -194,7 +263,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           key: ValueKey<String>(vm.detail.id),
           viewModel: vm,
           onOpenItem: _openDetail,
-          onPlayPressed: () {},
+          onPlayPressed: _onPlayCurrentDetail,
         );
     }
   }
