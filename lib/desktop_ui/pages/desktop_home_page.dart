@@ -1014,6 +1014,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     return FutureBuilder<List<MediaItem>>(
       future: future,
       builder: (context, snapshot) {
+        final scheme = Theme.of(context).colorScheme;
+        final isDark = scheme.brightness == Brightness.dark;
         final allItems = snapshot.data ?? const <MediaItem>[];
         final items = _selectedTab == _DesktopHomeTab.home
             ? allItems
@@ -1039,10 +1041,12 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
+                color: (isDark ? scheme.surface : scheme.surfaceContainerHighest)
+                    .withValues(alpha: isDark ? 0.34 : 0.92),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
+                  color: scheme.outlineVariant
+                      .withValues(alpha: isDark ? 0.28 : 0.55),
                 ),
               ),
               child: Row(
@@ -1050,7 +1054,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                   Expanded(
                     child: Text(
                       '继续观看加载失败：${snapshot.error}',
-                      style: const TextStyle(color: Colors.white70),
+                      style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1236,6 +1240,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
         final access = resolveServerAccess(appState: widget.appState);
         final width = MediaQuery.of(context).size.width;
         final horizontalPadding = _contentHorizontalPadding(width);
+        final scheme = Theme.of(context).colorScheme;
+        final isDark = scheme.brightness == Brightness.dark;
         final baseBackgroundColor = DesktopUnifiedBackground.baseColorForBrightness(
           Theme.of(context).brightness,
         );
@@ -1357,18 +1363,22 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                                     vertical: 18,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.05),
+                                    color: (isDark
+                                            ? scheme.surface
+                                            : scheme.surfaceContainerHighest)
+                                        .withValues(alpha: isDark ? 0.30 : 0.90),
                                     borderRadius: BorderRadius.circular(14),
                                     border: Border.all(
-                                      color: Colors.white.withValues(alpha: 0.12),
+                                      color: scheme.outlineVariant
+                                          .withValues(alpha: isDark ? 0.30 : 0.55),
                                     ),
                                   ),
                                   child: Text(
                                     _selectedTab == _DesktopHomeTab.favorites
                                         ? '喜欢列表为空，先点亮卡片右下角心形。'
                                         : '当前暂无首页内容，点击下拉刷新重试。',
-                                    style: const TextStyle(
-                                      color: Colors.white70,
+                                    style: TextStyle(
+                                      color: scheme.onSurfaceVariant,
                                       fontSize: 14,
                                     ),
                                   ),
@@ -1414,6 +1424,8 @@ class _DesktopHeaderBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: SizedBox(
@@ -1440,10 +1452,10 @@ class _DesktopHeaderBar extends StatelessWidget {
               child: const Icon(Icons.play_arrow_rounded, color: Colors.white),
             ),
             const SizedBox(width: 10),
-            const Text(
+            Text(
               'Linplayer',
               style: TextStyle(
-                color: Colors.white,
+                color: isDark ? Colors.white : scheme.onSurface,
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.2,
@@ -1481,6 +1493,15 @@ class _HeaderIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final bgColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : scheme.surface.withValues(alpha: 0.78);
+    final borderColor = isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : scheme.outlineVariant.withValues(alpha: 0.55);
+    final iconColor = isDark ? Colors.white : scheme.onSurface;
     return Tooltip(
       message: tooltip,
       child: Material(
@@ -1493,15 +1514,15 @@ class _HeaderIconButton extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.08),
+              color: bgColor,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: Colors.white.withValues(alpha: 0.18),
+                color: borderColor,
               ),
             ),
             child: Icon(
               icon,
-              color: Colors.white,
+              color: iconColor,
               size: 22,
             ),
           ),
@@ -1522,12 +1543,19 @@ class _HomeTabSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.32),
+        color: (isDark ? Colors.black : scheme.surfaceContainerHighest)
+            .withValues(alpha: isDark ? 0.32 : 0.86),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : scheme.outlineVariant.withValues(alpha: 0.45),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1562,6 +1590,9 @@ class _TabChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final unselectedColor = isDark ? Colors.white70 : scheme.onSurfaceVariant;
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(16),
@@ -1579,7 +1610,7 @@ class _TabChip extends StatelessWidget {
           child: Text(
             label,
             style: TextStyle(
-              color: selected ? Colors.white : Colors.white70,
+              color: selected ? Colors.white : unselectedColor,
               fontSize: 15,
               fontWeight: FontWeight.w600,
             ),
@@ -1603,6 +1634,7 @@ class _SectionTitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Row(
       children: [
         Expanded(
@@ -1610,8 +1642,8 @@ class _SectionTitleBar extends StatelessWidget {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: scheme.onSurface,
               fontSize: 20,
               fontWeight: FontWeight.w700,
             ),
@@ -1622,8 +1654,8 @@ class _SectionTitleBar extends StatelessWidget {
             onPressed: onAction,
             child: Text(
               '$actionLabel >',
-              style: const TextStyle(
-                color: Color(0xFF9CA3AF),
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
@@ -1970,6 +2002,7 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _HoverScaleSurface(
       onTap: widget.onTap,
       borderRadius: BorderRadius.circular(12),
@@ -2105,8 +2138,8 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
               widget.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
               ),
@@ -2118,8 +2151,8 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
                   widget.subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Color(0xFFB6BDC8),
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
@@ -2201,6 +2234,7 @@ class _PosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return _HoverScaleSurface(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -2287,8 +2321,8 @@ class _PosterCard extends StatelessWidget {
               title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: scheme.onSurface,
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
                 height: 1.25,
@@ -2299,8 +2333,8 @@ class _PosterCard extends StatelessWidget {
               meta,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF9CA3AF),
+              style: TextStyle(
+                color: scheme.onSurfaceVariant,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),

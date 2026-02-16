@@ -1,5 +1,7 @@
 ﻿import 'dart:async';
 
+import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
@@ -33,6 +35,7 @@ Widget _sectionTitle(
   final text = Text(
     title,
     style: Theme.of(context).textTheme.titleMedium?.copyWith(
+          color: Colors.white.withValues(alpha: 0.96),
           fontWeight: FontWeight.w700,
         ),
   );
@@ -53,15 +56,13 @@ Widget _detailActionButton(
   required VoidCallback? onTap,
   bool primary = false,
 }) {
-  final scheme = Theme.of(context).colorScheme;
-  final isDark = scheme.brightness == Brightness.dark;
-  final fg = primary ? scheme.onPrimaryContainer : scheme.onSurface;
+  const fg = Colors.white;
   final bg = primary
-      ? scheme.primaryContainer
-      : scheme.surface.withValues(alpha: isDark ? 0.22 : 0.78);
+      ? const Color(0xFF1F9F75).withValues(alpha: 0.84)
+      : Colors.black.withValues(alpha: 0.34);
   final borderColor = primary
       ? Colors.transparent
-      : scheme.outlineVariant.withValues(alpha: isDark ? 0.34 : 0.50);
+      : Colors.white.withValues(alpha: 0.20);
   return Material(
     color: Colors.transparent,
     child: InkWell(
@@ -101,6 +102,46 @@ Widget _detailActionButton(
           ),
         ),
       ),
+    ),
+  );
+}
+
+Widget _detailGlassPanel({
+  required Widget child,
+  EdgeInsetsGeometry? padding,
+  bool enableBlur = true,
+  double radius = 16,
+}) {
+  final borderRadius = BorderRadius.circular(radius);
+  final surface = Container(
+    padding: padding,
+    decoration: BoxDecoration(
+      borderRadius: borderRadius,
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.black.withValues(alpha: 0.46),
+          Colors.black.withValues(alpha: 0.34),
+        ],
+      ),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.20)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.22),
+          blurRadius: 20,
+          offset: const Offset(0, 10),
+        ),
+      ],
+    ),
+    child: child,
+  );
+  if (!enableBlur) return ClipRRect(borderRadius: borderRadius, child: surface);
+  return ClipRRect(
+    borderRadius: borderRadius,
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: surface,
     ),
   );
 }
@@ -730,10 +771,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 icon: const Icon(Icons.search),
               ),
               IconButton(
-                onPressed: () => _showTopActionHint('用户'),
-                icon: const Icon(Icons.person),
-              ),
-              IconButton(
                 onPressed: () => _showTopActionHint('设置'),
                 icon: const Icon(Icons.settings),
               ),
@@ -752,15 +789,12 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     required Duration? runtime,
   }) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final width = MediaQuery.of(context).size.width;
     final wide = width >= 980;
-    final heroTextColor = scheme.onSurface;
-    final heroMutedTextColor = scheme.onSurfaceVariant.withValues(alpha: 0.92);
-    final heroMetaBg = scheme.surface.withValues(
-      alpha: scheme.brightness == Brightness.dark ? 0.20 : 0.76,
-    );
-    final heroMetaBorder = scheme.outlineVariant.withValues(alpha: 0.30);
+    const heroTextColor = Colors.white;
+    final heroMutedTextColor = Colors.white.withValues(alpha: 0.88);
+    final heroMetaBg = Colors.black.withValues(alpha: 0.32);
+    final heroMetaBorder = Colors.white.withValues(alpha: 0.22);
     final posterUrl = access == null
         ? ''
         : access.adapter.imageUrl(
@@ -837,9 +871,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             top: 8,
             right: 8,
             child: Material(
-              color: scheme.surface.withValues(
-                alpha: scheme.brightness == Brightness.dark ? 0.55 : 0.76,
-              ),
+              color: Colors.black.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(999),
               child: IconButton(
                 onPressed: _favoriteLoaded ? _toggleLocalFavorite : null,
@@ -992,7 +1024,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             ],
           );
 
-    return AppPanel(
+    return _detailGlassPanel(
       enableBlur: !widget.isTv && widget.appState.enableBlurEffects,
       padding: _DetailUiTokens.panelPadding,
       child: wide
@@ -1206,7 +1238,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     required bool enableBlur,
   }) {
     if (_seasons.isEmpty) return const SizedBox.shrink();
-    return AppPanel(
+    return _detailGlassPanel(
       enableBlur: enableBlur,
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -1868,39 +1900,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       UiTemplate.minimalCovers => null,
     };
 
-    final scrimBottom = switch (template) {
-      UiTemplate.neonHud =>
-        Color.lerp(Colors.black, scheme.primary, 0.22)!.withValues(
-          alpha: isDark ? 0.74 : 0.62,
-        ),
-      UiTemplate.pixelArcade =>
-        Color.lerp(Colors.black, scheme.secondary, 0.18)!.withValues(
-          alpha: isDark ? 0.74 : 0.62,
-        ),
-      UiTemplate.stickerJournal =>
-        Color.lerp(Colors.black, scheme.secondary, 0.14)!.withValues(
-          alpha: isDark ? 0.70 : 0.60,
-        ),
-      UiTemplate.candyGlass =>
-        Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
-          alpha: isDark ? 0.68 : 0.58,
-        ),
-      UiTemplate.washiWatercolor =>
-        Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
-          alpha: isDark ? 0.66 : 0.56,
-        ),
-      UiTemplate.mangaStoryboard => isDark
-          ? Colors.black.withValues(alpha: 0.76)
-          : Colors.white.withValues(alpha: 0.82),
-      UiTemplate.proTool =>
-        Colors.black.withValues(alpha: isDark ? 0.68 : 0.58),
-      UiTemplate.minimalCovers =>
-        Colors.black.withValues(alpha: isDark ? 0.64 : 0.55),
-    };
+    final scrimBottom = Colors.black.withValues(alpha: 0.72);
 
-    final heroTitleColor = (template == UiTemplate.mangaStoryboard && !isDark)
-        ? Colors.black
-        : Colors.white;
+    const heroTitleColor = Colors.white;
 
     Widget heroImage = hero.isEmpty
         ? const ColoredBox(color: Colors.black26)
@@ -2134,8 +2136,12 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                           const SizedBox(height: 16),
                         ],
                         if (widget.itemId.isEmpty)
-                          Text(item.overview,
-                              style: Theme.of(context).textTheme.bodyMedium),
+                          Text(
+                            item.overview,
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Colors.white.withValues(alpha: 0.88),
+                                ),
+                          ),
                         const SizedBox(height: 16),
                         if (_chapters.isNotEmpty) ...[
                           _chaptersSection(context, _chapters),
@@ -2257,7 +2263,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: _HoverScale(
-                                  child: AppPanel(
+                                  child: _detailGlassPanel(
                                     enableBlur: enableBlur,
                                     padding: const EdgeInsets.all(10),
                                     child: InkWell(
@@ -3422,10 +3428,6 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 icon: const Icon(Icons.search),
               ),
               IconButton(
-                onPressed: () => showHint('用户'),
-                icon: const Icon(Icons.person),
-              ),
-              IconButton(
                 onPressed: () => showHint('设置'),
                 icon: const Icon(Icons.settings),
               ),
@@ -3439,12 +3441,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final isDark = scheme.brightness == Brightness.dark;
-    final heroTextColor = scheme.onSurface;
-    final heroMutedTextColor = scheme.onSurfaceVariant.withValues(alpha: 0.92);
-    final heroMetaBg = scheme.surface.withValues(alpha: isDark ? 0.20 : 0.76);
-    final heroMetaBorder = scheme.outlineVariant.withValues(alpha: 0.30);
+    const heroTextColor = Colors.white;
+    final heroMutedTextColor = Colors.white.withValues(alpha: 0.88);
+    final heroMetaBg = Colors.black.withValues(alpha: 0.32);
+    final heroMetaBorder = Colors.white.withValues(alpha: 0.22);
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
     final access = resolveServerAccess(
       appState: widget.appState,
@@ -3530,7 +3530,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  AppPanel(
+                  _detailGlassPanel(
                     enableBlur: enableBlur,
                     padding: _DetailUiTokens.panelPadding,
                     child: LayoutBuilder(
@@ -3656,8 +3656,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                             ?.copyWith(color: heroTextColor),
                                       ),
                                       const SizedBox(width: 6),
-                                      Icon(Icons.expand_more,
-                                          color: heroTextColor, size: 18),
+                                      const Icon(Icons.expand_more,
+                                          color: Colors.white, size: 18),
                                     ],
                                   ),
                                 ),
@@ -4394,98 +4394,21 @@ Widget _chaptersSection(BuildContext context, List<ChapterInfo> chapters) {
 
 Widget _pill(BuildContext context, String text) {
   final theme = Theme.of(context);
-  final scheme = theme.colorScheme;
-  final style = theme.extension<AppStyle>() ?? const AppStyle();
-  final isDark = scheme.brightness == Brightness.dark;
-
-  final pillRadius = switch (style.template) {
-    UiTemplate.neonHud => 12.0,
-    UiTemplate.pixelArcade => 10.0,
-    UiTemplate.mangaStoryboard => 10.0,
-    _ => 20.0,
-  };
-
-  final (Color bg, Color fg, BorderSide border) = switch (style.template) {
-    UiTemplate.neonHud => (
-        Colors.black.withValues(alpha: isDark ? 0.28 : 0.24),
-        Colors.white,
-        BorderSide(
-          color: scheme.primary.withValues(alpha: isDark ? 0.75 : 0.85),
-          width: 1.1,
-        ),
-      ),
-    UiTemplate.pixelArcade => (
-        Colors.black.withValues(alpha: isDark ? 0.30 : 0.24),
-        Colors.white,
-        BorderSide(
-          color: scheme.secondary.withValues(alpha: isDark ? 0.75 : 0.85),
-          width: 1.2,
-        ),
-      ),
-    UiTemplate.mangaStoryboard => (
-        Colors.white.withValues(alpha: isDark ? 0.24 : 0.88),
-        isDark ? Colors.white : Colors.black,
-        BorderSide(
-          color: (isDark ? Colors.white : Colors.black)
-              .withValues(alpha: isDark ? 0.55 : 0.85),
-          width: 1.2,
-        ),
-      ),
-    UiTemplate.stickerJournal => (
-        Color.lerp(Colors.black, scheme.secondary, 0.18)!.withValues(
-          alpha: isDark ? 0.30 : 0.24,
-        ),
-        Colors.white,
-        BorderSide(
-          color: scheme.secondary.withValues(alpha: isDark ? 0.50 : 0.70),
-          width: 1.0,
-        ),
-      ),
-    UiTemplate.candyGlass => (
-        Color.lerp(Colors.black, scheme.primary, 0.12)!.withValues(
-          alpha: isDark ? 0.28 : 0.22,
-        ),
-        Colors.white,
-        BorderSide.none,
-      ),
-    UiTemplate.washiWatercolor => (
-        Color.lerp(Colors.black, scheme.tertiary, 0.10)!.withValues(
-          alpha: isDark ? 0.26 : 0.20,
-        ),
-        Colors.white,
-        BorderSide.none,
-      ),
-    UiTemplate.proTool => (
-        Colors.black.withValues(alpha: isDark ? 0.28 : 0.22),
-        Colors.white,
-        BorderSide(
-          color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.18),
-          width: 1.0,
-        ),
-      ),
-    UiTemplate.minimalCovers => (
-        Colors.black.withValues(alpha: isDark ? 0.26 : 0.20),
-        Colors.white,
-        BorderSide.none,
-      ),
-  };
-
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
-      color: bg,
-      borderRadius: BorderRadius.circular(pillRadius),
-      border: border == BorderSide.none ? null : Border.fromBorderSide(border),
+      color: Colors.black.withValues(alpha: 0.30),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
     ),
     child: Text(
       text,
       style: theme.textTheme.labelMedium?.copyWith(
-            color: fg,
+            color: Colors.white,
             fontWeight: FontWeight.w700,
-            letterSpacing: style.template == UiTemplate.neonHud ? 0.2 : null,
           ) ??
-          TextStyle(
-            color: fg,
+          const TextStyle(
+            color: Colors.white,
             fontWeight: FontWeight.w700,
           ),
     ),
@@ -4983,7 +4906,7 @@ int _gcd(int a, int b) {
 
 Widget _infoCard(String title, String body) => SizedBox(
       width: 240,
-      child: AppPanel(
+      child: _detailGlassPanel(
         enableBlur: true,
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -4991,12 +4914,19 @@ Widget _infoCard(String title, String body) => SizedBox(
           children: [
             Text(
               title,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               body.isEmpty ? '无' : body,
-              style: const TextStyle(fontSize: 12, height: 1.4),
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                height: 1.4,
+              ),
               maxLines: 18,
               overflow: TextOverflow.ellipsis,
             ),
@@ -5067,8 +4997,9 @@ Widget _externalLinksSection(
               (link) => ActionChip(
                 avatar: Icon(link.icon, size: 18),
                 label: Text(link.label),
-                backgroundColor:
-                    Theme.of(context).colorScheme.surface.withValues(alpha: 0.7),
+                labelStyle: const TextStyle(color: Colors.white),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.24)),
+                backgroundColor: Colors.black.withValues(alpha: 0.30),
                 onPressed: () => openExternal(link.url),
               ),
             )
