@@ -54,34 +54,52 @@ Widget _detailActionButton(
   bool primary = false,
 }) {
   final scheme = Theme.of(context).colorScheme;
-  final fg = primary ? scheme.onPrimaryContainer : Colors.white;
-  final bg =
-      primary ? scheme.primaryContainer : Colors.black.withValues(alpha: 0.28);
-  return InkWell(
-    borderRadius: BorderRadius.circular(_DetailUiTokens.actionRadius),
-    onTap: onTap,
-    child: Ink(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(_DetailUiTokens.actionRadius),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: primary ? 0 : 0.22),
+  final isDark = scheme.brightness == Brightness.dark;
+  final fg = primary ? scheme.onPrimaryContainer : scheme.onSurface;
+  final bg = primary
+      ? scheme.primaryContainer
+      : scheme.surface.withValues(alpha: isDark ? 0.22 : 0.78);
+  final borderColor = primary
+      ? Colors.transparent
+      : scheme.outlineVariant.withValues(alpha: isDark ? 0.34 : 0.50);
+  return Material(
+    color: Colors.transparent,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(_DetailUiTokens.actionRadius),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(_DetailUiTokens.actionRadius),
+          border: Border.all(color: borderColor),
         ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: fg),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: fg,
-                  fontWeight: FontWeight.w700,
-                ),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 160),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: ScaleTransition(scale: animation, child: child),
           ),
-        ],
+          child: Row(
+            key: ValueKey<String>('$icon|$label|$primary'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ],
+          ),
+        ),
       ),
     ),
   );
@@ -210,7 +228,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     final userId = _userId;
     if (baseUrl == null || token == null || userId == null) {
       setState(() {
-        _error = '鏈繛鎺ユ湇鍔″櫒';
+        _error = '未连接服务器';
       });
       return;
     }
@@ -446,7 +464,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
         return SafeArea(
           child: ListView(
             children: [
-              const ListTile(title: Text('瀛ｉ€夋嫨')),
+              const ListTile(title: Text('季选择')),
               ..._seasons.asMap().entries.map((entry) {
                 final idx = entry.key;
                 final s = entry.value;
@@ -539,10 +557,10 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                     return ListView(
                       controller: controller,
                       children: const [
-                        ListTile(title: Text('閫夐泦')),
+                        ListTile(title: Text('选集')),
                         Padding(
                           padding: EdgeInsets.all(16),
-                          child: Text('鏆傛棤鍓ч泦'),
+                          child: Text('暂无剧集'),
                         ),
                       ],
                     );
@@ -733,8 +751,16 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
     required bool isSeries,
     required Duration? runtime,
   }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final width = MediaQuery.of(context).size.width;
     final wide = width >= 980;
+    final heroTextColor = scheme.onSurface;
+    final heroMutedTextColor = scheme.onSurfaceVariant.withValues(alpha: 0.92);
+    final heroMetaBg = scheme.surface.withValues(
+      alpha: scheme.brightness == Brightness.dark ? 0.20 : 0.76,
+    );
+    final heroMetaBorder = scheme.outlineVariant.withValues(alpha: 0.30);
     final posterUrl = access == null
         ? ''
         : access.adapter.imageUrl(
@@ -811,13 +837,15 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
             top: 8,
             right: 8,
             child: Material(
-              color: Colors.black.withValues(alpha: 0.55),
+              color: scheme.surface.withValues(
+                alpha: scheme.brightness == Brightness.dark ? 0.55 : 0.76,
+              ),
               borderRadius: BorderRadius.circular(999),
               child: IconButton(
                 onPressed: _favoriteLoaded ? _toggleLocalFavorite : null,
                 icon: Icon(
                   _localFavorite ? Icons.star : Icons.star_border_rounded,
-                  color: _localFavorite ? Colors.pinkAccent : Colors.white,
+                  color: _localFavorite ? Colors.pinkAccent : heroTextColor,
                 ),
               ),
             ),
@@ -831,8 +859,9 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       children: [
         Text(
           item.name,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: Colors.white,
+          style: (wide ? theme.textTheme.headlineMedium : theme.textTheme.headlineSmall)
+              ?.copyWith(
+                color: heroTextColor,
                 fontWeight: FontWeight.w800,
               ),
         ),
@@ -845,13 +874,14 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                 (m) => Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.14),
+                    color: heroMetaBg,
                     borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: heroMetaBorder),
                   ),
                   child: Text(
                     m,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: Colors.white,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                          color: heroTextColor,
                         ),
                   ),
                 ),
@@ -907,8 +937,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           const SizedBox(height: 16),
           Text(
             featuredLabel,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: Colors.white,
+            style: theme.textTheme.titleSmall?.copyWith(
+                  color: heroTextColor,
                   fontWeight: FontWeight.w700,
                 ),
           ),
@@ -918,8 +948,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           item.overview,
           maxLines: 4,
           overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.9),
+          style: theme.textTheme.bodyMedium?.copyWith(
+                color: heroMutedTextColor,
                 height: 1.45,
               ),
         ),
@@ -930,8 +960,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
       item.name,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            color: Colors.white,
+      style: theme.textTheme.headlineSmall?.copyWith(
+            color: heroTextColor,
             fontWeight: FontWeight.w900,
             shadows: const [
               Shadow(color: Colors.black54, blurRadius: 10),
@@ -1440,8 +1470,8 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     final audioText = selectedAudio != null && selectedAudio.isNotEmpty
         ? _streamLabel(selectedAudio, includeCodec: false) +
-            (selectedAudio == defaultAudio ? ' (榛樿)' : '')
-        : '榛樿';
+            (selectedAudio == defaultAudio ? ' (默认)' : '')
+        : '默认';
 
     final defaultSub = _defaultStream(subtitleStreams);
     final Map<String, dynamic>? selectedSub;
@@ -1458,12 +1488,12 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     final hasSubs = subtitleStreams.isNotEmpty;
     final subtitleText = _selectedSubtitleStreamIndex == -1
-        ? '鍏抽棴'
+        ? '关闭'
         : selectedSub != null && selectedSub.isNotEmpty
             ? _streamLabel(selectedSub, includeCodec: false)
             : hasSubs
-                ? '榛樿'
-                : '鍏抽棴';
+                ? '默认'
+                : '关闭';
 
     final scheme = Theme.of(context).colorScheme;
     final disabledColor = scheme.onSurface.withValues(alpha: 0.38);
@@ -1568,17 +1598,17 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
 
     final hasSubs = subtitleStreams.isNotEmpty;
     final subtitleText = _selectedSubtitleStreamIndex == -1
-        ? '鍏抽棴'
+        ? '关闭'
         : selectedSub != null && selectedSub.isNotEmpty
             ? _streamLabel(selectedSub, includeCodec: false)
             : hasSubs
-                ? '榛樿'
-                : '鍏抽棴';
+                ? '默认'
+                : '关闭';
 
     final audioText = selectedAudio != null && selectedAudio.isNotEmpty
         ? _streamLabel(selectedAudio, includeCodec: false) +
-            (selectedAudio == defaultAudio ? ' (榛樿)' : '')
-        : '榛樿';
+            (selectedAudio == defaultAudio ? ' (默认)' : '')
+        : '默认';
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1765,7 +1795,7 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
           enableBlur: enableBlur,
           child: AppBar(title: Text(widget.title)),
         ),
-        body: Center(child: Text(_error ?? '鍔犺浇澶辫触')),
+        body: Center(child: Text(_error ?? '加载失败')),
       );
     }
     final item = _detail!;
@@ -2330,71 +2360,6 @@ class _ShowDetailPageState extends State<ShowDetailPage> {
                             }).toList(),
                           ),
                         ],
-                        if (widget.itemId.isEmpty && _similar.isNotEmpty) ...[
-                          _sectionTitle(context, '更多类似'),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 240,
-                            child: _withHorizontalEdgeFade(
-                              context,
-                              child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _similar.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 12),
-                              itemBuilder: (context, index) {
-                                final s = _similar[index];
-                                final img = s.hasImage && access != null
-                                    ? access.adapter.imageUrl(
-                                        access.auth,
-                                        itemId: s.id,
-                                        maxWidth: 400,
-                                      )
-                                    : null;
-                                final date = (s.premiereDate ?? '').trim();
-                                final parsed = date.isEmpty
-                                    ? null
-                                    : DateTime.tryParse(date);
-                                final year = parsed != null
-                                    ? parsed.year.toString()
-                                    : (date.length >= 4
-                                        ? date.substring(0, 4)
-                                        : '');
-                                final badge = s.type == 'Movie'
-                                    ? '电影'
-                                    : (s.type == 'Series' ? '剧集' : '');
-
-                                return _HoverScale(
-                                  child: SizedBox(
-                                    width: 140,
-                                    child: MediaPosterTile(
-                                      title: s.name,
-                                      titleMaxLines: 2,
-                                      imageUrl: img,
-                                      year: year,
-                                      rating: s.communityRating,
-                                      badgeText: badge,
-                                      onTap: () {
-                                        Navigator.of(context).push(
-                                          MaterialPageRoute(
-                                            builder: (_) => ShowDetailPage(
-                                              itemId: s.id,
-                                              title: s.name,
-                                              appState: widget.appState,
-                                              server: widget.server,
-                                              isTv: widget.isTv,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                            ),
-                          ),
-                        ],
                         if (_similar.isNotEmpty) ...[
                           _sectionTitle(context, '更多类似'),
                           const SizedBox(height: 8),
@@ -2537,7 +2502,7 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
     final userId = _userId;
     if (baseUrl == null || token == null || userId == null) {
       setState(() {
-        _error = '鏈繛鎺ユ湇鍔″櫒';
+        _error = '未连接服务器';
         _loading = false;
       });
       return;
@@ -2599,7 +2564,7 @@ class _SeasonEpisodesPageState extends State<SeasonEpisodesPage> {
           : _error != null
               ? Center(child: Text(_error!))
               : _episodes.isEmpty
-                  ? const Center(child: Text('鏆傛棤鍓ч泦'))
+                  ? const Center(child: Text('暂无剧集'))
                   : ListView.separated(
                       padding: const EdgeInsets.all(16),
                       itemCount: _episodes.length,
@@ -2892,7 +2857,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
     final userId = _userId;
     if (baseUrl == null || token == null || userId == null) {
       setState(() {
-        _error = '鏈繛鎺ユ湇鍔″櫒';
+        _error = '未连接服务器';
         _loading = false;
       });
       return;
@@ -3135,7 +3100,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         return SafeArea(
           child: ListView(
             children: [
-              const ListTile(title: Text('鐗堟湰閫夋嫨')),
+              const ListTile(title: Text('版本选择')),
               ...sortedSources.map((ms) {
                 final id = (ms['Id']?.toString() ?? '').trim();
                 final selectedNow = id.isNotEmpty && id == current;
@@ -3189,12 +3154,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         return SafeArea(
           child: ListView(
             children: [
-              const ListTile(title: Text('闊宠建閫夋嫨')),
+              const ListTile(title: Text('音轨选择')),
               ListTile(
                 leading: Icon(_selectedAudioStreamIndex == null
                     ? Icons.check
                     : Icons.circle_outlined),
-                title: const Text('榛樿'),
+                title: const Text('默认'),
                 onTap: () => Navigator.of(ctx).pop(null),
               ),
               ...audioStreams.map((s) {
@@ -3206,7 +3171,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 return ListTile(
                   leading: Icon(
                       selectedNow ? Icons.check_circle : Icons.circle_outlined),
-                  title: Text(idx == defIndex ? '$title (榛樿)' : title),
+                  title: Text(idx == defIndex ? '$title (默认)' : title),
                   subtitle: (s['Codec'] as String?)?.isNotEmpty == true
                       ? Text(s['Codec'] as String)
                       : null,
@@ -3249,15 +3214,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
         return SafeArea(
           child: ListView(
             children: [
-              const ListTile(title: Text('瀛楀箷閫夋嫨')),
+              const ListTile(title: Text('字幕选择')),
               ListTile(
                 leading: Icon(isOff ? Icons.check : Icons.circle_outlined),
-                title: const Text('鍏抽棴'),
+                title: const Text('关闭'),
                 onTap: () => Navigator.of(ctx).pop(-1),
               ),
               ListTile(
                 leading: Icon(isDefault ? Icons.check : Icons.circle_outlined),
-                title: const Text('榛樿'),
+                title: const Text('默认'),
                 onTap: () => Navigator.of(ctx).pop(null),
               ),
               ...subtitleStreams.map((s) {
@@ -3269,7 +3234,7 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                 return ListTile(
                   leading: Icon(
                       selectedNow ? Icons.check_circle : Icons.circle_outlined),
-                  title: Text(idx == defIndex ? '$title (榛樿)' : title),
+                  title: Text(idx == defIndex ? '$title (默认)' : title),
                   subtitle: (s['Codec'] as String?)?.isNotEmpty == true
                       ? Text(s['Codec'] as String)
                       : null,
@@ -3473,6 +3438,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = scheme.brightness == Brightness.dark;
+    final heroTextColor = scheme.onSurface;
+    final heroMutedTextColor = scheme.onSurfaceVariant.withValues(alpha: 0.92);
+    final heroMetaBg = scheme.surface.withValues(alpha: isDark ? 0.20 : 0.76);
+    final heroMetaBorder = scheme.outlineVariant.withValues(alpha: 0.30);
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
     final access = resolveServerAccess(
       appState: widget.appState,
@@ -3595,19 +3567,19 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                           children: [
                             Text(
                               seriesTitle,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                  ?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                  ),
+                              style: (wide
+                                      ? theme.textTheme.headlineMedium
+                                      : theme.textTheme.headlineSmall)
+                                   ?.copyWith(
+                                     color: heroTextColor,
+                                     fontWeight: FontWeight.w800,
+                                   ),
                             ),
                             const SizedBox(height: 6),
                             Text(
                               _episodeLine(ep),
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    color: Colors.white,
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                    color: heroTextColor,
                                     fontWeight: FontWeight.w700,
                                   ),
                             ),
@@ -3621,17 +3593,15 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color:
-                                            Colors.white.withValues(alpha: 0.14),
+                                        color: heroMetaBg,
+                                        border: Border.all(color: heroMetaBorder),
                                         borderRadius:
                                             BorderRadius.circular(999),
                                       ),
                                       child: Text(
                                         m,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .labelMedium
-                                            ?.copyWith(color: Colors.white),
+                                        style: theme.textTheme.labelMedium
+                                            ?.copyWith(color: heroTextColor),
                                       ),
                                     ),
                                   )
@@ -3640,9 +3610,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                             const SizedBox(height: 12),
                             Text(
                               '视频：${_currentVideoText()}',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color: Colors.white,
-                                  ),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: heroTextColor),
                             ),
                             const SizedBox(height: 6),
                             if (ms != null)
@@ -3654,20 +3623,16 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                       const EdgeInsets.symmetric(vertical: 2),
                                   child: Text(
                                     '音频：${_currentAudioText()}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyMedium
-                                        ?.copyWith(color: Colors.white),
+                                    style: theme.textTheme.bodyMedium
+                                        ?.copyWith(color: heroTextColor),
                                   ),
                                 ),
                               )
                             else
                               Text(
                                 '音频：${_currentAudioText()}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(color: Colors.white),
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(color: heroTextColor),
                               ),
                             const SizedBox(height: 6),
                             if (ms != null)
@@ -3678,8 +3643,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 10, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color:
-                                        Colors.white.withValues(alpha: 0.14),
+                                    color: heroMetaBg,
+                                    border: Border.all(color: heroMetaBorder),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Row(
@@ -3687,14 +3652,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                     children: [
                                       Text(
                                         '字幕：${_currentSubtitleText()}',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(color: Colors.white),
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(color: heroTextColor),
                                       ),
                                       const SizedBox(width: 6),
-                                      const Icon(Icons.expand_more,
-                                          color: Colors.white, size: 18),
+                                      Icon(Icons.expand_more,
+                                          color: heroTextColor, size: 18),
                                     ],
                                   ),
                                 ),
@@ -3702,10 +3665,8 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                             else
                               Text(
                                 '字幕：${_currentSubtitleText()}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(color: Colors.white),
+                                style: theme.textTheme.bodyMedium
+                                    ?.copyWith(color: heroTextColor),
                               ),
                             const SizedBox(height: 12),
                             Wrap(
@@ -3751,13 +3712,10 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                                 _detail!.overview,
                                 maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: Colors.white.withValues(alpha: 0.92),
-                                      height: 1.45,
-                                    ),
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: heroMutedTextColor,
+                                  height: 1.45,
+                                ),
                               ),
                             ],
                           ],
@@ -3769,16 +3727,13 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
                             seriesTitle,
                             maxLines: 2,
                             textAlign: TextAlign.right,
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineMedium
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w900,
-                                  shadows: const [
-                                    Shadow(color: Colors.black54, blurRadius: 10),
-                                  ],
-                                ),
+                            style: theme.textTheme.headlineMedium?.copyWith(
+                              color: heroTextColor,
+                              fontWeight: FontWeight.w900,
+                              shadows: const [
+                                Shadow(color: Colors.black54, blurRadius: 10),
+                              ],
+                            ),
                           ),
                         );
 
@@ -4387,7 +4342,7 @@ Widget _chaptersSection(BuildContext context, List<ChapterInfo> chapters) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text('绔犺妭', style: Theme.of(context).textTheme.titleMedium),
+      _sectionTitle(context, '章节'),
       const SizedBox(height: 8),
       GridView.builder(
         shrinkWrap: true,
@@ -4767,6 +4722,11 @@ Widget _peopleSection(
   List<MediaPerson> people, {
   required ServerAccess access,
 }) {
+  final scheme = Theme.of(context).colorScheme;
+  final avatarBg = scheme.surfaceContainerHighest.withValues(
+    alpha: scheme.brightness == Brightness.dark ? 0.55 : 0.88,
+  );
+  final roleColor = scheme.onSurfaceVariant;
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -4793,7 +4753,7 @@ Widget _peopleSection(
                     CircleAvatar(
                       radius: 42,
                       backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
-                      backgroundColor: Colors.white24,
+                      backgroundColor: avatarBg,
                       child: img.isEmpty
                           ? Text(p.name.isNotEmpty ? p.name[0] : '?')
                           : null,
@@ -4805,7 +4765,7 @@ Widget _peopleSection(
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.white70,
+                            color: roleColor,
                           ),
                     ),
                   ],
@@ -4824,6 +4784,11 @@ Widget _castSection(
   List<MediaPerson> people, {
   required ServerAccess access,
 }) {
+  final scheme = Theme.of(context).colorScheme;
+  final avatarBg = scheme.surfaceContainerHighest.withValues(
+    alpha: scheme.brightness == Brightness.dark ? 0.55 : 0.88,
+  );
+  final roleColor = scheme.onSurfaceVariant;
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -4852,7 +4817,7 @@ Widget _castSection(
                       CircleAvatar(
                         radius: 42,
                         backgroundImage: img.isNotEmpty ? NetworkImage(img) : null,
-                        backgroundColor: Colors.white24,
+                        backgroundColor: avatarBg,
                         child: img.isEmpty
                             ? Text(p.name.isNotEmpty ? p.name[0] : '?')
                             : null,
@@ -4870,7 +4835,7 @@ Widget _castSection(
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.white70,
+                              color: roleColor,
                             ),
                       ),
                     ],

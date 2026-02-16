@@ -1,247 +1,318 @@
-# LinPlayer 源码导览（Architecture）
+﻿# LinPlayer 架构说明（Architecture）
 
-> 开发者文档：项目结构与模块说明。
+> 面向二次开发与排障的开发者文档。本文以当前 `main` 分支代码结构为准。
 
-本文面向想二次开发/排查问题的开发者，解释项目目录结构、核心模块职责，以及 Emby/Jellyfin 接口与播放链路（并包含 Plex PIN 登录添加服务器）的实现逻辑。
+## 1. 文档目标
 
-## 目录结构（顶层）
+- 快速理解项目的“分层边界”和“关键调用链”。
+- 明确每个目录/模块该放什么，不该放什么。
+- 为后续新增服务器类型、播放能力、TV 能力提供落点参考。
 
-- `.github/`：CI/CD（GitHub Actions）与打包脚本。
-  - `.github/workflows/build-all.yml`：多平台 Nightly 构建并发布 `nightly` Release。
-  - `.github/workflows/release-latest.yml`：将 `nightly` 产物提升为 `latest` Release。
-  - `.github/scripts/compute_version.*`：把 `workflow_dispatch` 输入的版本写入环境变量。
-  - `.github/installer/windows/linplayer.iss`：Windows 安装包（Inno Setup）脚本。
-- `assets/`：项目资源（目前主要用于应用图标）。
-  - `assets/app_icon.jpg`：图标源文件。
-  - `assets/README.md`：图标生成说明（`dart run flutter_launcher_icons`）。
-- `lib/`：Flutter 应用代码（页面编排/路由/少量 glue；通用 state/ui/player 已逐步抽到 `packages/`，`lib/` 下保留部分 re-export 便于渐进迁移）。
-- `packages/`：项目内置/改造后的依赖与可复用模块（模块化拆分进行中）。
-  - `packages/lin_player_core/`：纯 Dart 核心定义（AppConfig / FeatureFlags / MediaServerType 等）。
-  - `packages/lin_player_prefs/`：偏好设置定义（UI 模板、播放器设置枚举等）。
-  - `packages/lin_player_server_api/`：服务端/网络 API（Emby/Jellyfin、WebDAV、Plex 等）。
-  - `packages/lin_player_server_adapters/`：服务端适配层（UI 只依赖 adapter 接口）。
-  - `packages/lin_player_ui/`：UI 基建（主题/样式/玻璃效果/图标库等可复用组件）。
-  - `packages/lin_player_player/`：播放器模块（PlayerService、弹幕、播放控制等通用能力）。
-  - `packages/lin_player_state/`：全局状态与持久化（AppState、ServerProfile、备份等）。
-  - `packages/media_kit_patched/`：对 `media_kit` 的小改造版本，用于更细粒度传递 mpv 参数（见下文）。
-  - `packages/video_player_android_patched/`：对 `video_player_android` 的改造版本，用于 Exo 内核的字幕轨道枚举/选择与 platformView 字幕渲染（见下文）。
-- `android/`、`ios/`、`macos/`、`windows/`、`linux/`：Flutter 各平台宿主工程（应用名、图标、打包配置都在这里落地）。
-- `test/`：Flutter 测试（widget test + 部分单元测试）。
-- `build/`、`.dart_tool/`：构建/缓存产物（生成目录，通常不入库）。
+## 2. 架构总览
 
-## 关键配置文件
+LinPlayer 采用“页面层 + 状态层 + 适配层 + API 层 + 播放层 + 平台服务层”的结构：
 
-- `pubspec.yaml`
-  - Flutter/Dart 依赖清单。
-  - `dependency_overrides`：指向 `packages/media_kit_patched` 与 `packages/video_player_android_patched`（项目内改造的 `media_kit`/`video_player_android`）。
-  - `flutter_launcher_icons`：图标生成配置（源文件为 `assets/app_icon.jpg`）。
-- `analysis_options.yaml`：Dart/Flutter lints 配置。
-- `.gitignore`
-  - 忽略构建产物（如 `build/`、`.dart_tool/` 等）。
-  - 当前仓库也忽略了 `web/`（如果你需要 Web 端，建议先移除该忽略规则并补齐 Web 配置）。
+```text
+Flutter 页面(lib/*.dart)
+  -> AppState (packages/lin_player_state)
+    -> Server Adapter (packages/lin_player_server_adapters)
+      -> API Client (packages/lin_player_server_api)
+        -> Emby/Jellyfin/WebDAV/Plex 等服务
 
-## Flutter 端结构（lib/）
+播放页(lib/player_screen*.dart, lib/play_network_page*.dart)
+  -> lin_player_player (PlayerService / Danmaku / 播放控制)
+    -> media_kit(mpv) 或 video_player_android(Exo)
+```
 
-### 入口与路由
-- `lib/main.dart`
-  - `MediaKit.ensureInitialized()`：确保 native 播放后端（mpv）初始化。
-  - `PackageInfo.fromPlatform()`：写入 `EmbyApi.setAppVersion()`，用于 User-Agent。
-  - `AppState.loadFromStorage()`：恢复已保存的服务器、主题等状态。
-  - `MaterialApp.builder`：对竖屏/小屏做全局 UI 缩放（文本/图标/部分组件尺寸）。
-  - 根据 `appState.hasActiveServer` 决定进入：
-    - `ServerPage`（未登录/未选择服务器）
-    - `HomePage`（已选择服务器）
+## 3. 顶层目录职责
 
-### 全局状态（数据源）
-- `packages/lin_player_state/lib/app_state.dart`
-  - 角色：全局 Store（`ChangeNotifier`），负责：
-    - 服务器列表/当前服务器（`ServerProfile`）
-    - Emby 线路（`DomainInfo`）、媒体库（`LibraryInfo`）
-    - 列表缓存（`_itemsCache`、`_itemsTotal`、`_homeSections`）
-    - 主题与动态取色开关（Material You）
-    - 弹幕设置（启用/来源、本地/在线、在线源列表、开放平台凭证、样式参数等）
-    - SharedPreferences 持久化（servers/activeServer/theme/danmaku...）
-  - 关键流程：
-    - `addServer(...)`：登录并保存服务器（调用 `EmbyApi.authenticate` → `fetchDomains`/`fetchLibraries`）。
-    - `addPlexServer(...)`：保存 Plex 服务器信息（Token/连接地址等；当前仅保存登录信息，暂不支持浏览/播放）。
-    - `enterServer(serverId)`：切换服务器并刷新线路/媒体库/首页区块。
-    - `loadItems(...)`：拉取分页列表并写入缓存（用于库列表、搜索等）。
-    - `loadHome()`：按媒体库拉取最新条目，组成首页区块。
+- `.github/`
+  - CI/CD、Nightly/Latest 发布流程、安装包脚本。
+- `assets/`
+  - 图标、Anime4K shader、TV 代理资源、TV 远程网页静态资源。
+- `lib/`
+  - Flutter 业务页面与应用编排（入口、路由、页面、平台服务 glue）。
+- `packages/`
+  - 模块化后的核心包（state/ui/player/server/api/core/prefs）与 patched 依赖。
+- `docs/`
+  - 用户与开发文档。
+- `tool/`
+  - 构建辅助脚本（如 TV 代理资源拉取）。
+- `workers/`
+  - 辅助 Worker（当前有 `workers/dandanplay-proxy`）。
+
+## 4. 分层说明
+
+### 4.1 页面与编排层（`lib/`）
+
+入口：`lib/main.dart`
+
+职责：
+- 初始化媒体后端（`MediaKit.ensureInitialized()`）。
+- 初始化设备信息与 User-Agent（`ServerApiBootstrap.configure(...)`）。
+- 加载全局状态（`AppState.loadFromStorage()`）。
+- 根据设备类型与当前服务类型，选择 Home 壳：
+  - TV：`lib/tv/tv_shell.dart`
+  - Desktop：`lib/desktop_ui/desktop_shell.dart`
+  - Mobile/Tablet：`lib/home_page.dart` 或 `lib/webdav_home_page.dart`
+
+关键页面：
+- 服务管理：`lib/server_page.dart`
+- 首页与库：`lib/home_page.dart`、`lib/library_page.dart`、`lib/library_items_page.dart`
+- 详情页：`lib/show_detail_page.dart`
+- 播放页：
+  - MPV：`lib/player_screen.dart`、`lib/play_network_page.dart`
+  - Exo：`lib/player_screen_exo.dart`、`lib/play_network_page_exo.dart`
+- WebDAV：首页壳与浏览器：`lib/webdav_home_page.dart`、`lib/webdav_browser_page.dart`
+- 聚合检索：`lib/aggregate_service_page.dart`
+
+### 4.2 状态层（`packages/lin_player_state`）
+
+核心：`packages/lin_player_state/lib/app_state.dart`
+
+职责：
+- 全局状态中心（`ChangeNotifier`）。
+- 持久化（SharedPreferences）与缓存（库缓存、首页缓存、播放偏好、弹幕偏好、TV 偏好等）。
+- 服务管理流程：
+  - `addServer(...)`（Emby/Jellyfin）
+  - `addWebDavServer(...)`
+  - `addPlexServer(...)`
+  - `enterServer(...)` / `leaveServer()`
+- 数据加载流程：`loadItems(...)`、`loadHome(...)`、`loadMediaStats(...)`
+
+相关模型：
 - `packages/lin_player_state/lib/server_profile.dart`
-  - 角色：单个服务器配置与用户偏好。
-  - 字段：
-    - `serverType/apiPrefix`：服务器类型与 API 前缀（Emby 常见为 `emby`，Jellyfin 常见为空字符串）。
-    - `baseUrl/token/userId`：Emby/Jellyfin 访问三要素
-    - `hiddenLibraries`：隐藏的媒体库（长按媒体库卡片切换）
-    - `domainRemarks`：线路备注（可选）
-    - `plexMachineIdentifier`：Plex 服务器机器标识（可选，用于后续匹配/识别）
-- `packages/lin_player_prefs/lib/danmaku_preferences.dart`
-  - 角色：弹幕偏好枚举与序列化（本地/在线）。
+- `packages/lin_player_state/lib/local_playback_handoff.dart`
+- `packages/lin_player_state/lib/route_entries.dart`
 
-### Emby/Jellyfin 接口封装（HTTP）
-- `packages/lin_player_server_api/lib/services/emby_api.dart`
-  - 角色：封装 Emby/Jellyfin 常用接口 + 必要的 Header（`X-Emby-Token`、`X-Emby-Authorization`、`User-Agent`）。
-  - 主要方法（对应 UI/状态层调用）：
-    - `authenticate(username, password, deviceId)`：
-      - 尝试 http/https + 可选端口组合（`_candidates()`），命中后返回 `token/userId/baseUrlUsed`。
-    - `fetchDomains(token, baseUrl)`：
-      - 拉取扩展线路：`/emby/System/Ext/ServerDomains`（允许失败，失败即返回空；可配合 `emby_ext_domains` 等实现部署/使用）。
-    - `fetchLibraries(token, baseUrl, userId)`：
-      - 拉取媒体库视图：`/emby/Users/{userId}/Views`。
-    - `fetchItems(...)`：
-      - 统一的分页列表查询：`/emby/Users/{userId}/Items?...`（支持搜索、排序、类型过滤等）。
-      - `fetchSeasons/fetchEpisodes` 基于它做细分封装。
-    - `fetchContinueWatching / fetchLatestMovies / fetchLatestEpisodes / fetchLatestFromLibrary`：
-      - 首页“继续观看/最新内容”的数据来源。
-    - `fetchPlaybackInfo(token, baseUrl, userId, deviceId, itemId)`：
-      - 获取 `PlaySessionId` / `MediaSources` / `MediaSourceId`。
-      - 兼容策略：先 GET，遇到 404/5xx 或返回缺字段则 fallback 到 POST（带 `DeviceProfile`）。
-    - `fetchItemDetail / fetchChapters / fetchSimilar`：
-      - 详情页、章节、相似推荐等。
-  - `imageUrl(...)` / `personImageUrl(...)`：
-    - 统一生成封面/人物图片 URL（UI 用 `CachedNetworkImage` 加载）。
+### 4.3 适配层（`packages/lin_player_server_adapters`）
 
-### Plex 接口封装（PIN 登录）
-- `packages/lin_player_server_api/lib/services/plex_api.dart`
-  - 角色：封装 Plex PIN 登录与资源列表接口（plex.tv API v2），用于在 App 内完成“账号授权 → 选择服务器 → 保存”。
-  - 主要方法：
-    - `createPin()`：创建 PIN（返回 `id/code/expiresAt`）。
-    - `buildAuthUrl(code)`：拼接授权 URL（在外部浏览器打开）。
-    - `fetchPin(id)`：轮询 PIN 状态，直到获得 `authToken`。
-    - `fetchResources(authToken)`：拉取账号资源列表并筛选 `server`。
-  - UI 集成：`lib/server_page.dart` 中选择 Plex 后可用“账号登录（推荐）”走浏览器授权，或在“手动添加”里登录获取 Token 并填入。
+核心接口：`packages/lin_player_server_adapters/lib/server_adapters/server_adapter.dart`
 
-### 在线弹幕接口封装（弹弹play）
-- `packages/lin_player_player/lib/dandanplay_api.dart`
-  - 角色：封装弹弹play API v2 的匹配与弹幕下载（`/api/v2/match`、`/api/v2/comment/{episodeId}`）。
-  - 鉴权：
-    - 优先使用开放平台签名头：`X-AppId` / `X-Timestamp` / `X-Signature`。
-    - 若返回 403 且提示缺少鉴权，会回退到 `X-AppSecret` 模式（方便自建兼容服务）。
-  - 兼容服务示例（自建/第三方）：`https://github.com/huangxd-/danmu_api`、`https://github.com/l429609201/misaka_danmu_server`
+职责：
+- 定义统一服务能力接口 `MediaServerAdapter`，对页面层屏蔽服务端差异。
+- 在工厂 `server_adapter_factory.dart` 中按产品线选择具体适配器实现。
 
-### 播放器封装与播放链路
+现有实现：
+- `lin/lin_emby_adapter.dart`（Emby/Jellyfin 主实现）
+- `emos/emos_adapter.dart`
+- `uhd/uhd_adapter.dart`
 
-#### 1) 播放器封装
-- `packages/lin_player_player/lib/player_service.dart`
-  - 角色：对 `media_kit`/`media_kit_video` 的轻量封装，屏蔽初始化/销毁细节。
-  - `PlayerConfiguration` 关键点：
-    - `hwdec=auto` / `hwdec=no`：硬解/软解切换。
-    - 网络播放时增大 forward cache、限制 back cache，减少内存占用与回退卡顿。
-    - Windows 上设置 `gpu-context=d3d11`，降低 `vo=gpu` 的卡顿概率。
-  - 注意：该配置依赖 `packages/media_kit_patched` 暴露的 `extraMpvOptions`（用于传入 mpv 原生参数）。
-- `packages/lin_player_player/lib/src/player/playback_controls.dart`
-  - 角色：播放控制条（进度条、快捷快进/快退、菜单与状态 chips）。
-  - 状态 chips：缓冲速度、网速、系统时间、电量等（由设置项控制）。
-  - 网速（“网速”chip）：Android 优先显示**系统下载速率（RX）**（`TrafficStats.getTotalRxBytes()` 采样计算）；不可用时回退到播放器统计/缓冲估算（不同内核实现略有差异）。
+页面侧统一接入点：
+- `lib/server_adapters/server_access.dart`（`resolveServerAccess(...)`）
 
-#### 1.5) 画质增强（Anime4K）
-- `packages/lin_player_player/lib/src/player/anime4k.dart`：通过 mpv `glsl-shaders` 管线加载 Anime4K 预设（仅 MPV 内核）。
-- Shader 资源位于 `assets/shaders/anime4k/`（来自 Anime4K：`https://github.com/bloc97/Anime4K`；具体版本与 License 见该目录 `README.md` / `LICENSE`）。
-- 预设枚举与说明：`packages/lin_player_prefs/lib/anime4k_preferences.dart`。
+### 4.4 API 层（`packages/lin_player_server_api`）
 
-#### 2) 本地播放（文件）
-- `lib/player_screen.dart`
-  - `FilePicker` 选择本地视频 → `PlayerService.initialize(path)`。
-  - 支持：播放列表、进度条、10s 快进/快退、音轨/字幕切换、硬解/软解切换。
-  - 字幕默认策略：当用户没有显式选择字幕时，默认优先匹配**简体中文**字幕（`zhs/chs/zh-Hans/zh-CN/简体/简中` 等）。
-  - 字幕渲染（MPV）：通过 `media_kit_video` 的 `SubtitleView`（`Video.subtitleViewConfiguration`）显示字幕，避免“选择了字幕但不显示”的问题，并支持字号/位置/延迟/加粗/ASS override 等调整。
-  - 页面生命周期：播放页被覆盖（push 到新路由）时会主动释放播放器，避免后台继续播放/缓冲（`RouteObserver + RouteAware.didPushNext`）。
-  - 弹幕：
-    - `Video` 上方叠加 `DanmakuStage`（覆盖层渲染）。
-    - 支持本地 XML 加载与在线加载（在线匹配使用文件名前 16MB 的 MD5 + 文件名）。
+主要文件：
+- `services/emby_api.dart`
+- `services/plex_api.dart`
+- `services/webdav_api.dart`
+- `services/webdav_proxy.dart`
+- `services/server_share_text_parser.dart`
+- `network/lin_http_client.dart`
 
-#### 3) Emby 在线播放（网络）
-- `lib/play_network_page.dart`
-  - 流程：
-    1. `_buildStreamUrl()`：根据 `itemId` 以及（可选）`mediaSourceId/audioStreamIndex/subtitleStreamIndex` 构造可播放 URL。
-    2. `PlayerService.initialize(networkUrl, httpHeaders)`：
-       - 关键 Header：`X-Emby-Token`、`X-Emby-Authorization`（以及 User-Agent）。
-    3. 监听 buffering / error / tracks：
-       - UI 展示缓冲进度。
-       - 初始音轨/字幕偏好只应用一次（避免 tracks 更新时反复覆盖）。
-  - 字幕默认策略：当用户没有显式选择字幕时，默认优先匹配**简体中文**字幕；用户手动选择/关闭后会记忆并尊重该选择。
-  - 页面生命周期：播放页被覆盖（push 到新路由）时会主动释放播放器，避免返回首页仍继续播放/缓冲（`RouteObserver + RouteAware.didPushNext`）。
-  - 弹幕：
-    - `Video` 上方叠加 `DanmakuStage`（覆盖层渲染）。
-    - 在线匹配默认仅使用标题/文件名（无法获取文件 Hash 时准确度可能下降）。
+职责：
+- 原始 HTTP 能力与协议细节（header、鉴权、重试、fallback）。
+- 业务接口封装：鉴权、列表、详情、播放信息、播放上报、章节、相似推荐等。
 
-#### 4) Exo 播放内核（Android，可选）
-- 入口：设置 → 播放 → 播放器内核（`PlayerCore.exo`）。
-- 本地播放：`lib/player_screen_exo.dart`
-  - 基于 `video_player`（Android 底层为 Media3 ExoPlayer）。
-  - 默认使用 `VideoViewType.platformView`（用于规避部分 HDR/Dolby Vision 片源的颜色问题）。
-  - 支持音轨/字幕切换：
-    - 音轨：通过 `video_player_platform_interface` 的 `getAudioTracks/selectAudioTrack`（Android 支持）。
-    - 字幕：通过本项目对 `video_player_android` 的补丁接口（支持枚举/选择/关闭）。
-- 在线播放：`lib/play_network_page_exo.dart`
-  - 仍通过 Emby 的 `AudioStreamIndex/SubtitleStreamIndex` 把“默认音轨/字幕”写入 URL；播放过程中也可再次切换。
-  - 网速显示：优先显示系统下载速率（RX）；若系统统计不可用，则按“缓冲速度 × 码率”进行估算。
-  - 页面生命周期：播放页被覆盖（push 到新路由）时会主动释放播放器，避免后台继续播放/缓冲（`RouteObserver + RouteAware.didPushNext`）。
-- 实现与维护：
-  - `packages/video_player_android_patched/lib/exo_tracks.dart`：对外暴露 Pigeon 生成的 Exo 字幕相关 API，避免直接 `import` 依赖包的 `lib/src`。
-  - `packages/video_player_android_patched/android/.../PlatformVideoView.java`：Android 侧监听 `Player.Listener.onCues` 并叠加 `TextView` 显示字幕。
-  - 如需升级 `video_player_android`，建议先阅读 `packages/video_player_android_patched/README_LINPLAYER.md`。
+说明：
+- Emby/Jellyfin 共用 `EmbyApi`（通过 `MediaServerType` 区分 header 与 prefix 策略）。
+- WebDAV 负责目录列举与鉴权处理（含 Digest/Basic）。
+- Plex 负责 PIN 登录和服务器资源发现（当前项目中主要是“登录与保存服务器信息”）。
 
-### 主要页面（UI）
-- `lib/server_page.dart`：服务器管理（添加/编辑/删除/选择），并提供主题设置入口。
-- `lib/home_page.dart`：主入口（底部导航：首页/媒体库/本地），含全局搜索与线路选择。
-- `lib/library_page.dart`：媒体库列表（刷新、排序、显示/隐藏库）。
-- `lib/library_items_page.dart`：媒体库内容列表（分页加载、进入详情）。
-- `lib/show_detail_page.dart`：详情页（Series/Season/Episode 结构、相似推荐、章节、播放入口与可选媒体源/音轨/字幕）。
-- `lib/aggregate_service_page.dart`：聚合搜索（跨服务器）。同一作品按“服务器”聚合；电影会额外展示分辨率/码率/大小，并按 `分辨率 → 码率 → 大小` 从大到小排序；同一服务器的多个版本也按同样规则展示。
-- `lib/danmaku_settings_page.dart`：弹幕设置页（本地/在线、在线源管理、样式设置）。
-- `packages/lin_player_ui/lib/src/ui/`：UI 基础设施
-  - `app_theme.dart`：Material 3 主题与动态取色。
-  - `theme_sheet.dart`：主题设置弹窗。
-  - `ui_scale.dart`：按屏幕宽度计算 UI 缩放系数（用于竖屏平板/手机避免 UI 过小）。
+### 4.5 播放层（`packages/lin_player_player`）
 
-## 典型数据流（从 UI 到 API）
+主要文件：
+- `player_service.dart`：MPV 播放能力封装。
+- `src/player/playback_controls.dart`：播放控制 UI 复用组件。
+- `src/player/danmaku_stage.dart` + `danmaku*.dart`：弹幕管线。
+- `src/player/anime4k.dart`：Anime4K shader 管线。
+- `dandanplay_api.dart`：在线弹幕匹配与下载。
 
-### 登录与初始化
-1. `ServerPage` 提交表单 → `AppState.addServer(...)`
-2. `EmbyApi.authenticate(...)` 获取 `token/baseUrl/userId`
-3. `EmbyApi.fetchDomains(...)`（可选）+ `EmbyApi.fetchLibraries(...)`
-4. `AppState` 保存到 SharedPreferences，并切换到 `HomePage`
+说明：
+- MPV 路径使用 `media_kit`。
+- Exo 路径使用 `video_player_android`（并通过 patched 包增强轨道能力）。
 
-### Plex PIN 登录（仅保存）
-1. `ServerPage` 选择 Plex → 调用 `PlexApi.createPin()`，并在外部浏览器打开 `buildAuthUrl(code)`。
-2. App 轮询 `PlexApi.fetchPin(id)` 直到拿到 `authToken`。
-3. 账号登录模式：`PlexApi.fetchResources(authToken)` 获取服务器列表 → 用户选择服务器 → `AppState.addPlexServer(...)` 保存。
-4. 手动添加模式：用户填写服务器地址/端口 + Token → `AppState.addPlexServer(...)` 保存。
+### 4.6 UI 基建层（`packages/lin_player_ui`）
 
-### 列表与搜索
-- `AppState.loadItems(...)` → `EmbyApi.fetchItems(...)` → 写入 `_itemsCache/_itemsTotal` → UI 通过 `AnimatedBuilder` 刷新。
-- 聚合搜索：`AggregateServicePage` 并行请求各服务器搜索结果 → 按作品聚合 →（电影详情页）再调用 `fetchPlaybackInfo` 解析 `MediaSources`，用于展示分辨率/码率/大小，并按 `分辨率 → 码率 → 大小` 从大到小排序。
+主要文件：
+- `src/ui/app_theme.dart`、`theme_sheet.dart`、`ui_scale.dart`
+- `src/ui/glass_background.dart`、`frosted_card.dart`
+- `src/ui/app_components.dart`、`rating_badge.dart` 等
 
-### 播放（网络）
-- 详情/列表点击播放 → `PlayNetworkPage`
-- `PlayNetworkPage` 组装 URL + headers → `PlayerService.initialize(...)` → `Video(controller)` 渲染。
+职责：
+- 统一主题、风格模板、缩放与基础组件。
+- 保证页面层不重复实现公共视觉逻辑。
 
-## 平台目录（android/ios/macos/windows/linux/）
+### 4.7 配置与偏好层（`packages/lin_player_prefs`）
 
-这些目录是 Flutter 生成的宿主工程：
-- 应用展示名、包名、图标、签名/打包配置都在这里落地。
-- 例如：
-  - Android 应用名/图标：`android/app/src/main/AndroidManifest.xml`
-  - iOS 应用名：`ios/Runner/Info.plist`
-  - macOS 应用名：`macos/Runner/Configs/AppInfo.xcconfig`
-  - Windows exe 名/图标：`windows/CMakeLists.txt`、`windows/runner/Runner.rc`
+主要文件：
+- `preferences.dart`
+- `interaction_preferences.dart`
+- `danmaku_preferences.dart`
+- `anime4k_preferences.dart`
 
-Android 额外平台通道（MethodChannel）：
-- `linplayer/device`（`DeviceType`）：`isAndroidTv`、`batteryLevel`、`totalRxBytes`（系统网速）、`primaryAbi`、`nativeLibraryDir`、`setExecutable`、`setHttpProxy`
-- `linplayer/app_icon`（`AppIconService`）：动态切换桌面图标
+职责：
+- 偏好枚举、配置模型定义（供 `AppState` 与 UI 使用）。
 
-## 你要改哪里？（常见改动入口）
+### 4.8 核心配置层（`packages/lin_player_core`）
 
-- **改 UI/交互**：优先看 `lib/home_page.dart`、`lib/show_detail_page.dart`、`lib/play_network_page.dart`。
-- **改 Emby/Jellyfin 接口/字段**：`packages/lin_player_server_api/lib/services/emby_api.dart`（必要时同步调整 `MediaItem` 字段解析）。
-- **改 Plex PIN 登录/资源列表**：`packages/lin_player_server_api/lib/services/plex_api.dart`、`lib/server_page.dart`。
-- **改缓存/状态/持久化**：`packages/lin_player_state/lib/app_state.dart`。
-- **调播放器体验（硬解/缓冲/参数）**：`packages/lin_player_player/lib/player_service.dart`。
-- **改主题/视觉规范**：`packages/lin_player_ui/lib/src/ui/app_theme.dart`。
+主要文件：
+- `app_config/app_config.dart`
+- `app_config/app_feature_flags.dart`
+- `app_config/app_product.dart`
+- `state/media_server_type.dart`
 
-## 参考项目（灵感/对照实现）
+职责：
+- 产品线差异（`lin/emos/uhd`）
+- 功能开关（允许的 server type）
+- 基础枚举与全局配置上下文
 
-- Anime4K：https://github.com/bloc97/Anime4K
-- Playboy Player：https://github.com/Playboy-Player/Playboy
-- NipaPlay Reload：https://github.com/MCDFsteve/NipaPlay-Reload
+## 5. patched 依赖说明
+
+- `packages/media_kit_patched`
+  - 为 MPV 路径提供更细粒度参数传递能力。
+- `packages/video_player_android_patched`
+  - 增强 Exo 轨道相关能力（音轨/字幕轨选择等）。
+
+`pubspec.yaml` 中通过 `dependency_overrides` 强制覆盖到项目内 patched 包。
+
+## 6. 关键业务链路
+
+### 6.1 启动链路
+
+1. `main.dart` 初始化媒体内核、设备信息、AppConfig。
+2. `AppState.loadFromStorage()` 恢复服务、主题、偏好、缓存。
+3. 根据设备类型进入 `TvShell` / `DesktopShell` / 普通 Home。
+4. 启动可选服务：TV Remote、Built-in Proxy、自动更新检查。
+
+### 6.2 添加服务器链路
+
+页面：`lib/server_page.dart`
+
+- Emby/Jellyfin：`AppState.addServer(...)`
+  - 内部通过 adapter/API 完成鉴权与基础信息拉取。
+- WebDAV：`AppState.addWebDavServer(...)`
+- Plex：
+  - 账号授权流（PIN）+ 资源选择，或手动填 token。
+  - 最终进入 `AppState.addPlexServer(...)`。
+
+### 6.3 首页/列表加载链路
+
+1. 页面触发 `AppState.loadHome()` / `loadItems(...)`。
+2. `AppState` 使用当前 active server 构建访问上下文。
+3. 调 adapter 拉取数据并写入本地缓存。
+4. `notifyListeners()` 驱动 UI 更新。
+
+### 6.4 播放链路（网络媒体）
+
+入口：`show_detail_page.dart` / 列表页 -> `play_network_page*.dart`
+
+1. 通过 `resolveServerAccess(...)` 获取 `adapter + auth`。
+2. `fetchPlaybackInfo(...)` 获取 `PlaySessionId/MediaSources`。
+3. 组装流 URL 与 header，交给 MPV 或 Exo 播放。
+4. 播放期间上报：
+  - `reportPlaybackStart`
+  - `reportPlaybackProgress`
+  - `reportPlaybackStopped`
+  - `updatePlaybackPosition`
+
+### 6.5 播放链路（本地文件/WebDAV）
+
+- 本地：`player_screen*.dart` 直接从本地路径建立播放列表。
+- WebDAV：`webdav_browser_page.dart`
+  - 先通过 `webdav_proxy.dart` 注册本地代理 URL。
+  - 再把 URL 作为本地播放队列交给播放器。
+
+### 6.6 弹幕链路
+
+1. 播放页叠加 `DanmakuStage`。
+2. 数据来源：本地 XML 或在线（`dandanplay_api.dart`）。
+3. 渲染参数来自 `AppState`（透明度、字号、速度、去重、防遮挡等）。
+
+### 6.7 TV 专项链路
+
+- TV 遥控网页：`tv_remote_service.dart`
+  - 内置 HTTP + WebSocket 服务，提供移动端控制入口。
+- TV 内置代理：`built_in_proxy_service.dart`
+  - 管理 mihomo 进程、配置生成、代理规则及 UI 面板资源。
+
+## 7. 平台与壳层
+
+### 7.1 Desktop 壳层
+
+目录：`lib/desktop_ui/`
+
+职责：
+- 提供桌面端独立壳与页面组织。
+- 与移动端共享状态层、适配层、API 层。
+
+### 7.2 TV 壳层
+
+目录：`lib/tv/`
+
+职责：
+- TV 首页、背景模式、首启向导、遥控操作体验。
+
+## 8. 数据与持久化策略
+
+持久化入口：`AppState`（SharedPreferences）
+
+典型内容：
+- 当前服务与服务器列表。
+- 主题、缩放、交互手势、播放器偏好。
+- 弹幕偏好、TV 偏好、自动更新设置。
+- 轻量缓存：库列表、首页区块、部分统计信息。
+
+## 9. 扩展指南
+
+### 9.1 新增一个服务端类型
+
+建议步骤：
+1. 在 `lin_player_core` 扩展 `MediaServerType` 与 FeatureFlag。
+2. 在 `lin_player_server_api` 新增 API 客户端。
+3. 在 `lin_player_server_adapters` 实现新的 Adapter。
+4. 在 `ServerAdapterFactory` 与 `server_page.dart` 接入。
+5. 在 `AppState` 补充服务保存/切换逻辑。
+
+### 9.2 新增播放能力
+
+建议步骤：
+1. 优先落在 `lin_player_player`（而不是页面直接写）。
+2. 页面层只做参数编排与状态展示。
+3. 涉及平台特性时，通过 patched 包或平台通道落地。
+
+### 9.3 新增 UI 模板或全局视觉能力
+
+建议步骤：
+1. 在 `lin_player_ui` 扩展主题/样式模型。
+2. 由 `AppState` 持久化模板/参数。
+3. 页面层仅消费，不重复定义 token。
+
+## 10. 调试与维护建议
+
+- 静态检查：`flutter analyze`
+- 测试：`flutter test`
+- 平台构建前先确认：`flutter doctor -v`
+- 对外接口异常优先查：
+  - 当前 active server 信息
+  - Adapter 选型是否正确
+  - API prefix / token / userId 是否一致
+- 播放异常优先查：
+  - `fetchPlaybackInfo` 返回的 `MediaSources`
+  - 选中的音轨/字幕索引
+  - MPV/Exo 内核是否匹配当前片源
+
+## 11. 相关文档
+
+- `docs/dev/README.md`
+- `docs/dev/ANDROID_SIGNING.md`
+- `docs/dev/TV_PROXY_ROADMAP.md`
+- `docs/SERVER_IMPORT.md`
+
+---
+
+如果你准备继续模块化重构，建议下一步先统一：
+- 页面层对 `AppState` 的直接读写边界
+- 播放页的共享 ViewModel/Controller 抽象
+- 详情页（剧/集）的公共组件拆分
