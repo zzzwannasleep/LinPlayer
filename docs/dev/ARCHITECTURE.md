@@ -246,6 +246,7 @@ Flutter 页面(lib/*.dart)
 职责：
 - 提供桌面端独立壳与页面组织。
 - 与移动端共享状态层、适配层、API 层。
+- 详细设计与组件拆分：`docs/dev/DESKTOP_UI_ARCHITECTURE.md`
 
 ### 7.2 TV 壳层
 

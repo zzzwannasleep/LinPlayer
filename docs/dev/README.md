@@ -54,6 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tool/fetch_tv_proxy_assets.p
 ## 源码导览
 
 项目结构与各模块职责：`docs/dev/ARCHITECTURE.md`
+桌面端 UI 专项重构说明：`docs/dev/DESKTOP_UI_ARCHITECTURE.md`
 
 ## CI / 发布
 
