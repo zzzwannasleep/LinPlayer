@@ -33,7 +33,7 @@ class EpisodeHeroSection extends StatelessWidget {
         height: 360,
         child: Stack(
           children: [
-            Positioned.fill(
+            const Positioned.fill(
               child: UiPlaceholderImage(
                 url:
                     'https://placehold.co/1400x700/111827/A9B7CF/png?text=EPISODE+HERO',
@@ -67,7 +67,7 @@ class EpisodeHeroSection extends StatelessWidget {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(18),
-                    child: SizedBox(
+                    child: const SizedBox(
                       width: 470,
                       child: AspectRatio(
                         aspectRatio: 16 / 9,
@@ -95,11 +95,11 @@ class _EpisodeHeroInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text(
+        Text(
           'Placeholder Episode Main Title',
           style: TextStyle(
             color: DesktopUiTheme.textPrimary,
@@ -108,18 +108,18 @@ class _EpisodeHeroInfo extends StatelessWidget {
             height: 1.12,
           ),
         ),
-        const SizedBox(height: 14),
+        SizedBox(height: 14),
         Wrap(
           spacing: 10,
           runSpacing: 10,
-          children: const [
+          children: [
             UiTagChip(label: 'Placeholder Tag'),
             UiTagChip(label: 'Placeholder Tag'),
             UiTagChip(label: 'Placeholder Tag'),
           ],
         ),
-        const SizedBox(height: 16),
-        const Wrap(
+        SizedBox(height: 16),
+        Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
@@ -132,8 +132,8 @@ class _EpisodeHeroInfo extends StatelessWidget {
             UiGlassButton(label: 'Placeholder Icon', icon: Icons.add_rounded),
           ],
         ),
-        const SizedBox(height: 16),
-        const Text(
+        SizedBox(height: 16),
+        Text(
           'Placeholder Description Placeholder Description Placeholder Description '
           'Placeholder Description Placeholder Description.',
           style: TextStyle(

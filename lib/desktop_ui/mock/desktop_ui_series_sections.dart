@@ -39,7 +39,7 @@ class HeroSection extends StatelessWidget {
         height: 430,
         child: Stack(
           children: [
-            Positioned.fill(
+            const Positioned.fill(
               child: UiPlaceholderImage(
                 url:
                     'https://placehold.co/1400x700/0F172A/90A3C2/png?text=HERO+BACKGROUND',
@@ -74,7 +74,7 @@ class HeroSection extends StatelessWidget {
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(18),
-                    child: SizedBox(
+                    child: const SizedBox(
                       width: 250,
                       child: AspectRatio(
                         aspectRatio: 2 / 3,
@@ -102,11 +102,11 @@ class _HeroInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        const Text(
+        Text(
           'Placeholder Series Main Title',
           style: TextStyle(
             color: DesktopUiTheme.textPrimary,
@@ -115,19 +115,19 @@ class _HeroInfo extends StatelessWidget {
             height: 1.08,
           ),
         ),
-        const SizedBox(height: 14),
+        SizedBox(height: 14),
         Wrap(
           spacing: 10,
           runSpacing: 10,
-          children: const [
+          children: [
             UiTagChip(label: 'Placeholder Tag'),
             UiTagChip(label: 'Placeholder Tag'),
             UiTagChip(label: 'Placeholder Tag'),
             UiTagChip(label: 'Placeholder Tag'),
           ],
         ),
-        const SizedBox(height: 18),
-        const Wrap(
+        SizedBox(height: 18),
+        Wrap(
           spacing: 10,
           runSpacing: 10,
           children: [
@@ -141,8 +141,8 @@ class _HeroInfo extends StatelessWidget {
                 label: 'Placeholder Icon', icon: Icons.favorite_border),
           ],
         ),
-        const SizedBox(height: 18),
-        const Text(
+        SizedBox(height: 18),
+        Text(
           'Placeholder Description Placeholder Description Placeholder Description '
           'Placeholder Description Placeholder Description Placeholder Description.',
           style: TextStyle(
@@ -246,15 +246,15 @@ class ExternalLinkRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const UiSectionHeader(title: 'Placeholder External Link Row'),
-        const SizedBox(height: 16),
+        UiSectionHeader(title: 'Placeholder External Link Row'),
+        SizedBox(height: 16),
         Wrap(
           spacing: 12,
           runSpacing: 12,
-          children: const [
+          children: [
             UiGlassButton(label: 'Placeholder Link 01'),
             UiGlassButton(label: 'Placeholder Link 02'),
             UiGlassButton(label: 'Placeholder Link 03'),

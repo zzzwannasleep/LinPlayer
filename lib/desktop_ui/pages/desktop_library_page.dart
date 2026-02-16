@@ -313,7 +313,6 @@ class _LibraryCategoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
     final gradient = _palette[library.id.hashCode.abs() % _palette.length];
     final collage = preview.take(4).toList(growable: false);
 
@@ -434,6 +433,8 @@ class _CollagePoster extends StatelessWidget {
       );
     }
 
+    final image = imageUrl;
+
     return Positioned(
       left: left,
       top: top,
@@ -442,9 +443,9 @@ class _CollagePoster extends StatelessWidget {
         child: SizedBox(
           width: 56,
           height: 84,
-          child: imageUrl != null && imageUrl!.isNotEmpty
+          child: image != null && image.isNotEmpty
               ? Image.network(
-                  imageUrl!,
+                  image,
                   fit: BoxFit.cover,
                   errorBuilder: (_, __, ___) =>
                       _collageFallback(context, placeholderLabel),
