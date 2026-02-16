@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
@@ -19,6 +20,7 @@ import '../../server_page.dart';
 import '../../server_adapters/server_access.dart';
 import '../../settings_page.dart';
 import '../../show_detail_page.dart';
+import '../widgets/desktop_unified_background.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({super.key, required this.appState});
@@ -41,8 +43,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
   final Set<String> _favoriteItemIds = <String>{};
   final Map<String, bool> _playedOverrides = <String, bool>{};
   final Set<String> _updatingPlayedIds = <String>{};
-  String? _selectedLibraryId;
-  String? _selectedMediaItemId;
+  String? _activeCardId;
 
   @override
   void initState() {
@@ -149,15 +150,171 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
   }
 
   Future<void> _showThemePicker() {
-    return showThemeSheet(
-      context,
-      listenable: widget.appState,
-      themeMode: () => widget.appState.themeMode,
-      setThemeMode: widget.appState.setThemeMode,
-      useDynamicColor: () => widget.appState.useDynamicColor,
-      setUseDynamicColor: widget.appState.setUseDynamicColor,
-      uiTemplate: () => widget.appState.uiTemplate,
-      setUiTemplate: widget.appState.setUiTemplate,
+    double? opacityDraft;
+    double? blurDraft;
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: const Color(0xF012141A),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return AnimatedBuilder(
+              animation: widget.appState,
+              builder: (context, _) {
+                final appState = widget.appState;
+                final currentMode = appState.themeMode;
+                final selectedMode = currentMode == ThemeMode.system
+                    ? (Theme.of(context).brightness == Brightness.dark
+                        ? ThemeMode.dark
+                        : ThemeMode.light)
+                    : currentMode;
+                final backgroundImage = appState.desktopBackgroundImage.trim();
+                final opacity =
+                    (opacityDraft ?? appState.desktopBackgroundOpacity)
+                        .clamp(0.0, 1.0)
+                        .toDouble();
+                final blur = (blurDraft ?? appState.desktopBackgroundBlurSigma)
+                    .clamp(0.0, 30.0)
+                    .toDouble();
+                final opacityPct = (opacity * 100).round();
+
+                return SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '主题样式',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          '主题模式',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SegmentedButton<ThemeMode>(
+                          segments: const <ButtonSegment<ThemeMode>>[
+                            ButtonSegment(
+                              value: ThemeMode.light,
+                              label: Text('浅色'),
+                            ),
+                            ButtonSegment(
+                              value: ThemeMode.dark,
+                              label: Text('深色'),
+                            ),
+                          ],
+                          selected: {selectedMode},
+                          onSelectionChanged: (s) {
+                            unawaited(appState.setThemeMode(s.first));
+                          },
+                        ),
+                        const SizedBox(height: 14),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.image_outlined),
+                          title: const Text('自定义背景图'),
+                          subtitle: Text(
+                            backgroundImage.isEmpty ? '未设置' : backgroundImage,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Wrap(
+                            spacing: 8,
+                            children: [
+                              FilledButton.tonal(
+                                onPressed: () async {
+                                  final result =
+                                      await FilePicker.platform.pickFiles(
+                                    dialogTitle: '选择背景图片',
+                                    allowMultiple: false,
+                                    type: FileType.image,
+                                    withData: false,
+                                  );
+                                  final path = result?.files.single.path;
+                                  if (path == null || path.trim().isEmpty) {
+                                    return;
+                                  }
+                                  await appState.setDesktopBackgroundImage(
+                                    path.trim(),
+                                  );
+                                },
+                                child: const Text('选择'),
+                              ),
+                              if (backgroundImage.isNotEmpty)
+                                FilledButton.tonal(
+                                  onPressed: () =>
+                                      appState.setDesktopBackgroundImage(''),
+                                  child: const Text('清空'),
+                                ),
+                            ],
+                          ),
+                        ),
+                        if (backgroundImage.isNotEmpty) ...[
+                          const Divider(height: 1),
+                          const SizedBox(height: 10),
+                          const Text(
+                            '背景透明度',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          AppSlider(
+                            value: opacity,
+                            min: 0.0,
+                            max: 1.0,
+                            divisions: 20,
+                            label: '$opacityPct%',
+                            onChanged: (v) =>
+                                setSheetState(() => opacityDraft = v),
+                            onChangeEnd: (v) {
+                              setSheetState(() => opacityDraft = null);
+                              unawaited(appState.setDesktopBackgroundOpacity(v));
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            '背景模糊度',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          AppSlider(
+                            value: blur,
+                            min: 0.0,
+                            max: 30.0,
+                            divisions: 30,
+                            label: blur.toStringAsFixed(0),
+                            onChanged: (v) =>
+                                setSheetState(() => blurDraft = v),
+                            onChangeEnd: (v) {
+                              setSheetState(() => blurDraft = null);
+                              unawaited(
+                                appState.setDesktopBackgroundBlurSigma(v),
+                              );
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
@@ -450,7 +607,6 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
   }
 
   Future<void> _openItemDetail(MediaItem item) async {
-    _focusMediaItem(item.id);
     final isEpisode = item.type.toLowerCase() == 'episode';
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -469,7 +625,6 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
   }
 
   Future<void> _openLibraryItems(String parentId, String title) async {
-    _focusLibrary(parentId);
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => LibraryItemsPage(
@@ -482,14 +637,9 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     );
   }
 
-  void _focusLibrary(String libraryId) {
-    if (_selectedLibraryId == libraryId) return;
-    setState(() => _selectedLibraryId = libraryId);
-  }
-
-  void _focusMediaItem(String itemId) {
-    if (_selectedMediaItemId == itemId) return;
-    setState(() => _selectedMediaItemId = itemId);
+  void _setActiveCard(String? cardId) {
+    if (_activeCardId == cardId) return;
+    setState(() => _activeCardId = cardId);
   }
 
   void _toggleFavorite(String itemId) {
@@ -781,33 +931,6 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     );
   }
 
-  String? _backgroundImageUrl(
-    ServerAccess? access,
-    List<HomeEntry> homeEntries,
-    List<LibraryInfo> libraries,
-  ) {
-    if (access == null) return null;
-    for (final entry in homeEntries) {
-      for (final item in entry.items) {
-        if (!item.hasImage) continue;
-        return access.adapter.imageUrl(
-          access.auth,
-          itemId: item.id,
-          imageType: 'Backdrop',
-          maxWidth: 1920,
-        );
-      }
-    }
-    if (libraries.isNotEmpty) {
-      return access.adapter.imageUrl(
-        access.auth,
-        itemId: libraries.first.id,
-        maxWidth: 1920,
-      );
-    }
-    return null;
-  }
-
   Widget _buildMediaLibrarySection({
     required double horizontalPadding,
     required List<LibraryInfo> libraries,
@@ -849,6 +972,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
             scrollStep: cardWidth * 2.4,
             itemBuilder: (context, index) {
               final library = libraries[index];
+              final cardId = 'library:${library.id}:$index';
               final colors = palettes[index % palettes.length];
               return SizedBox(
                 width: cardWidth,
@@ -862,9 +986,13 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                     maxWidth: 900,
                   ),
                   palette: colors,
-                  selected: _selectedLibraryId == library.id,
-                  onHoverChanged: (hovered) {
-                    if (hovered) _focusLibrary(library.id);
+                  selected: _activeCardId == cardId,
+                  onActiveChanged: (active) {
+                    if (active) {
+                      _setActiveCard(cardId);
+                    } else if (_activeCardId == cardId) {
+                      _setActiveCard(null);
+                    }
                   },
                   onTap: () => _openLibraryItems(library.id, library.name),
                 ),
@@ -977,6 +1105,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                 scrollStep: cardWidth * 2.2,
                 itemBuilder: (context, index) {
                   final item = items[index];
+                  final cardId = 'continue:${item.id}:$index';
                   final played = _isPlayed(item);
                   final progress = (() {
                     final total = item.runTimeTicks ?? 0;
@@ -1003,9 +1132,13 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                       progress: progress,
                       played: played,
                       favorite: _isFavorite(item.id),
-                      selected: _selectedMediaItemId == item.id,
-                      onHoverChanged: (hovered) {
-                        if (hovered) _focusMediaItem(item.id);
+                      selected: _activeCardId == cardId,
+                      onActiveChanged: (active) {
+                        if (active) {
+                          _setActiveCard(cardId);
+                        } else if (_activeCardId == cardId) {
+                          _setActiveCard(null);
+                        }
                       },
                       updatingPlayed: _updatingPlayedIds.contains(item.id),
                       onTap: () => _openItemDetail(item),
@@ -1058,6 +1191,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
             scrollStep: posterWidth * 4.5,
             itemBuilder: (context, index) {
               final item = entry.items[index];
+              final cardId = 'entry:${entry.key}:${item.id}:$index';
               return SizedBox(
                 width: posterWidth,
                 child: _PosterCard(
@@ -1072,9 +1206,13 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                   badgeText: _itemBadge(item),
                   badgeColor: _badgeColor(item),
                   favorite: _isFavorite(item.id),
-                  selected: _selectedMediaItemId == item.id,
-                  onHoverChanged: (hovered) {
-                    if (hovered) _focusMediaItem(item.id);
+                  selected: _activeCardId == cardId,
+                  onActiveChanged: (active) {
+                    if (active) {
+                      _setActiveCard(cardId);
+                    } else if (_activeCardId == cardId) {
+                      _setActiveCard(null);
+                    }
                   },
                   onTap: () => _openItemDetail(item),
                   onToggleFavorite: () => _toggleFavorite(item.id),
@@ -1096,10 +1234,11 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
         final visibleEntries = _entriesForCurrentTab(allHomeEntries);
         final visibleLibraries = _visibleLibraries();
         final access = resolveServerAccess(appState: widget.appState);
-        final backgroundImageUrl =
-            _backgroundImageUrl(access, allHomeEntries, visibleLibraries);
         final width = MediaQuery.of(context).size.width;
         final horizontalPadding = _contentHorizontalPadding(width);
+        final baseBackgroundColor = DesktopUnifiedBackground.baseColorForBrightness(
+          Theme.of(context).brightness,
+        );
 
         final emptyState = !_bootstrapping &&
             visibleEntries.isEmpty &&
@@ -1108,28 +1247,13 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                 : visibleLibraries.isEmpty);
 
         return Scaffold(
-          backgroundColor: const Color(0xFF06080D),
+          backgroundColor: baseBackgroundColor,
           body: Stack(
             children: [
               Positioned.fill(
-                child: _DesktopBackdrop(
-                  imageUrl: backgroundImageUrl,
-                  enableBlur: widget.appState.enableBlurEffects,
-                ),
-              ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.45),
-                        Colors.black.withValues(alpha: 0.66),
-                        const Color(0xFF05070B).withValues(alpha: 0.90),
-                      ],
-                    ),
-                  ),
+                child: DesktopUnifiedBackground(
+                  appState: widget.appState,
+                  baseColor: baseBackgroundColor,
                 ),
               ),
               SafeArea(
@@ -1699,7 +1823,7 @@ class _LibraryCard extends StatelessWidget {
     required this.imageUrl,
     required this.palette,
     required this.selected,
-    this.onHoverChanged,
+    this.onActiveChanged,
     required this.onTap,
   });
 
@@ -1709,7 +1833,7 @@ class _LibraryCard extends StatelessWidget {
   final String? imageUrl;
   final List<Color> palette;
   final bool selected;
-  final ValueChanged<bool>? onHoverChanged;
+  final ValueChanged<bool>? onActiveChanged;
   final VoidCallback onTap;
 
   @override
@@ -1719,18 +1843,13 @@ class _LibraryCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       hoverScale: 1.03,
       pressedScale: 0.98,
-      onHoverChanged: onHoverChanged,
+      onActiveChanged: onActiveChanged,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected
-                ? const Color(0xFF38BDF8)
-                : Colors.white.withValues(alpha: 0.10),
-            width: selected ? 1.5 : 1,
-          ),
+          color: selected ? Colors.white.withValues(alpha: 0.02) : null,
           boxShadow: selected
               ? [
                   BoxShadow(
@@ -1821,7 +1940,7 @@ class _ContinueWatchingCard extends StatefulWidget {
     required this.played,
     required this.favorite,
     required this.selected,
-    this.onHoverChanged,
+    this.onActiveChanged,
     required this.updatingPlayed,
     required this.onTap,
     required this.onTogglePlayed,
@@ -1836,7 +1955,7 @@ class _ContinueWatchingCard extends StatefulWidget {
   final bool played;
   final bool favorite;
   final bool selected;
-  final ValueChanged<bool>? onHoverChanged;
+  final ValueChanged<bool>? onActiveChanged;
   final bool updatingPlayed;
   final VoidCallback onTap;
   final VoidCallback onTogglePlayed;
@@ -1858,20 +1977,15 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
       pressedScale: 0.985,
       onHoverChanged: (value) {
         setState(() => _hovered = value);
-        widget.onHoverChanged?.call(value);
       },
+      onActiveChanged: widget.onActiveChanged,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: widget.selected
-                ? const Color(0xFF38BDF8)
-                : Colors.white.withValues(alpha: 0.08),
-            width: widget.selected ? 1.5 : 1,
-          ),
+          color: widget.selected ? Colors.white.withValues(alpha: 0.02) : null,
           boxShadow: widget.selected
               ? [
                   BoxShadow(
@@ -2069,7 +2183,7 @@ class _PosterCard extends StatelessWidget {
     required this.badgeColor,
     required this.favorite,
     required this.selected,
-    this.onHoverChanged,
+    this.onActiveChanged,
     required this.onTap,
     required this.onToggleFavorite,
   });
@@ -2081,7 +2195,7 @@ class _PosterCard extends StatelessWidget {
   final Color badgeColor;
   final bool favorite;
   final bool selected;
-  final ValueChanged<bool>? onHoverChanged;
+  final ValueChanged<bool>? onActiveChanged;
   final VoidCallback onTap;
   final VoidCallback onToggleFavorite;
 
@@ -2092,19 +2206,14 @@ class _PosterCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       hoverScale: 1.03,
       pressedScale: 0.98,
-      onHoverChanged: onHoverChanged,
+      onActiveChanged: onActiveChanged,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: selected
-                ? const Color(0xFF38BDF8)
-                : Colors.white.withValues(alpha: 0.08),
-            width: selected ? 1.5 : 1,
-          ),
+          color: selected ? Colors.white.withValues(alpha: 0.02) : null,
           boxShadow: selected
               ? [
                   BoxShadow(
@@ -2240,6 +2349,7 @@ class _HoverScaleSurface extends StatefulWidget {
     this.hoverScale = 1.02,
     this.pressedScale = 0.985,
     this.onHoverChanged,
+    this.onActiveChanged,
   });
 
   final Widget child;
@@ -2248,6 +2358,7 @@ class _HoverScaleSurface extends StatefulWidget {
   final double hoverScale;
   final double pressedScale;
   final ValueChanged<bool>? onHoverChanged;
+  final ValueChanged<bool>? onActiveChanged;
 
   @override
   State<_HoverScaleSurface> createState() => _HoverScaleSurfaceState();
@@ -2255,126 +2366,77 @@ class _HoverScaleSurface extends StatefulWidget {
 
 class _HoverScaleSurfaceState extends State<_HoverScaleSurface> {
   bool _hovered = false;
+  bool _focused = false;
   bool _pressed = false;
+
+  bool get _active => _hovered || _focused;
+
+  void _emitActiveChanged() => widget.onActiveChanged?.call(_active);
 
   void _setHover(bool value) {
     if (_hovered == value) return;
     setState(() => _hovered = value);
     widget.onHoverChanged?.call(value);
+    _emitActiveChanged();
+  }
+
+  void _setFocused(bool value) {
+    if (_focused == value) return;
+    setState(() => _focused = value);
+    _emitActiveChanged();
   }
 
   @override
   Widget build(BuildContext context) {
     final scale = _pressed
         ? widget.pressedScale
-        : (_hovered ? widget.hoverScale : 1.0);
+        : (_active ? widget.hoverScale : 1.0);
 
-    return MouseRegion(
-      onEnter: (_) => _setHover(true),
-      onExit: (_) => _setHover(false),
-      child: GestureDetector(
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTapUp: (_) => setState(() => _pressed = false),
-        child: AnimatedScale(
-          scale: scale,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: widget.borderRadius,
-              onTap: widget.onTap,
-              child: widget.child,
-            ),
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowLeft):
+            DirectionalFocusIntent(TraversalDirection.left),
+        SingleActivator(LogicalKeyboardKey.arrowRight):
+            DirectionalFocusIntent(TraversalDirection.right),
+        SingleActivator(LogicalKeyboardKey.arrowUp):
+            DirectionalFocusIntent(TraversalDirection.up),
+        SingleActivator(LogicalKeyboardKey.arrowDown):
+            DirectionalFocusIntent(TraversalDirection.down),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+            onInvoke: (intent) {
+              FocusScope.of(context).focusedChild?.focusInDirection(
+                intent.direction,
+              );
+              return null;
+            },
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DesktopBackdrop extends StatelessWidget {
-  const _DesktopBackdrop({
-    required this.imageUrl,
-    required this.enableBlur,
-  });
-
-  final String? imageUrl;
-  final bool enableBlur;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFF131A2A),
-                Color(0xFF0A0F18),
-                Color(0xFF05070B),
-              ],
-            ),
-          ),
-        ),
-        if ((imageUrl ?? '').isNotEmpty)
-          Positioned.fill(
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(
-                sigmaX: enableBlur ? 22 : 0,
-                sigmaY: enableBlur ? 22 : 0,
+        },
+        child: Focus(
+          canRequestFocus: true,
+          onFocusChange: _setFocused,
+          child: MouseRegion(
+            onEnter: (_) => _setHover(true),
+            onExit: (_) => _setHover(false),
+            child: GestureDetector(
+              onTapDown: (_) => setState(() => _pressed = true),
+              onTapCancel: () => setState(() => _pressed = false),
+              onTapUp: (_) => setState(() => _pressed = false),
+              child: AnimatedScale(
+                scale: scale,
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: widget.borderRadius,
+                    onTap: widget.onTap,
+                    child: widget.child,
+                  ),
+                ),
               ),
-              child: _CoverImage(
-                imageUrl: imageUrl,
-                fit: BoxFit.cover,
-              ),
-            ),
-          ),
-        Positioned(
-          left: -120,
-          top: -120,
-          child: _GlowBlob(
-            size: 360,
-            color: const Color(0xFF3B82F6).withValues(alpha: 0.22),
-          ),
-        ),
-        Positioned(
-          right: -100,
-          bottom: -110,
-          child: _GlowBlob(
-            size: 320,
-            color: const Color(0xFF00A4DC).withValues(alpha: 0.18),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GlowBlob extends StatelessWidget {
-  const _GlowBlob({
-    required this.size,
-    required this.color,
-  });
-
-  final double size;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: ClipOval(
-        child: ImageFiltered(
-          imageFilter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: DecoratedBox(
-              decoration: BoxDecoration(color: color),
             ),
           ),
         ),

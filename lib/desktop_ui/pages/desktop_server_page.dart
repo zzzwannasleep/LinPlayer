@@ -37,6 +37,7 @@ class _DesktopServerPageState extends State<DesktopServerPage> {
       ServerPage(
         appState: widget.appState,
         showInlineLocalEntry: false,
+        desktopLayout: true,
       ),
       useExoCore
           ? ExoPlayerScreen(appState: widget.appState)
@@ -45,6 +46,7 @@ class _DesktopServerPageState extends State<DesktopServerPage> {
     ];
 
     return DesktopCinematicShell(
+      appState: widget.appState,
       title: 'Workspace',
       tabs: _tabs,
       selectedIndex: _index,

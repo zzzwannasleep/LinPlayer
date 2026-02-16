@@ -48,6 +48,7 @@ class _DesktopWebDavHomePageState extends State<DesktopWebDavHomePage> {
     ];
 
     return DesktopCinematicShell(
+      appState: widget.appState,
       title: 'Workspace',
       tabs: _tabs,
       selectedIndex: _index,

@@ -152,6 +152,10 @@ class AppState extends ChangeNotifier {
   // is actually "unlimited stream cache". We still read it for migration.
   static const _kLegacyUnlimitedCoverCacheKey = 'unlimitedCoverCache_v1';
   static const _kEnableBlurEffectsKey = 'enableBlurEffects_v1';
+  static const _kDesktopBackgroundImageKey = 'desktopBackgroundImage_v1';
+  static const _kDesktopBackgroundOpacityKey = 'desktopBackgroundOpacity_v1';
+  static const _kDesktopBackgroundBlurSigmaKey =
+      'desktopBackgroundBlurSigma_v1';
   static const _kExternalMpvPathKey = 'externalMpvPath_v1';
   static const _kAnime4kPresetKey = 'anime4kPreset_v1';
   static const _kDanmakuEnabledKey = 'danmakuEnabled_v1';
@@ -253,6 +257,9 @@ class AppState extends ChangeNotifier {
   bool _unlimitedStreamCache = false;
   bool _autoSkipIntro = false;
   bool _enableBlurEffects = true;
+  String _desktopBackgroundImage = '';
+  double _desktopBackgroundOpacity = 0.32;
+  double _desktopBackgroundBlurSigma = 12.0;
   bool _showHomeLibraryQuickAccess = true;
   bool _showHomeRandomRecommendations = true;
   bool _autoUpdateEnabled = false;
@@ -655,6 +662,9 @@ class AppState extends ChangeNotifier {
   bool get unlimitedStreamCache => _unlimitedStreamCache;
   bool get autoSkipIntro => _autoSkipIntro;
   bool get enableBlurEffects => _enableBlurEffects;
+  String get desktopBackgroundImage => _desktopBackgroundImage;
+  double get desktopBackgroundOpacity => _desktopBackgroundOpacity;
+  double get desktopBackgroundBlurSigma => _desktopBackgroundBlurSigma;
   bool get showHomeLibraryQuickAccess => _showHomeLibraryQuickAccess;
   bool get showHomeRandomRecommendations => _showHomeRandomRecommendations;
   bool get autoUpdateEnabled => _autoUpdateEnabled;
@@ -835,6 +845,15 @@ class AppState extends ChangeNotifier {
     }
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntroKey) ?? false;
     _enableBlurEffects = prefs.getBool(_kEnableBlurEffectsKey) ?? true;
+    _desktopBackgroundImage = prefs.getString(_kDesktopBackgroundImageKey) ?? '';
+    _desktopBackgroundOpacity =
+        (prefs.getDouble(_kDesktopBackgroundOpacityKey) ?? 0.32)
+            .clamp(0.0, 1.0)
+            .toDouble();
+    _desktopBackgroundBlurSigma =
+        (prefs.getDouble(_kDesktopBackgroundBlurSigmaKey) ?? 12.0)
+            .clamp(0.0, 30.0)
+            .toDouble();
     _showHomeLibraryQuickAccess =
         prefs.getBool(_kShowHomeLibraryQuickAccessKey) ?? true;
     _showHomeRandomRecommendations =
@@ -1073,6 +1092,9 @@ class AppState extends ChangeNotifier {
         'unlimitedStreamCache': _unlimitedStreamCache,
         'autoSkipIntro': _autoSkipIntro,
         'enableBlurEffects': _enableBlurEffects,
+        'desktopBackgroundImage': _desktopBackgroundImage,
+        'desktopBackgroundOpacity': _desktopBackgroundOpacity,
+        'desktopBackgroundBlurSigma': _desktopBackgroundBlurSigma,
         'showHomeLibraryQuickAccess': _showHomeLibraryQuickAccess,
         'showHomeRandomRecommendations': _showHomeRandomRecommendations,
         'autoUpdateEnabled': _autoUpdateEnabled,
@@ -1417,6 +1439,16 @@ class AppState extends ChangeNotifier {
     final nextAutoSkipIntro = _readBool(data['autoSkipIntro'], fallback: false);
     final nextEnableBlurEffects =
         _readBool(data['enableBlurEffects'], fallback: true);
+    final nextDesktopBackgroundImage =
+        (data['desktopBackgroundImage'] ?? '').toString().trim();
+    final nextDesktopBackgroundOpacity =
+        _readDouble(data['desktopBackgroundOpacity'], fallback: 0.32)
+            .clamp(0.0, 1.0)
+            .toDouble();
+    final nextDesktopBackgroundBlurSigma =
+        _readDouble(data['desktopBackgroundBlurSigma'], fallback: 12.0)
+            .clamp(0.0, 30.0)
+            .toDouble();
     final nextShowHomeLibraryQuickAccess =
         _readBool(data['showHomeLibraryQuickAccess'], fallback: true);
     final nextShowHomeRandomRecommendations =
@@ -1618,6 +1650,9 @@ class AppState extends ChangeNotifier {
     _unlimitedStreamCache = nextUnlimitedStreamCache;
     _autoSkipIntro = nextAutoSkipIntro;
     _enableBlurEffects = nextEnableBlurEffects;
+    _desktopBackgroundImage = nextDesktopBackgroundImage;
+    _desktopBackgroundOpacity = nextDesktopBackgroundOpacity;
+    _desktopBackgroundBlurSigma = nextDesktopBackgroundBlurSigma;
     _showHomeLibraryQuickAccess = nextShowHomeLibraryQuickAccess;
     _showHomeRandomRecommendations = nextShowHomeRandomRecommendations;
     _autoUpdateEnabled = nextAutoUpdateEnabled;
@@ -1724,6 +1759,19 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_kUnlimitedStreamCacheKey, _unlimitedStreamCache);
     await prefs.setBool(_kAutoSkipIntroKey, _autoSkipIntro);
     await prefs.setBool(_kEnableBlurEffectsKey, _enableBlurEffects);
+    if (_desktopBackgroundImage.isEmpty) {
+      await prefs.remove(_kDesktopBackgroundImageKey);
+    } else {
+      await prefs.setString(_kDesktopBackgroundImageKey, _desktopBackgroundImage);
+    }
+    await prefs.setDouble(
+      _kDesktopBackgroundOpacityKey,
+      _desktopBackgroundOpacity,
+    );
+    await prefs.setDouble(
+      _kDesktopBackgroundBlurSigmaKey,
+      _desktopBackgroundBlurSigma,
+    );
     await prefs.setBool(
       _kShowHomeLibraryQuickAccessKey,
       _showHomeLibraryQuickAccess,
@@ -3050,6 +3098,37 @@ class AppState extends ChangeNotifier {
     _enableBlurEffects = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kEnableBlurEffectsKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopBackgroundImage(String value) async {
+    final next = value.trim();
+    if (_desktopBackgroundImage == next) return;
+    _desktopBackgroundImage = next;
+    final prefs = await SharedPreferences.getInstance();
+    if (next.isEmpty) {
+      await prefs.remove(_kDesktopBackgroundImageKey);
+    } else {
+      await prefs.setString(_kDesktopBackgroundImageKey, next);
+    }
+    notifyListeners();
+  }
+
+  Future<void> setDesktopBackgroundOpacity(double value) async {
+    final next = value.clamp(0.0, 1.0).toDouble();
+    if ((_desktopBackgroundOpacity - next).abs() < 0.00001) return;
+    _desktopBackgroundOpacity = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kDesktopBackgroundOpacityKey, next);
+    notifyListeners();
+  }
+
+  Future<void> setDesktopBackgroundBlurSigma(double value) async {
+    final next = value.clamp(0.0, 30.0).toDouble();
+    if ((_desktopBackgroundBlurSigma - next).abs() < 0.00001) return;
+    _desktopBackgroundBlurSigma = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kDesktopBackgroundBlurSigmaKey, next);
     notifyListeners();
   }
 
