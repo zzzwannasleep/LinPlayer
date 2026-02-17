@@ -33,9 +33,8 @@ class DesktopNavigationLayout extends StatelessWidget {
     final backgroundEnd =
         backgroundEndColor ?? desktopTheme.backgroundGradientEnd;
     final showSidebar = sidebarVisible && sidebarWidth > 0;
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final horizontalPadding = screenWidth >= 1120 ? 40.0 : 24.0;
-    final topBarFactor = topBarVisibility.clamp(0.0, 1.0).toDouble();
+    const horizontalPadding = 0.0;
+    final topBarTarget = topBarVisibility.clamp(0.0, 1.0).toDouble();
 
     return Stack(
       children: [
@@ -56,13 +55,17 @@ class DesktopNavigationLayout extends StatelessWidget {
           child: Column(
             children: [
               ClipRect(
-                child: Align(
+                child: AnimatedAlign(
                   alignment: Alignment.topCenter,
-                  heightFactor: topBarFactor,
-                  child: Opacity(
-                    opacity: topBarFactor,
+                  heightFactor: topBarTarget,
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  child: AnimatedOpacity(
+                    opacity: topBarTarget,
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOutCubic,
                     child: IgnorePointer(
-                      ignoring: topBarFactor < 0.05,
+                      ignoring: topBarTarget < 0.05,
                       child: Padding(
                         padding: EdgeInsets.fromLTRB(
                             horizontalPadding, 0, horizontalPadding, 0),
@@ -72,7 +75,11 @@ class DesktopNavigationLayout extends StatelessWidget {
                   ),
                 ),
               ),
-              SizedBox(height: 22 * topBarFactor),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                height: 22 * topBarTarget,
+              ),
               Expanded(
                 child: Padding(
                   padding: EdgeInsets.fromLTRB(

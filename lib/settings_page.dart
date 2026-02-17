@@ -1274,8 +1274,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final isTv = _isTv(context);
-    final isAndroid =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
     final isDesktop = !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.windows ||
             defaultTargetPlatform == TargetPlatform.linux ||
@@ -1482,11 +1480,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
               _Section(
                 title: '外观',
-                subtitle: isTv
-                    ? '自定义背景 / UI 缩放 / 模糊与透明度'
-                    : blurAllowed
-                        ? (enableBlur ? '手机/桌面启用毛玻璃等特效' : '已关闭毛玻璃特效（更流畅）')
-                        : 'TV 端自动关闭高开销特效',
+                subtitle: isTv ? '自定义背景 / UI 缩放 / 模糊与透明度' : '主题、缩放与界面语言',
                 enableBlur: enableBlur,
                 child: Column(
                   children: [
@@ -1725,8 +1719,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       value: ThemeMode.light,
                                       label: Text('浅色')),
                                   ButtonSegment(
-                                      value: ThemeMode.dark,
-                                      label: Text('深色')),
+                                      value: ThemeMode.dark, label: Text('深色')),
                                 ]
                               : const <ButtonSegment<ThemeMode>>[
                                   ButtonSegment(
@@ -1736,8 +1729,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                       value: ThemeMode.light,
                                       label: Text('浅色')),
                                   ButtonSegment(
-                                      value: ThemeMode.dark,
-                                      label: Text('深色')),
+                                      value: ThemeMode.dark, label: Text('深色')),
                                 ];
                           final selectedMode = isDesktopBinaryTheme &&
                                   appState.themeMode == ThemeMode.system
@@ -1806,21 +1798,36 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     const Divider(height: 1),
-                    if (!isTv) ...[
-                      SwitchListTile(
-                        value: appState.uiTemplate == UiTemplate.proTool
-                            ? true
-                            : appState.compactMode,
-                        onChanged: appState.uiTemplate == UiTemplate.proTool
-                            ? null
-                            : (v) => appState.setCompactMode(v),
-                        title: const Text('紧凑模式'),
-                        subtitle: Text(
-                          appState.uiTemplate == UiTemplate.proTool
-                              ? '专业工具模板固定启用'
-                              : '缩小控件间距与高度（手机开启会更小）',
-                        ),
+                    if (isDesktop) ...[
+                      ListTile(
                         contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.translate_outlined),
+                        title: const Text('界面语言'),
+                        subtitle: const Text('仅影响桌面端 UI 文案'),
+                        trailing: ConstrainedBox(
+                          constraints:
+                              BoxConstraints(maxWidth: trailingMaxWidth),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: appState.desktopUiLanguage,
+                              isExpanded: true,
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'zhCn',
+                                  child: Text('中文'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'enUs',
+                                  child: Text('English'),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                if (v == null) return;
+                                appState.setDesktopUiLanguage(v);
+                              },
+                            ),
+                          ),
+                        ),
                       ),
                       const Divider(height: 1),
                     ],
@@ -1835,65 +1842,11 @@ class _SettingsPageState extends State<SettingsPage> {
                     if (!isTv) ...[
                       const Divider(height: 1),
                       SwitchListTile(
-                        value: appState.showHomeRandomRecommendations,
-                        onChanged: (v) =>
-                            appState.setShowHomeRandomRecommendations(v),
-                        title: const Text('首页随机推荐'),
-                        subtitle: const Text('在首页显示“随机推荐”栏目'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ],
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      value: appState.enableBlurEffects,
-                      onChanged: blurAllowed
-                          ? (v) => appState.setEnableBlurEffects(v)
-                          : null,
-                      title: const Text('毛玻璃特效'),
-                      subtitle: Text(
-                        blurAllowed
-                            ? '关闭可提升滚动/动画流畅度（尤其是高刷屏）'
-                            : 'TV 端强制关闭以提升流畅度',
-                      ),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    if (!isTv) ...[
-                      const Divider(height: 1),
-                      SwitchListTile(
                         value: appState.useDynamicColor,
                         onChanged: (v) => appState.setUseDynamicColor(v),
                         title: const Text('莫奈取色（Material You）'),
                         subtitle: const Text('Android 12+ 生效，其它平台自动回退'),
                         contentPadding: EdgeInsets.zero,
-                      ),
-                      const Divider(height: 1),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.dashboard_customize_outlined),
-                        title: const Text('UI 模板'),
-                        subtitle: const Text('不同风格/布局（手机 + 桌面）'),
-                        trailing: ConstrainedBox(
-                          constraints:
-                              BoxConstraints(maxWidth: trailingMaxWidth),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<UiTemplate>(
-                              value: appState.uiTemplate,
-                              isExpanded: true,
-                              items: UiTemplate.values
-                                  .map(
-                                    (t) => DropdownMenuItem(
-                                      value: t,
-                                      child: Text(t.label),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) {
-                                if (v == null) return;
-                                appState.setUiTemplate(v);
-                              },
-                            ),
-                          ),
-                        ),
                       ),
                     ],
                   ],
@@ -1905,62 +1858,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 enableBlur: enableBlur,
                 child: Column(
                   children: [
-                    SwitchListTile(
-                      value: appState.preferHardwareDecode,
-                      onChanged: (v) => appState.setPreferHardwareDecode(v),
-                      title: const Text('优先硬解'),
-                      subtitle: const Text('TV/低端设备建议关闭以提升兼容性'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    const Divider(height: 1),
-                    if (isAndroid) ...[
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.memory_outlined),
-                        title: const Text('播放器内核'),
-                        subtitle: const Text('Exo 更适合部分杜比视界 P8 片源（偏紫/偏绿）'),
-                        trailing: ConstrainedBox(
-                          constraints:
-                              BoxConstraints(maxWidth: trailingMaxWidth),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<PlayerCore>(
-                              value: appState.playerCore,
-                              items: [
-                                DropdownMenuItem(
-                                  value: PlayerCore.mpv,
-                                  child: Text(PlayerCore.mpv.label),
-                                ),
-                                DropdownMenuItem(
-                                  value: PlayerCore.exo,
-                                  child:
-                                      Text('${PlayerCore.exo.label}（Android）'),
-                                ),
-                              ],
-                              onChanged: (v) {
-                                if (v == null) return;
-                                // ignore: unawaited_futures
-                                appState.setPlayerCore(v);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('切换内核将在下次开始播放时生效'),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                      const Divider(height: 1),
-                    ] else ...[
-                      const ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.memory_outlined),
-                        title: Text('播放器内核'),
-                        subtitle: Text('当前平台仅支持 MPV（Exo 仅 Android）'),
-                        trailing: Text('MPV'),
-                      ),
-                      const Divider(height: 1),
-                    ],
                     SwitchListTile(
                       value: appState.episodePickerShowTitle,
                       onChanged: (v) => appState.setEpisodePickerShowTitle(v),
@@ -2372,70 +2269,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Column(
                   children: [
                     if (!isTv) ...[
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.apps_outlined),
-                        title: const Text('应用图标'),
-                        subtitle: Text(AppIconService.isSupported
-                            ? '切换后可能需要等待桌面刷新'
-                            : '仅 Android 支持'),
-                        trailing: ConstrainedBox(
-                          constraints:
-                              BoxConstraints(maxWidth: trailingMaxWidth),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: appState.appIconId,
-                              items: const [
-                                DropdownMenuItem(
-                                    value: 'default', child: Text('默认')),
-                                DropdownMenuItem(
-                                    value: 'pink', child: Text('粉色')),
-                                DropdownMenuItem(
-                                    value: 'purple', child: Text('紫色')),
-                                DropdownMenuItem(
-                                    value: 'miku', child: Text('初音未来')),
-                              ],
-                              onChanged: !AppIconService.isSupported
-                                  ? null
-                                  : (v) async {
-                                      if (v == null) return;
-                                      final ok =
-                                          await AppIconService.setIconId(v);
-                                      if (!ok && context.mounted) {
-                                        ScaffoldMessenger.of(context)
-                                            .showSnackBar(
-                                          const SnackBar(
-                                              content:
-                                                  Text('切换失败（可能不支持当前系统/桌面）')),
-                                        );
-                                        return;
-                                      }
-                                      await appState.setAppIconId(v);
-                                    },
-                            ),
-                          ),
-                        ),
-                      ),
-                      const Divider(height: 1),
-                    ],
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.volunteer_activism_outlined),
-                      title: const Text('捐赠'),
-                      subtitle: const Text('支持作者继续开发（爱发电）'),
-                      trailing: const Icon(Icons.open_in_new),
-                      onTap: () async {
-                        final ok = await launchUrlString(_donateUrl);
-                        if (!ok && context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                                content: Text('无法打开链接，请检查系统浏览器/网络设置')),
-                          );
-                        }
-                      },
-                    ),
-                    const Divider(height: 1),
-                    if (!isTv) ...[
                       SwitchListTile(
                         value: appState.autoSkipIntro,
                         onChanged: (v) async {
@@ -2603,6 +2436,24 @@ class _SettingsPageState extends State<SettingsPage> {
                       trailing: const Icon(Icons.open_in_new),
                       onTap: () async {
                         final ok = await launchUrlString(appConfig.repoUrl);
+                        if (!ok && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('无法打开链接，请检查系统浏览器/网络设置'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.volunteer_activism_outlined),
+                      title: const Text('捐赠'),
+                      subtitle: const Text('支持作者继续开发（爱发电）'),
+                      trailing: const Icon(Icons.open_in_new),
+                      onTap: () async {
+                        final ok = await launchUrlString(_donateUrl);
                         if (!ok && context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(

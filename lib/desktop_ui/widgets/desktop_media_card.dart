@@ -59,7 +59,7 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
   @override
   Widget build(BuildContext context) {
     final theme = DesktopThemeExtension.of(context);
-    final imageUrl = _imageUrl();
+    final imageUrls = _imageCandidates();
     final progress = mediaProgress(widget.item);
     final subtitle = widget.subtitleOverride ?? _defaultSubtitle(widget.item);
     final customTitle = (widget.titleOverride ?? '').trim();
@@ -108,7 +108,7 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
                           fit: StackFit.expand,
                           children: [
                             _CardImage(
-                              imageUrl: imageUrl,
+                              imageUrls: imageUrls,
                               title: widget.item.name,
                             ),
                             if (widget.showBadge && badge.isNotEmpty)
@@ -260,46 +260,117 @@ class _DesktopMediaCardState extends State<DesktopMediaCard> {
   }
 
   String _defaultBadge(MediaItem item) {
+    final type = item.type.trim().toLowerCase();
     final episode = item.episodeNumber ?? 0;
-    if (episode > 0) return '$episode';
+    if (type == 'episode' && episode > 0) return '$episode';
     final season = item.seasonNumber ?? 0;
-    if (season > 0) return '$season';
-    return '${(item.id.hashCode.abs() % 99) + 1}';
+    if (type == 'season' && season > 0) return 'S$season';
+    return '';
   }
 
-  String? _imageUrl() {
+  List<String> _imageCandidates() {
     final currentAccess = widget.access;
-    if (currentAccess == null) return null;
-    if (widget.imageType == 'Primary' && !widget.item.hasImage) return null;
-    return currentAccess.adapter.imageUrl(
-      currentAccess.auth,
+    if (currentAccess == null) return const <String>[];
+
+    final urls = <String>[];
+    final primaryType =
+        widget.imageType.trim().isEmpty ? 'Primary' : widget.imageType.trim();
+
+    void addCandidate({
+      required String? itemId,
+      required String imageType,
+      required int maxWidth,
+    }) {
+      final id = (itemId ?? '').trim();
+      if (id.isEmpty) return;
+      final url = currentAccess.adapter.imageUrl(
+        currentAccess.auth,
+        itemId: id,
+        imageType: imageType,
+        maxWidth: maxWidth,
+      );
+      if (url.trim().isEmpty || urls.contains(url)) return;
+      urls.add(url);
+    }
+
+    addCandidate(
       itemId: widget.item.id,
-      imageType: widget.imageType,
-      maxWidth: 560,
+      imageType: primaryType,
+      maxWidth: primaryType.toLowerCase() == 'backdrop' ? 920 : 560,
     );
+    if (primaryType.toLowerCase() == 'primary') {
+      addCandidate(itemId: widget.item.id, imageType: 'Thumb', maxWidth: 560);
+      addCandidate(
+        itemId: widget.item.id,
+        imageType: 'Backdrop',
+        maxWidth: 920,
+      );
+    }
+    addCandidate(
+        itemId: widget.item.parentId, imageType: 'Primary', maxWidth: 560);
+    addCandidate(
+        itemId: widget.item.parentId, imageType: 'Thumb', maxWidth: 560);
+    addCandidate(
+        itemId: widget.item.seriesId, imageType: 'Primary', maxWidth: 560);
+    addCandidate(
+      itemId: widget.item.seriesId,
+      imageType: 'Backdrop',
+      maxWidth: 920,
+    );
+
+    return urls;
   }
 }
 
-class _CardImage extends StatelessWidget {
+class _CardImage extends StatefulWidget {
   const _CardImage({
-    required this.imageUrl,
+    required this.imageUrls,
     required this.title,
   });
 
-  final String? imageUrl;
+  final List<String> imageUrls;
   final String title;
 
   @override
+  State<_CardImage> createState() => _CardImageState();
+}
+
+class _CardImageState extends State<_CardImage> {
+  int _currentIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant _CardImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrls.join('|') != widget.imageUrls.join('|')) {
+      _currentIndex = 0;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (imageUrl != null && imageUrl!.isNotEmpty) {
+    final candidates = widget.imageUrls
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    if (candidates.isNotEmpty && _currentIndex < candidates.length) {
+      final imageUrl = candidates[_currentIndex];
       return CachedNetworkImage(
-        imageUrl: imageUrl!,
+        key: ValueKey<String>('${widget.title}-$imageUrl'),
+        imageUrl: imageUrl,
         fit: BoxFit.cover,
         placeholder: (_, __) => const _ImageFallback(),
-        errorWidget: (_, __, ___) => _ImageFallback(title: title),
+        errorWidget: (_, __, ___) {
+          if (_currentIndex < candidates.length - 1) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              setState(() => _currentIndex += 1);
+            });
+          }
+          return _ImageFallback(title: widget.title);
+        },
       );
     }
-    return _ImageFallback(title: title);
+    return _ImageFallback(title: widget.title);
   }
 }
 

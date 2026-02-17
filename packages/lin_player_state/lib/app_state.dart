@@ -130,6 +130,7 @@ class AppState extends ChangeNotifier {
   static const _kActiveServerIdKey = 'activeServerId_v1';
   static const _kThemeModeKey = 'themeMode_v1';
   static const _kUiScaleFactorKey = 'uiScaleFactor_v1';
+  static const _kDesktopUiLanguageKey = 'desktopUiLanguage_v1';
   static const _kDynamicColorKey = 'dynamicColor_v1';
   static const _kCompactModeKey = 'compactMode_v1';
   static const _kUiTemplateKey = 'uiTemplate_v1';
@@ -241,6 +242,7 @@ class AppState extends ChangeNotifier {
   late final String _deviceId = _randomId();
   ThemeMode _themeMode = ThemeMode.system;
   double _uiScaleFactor = 1.0;
+  String _desktopUiLanguage = 'zhCn';
   bool _useDynamicColor = true;
   bool _compactMode = _defaultCompactModeForPlatform();
   UiTemplate _uiTemplate = UiTemplate.candyGlass;
@@ -683,6 +685,7 @@ class AppState extends ChangeNotifier {
   List<MediaItem> getHome(String key) => _homeSections[key] ?? [];
   ThemeMode get themeMode => _themeMode;
   double get uiScaleFactor => _uiScaleFactor;
+  String get desktopUiLanguage => _desktopUiLanguage;
   bool get useDynamicColor => _useDynamicColor;
   bool get compactMode => _compactMode;
   UiTemplate get uiTemplate => _uiTemplate;
@@ -845,6 +848,8 @@ class AppState extends ChangeNotifier {
     _uiScaleFactor =
         ((prefs.getDouble(_kUiScaleFactorKey) ?? 1.0).clamp(0.25, 2.0))
             .toDouble();
+    _desktopUiLanguage =
+        _normalizeDesktopUiLanguage(prefs.getString(_kDesktopUiLanguageKey));
     _useDynamicColor = prefs.getBool(_kDynamicColorKey) ?? true;
     _compactMode =
         prefs.getBool(_kCompactModeKey) ?? _defaultCompactModeForPlatform();
@@ -1122,6 +1127,7 @@ class AppState extends ChangeNotifier {
       'data': {
         'themeMode': _encodeThemeMode(_themeMode),
         'uiScaleFactor': _uiScaleFactor,
+        'desktopUiLanguage': _desktopUiLanguage,
         'useDynamicColor': _useDynamicColor,
         'compactMode': _compactMode,
         'uiTemplate': _uiTemplate.id,
@@ -1447,6 +1453,8 @@ class AppState extends ChangeNotifier {
     final nextUiScale = _readDouble(data['uiScaleFactor'], fallback: 1.0)
         .clamp(0.25, 2.0)
         .toDouble();
+    final nextDesktopUiLanguage =
+        _normalizeDesktopUiLanguage(data['desktopUiLanguage']?.toString());
     final nextUseDynamic = _readBool(data['useDynamicColor'], fallback: true);
     final nextCompactMode = _readBool(
       data['compactMode'],
@@ -1678,6 +1686,7 @@ class AppState extends ChangeNotifier {
 
     _themeMode = nextThemeMode;
     _uiScaleFactor = nextUiScale;
+    _desktopUiLanguage = nextDesktopUiLanguage;
     _useDynamicColor = nextUseDynamic;
     _compactMode = nextCompactMode;
     _uiTemplate = nextUiTemplate;
@@ -1785,6 +1794,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kThemeModeKey, _encodeThemeMode(_themeMode));
     await prefs.setDouble(_kUiScaleFactorKey, _uiScaleFactor);
+    await prefs.setString(_kDesktopUiLanguageKey, _desktopUiLanguage);
     await prefs.setBool(_kDynamicColorKey, _useDynamicColor);
     await prefs.setBool(_kCompactModeKey, _compactMode);
     await prefs.setString(_kUiTemplateKey, _uiTemplate.id);
@@ -3016,6 +3026,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setDesktopUiLanguage(String languageCode) async {
+    final next = _normalizeDesktopUiLanguage(languageCode);
+    if (_desktopUiLanguage == next) return;
+    _desktopUiLanguage = next;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kDesktopUiLanguageKey, next);
+    notifyListeners();
+  }
+
   Future<void> setCompactMode(bool enabled) async {
     if (_compactMode == enabled) return;
     _compactMode = enabled;
@@ -3907,6 +3926,14 @@ class AppState extends ChangeNotifier {
       case ThemeMode.system:
         return 'system';
     }
+  }
+
+  static String _normalizeDesktopUiLanguage(String? value) {
+    final raw = (value ?? '').trim().toLowerCase();
+    if (raw == 'en' || raw == 'enus' || raw == 'en-us' || raw == 'en_us') {
+      return 'enUs';
+    }
+    return 'zhCn';
   }
 
   static String _suggestServerName(String baseUrl) {

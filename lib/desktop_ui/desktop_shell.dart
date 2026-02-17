@@ -19,7 +19,6 @@ import 'pages/desktop_library_page.dart';
 import 'pages/desktop_navigation_layout.dart';
 import 'pages/desktop_search_page.dart';
 import 'pages/desktop_server_page.dart';
-import 'pages/desktop_ui_settings_page.dart';
 import 'pages/desktop_webdav_home_page.dart';
 import 'theme/desktop_theme_extension.dart';
 import 'view_models/desktop_detail_view_model.dart';
@@ -87,7 +86,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   _DesktopSection _section = _DesktopSection.library;
   DesktopHomeTab _homeTab = DesktopHomeTab.home;
   bool _sidebarCollapsed = true;
-  DesktopUiLanguage _uiLanguage = DesktopUiLanguage.zhCn;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   int _refreshSignal = 0;
@@ -108,6 +106,21 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     _searchController.dispose();
     _detailViewModel?.dispose();
     super.dispose();
+  }
+
+  DesktopUiLanguage get _uiLanguage =>
+      _desktopUiLanguageFromCode(widget.appState.desktopUiLanguage);
+
+  DesktopUiLanguage _desktopUiLanguageFromCode(String code) {
+    switch (code.trim().toLowerCase()) {
+      case 'en':
+      case 'enus':
+      case 'en-us':
+      case 'en_us':
+        return DesktopUiLanguage.enUs;
+      default:
+        return DesktopUiLanguage.zhCn;
+    }
   }
 
   TextTheme _stripTextDecorations(TextTheme textTheme) {
@@ -173,16 +186,12 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   }
 
   List<DesktopSidebarServer> _buildSidebarServers() {
-    final activeServerId = widget.appState.activeServerId;
     return widget.appState.servers
         .map(
           (server) => DesktopSidebarServer(
             id: server.id,
             name: server.name.trim().isEmpty ? server.baseUrl : server.name,
-            subtitle: _buildServerSubtitleText(
-              server,
-              isActive: activeServerId == server.id,
-            ),
+            subtitle: _buildServerSubtitleText(server),
             serverType: server.serverType,
             iconUrl: server.iconUrl,
           ),
@@ -190,42 +199,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         .toList(growable: false);
   }
 
-  String _extractServerHost(String baseUrl) {
-    final raw = baseUrl.trim();
-    if (raw.isEmpty) return '';
-
-    Uri? uri;
-    try {
-      uri = Uri.parse(raw);
-    } catch (_) {}
-
-    if (uri == null || uri.host.trim().isEmpty) {
-      try {
-        uri = Uri.parse('https://$raw');
-      } catch (_) {}
-    }
-
-    if (uri == null || uri.host.trim().isEmpty) return raw;
-    final host = uri.host.trim();
-    return uri.hasPort ? '$host:${uri.port}' : host;
-  }
-
-  String _buildServerSubtitleText(
-    ServerProfile server, {
-    required bool isActive,
-  }) {
+  String _buildServerSubtitleText(ServerProfile server) {
     final remark = (server.remark ?? '').trim();
-    final host = _extractServerHost(server.baseUrl);
-    final baseSubtitle = remark.isNotEmpty
-        ? remark
-        : (host.isNotEmpty
-            ? '${server.serverType.label} - $host'
-            : server.serverType.label);
-    if (!isActive) return baseSubtitle;
-    return _uiLanguage.pick(
-      zh: '\u5f53\u524d\u8fde\u63a5 - $baseSubtitle',
-      en: 'Current - $baseSubtitle',
-    );
+    return remark;
   }
 
   Future<void> _loadMediaStats({bool forceRefresh = false}) async {
@@ -355,19 +331,6 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         builder: (_) => SettingsPage(appState: widget.appState),
       ),
     );
-  }
-
-  Future<void> _openDesktopUiSettings() async {
-    final selected = await Navigator.of(context).push<DesktopUiLanguage>(
-      MaterialPageRoute(
-        builder: (_) => DesktopUiSettingsPage(
-          initialLanguage: _uiLanguage,
-          onOpenSystemSettings: _openSettings,
-        ),
-      ),
-    );
-    if (!mounted || selected == null) return;
-    setState(() => _uiLanguage = selected);
   }
 
   Future<void> _openRouteManager() async {
@@ -654,37 +617,53 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     });
   }
 
+  void _setTopBarVisibility(double value) {
+    final next = value.clamp(0.0, 1.0).toDouble();
+    if ((next - _topBarVisibility).abs() <= 0.001 || !mounted) return;
+    setState(() => _topBarVisibility = next);
+  }
+
   bool _handleContentScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
     final axis = axisDirectionToAxis(notification.metrics.axisDirection);
     if (axis != Axis.vertical) return false;
 
+    final pixels = notification.metrics.pixels;
+    if (pixels <= 0) {
+      _setTopBarVisibility(1.0);
+      return false;
+    }
+
     if (notification is ScrollUpdateNotification) {
       final delta = notification.scrollDelta ?? 0;
-      if (delta.abs() < 0.4) return false;
-      final next =
-          (_topBarVisibility - (delta / 150)).clamp(0.0, 1.0).toDouble();
-      if ((next - _topBarVisibility).abs() > 0.005 && mounted) {
-        setState(() => _topBarVisibility = next);
+      if (delta.abs() < 0.5) return false;
+      _setTopBarVisibility(delta > 0 ? 0.0 : 1.0);
+      return false;
+    }
+
+    if (notification is OverscrollNotification && notification.overscroll < 0) {
+      _setTopBarVisibility(1.0);
+      return false;
+    }
+
+    if (notification is UserScrollNotification) {
+      switch (notification.direction) {
+        case ScrollDirection.forward:
+          _setTopBarVisibility(1.0);
+          break;
+        case ScrollDirection.reverse:
+          _setTopBarVisibility(0.0);
+          break;
+        case ScrollDirection.idle:
+          _setTopBarVisibility(pixels <= 0 ? 1.0 : 0.0);
+          break;
       }
       return false;
     }
 
     if (notification is ScrollEndNotification) {
-      final snap = _topBarVisibility > 0.58 ? 1.0 : 0.0;
-      if ((snap - _topBarVisibility).abs() > 0.005 && mounted) {
-        setState(() => _topBarVisibility = snap);
-      }
+      _setTopBarVisibility(pixels <= 0 ? 1.0 : 0.0);
       return false;
-    }
-
-    if (notification is UserScrollNotification) {
-      if (notification.direction == ScrollDirection.forward &&
-          notification.metrics.pixels <= 0 &&
-          _topBarVisibility < 1.0 &&
-          mounted) {
-        setState(() => _topBarVisibility = 1.0);
-      }
     }
 
     return false;
@@ -768,6 +747,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                 child: DesktopShortcutWrapper(
                   child: FocusTraversalManager(
                     child: WindowPaddingContainer(
+                      padding: EdgeInsets.zero,
+                      dragRegionHeight: 0,
                       child: DesktopNavigationLayout(
                         backgroundStartColor:
                             isDetailSection ? detailBackground : null,
@@ -803,7 +784,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                           onSearchSubmitted: _handleSearchSubmitted,
                           onRefresh: _refreshCurrentPage,
                           onOpenRouteManager: _openRouteManager,
-                          onOpenSettings: _openDesktopUiSettings,
+                          onOpenSettings: _openSettings,
                           searchHint: _uiLanguage.pick(
                             zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
                             en: 'Search series or movies',

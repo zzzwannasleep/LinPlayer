@@ -688,6 +688,10 @@ class _HeroInfoColumn extends StatelessWidget {
     final colors = _EpisodeDetailColors.of(context);
     final title =
         item.name.trim().isEmpty ? '\u672a\u547d\u540d\u5267\u96c6' : item.name;
+    final subtitleLine = <String>[
+      if (episodeMark.trim().isNotEmpty) episodeMark.trim(),
+      if (subtitle.trim().isNotEmpty) subtitle.trim(),
+    ].join(' - ');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -702,14 +706,16 @@ class _HeroInfoColumn extends StatelessWidget {
             height: 1.15,
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          subtitle.isEmpty ? episodeMark : '$episodeMark - $subtitle',
-          style: TextStyle(
-            fontSize: 14,
-            color: colors.textSecondary,
+        if (subtitleLine.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            subtitleLine,
+            style: TextStyle(
+              fontSize: 14,
+              color: colors.textSecondary,
+            ),
           ),
-        ),
+        ],
         const SizedBox(height: 12),
         Wrap(
           spacing: 16,
@@ -2174,8 +2180,11 @@ String _seasonSectionTitle(MediaItem item, bool isEpisode) {
 }
 
 String _episodeMark(MediaItem item) {
+  final type = item.type.trim().toLowerCase();
+  if (type != 'episode') return '';
   final season = math.max(item.seasonNumber ?? 0, 0);
   final episode = math.max(item.episodeNumber ?? 0, 0);
+  if (season <= 0 || episode <= 0) return '';
   return 'S$season:E$episode';
 }
 
@@ -2391,7 +2400,7 @@ String _mediaSourceLabel(
   required String fallback,
 }) {
   if (source == null) return fallback;
-  final name = (source['Name'] ?? '').toString().trim();
+  final name = _normalizeMediaSourceName((source['Name'] ?? '').toString());
   if (name.isNotEmpty) return name;
 
   final streams = _mediaStreamsByType(source, 'video');
@@ -2403,6 +2412,25 @@ String _mediaSourceLabel(
       ? '${height}p'
       : '';
   return _coalesceNonEmpty([quality, codec, fallback], separator: ' ');
+}
+
+String _normalizeMediaSourceName(String raw) {
+  final parts = raw
+      .split(RegExp(r'\s*[·|/]+\s*|\s+-\s+'))
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) return '';
+  final unique = <String>[];
+  for (final part in parts) {
+    final marker = part.toUpperCase();
+    if (unique.any((entry) => entry.toUpperCase() == marker)) continue;
+    unique.add(part);
+  }
+  if (unique.length == 1) {
+    return unique.first.toUpperCase();
+  }
+  return unique.join(' · ');
 }
 
 String _audioStreamLabel(Map<String, dynamic> stream) {
@@ -2428,8 +2456,7 @@ Map<String, String> _videoSpecs(
   Map<String, dynamic>? source,
 ) {
   return {
-    '\u6807\u9898\u540d\u79f0':
-        _mediaSourceLabel(source, fallback: '1080p HEVC'),
+    '\u89c6\u9891\u683c\u5f0f': _videoFormatLabel(videoStream, source),
     '\u7f16\u7801\u683c\u5f0f':
         _fallback((videoStream?['Codec'] ?? '').toString().toUpperCase()),
     '\u7f16\u7801\u89c4\u683c':
@@ -2445,6 +2472,39 @@ Map<String, String> _videoSpecs(
     '\u5e27\u901f\u7387': _formatFrameRate(videoStream),
     '\u6bd4\u7279\u7387': _formatBitRate(_asInt(videoStream?['BitRate'])),
   };
+}
+
+String _videoFormatLabel(
+  Map<String, dynamic>? videoStream,
+  Map<String, dynamic>? source,
+) {
+  final candidates = <String>[
+    (source?['Container'] ?? '').toString(),
+    (videoStream?['Container'] ?? '').toString(),
+    (videoStream?['Codec'] ?? '').toString(),
+    (source?['Name'] ?? '').toString(),
+  ];
+  for (final candidate in candidates) {
+    final token = _singleFormatText(candidate);
+    if (token.isNotEmpty) return token;
+  }
+  return '--';
+}
+
+String _singleFormatText(String raw) {
+  final parts = raw
+      .split(RegExp(r'[·|/、,]+'))
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList(growable: false);
+  if (parts.isEmpty) return '';
+  final words = parts.first
+      .split(RegExp(r'\s+'))
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList(growable: false);
+  if (words.isEmpty) return parts.first.toUpperCase();
+  return words.first.toUpperCase();
 }
 
 Map<String, String> _audioSpecs(Map<String, dynamic>? audioStream) {

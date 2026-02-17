@@ -683,47 +683,16 @@ class _CategoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = DesktopThemeExtension.of(context);
-    final coverItem = preview.firstWhere(
-      (item) => item.hasImage,
-      orElse: () => preview.isEmpty
-          ? MediaItem(
-              id: '',
-              name: '',
-              type: '',
-              overview: '',
-              communityRating: null,
-              premiereDate: null,
-              genres: const [],
-              runTimeTicks: null,
-              sizeBytes: null,
-              container: null,
-              providerIds: const {},
-              seriesId: null,
-              seriesName: '',
-              seasonName: '',
-              seasonNumber: null,
-              episodeNumber: null,
-              hasImage: false,
-              playbackPositionTicks: 0,
-              played: false,
-              people: const [],
-            )
-          : preview.first,
-    );
-    final imageUrl = coverItem.id.isEmpty
-        ? null
-        : _imageUrl(
-              access: access,
-              item: coverItem,
-              imageType: 'Backdrop',
-              maxWidth: 640,
-            ) ??
-            _imageUrl(
-              access: access,
-              item: coverItem,
-              imageType: 'Primary',
-              maxWidth: 480,
-            );
+    final imageCandidates = <String>[];
+    for (final item in preview.take(8)) {
+      final urls = _coverImageCandidates(access: access, item: item);
+      for (final url in urls) {
+        if (!imageCandidates.contains(url)) {
+          imageCandidates.add(url);
+        }
+      }
+      if (imageCandidates.length >= 12) break;
+    }
 
     final label = library.name.trim().isEmpty
         ? _t(
@@ -741,13 +710,10 @@ class _CategoryCard extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if ((imageUrl ?? '').isNotEmpty)
-            CachedNetworkImage(
-              imageUrl: imageUrl!,
-              fit: BoxFit.cover,
-              placeholder: (_, __) => ColoredBox(color: theme.surfaceElevated),
-              errorWidget: (_, __, ___) =>
-                  ColoredBox(color: theme.surfaceElevated),
+          if (imageCandidates.isNotEmpty)
+            _CategoryCoverImage(
+              imageUrls: imageCandidates,
+              placeholder: ColoredBox(color: theme.surfaceElevated),
             )
           else
             DecoratedBox(
@@ -798,6 +764,59 @@ class _CategoryCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _CategoryCoverImage extends StatefulWidget {
+  const _CategoryCoverImage({
+    required this.imageUrls,
+    required this.placeholder,
+  });
+
+  final List<String> imageUrls;
+  final Widget placeholder;
+
+  @override
+  State<_CategoryCoverImage> createState() => _CategoryCoverImageState();
+}
+
+class _CategoryCoverImageState extends State<_CategoryCoverImage> {
+  int _currentIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant _CategoryCoverImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrls.join('|') != widget.imageUrls.join('|')) {
+      _currentIndex = 0;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final urls = widget.imageUrls
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+    if (urls.isEmpty || _currentIndex >= urls.length) {
+      return widget.placeholder;
+    }
+
+    final imageUrl = urls[_currentIndex];
+    return CachedNetworkImage(
+      key: ValueKey<String>('category-$imageUrl'),
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      placeholder: (_, __) => widget.placeholder,
+      errorWidget: (_, __, ___) {
+        if (_currentIndex < urls.length - 1) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() => _currentIndex += 1);
+          });
+        }
+        return widget.placeholder;
+      },
     );
   }
 }
@@ -1165,18 +1184,51 @@ String _t({
   return language.pick(zh: zh, en: en);
 }
 
-String? _imageUrl({
+String? _imageUrlById({
   required ServerAccess? access,
-  required MediaItem? item,
+  required String? itemId,
   required String imageType,
   required int maxWidth,
 }) {
-  if (access == null || item == null) return null;
-  if (imageType == 'Primary' && !item.hasImage) return null;
+  if (access == null) return null;
+  final id = (itemId ?? '').trim();
+  if (id.isEmpty) return null;
   return access.adapter.imageUrl(
     access.auth,
-    itemId: item.id,
+    itemId: id,
     imageType: imageType,
     maxWidth: maxWidth,
   );
+}
+
+List<String> _coverImageCandidates({
+  required ServerAccess? access,
+  required MediaItem item,
+}) {
+  final urls = <String>[];
+
+  void add({
+    required String? itemId,
+    required String imageType,
+    required int maxWidth,
+  }) {
+    final url = _imageUrlById(
+      access: access,
+      itemId: itemId,
+      imageType: imageType,
+      maxWidth: maxWidth,
+    );
+    if (url == null || url.trim().isEmpty || urls.contains(url)) return;
+    urls.add(url);
+  }
+
+  add(itemId: item.id, imageType: 'Backdrop', maxWidth: 640);
+  add(itemId: item.id, imageType: 'Primary', maxWidth: 480);
+  add(itemId: item.id, imageType: 'Thumb', maxWidth: 480);
+  add(itemId: item.parentId, imageType: 'Primary', maxWidth: 480);
+  add(itemId: item.parentId, imageType: 'Thumb', maxWidth: 480);
+  add(itemId: item.seriesId, imageType: 'Primary', maxWidth: 480);
+  add(itemId: item.seriesId, imageType: 'Backdrop', maxWidth: 640);
+
+  return urls;
 }
