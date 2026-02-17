@@ -214,6 +214,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     return AnimatedBuilder(
       animation: widget.viewModel,
       builder: (context, _) {
+        final colors = _EpisodeDetailColors.of(context);
         final vm = widget.viewModel;
         final item = vm.detail;
         final detailType = item.type.trim().toLowerCase();
@@ -232,8 +233,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
         final showMediaInfo = detailType == 'episode' || detailType == 'movie';
 
         return DecoratedBox(
-          decoration:
-              const BoxDecoration(color: _EpisodeDetailColors.background),
+          decoration: BoxDecoration(color: colors.background),
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(
@@ -476,6 +476,7 @@ class _HeroPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     final backdropUrl = _imageUrl(
       access: access,
       item: item,
@@ -517,11 +518,11 @@ class _HeroPanel extends StatelessWidget {
         return ClipRRect(
           borderRadius: BorderRadius.circular(16),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            decoration: BoxDecoration(
+              color: colors.surface,
               boxShadow: [
                 BoxShadow(
-                  color: _EpisodeDetailColors.shadow,
+                  color: colors.shadow,
                   blurRadius: 20,
                   offset: Offset(0, 4),
                 ),
@@ -531,14 +532,14 @@ class _HeroPanel extends StatelessWidget {
               children: [
                 Positioned.fill(
                   child: backdropUrl == null || backdropUrl.isEmpty
-                      ? const DecoratedBox(
+                      ? DecoratedBox(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                               colors: [
-                                Color(0xFFF1F4F7),
-                                Color(0xFFE8EEF4),
+                                colors.heroFallbackStart,
+                                colors.heroFallbackEnd,
                               ],
                             ),
                           ),
@@ -554,16 +555,16 @@ class _HeroPanel extends StatelessWidget {
                           ),
                         ),
                 ),
-                const Positioned.fill(
+                Positioned.fill(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Color(0xE6FFFFFF),
-                          Color(0x4DFFFFFF),
-                          Color(0xF2FFFFFF),
+                          colors.heroOverlayTop,
+                          colors.heroOverlayMiddle,
+                          colors.heroOverlayBottom,
                         ],
                         stops: [0, 0.4, 1],
                       ),
@@ -680,6 +681,7 @@ class _HeroInfoColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     final title =
         item.name.trim().isEmpty ? '\u672a\u547d\u540d\u5267\u96c6' : item.name;
     return Column(
@@ -689,19 +691,19 @@ class _HeroInfoColumn extends StatelessWidget {
           title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 32,
             fontWeight: FontWeight.w800,
-            color: _EpisodeDetailColors.textPrimary,
+            color: colors.textPrimary,
             height: 1.15,
           ),
         ),
         const SizedBox(height: 8),
         Text(
           subtitle.isEmpty ? episodeMark : '$episodeMark - $subtitle',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: _EpisodeDetailColors.textSecondary,
+            color: colors.textSecondary,
           ),
         ),
         const SizedBox(height: 12),
@@ -776,14 +778,15 @@ class _PosterCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return Container(
       width: width,
       height: height,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
-            color: _EpisodeDetailColors.shadow,
+            color: colors.shadow,
             blurRadius: 20,
             offset: Offset(0, 4),
           ),
@@ -812,21 +815,22 @@ class _FallbackImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
+    final colors = _EpisodeDetailColors.of(context);
+    return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFE9EEF2),
-            Color(0xFFDDE4EA),
+            colors.fallbackImageStart,
+            colors.fallbackImageEnd,
           ],
         ),
       ),
       child: Center(
         child: Icon(
           Icons.image_outlined,
-          color: _EpisodeDetailColors.textTertiary,
+          color: colors.textTertiary,
           size: 28,
         ),
       ),
@@ -841,20 +845,21 @@ class _MetaInfoLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
           item.icon,
           size: 16,
-          color: _EpisodeDetailColors.textBody,
+          color: colors.textBody,
         ),
         const SizedBox(width: 6),
         Text(
           item.text,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: _EpisodeDetailColors.textBody,
+            color: colors.textBody,
           ),
         ),
       ],
@@ -876,6 +881,7 @@ class _OverviewTextState extends State<_OverviewText> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     final text = widget.overview.trim().isEmpty
         ? '\u6682\u65e0\u5267\u60c5\u7b80\u4ecb\u3002'
         : widget.overview.trim();
@@ -888,9 +894,9 @@ class _OverviewTextState extends State<_OverviewText> {
           text,
           maxLines: _expanded ? null : 3,
           overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 15,
-            color: Color(0xFF444444),
+            color: colors.textBody,
             height: 1.6,
           ),
         ),
@@ -900,9 +906,9 @@ class _OverviewTextState extends State<_OverviewText> {
             onTap: () => setState(() => _expanded = !_expanded),
             child: Text(
               _expanded ? '\u6536\u8d77' : '\u66f4\u591a',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
-                color: _EpisodeDetailColors.textTertiary,
+                color: colors.textTertiary,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -932,6 +938,7 @@ class _ActionButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -943,9 +950,9 @@ class _ActionButtons extends StatelessWidget {
           style: ButtonStyle(
             backgroundColor: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.hovered)) {
-                return const Color(0xFF1565C0);
+                return colors.primaryHover;
               }
-              return _EpisodeDetailColors.primary;
+              return colors.primary;
             }),
             foregroundColor: const WidgetStatePropertyAll<Color>(Colors.white),
             elevation: const WidgetStatePropertyAll<double>(0),
@@ -966,17 +973,16 @@ class _ActionButtons extends StatelessWidget {
           style: ButtonStyle(
             side: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.hovered)) {
-                return const BorderSide(color: Color(0xFF3F9E43), width: 1.3);
+                return BorderSide(color: colors.successHoverBorder, width: 1.3);
               }
-              return const BorderSide(color: _EpisodeDetailColors.success);
+              return BorderSide(color: colors.success);
             }),
-            foregroundColor: const WidgetStatePropertyAll<Color>(
-                _EpisodeDetailColors.success),
+            foregroundColor: WidgetStatePropertyAll<Color>(colors.success),
             backgroundColor: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.hovered)) {
-                return const Color(0x154CAF50);
+                return colors.successHoverBackground;
               }
-              return watched ? const Color(0x124CAF50) : Colors.white;
+              return watched ? colors.successBackground : colors.surface;
             }),
             shape: WidgetStatePropertyAll(
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -1058,9 +1064,8 @@ class _CircleIconButtonState extends State<_CircleIconButton> {
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.active
-        ? const Color(0xFFE85066)
-        : _EpisodeDetailColors.textSecondary;
+    final colors = _EpisodeDetailColors.of(context);
+    final color = widget.active ? colors.heartActive : colors.textSecondary;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -1074,12 +1079,10 @@ class _CircleIconButtonState extends State<_CircleIconButton> {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: _hovered ? const Color(0xFFF3F7FB) : Colors.white,
+            color: _hovered ? colors.surfaceHover : colors.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: _hovered
-                  ? _EpisodeDetailColors.primary
-                  : _EpisodeDetailColors.border,
+              color: _hovered ? colors.primary : colors.border,
             ),
           ),
           child: Icon(widget.icon, size: 20, color: color),
@@ -1115,6 +1118,7 @@ class _TechDropdownState extends State<_TechDropdown> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -1153,25 +1157,22 @@ class _TechDropdownState extends State<_TechDropdown> {
           duration: const Duration(milliseconds: 140),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
-            color: _hovered ? const Color(0xFFF2F5F9) : Colors.white,
+            color: _hovered ? colors.surfaceHover : colors.surface,
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: _hovered
-                  ? _EpisodeDetailColors.primary
-                  : _EpisodeDetailColors.border,
+              color: _hovered ? colors.primary : colors.border,
             ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(widget.icon,
-                  size: 16, color: _EpisodeDetailColors.textTertiary),
+              Icon(widget.icon, size: 16, color: colors.textTertiary),
               const SizedBox(width: 6),
               Text(
                 '${widget.label}: ',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
-                  color: _EpisodeDetailColors.textTertiary,
+                  color: colors.textTertiary,
                 ),
               ),
               ConstrainedBox(
@@ -1180,17 +1181,17 @@ class _TechDropdownState extends State<_TechDropdown> {
                   widget.value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: _EpisodeDetailColors.textPrimary,
+                    color: colors.textPrimary,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
-              const Icon(
+              Icon(
                 Icons.keyboard_arrow_down_rounded,
                 size: 18,
-                color: _EpisodeDetailColors.textSecondary,
+                color: colors.textSecondary,
               ),
             ],
           ),
@@ -1217,26 +1218,27 @@ class _SeasonEpisodesSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return _SectionSurface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF222222),
+              color: colors.textPrimary,
             ),
           ),
           const SizedBox(height: 16),
           if (episodes.isEmpty)
-            const SizedBox(
+            SizedBox(
               height: 112,
               child: Center(
                 child: Text(
                   '\u6682\u65e0\u5267\u96c6',
-                  style: TextStyle(color: _EpisodeDetailColors.textSecondary),
+                  style: TextStyle(color: colors.textSecondary),
                 ),
               ),
             )
@@ -1390,6 +1392,7 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -1406,11 +1409,11 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
               border: widget.isCurrent
-                  ? Border.all(color: _EpisodeDetailColors.primary, width: 2)
+                  ? Border.all(color: colors.primary, width: 2)
                   : null,
-              boxShadow: const [
+              boxShadow: [
                 BoxShadow(
-                  color: _EpisodeDetailColors.shadow,
+                  color: colors.shadow,
                   blurRadius: 8,
                   offset: Offset(0, 2),
                 ),
@@ -1462,7 +1465,7 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: _EpisodeDetailColors.primary,
+                          color: colors.primary,
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: const Text(
@@ -1496,16 +1499,17 @@ class _ExternalLinksSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return _SectionSurface(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             '\u5916\u90e8\u94fe\u63a5',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
-              color: Color(0xFF222222),
+              color: colors.textPrimary,
             ),
           ),
           const SizedBox(height: 12),
@@ -1551,12 +1555,11 @@ class _ExternalLinkButtonState extends State<_ExternalLinkButton> {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = _hovered && widget.enabled
-        ? _EpisodeDetailColors.borderHover
-        : _EpisodeDetailColors.border;
-    final textColor = widget.enabled
-        ? _EpisodeDetailColors.textSecondary
-        : _EpisodeDetailColors.textTertiary;
+    final colors = _EpisodeDetailColors.of(context);
+    final borderColor =
+        _hovered && widget.enabled ? colors.borderHover : colors.border;
+    final textColor =
+        widget.enabled ? colors.textSecondary : colors.textTertiary;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -1570,8 +1573,8 @@ class _ExternalLinkButtonState extends State<_ExternalLinkButton> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
           decoration: BoxDecoration(
             color: _hovered && widget.enabled
-                ? const Color(0xFFF4F8FF)
-                : Colors.white,
+                ? colors.surfaceHover
+                : colors.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: borderColor),
           ),
@@ -1640,9 +1643,10 @@ class _ExternalLinkIconFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFFE8ECF1),
+        color: colors.iconFallbackBackground,
         borderRadius: BorderRadius.circular(4),
       ),
       child: Center(
@@ -1650,9 +1654,9 @@ class _ExternalLinkIconFallback extends StatelessWidget {
           text.toUpperCase(),
           maxLines: 1,
           overflow: TextOverflow.clip,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 9,
-            color: Color(0xFF425466),
+            color: colors.iconFallbackForeground,
             fontWeight: FontWeight.w700,
             height: 1.0,
           ),
@@ -1679,6 +1683,7 @@ class _MediaInfoSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     final fileContainer = _coalesceNonEmpty([
       (selectedSource?['Container'] ?? '').toString(),
       (item.container ?? '').toString(),
@@ -1727,9 +1732,9 @@ class _MediaInfoSection extends StatelessWidget {
         children: [
           Text(
             fileHeader,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
-              color: _EpisodeDetailColors.textSecondary,
+              color: colors.textSecondary,
             ),
           ),
           const SizedBox(height: 16),
@@ -1766,32 +1771,32 @@ class _MediaInfoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _EpisodeDetailColors.border),
+        border: Border.all(color: colors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(data.icon,
-                  size: 16, color: _EpisodeDetailColors.textSecondary),
+              Icon(data.icon, size: 16, color: colors.textSecondary),
               const SizedBox(width: 8),
               Text(
                 data.title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: _EpisodeDetailColors.textPrimary,
+                  color: colors.textPrimary,
                 ),
               ),
             ],
           ),
-          const Divider(height: 18, color: _EpisodeDetailColors.border),
+          Divider(height: 18, color: colors.border),
           Expanded(
             child: ListView.builder(
               itemCount: data.specs.length,
@@ -1807,18 +1812,18 @@ class _MediaInfoCard extends StatelessWidget {
                         width: 74,
                         child: Text(
                           entry.key,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: _EpisodeDetailColors.textTertiary,
+                            color: colors.textTertiary,
                           ),
                         ),
                       ),
                       Expanded(
                         child: Text(
                           entry.value,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: _EpisodeDetailColors.textSecondary,
+                            color: colors.textSecondary,
                           ),
                         ),
                       ),
@@ -1841,12 +1846,13 @@ class _SectionSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _EpisodeDetailColors.border),
+        border: Border.all(color: colors.border),
       ),
       child: child,
     );
@@ -1860,18 +1866,19 @@ class _ErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = _EpisodeDetailColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0x1AE53935),
+        color: colors.errorBackground,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0x66E53935)),
+        border: Border.all(color: colors.errorBorder),
       ),
       child: Row(
         children: [
-          const Icon(
+          Icon(
             Icons.error_outline_rounded,
-            color: _EpisodeDetailColors.error,
+            color: colors.error,
             size: 18,
           ),
           const SizedBox(width: 8),
@@ -1880,7 +1887,7 @@ class _ErrorBanner extends StatelessWidget {
               message,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Color(0xFF8B1A17)),
+              style: TextStyle(color: colors.errorText),
             ),
           ),
         ],
@@ -1965,22 +1972,142 @@ class _ExternalLink {
   final String iconAssetPath;
 }
 
+@immutable
 class _EpisodeDetailColors {
-  static const background = Color(0xFFF5F5F5);
+  const _EpisodeDetailColors({
+    required this.background,
+    required this.surface,
+    required this.surfaceHover,
+    required this.heroFallbackStart,
+    required this.heroFallbackEnd,
+    required this.heroOverlayTop,
+    required this.heroOverlayMiddle,
+    required this.heroOverlayBottom,
+    required this.fallbackImageStart,
+    required this.fallbackImageEnd,
+    required this.iconFallbackBackground,
+    required this.iconFallbackForeground,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textTertiary,
+    required this.textBody,
+    required this.primary,
+    required this.primaryHover,
+    required this.success,
+    required this.successHoverBorder,
+    required this.successHoverBackground,
+    required this.successBackground,
+    required this.error,
+    required this.errorBackground,
+    required this.errorBorder,
+    required this.errorText,
+    required this.heartActive,
+    required this.border,
+    required this.borderHover,
+    required this.shadow,
+  });
 
-  static const textPrimary = Color(0xFF1A1A1A);
-  static const textSecondary = Color(0xFF666666);
-  static const textTertiary = Color(0xFF999999);
-  static const textBody = Color(0xFF555555);
+  final Color background;
+  final Color surface;
+  final Color surfaceHover;
+  final Color heroFallbackStart;
+  final Color heroFallbackEnd;
+  final Color heroOverlayTop;
+  final Color heroOverlayMiddle;
+  final Color heroOverlayBottom;
+  final Color fallbackImageStart;
+  final Color fallbackImageEnd;
+  final Color iconFallbackBackground;
+  final Color iconFallbackForeground;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color textTertiary;
+  final Color textBody;
+  final Color primary;
+  final Color primaryHover;
+  final Color success;
+  final Color successHoverBorder;
+  final Color successHoverBackground;
+  final Color successBackground;
+  final Color error;
+  final Color errorBackground;
+  final Color errorBorder;
+  final Color errorText;
+  final Color heartActive;
+  final Color border;
+  final Color borderHover;
+  final Color shadow;
 
-  static const primary = Color(0xFF1976D2);
-  static const success = Color(0xFF4CAF50);
-  static const error = Color(0xFFE53935);
+  static const light = _EpisodeDetailColors(
+    background: Color(0xFFF5F5F5),
+    surface: Colors.white,
+    surfaceHover: Color(0xFFF3F7FB),
+    heroFallbackStart: Color(0xFFF1F4F7),
+    heroFallbackEnd: Color(0xFFE8EEF4),
+    heroOverlayTop: Color(0xE6FFFFFF),
+    heroOverlayMiddle: Color(0x4DFFFFFF),
+    heroOverlayBottom: Color(0xF2FFFFFF),
+    fallbackImageStart: Color(0xFFE9EEF2),
+    fallbackImageEnd: Color(0xFFDDE4EA),
+    iconFallbackBackground: Color(0xFFE8ECF1),
+    iconFallbackForeground: Color(0xFF425466),
+    textPrimary: Color(0xFF1A1A1A),
+    textSecondary: Color(0xFF666666),
+    textTertiary: Color(0xFF999999),
+    textBody: Color(0xFF555555),
+    primary: Color(0xFF1976D2),
+    primaryHover: Color(0xFF1565C0),
+    success: Color(0xFF4CAF50),
+    successHoverBorder: Color(0xFF3F9E43),
+    successHoverBackground: Color(0x154CAF50),
+    successBackground: Color(0x124CAF50),
+    error: Color(0xFFE53935),
+    errorBackground: Color(0x1AE53935),
+    errorBorder: Color(0x66E53935),
+    errorText: Color(0xFF8B1A17),
+    heartActive: Color(0xFFE85066),
+    border: Color(0xFFE0E0E0),
+    borderHover: Color(0xFF1976D2),
+    shadow: Color(0x1A000000),
+  );
 
-  static const border = Color(0xFFE0E0E0);
-  static const borderHover = Color(0xFF1976D2);
+  static const dark = _EpisodeDetailColors(
+    background: Color(0xFF0E1116),
+    surface: Color(0xFF161B23),
+    surfaceHover: Color(0xFF202733),
+    heroFallbackStart: Color(0xFF1A2230),
+    heroFallbackEnd: Color(0xFF111722),
+    heroOverlayTop: Color(0xE611151C),
+    heroOverlayMiddle: Color(0x8010151C),
+    heroOverlayBottom: Color(0xF2161B24),
+    fallbackImageStart: Color(0xFF273141),
+    fallbackImageEnd: Color(0xFF1A2330),
+    iconFallbackBackground: Color(0xFF2A3342),
+    iconFallbackForeground: Color(0xFFD0D9E6),
+    textPrimary: Color(0xFFF2F6FB),
+    textSecondary: Color(0xFFB7C1CC),
+    textTertiary: Color(0xFF95A2B2),
+    textBody: Color(0xFFCFD6E0),
+    primary: Color(0xFF5EA2FF),
+    primaryHover: Color(0xFF4A8FE9),
+    success: Color(0xFF62C276),
+    successHoverBorder: Color(0xFF54B56A),
+    successHoverBackground: Color(0x1F62C276),
+    successBackground: Color(0x1858B86D),
+    error: Color(0xFFFF8A86),
+    errorBackground: Color(0x2AE53935),
+    errorBorder: Color(0x66EF5350),
+    errorText: Color(0xFFFFC9C7),
+    heartActive: Color(0xFFFF8AA5),
+    border: Color(0x4052657D),
+    borderHover: Color(0xFF5EA2FF),
+    shadow: Color(0x55000000),
+  );
 
-  static const shadow = Color(0x1A000000);
+  static _EpisodeDetailColors of(BuildContext context) {
+    final brightness = Theme.of(context).brightness;
+    return brightness == Brightness.dark ? dark : light;
+  }
 }
 
 String _seasonSectionTitle(MediaItem item, bool isEpisode) {

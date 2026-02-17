@@ -191,6 +191,8 @@ class AppState extends ChangeNotifier {
 
   static const _kServerLibrariesCachePrefix = 'serverLibrariesCache_v1:';
   static const _kServerHomeCachePrefix = 'serverHomeCache_v1:';
+  static const _kServerContinueWatchingCachePrefix =
+      'serverContinueWatchingCache_v1:';
 
   // Interaction & gestures (shared by MPV/Exo).
   static const _kGestureBrightnessKey = 'gestureBrightness_v1';
@@ -332,10 +334,13 @@ class AppState extends ChangeNotifier {
       '$_kServerLibrariesCachePrefix$serverId';
   static String _homeCacheKey(String serverId) =>
       '$_kServerHomeCachePrefix$serverId';
+  static String _continueWatchingCacheKey(String serverId) =>
+      '$_kServerContinueWatchingCachePrefix$serverId';
 
   void _restoreServerCaches(SharedPreferences prefs, String serverId) {
     _restoreLibrariesFromCache(prefs, serverId);
     _restoreHomeFromCache(prefs, serverId);
+    _restoreContinueWatchingFromCache(prefs, serverId);
   }
 
   void _restoreLibrariesFromCache(SharedPreferences prefs, String serverId) {
@@ -403,6 +408,31 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  void _restoreContinueWatchingFromCache(
+    SharedPreferences prefs,
+    String serverId,
+  ) {
+    final raw = prefs.getString(_continueWatchingCacheKey(serverId));
+    if (raw == null || raw.trim().isEmpty) return;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final items = <MediaItem>[];
+      for (final entry in decoded) {
+        final map = _coerceStringKeyedMap(entry);
+        if (map == null) continue;
+        final item = MediaItem.fromJson(map);
+        if (item.id.trim().isEmpty) continue;
+        items.add(item);
+      }
+      if (items.isNotEmpty) {
+        _continueWatching = items;
+      }
+    } catch (_) {
+      // ignore broken cache
+    }
+  }
+
   Future<void> _persistLibrariesCache() async {
     final serverId = activeServerId;
     if (serverId == null) return;
@@ -429,6 +459,22 @@ class AppState extends ChangeNotifier {
       'totals': totals,
     };
     await prefs.setString(_homeCacheKey(serverId), jsonEncode(data));
+  }
+
+  Future<void> _persistContinueWatchingCache() async {
+    final serverId = activeServerId;
+    if (serverId == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final data = (_continueWatching ?? const <MediaItem>[])
+        .take(20)
+        .map((item) => item.toJson())
+        .toList(growable: false);
+    if (data.isEmpty) {
+      await prefs.remove(_continueWatchingCacheKey(serverId));
+      return;
+    }
+    await prefs.setString(
+        _continueWatchingCacheKey(serverId), jsonEncode(data));
   }
 
   void _resetPerServerCaches() {
@@ -607,6 +653,8 @@ class AppState extends ChangeNotifier {
       baseUrl != null &&
       token != null &&
       userId != null;
+  bool get hasCachedContinueWatching =>
+      (_continueWatching ?? const <MediaItem>[]).isNotEmpty;
 
   String? get baseUrl {
     final v = activeServer?.baseUrl;
@@ -845,7 +893,8 @@ class AppState extends ChangeNotifier {
     }
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntroKey) ?? false;
     _enableBlurEffects = prefs.getBool(_kEnableBlurEffectsKey) ?? true;
-    _desktopBackgroundImage = prefs.getString(_kDesktopBackgroundImageKey) ?? '';
+    _desktopBackgroundImage =
+        prefs.getString(_kDesktopBackgroundImageKey) ?? '';
     _desktopBackgroundOpacity =
         (prefs.getDouble(_kDesktopBackgroundOpacityKey) ?? 0.32)
             .clamp(0.0, 1.0)
@@ -1762,7 +1811,8 @@ class AppState extends ChangeNotifier {
     if (_desktopBackgroundImage.isEmpty) {
       await prefs.remove(_kDesktopBackgroundImageKey);
     } else {
-      await prefs.setString(_kDesktopBackgroundImageKey, _desktopBackgroundImage);
+      await prefs.setString(
+          _kDesktopBackgroundImageKey, _desktopBackgroundImage);
     }
     await prefs.setDouble(
       _kDesktopBackgroundOpacityKey,
@@ -2403,8 +2453,6 @@ class AppState extends ChangeNotifier {
       _itemsCache.clear();
       _randomRecommendations = null;
       _randomRecommendationsInFlight = null;
-      _continueWatching = null;
-      _continueWatchingInFlight = null;
       _error = null;
     } catch (e) {
       _error = e.toString();
@@ -2564,21 +2612,85 @@ class AppState extends ChangeNotifier {
         : res.items.take(6).toList();
   }
 
+  String _continueWatchingEntryKey(MediaItem item) {
+    final type = item.type.toLowerCase().trim();
+    if (type == 'episode') {
+      final seriesId = (item.seriesId ?? '').trim();
+      if (seriesId.isNotEmpty) return 'series:$seriesId';
+      final seriesName = item.seriesName.trim();
+      if (seriesName.isNotEmpty) return 'seriesName:$seriesName';
+    }
+    return 'item:${item.id}';
+  }
+
+  MediaItem _pickPreferredContinueWatchingItem(MediaItem a, MediaItem b) {
+    if (a.played != b.played) {
+      return a.played ? b : a;
+    }
+    if (a.playbackPositionTicks != b.playbackPositionTicks) {
+      return a.playbackPositionTicks >= b.playbackPositionTicks ? a : b;
+    }
+    return a;
+  }
+
+  List<MediaItem> _mergeContinueWatching(
+    List<MediaItem> localItems,
+    List<MediaItem> remoteItems,
+  ) {
+    final mergedByKey = <String, MediaItem>{};
+    for (final item in localItems) {
+      final key = _continueWatchingEntryKey(item);
+      final existing = mergedByKey[key];
+      if (existing == null) {
+        mergedByKey[key] = item;
+      } else {
+        mergedByKey[key] = _pickPreferredContinueWatchingItem(existing, item);
+      }
+    }
+
+    final ordered = <MediaItem>[];
+    final used = <String>{};
+    for (final item in remoteItems) {
+      final key = _continueWatchingEntryKey(item);
+      final local = mergedByKey[key];
+      final chosen = local == null
+          ? item
+          : _pickPreferredContinueWatchingItem(item, local);
+      if (used.add(key)) ordered.add(chosen);
+      mergedByKey.remove(key);
+      if (ordered.length >= 20) return ordered;
+    }
+
+    for (final entry in mergedByKey.entries) {
+      if (used.add(entry.key)) ordered.add(entry.value);
+      if (ordered.length >= 20) break;
+    }
+    return ordered;
+  }
+
   Future<List<MediaItem>> loadContinueWatching({
     bool forceRefresh = false,
   }) {
+    final localSnapshot =
+        (_continueWatching ?? const <MediaItem>[]).toList(growable: false);
+    final inFlight = _continueWatchingInFlight;
+
     if (!forceRefresh) {
-      final cached = _continueWatching;
-      if (cached != null) return Future.value(cached);
-      final inFlight = _continueWatchingInFlight;
+      if (localSnapshot.isNotEmpty) return Future.value(localSnapshot);
       if (inFlight != null) return inFlight;
+    } else if (inFlight != null) {
+      return inFlight;
     }
 
     final future = _fetchContinueWatching();
     _continueWatchingInFlight = future;
-    return future.then((items) {
-      _continueWatching = items;
-      return items;
+    return future.then((remoteItems) async {
+      final merged = localSnapshot.isEmpty
+          ? remoteItems
+          : _mergeContinueWatching(localSnapshot, remoteItems);
+      _continueWatching = merged;
+      await _persistContinueWatchingCache();
+      return merged;
     }).whenComplete(() {
       if (_continueWatchingInFlight == future) {
         _continueWatchingInFlight = null;
@@ -2875,8 +2987,8 @@ class AppState extends ChangeNotifier {
   }) async {
     if (kIsWeb) return;
     final platform = defaultTargetPlatform;
-    final isDesktopTarget = platform == TargetPlatform.windows ||
-        platform == TargetPlatform.macOS;
+    final isDesktopTarget =
+        platform == TargetPlatform.windows || platform == TargetPlatform.macOS;
     if (!isDesktopTarget) return;
 
     final prefs = await SharedPreferences.getInstance();

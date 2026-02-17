@@ -697,7 +697,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           builder: (context) {
             final desktopTheme = DesktopThemeExtension.of(context);
             final isDetailSection = _section == _DesktopSection.detail;
-            const detailBackground = Color(0xFFF5F5F5);
+            final detailBackground = desktopTheme.background;
             final title = switch (_section) {
               _DesktopSection.library => _uiLanguage.pick(
                   zh: _homeTab == DesktopHomeTab.home

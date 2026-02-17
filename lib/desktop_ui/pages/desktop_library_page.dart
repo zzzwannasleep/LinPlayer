@@ -41,11 +41,20 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   bool _loading = true;
   String? _error;
   Future<List<MediaItem>>? _continueFuture;
+  List<MediaItem> _continueItems = const <MediaItem>[];
   final Set<String> _favoriteItemIds = <String>{};
 
   @override
   void initState() {
     super.initState();
+    final hasLocalContinue = widget.appState.hasCachedContinueWatching;
+    _continueFuture = widget.appState.loadContinueWatching(forceRefresh: false);
+    unawaited(
+      _bindContinueFuture(
+        _continueFuture!,
+        refreshRemoteAfterBind: hasLocalContinue,
+      ),
+    );
     unawaited(_restoreFavoriteIds());
     unawaited(_bootstrap(forceRefresh: false));
   }
@@ -71,11 +80,15 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
       await widget.appState.loadHome(forceRefresh: true);
 
       if (!mounted) return;
-      setState(() {
+      if (_continueFuture == null) {
         _continueFuture = widget.appState.loadContinueWatching(
-          forceRefresh: forceRefresh,
+          forceRefresh: false,
         );
-      });
+        unawaited(_bindContinueFuture(_continueFuture!));
+      }
+      if (forceRefresh) {
+        unawaited(_refreshContinueWatchingInBackground());
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -84,6 +97,31 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
         setState(() => _loading = false);
       }
     }
+  }
+
+  Future<void> _bindContinueFuture(
+    Future<List<MediaItem>> future, {
+    bool refreshRemoteAfterBind = false,
+  }) async {
+    try {
+      final items = await future;
+      if (!mounted) return;
+      setState(() {
+        _continueItems = items;
+        _continueFuture = Future.value(items);
+      });
+      if (refreshRemoteAfterBind) {
+        unawaited(_refreshContinueWatchingInBackground());
+      }
+    } catch (_) {
+      // Keep current list when refresh fails.
+    }
+  }
+
+  Future<void> _refreshContinueWatchingInBackground() async {
+    final future = widget.appState.loadContinueWatching(forceRefresh: true);
+    setState(() => _continueFuture = future);
+    await _bindContinueFuture(future);
   }
 
   String get _favoriteStorageKey {
@@ -347,8 +385,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
             forceRefresh: false,
           ),
       builder: (context, snapshot) {
-        final items =
-            _applyActiveTabFilter(snapshot.data ?? const <MediaItem>[]);
+        final sourceItems = snapshot.data ?? _continueItems;
+        final items = _applyActiveTabFilter(sourceItems);
         if (favoriteMode &&
             items.isEmpty &&
             snapshot.connectionState != ConnectionState.waiting) {
@@ -367,7 +405,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
           ),
           items: items,
           access: access,
-          loading: snapshot.connectionState == ConnectionState.waiting,
+          loading: snapshot.connectionState == ConnectionState.waiting &&
+              sourceItems.isEmpty,
           language: widget.language,
           onOpenItem: widget.onOpenItem,
           isFavorite: _isFavorite,

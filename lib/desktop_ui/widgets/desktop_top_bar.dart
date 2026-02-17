@@ -144,12 +144,6 @@ class DesktopTopBar extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _HeaderIconButton(
-                            icon: Icons.cast_outlined,
-                            tooltip: _t(zh: '\u6295\u5c4f', en: 'Cast'),
-                            color: iconColor,
-                          ),
-                          const SizedBox(width: 6),
-                          _HeaderIconButton(
                             icon: Icons.search_rounded,
                             tooltip: _t(zh: '\u641c\u7d22', en: 'Search'),
                             onTap: () =>
