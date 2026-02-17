@@ -21,6 +21,7 @@ class DesktopDetailViewModel extends ChangeNotifier {
   List<MediaItem> _episodes = const <MediaItem>[];
   List<MediaItem> _similar = const <MediaItem>[];
   List<MediaPerson> _people = const <MediaPerson>[];
+  PlaybackInfoResult? _playbackInfo;
   bool _loading = false;
   String? _error;
   bool _favorite = false;
@@ -31,6 +32,7 @@ class DesktopDetailViewModel extends ChangeNotifier {
   List<MediaItem> get episodes => _episodes;
   List<MediaItem> get similar => _similar;
   List<MediaPerson> get people => _people;
+  PlaybackInfoResult? get playbackInfo => _playbackInfo;
   bool get loading => _loading;
   String? get error => _error;
   bool get favorite => _favorite;
@@ -75,7 +77,8 @@ class DesktopDetailViewModel extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    final currentAccess = resolveServerAccess(appState: appState, server: server);
+    final currentAccess =
+        resolveServerAccess(appState: appState, server: server);
     if (currentAccess == null) {
       _loading = false;
       _error = 'No active media server session';
@@ -84,6 +87,7 @@ class DesktopDetailViewModel extends ChangeNotifier {
     }
 
     _access = currentAccess;
+    _playbackInfo = null;
 
     try {
       var detailItem = _seedItem;
@@ -104,14 +108,20 @@ class DesktopDetailViewModel extends ChangeNotifier {
           )
           .then((result) => result.items)
           .catchError((_) => const <MediaItem>[]);
+      final Future<PlaybackInfoResult?> playbackFuture = currentAccess.adapter
+          .fetchPlaybackInfo(
+            currentAccess.auth,
+            itemId: detailItem.id,
+          )
+          .then<PlaybackInfoResult?>((value) => value)
+          .catchError((_) => null);
 
       List<MediaItem> seasons = const <MediaItem>[];
       List<MediaItem> episodes = const <MediaItem>[];
 
       final type = detailItem.type.trim().toLowerCase();
-      final seriesId = type == 'series'
-          ? detailItem.id
-          : (detailItem.seriesId ?? '').trim();
+      final seriesId =
+          type == 'series' ? detailItem.id : (detailItem.seriesId ?? '').trim();
 
       if (seriesId.isNotEmpty) {
         try {
@@ -151,14 +161,18 @@ class DesktopDetailViewModel extends ChangeNotifier {
       }
 
       final similarItems = await similarFuture;
+      final playbackInfo = await playbackFuture;
 
       _detail = detailItem;
       _seasons = seasons;
       _episodes = episodes;
-      _similar = similarItems.where((item) => item.id != detailItem.id).toList();
+      _similar =
+          similarItems.where((item) => item.id != detailItem.id).toList();
       _people = detailItem.people;
+      _playbackInfo = playbackInfo;
     } catch (e) {
       _error = e.toString();
+      _playbackInfo = null;
     } finally {
       _loading = false;
       notifyListeners();
