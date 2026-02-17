@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:lin_player_player/lin_player_player.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
@@ -33,6 +34,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
   int? _selectedAudioStreamIndex;
   int _selectedSubtitleStreamIndex = -1;
   bool? _playedOverride;
+  bool _launchingExternalMpv = false;
 
   @override
   void initState() {
@@ -66,6 +68,147 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     }
   }
 
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  MediaItem? _resolvePlayableItemForExternalMpv({
+    required MediaItem item,
+    required List<MediaItem> episodes,
+  }) {
+    final type = item.type.trim().toLowerCase();
+    if (type == 'series' || type == 'season') {
+      if (episodes.isEmpty) return null;
+      return episodes.firstWhere(
+        (entry) => entry.playbackPositionTicks > 0,
+        orElse: () => episodes.first,
+      );
+    }
+    return item;
+  }
+
+  String _apiUrlWithPrefix({
+    required String baseUrl,
+    required String apiPrefix,
+    required String path,
+  }) {
+    var base = baseUrl.trim();
+    while (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+
+    var prefix = apiPrefix.trim();
+    while (prefix.startsWith('/')) {
+      prefix = prefix.substring(1);
+    }
+    while (prefix.endsWith('/')) {
+      prefix = prefix.substring(0, prefix.length - 1);
+    }
+
+    final fixedPath = path.startsWith('/') ? path.substring(1) : path;
+    if (prefix.isEmpty) return '$base/$fixedPath';
+    return '$base/$prefix/$fixedPath';
+  }
+
+  String _buildDirectStreamUrl({
+    required ServerAuthSession auth,
+    required String itemId,
+    required String mediaSourceId,
+    required String playSessionId,
+    required String deviceId,
+  }) {
+    final streamPath = 'Videos/$itemId/stream';
+    final uri = Uri.parse(
+      _apiUrlWithPrefix(
+        baseUrl: auth.baseUrl,
+        apiPrefix: auth.apiPrefix,
+        path: streamPath,
+      ),
+    ).replace(
+      queryParameters: {
+        'static': 'true',
+        'MediaSourceId': mediaSourceId,
+        if (playSessionId.trim().isNotEmpty) 'PlaySessionId': playSessionId,
+        if (auth.userId.trim().isNotEmpty) 'UserId': auth.userId.trim(),
+        if (deviceId.trim().isNotEmpty) 'DeviceId': deviceId.trim(),
+        'api_key': auth.token,
+      },
+    );
+    return uri.toString();
+  }
+
+  Future<void> _launchExternalMpv({
+    required MediaItem item,
+    required _TrackSelectionState trackState,
+  }) async {
+    if (_launchingExternalMpv) return;
+    final vm = widget.viewModel;
+    final access = vm.access;
+    if (access == null) {
+      _showMessage('\u672a\u8fde\u63a5\u5a92\u4f53\u670d\u52a1\u5668');
+      return;
+    }
+
+    final playable = _resolvePlayableItemForExternalMpv(
+      item: item,
+      episodes: vm.episodes,
+    );
+    if (playable == null || playable.id.trim().isEmpty) {
+      _showMessage(
+          '\u5f53\u524d\u6761\u76ee\u65e0\u53ef\u64ad\u653e\u8d44\u6e90');
+      return;
+    }
+
+    setState(() => _launchingExternalMpv = true);
+    try {
+      final info = await access.adapter.fetchPlaybackInfo(
+        access.auth,
+        itemId: playable.id,
+      );
+      final sources = _playbackSources(info);
+      final preferredValue =
+          playable.id == item.id ? trackState.selectedVideoValue : null;
+      Map<String, dynamic>? selectedSource = _resolveSourceFromSelection(
+        sources: sources,
+        selectedValue: preferredValue,
+      );
+      selectedSource ??= sources.isEmpty ? null : sources.first;
+      final mediaSourceId =
+          (selectedSource?['Id'] ?? info.mediaSourceId).toString().trim();
+      if (mediaSourceId.isEmpty) {
+        _showMessage('\u65e0\u6cd5\u89e3\u6790\u5a92\u4f53\u6e90');
+        return;
+      }
+
+      final streamUrl = _buildDirectStreamUrl(
+        auth: access.auth,
+        itemId: playable.id,
+        mediaSourceId: mediaSourceId,
+        playSessionId: info.playSessionId,
+        deviceId: vm.appState.deviceId,
+      );
+
+      final launched = await launchExternalMpv(
+        executablePath: vm.appState.externalMpvPath,
+        source: streamUrl,
+        httpHeaders: access.adapter.buildStreamHeaders(access.auth),
+      );
+      _showMessage(
+        launched
+            ? '\u5df2\u8c03\u7528\u5916\u90e8 MPV'
+            : '\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25\uff0c\u8bf7\u5728\u8bbe\u7f6e\u4e2d\u914d\u7f6e MPV \u8def\u5f84',
+      );
+    } catch (_) {
+      _showMessage('\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25');
+    } finally {
+      if (mounted) {
+        setState(() => _launchingExternalMpv = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -86,6 +229,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
         );
         final links = _buildExternalLinks(item);
         final watched = _playedOverride ?? item.played;
+        final showMediaInfo = detailType == 'episode' || detailType == 'movie';
 
         return DecoratedBox(
           decoration: BoxDecoration(
@@ -97,55 +241,6 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
             borderRadius: BorderRadius.circular(18),
             child: CustomScrollView(
               slivers: [
-                SliverAppBar(
-                  pinned: true,
-                  backgroundColor: Colors.white,
-                  surfaceTintColor: Colors.transparent,
-                  elevation: 0,
-                  scrolledUnderElevation: 1.5,
-                  toolbarHeight: 60,
-                  automaticallyImplyLeading: false,
-                  titleSpacing: 0,
-                  title: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        _NavTextButton(
-                          icon: Icons.arrow_back_rounded,
-                          label: '\u8fd4\u56de',
-                          onTap: () => Navigator.maybePop(context),
-                        ),
-                        const SizedBox(width: 8),
-                        _NavTextButton(
-                          icon: Icons.home_rounded,
-                          label: '\u9996\u9875',
-                          onTap: () {},
-                        ),
-                        const SizedBox(width: 8),
-                        _NavTextButton(
-                          icon: Icons.menu_rounded,
-                          label: '\u83dc\u5355',
-                          onTap: () {},
-                        ),
-                        const Spacer(),
-                        _NavIconButton(
-                          icon: Icons.search_rounded,
-                          onTap: () {},
-                        ),
-                        const SizedBox(width: 8),
-                        _NavIconButton(
-                          icon: Icons.person_outline_rounded,
-                          onTap: () {},
-                        ),
-                        const SizedBox(width: 8),
-                        _NavIconButton(
-                          icon: Icons.settings_outlined,
-                          onTap: () {},
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
@@ -159,6 +254,14 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                       onToggleFavorite: vm.toggleFavorite,
                       onToggleWatched: () {
                         setState(() => _playedOverride = !watched);
+                      },
+                      onLaunchExternalMpv: () {
+                        unawaited(
+                          _launchExternalMpv(
+                            item: item,
+                            trackState: trackState,
+                          ),
+                        );
                       },
                       onSelectVideo: (value) {
                         setState(() {
@@ -213,19 +316,21 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                     ),
                   ),
                 ),
-                const SliverToBoxAdapter(child: SizedBox(height: 20)),
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: _MediaInfoSection(
-                      item: item,
-                      selectedSource: trackState.selectedSource,
-                      selectedAudio: trackState.selectedAudio,
-                      selectedSubtitle: trackState.selectedSubtitle,
-                      subtitleStreams: trackState.subtitleStreams,
+                if (showMediaInfo) ...[
+                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: _MediaInfoSection(
+                        item: item,
+                        selectedSource: trackState.selectedSource,
+                        selectedAudio: trackState.selectedAudio,
+                        selectedSubtitle: trackState.selectedSubtitle,
+                        subtitleStreams: trackState.subtitleStreams,
+                      ),
                     ),
                   ),
-                ),
+                ],
                 const SliverToBoxAdapter(child: SizedBox(height: 28)),
               ],
             ),
@@ -353,6 +458,7 @@ class _HeroPanel extends StatelessWidget {
     required this.onPlay,
     required this.onToggleFavorite,
     required this.onToggleWatched,
+    required this.onLaunchExternalMpv,
     required this.onSelectVideo,
     required this.onSelectAudio,
     required this.onSelectSubtitle,
@@ -366,6 +472,7 @@ class _HeroPanel extends StatelessWidget {
   final VoidCallback? onPlay;
   final VoidCallback? onToggleFavorite;
   final VoidCallback onToggleWatched;
+  final VoidCallback onLaunchExternalMpv;
   final ValueChanged<String> onSelectVideo;
   final ValueChanged<String> onSelectAudio;
   final ValueChanged<String> onSelectSubtitle;
@@ -408,7 +515,7 @@ class _HeroPanel extends StatelessWidget {
         final maxWidth = constraints.maxWidth;
         final verticalLayout = maxWidth < 800;
         final posterWidth = maxWidth < 1000 ? 260.0 : 320.0;
-        final posterHeight = posterWidth * 9 / 16;
+        final posterHeight = posterWidth * 3 / 2;
 
         return ClipRRect(
           borderRadius: BorderRadius.circular(16),
@@ -490,6 +597,7 @@ class _HeroPanel extends StatelessWidget {
                               onPlay: onPlay,
                               onToggleFavorite: onToggleFavorite,
                               onToggleWatched: onToggleWatched,
+                              onLaunchExternalMpv: onLaunchExternalMpv,
                               onSelectVideo: onSelectVideo,
                               onSelectAudio: onSelectAudio,
                               onSelectSubtitle: onSelectSubtitle,
@@ -518,6 +626,7 @@ class _HeroPanel extends StatelessWidget {
                                 onPlay: onPlay,
                                 onToggleFavorite: onToggleFavorite,
                                 onToggleWatched: onToggleWatched,
+                                onLaunchExternalMpv: onLaunchExternalMpv,
                                 onSelectVideo: onSelectVideo,
                                 onSelectAudio: onSelectAudio,
                                 onSelectSubtitle: onSelectSubtitle,
@@ -547,6 +656,7 @@ class _HeroInfoColumn extends StatelessWidget {
     required this.onPlay,
     required this.onToggleFavorite,
     required this.onToggleWatched,
+    required this.onLaunchExternalMpv,
     required this.onSelectVideo,
     required this.onSelectAudio,
     required this.onSelectSubtitle,
@@ -562,6 +672,7 @@ class _HeroInfoColumn extends StatelessWidget {
   final VoidCallback? onPlay;
   final VoidCallback? onToggleFavorite;
   final VoidCallback onToggleWatched;
+  final VoidCallback onLaunchExternalMpv;
   final ValueChanged<String> onSelectVideo;
   final ValueChanged<String> onSelectAudio;
   final ValueChanged<String> onSelectSubtitle;
@@ -638,20 +749,10 @@ class _HeroInfoColumn extends StatelessWidget {
           onPlay: onPlay,
           onToggleWatched: onToggleWatched,
           onToggleFavorite: onToggleFavorite,
+          onLaunchExternalMpv: onLaunchExternalMpv,
         ),
         const SizedBox(height: 18),
-        Text(
-          item.overview.trim().isEmpty
-              ? '\u6682\u65e0\u5267\u60c5\u7b80\u4ecb\u3002'
-              : item.overview,
-          maxLines: 3,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 15,
-            color: Color(0xFF444444),
-            height: 1.6,
-          ),
-        ),
+        _OverviewText(overview: item.overview),
       ],
     );
   }
@@ -758,6 +859,57 @@ class _MetaInfoLabel extends StatelessWidget {
   }
 }
 
+class _OverviewText extends StatefulWidget {
+  const _OverviewText({required this.overview});
+
+  final String overview;
+
+  @override
+  State<_OverviewText> createState() => _OverviewTextState();
+}
+
+class _OverviewTextState extends State<_OverviewText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = widget.overview.trim().isEmpty
+        ? '\u6682\u65e0\u5267\u60c5\u7b80\u4ecb\u3002'
+        : widget.overview.trim();
+    final canExpand = text.length > 90;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          text,
+          maxLines: _expanded ? null : 3,
+          overflow: _expanded ? TextOverflow.visible : TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 15,
+            color: Color(0xFF444444),
+            height: 1.6,
+          ),
+        ),
+        if (canExpand) ...[
+          const SizedBox(height: 4),
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Text(
+              _expanded ? '\u6536\u8d77' : '\u66f4\u591a',
+              style: const TextStyle(
+                fontSize: 13,
+                color: _EpisodeDetailColors.textTertiary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _ActionButtons extends StatelessWidget {
   const _ActionButtons({
     required this.watched,
@@ -765,6 +917,7 @@ class _ActionButtons extends StatelessWidget {
     required this.onPlay,
     required this.onToggleWatched,
     required this.onToggleFavorite,
+    required this.onLaunchExternalMpv,
   });
 
   final bool watched;
@@ -772,6 +925,7 @@ class _ActionButtons extends StatelessWidget {
   final VoidCallback? onPlay;
   final VoidCallback onToggleWatched;
   final VoidCallback? onToggleFavorite;
+  final VoidCallback onLaunchExternalMpv;
 
   @override
   Widget build(BuildContext context) {
@@ -838,19 +992,37 @@ class _ActionButtons extends StatelessWidget {
         ),
         PopupMenuButton<String>(
           tooltip: '\u66f4\u591a',
-          onSelected: (_) {},
-          itemBuilder: (context) => const [
-            PopupMenuItem(
+          onSelected: (value) {
+            switch (value) {
+              case 'mark_unwatched':
+                if (watched) onToggleWatched();
+                break;
+              case 'mark_watched':
+                if (!watched) onToggleWatched();
+                break;
+              case 'launch_external_mpv':
+                onLaunchExternalMpv();
+                break;
+              default:
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
               value: 'add_list',
               child: Text('\u6dfb\u52a0\u5230\u5217\u8868'),
             ),
             PopupMenuItem(
-              value: 'mark_unwatched',
-              child: Text('\u6807\u8bb0\u4e3a\u672a\u64ad\u653e'),
+              value: watched ? 'mark_unwatched' : 'mark_watched',
+              child: Text(
+                watched
+                    ? '\u6807\u8bb0\u4e3a\u672a\u64ad\u653e'
+                    : '\u6807\u8bb0\u4e3a\u5df2\u64ad\u653e',
+              ),
             ),
-            PopupMenuItem(
-              value: 'edit_meta',
-              child: Text('\u7f16\u8f91\u5143\u6570\u636e'),
+            const PopupMenuItem(
+              value: 'launch_external_mpv',
+              child: Text('\u8c03\u7528\u5916\u90e8 MPV'),
             ),
           ],
           child: const _CircleIconButton(
@@ -1130,21 +1302,13 @@ class _EpisodeHorizontalListState extends State<_EpisodeHorizontalList> {
           separatorBuilder: (_, __) => const SizedBox(width: 16),
           itemBuilder: (context, index) {
             final episode = widget.episodes[index];
-            final imageUrl = _imageUrl(
-                  access: widget.access,
-                  item: episode,
-                  type: 'Backdrop',
-                  maxWidth: 920,
-                ) ??
-                _imageUrl(
-                  access: widget.access,
-                  item: episode,
-                  type: 'Primary',
-                  maxWidth: 720,
-                );
+            final imageUrls = _episodeImageCandidates(
+              access: widget.access,
+              episode: episode,
+            );
             return _EpisodeThumbnailCard(
               item: episode,
-              imageUrl: imageUrl,
+              imageUrls: imageUrls,
               isCurrent: episode.id == widget.currentItemId,
               onTap: widget.onTap == null ? null : () => widget.onTap!(episode),
             );
@@ -1158,13 +1322,13 @@ class _EpisodeHorizontalListState extends State<_EpisodeHorizontalList> {
 class _EpisodeThumbnailCard extends StatefulWidget {
   const _EpisodeThumbnailCard({
     required this.item,
-    required this.imageUrl,
+    required this.imageUrls,
     required this.isCurrent,
     this.onTap,
   });
 
   final MediaItem item;
-  final String? imageUrl;
+  final List<String> imageUrls;
   final bool isCurrent;
   final VoidCallback? onTap;
 
@@ -1174,6 +1338,52 @@ class _EpisodeThumbnailCard extends StatefulWidget {
 
 class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
   bool _hovered = false;
+  int _imageIndex = 0;
+  bool _switchingImage = false;
+
+  @override
+  void didUpdateWidget(covariant _EpisodeThumbnailCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.item.id != widget.item.id ||
+        oldWidget.imageUrls.join('|') != widget.imageUrls.join('|')) {
+      _imageIndex = 0;
+      _switchingImage = false;
+    }
+  }
+
+  Widget _buildImage() {
+    final urls = widget.imageUrls
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList(growable: false);
+    if (urls.isEmpty || _imageIndex >= urls.length) {
+      return const _FallbackImage(label: '');
+    }
+
+    final imageUrl = urls[_imageIndex];
+    return CachedNetworkImage(
+      key: ValueKey<String>('episode-${widget.item.id}-$imageUrl'),
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      placeholder: (_, __) => const SizedBox.shrink(),
+      errorWidget: (_, __, ___) {
+        if (_imageIndex < urls.length - 1) {
+          if (!_switchingImage) {
+            _switchingImage = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              setState(() {
+                _imageIndex += 1;
+                _switchingImage = false;
+              });
+            });
+          }
+          return const SizedBox.shrink();
+        }
+        return const _FallbackImage(label: '');
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1208,15 +1418,7 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  (widget.imageUrl ?? '').trim().isEmpty
-                      ? const _FallbackImage(label: '')
-                      : CachedNetworkImage(
-                          imageUrl: widget.imageUrl!,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, __, ___) =>
-                              const _FallbackImage(label: ''),
-                          placeholder: (_, __) => const SizedBox.shrink(),
-                        ),
+                  _buildImage(),
                   Positioned(
                     left: 0,
                     right: 0,
@@ -1296,7 +1498,7 @@ class _ExternalLinksSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '\u6570\u636e\u5e93\u94fe\u63a5',
+            '\u5916\u90e8\u94fe\u63a5',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -1311,6 +1513,7 @@ class _ExternalLinksSection extends StatelessWidget {
                 .map(
                   (link) => _ExternalLinkButton(
                     label: link.label,
+                    iconUrl: link.iconUrl,
                     enabled: link.url.isNotEmpty,
                     onTap: link.url.isEmpty ? null : () => onOpenLink(link.url),
                   ),
@@ -1326,11 +1529,13 @@ class _ExternalLinksSection extends StatelessWidget {
 class _ExternalLinkButton extends StatefulWidget {
   const _ExternalLinkButton({
     required this.label,
+    this.iconUrl,
     required this.enabled,
     this.onTap,
   });
 
   final String label;
+  final String? iconUrl;
   final bool enabled;
   final VoidCallback? onTap;
 
@@ -1367,13 +1572,86 @@ class _ExternalLinkButtonState extends State<_ExternalLinkButton> {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: borderColor),
           ),
-          child: Text(
-            '?? ${widget.label}',
-            style: TextStyle(
-              fontSize: 13,
-              color: textColor,
-              fontWeight: FontWeight.w600,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _ExternalLinkIcon(
+                label: widget.label,
+                iconUrl: widget.iconUrl,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ExternalLinkIcon extends StatelessWidget {
+  const _ExternalLinkIcon({
+    required this.label,
+    this.iconUrl,
+  });
+
+  final String label;
+  final String? iconUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = (iconUrl ?? '').trim();
+    final normalizedLabel = label.trim();
+    final fallbackText =
+        normalizedLabel.isEmpty ? '?' : normalizedLabel.substring(0, 1);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        width: 16,
+        height: 16,
+        child: url.isEmpty
+            ? _ExternalLinkIconFallback(text: fallbackText)
+            : Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) {
+                  return _ExternalLinkIconFallback(text: fallbackText);
+                },
+              ),
+      ),
+    );
+  }
+}
+
+class _ExternalLinkIconFallback extends StatelessWidget {
+  const _ExternalLinkIconFallback({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8ECF1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Center(
+        child: Text(
+          text.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.clip,
+          style: const TextStyle(
+            fontSize: 9,
+            color: Color(0xFF425466),
+            fontWeight: FontWeight.w700,
+            height: 1.0,
           ),
         ),
       ),
@@ -1572,98 +1850,6 @@ class _SectionSurface extends StatelessWidget {
   }
 }
 
-class _NavTextButton extends StatefulWidget {
-  const _NavTextButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  State<_NavTextButton> createState() => _NavTextButtonState();
-}
-
-class _NavTextButtonState extends State<_NavTextButton> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: _hovered ? const Color(0xFFF3F6F9) : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(widget.icon, size: 18, color: const Color(0xFF444444)),
-              const SizedBox(width: 4),
-              Text(
-                widget.label,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF444444),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavIconButton extends StatefulWidget {
-  const _NavIconButton({
-    required this.icon,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  State<_NavIconButton> createState() => _NavIconButtonState();
-}
-
-class _NavIconButtonState extends State<_NavIconButton> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: _hovered ? const Color(0xFFF3F6F9) : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(widget.icon, size: 20, color: const Color(0xFF444444)),
-        ),
-      ),
-    );
-  }
-}
-
 class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({required this.message});
 
@@ -1765,10 +1951,15 @@ class _MediaInfoCardData {
 }
 
 class _ExternalLink {
-  const _ExternalLink({required this.label, required this.url});
+  const _ExternalLink({
+    required this.label,
+    required this.url,
+    required this.iconUrl,
+  });
 
   final String label;
   final String url;
+  final String iconUrl;
 }
 
 class _EpisodeDetailColors {
@@ -1867,7 +2058,11 @@ String _providerId(MediaItem item, List<String> providerKeys) {
 }
 
 List<_ExternalLink> _buildExternalLinks(MediaItem item) {
-  final isSeries = item.type.trim().toLowerCase() == 'series';
+  final type = item.type.trim().toLowerCase();
+  final isSeries = type == 'series' ||
+      type == 'season' ||
+      type == 'episode' ||
+      (item.seriesId ?? '').trim().isNotEmpty;
   final imdbId = _providerId(item, const ['imdb']);
   final traktId = _providerId(item, const ['trakt']);
   final tmdbId = _providerId(item, const ['tmdb']);
@@ -1887,10 +2082,57 @@ List<_ExternalLink> _buildExternalLinks(MediaItem item) {
       : '';
 
   return [
-    _ExternalLink(label: 'IMDb', url: imdbUrl),
-    _ExternalLink(label: 'Trakt', url: traktUrl),
-    _ExternalLink(label: 'TMDB', url: tmdbUrl),
+    _ExternalLink(
+      label: 'IMDb',
+      url: imdbUrl,
+      iconUrl: 'https://www.imdb.com/favicon.ico',
+    ),
+    _ExternalLink(
+      label: 'Trakt',
+      url: traktUrl,
+      iconUrl: 'https://trakt.tv/favicon.ico',
+    ),
+    _ExternalLink(
+      label: 'TMDB',
+      url: tmdbUrl,
+      iconUrl: 'https://www.themoviedb.org/favicon.ico',
+    ),
   ];
+}
+
+List<String> _episodeImageCandidates({
+  required ServerAccess? access,
+  required MediaItem episode,
+}) {
+  final currentAccess = access;
+  if (currentAccess == null) return const <String>[];
+  final urls = <String>[];
+
+  void addUrl({
+    required String itemId,
+    required String imageType,
+    required int maxWidth,
+  }) {
+    final id = itemId.trim();
+    if (id.isEmpty) return;
+    final url = currentAccess.adapter.imageUrl(
+      currentAccess.auth,
+      itemId: id,
+      imageType: imageType,
+      maxWidth: maxWidth,
+    );
+    if (url.trim().isEmpty || urls.contains(url)) return;
+    urls.add(url);
+  }
+
+  addUrl(itemId: episode.id, imageType: 'Primary', maxWidth: 920);
+  addUrl(itemId: episode.id, imageType: 'Thumb', maxWidth: 920);
+  addUrl(itemId: episode.id, imageType: 'Backdrop', maxWidth: 1280);
+  addUrl(itemId: episode.parentId ?? '', imageType: 'Primary', maxWidth: 920);
+  addUrl(itemId: episode.seriesId ?? '', imageType: 'Primary', maxWidth: 920);
+  addUrl(itemId: episode.seriesId ?? '', imageType: 'Backdrop', maxWidth: 1280);
+
+  return urls;
 }
 
 List<Map<String, dynamic>> _playbackSources(PlaybackInfoResult? info) {
@@ -2116,7 +2358,7 @@ String? _imageUrl({
 }) {
   final currentAccess = access;
   if (currentAccess == null) return null;
-  if (!item.hasImage && type == 'Primary') return null;
+  if (item.id.trim().isEmpty) return null;
   return currentAccess.adapter.imageUrl(
     currentAccess.auth,
     itemId: item.id,

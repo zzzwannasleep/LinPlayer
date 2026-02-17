@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:lin_player_core/app_config/app_config.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
@@ -26,6 +27,14 @@ final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  assert(() {
+    debugPaintSizeEnabled = false;
+    debugPaintBaselinesEnabled = false;
+    debugPaintPointersEnabled = false;
+    debugPaintLayerBordersEnabled = false;
+    debugRepaintRainbowEnabled = false;
+    return true;
+  }());
   // Ensure native media backends (mpv) are ready before any player is created.
   MediaKit.ensureInitialized();
   await DeviceType.init();
@@ -52,7 +61,8 @@ void main() async {
   await appState.loadFromStorage();
   if (DesktopShell.isDesktopTarget) {
     await appState.applyDesktopThemeFromSystemIfNeeded(
-      systemBrightness: WidgetsBinding.instance.platformDispatcher.platformBrightness,
+      systemBrightness:
+          WidgetsBinding.instance.platformDispatcher.platformBrightness,
     );
   }
 
@@ -282,14 +292,14 @@ class _LinPlayerAppState extends State<LinPlayerApp>
 
                 return UiScaleScope(
                   scale: scale,
-                    child: MediaQuery(
-                      data: mediaQuery.copyWith(textScaler: textScaler),
-                      child: Theme(
-                        data: effectiveTheme,
-                        child: AppUpdateAutoChecker(
-                          appState: appState,
-                          child: appChild,
-                        ),
+                  child: MediaQuery(
+                    data: mediaQuery.copyWith(textScaler: textScaler),
+                    child: Theme(
+                      data: effectiveTheme,
+                      child: AppUpdateAutoChecker(
+                        appState: appState,
+                        child: appChild,
+                      ),
                     ),
                   ),
                 );

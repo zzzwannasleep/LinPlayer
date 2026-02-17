@@ -52,6 +52,20 @@ class AuthResult {
       this.apiPrefixUsed = 'emby'});
 }
 
+bool _hasAnyImageData(Map<String, dynamic> json) {
+  if ((json['ImageTags'] as Map?)?.isNotEmpty == true) return true;
+  if ((json['BackdropImageTags'] as List?)?.isNotEmpty == true) return true;
+  if ((json['PrimaryImageTag'] ?? '').toString().trim().isNotEmpty) return true;
+  if ((json['ThumbImageTag'] ?? '').toString().trim().isNotEmpty) return true;
+  if ((json['ParentThumbImageTag'] ?? '').toString().trim().isNotEmpty) {
+    return true;
+  }
+  if ((json['SeriesPrimaryImageTag'] ?? '').toString().trim().isNotEmpty) {
+    return true;
+  }
+  return false;
+}
+
 class MediaItem {
   final String id;
   final String name;
@@ -118,7 +132,7 @@ class MediaItem {
         seasonName: json['SeasonName'] as String? ?? '',
         seasonNumber: json['ParentIndexNumber'] as int?,
         episodeNumber: json['IndexNumber'] as int?,
-        hasImage: (json['ImageTags'] as Map?)?.isNotEmpty == true,
+        hasImage: _hasAnyImageData(json),
         playbackPositionTicks:
             (json['UserData'] as Map?)?['PlaybackPositionTicks'] as int? ?? 0,
         played: (json['UserData'] as Map?)?['Played'] == true,
@@ -792,7 +806,7 @@ class EmbyApi {
     String? fields,
   }) async {
     final resolvedFields = (fields == null || fields.trim().isEmpty)
-        ? 'Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,PrimaryImageAspectRatio,RunTimeTicks,Size,Container,Genres,CommunityRating,PremiereDate'
+        ? 'Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,PrimaryImageTag,ThumbImageTag,ParentThumbImageTag,SeriesPrimaryImageTag,BackdropImageTags,PrimaryImageAspectRatio,RunTimeTicks,Size,Container,Genres,CommunityRating,PremiereDate'
         : fields.trim();
     final params = <String>[
       if (parentId != null && parentId.isNotEmpty) 'ParentId=$parentId',
@@ -900,7 +914,7 @@ class EmbyApi {
         '&SortBy=DatePlayed'
         '&SortOrder=Descending'
         '&Limit=$limit'
-        '&Fields=Overview,ParentId,SeriesId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData',
+        '&Fields=Overview,ParentId,SeriesId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,PrimaryImageTag,ThumbImageTag,ParentThumbImageTag,SeriesPrimaryImageTag,BackdropImageTags,UserData',
       ),
     );
     final resp = await _client.get(url,
@@ -974,7 +988,7 @@ class EmbyApi {
         '&Recursive=true'
         '&SortBy=DateCreated'
         '&SortOrder=Descending'
-        '&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData'
+        '&Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,PrimaryImageTag,ThumbImageTag,ParentThumbImageTag,SeriesPrimaryImageTag,BackdropImageTags,UserData'
         '&Limit=$limit',
       ),
     );
@@ -1251,7 +1265,7 @@ class EmbyApi {
       _apiUrl(
         baseUrl,
         'Users/$userId/Items/$itemId'
-        '?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,UserData,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container',
+        '?Fields=Overview,ParentId,ParentIndexNumber,IndexNumber,SeriesName,SeasonName,ImageTags,PrimaryImageTag,ThumbImageTag,ParentThumbImageTag,SeriesPrimaryImageTag,BackdropImageTags,UserData,ProviderIds,CommunityRating,PremiereDate,ProductionYear,Genres,People,RunTimeTicks,Size,Container',
       ),
     );
     final resp = await _client.get(url,
@@ -1364,7 +1378,7 @@ class EmbyApi {
     final url = Uri.parse(
       _apiUrl(
         baseUrl,
-        'Users/$userId/Items/$itemId/Similar?Limit=$limit&Fields=Overview,ImageTags,ProviderIds,CommunityRating,Genres,ProductionYear',
+        'Users/$userId/Items/$itemId/Similar?Limit=$limit&Fields=Overview,ImageTags,PrimaryImageTag,ThumbImageTag,SeriesPrimaryImageTag,BackdropImageTags,ProviderIds,CommunityRating,Genres,ProductionYear',
       ),
     );
     final resp = await _client.get(url,
