@@ -4,12 +4,16 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../library_items_page.dart';
 import '../../server_adapters/server_access.dart';
 import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_extension.dart';
 import '../widgets/desktop_media_card.dart';
 import '../widgets/desktop_top_bar.dart' show DesktopHomeTab;
+import 'desktop_continue_watching_page.dart';
+import 'desktop_favorites_items_page.dart';
 
 class DesktopLibraryPage extends StatefulWidget {
   const DesktopLibraryPage({
@@ -32,6 +36,8 @@ class DesktopLibraryPage extends StatefulWidget {
 }
 
 class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
+  static const String _kDesktopFavoritesPrefix = 'desktopFavoriteIds_v1:';
+
   bool _loading = true;
   String? _error;
   Future<List<MediaItem>>? _continueFuture;
@@ -40,6 +46,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(_restoreFavoriteIds());
     unawaited(_bootstrap(forceRefresh: false));
   }
 
@@ -79,6 +86,79 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     }
   }
 
+  String get _favoriteStorageKey {
+    final serverId = widget.appState.activeServerId ?? 'none';
+    return '$_kDesktopFavoritesPrefix$serverId';
+  }
+
+  Future<void> _restoreFavoriteIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getStringList(_favoriteStorageKey) ?? const <String>[];
+    final normalized = stored
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet();
+    if (!mounted) return;
+    setState(() {
+      _favoriteItemIds
+        ..clear()
+        ..addAll(normalized);
+    });
+  }
+
+  Future<void> _persistFavoriteIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final sorted = _favoriteItemIds.toList()..sort();
+    await prefs.setStringList(_favoriteStorageKey, sorted);
+  }
+
+  Future<void> _openLibraryItemsPage({
+    required String parentId,
+    required String title,
+  }) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LibraryItemsPage(
+          appState: widget.appState,
+          parentId: parentId,
+          title: title,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openContinueWatchingPage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DesktopContinueWatchingPage(
+          appState: widget.appState,
+          language: widget.language,
+          onOpenItem: widget.onOpenItem,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFavoriteItemsPage({
+    required String title,
+    required List<MediaItem> items,
+  }) async {
+    if (items.isEmpty) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DesktopFavoritesItemsPage(
+          appState: widget.appState,
+          title: title,
+          items: items,
+          language: widget.language,
+          isFavorite: _isFavorite,
+          onToggleFavorite: _toggleFavorite,
+          onOpenItem: widget.onOpenItem,
+        ),
+      ),
+    );
+  }
+
   void _toggleFavorite(String itemId) {
     setState(() {
       if (_favoriteItemIds.contains(itemId)) {
@@ -87,6 +167,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
         _favoriteItemIds.add(itemId);
       }
     });
+    unawaited(_persistFavoriteIds());
   }
 
   bool _isFavorite(String itemId) => _favoriteItemIds.contains(itemId);
@@ -176,6 +257,42 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
                 onOpenItem: widget.onOpenItem,
                 isFavorite: _isFavorite,
                 onToggleFavorite: _toggleFavorite,
+                onViewAllTap: filtered.isEmpty
+                    ? null
+                    : () {
+                        if (favoriteMode) {
+                          final sectionTitle = library.name.trim().isEmpty
+                              ? _t(
+                                  language: widget.language,
+                                  zh: '\u5a92\u4f53\u5e93',
+                                  en: 'Library',
+                                )
+                              : library.name;
+                          unawaited(
+                            _openFavoriteItemsPage(
+                              title: _t(
+                                language: widget.language,
+                                zh: '\u559c\u6b22 \u00b7 $sectionTitle',
+                                en: 'Favorites · $sectionTitle',
+                              ),
+                              items: filtered,
+                            ),
+                          );
+                          return;
+                        }
+                        unawaited(
+                          _openLibraryItemsPage(
+                            parentId: library.id,
+                            title: library.name.trim().isEmpty
+                                ? _t(
+                                    language: widget.language,
+                                    zh: '\u5a92\u4f53\u5e93',
+                                    en: 'Library',
+                                  )
+                                : library.name,
+                          ),
+                        );
+                      },
               ),
             );
         }
@@ -256,6 +373,24 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
           isFavorite: _isFavorite,
           onToggleFavorite: _toggleFavorite,
           showProgress: true,
+          onViewAllTap: items.isEmpty
+              ? null
+              : () {
+                  if (favoriteMode) {
+                    unawaited(
+                      _openFavoriteItemsPage(
+                        title: _t(
+                          language: widget.language,
+                          zh: '\u559c\u6b22 \u00b7 \u7ee7\u7eed\u89c2\u770b',
+                          en: 'Favorites · Continue',
+                        ),
+                        items: items,
+                      ),
+                    );
+                    return;
+                  }
+                  unawaited(_openContinueWatchingPage());
+                },
         );
       },
     );
@@ -540,6 +675,7 @@ class _PosterRailSection extends StatelessWidget {
     required this.onOpenItem,
     required this.isFavorite,
     required this.onToggleFavorite,
+    this.onViewAllTap,
     this.showProgress = false,
   });
 
@@ -552,6 +688,7 @@ class _PosterRailSection extends StatelessWidget {
   final ValueChanged<MediaItem> onOpenItem;
   final bool Function(String itemId) isFavorite;
   final ValueChanged<String> onToggleFavorite;
+  final VoidCallback? onViewAllTap;
   final bool showProgress;
 
   @override
@@ -593,6 +730,7 @@ class _PosterRailSection extends StatelessWidget {
                 zh: '\u67e5\u770b\u5168\u90e8',
                 en: 'View all',
               ),
+              onTap: onViewAllTap,
             ),
           ],
         ),
@@ -722,9 +860,13 @@ class _HoverScaleCardState extends State<_HoverScaleCard> {
 }
 
 class _ViewAllLink extends StatefulWidget {
-  const _ViewAllLink({required this.label});
+  const _ViewAllLink({
+    required this.label,
+    this.onTap,
+  });
 
   final String label;
+  final VoidCallback? onTap;
 
   @override
   State<_ViewAllLink> createState() => _ViewAllLinkState();
@@ -737,15 +879,20 @@ class _ViewAllLinkState extends State<_ViewAllLink> {
   Widget build(BuildContext context) {
     final theme = DesktopThemeExtension.of(context);
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
+      cursor: widget.onTap != null
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: Text(
-        widget.label,
-        style: TextStyle(
-          color: _hovered ? theme.accent : theme.link,
-          fontSize: 13,
-          fontWeight: FontWeight.w400,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Text(
+          widget.label,
+          style: TextStyle(
+            color: _hovered ? theme.accent : theme.link,
+            fontSize: 13,
+            fontWeight: FontWeight.w400,
+          ),
         ),
       ),
     );

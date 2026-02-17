@@ -11,6 +11,7 @@ import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 import 'package:lin_player_ui/lin_player_ui.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_player_android/exo_tracks.dart' as vp_android;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
@@ -54,6 +55,9 @@ class ExoPlayNetworkPage extends StatefulWidget {
 
 class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     with WidgetsBindingObserver, RouteAware {
+  static const String _kLocalPlaybackProgressPrefix =
+      'networkPlaybackProgress_v1:';
+
   ServerAccess? _serverAccess;
   VideoPlayerController? _controller;
   Timer? _uiTimer;
@@ -162,11 +166,11 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   int? _selectedSubtitleStreamIndex;
   Duration? _overrideStartPosition;
   bool _overrideResumeImmediately = false;
-  DateTime? _lastProgressReportAt;
-  bool _lastProgressReportPaused = false;
+  int _lastLocalProgressSecond = -1;
+  bool _localProgressWriteInFlight = false;
+  int? _pendingLocalProgressTicks;
   bool _reportedStart = false;
   bool _reportedStop = false;
-  bool _progressReportInFlight = false;
 
   MediaItem? _episodePickerItem;
   bool _episodePickerItemLoading = false;
@@ -1326,7 +1330,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       if (!mounted) return;
 
       if (showToast) {
-        final displayTitle = title.isEmpty ? 'episodeId=${candidate.episodeId}' : title;
+        final displayTitle =
+            title.isEmpty ? 'episodeId=${candidate.episodeId}' : title;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('已手动匹配并加载弹幕：$displayTitle')),
         );
@@ -2298,9 +2303,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     _reportedStart = false;
     _reportedStop = false;
-    _progressReportInFlight = false;
-    _lastProgressReportAt = null;
-    _lastProgressReportPaused = false;
+    _lastLocalProgressSecond = -1;
+    _pendingLocalProgressTicks = null;
+    _localProgressWriteInFlight = false;
+    _lastUiTickAt = null;
 
     _playSessionId = null;
     _mediaSourceId = null;
@@ -2352,7 +2358,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       await _applyOrientationForMode();
       await _applyExoSubtitleOptions();
       await _maybeAutoSelectSubtitleTrack(controller);
-      final start = _overrideStartPosition ?? widget.startPosition;
+      final cloudStart = _overrideStartPosition ?? widget.startPosition;
+      final localStart = await _readLocalProgressDuration();
+      Duration? start = cloudStart;
+      if (localStart != null && (start == null || localStart > start)) {
+        start = localStart;
+      }
       final resumeImmediately =
           _overrideResumeImmediately || widget.resumeImmediately;
       _overrideStartPosition = null;
@@ -2595,6 +2606,60 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   int _toTicks(Duration d) => d.inMicroseconds * 10;
 
+  String get _localProgressKey {
+    final serverId =
+        (widget.server?.id ?? widget.appState.activeServerId ?? '').trim();
+    final base = _baseUrl ?? '';
+    final scope = serverId.isNotEmpty ? serverId : base;
+    final normalized = scope.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    return '$_kLocalPlaybackProgressPrefix$normalized:${widget.itemId}';
+  }
+
+  Future<Duration?> _readLocalProgressDuration() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ticks = prefs.getInt(_localProgressKey);
+      if (ticks == null || ticks <= 0) return null;
+      return Duration(microseconds: (ticks / 10).round());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _clearLocalProgress() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_localProgressKey);
+    } catch (_) {}
+    _lastLocalProgressSecond = -1;
+    _pendingLocalProgressTicks = null;
+  }
+
+  void _persistLocalProgress(Duration position, {bool force = false}) {
+    final safe = position < Duration.zero ? Duration.zero : position;
+    final second = safe.inSeconds;
+    if (!force && second == _lastLocalProgressSecond) return;
+    _lastLocalProgressSecond = second;
+    _pendingLocalProgressTicks = _toTicks(safe);
+    // ignore: unawaited_futures
+    _flushPendingLocalProgress();
+  }
+
+  Future<void> _flushPendingLocalProgress() async {
+    if (_localProgressWriteInFlight) return;
+    _localProgressWriteInFlight = true;
+    try {
+      while (_pendingLocalProgressTicks != null) {
+        final ticks = _pendingLocalProgressTicks!;
+        _pendingLocalProgressTicks = null;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt(_localProgressKey, ticks);
+      }
+    } finally {
+      _localProgressWriteInFlight = false;
+    }
+  }
+
   static String _fmtClock(Duration d) {
     String two(int v) => v.toString().padLeft(2, '0');
     final h = d.inHours;
@@ -2675,9 +2740,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       _lastTotalRxBytes = null;
       _lastTotalRxAt = null;
 
-      final next = (fallbackBytesPerSecond != null && fallbackBytesPerSecond.isFinite)
-          ? fallbackBytesPerSecond
-          : null;
+      final next =
+          (fallbackBytesPerSecond != null && fallbackBytesPerSecond.isFinite)
+              ? fallbackBytesPerSecond
+              : null;
       if (next == null) {
         if (_netSpeedBytesPerSecond != null) {
           setState(() => _netSpeedBytesPerSecond = null);
@@ -3050,53 +3116,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   void _maybeReportPlaybackProgress(Duration position, {bool force = false}) {
     if (_reportedStop) return;
     if (_deferProgressReporting) return;
-    if (_progressReportInFlight) return;
-    final access = _serverAccess;
-    if (access == null) return;
-
-    final now = DateTime.now();
-    final paused = !_isPlaying;
-
-    final due = _lastProgressReportAt == null ||
-        now.difference(_lastProgressReportAt!) >= const Duration(seconds: 15);
-    final pausedChanged = paused != _lastProgressReportPaused &&
-        (_lastProgressReportAt == null ||
-            now.difference(_lastProgressReportAt!) >=
-                const Duration(seconds: 1));
-    final shouldReport = force || due || pausedChanged;
-    if (!shouldReport) return;
-
-    _lastProgressReportAt = now;
-    _lastProgressReportPaused = paused;
-    _progressReportInFlight = true;
-
-    final ticks = _toTicks(position);
-
-    // ignore: unawaited_futures
-    () async {
-      try {
-        final ps = _playSessionId;
-        final ms = _mediaSourceId;
-        if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-          await access.adapter.reportPlaybackProgress(
-            access.auth,
-            itemId: widget.itemId,
-            mediaSourceId: ms,
-            playSessionId: ps,
-            positionTicks: ticks,
-            isPaused: paused,
-          );
-        } else {
-          await access.adapter.updatePlaybackPosition(
-            access.auth,
-            itemId: widget.itemId,
-            positionTicks: ticks,
-          );
-        }
-      } finally {
-        _progressReportInFlight = false;
-      }
-    }();
+    _persistLocalProgress(position, force: force);
   }
 
   Future<void> _reportPlaybackStoppedBestEffort(
@@ -3104,14 +3124,21 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (_reportedStop) return;
     _reportedStop = true;
 
-    final access = _serverAccess;
-    if (access == null) return;
-
     final pos = _position;
     final dur = _duration;
     final played = completed ||
         (dur > Duration.zero && pos >= dur - const Duration(seconds: 20));
     final ticks = _toTicks(pos);
+    _persistLocalProgress(pos, force: true);
+    await _flushPendingLocalProgress();
+
+    final access = _serverAccess;
+    if (access == null) {
+      if (played) {
+        await _clearLocalProgress();
+      }
+      return;
+    }
 
     try {
       final ps = _playSessionId;
@@ -3135,6 +3162,10 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
         played: played,
       );
     } catch (_) {}
+
+    if (played) {
+      await _clearLocalProgress();
+    }
   }
 
   bool get _shouldControlSystemUi {
@@ -3304,7 +3335,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     } catch (_) {}
   }
 
-  Future<void> _maybeAutoSelectSubtitleTrack(VideoPlayerController controller) async {
+  Future<void> _maybeAutoSelectSubtitleTrack(
+      VideoPlayerController controller) async {
     if (!_isAndroid) return;
 
     final prefRaw = widget.appState.preferredSubtitleLang.trim();
@@ -3327,7 +3359,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     late final List<vp_android.ExoPlayerSubtitleTrackData> tracks;
     try {
       final data = await api.getSubtitleTracks();
-      tracks = data.exoPlayerTracks ?? const <vp_android.ExoPlayerSubtitleTrackData>[];
+      tracks = data.exoPlayerTracks ??
+          const <vp_android.ExoPlayerSubtitleTrackData>[];
     } catch (_) {
       return;
     }
@@ -3335,8 +3368,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (tracks.isEmpty) return;
     if (tracks.any((t) => t.isSelected)) return;
 
-    final isDefaultPref =
-        prefRaw.isEmpty || prefRaw.toLowerCase() == 'default';
+    final isDefaultPref = prefRaw.isEmpty || prefRaw.toLowerCase() == 'default';
     final primaryPref = isDefaultPref ? 'zhs' : prefRaw;
 
     vp_android.ExoPlayerSubtitleTrackData? picked;
