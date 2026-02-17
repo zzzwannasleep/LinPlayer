@@ -2,160 +2,271 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 
-import '../theme/desktop_theme_extension.dart';
 import '../../server_adapters/server_access.dart';
+import '../theme/desktop_theme_extension.dart';
 import 'desktop_media_meta.dart';
-import 'hover_effect_wrapper.dart';
 
-class DesktopMediaCard extends StatelessWidget {
+class DesktopMediaCard extends StatefulWidget {
   const DesktopMediaCard({
     super.key,
     required this.item,
     required this.access,
     this.onTap,
+    this.onTogglePlayed,
+    this.onToggleFavorite,
+    this.onMore,
     this.imageType = 'Primary',
-    this.width = 208,
-    this.imageAspectRatio = 0.64,
-    this.showProgress = true,
+    this.width = 160,
+    this.imageAspectRatio = 2 / 3,
+    this.showProgress = false,
+    this.showMeta = true,
+    this.showBadge = true,
+    this.isFavorite = false,
     this.subtitleOverride,
+    this.badgeText,
   });
 
   final MediaItem item;
   final ServerAccess? access;
   final VoidCallback? onTap;
+  final VoidCallback? onTogglePlayed;
+  final VoidCallback? onToggleFavorite;
+  final VoidCallback? onMore;
   final String imageType;
   final double width;
   final double imageAspectRatio;
   final bool showProgress;
+  final bool showMeta;
+  final bool showBadge;
+  final bool isFavorite;
   final String? subtitleOverride;
+  final String? badgeText;
+
+  @override
+  State<DesktopMediaCard> createState() => _DesktopMediaCardState();
+}
+
+class _DesktopMediaCardState extends State<DesktopMediaCard> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  bool get _active => _hovered || _focused;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
     final imageUrl = _imageUrl();
-    final progress = mediaProgress(item);
-    final year = mediaYear(item);
-    final runtime = mediaRuntimeLabel(item);
-    final subtitle = subtitleOverride ??
-        [mediaTypeLabel(item), year, runtime]
-            .where((part) => part.trim().isNotEmpty)
-            .join('  ·  ');
+    final progress = mediaProgress(widget.item);
+    final subtitle = widget.subtitleOverride ?? _defaultSubtitle(widget.item);
+    final badge = (widget.badgeText ?? _defaultBadge(widget.item)).trim();
 
     return SizedBox(
-      width: width,
-      child: HoverEffectWrapper(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        hoverScale: 1.05,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: desktopTheme.surfaceElevated,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: desktopTheme.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.34),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: AspectRatio(
-            aspectRatio: imageAspectRatio,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _CardImage(
-                  imageUrl: imageUrl,
-                  title: item.name,
-                ),
-                Positioned(
-                  top: 10,
-                  left: 10,
-                  child: _TypePill(label: mediaTypeLabel(item)),
-                ),
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: _StatusBadge(played: item.played),
-                ),
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.82),
-                        ],
-                        stops: const [0.48, 1],
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: showProgress && progress > 0 ? 18 : 12,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        item.name.trim().isEmpty ? 'Untitled' : item.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 14,
-                          height: 1.2,
-                        ),
-                      ),
-                      if (subtitle.trim().isNotEmpty) ...[
-                        const SizedBox(height: 5),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFFD0DBEA),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
+      width: widget.width,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FocusableActionDetector(
+            onShowHoverHighlight: (value) => setState(() => _hovered = value),
+            onShowFocusHighlight: (value) => setState(() => _focused = value),
+            mouseCursor: widget.onTap != null
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.basic,
+            child: AnimatedScale(
+              scale: _active ? 1.05 : 1.0,
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: _active
+                      ? [
+                          BoxShadow(
+                            color: theme.shadowColor,
+                            blurRadius: 16,
+                            offset: const Offset(0, 8),
                           ),
-                        ),
-                      ],
-                    ],
-                  ),
+                        ]
+                      : null,
                 ),
-                if (showProgress && progress > 0)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      minHeight: 4,
-                      backgroundColor: Colors.black.withValues(alpha: 0.38),
-                      color: desktopTheme.accent,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: widget.onTap,
+                      child: AspectRatio(
+                        aspectRatio: widget.imageAspectRatio,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            _CardImage(
+                              imageUrl: imageUrl,
+                              title: widget.item.name,
+                            ),
+                            if (widget.showBadge && badge.isNotEmpty)
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: _Badge(
+                                  text: badge,
+                                  color: theme.posterBadgeBackground,
+                                ),
+                              ),
+                            AnimatedOpacity(
+                              opacity: _active ? 1 : 0,
+                              duration: const Duration(milliseconds: 170),
+                              curve: Curves.easeOutCubic,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: theme.posterOverlay,
+                                ),
+                                child: Stack(
+                                  children: [
+                                    Center(
+                                      child: Container(
+                                        width: 48,
+                                        height: 48,
+                                        decoration: BoxDecoration(
+                                          color: theme.accent,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(
+                                          Icons.play_arrow_rounded,
+                                          color: Colors.white,
+                                          size: 24,
+                                        ),
+                                      ),
+                                    ),
+                                    Positioned(
+                                      left: 0,
+                                      right: 0,
+                                      bottom: 0,
+                                      child: SizedBox(
+                                        height: 40,
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceEvenly,
+                                          children: [
+                                            _OverlayIconButton(
+                                              icon: widget.item.played
+                                                  ? Icons.check_rounded
+                                                  : Icons.check_outlined,
+                                              active: widget.item.played,
+                                              activeColor: theme.accent,
+                                              onTap: widget.onTogglePlayed,
+                                              background:
+                                                  theme.posterControlBackground,
+                                            ),
+                                            _OverlayIconButton(
+                                              icon: widget.isFavorite
+                                                  ? Icons.favorite_rounded
+                                                  : Icons
+                                                      .favorite_border_rounded,
+                                              active: widget.isFavorite,
+                                              activeColor:
+                                                  const Color(0xFFFF6B81),
+                                              onTap: widget.onToggleFavorite,
+                                              background:
+                                                  theme.posterControlBackground,
+                                            ),
+                                            _OverlayIconButton(
+                                              icon: Icons.more_horiz_rounded,
+                                              active: false,
+                                              activeColor: Colors.white,
+                                              onTap: widget.onMore,
+                                              background:
+                                                  theme.posterControlBackground,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (widget.showProgress && progress > 0)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: SizedBox(
+                                  height: 4,
+                                  child: Stack(
+                                    children: [
+                                      ColoredBox(
+                                        color:
+                                            Colors.black.withValues(alpha: 0.4),
+                                      ),
+                                      FractionallySizedBox(
+                                        alignment: Alignment.centerLeft,
+                                        widthFactor: progress,
+                                        child: ColoredBox(color: theme.accent),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
-              ],
+                ),
+              ),
             ),
           ),
-        ),
+          if (widget.showMeta) ...[
+            const SizedBox(height: 8),
+            Text(
+              widget.item.name.trim().isEmpty ? 'Untitled' : widget.item.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: theme.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: theme.textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
 
+  String _defaultSubtitle(MediaItem item) {
+    final year = mediaYear(item);
+    final status = item.played ? 'Played' : 'Now';
+    return year.isEmpty ? status : '$year · $status';
+  }
+
+  String _defaultBadge(MediaItem item) {
+    final episode = item.episodeNumber ?? 0;
+    if (episode > 0) return '$episode';
+    final season = item.seasonNumber ?? 0;
+    if (season > 0) return '$season';
+    return '${(item.id.hashCode.abs() % 99) + 1}';
+  }
+
   String? _imageUrl() {
-    final currentAccess = access;
-    if (currentAccess == null || !item.hasImage) return null;
+    final currentAccess = widget.access;
+    if (currentAccess == null) return null;
+    if (widget.imageType == 'Primary' && !widget.item.hasImage) return null;
     return currentAccess.adapter.imageUrl(
       currentAccess.auth,
-      itemId: item.id,
-      imageType: imageType,
+      itemId: widget.item.id,
+      imageType: widget.imageType,
       maxWidth: 560,
     );
   }
@@ -191,28 +302,28 @@ class _ImageFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            desktopTheme.surface,
-            desktopTheme.surfaceElevated,
-          ],
+          colors: [theme.surface, theme.surfaceElevated],
         ),
       ),
       child: Center(
-        child: Text(
-          title.trim().isEmpty ? 'No Poster' : title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: desktopTheme.textMuted,
-            fontWeight: FontWeight.w500,
-            fontSize: 12,
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Text(
+            title.trim().isEmpty ? 'No Poster' : title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: theme.textMuted,
+              fontWeight: FontWeight.w500,
+              fontSize: 12,
+            ),
           ),
         ),
       ),
@@ -220,54 +331,67 @@ class _ImageFallback extends StatelessWidget {
   }
 }
 
-class _TypePill extends StatelessWidget {
-  const _TypePill({required this.label});
+class _OverlayIconButton extends StatelessWidget {
+  const _OverlayIconButton({
+    required this.icon,
+    required this.active,
+    required this.activeColor,
+    required this.background,
+    this.onTap,
+  });
 
-  final String label;
+  final IconData icon;
+  final bool active;
+  final Color activeColor;
+  final Color background;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.58),
+    final fg = active ? activeColor : Colors.white;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
+        child: Ink(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: background,
           ),
+          child: Icon(icon, size: 16, color: fg),
         ),
       ),
     );
   }
 }
 
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.played});
+class _Badge extends StatelessWidget {
+  const _Badge({required this.text, required this.color});
 
-  final bool played;
+  final String text;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 22,
-      height: 22,
+      width: 24,
+      height: 24,
       decoration: BoxDecoration(
-        color: played
-            ? const Color(0xFFE7F2FF)
-            : Colors.white.withValues(alpha: 0.86),
-        borderRadius: BorderRadius.circular(999),
+        color: color,
+        shape: BoxShape.circle,
       ),
-      child: Icon(
-        played ? Icons.check_rounded : Icons.play_arrow_rounded,
-        size: 14,
-        color: const Color(0xFF0B172B),
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          height: 1.0,
+        ),
       ),
     );
   }

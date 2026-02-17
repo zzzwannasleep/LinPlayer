@@ -2,7 +2,10 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_extension.dart';
+
+enum DesktopHomeTab { home, favorites }
 
 class DesktopTopBar extends StatelessWidget {
   const DesktopTopBar({
@@ -11,108 +14,152 @@ class DesktopTopBar extends StatelessWidget {
     required this.searchController,
     required this.onSearchSubmitted,
     required this.onSearchChanged,
+    this.language = DesktopUiLanguage.zhCn,
     this.showSearch = true,
     this.showBack = false,
     this.onBack,
     this.onToggleSidebar,
     this.onRefresh,
     this.onOpenSettings,
-    this.searchHint = 'Search series or movies',
+    this.homeTab = DesktopHomeTab.home,
+    this.onHomeTabChanged,
+    this.searchHint = '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
   });
 
   final String title;
   final TextEditingController searchController;
   final ValueChanged<String> onSearchSubmitted;
   final ValueChanged<String> onSearchChanged;
+  final DesktopUiLanguage language;
   final bool showSearch;
   final bool showBack;
   final VoidCallback? onBack;
   final VoidCallback? onToggleSidebar;
   final VoidCallback? onRefresh;
   final VoidCallback? onOpenSettings;
+  final DesktopHomeTab homeTab;
+  final ValueChanged<DesktopHomeTab>? onHomeTabChanged;
   final String searchHint;
+
+  String _t({
+    required String zh,
+    required String en,
+  }) {
+    return language.pick(zh: zh, en: en);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
-    final titleStyle = TextStyle(
-      color: desktopTheme.textPrimary,
-      fontSize: 20,
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.2,
-    );
+    final theme = DesktopThemeExtension.of(context);
+    final iconColor = theme.textPrimary;
+    final background =
+        showSearch ? theme.headerScrolledBackground : theme.headerBackground;
+    final background2 = showSearch
+        ? theme.headerScrolledBackground.withValues(alpha: 0.96)
+        : theme.headerScrolledBackground.withValues(alpha: 0.86);
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(14),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.26),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: desktopTheme.border),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [background, background2],
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: theme.border.withValues(alpha: 0.8)),
           ),
           child: SizedBox(
-            height: 64,
+            height: 60,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  _TopIconButton(
-                    icon: showBack
-                        ? Icons.arrow_back_rounded
-                        : Icons.menu_rounded,
-                    tooltip: showBack ? 'Back' : 'Toggle sidebar',
-                    onTap: showBack ? onBack : onToggleSidebar,
+                  SizedBox(
+                    width: 280,
+                    child: Row(
+                      children: [
+                        _HeaderIconButton(
+                          icon: showBack
+                              ? Icons.arrow_back_rounded
+                              : Icons.menu_rounded,
+                          tooltip: showBack
+                              ? _t(zh: '\u8fd4\u56de', en: 'Back')
+                              : _t(zh: '\u83dc\u5355', en: 'Menu'),
+                          onTap: showBack ? onBack : onToggleSidebar,
+                          color: iconColor,
+                        ),
+                        const SizedBox(width: 10),
+                        _LogoBadge(theme: theme),
+                      ],
+                    ),
                   ),
-                  const SizedBox(width: 10),
-                  _LogoBadge(theme: desktopTheme),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: showSearch
-                        ? Row(
-                            children: [
-                              Flexible(
-                                flex: 3,
-                                child: Text(
-                                  title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: titleStyle,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                flex: 5,
-                                child: _SearchInput(
-                                  controller: searchController,
-                                  hintText: searchHint,
-                                  onSubmitted: onSearchSubmitted,
-                                  onChanged: onSearchChanged,
-                                ),
-                              ),
-                            ],
-                          )
-                        : const Center(child: _TopPillTabs()),
+                    child: Center(
+                      child: showSearch
+                          ? _SearchCenter(
+                              title: title,
+                              controller: searchController,
+                              hintText: searchHint,
+                              onSubmitted: onSearchSubmitted,
+                              onChanged: onSearchChanged,
+                              textColor: theme.textPrimary,
+                            )
+                          : _TopPillTabs(
+                              language: language,
+                              selected: homeTab,
+                              onChanged: onHomeTabChanged,
+                            ),
+                    ),
                   ),
-                  const SizedBox(width: 10),
-                  _TopIconButton(
-                    icon: Icons.refresh_rounded,
-                    tooltip: 'Refresh',
-                    onTap: onRefresh,
-                  ),
-                  const SizedBox(width: 6),
-                  const _TopIconButton(
-                    icon: Icons.notifications_none_rounded,
-                    tooltip: 'Notifications',
-                  ),
-                  const SizedBox(width: 6),
-                  const _AvatarBadge(),
-                  const SizedBox(width: 6),
-                  _TopIconButton(
-                    icon: Icons.settings_outlined,
-                    tooltip: 'Settings',
-                    onTap: onOpenSettings,
+                  SizedBox(
+                    width: 280,
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _HeaderIconButton(
+                            icon: Icons.cast_outlined,
+                            tooltip: _t(zh: '\u6295\u5c4f', en: 'Cast'),
+                            color: iconColor,
+                          ),
+                          const SizedBox(width: 6),
+                          _HeaderIconButton(
+                            icon: Icons.search_rounded,
+                            tooltip: _t(zh: '\u641c\u7d22', en: 'Search'),
+                            onTap: () =>
+                                onSearchSubmitted(searchController.text),
+                            color: iconColor,
+                          ),
+                          const SizedBox(width: 6),
+                          _HeaderIconButton(
+                            icon: Icons.person_outline_rounded,
+                            tooltip: _t(zh: '\u7528\u6237', en: 'Profile'),
+                            color: iconColor,
+                          ),
+                          const SizedBox(width: 6),
+                          _HeaderIconButton(
+                            icon: Icons.settings_outlined,
+                            tooltip: _t(zh: '\u8bbe\u7f6e', en: 'Settings'),
+                            onTap: onOpenSettings,
+                            color: iconColor,
+                          ),
+                          if (onRefresh != null && showSearch) ...[
+                            const SizedBox(width: 6),
+                            _HeaderIconButton(
+                              icon: Icons.refresh_rounded,
+                              tooltip: _t(zh: '\u5237\u65b0', en: 'Refresh'),
+                              onTap: onRefresh,
+                              color: iconColor,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -124,61 +171,84 @@ class DesktopTopBar extends StatelessWidget {
   }
 }
 
-class _SearchInput extends StatelessWidget {
-  const _SearchInput({
+class _SearchCenter extends StatelessWidget {
+  const _SearchCenter({
+    required this.title,
     required this.controller,
     required this.hintText,
     required this.onSubmitted,
     required this.onChanged,
+    required this.textColor,
   });
 
+  final String title;
   final TextEditingController controller;
   final String hintText;
   final ValueChanged<String> onSubmitted;
   final ValueChanged<String> onChanged;
+  final Color textColor;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
-
-    return TextField(
-      controller: controller,
-      onChanged: onChanged,
-      onSubmitted: onSubmitted,
-      textInputAction: TextInputAction.search,
-      decoration: InputDecoration(
-        isDense: true,
-        hintText: hintText,
-        hintStyle: TextStyle(
-          color: desktopTheme.textMuted.withValues(alpha: 0.78),
-          fontSize: 13,
-        ),
-        prefixIcon: Icon(
-          Icons.search_rounded,
-          size: 20,
-          color: desktopTheme.textMuted,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide:
-              BorderSide(color: desktopTheme.border.withValues(alpha: 0.8)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide:
-              BorderSide(color: desktopTheme.border.withValues(alpha: 0.8)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(999),
-          borderSide: BorderSide(
-            color: desktopTheme.focus,
-            width: 1.6,
+    final theme = DesktopThemeExtension.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 720),
+      child: Row(
+        children: [
+          Flexible(
+            flex: 3,
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: textColor,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
-        ),
-        fillColor: Colors.white.withValues(alpha: 0.10),
-        filled: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          const SizedBox(width: 14),
+          Expanded(
+            flex: 5,
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              onSubmitted: onSubmitted,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(color: theme.textPrimary, fontSize: 14),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: hintText,
+                hintStyle: TextStyle(
+                  color: theme.textMuted.withValues(alpha: 0.9),
+                  fontSize: 13,
+                ),
+                prefixIcon: Icon(
+                  Icons.search_rounded,
+                  size: 20,
+                  color: theme.textMuted,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(999),
+                  borderSide: BorderSide(color: theme.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(999),
+                  borderSide: BorderSide(color: theme.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(999),
+                  borderSide: BorderSide(color: theme.focus, width: 1.4),
+                ),
+                fillColor: theme.surfaceElevated.withValues(alpha: 0.78),
+                filled: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -194,10 +264,10 @@ class _LogoBadge extends StatelessWidget {
     return Row(
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(9),
+          borderRadius: BorderRadius.circular(8),
           child: SizedBox(
-            width: 28,
-            height: 28,
+            width: 30,
+            height: 30,
             child: Image.asset(
               'assets/app_icon.jpg',
               fit: BoxFit.cover,
@@ -206,11 +276,11 @@ class _LogoBadge extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Text(
-          'LinPlayer',
+          'LinPlayer\u25c6',
           style: TextStyle(
             color: theme.textPrimary,
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
+            fontSize: 24,
+            fontWeight: FontWeight.w500,
             letterSpacing: 0.2,
           ),
         ),
@@ -220,111 +290,100 @@ class _LogoBadge extends StatelessWidget {
 }
 
 class _TopPillTabs extends StatelessWidget {
-  const _TopPillTabs();
+  const _TopPillTabs({
+    required this.language,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final DesktopUiLanguage language;
+  final DesktopHomeTab selected;
+  final ValueChanged<DesktopHomeTab>? onChanged;
+
+  String _t({
+    required String zh,
+    required String en,
+  }) {
+    return language.pick(zh: zh, en: en);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
+    Widget tab(DesktopHomeTab value, String zh, String en) {
+      final active = selected == value;
+      return InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onChanged == null ? null : () => onChanged!(value),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? theme.topTabActiveBackground : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            _t(zh: zh, en: en),
+            style: TextStyle(
+              color:
+                  active ? theme.textPrimary : theme.topTabInactiveForeground,
+              fontSize: 14,
+              fontWeight: active ? FontWeight.w500 : FontWeight.w400,
+            ),
+          ),
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.42),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: desktopTheme.border),
+        color: theme.topTabBackground,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: theme.border.withValues(alpha: 0.8)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: desktopTheme.accent,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: const Text(
-              'Home',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              'Favorites',
-              style: TextStyle(
-                color: Color(0xFFC4CDDB),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
+          tab(DesktopHomeTab.home, '\u4e3b\u9875', 'Home'),
+          const SizedBox(width: 2),
+          tab(DesktopHomeTab.favorites, '\u559c\u6b22', 'Favorites'),
         ],
       ),
     );
   }
 }
 
-class _TopIconButton extends StatelessWidget {
-  const _TopIconButton({
+class _HeaderIconButton extends StatelessWidget {
+  const _HeaderIconButton({
     required this.icon,
     required this.tooltip,
+    required this.color,
     this.onTap,
   });
 
   final IconData icon;
   final String tooltip;
+  final Color color;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
     return Tooltip(
       message: tooltip,
       child: InkWell(
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Container(
           width: 34,
           height: 34,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.11),
-            borderRadius: BorderRadius.circular(999),
-            border:
-                Border.all(color: desktopTheme.border.withValues(alpha: 0.9)),
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
           ),
-          child: Icon(icon, size: 18, color: desktopTheme.textPrimary),
+          child: Icon(icon, size: 24, color: color),
         ),
-      ),
-    );
-  }
-}
-
-class _AvatarBadge extends StatelessWidget {
-  const _AvatarBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
-    return Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF365A9B), Color(0xFF1A2946)],
-        ),
-        border: Border.all(color: desktopTheme.border.withValues(alpha: 0.9)),
-      ),
-      child: const Icon(
-        Icons.person_outline_rounded,
-        size: 18,
-        color: Colors.white,
       ),
     );
   }

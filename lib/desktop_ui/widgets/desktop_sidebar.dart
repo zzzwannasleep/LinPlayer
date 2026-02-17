@@ -36,7 +36,7 @@ class DesktopSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -44,12 +44,12 @@ class DesktopSidebar extends StatelessWidget {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            desktopTheme.sidebarColor,
-            desktopTheme.sidebarColor.withValues(alpha: 0.86),
+            theme.sidebarColor,
+            theme.sidebarColor.withValues(alpha: 0.94),
           ],
         ),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: desktopTheme.border),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.border),
       ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -70,12 +70,8 @@ class DesktopSidebar extends StatelessWidget {
                       width: 34,
                       height: 34,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        gradient: const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFF2D8CFF), Color(0xFF1696BB)],
-                        ),
+                        borderRadius: BorderRadius.circular(8),
+                        color: theme.accent,
                       ),
                       alignment: Alignment.center,
                       child: const Text(
@@ -93,15 +89,15 @@ class DesktopSidebar extends StatelessWidget {
                           width: 10,
                           height: 10,
                           decoration: BoxDecoration(
-                            color: desktopTheme.accent,
+                            color: theme.accent,
                             borderRadius: BorderRadius.circular(999),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'LinPlayer Desktop',
+                          'LinPlayer◆',
                           style: TextStyle(
-                            color: desktopTheme.textPrimary,
+                            color: theme.textPrimary,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.2,
                           ),
@@ -138,16 +134,16 @@ class DesktopSidebar extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: desktopTheme.surface,
+                  color: theme.surface.withValues(alpha: 0.72),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: desktopTheme.border),
+                  border: Border.all(color: theme.border),
                 ),
                 child: Text(
                   serverLabel!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: desktopTheme.textMuted,
+                    color: theme.textMuted,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),

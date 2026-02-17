@@ -9,14 +9,20 @@ class DesktopHorizontalSection extends StatelessWidget {
     required this.children,
     this.subtitle,
     this.trailing,
+    this.onTrailingTap,
+    this.trailingLabel = 'View All',
+    this.showDefaultTrailing = false,
     this.emptyLabel = 'No items yet',
     this.spacing = 16,
-    this.viewportHeight = 380,
+    this.viewportHeight = 320,
   });
 
   final String title;
   final String? subtitle;
   final Widget? trailing;
+  final VoidCallback? onTrailingTap;
+  final String trailingLabel;
+  final bool showDefaultTrailing;
   final List<Widget> children;
   final String emptyLabel;
   final double spacing;
@@ -24,7 +30,7 @@ class DesktopHorizontalSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -38,8 +44,8 @@ class DesktopHorizontalSection extends StatelessWidget {
                   Text(
                     title,
                     style: TextStyle(
-                      color: desktopTheme.textPrimary,
-                      fontSize: 24,
+                      color: theme.textPrimary,
+                      fontSize: 20,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -48,9 +54,9 @@ class DesktopHorizontalSection extends StatelessWidget {
                     Text(
                       subtitle!,
                       style: TextStyle(
-                        color: desktopTheme.textMuted,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w500,
+                        color: theme.textMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                   ],
@@ -59,14 +65,10 @@ class DesktopHorizontalSection extends StatelessWidget {
             ),
             if (trailing != null)
               trailing!
-            else
-              Text(
-                'View More',
-                style: TextStyle(
-                  color: desktopTheme.textMuted,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
+            else if (showDefaultTrailing)
+              _SectionLink(
+                label: trailingLabel,
+                onTap: onTrailingTap,
               ),
           ],
         ),
@@ -77,7 +79,7 @@ class DesktopHorizontalSection extends StatelessWidget {
               ? Center(
                   child: Text(
                     emptyLabel,
-                    style: TextStyle(color: desktopTheme.textMuted),
+                    style: TextStyle(color: theme.textMuted),
                   ),
                 )
               : ListView.separated(
@@ -89,6 +91,46 @@ class DesktopHorizontalSection extends StatelessWidget {
                 ),
         ),
       ],
+    );
+  }
+}
+
+class _SectionLink extends StatefulWidget {
+  const _SectionLink({
+    required this.label,
+    this.onTap,
+  });
+
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  State<_SectionLink> createState() => _SectionLinkState();
+}
+
+class _SectionLinkState extends State<_SectionLink> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
+    return MouseRegion(
+      cursor: widget.onTap != null
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Text(
+          widget.label,
+          style: TextStyle(
+            color: _hovered ? theme.accent : theme.link,
+            fontSize: 13,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      ),
     );
   }
 }

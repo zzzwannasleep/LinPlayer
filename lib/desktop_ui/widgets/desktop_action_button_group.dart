@@ -16,7 +16,7 @@ class DesktopActionButtonGroup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
 
     return Wrap(
       spacing: 12,
@@ -25,12 +25,12 @@ class DesktopActionButtonGroup extends StatelessWidget {
         FilledButton.icon(
           onPressed: onPlay,
           style: FilledButton.styleFrom(
-            backgroundColor: desktopTheme.accent,
+            backgroundColor: theme.accent,
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(999),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           ),
           icon: const Icon(Icons.play_arrow_rounded),
           label: const Text(
@@ -41,12 +41,12 @@ class DesktopActionButtonGroup extends StatelessWidget {
         OutlinedButton.icon(
           onPressed: onToggleFavorite,
           style: OutlinedButton.styleFrom(
-            foregroundColor: desktopTheme.textPrimary,
-            side: BorderSide(color: desktopTheme.border),
+            foregroundColor: theme.textPrimary,
+            side: BorderSide(color: theme.border),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(999),
             ),
-            backgroundColor: Colors.white.withValues(alpha: 0.10),
+            backgroundColor: theme.surface.withValues(alpha: 0.72),
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           ),
           icon: Icon(
@@ -61,12 +61,12 @@ class DesktopActionButtonGroup extends StatelessWidget {
         OutlinedButton(
           onPressed: () {},
           style: OutlinedButton.styleFrom(
-            foregroundColor: desktopTheme.textPrimary,
-            side: BorderSide(color: desktopTheme.border),
+            foregroundColor: theme.textPrimary,
+            side: BorderSide(color: theme.border),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(999),
             ),
-            backgroundColor: Colors.white.withValues(alpha: 0.10),
+            backgroundColor: theme.surface.withValues(alpha: 0.72),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
           ),
           child: const Icon(Icons.more_horiz_rounded),

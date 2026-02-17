@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -7,20 +6,26 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 import '../../server_adapters/server_access.dart';
+import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_extension.dart';
-import '../widgets/desktop_media_meta.dart';
+import '../widgets/desktop_media_card.dart';
+import '../widgets/desktop_top_bar.dart' show DesktopHomeTab;
 
 class DesktopLibraryPage extends StatefulWidget {
   const DesktopLibraryPage({
     super.key,
     required this.appState,
     required this.onOpenItem,
+    required this.activeTab,
     this.refreshSignal = 0,
+    this.language = DesktopUiLanguage.zhCn,
   });
 
   final AppState appState;
   final ValueChanged<MediaItem> onOpenItem;
+  final DesktopHomeTab activeTab;
   final int refreshSignal;
+  final DesktopUiLanguage language;
 
   @override
   State<DesktopLibraryPage> createState() => _DesktopLibraryPageState();
@@ -30,7 +35,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   bool _loading = true;
   String? _error;
   Future<List<MediaItem>>? _continueFuture;
-  Future<List<MediaItem>>? _recommendFuture;
+  final Set<String> _favoriteItemIds = <String>{};
 
   @override
   void initState() {
@@ -57,12 +62,10 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
         await widget.appState.refreshLibraries();
       }
       await widget.appState.loadHome(forceRefresh: true);
+
       if (!mounted) return;
       setState(() {
         _continueFuture = widget.appState.loadContinueWatching(
-          forceRefresh: forceRefresh,
-        );
-        _recommendFuture = widget.appState.loadRandomRecommendations(
           forceRefresh: forceRefresh,
         );
       });
@@ -76,15 +79,34 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     }
   }
 
+  void _toggleFavorite(String itemId) {
+    setState(() {
+      if (_favoriteItemIds.contains(itemId)) {
+        _favoriteItemIds.remove(itemId);
+      } else {
+        _favoriteItemIds.add(itemId);
+      }
+    });
+  }
+
+  bool _isFavorite(String itemId) => _favoriteItemIds.contains(itemId);
+
+  List<MediaItem> _applyActiveTabFilter(List<MediaItem> items) {
+    if (widget.activeTab == DesktopHomeTab.home) return items;
+    return items
+        .where((item) => _favoriteItemIds.contains(item.id))
+        .toList(growable: false);
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
-        final desktopTheme = DesktopThemeExtension.of(context);
+        final theme = DesktopThemeExtension.of(context);
         final access = resolveServerAccess(appState: widget.appState);
         final libraries = widget.appState.libraries
-            .where((lib) => !widget.appState.isLibraryHidden(lib.id))
+            .where((library) => !widget.appState.isLibraryHidden(library.id))
             .toList(growable: false);
 
         final appStateError = widget.appState.error;
@@ -98,231 +120,269 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final wallpaperItem = _pickWallpaperItem(libraries);
-        final wallpaperUrl = _imageUrl(
-              access: access,
-              item: wallpaperItem,
-              imageType: 'Backdrop',
-              maxWidth: 1920,
-            ) ??
-            _imageUrl(
-              access: access,
-              item: wallpaperItem,
-              imageType: 'Primary',
-              maxWidth: 1200,
-            );
+        final favoriteMode = widget.activeTab == DesktopHomeTab.favorites;
 
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: _LibraryBackground(
-                  imageUrl: wallpaperUrl,
-                  color: desktopTheme.background,
-                ),
-              ),
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.44),
-                        Colors.black.withValues(alpha: 0.58),
-                        Colors.black.withValues(alpha: 0.70),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              CustomScrollView(
-                slivers: [
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 40),
-                    sliver: SliverList(
-                      delegate: SliverChildListDelegate(
-                        [
-                          if ((effectiveError ?? '').trim().isNotEmpty)
-                            _ErrorBanner(
-                              message: effectiveError!,
-                              onRetry: () => _bootstrap(forceRefresh: true),
-                            ),
-                          if ((effectiveError ?? '').trim().isNotEmpty)
-                            const SizedBox(height: 18),
-                          if (libraries.isNotEmpty)
-                            _CategoryStripSection(
-                              libraries: libraries,
-                              appState: widget.appState,
-                              access: access,
-                              onOpenItem: widget.onOpenItem,
-                            ),
-                          if (libraries.isNotEmpty) const SizedBox(height: 34),
-                          _buildFutureRowSection(
-                            title: 'Continue Watching',
-                            future: _continueFuture ??
-                                widget.appState.loadContinueWatching(
-                                  forceRefresh: false,
-                                ),
-                            access: access,
-                          ),
-                          const SizedBox(height: 36),
-                          _buildFutureRowSection(
-                            title: 'Recommended',
-                            future: _recommendFuture ??
-                                widget.appState.loadRandomRecommendations(
-                                  forceRefresh: false,
-                                ),
-                            access: access,
-                          ),
-                          for (final library in libraries) ...[
-                            const SizedBox(height: 36),
-                            _PosterRowSection(
-                              title: library.name,
-                              items: widget.appState.getHome('lib_${library.id}'),
-                              access: access,
-                              onOpenItem: widget.onOpenItem,
-                            ),
-                          ],
-                          if (libraries.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 30),
-                              child: Text(
-                                'No visible libraries',
-                                style: TextStyle(
-                                  color: desktopTheme.textMuted,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+        final contentChildren = <Widget>[
+          if ((effectiveError ?? '').trim().isNotEmpty)
+            _ErrorBanner(
+              message: effectiveError!,
+              onRetry: () => _bootstrap(forceRefresh: true),
+              language: widget.language,
+            ),
+          if ((effectiveError ?? '').trim().isNotEmpty)
+            const SizedBox(height: 24),
+          _MediaCategorySection(
+            libraries: libraries,
+            appState: widget.appState,
+            access: access,
+            onOpenItem: widget.onOpenItem,
+            language: widget.language,
           ),
+          const SizedBox(height: 32),
+          if (favoriteMode && _favoriteItemIds.isEmpty)
+            _FavoritesEmptySection(language: widget.language)
+          else
+            _buildContinueSection(
+              access: access,
+              favoriteMode: favoriteMode,
+            ),
+        ];
+
+        for (final library in libraries) {
+          final filtered = _applyActiveTabFilter(
+            widget.appState.getHome('lib_${library.id}'),
+          );
+          if (favoriteMode && filtered.isEmpty) continue;
+          contentChildren
+            ..add(const SizedBox(height: 32))
+            ..add(
+              _PosterRailSection(
+                prefixTitle: _t(
+                  language: widget.language,
+                  zh: '\u6700\u65b0',
+                  en: 'Latest',
+                ),
+                highlightedTitle: library.name.trim().isEmpty
+                    ? _t(
+                        language: widget.language,
+                        zh: '\u5206\u7c7b',
+                        en: 'Category',
+                      )
+                    : library.name,
+                items: filtered,
+                access: access,
+                loading: false,
+                language: widget.language,
+                onOpenItem: widget.onOpenItem,
+                isFavorite: _isFavorite,
+                onToggleFavorite: _toggleFavorite,
+              ),
+            );
+        }
+
+        if (!favoriteMode && libraries.isEmpty) {
+          contentChildren
+            ..add(const SizedBox(height: 20))
+            ..add(
+              Text(
+                _t(
+                  language: widget.language,
+                  zh: '\u6682\u65e0\u53ef\u89c1\u5a92\u4f53\u5e93',
+                  en: 'No visible libraries',
+                ),
+                style: TextStyle(
+                  color: theme.textMuted,
+                  fontSize: 13,
+                ),
+              ),
+            );
+        }
+
+        return Stack(
+          children: [
+            const Positioned.fill(child: _DecorativeBackground()),
+            CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 44),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: contentChildren,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         );
       },
     );
   }
 
-  Widget _buildFutureRowSection({
-    required String title,
-    required Future<List<MediaItem>> future,
+  Widget _buildContinueSection({
     required ServerAccess? access,
+    required bool favoriteMode,
   }) {
     return FutureBuilder<List<MediaItem>>(
-      future: future,
+      future: _continueFuture ??
+          widget.appState.loadContinueWatching(
+            forceRefresh: false,
+          ),
       builder: (context, snapshot) {
-        final items = snapshot.data ?? const <MediaItem>[];
-        return _PosterRowSection(
-          title: title,
+        final items =
+            _applyActiveTabFilter(snapshot.data ?? const <MediaItem>[]);
+        if (favoriteMode &&
+            items.isEmpty &&
+            snapshot.connectionState != ConnectionState.waiting) {
+          return const SizedBox.shrink();
+        }
+        return _PosterRailSection(
+          prefixTitle: _t(
+            language: widget.language,
+            zh: '\u6700\u65b0',
+            en: 'Latest',
+          ),
+          highlightedTitle: _t(
+            language: widget.language,
+            zh: '\u7ee7\u7eed\u89c2\u770b',
+            en: 'Continue',
+          ),
           items: items,
           access: access,
-          onOpenItem: widget.onOpenItem,
           loading: snapshot.connectionState == ConnectionState.waiting,
+          language: widget.language,
+          onOpenItem: widget.onOpenItem,
+          isFavorite: _isFavorite,
+          onToggleFavorite: _toggleFavorite,
+          showProgress: true,
         );
       },
     );
-  }
-
-  MediaItem? _pickWallpaperItem(List<LibraryInfo> libraries) {
-    for (final library in libraries) {
-      final items = widget.appState.getHome('lib_${library.id}');
-      if (items.isEmpty) continue;
-      for (final item in items) {
-        if (item.hasImage) return item;
-      }
-      return items.first;
-    }
-    return null;
   }
 }
 
-class _LibraryBackground extends StatelessWidget {
-  const _LibraryBackground({
-    required this.imageUrl,
-    required this.color,
-  });
-
-  final String? imageUrl;
-  final Color color;
+class _DecorativeBackground extends StatelessWidget {
+  const _DecorativeBackground();
 
   @override
   Widget build(BuildContext context) {
-    final url = (imageUrl ?? '').trim();
-    if (url.isEmpty) {
-      return ColoredBox(color: color);
-    }
-
+    final theme = DesktopThemeExtension.of(context);
     return Stack(
       fit: StackFit.expand,
       children: [
-        ImageFiltered(
-          imageFilter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: CachedNetworkImage(
-            imageUrl: url,
-            fit: BoxFit.cover,
-            placeholder: (_, __) => ColoredBox(color: color),
-            errorWidget: (_, __, ___) => ColoredBox(color: color),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                theme.background.withValues(alpha: 0.12),
+                Colors.transparent,
+              ],
+            ),
           ),
         ),
-        ColoredBox(color: Colors.black.withValues(alpha: 0.26)),
+        Positioned(
+          left: -80,
+          top: -70,
+          child: Container(
+            width: 260,
+            height: 260,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: theme.accent.withValues(alpha: 0.06),
+            ),
+          ),
+        ),
+        Positioned(
+          right: -60,
+          top: 120,
+          child: Container(
+            width: 220,
+            height: 220,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: theme.accent.withValues(alpha: 0.04),
+            ),
+          ),
+        ),
       ],
     );
   }
 }
 
-class _CategoryStripSection extends StatelessWidget {
-  const _CategoryStripSection({
+class _MediaCategorySection extends StatelessWidget {
+  const _MediaCategorySection({
     required this.libraries,
     required this.appState,
     required this.access,
     required this.onOpenItem,
+    required this.language,
   });
 
   final List<LibraryInfo> libraries;
   final AppState appState;
   final ServerAccess? access;
   final ValueChanged<MediaItem> onOpenItem;
+  final DesktopUiLanguage language;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Media',
+          _t(
+            language: language,
+            zh: '\u6211\u7684\u5a92\u4f53',
+            en: 'My Media',
+          ),
           style: TextStyle(
-            color: desktopTheme.textPrimary,
-            fontSize: 38,
-            fontWeight: FontWeight.w800,
+            color: theme.textPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 168,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: libraries.length,
-            itemBuilder: (context, index) {
-              final library = libraries[index];
-              final preview = appState.getHome('lib_${library.id}');
-              return _CategoryCard(
-                index: index,
-                library: library,
-                preview: preview,
-                access: access,
-                onOpenItem: onOpenItem,
+        const SizedBox(height: 16),
+        if (libraries.isEmpty)
+          Text(
+            _t(
+              language: language,
+              zh: '\u6682\u65e0\u5206\u7c7b',
+              en: 'No categories',
+            ),
+            style: TextStyle(color: theme.textMuted),
+          )
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final maxWidth = constraints.maxWidth;
+              const spacing = 16.0;
+              final columns = (maxWidth / (140 + spacing)).floor().clamp(3, 8);
+              final cardWidth = ((maxWidth - (columns - 1) * spacing) / columns)
+                  .clamp(120.0, 160.0);
+              final cardHeight = cardWidth / 1.4;
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: libraries.map((library) {
+                  final preview = appState.getHome('lib_${library.id}');
+                  return _CategoryCard(
+                    width: cardWidth,
+                    height: cardHeight,
+                    library: library,
+                    preview: preview,
+                    access: access,
+                    onOpenItem: onOpenItem,
+                    language: language,
+                  );
+                }).toList(growable: false),
               );
             },
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
           ),
-        ),
       ],
     );
   }
@@ -330,100 +390,137 @@ class _CategoryStripSection extends StatelessWidget {
 
 class _CategoryCard extends StatelessWidget {
   const _CategoryCard({
-    required this.index,
+    required this.width,
+    required this.height,
     required this.library,
     required this.preview,
     required this.access,
     required this.onOpenItem,
+    required this.language,
   });
 
-  final int index;
+  final double width;
+  final double height;
   final LibraryInfo library;
   final List<MediaItem> preview;
   final ServerAccess? access;
   final ValueChanged<MediaItem> onOpenItem;
-
-  static const List<List<Color>> _palette = [
-    [Color(0xFF0C7B7B), Color(0xFF128CB2)],
-    [Color(0xFFAA111B), Color(0xFF5F1C87)],
-    [Color(0xFF1E2B8B), Color(0xFF185EA1)],
-    [Color(0xFF6116A5), Color(0xFF2766C6)],
-    [Color(0xFF2A6C90), Color(0xFF4B87B9)],
-    [Color(0xFFA55B80), Color(0xFFB57A9C)],
-    [Color(0xFF993976), Color(0xFFA84D8B)],
-    [Color(0xFF19703D), Color(0xFF26924A)],
-  ];
+  final DesktopUiLanguage language;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
-    final colors = _palette[index % _palette.length];
-    final posters = preview.take(4).toList(growable: false);
+    final theme = DesktopThemeExtension.of(context);
+    final coverItem = preview.firstWhere(
+      (item) => item.hasImage,
+      orElse: () => preview.isEmpty
+          ? MediaItem(
+              id: '',
+              name: '',
+              type: '',
+              overview: '',
+              communityRating: null,
+              premiereDate: null,
+              genres: const [],
+              runTimeTicks: null,
+              sizeBytes: null,
+              container: null,
+              providerIds: const {},
+              seriesId: null,
+              seriesName: '',
+              seasonName: '',
+              seasonNumber: null,
+              episodeNumber: null,
+              hasImage: false,
+              playbackPositionTicks: 0,
+              played: false,
+              people: const [],
+            )
+          : preview.first,
+    );
+    final imageUrl = coverItem.id.isEmpty
+        ? null
+        : _imageUrl(
+              access: access,
+              item: coverItem,
+              imageType: 'Backdrop',
+              maxWidth: 640,
+            ) ??
+            _imageUrl(
+              access: access,
+              item: coverItem,
+              imageType: 'Primary',
+              maxWidth: 480,
+            );
 
-    return SizedBox(
-      width: 180,
-      child: Column(
+    final label = library.name.trim().isEmpty
+        ? _t(
+            language: language,
+            zh: '\u5206\u7c7b',
+            en: 'Category',
+          )
+        : library.name;
+
+    return _HoverScaleCard(
+      width: width,
+      height: height,
+      borderRadius: 8,
+      onTap: preview.isEmpty ? null : () => onOpenItem(preview.first),
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: preview.isEmpty ? null : () => onOpenItem(preview.first),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: colors,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.28),
-                      blurRadius: 16,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
+          if ((imageUrl ?? '').isNotEmpty)
+            CachedNetworkImage(
+              imageUrl: imageUrl!,
+              fit: BoxFit.cover,
+              placeholder: (_, __) => ColoredBox(color: theme.surfaceElevated),
+              errorWidget: (_, __, ___) =>
+                  ColoredBox(color: theme.surfaceElevated),
+            )
+          else
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [theme.surfaceElevated, theme.surface],
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Align(
-                        alignment: Alignment.topLeft,
-                        child: Text(
-                          library.name.trim().isEmpty ? 'Library' : library.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      for (var i = 0; i < 4; i++)
-                        _CategoryPoster(
-                          left: 68 + i * 21,
-                          top: 8 + i * 6,
-                          item: i < posters.length ? posters[i] : null,
-                          access: access,
-                        ),
-                    ],
-                  ),
+              ),
+            ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    theme.categoryOverlay,
+                  ],
+                  stops: const [0.45, 1.0],
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            library.name.trim().isEmpty ? 'Library' : library.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: desktopTheme.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
+          Positioned(
+            left: 10,
+            right: 10,
+            bottom: 8,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: theme.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                shadows: const [
+                  Shadow(
+                    color: Colors.black54,
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -432,72 +529,37 @@ class _CategoryCard extends StatelessWidget {
   }
 }
 
-class _CategoryPoster extends StatelessWidget {
-  const _CategoryPoster({
-    required this.left,
-    required this.top,
-    required this.item,
-    required this.access,
-  });
-
-  final double left;
-  final double top;
-  final MediaItem? item;
-  final ServerAccess? access;
-
-  @override
-  Widget build(BuildContext context) {
-    final imageUrl = _imageUrl(
-      access: access,
-      item: item,
-      imageType: 'Primary',
-      maxWidth: 280,
-    );
-
-    return Positioned(
-      left: left,
-      top: top,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: SizedBox(
-          width: 44,
-          height: 62,
-          child: imageUrl == null
-              ? const ColoredBox(color: Color(0x44000000))
-              : CachedNetworkImage(
-                  imageUrl: imageUrl,
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => const ColoredBox(
-                    color: Color(0x44000000),
-                  ),
-                  errorWidget: (_, __, ___) => const ColoredBox(
-                    color: Color(0x44000000),
-                  ),
-                ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PosterRowSection extends StatelessWidget {
-  const _PosterRowSection({
-    required this.title,
+class _PosterRailSection extends StatelessWidget {
+  const _PosterRailSection({
+    required this.prefixTitle,
+    required this.highlightedTitle,
     required this.items,
     required this.access,
+    required this.loading,
+    required this.language,
     required this.onOpenItem,
-    this.loading = false,
+    required this.isFavorite,
+    required this.onToggleFavorite,
+    this.showProgress = false,
   });
 
-  final String title;
+  final String prefixTitle;
+  final String highlightedTitle;
   final List<MediaItem> items;
   final ServerAccess? access;
-  final ValueChanged<MediaItem> onOpenItem;
   final bool loading;
+  final DesktopUiLanguage language;
+  final ValueChanged<MediaItem> onOpenItem;
+  final bool Function(String itemId) isFavorite;
+  final ValueChanged<String> onToggleFavorite;
+  final bool showProgress;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
+    final theme = DesktopThemeExtension.of(context);
+    final sectionTitle = highlightedTitle.trim().isEmpty
+        ? _t(language: language, zh: '\u5206\u533a', en: 'Section')
+        : highlightedTitle;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -505,22 +567,31 @@ class _PosterRowSection extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Text(
-                title.trim().isEmpty ? 'Section' : title,
-                style: TextStyle(
-                  color: desktopTheme.textPrimary,
-                  fontSize: 44,
-                  fontWeight: FontWeight.w800,
-                  height: 1.02,
+              child: RichText(
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                text: TextSpan(
+                  style: TextStyle(
+                    color: theme.textPrimary,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  children: [
+                    TextSpan(text: prefixTitle),
+                    const TextSpan(text: '  '),
+                    TextSpan(
+                      text: sectionTitle,
+                      style: TextStyle(color: theme.textMuted),
+                    ),
+                  ],
                 ),
               ),
             ),
-            Text(
-              'View All',
-              style: TextStyle(
-                color: desktopTheme.textMuted.withValues(alpha: 0.92),
-                fontSize: 22,
-                fontWeight: FontWeight.w600,
+            _ViewAllLink(
+              label: _t(
+                language: language,
+                zh: '\u67e5\u770b\u5168\u90e8',
+                en: 'View all',
               ),
             ),
           ],
@@ -528,37 +599,47 @@ class _PosterRowSection extends StatelessWidget {
         const SizedBox(height: 16),
         if (loading)
           SizedBox(
-            height: 320,
+            height: 294,
             child: Center(
               child: Text(
-                'Loading...',
-                style: TextStyle(color: desktopTheme.textMuted),
+                _t(
+                    language: language,
+                    zh: '\u52a0\u8f7d\u4e2d...',
+                    en: 'Loading...'),
+                style: TextStyle(color: theme.textMuted),
               ),
             ),
           )
         else if (items.isEmpty)
           SizedBox(
-            height: 320,
+            height: 294,
             child: Center(
               child: Text(
-                'No media found',
-                style: TextStyle(color: desktopTheme.textMuted),
+                _t(
+                    language: language,
+                    zh: '\u6682\u65e0\u5185\u5bb9',
+                    en: 'No media found'),
+                style: TextStyle(color: theme.textMuted),
               ),
             ),
           )
         else
           SizedBox(
-            height: 350,
+            height: 294,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              clipBehavior: Clip.none,
               itemCount: items.length,
               itemBuilder: (context, index) {
                 final item = items[index];
-                return _HomePosterCard(
+                return DesktopMediaCard(
                   item: item,
                   access: access,
+                  width: 160,
+                  imageAspectRatio: 2 / 3,
+                  showProgress: showProgress,
+                  isFavorite: isFavorite(item.id),
                   onTap: () => onOpenItem(item),
+                  onToggleFavorite: () => onToggleFavorite(item.id),
                 );
               },
               separatorBuilder: (_, __) => const SizedBox(width: 16),
@@ -569,155 +650,152 @@ class _PosterRowSection extends StatelessWidget {
   }
 }
 
-class _HomePosterCard extends StatelessWidget {
-  const _HomePosterCard({
-    required this.item,
-    required this.access,
-    required this.onTap,
+class _HoverScaleCard extends StatefulWidget {
+  const _HoverScaleCard({
+    required this.child,
+    required this.width,
+    required this.height,
+    required this.borderRadius,
+    this.onTap,
   });
 
-  final MediaItem item;
-  final ServerAccess? access;
-  final VoidCallback onTap;
+  final Widget child;
+  final double width;
+  final double height;
+  final double borderRadius;
+  final VoidCallback? onTap;
+
+  @override
+  State<_HoverScaleCard> createState() => _HoverScaleCardState();
+}
+
+class _HoverScaleCardState extends State<_HoverScaleCard> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  bool get _active => _hovered || _focused;
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
-    final imageUrl = _imageUrl(
-      access: access,
-      item: item,
-      imageType: 'Primary',
-      maxWidth: 560,
-    );
-    final subtitle = _buildSubtitle(item);
-    final badge = (item.id.hashCode.abs() % 320) + 1;
-    final active = item.playbackPositionTicks > 0;
-
-    return SizedBox(
-      width: 186,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: active
-                        ? const Color(0xFF5AC54A)
-                        : desktopTheme.border.withValues(alpha: 0.65),
-                    width: active ? 3 : 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      blurRadius: 18,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (imageUrl != null)
-                        CachedNetworkImage(
-                          imageUrl: imageUrl,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => _posterFallback(desktopTheme),
-                          errorWidget: (_, __, ___) => _posterFallback(desktopTheme),
-                        )
-                      else
-                        _posterFallback(desktopTheme),
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF4CB948),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Text(
-                            '$badge',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
+    final theme = DesktopThemeExtension.of(context);
+    return FocusableActionDetector(
+      onShowHoverHighlight: (value) => setState(() => _hovered = value),
+      onShowFocusHighlight: (value) => setState(() => _focused = value),
+      mouseCursor: widget.onTap != null
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic,
+      child: AnimatedScale(
+        scale: _active ? 1.05 : 1.0,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        child: SizedBox(
+          width: widget.width,
+          height: widget.height,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(widget.borderRadius),
+              boxShadow: _active
+                  ? [
+                      BoxShadow(
+                        color: theme.shadowColor.withValues(alpha: 0.9),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
                       ),
-                      if (active)
-                        Align(
-                          alignment: Alignment.center,
-                          child: Container(
-                            width: 58,
-                            height: 58,
-                            decoration: BoxDecoration(
-                              color: const Color(0xD94CB948),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: const Icon(
-                              Icons.play_arrow_rounded,
-                              color: Colors.white,
-                              size: 34,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+                    ]
+                  : null,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(widget.borderRadius),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: widget.onTap,
+                  child: widget.child,
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              item.name.trim().isEmpty ? 'Untitled' : item.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: desktopTheme.textPrimary,
-                fontSize: 15.5,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: desktopTheme.textMuted,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _posterFallback(DesktopThemeExtension desktopTheme) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            desktopTheme.surface,
-            desktopTheme.surfaceElevated,
-          ],
+class _ViewAllLink extends StatefulWidget {
+  const _ViewAllLink({required this.label});
+
+  final String label;
+
+  @override
+  State<_ViewAllLink> createState() => _ViewAllLinkState();
+}
+
+class _ViewAllLinkState extends State<_ViewAllLink> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Text(
+        widget.label,
+        style: TextStyle(
+          color: _hovered ? theme.accent : theme.link,
+          fontSize: 13,
+          fontWeight: FontWeight.w400,
         ),
+      ),
+    );
+  }
+}
+
+class _FavoritesEmptySection extends StatelessWidget {
+  const _FavoritesEmptySection({required this.language});
+
+  final DesktopUiLanguage language;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+      decoration: BoxDecoration(
+        color: theme.surface.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _t(
+              language: language,
+              zh: '\u8fd8\u6ca1\u6709\u6536\u85cf',
+              en: 'No favorites yet',
+            ),
+            style: TextStyle(
+              color: theme.textPrimary,
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _t(
+              language: language,
+              zh: '\u5728\u4e3b\u9875\u5361\u7247\u70b9\u51fb\u7231\u5fc3\uff0c\u5c31\u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc',
+              en: 'Tap heart on cards from Home to collect favorites here.',
+            ),
+            style: TextStyle(
+              color: theme.textMuted,
+              fontSize: 13,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -727,18 +805,21 @@ class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({
     required this.message,
     required this.onRetry,
+    required this.language,
   });
 
   final String message;
   final VoidCallback onRetry;
+  final DesktopUiLanguage language;
 
   @override
   Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0x2EE14E4E),
+        color: const Color(0x29FF5A5A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x66FF8C8C)),
+        border: Border.all(color: const Color(0x66FF7F7F)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -751,12 +832,15 @@ class _ErrorBanner extends StatelessWidget {
                 message,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: theme.textPrimary),
               ),
             ),
             const SizedBox(width: 10),
             TextButton(
               onPressed: onRetry,
-              child: const Text('Retry'),
+              child: Text(
+                _t(language: language, zh: '\u91cd\u8bd5', en: 'Retry'),
+              ),
             ),
           ],
         ),
@@ -765,12 +849,12 @@ class _ErrorBanner extends StatelessWidget {
   }
 }
 
-String _buildSubtitle(MediaItem item) {
-  final year = mediaYear(item);
-  if (year.isEmpty) {
-    return item.played ? 'Completed' : 'Ongoing';
-  }
-  return item.played ? '$year • Completed' : '$year • Ongoing';
+String _t({
+  required DesktopUiLanguage language,
+  required String zh,
+  required String en,
+}) {
+  return language.pick(zh: zh, en: en);
 }
 
 String? _imageUrl({

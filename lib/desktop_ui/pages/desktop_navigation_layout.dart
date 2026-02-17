@@ -24,6 +24,8 @@ class DesktopNavigationLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final desktopTheme = DesktopThemeExtension.of(context);
     final showSidebar = sidebarVisible && sidebarWidth > 0;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final horizontalPadding = screenWidth >= 1120 ? 40.0 : 24.0;
 
     return Stack(
       children: [
@@ -33,35 +35,35 @@ class DesktopNavigationLayout extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                desktopTheme.backgroundGradientStart,
+                desktopTheme.background,
                 desktopTheme.backgroundGradientEnd,
               ],
             ),
           ),
           child: const SizedBox.expand(),
         ),
-        Positioned(
-          left: -120,
-          top: -140,
-          child: _GlowSpot(
-            size: 360,
-            color: desktopTheme.accent.withValues(alpha: 0.12),
+        SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                    horizontalPadding, 0, horizontalPadding, 0),
+                child: topBar,
+              ),
+              const SizedBox(height: 22),
+              Expanded(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    horizontalPadding,
+                    0,
+                    horizontalPadding,
+                    24,
+                  ),
+                  child: content,
+                ),
+              ),
+            ],
           ),
-        ),
-        Positioned(
-          right: -130,
-          top: 120,
-          child: _GlowSpot(
-            size: 300,
-            color: desktopTheme.focus.withValues(alpha: 0.08),
-          ),
-        ),
-        Column(
-          children: [
-            topBar,
-            const SizedBox(height: 14),
-            Expanded(child: content),
-          ],
         ),
         if (showSidebar)
           Positioned.fill(
@@ -69,45 +71,21 @@ class DesktopNavigationLayout extends StatelessWidget {
               behavior: HitTestBehavior.opaque,
               onTap: onDismissSidebar,
               child: ColoredBox(
-                color: Colors.black.withValues(alpha: 0.26),
+                color: Colors.black.withValues(alpha: 0.32),
               ),
             ),
           ),
         if (showSidebar)
-          Align(
-            alignment: Alignment.centerLeft,
+          Positioned(
+            top: 72,
+            bottom: 24,
+            left: 16,
             child: SizedBox(
               width: sidebarWidth,
               child: sidebar,
             ),
           ),
       ],
-    );
-  }
-}
-
-class _GlowSpot extends StatelessWidget {
-  const _GlowSpot({
-    required this.size,
-    required this.color,
-  });
-
-  final double size;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [color, Colors.transparent],
-          ),
-        ),
-      ),
     );
   }
 }

@@ -21,8 +21,8 @@ class DesktopSidebarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final desktopTheme = DesktopThemeExtension.of(context);
-    final fg = selected ? desktopTheme.textPrimary : desktopTheme.textMuted;
+    final theme = DesktopThemeExtension.of(context);
+    final fg = selected ? theme.textPrimary : theme.textMuted;
 
     return HoverEffectWrapper(
       onTap: onTap,
@@ -31,13 +31,13 @@ class DesktopSidebarItem extends StatelessWidget {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: selected
-              ? desktopTheme.accent.withValues(alpha: 0.18)
+              ? theme.topTabActiveBackground
               : Colors.white.withValues(alpha: 0.02),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected
-                ? desktopTheme.accent.withValues(alpha: 0.45)
-                : desktopTheme.border.withValues(alpha: 0.2),
+                ? theme.accent.withValues(alpha: 0.42)
+                : theme.border.withValues(alpha: 0.24),
           ),
         ),
         child: Padding(
@@ -52,7 +52,7 @@ class DesktopSidebarItem extends StatelessWidget {
               Icon(
                 icon,
                 size: 20,
-                color: selected ? desktopTheme.accent : fg,
+                color: selected ? theme.accent : fg,
               ),
               if (!collapsed) ...[
                 const SizedBox(width: 12),

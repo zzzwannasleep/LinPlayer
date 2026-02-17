@@ -13,11 +13,13 @@ import '../play_network_page_exo.dart';
 import '../server_page.dart';
 import '../settings_page.dart';
 import 'mock/desktop_ui_preview_page.dart';
+import 'models/desktop_ui_language.dart';
 import 'pages/desktop_detail_page.dart';
 import 'pages/desktop_library_page.dart';
 import 'pages/desktop_navigation_layout.dart';
 import 'pages/desktop_search_page.dart';
 import 'pages/desktop_server_page.dart';
+import 'pages/desktop_ui_settings_page.dart';
 import 'pages/desktop_webdav_home_page.dart';
 import 'theme/desktop_theme_extension.dart';
 import 'view_models/desktop_detail_view_model.dart';
@@ -83,7 +85,9 @@ class _DesktopWorkspace extends StatefulWidget {
 
 class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   _DesktopSection _section = _DesktopSection.library;
+  DesktopHomeTab _homeTab = DesktopHomeTab.home;
   bool _sidebarCollapsed = true;
+  DesktopUiLanguage _uiLanguage = DesktopUiLanguage.zhCn;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   int _refreshSignal = 0;
@@ -97,12 +101,27 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   }
 
   ThemeData _withDesktopTheme(ThemeData base) {
-    final current = base.extension<DesktopThemeExtension>();
-    if (current != null) return base;
-    final extensions = base.extensions.values.toList();
-    extensions.add(DesktopThemeExtension.fallback(base.brightness));
+    final fallback = DesktopThemeExtension.fallback(base.brightness);
+    final existing = base.extension<DesktopThemeExtension>();
+    final desktopTheme = existing ?? fallback;
+    final extensions = base.extensions.values
+        .where((ext) => ext is! DesktopThemeExtension)
+        .toList();
+    extensions.add(desktopTheme);
+
+    final scheme = ColorScheme.fromSeed(
+      seedColor: desktopTheme.accent,
+      brightness: base.brightness,
+    ).copyWith(
+      primary: desktopTheme.accent,
+      surface: desktopTheme.surface,
+    );
 
     return base.copyWith(
+      colorScheme: scheme,
+      scaffoldBackgroundColor: desktopTheme.background,
+      canvasColor: desktopTheme.background,
+      cardColor: desktopTheme.surface,
       extensions: extensions,
     );
   }
@@ -120,7 +139,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         unawaited(_openServerManager());
         break;
       case 'settings':
-        unawaited(_openSettings());
+        unawaited(_openDesktopUiSettings());
         break;
       case 'detail':
         if (_detailViewModel != null) {
@@ -128,6 +147,13 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         }
         break;
     }
+  }
+
+  void _handleHomeTabChanged(DesktopHomeTab tab) {
+    setState(() {
+      _homeTab = tab;
+      _section = _DesktopSection.library;
+    });
   }
 
   void _toggleSidebar() {
@@ -230,6 +256,19 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     );
   }
 
+  Future<void> _openDesktopUiSettings() async {
+    final selected = await Navigator.of(context).push<DesktopUiLanguage>(
+      MaterialPageRoute(
+        builder: (_) => DesktopUiSettingsPage(
+          initialLanguage: _uiLanguage,
+          onOpenSystemSettings: _openSettings,
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    setState(() => _uiLanguage = selected);
+  }
+
   Future<void> _openServerManager() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -264,6 +303,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           appState: widget.appState,
           refreshSignal: _refreshSignal,
           onOpenItem: _openDetail,
+          activeTab: _homeTab,
+          language: _uiLanguage,
         );
       case _DesktopSection.search:
         return DesktopSearchPage(
@@ -276,7 +317,13 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       case _DesktopSection.detail:
         final vm = _detailViewModel;
         if (vm == null) {
-          return const Center(child: Text('No detail selected'));
+          return Center(
+            child: Text(
+              _uiLanguage.pick(
+                  zh: '\u672a\u9009\u62e9\u8be6\u60c5\u5185\u5bb9',
+                  en: 'No detail selected'),
+            ),
+          );
         }
         return DesktopDetailPage(
           key: ValueKey<String>(vm.detail.id),
@@ -297,10 +344,21 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         builder: (context) {
           final desktopTheme = DesktopThemeExtension.of(context);
           final title = switch (_section) {
-            _DesktopSection.library => 'Library',
-            _DesktopSection.search => 'Search',
-            _DesktopSection.detail =>
-              _detailViewModel?.detail.name ?? 'Media Detail',
+            _DesktopSection.library => _uiLanguage.pick(
+                zh: _homeTab == DesktopHomeTab.home
+                    ? '\u4e3b\u9875'
+                    : '\u559c\u6b22',
+                en: _homeTab == DesktopHomeTab.home ? 'Home' : 'Favorites',
+              ),
+            _DesktopSection.search => _uiLanguage.pick(
+                zh: '\u641c\u7d22',
+                en: 'Search',
+              ),
+            _DesktopSection.detail => _detailViewModel?.detail.name ??
+                _uiLanguage.pick(
+                  zh: '\u8be6\u60c5',
+                  en: 'Media Detail',
+                ),
           };
           final selectedSidebarId = switch (_section) {
             _DesktopSection.library => 'library',
@@ -320,30 +378,45 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                       onDismissSidebar: _hideSidebar,
                       sidebar: DesktopSidebar(
                         destinations: <DesktopSidebarDestination>[
-                          const DesktopSidebarDestination(
+                          DesktopSidebarDestination(
                             id: 'library',
-                            label: 'Library',
+                            label: _uiLanguage.pick(
+                              zh: '\u5a92\u4f53\u5e93',
+                              en: 'Library',
+                            ),
                             icon: Icons.video_library_outlined,
                           ),
-                          const DesktopSidebarDestination(
+                          DesktopSidebarDestination(
                             id: 'search',
-                            label: 'Search',
+                            label: _uiLanguage.pick(
+                              zh: '\u641c\u7d22',
+                              en: 'Search',
+                            ),
                             icon: Icons.search_rounded,
                           ),
                           DesktopSidebarDestination(
                             id: 'detail',
-                            label: 'Detail',
+                            label: _uiLanguage.pick(
+                              zh: '\u8be6\u60c5',
+                              en: 'Detail',
+                            ),
                             icon: Icons.movie_outlined,
                             enabled: _detailViewModel != null,
                           ),
-                          const DesktopSidebarDestination(
+                          DesktopSidebarDestination(
                             id: 'servers',
-                            label: 'Servers',
+                            label: _uiLanguage.pick(
+                              zh: '\u670d\u52a1\u5668',
+                              en: 'Servers',
+                            ),
                             icon: Icons.storage_outlined,
                           ),
-                          const DesktopSidebarDestination(
+                          DesktopSidebarDestination(
                             id: 'settings',
-                            label: 'Settings',
+                            label: _uiLanguage.pick(
+                              zh: '\u8bbe\u7f6e',
+                              en: 'Settings',
+                            ),
                             icon: Icons.settings_outlined,
                           ),
                         ],
@@ -354,7 +427,10 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                       ),
                       topBar: DesktopTopBar(
                         title: title,
+                        language: _uiLanguage,
                         showSearch: _section != _DesktopSection.library,
+                        homeTab: _homeTab,
+                        onHomeTabChanged: _handleHomeTabChanged,
                         showBack: _section == _DesktopSection.detail,
                         onBack: () => setState(
                           () => _section = _DesktopSection.library,
@@ -364,7 +440,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                         onSearchChanged: _handleSearchChanged,
                         onSearchSubmitted: _handleSearchSubmitted,
                         onRefresh: _refreshCurrentPage,
-                        onOpenSettings: _openSettings,
+                        onOpenSettings: _openDesktopUiSettings,
+                        searchHint: _uiLanguage.pick(
+                          zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
+                          en: 'Search series or movies',
+                        ),
                       ),
                       content: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 180),
