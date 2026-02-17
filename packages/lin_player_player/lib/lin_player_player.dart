@@ -1,8 +1,7 @@
-/// Player foundations for LinPlayer.
-///
-/// Includes mpv/media_kit wrappers, danmaku, playback controls, thumbnail/track
-/// helpers, and related utilities.
-library lin_player_player;
+// Player foundations for LinPlayer.
+//
+// Includes mpv/media_kit wrappers, danmaku, playback controls, thumbnail/track
+// helpers, and related utilities.
 
 export 'dandanplay_api.dart';
 export 'player_service.dart';

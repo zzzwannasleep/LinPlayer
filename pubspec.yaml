@@ -26,7 +26,7 @@ dependencies:
   lin_player_state:
     path: packages/lin_player_state
   
-  file_picker: ^8.0.0+1
+  file_picker: ^10.3.10
   http: ^1.2.2
   crypto: ^3.0.3
   cryptography: ^2.7.0
@@ -53,13 +53,13 @@ dependencies:
   path_provider: ^2.1.2
   qr_flutter: ^4.1.0
   webview_flutter: ^4.4.2
-  archive: ^3.6.1
+  archive: ^4.0.8
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  flutter_lints: ^3.0.0
+  flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
 
 dependency_overrides:

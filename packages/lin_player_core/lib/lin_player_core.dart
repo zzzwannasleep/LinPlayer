@@ -1,5 +1,3 @@
-library lin_player_core;
-
 export 'app_config/app_config.dart';
 export 'app_config/app_feature_flags.dart';
 export 'app_config/app_product.dart';

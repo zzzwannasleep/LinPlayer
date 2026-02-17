@@ -1,8 +1,7 @@
-/// Global state & persistence for LinPlayer.
-///
-/// Hosts `AppState`, server models, backup import/export and other stateful
-/// building blocks. UI should depend on this package, not the other way around.
-library lin_player_state;
+// Global state & persistence for LinPlayer.
+//
+// Hosts `AppState`, server models, backup import/export and other stateful
+// building blocks. UI should depend on this package, not the other way around.
 
 export 'app_state.dart';
 export 'backup_crypto.dart';
