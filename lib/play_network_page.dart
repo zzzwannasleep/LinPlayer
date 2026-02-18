@@ -177,6 +177,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   bool _desktopDanmakuOnlineLoading = false;
   bool _desktopDanmakuManualLoading = false;
   bool _desktopLineLoading = false;
+  bool _desktopFullscreen = false;
   double _danmakuTimeOffsetSeconds = 0.0;
 
   final GlobalKey<DanmakuStageState> _danmakuKey =
@@ -4192,11 +4193,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _showSubtitleTracks(context);
       return;
     }
-    if (panel == _DesktopSidePanel.danmaku) {
-      // ignore: unawaited_futures
-      unawaited(_showDanmakuSheet());
-      return;
-    }
     if (panel == _DesktopSidePanel.none) {
       setState(() {
         _desktopSidePanel = _DesktopSidePanel.none;
@@ -4220,6 +4216,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     } else {
       _showControls(scheduleHide: false);
     }
+  }
+
+  void _toggleDesktopFullscreen() {
+    setState(() {
+      _desktopFullscreen = !_desktopFullscreen;
+      _desktopSidePanel = _DesktopSidePanel.none;
+      _desktopSpeedPanelVisible = false;
+    });
+    _showControls(scheduleHide: false);
   }
 
   Future<void> _loadDesktopLineSources({bool forceRefresh = false}) async {
@@ -4498,22 +4503,33 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final shellBorder = isDark
         ? Colors.white.withValues(alpha: 0.1)
         : Colors.black.withValues(alpha: 0.08);
+    final shellRadius = BorderRadius.circular(_desktopFullscreen ? 0 : 30);
 
     return SafeArea(
+      top: !_desktopFullscreen,
+      bottom: !_desktopFullscreen,
+      left: !_desktopFullscreen,
+      right: !_desktopFullscreen,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          _buildDesktopBackdrop(isDark: isDark),
+          _desktopFullscreen
+              ? const ColoredBox(color: Colors.black)
+              : _buildDesktopBackdrop(isDark: isDark),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            padding: _desktopFullscreen
+                ? EdgeInsets.zero
+                : const EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: _buildDesktopGlassPanel(
               context: context,
-              blurSigma: 14,
-              color: shellColor,
-              borderRadius: BorderRadius.circular(30),
-              borderColor: shellBorder,
+              blurSigma: _desktopFullscreen ? 0 : 14,
+              color: _desktopFullscreen ? Colors.transparent : shellColor,
+              borderRadius: shellRadius,
+              borderColor: _desktopFullscreen ? Colors.transparent : shellBorder,
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: _desktopFullscreen
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.all(16),
                 child: _buildDesktopVideoSurface(
                   context,
                   isDark: isDark,
@@ -4593,6 +4609,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     required Duration duration,
     required bool isPlaying,
   }) {
+    final frameRadius = _desktopFullscreen ? 0.0 : 30.0;
     final panelColor =
         isDark ? const Color(0x99111113) : const Color(0xD9FFFFFF);
     final panelBorder = isDark
@@ -4601,12 +4618,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     return _buildDesktopGlassPanel(
       context: context,
-      blurSigma: 14,
-      color: panelColor,
-      borderRadius: BorderRadius.circular(30),
-      borderColor: panelBorder,
+      blurSigma: _desktopFullscreen ? 0 : 14,
+      color: _desktopFullscreen ? Colors.transparent : panelColor,
+      borderRadius: BorderRadius.circular(frameRadius),
+      borderColor: _desktopFullscreen ? Colors.transparent : panelBorder,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(frameRadius),
         child: DecoratedBox(
           decoration: const BoxDecoration(color: Colors.black),
           child: Stack(
@@ -4766,7 +4783,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                   ),
                 Positioned.fill(
                   child: SafeArea(
-                    minimum: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    minimum: _desktopFullscreen
+                        ? const EdgeInsets.fromLTRB(8, 8, 8, 8)
+                        : const EdgeInsets.fromLTRB(12, 12, 12, 12),
                     child: Stack(
                       children: [
                         Align(
@@ -4804,7 +4823,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                         Align(
                           alignment: Alignment.centerRight,
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(0, 56, 0, 124),
+                            padding: _desktopFullscreen
+                                ? const EdgeInsets.fromLTRB(0, 44, 0, 104)
+                                : const EdgeInsets.fromLTRB(0, 56, 0, 124),
                             child: AnimatedSlide(
                               duration: _desktopAnimDuration,
                               curve: Curves.easeOutCubic,
@@ -4858,25 +4879,31 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     required bool isDark,
     required bool controlsEnabled,
   }) {
-    final panelColor =
-        isDark ? const Color(0x4D111214) : const Color(0x4DFFFFFF);
-    final panelBorder = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.04);
     final titleColor = isDark ? Colors.white : Colors.black87;
     final subtitleColor = isDark ? Colors.white70 : Colors.black54;
+    final chipBg = isDark
+        ? Colors.black.withValues(alpha: 0.56)
+        : Colors.white.withValues(alpha: 0.9);
+    final chipBorder = isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.12);
 
     return _buildDesktopGlassPanel(
       context: context,
-      blurSigma: 8,
-      color: panelColor,
+      blurSigma: 0,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
-      borderColor: panelBorder,
+      borderColor: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         child: Row(
           children: [
             IconButton(
+              style: IconButton.styleFrom(
+                backgroundColor: chipBg,
+                foregroundColor: titleColor,
+                side: BorderSide(color: chipBorder),
+              ),
               tooltip: '返回',
               onPressed: Navigator.of(context).canPop()
                   ? () => Navigator.of(context).pop()
@@ -4905,14 +4932,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.black.withValues(alpha: 0.12)
-                          : Colors.black.withValues(alpha: 0.02),
+                      color: chipBg,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : Colors.black.withValues(alpha: 0.04),
+                        color: chipBorder,
                       ),
                     ),
                     child: Text(
@@ -5005,11 +5028,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         : (isDark ? Colors.white70 : Colors.black54);
     final bg = active
         ? (isDark
-            ? Colors.white.withValues(alpha: 0.10)
-            : Colors.black.withValues(alpha: 0.05))
+            ? Colors.white.withValues(alpha: 0.22)
+            : Colors.black.withValues(alpha: 0.14))
         : (isDark
-            ? Colors.black.withValues(alpha: 0.10)
-            : Colors.black.withValues(alpha: 0.015));
+            ? Colors.black.withValues(alpha: 0.56)
+            : Colors.white.withValues(alpha: 0.9));
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -5022,8 +5045,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.black.withValues(alpha: 0.04),
+                  ? Colors.white.withValues(alpha: 0.18)
+                  : Colors.black.withValues(alpha: 0.12),
             ),
           ),
           child: Row(
@@ -5966,10 +5989,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final sliderMaxMs = math.max(duration.inMilliseconds, 1);
     final sliderValueMs = _lastPosition.inMilliseconds.clamp(0, sliderMaxMs);
     final sliderEnabled = controlsEnabled && duration > Duration.zero;
+    final chipBg = isDark
+        ? Colors.black.withValues(alpha: 0.58)
+        : Colors.white.withValues(alpha: 0.92);
+    final chipBorder = isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.12);
     final iconColor = isDark ? Colors.white : Colors.black87;
     final secondaryIconColor = isDark ? Colors.white70 : Colors.black54;
-    final panelColor =
-        isDark ? const Color(0x4A121418) : const Color(0x52FFFFFF);
     final panelBorder = isDark
         ? Colors.white.withValues(alpha: 0.08)
         : Colors.black.withValues(alpha: 0.04);
@@ -5989,17 +6016,24 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     return _buildDesktopGlassPanel(
       context: context,
-      blurSigma: 18,
-      color: panelColor,
+      blurSigma: 0,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(24),
-      borderColor: panelBorder,
+      borderColor: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: chipBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: chipBorder),
+              ),
+              child: Row(
+                children: [
                 Text(
                   _fmtClock(_lastPosition),
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -6057,7 +6091,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                         color: secondaryIconColor,
                       ),
                 ),
-              ],
+                ],
+              ),
             ),
             if (_desktopSpeedPanelVisible) ...[
               const SizedBox(height: 8),
@@ -6139,8 +6174,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                 ),
               ),
             ],
-            const SizedBox(height: 4),
-            Row(
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: chipBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: chipBorder),
+              ),
+              child: Row(
               children: [
                 const SizedBox(width: 156),
                 Expanded(
@@ -6195,14 +6237,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                   ),
                 ),
                 SizedBox(
-                  width: 180,
+                  width: 236,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
-                          side: BorderSide(color: panelBorder),
+                          side: BorderSide(color: chipBorder),
                         ),
                         onPressed: !controlsEnabled
                             ? null
@@ -6220,7 +6262,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               },
                         child: Text('倍速 $speedHint'),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        tooltip:
+                            _desktopFullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                        onPressed:
+                            controlsEnabled ? _toggleDesktopFullscreen : null,
+                        icon: Icon(
+                          _desktopFullscreen
+                              ? Icons.fullscreen_exit
+                              : Icons.fullscreen,
+                          color: iconColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       IconButton(
                         tooltip: '选集',
                         onPressed: controlsEnabled
@@ -6239,6 +6294,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                 ),
               ],
             ),
+          ),
           ],
         ),
       ),

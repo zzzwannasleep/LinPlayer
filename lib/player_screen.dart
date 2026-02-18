@@ -110,6 +110,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   _DesktopSidePanel _desktopSidePanel = _DesktopSidePanel.none;
   bool _desktopEpisodeGridMode = false;
   bool _desktopSpeedPanelVisible = false;
+  bool _desktopFullscreen = false;
   int? _desktopSelectedSeason;
   bool _desktopDanmakuOnlineLoading = false;
   bool _desktopDanmakuManualLoading = false;
@@ -2466,22 +2467,33 @@ class _PlayerScreenState extends State<PlayerScreen>
     final shellBorder = isDark
         ? Colors.white.withValues(alpha: 0.1)
         : Colors.black.withValues(alpha: 0.08);
+    final shellRadius = BorderRadius.circular(_desktopFullscreen ? 0 : 30);
 
     return SafeArea(
+      top: !_desktopFullscreen,
+      bottom: !_desktopFullscreen,
+      left: !_desktopFullscreen,
+      right: !_desktopFullscreen,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          _buildDesktopBackdrop(isDark: isDark),
+          _desktopFullscreen
+              ? const ColoredBox(color: Colors.black)
+              : _buildDesktopBackdrop(isDark: isDark),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            padding: _desktopFullscreen
+                ? EdgeInsets.zero
+                : const EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: _buildDesktopGlassPanel(
               context: context,
-              blurSigma: 14,
-              color: shellColor,
-              borderRadius: BorderRadius.circular(30),
-              borderColor: shellBorder,
+              blurSigma: _desktopFullscreen ? 0 : 14,
+              color: _desktopFullscreen ? Colors.transparent : shellColor,
+              borderRadius: shellRadius,
+              borderColor: _desktopFullscreen ? Colors.transparent : shellBorder,
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: _desktopFullscreen
+                    ? EdgeInsets.zero
+                    : const EdgeInsets.all(16),
                 child: _buildDesktopVideoSurface(
                   context,
                   isDark: isDark,
@@ -2560,6 +2572,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     required String currentFileName,
   }) {
     final textTheme = Theme.of(context).textTheme;
+    final frameRadius = _desktopFullscreen ? 0.0 : 30.0;
     final panelColor = isDark ? const Color(0x99111113) : const Color(0xD9FFFFFF);
     final panelBorder = isDark
         ? Colors.white.withValues(alpha: 0.14)
@@ -2567,12 +2580,12 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     return _buildDesktopGlassPanel(
       context: context,
-      blurSigma: 14,
-      color: panelColor,
-      borderRadius: BorderRadius.circular(30),
-      borderColor: panelBorder,
+      blurSigma: _desktopFullscreen ? 0 : 14,
+      color: _desktopFullscreen ? Colors.transparent : panelColor,
+      borderRadius: BorderRadius.circular(frameRadius),
+      borderColor: _desktopFullscreen ? Colors.transparent : panelBorder,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(frameRadius),
         child: DecoratedBox(
           decoration: const BoxDecoration(color: Colors.black),
           child: Stack(
@@ -2754,7 +2767,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 alignment: Alignment.topCenter,
                 child: SafeArea(
                   bottom: false,
-                  minimum: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                  minimum: _desktopFullscreen
+                      ? const EdgeInsets.fromLTRB(8, 8, 8, 0)
+                      : const EdgeInsets.fromLTRB(16, 14, 16, 0),
                   child: AnimatedOpacity(
                     opacity: _controlsVisible ? 1 : 0,
                     duration: const Duration(milliseconds: 180),
@@ -2776,7 +2791,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 alignment: Alignment.centerRight,
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 74, 14, 126),
+                    padding: _desktopFullscreen
+                        ? const EdgeInsets.fromLTRB(0, 44, 0, 104)
+                        : const EdgeInsets.fromLTRB(0, 74, 14, 126),
                     child: AnimatedSlide(
                       offset: _desktopSidePanel == _DesktopSidePanel.none
                           ? const Offset(1.08, 0)
@@ -2800,7 +2817,9 @@ class _PlayerScreenState extends State<PlayerScreen>
                 alignment: Alignment.bottomCenter,
                 child: SafeArea(
                   top: false,
-                  minimum: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+                  minimum: _desktopFullscreen
+                      ? const EdgeInsets.fromLTRB(8, 0, 8, 8)
+                      : const EdgeInsets.fromLTRB(18, 0, 18, 14),
                   child: AnimatedOpacity(
                     opacity: _controlsVisible ? 1 : 0,
                     duration: const Duration(milliseconds: 200),
@@ -2832,10 +2851,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     final sliderMaxMs = math.max(_duration.inMilliseconds, 1);
     final sliderValueMs = _position.inMilliseconds.clamp(0, sliderMaxMs);
     final sliderEnabled = enabled && _duration > Duration.zero;
-    final panelColor = isDark ? const Color(0xD9101012) : const Color(0xEAFFFFFF);
-    final panelBorder = isDark
-        ? Colors.white.withValues(alpha: 0.12)
-        : Colors.black.withValues(alpha: 0.08);
+    final chipBg = isDark
+        ? Colors.black.withValues(alpha: 0.58)
+        : Colors.white.withValues(alpha: 0.92);
+    final chipBorder = isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.12);
     final timelineActive =
         isDark ? Colors.white.withValues(alpha: 0.92) : Colors.black87;
     final timelineBuffered =
@@ -2853,17 +2874,24 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     return _buildDesktopGlassPanel(
       context: context,
-      blurSigma: 18,
-      color: panelColor,
+      blurSigma: 0,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(24),
-      borderColor: panelBorder,
+      borderColor: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: chipBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: chipBorder),
+              ),
+              child: Row(
+                children: [
                 Text(
                   _fmtClock(_position),
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
@@ -2923,7 +2951,8 @@ class _PlayerScreenState extends State<PlayerScreen>
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                 ),
-              ],
+                ],
+              ),
             ),
             if (_desktopSpeedPanelVisible) ...[
               const SizedBox(height: 8),
@@ -2999,14 +3028,21 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ),
               ),
             ],
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                const SizedBox(width: 156),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: chipBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: chipBorder),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(width: 156),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
                       _desktopControlButton(
                         context,
                         isDark: isDark,
@@ -3050,14 +3086,14 @@ class _PlayerScreenState extends State<PlayerScreen>
                               }
                             : null,
                       ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                SizedBox(
-                  width: 156,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
+                  SizedBox(
+                    width: 236,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
@@ -3080,7 +3116,19 @@ class _PlayerScreenState extends State<PlayerScreen>
                         icon: const Icon(Icons.speed_outlined, size: 18),
                         label: Text(speedHint),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        tooltip:
+                            _desktopFullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                        onPressed: enabled ? _toggleDesktopFullscreen : null,
+                        icon: Icon(
+                          _desktopFullscreen
+                              ? Icons.fullscreen_exit
+                              : Icons.fullscreen,
+                          color: iconColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                       IconButton(
                         tooltip: '选集',
                         onPressed: rightActionEnabled
@@ -3093,10 +3141,11 @@ class _PlayerScreenState extends State<PlayerScreen>
                           color: iconColor,
                         ),
                       ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -3123,18 +3172,28 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  void _toggleDesktopFullscreen() {
+    setState(() {
+      _desktopFullscreen = !_desktopFullscreen;
+      _desktopSidePanel = _DesktopSidePanel.none;
+      _desktopSpeedPanelVisible = false;
+    });
+    _showControls(scheduleHide: false);
+  }
+
   Widget _buildDesktopTopStatusBar(
     BuildContext context, {
     required bool isDark,
     required String currentFileName,
   }) {
-    final panelColor =
-        isDark ? const Color(0xB8111214) : const Color(0xEAF9FAFD);
-    final panelBorder = isDark
-        ? Colors.white.withValues(alpha: 0.14)
-        : Colors.black.withValues(alpha: 0.08);
     final titleColor = isDark ? Colors.white : Colors.black87;
     final subtitleColor = isDark ? Colors.white70 : Colors.black54;
+    final chipBg = isDark
+        ? Colors.black.withValues(alpha: 0.56)
+        : Colors.white.withValues(alpha: 0.9);
+    final chipBorder = isDark
+        ? Colors.white.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.12);
     final hasCurrent = _currentlyPlayingIndex >= 0 &&
         _currentlyPlayingIndex < _playlist.length;
     final info = hasCurrent
@@ -3148,15 +3207,20 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     return _buildDesktopGlassPanel(
       context: context,
-      blurSigma: 14,
-      color: panelColor,
+      blurSigma: 0,
+      color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
-      borderColor: panelBorder,
+      borderColor: Colors.transparent,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
         child: Row(
           children: [
             IconButton(
+              style: IconButton.styleFrom(
+                backgroundColor: chipBg,
+                foregroundColor: titleColor,
+                side: BorderSide(color: chipBorder),
+              ),
               tooltip: '返回',
               onPressed: canPop ? () => Navigator.of(context).pop() : null,
               icon: const Icon(Icons.arrow_back_rounded),
@@ -3183,14 +3247,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.black.withValues(alpha: 0.36)
-                          : Colors.black.withValues(alpha: 0.04),
+                      color: chipBg,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.12)
-                            : Colors.black.withValues(alpha: 0.08),
+                        color: chipBorder,
                       ),
                     ),
                     child: Text(
@@ -3280,8 +3340,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             ? Colors.white.withValues(alpha: 0.22)
             : Colors.black.withValues(alpha: 0.12))
         : (isDark
-            ? Colors.black.withValues(alpha: 0.26)
-            : Colors.black.withValues(alpha: 0.04));
+            ? Colors.black.withValues(alpha: 0.56)
+            : Colors.white.withValues(alpha: 0.9));
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -3294,8 +3354,8 @@ class _PlayerScreenState extends State<PlayerScreen>
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.12)
-                  : Colors.black.withValues(alpha: 0.08),
+                  ? Colors.white.withValues(alpha: 0.18)
+                  : Colors.black.withValues(alpha: 0.12),
             ),
           ),
           child: Row(
