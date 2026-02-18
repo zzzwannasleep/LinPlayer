@@ -427,7 +427,9 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   bool get _editableTextFocused {
     final focusContext = FocusManager.instance.primaryFocus?.context;
-    return focusContext?.widget is EditableText;
+    if (focusContext == null) return false;
+    if (focusContext.widget is EditableText) return true;
+    return focusContext.findAncestorWidgetOfExactType<EditableText>() != null;
   }
 
   void _setDesktopBarHover({
@@ -470,7 +472,7 @@ class _PlayerScreenState extends State<PlayerScreen>
         _desktopSpaceKeyPressed = true;
         _showControls();
         // ignore: unawaited_futures
-        _togglePlayPause(showOverlay: false);
+        unawaited(_togglePlayPause(showOverlay: false));
         return KeyEventResult.handled;
       }
       if (event is KeyUpEvent) {
@@ -487,18 +489,22 @@ class _PlayerScreenState extends State<PlayerScreen>
     if (key == LogicalKeyboardKey.arrowLeft) {
       _showControls();
       // ignore: unawaited_futures
-      _seekRelative(
-        Duration(seconds: -_seekBackSeconds),
-        showOverlay: false,
+      unawaited(
+        _seekRelative(
+          Duration(seconds: -_seekBackSeconds),
+          showOverlay: false,
+        ),
       );
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
       _showControls();
       // ignore: unawaited_futures
-      _seekRelative(
-        Duration(seconds: _seekForwardSeconds),
-        showOverlay: false,
+      unawaited(
+        _seekRelative(
+          Duration(seconds: _seekForwardSeconds),
+          showOverlay: false,
+        ),
       );
       return KeyEventResult.handled;
     }
@@ -1962,8 +1968,10 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     _isTvDevice = _isTv(context);
 
-    final remoteEnabled =
-        _isTvDevice || (widget.appState?.forceRemoteControlKeys ?? false);
+    final useDesktopCinematic = _isDesktopCinematicMode;
+    final remoteEnabled = _isTvDevice ||
+        (!useDesktopCinematic &&
+            (widget.appState?.forceRemoteControlKeys ?? false));
     _remoteEnabled = remoteEnabled;
 
     Widget wrapVideo(Widget child) {
@@ -1973,7 +1981,6 @@ class _PlayerScreenState extends State<PlayerScreen>
 
     final isAndroid =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    final useDesktopCinematic = _isDesktopCinematicMode;
     final canPopRoute = Navigator.of(context).canPop();
     final needsSafeExit = isAndroid &&
         canPopRoute &&

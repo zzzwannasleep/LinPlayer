@@ -169,10 +169,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           defaultTargetPlatform == TargetPlatform.linux);
 
   static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
+  static const Duration _desktopControlsAutoHideDelay = Duration(seconds: 1);
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
   bool _isScrubbing = false;
   _DesktopSidePanel _desktopSidePanel = _DesktopSidePanel.none;
+  bool _desktopTopBarHovered = false;
+  bool _desktopBottomBarHovered = false;
+  bool _desktopSpaceKeyPressed = false;
   bool _desktopEpisodeGridMode = false;
   bool _desktopSpeedPanelVisible = false;
   bool _desktopDanmakuOnlineLoading = false;
@@ -2776,6 +2780,97 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _applyDanmakuPauseState(true);
   }
 
+  Duration get _activeControlsAutoHideDelay =>
+      _useDesktopPlaybackUi ? _desktopControlsAutoHideDelay : _controlsAutoHideDelay;
+
+  bool get _desktopBarsHovered => _desktopTopBarHovered || _desktopBottomBarHovered;
+
+  bool get _editableTextFocused {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) return false;
+    if (focusContext.widget is EditableText) return true;
+    return focusContext.findAncestorWidgetOfExactType<EditableText>() != null;
+  }
+
+  void _setDesktopBarHover({
+    required bool top,
+    required bool hover,
+  }) {
+    if (!_useDesktopPlaybackUi) return;
+    final changed =
+        top ? _desktopTopBarHovered != hover : _desktopBottomBarHovered != hover;
+    if (!changed) return;
+
+    setState(() {
+      if (top) {
+        _desktopTopBarHovered = hover;
+      } else {
+        _desktopBottomBarHovered = hover;
+      }
+      if (hover) _controlsVisible = true;
+    });
+
+    if (hover) {
+      _showControls(scheduleHide: false);
+    } else {
+      _scheduleControlsHide();
+    }
+  }
+
+  KeyEventResult _handleDesktopShortcutKeyEvent(KeyEvent event) {
+    if (!_useDesktopPlaybackUi || _remoteEnabled) {
+      return KeyEventResult.ignored;
+    }
+    if (_editableTextFocused || !_gesturesEnabled) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.space) {
+      if (event is KeyDownEvent) {
+        if (_desktopSpaceKeyPressed) return KeyEventResult.handled;
+        _desktopSpaceKeyPressed = true;
+        _showControls();
+        // ignore: unawaited_futures
+        unawaited(_togglePlayPause(showOverlay: false));
+        return KeyEventResult.handled;
+      }
+      if (event is KeyUpEvent) {
+        _desktopSpaceKeyPressed = false;
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _showControls();
+      // ignore: unawaited_futures
+      unawaited(
+        _seekRelative(
+          Duration(seconds: -_seekBackSeconds),
+          showOverlay: false,
+        ),
+      );
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _showControls();
+      // ignore: unawaited_futures
+      unawaited(
+        _seekRelative(
+          Duration(seconds: _seekForwardSeconds),
+          showOverlay: false,
+        ),
+      );
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   void _showControls({bool scheduleHide = true}) {
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
@@ -2845,14 +2940,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     if (_remoteEnabled) return;
-    if (!_controlsVisible || _isScrubbing) return;
+    if (_useDesktopPlaybackUi && _desktopBarsHovered) return;
     if (_desktopSidePanel != _DesktopSidePanel.none ||
         _desktopSpeedPanelVisible) {
       return;
     }
-    _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
+    if (!_controlsVisible || _isScrubbing) return;
+    _controlsHideTimer = Timer(_activeControlsAutoHideDelay, () {
       if (!mounted || _isScrubbing || _remoteEnabled) return;
-      setState(() => _controlsVisible = false);
+      if (_useDesktopPlaybackUi && _desktopBarsHovered) return;
+      setState(() {
+        _controlsVisible = false;
+        _desktopSidePanel = _DesktopSidePanel.none;
+        _desktopSpeedPanelVisible = false;
+      });
       // ignore: unawaited_futures
       _enterImmersiveMode();
     });
@@ -3346,16 +3447,21 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final duration = initialized ? _playerService.duration : Duration.zero;
     final isPlaying = initialized ? _playerService.isPlaying : false;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
-    final remoteEnabled = widget.isTv || widget.appState.forceRemoteControlKeys;
     final useDesktopCinematic = _useDesktopPlaybackUi;
+    final remoteEnabled =
+        widget.isTv || (!useDesktopCinematic && widget.appState.forceRemoteControlKeys);
     _remoteEnabled = remoteEnabled;
 
     return Focus(
       focusNode: _tvSurfaceFocusNode,
-      autofocus: remoteEnabled,
-      canRequestFocus: remoteEnabled,
+      autofocus: remoteEnabled || useDesktopCinematic,
+      canRequestFocus: remoteEnabled || useDesktopCinematic,
       skipTraversal: true,
       onKeyEvent: (node, event) {
+        final desktopShortcutResult = _handleDesktopShortcutKeyEvent(event);
+        if (desktopShortcutResult != KeyEventResult.ignored) {
+          return desktopShortcutResult;
+        }
         if (!remoteEnabled) return KeyEventResult.ignored;
         if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
         final key = event.logicalKey;
@@ -4978,32 +5084,48 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                       children: [
                         Align(
                           alignment: Alignment.topCenter,
-                          child: AnimatedOpacity(
-                            opacity: _controlsVisible ? 1 : 0,
-                            duration: _desktopAnimDuration,
-                            child: IgnorePointer(
-                              ignoring: !_controlsVisible,
-                              child: _buildDesktopTopStatusBar(
-                                context,
-                                isDark: isDark,
-                                controlsEnabled: controlsEnabled,
+                          child: MouseRegion(
+                            onEnter: (_) =>
+                                _setDesktopBarHover(top: true, hover: true),
+                            onExit: (_) =>
+                                _setDesktopBarHover(top: true, hover: false),
+                            child: AnimatedOpacity(
+                              opacity: _controlsVisible ? 1 : 0,
+                              duration: _desktopAnimDuration,
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible,
+                                child: _buildDesktopTopStatusBar(
+                                  context,
+                                  isDark: isDark,
+                                  controlsEnabled: controlsEnabled,
+                                ),
                               ),
                             ),
                           ),
                         ),
                         Align(
                           alignment: Alignment.bottomCenter,
-                          child: AnimatedOpacity(
-                            opacity: _controlsVisible ? 1 : 0,
-                            duration: _desktopAnimDuration,
-                            child: IgnorePointer(
-                              ignoring: !_controlsVisible,
-                              child: _buildDesktopPlaybackControls(
-                                context,
-                                isDark: isDark,
-                                controlsEnabled: controlsEnabled,
-                                duration: duration,
-                                isPlaying: isPlaying,
+                          child: MouseRegion(
+                            onEnter: (_) =>
+                                _setDesktopBarHover(top: false, hover: true),
+                            onExit: (_) =>
+                                _setDesktopBarHover(top: false, hover: false),
+                            child: AnimatedOpacity(
+                              opacity: _controlsVisible ? 1 : 0,
+                              duration: _desktopAnimDuration,
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible,
+                                child: Listener(
+                                  onPointerDown: (_) =>
+                                      _showControls(scheduleHide: false),
+                                  child: _buildDesktopPlaybackControls(
+                                    context,
+                                    isDark: isDark,
+                                    controlsEnabled: controlsEnabled,
+                                    duration: duration,
+                                    isPlaying: isPlaying,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -6217,9 +6339,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: chipBg,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: chipBorder),
+                border: Border.all(color: Colors.transparent),
               ),
               child: Row(
                 children: [
@@ -6367,9 +6489,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
-                color: chipBg,
+                color: Colors.transparent,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: chipBorder),
+                border: Border.all(color: Colors.transparent),
               ),
               child: Row(
               children: [
@@ -6433,7 +6555,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
+                          backgroundColor: chipBg,
+                          foregroundColor: iconColor,
                           side: BorderSide(color: chipBorder),
+                          shape: const StadiumBorder(),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
                         ),
                         onPressed: !controlsEnabled
                             ? null
@@ -6449,24 +6578,40 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   _scheduleControlsHide();
                                 }
                               },
-                        child: Text('倍速 $speedHint'),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.speed_outlined, size: 18),
+                            const SizedBox(width: 6),
+                            Text(speedHint),
+                          ],
+                        ),
                       ),
                       const SizedBox(width: 4),
                       IconButton(
                         tooltip:
                             _desktopFullscreen ? 'Exit fullscreen' : 'Fullscreen',
+                        style: IconButton.styleFrom(
+                          backgroundColor: chipBg,
+                          foregroundColor: iconColor,
+                          side: BorderSide(color: chipBorder),
+                        ),
                         onPressed:
                             controlsEnabled ? _toggleDesktopFullscreen : null,
                         icon: Icon(
                           _desktopFullscreen
                               ? Icons.fullscreen_exit
                               : Icons.fullscreen,
-                          color: iconColor,
                         ),
                       ),
                       const SizedBox(width: 4),
                       IconButton(
                         tooltip: '选集',
+                        style: IconButton.styleFrom(
+                          backgroundColor: chipBg,
+                          foregroundColor: iconColor,
+                          side: BorderSide(color: chipBorder),
+                        ),
                         onPressed: controlsEnabled
                             ? () =>
                                 _toggleDesktopPanel(_DesktopSidePanel.episode)
@@ -6475,7 +6620,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                           _desktopSidePanel == _DesktopSidePanel.episode
                               ? Icons.close
                               : Icons.format_list_numbered,
-                          color: iconColor,
                         ),
                       ),
                     ],
