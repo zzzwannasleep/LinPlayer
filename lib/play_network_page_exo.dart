@@ -2574,10 +2574,12 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
             (s) => (s['Id'] as String? ?? '') == selectedId,
             orElse: () => sources.first,
           );
-          _selectedMediaSourceId = selectedId;
         } else {
           ms = sources.first;
         }
+        final resolvedSelectedId = (ms['Id'] as String? ?? '').trim();
+        _selectedMediaSourceId =
+            resolvedSelectedId.isEmpty ? null : resolvedSelectedId;
       }
       _playSessionId = info.playSessionId;
       _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;

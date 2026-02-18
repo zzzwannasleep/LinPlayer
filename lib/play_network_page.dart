@@ -105,6 +105,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   int? _selectedSubtitleStreamIndex;
   Duration? _overrideStartPosition;
   bool _overrideResumeImmediately = false;
+  bool _skipAutoResumeOnce = false;
   int _lastLocalProgressSecond = -1;
   bool _localProgressWriteInFlight = false;
   int? _pendingLocalProgressTicks;
@@ -405,9 +406,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       }
       final resumeImmediately =
           _overrideResumeImmediately || widget.resumeImmediately;
+      final skipAutoResume = _skipAutoResumeOnce;
       _overrideStartPosition = null;
       _overrideResumeImmediately = false;
-      if (start != null && start > Duration.zero) {
+      _skipAutoResumeOnce = false;
+      if (!skipAutoResume && start != null && start > Duration.zero) {
         final target = _safeSeekTarget(start, _playerService.duration);
         _deferProgressReporting = true;
         if (resumeImmediately) {
@@ -2016,10 +2019,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             (s) => (s['Id'] as String? ?? '') == selectedId,
             orElse: () => sources.first,
           );
-          _selectedMediaSourceId = selectedId;
         } else {
           ms = sources.first;
         }
+        final resolvedSelectedId = (ms['Id'] as String? ?? '').trim();
+        _selectedMediaSourceId =
+            resolvedSelectedId.isEmpty ? null : resolvedSelectedId;
       }
       _playSessionId = info.playSessionId;
       _mediaSourceId = (ms?['Id'] as String?) ?? info.mediaSourceId;
@@ -2293,6 +2298,65 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (target < total) return target;
     final rewind = total - const Duration(seconds: 5);
     return rewind > Duration.zero ? rewind : Duration.zero;
+  }
+
+  bool _hasVideoSignal(VideoParams? params) {
+    if (params == null) return false;
+    final width = params.dw ?? params.w ?? 0;
+    final height = params.dh ?? params.h ?? 0;
+    if (width > 0 && height > 0) return true;
+    if ((params.pixelformat ?? '').trim().isNotEmpty) return true;
+    if ((params.hwPixelformat ?? '').trim().isNotEmpty) return true;
+    return false;
+  }
+
+  Future<bool> _waitForVideoSignal({
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (mounted && DateTime.now().isBefore(deadline)) {
+      if (_playError != null || !_playerService.isInitialized) return false;
+      final params = _lastVideoParams ?? _playerService.player.state.videoParams;
+      if (_hasVideoSignal(params)) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    return false;
+  }
+
+  Future<void> _resumePlaybackAfterSwitch(Duration resumePos) async {
+    if (resumePos <= Duration.zero) return;
+    if (!_playerService.isInitialized || _playError != null) return;
+
+    final hasVideo = await _waitForVideoSignal(timeout: const Duration(seconds: 2));
+    if (!hasVideo) return;
+
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (mounted &&
+        _playerService.duration <= Duration.zero &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    if (!mounted || !_playerService.isInitialized || _playError != null) return;
+
+    final total = _playerService.duration;
+    if (total <= Duration.zero) return;
+    final target = _safeSeekTarget(resumePos, total);
+    if (target <= Duration.zero) return;
+
+    await _playerService.seek(
+      target,
+      flushBuffer: _flushBufferOnSeek,
+    );
+    if (!mounted) return;
+
+    _resumeHintTimer?.cancel();
+    _resumeHintTimer = null;
+    setState(() {
+      _lastPosition = target;
+      _resumeHintPosition = null;
+      _showResumeHint = false;
+    });
+    _syncDanmakuCursor(target);
   }
 
   void _startResumeHintTimer() {
@@ -3161,9 +3225,18 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final sid = (widget.seriesId ?? '').trim();
     final serverId = widget.server?.id ?? widget.appState.activeServerId;
     if (serverId == null || serverId.isEmpty || sid.isEmpty) return;
-    final idx = sources.indexWhere(
-      (ms) => (ms['Id']?.toString() ?? '') == selectedSourceId,
+    final normalizedId = selectedSourceId.trim();
+    if (normalizedId.isEmpty) return;
+    final canonicalSources =
+        _availableMediaSources.isNotEmpty ? _availableMediaSources : sources;
+    var idx = canonicalSources.indexWhere(
+      (ms) => (ms['Id']?.toString() ?? '') == normalizedId,
     );
+    if (idx < 0) {
+      idx = sources.indexWhere(
+        (ms) => (ms['Id']?.toString() ?? '') == normalizedId,
+      );
+    }
     if (idx < 0) return;
     await widget.appState.setSeriesMediaSourceIndex(
       serverId: serverId,
@@ -3197,12 +3270,15 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _selectedMediaSourceId = selected;
       _selectedAudioStreamIndex = null;
       _selectedSubtitleStreamIndex = null;
-      _overrideStartPosition = pos;
-      _overrideResumeImmediately = true;
+      _overrideStartPosition = null;
+      _overrideResumeImmediately = false;
+      _skipAutoResumeOnce = true;
       _loading = true;
       _playError = null;
     });
     await _init();
+    if (!mounted || _playError != null || !_playerService.isInitialized) return;
+    await _resumePlaybackAfterSwitch(pos);
   }
 
   Future<void> _switchVersion() async {
@@ -4303,23 +4379,77 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final resumePos =
         _playerService.isInitialized ? _lastPosition : Duration.zero;
     _maybeReportPlaybackProgress(resumePos, force: true);
+    final previousSources = List<Map<String, dynamic>>.from(_availableMediaSources);
+    final previousSelectedSourceId = _selectedMediaSourceId;
+    final previousAudioIndex = _selectedAudioStreamIndex;
+    final previousSubtitleIndex = _selectedSubtitleStreamIndex;
+    var routeUpdated = false;
 
-    try {
-      await widget.appState.updateServerRoute(serverId, url: nextUrl);
+    Future<void> restorePreviousRoute({String? message}) async {
+      try {
+        await widget.appState.updateServerRoute(serverId, url: currentUrl);
+      } catch (_) {}
       _serverAccess =
           resolveServerAccess(appState: widget.appState, server: widget.server);
       if (!mounted) return;
       setState(() {
-        _availableMediaSources = const [];
-        _overrideStartPosition = resumePos;
-        _overrideResumeImmediately = true;
+        _availableMediaSources = previousSources;
+        _selectedMediaSourceId = previousSelectedSourceId;
+        _selectedAudioStreamIndex = previousAudioIndex;
+        _selectedSubtitleStreamIndex = previousSubtitleIndex;
+        _overrideStartPosition = null;
+        _overrideResumeImmediately = false;
+        _skipAutoResumeOnce = true;
         _desktopSidePanel = _DesktopSidePanel.none;
         _desktopSpeedPanelVisible = false;
         _loading = true;
         _playError = null;
       });
       await _init();
+      if (!mounted) return;
+      await _resumePlaybackAfterSwitch(resumePos);
+      if (!mounted || message == null || message.trim().isEmpty) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message.trim())),
+      );
+    }
+
+    try {
+      await widget.appState.updateServerRoute(serverId, url: nextUrl);
+      routeUpdated = true;
+      _serverAccess =
+          resolveServerAccess(appState: widget.appState, server: widget.server);
+      if (!mounted) return;
+      setState(() {
+        _availableMediaSources = const [];
+        _selectedMediaSourceId = null;
+        _selectedAudioStreamIndex = null;
+        _selectedSubtitleStreamIndex = null;
+        _overrideStartPosition = null;
+        _overrideResumeImmediately = false;
+        _skipAutoResumeOnce = true;
+        _desktopSidePanel = _DesktopSidePanel.none;
+        _desktopSpeedPanelVisible = false;
+        _loading = true;
+        _playError = null;
+      });
+      await _init();
+      final hasVideo = await _waitForVideoSignal();
+      final switchOk = mounted &&
+          _playError == null &&
+          _playerService.isInitialized &&
+          hasVideo;
+      if (!switchOk) {
+        await restorePreviousRoute(
+          message: 'New route has no video. Restored previous route.',
+        );
+        return;
+      }
+      await _resumePlaybackAfterSwitch(resumePos);
     } catch (e) {
+      if (routeUpdated) {
+        await restorePreviousRoute();
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('线路切换失败：$e')),
@@ -4348,6 +4478,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     final loading =
                         snapshot.connectionState != ConnectionState.done;
                     final entries = snapshot.data ?? const <RouteEntry>[];
+                    final isDark =
+                        Theme.of(context).brightness == Brightness.dark;
                     return Column(
                       children: [
                         Padding(
@@ -4411,6 +4543,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
+                                  tileColor: isDark
+                                      ? Colors.white.withValues(
+                                          alpha: selected ? 0.16 : 0.06,
+                                        )
+                                      : Colors.black.withValues(
+                                          alpha: selected ? 0.1 : 0.04,
+                                        ),
                                   title: Text(
                                     name,
                                     maxLines: 1,
