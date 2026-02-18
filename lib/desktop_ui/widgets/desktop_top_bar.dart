@@ -409,52 +409,160 @@ class _TopPillTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = DesktopThemeExtension.of(context);
-    Widget tab(DesktopHomeTab value, String zh, String en) {
-      final active = selected == value;
-      return InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onChanged == null ? null : () => onChanged!(value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-          decoration: BoxDecoration(
-            color: active ? theme.topTabActiveBackground : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            _t(zh: zh, en: en),
-            style: TextStyle(
-              color:
-                  active ? theme.textPrimary : theme.topTabInactiveForeground,
-              fontSize: 14,
-              fontWeight: active ? FontWeight.w500 : FontWeight.w400,
-            ),
-          ),
-        ),
-      );
-    }
+    final homeActive = selected == DesktopHomeTab.home;
 
     return Container(
+      width: 248,
+      height: 40,
       padding: const EdgeInsets.all(3.5),
       decoration: BoxDecoration(
         color: theme.topTabBackground,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: theme.border.withValues(alpha: 0.8)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Stack(
+        fit: StackFit.expand,
         children: [
-          tab(DesktopHomeTab.home, '\u4e3b\u9875', 'Home'),
-          const SizedBox(width: 2),
-          tab(DesktopHomeTab.favorites, '\u559c\u6b22', 'Favorites'),
+          AnimatedAlign(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutBack,
+            alignment:
+                homeActive ? Alignment.centerLeft : Alignment.centerRight,
+            child: FractionallySizedBox(
+              widthFactor: 0.5,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 1),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.topTabActiveBackground,
+                    borderRadius: BorderRadius.circular(18),
+                    boxShadow: [
+                      BoxShadow(
+                        color: theme.accent.withValues(alpha: 0.22),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: _TopPillActionButton(
+                  label: _t(zh: '\u4e3b\u9875', en: 'Home'),
+                  active: selected == DesktopHomeTab.home,
+                  activeColor: theme.textPrimary,
+                  inactiveColor: theme.topTabInactiveForeground,
+                  onTap: onChanged == null
+                      ? null
+                      : () => onChanged!(DesktopHomeTab.home),
+                ),
+              ),
+              Expanded(
+                child: _TopPillActionButton(
+                  label: _t(zh: '\u559c\u6b22', en: 'Favorites'),
+                  active: selected == DesktopHomeTab.favorites,
+                  activeColor: theme.textPrimary,
+                  inactiveColor: theme.topTabInactiveForeground,
+                  onTap: onChanged == null
+                      ? null
+                      : () => onChanged!(DesktopHomeTab.favorites),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _HeaderIconButton extends StatelessWidget {
+class _TopPillActionButton extends StatefulWidget {
+  const _TopPillActionButton({
+    required this.label,
+    required this.active,
+    required this.activeColor,
+    required this.inactiveColor,
+    this.onTap,
+  });
+
+  final String label;
+  final bool active;
+  final Color activeColor;
+  final Color inactiveColor;
+  final VoidCallback? onTap;
+
+  @override
+  State<_TopPillActionButton> createState() => _TopPillActionButtonState();
+}
+
+class _TopPillActionButtonState extends State<_TopPillActionButton> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
+    final scale = _pressed ? 0.96 : (_hovered ? 1.02 : 1.0);
+    final slide = _pressed
+        ? const Offset(0, 0.05)
+        : (_hovered ? const Offset(0, -0.03) : Offset.zero);
+
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) {
+        if (!_hovered && !_pressed) return;
+        setState(() {
+          _hovered = false;
+          _pressed = false;
+        });
+      },
+      child: AnimatedScale(
+        scale: scale,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOutCubic,
+        child: AnimatedSlide(
+          offset: slide,
+          duration: const Duration(milliseconds: 140),
+          curve: Curves.easeOutCubic,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: widget.onTap,
+              onTapDown:
+                  enabled ? (_) => setState(() => _pressed = true) : null,
+              onTapCancel:
+                  enabled ? () => setState(() => _pressed = false) : null,
+              onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
+              child: Center(
+                child: AnimatedDefaultTextStyle(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOutCubic,
+                  style: TextStyle(
+                    color: widget.active
+                        ? widget.activeColor
+                        : widget.inactiveColor,
+                    fontSize: 14,
+                    fontWeight:
+                        widget.active ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                  child: Text(widget.label),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderIconButton extends StatefulWidget {
   const _HeaderIconButton({
     required this.icon,
     required this.tooltip,
@@ -468,20 +576,86 @@ class _HeaderIconButton extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<_HeaderIconButton> createState() => _HeaderIconButtonState();
+}
+
+class _HeaderIconButtonState extends State<_HeaderIconButton> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
+    final enabled = widget.onTap != null;
+    final scale = _pressed ? 0.9 : (_hovered ? 1.05 : 1.0);
+    final slide = _pressed
+        ? const Offset(0, 0.06)
+        : (_hovered ? const Offset(0, -0.04) : Offset.zero);
+    final background = _pressed
+        ? theme.topTabActiveBackground.withValues(alpha: 0.86)
+        : (_hovered
+            ? theme.topTabBackground.withValues(alpha: 0.9)
+            : Colors.transparent);
+
     return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(18),
+      message: widget.tooltip,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) {
+          if (!_hovered && !_pressed) return;
+          setState(() {
+            _hovered = false;
+            _pressed = false;
+          });
+        },
+        child: AnimatedScale(
+          scale: scale,
+          duration: const Duration(milliseconds: 130),
+          curve: Curves.easeOutCubic,
+          child: AnimatedSlide(
+            offset: slide,
+            duration: const Duration(milliseconds: 130),
+            curve: Curves.easeOutCubic,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              curve: Curves.easeOutCubic,
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: background,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: (_hovered || _pressed)
+                      ? theme.border.withValues(alpha: 0.84)
+                      : Colors.transparent,
+                ),
+                boxShadow: (_hovered || _pressed)
+                    ? [
+                        BoxShadow(
+                          color: theme.shadowColor.withValues(alpha: 0.45),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : const [],
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(18),
+                  onTap: widget.onTap,
+                  onTapDown:
+                      enabled ? (_) => setState(() => _pressed = true) : null,
+                  onTapCancel:
+                      enabled ? () => setState(() => _pressed = false) : null,
+                  onTapUp:
+                      enabled ? (_) => setState(() => _pressed = false) : null,
+                  child: Icon(widget.icon, size: 22, color: widget.color),
+                ),
+              ),
+            ),
           ),
-          child: Icon(icon, size: 24, color: color),
         ),
       ),
     );

@@ -4,6 +4,14 @@ import 'package:lin_player_core/state/media_server_type.dart';
 import '../theme/desktop_theme_extension.dart';
 import 'hover_effect_wrapper.dart';
 
+enum DesktopSidebarServerAction {
+  editIcon,
+  editRemark,
+  editPassword,
+  editRoute,
+  deleteServer,
+}
+
 class DesktopSidebarItem extends StatelessWidget {
   const DesktopSidebarItem({
     super.key,
@@ -14,6 +22,7 @@ class DesktopSidebarItem extends StatelessWidget {
     this.iconUrl,
     this.collapsed = false,
     required this.onTap,
+    this.onActionSelected,
   });
 
   final String serverName;
@@ -23,6 +32,7 @@ class DesktopSidebarItem extends StatelessWidget {
   final String? iconUrl;
   final bool collapsed;
   final VoidCallback onTap;
+  final ValueChanged<DesktopSidebarServerAction>? onActionSelected;
 
   IconData _fallbackIconForType(MediaServerType type) {
     switch (type) {
@@ -155,8 +165,104 @@ class DesktopSidebarItem extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (onActionSelected != null) ...[
+                  const SizedBox(width: 6),
+                  _SidebarServerMenuButton(
+                    selected: selected,
+                    onSelected: onActionSelected!,
+                  ),
+                ],
               ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarServerMenuButton extends StatelessWidget {
+  const _SidebarServerMenuButton({
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final bool selected;
+  final ValueChanged<DesktopSidebarServerAction> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = DesktopThemeExtension.of(context);
+    final iconColor =
+        selected ? theme.textPrimary : theme.textMuted.withValues(alpha: 0.86);
+
+    PopupMenuItem<DesktopSidebarServerAction> item({
+      required DesktopSidebarServerAction value,
+      required IconData icon,
+      required String label,
+      bool danger = false,
+    }) {
+      final color = danger ? const Color(0xFFFF9A9A) : null;
+      return PopupMenuItem<DesktopSidebarServerAction>(
+        value: value,
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 10),
+            Text(label, style: color == null ? null : TextStyle(color: color)),
+          ],
+        ),
+      );
+    }
+
+    return Tooltip(
+      message: '更多',
+      child: PopupMenuButton<DesktopSidebarServerAction>(
+        tooltip: '更多',
+        onSelected: onSelected,
+        itemBuilder: (context) => [
+          item(
+            value: DesktopSidebarServerAction.editIcon,
+            icon: Icons.image_outlined,
+            label: '修改图标',
+          ),
+          item(
+            value: DesktopSidebarServerAction.editRemark,
+            icon: Icons.edit_note_outlined,
+            label: '修改备注',
+          ),
+          item(
+            value: DesktopSidebarServerAction.editPassword,
+            icon: Icons.lock_reset_outlined,
+            label: '修改密码',
+          ),
+          item(
+            value: DesktopSidebarServerAction.editRoute,
+            icon: Icons.alt_route_rounded,
+            label: '修改线路',
+          ),
+          const PopupMenuDivider(),
+          item(
+            value: DesktopSidebarServerAction.deleteServer,
+            icon: Icons.delete_outline,
+            label: '删除服务器',
+            danger: true,
+          ),
+        ],
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: selected ? 0.14 : 0.05),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: theme.border.withValues(alpha: selected ? 0.72 : 0.44),
+            ),
+          ),
+          child: Icon(
+            Icons.more_horiz_rounded,
+            size: 18,
+            color: iconColor,
           ),
         ),
       ),

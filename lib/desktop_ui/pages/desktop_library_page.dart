@@ -321,6 +321,20 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
             appState: widget.appState,
             access: access,
             language: widget.language,
+            onOpenLibrary: (library) {
+              unawaited(
+                _openLibraryItemsPage(
+                  parentId: library.id,
+                  title: library.name.trim().isEmpty
+                      ? _t(
+                          language: widget.language,
+                          zh: '\u5a92\u4f53\u5e93',
+                          en: 'Library',
+                        )
+                      : library.name,
+                ),
+              );
+            },
           ),
           const SizedBox(height: 32),
           if (favoriteMode && _favoriteItemIds.isEmpty)
@@ -557,12 +571,14 @@ class _MediaCategorySection extends StatefulWidget {
     required this.appState,
     required this.access,
     required this.language,
+    required this.onOpenLibrary,
   });
 
   final List<LibraryInfo> libraries;
   final AppState appState;
   final ServerAccess? access;
   final DesktopUiLanguage language;
+  final ValueChanged<LibraryInfo> onOpenLibrary;
 
   @override
   State<_MediaCategorySection> createState() => _MediaCategorySectionState();
@@ -666,15 +682,14 @@ class _MediaCategorySectionState extends State<_MediaCategorySection> {
                         preview: preview,
                         access: widget.access,
                         language: widget.language,
-                        onTap: preview.isEmpty
-                            ? null
-                            : () {
-                                _centerLibraryCard(
-                                  index: index,
-                                  cardWidth: cardWidth,
-                                  spacing: spacing,
-                                );
-                              },
+                        onTap: () {
+                          _centerLibraryCard(
+                            index: index,
+                            cardWidth: cardWidth,
+                            spacing: spacing,
+                          );
+                          widget.onOpenLibrary(library);
+                        },
                       );
                     },
                   ),

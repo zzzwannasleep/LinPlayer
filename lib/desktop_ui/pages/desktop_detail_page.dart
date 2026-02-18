@@ -234,8 +234,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
               )
             : _t(
                 zh: '\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25\uff0c\u8bf7\u5728\u8bbe\u7f6e\u4e2d\u914d\u7f6e MPV \u8def\u5f84',
-                en:
-                    'Failed to launch MPV. Configure MPV executable path in settings.',
+                en: 'Failed to launch MPV. Configure MPV executable path in settings.',
               ),
       );
     } catch (_) {
@@ -572,13 +571,8 @@ class _HeroPanel extends StatelessWidget {
     );
     final episodeMark = _episodeMark(item);
     final subtitle = _subtitleLine(item);
+    final isEpisode = item.type.trim().toLowerCase() == 'episode';
     final metadata = <_MetaValue>[
-      _MetaValue(
-        icon: Icons.star_rounded,
-        text: item.communityRating == null
-            ? '--'
-            : item.communityRating!.toStringAsFixed(1),
-      ),
       _MetaValue(
         icon: Icons.calendar_month_outlined,
         text: _formatDate(item.premiereDate),
@@ -596,8 +590,13 @@ class _HeroPanel extends StatelessWidget {
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
         final verticalLayout = maxWidth < 800;
-        final posterWidth = maxWidth < 1000 ? 260.0 : 320.0;
-        final posterHeight = posterWidth * 3 / 2;
+        final episodePosterWidth = verticalLayout
+            ? (maxWidth - 56).clamp(220.0, 520.0).toDouble()
+            : (maxWidth < 1200 ? 340.0 : 400.0);
+        final posterWidth =
+            isEpisode ? episodePosterWidth : (maxWidth < 1000 ? 260.0 : 320.0);
+        final posterHeight =
+            isEpisode ? posterWidth * 9 / 16 : posterWidth * 3 / 2;
 
         return ClipRRect(
           borderRadius: BorderRadius.circular(16),
@@ -770,14 +769,13 @@ class _HeroInfoColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = _EpisodeDetailColors.of(context);
-    final title =
-        item.name.trim().isEmpty
-            ? _dtr(
-                language: language,
-                zh: '\u672a\u547d\u540d\u5267\u96c6',
-                en: 'Untitled Episode',
-              )
-            : item.name;
+    final title = item.name.trim().isEmpty
+        ? _dtr(
+            language: language,
+            zh: '\u672a\u547d\u540d\u5267\u96c6',
+            en: 'Untitled Episode',
+          )
+        : item.name;
     final subtitleLine = <String>[
       if (episodeMark.trim().isNotEmpty) episodeMark.trim(),
       if (subtitle.trim().isNotEmpty) subtitle.trim(),
@@ -2697,11 +2695,9 @@ String _subtitleStreamLabel(Map<String, dynamic> stream) {
 
 Map<String, String> _videoSpecs(
   Map<String, dynamic>? videoStream,
-  Map<String, dynamic>? source,
-  {
+  Map<String, dynamic>? source, {
   required DesktopUiLanguage language,
-}
-) {
+}) {
   return {
     _dtr(language: language, zh: '\u89c6\u9891\u683c\u5f0f', en: 'Format'):
         _videoFormatLabel(videoStream, source),
@@ -2789,24 +2785,25 @@ Map<String, String> _subtitleSpecs(
   return {
     _dtr(language: language, zh: '\u6807\u9898\u540d\u79f0', en: 'Title'):
         subtitleStream == null
-            ? _dtr(language: language, zh: '\u65e0\u5b57\u5e55', en: 'No subtitle')
-        : _subtitleStreamLabel(subtitleStream),
+            ? _dtr(
+                language: language, zh: '\u65e0\u5b57\u5e55', en: 'No subtitle')
+            : _subtitleStreamLabel(subtitleStream),
     _dtr(language: language, zh: '\u8bed\u8a00\u79cd\u7c7b', en: 'Language'):
         _fallback((subtitleStream?['Language'] ?? '').toString()),
     _dtr(language: language, zh: '\u7f16\u7801\u683c\u5f0f', en: 'Codec'):
         _fallback((subtitleStream?['Codec'] ?? '').toString().toUpperCase()),
     _dtr(language: language, zh: '\u9ed8\u8ba4', en: 'Default'):
         subtitleStream == null
-        ? '--'
-        : (subtitleStream['IsDefault'] == true
-            ? _dtr(language: language, zh: '\u662f', en: 'Yes')
-            : _dtr(language: language, zh: '\u5426', en: 'No')),
+            ? '--'
+            : (subtitleStream['IsDefault'] == true
+                ? _dtr(language: language, zh: '\u662f', en: 'Yes')
+                : _dtr(language: language, zh: '\u5426', en: 'No')),
     _dtr(language: language, zh: '\u5f3a\u5236', en: 'Forced'):
         subtitleStream == null
-        ? '--'
-        : (subtitleStream['IsForced'] == true
-            ? _dtr(language: language, zh: '\u662f', en: 'Yes')
-            : _dtr(language: language, zh: '\u5426', en: 'No')),
+            ? '--'
+            : (subtitleStream['IsForced'] == true
+                ? _dtr(language: language, zh: '\u662f', en: 'Yes')
+                : _dtr(language: language, zh: '\u5426', en: 'No')),
   };
 }
 

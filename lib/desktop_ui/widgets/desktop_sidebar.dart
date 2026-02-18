@@ -29,12 +29,15 @@ class DesktopSidebar extends StatelessWidget {
     required this.servers,
     required this.selectedServerId,
     required this.onSelected,
+    this.onServerAction,
     this.collapsed = false,
   });
 
   final List<DesktopSidebarServer> servers;
   final String? selectedServerId;
   final ValueChanged<String> onSelected;
+  final void Function(String serverId, DesktopSidebarServerAction action)?
+      onServerAction;
   final bool collapsed;
 
   @override
@@ -104,6 +107,11 @@ class DesktopSidebar extends StatelessWidget {
                               selected: selectedServerId == item.id,
                               collapsed: collapsed,
                               onTap: () => onSelected(item.id),
+                              onActionSelected:
+                                  collapsed || onServerAction == null
+                                      ? null
+                                      : (action) =>
+                                          onServerAction!(item.id, action),
                             ),
                           ),
                         );

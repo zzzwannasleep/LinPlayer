@@ -24,6 +24,7 @@ import 'view_models/desktop_detail_view_model.dart';
 import 'widgets/desktop_page_route.dart';
 import 'widgets/desktop_shortcut_wrapper.dart';
 import 'widgets/desktop_sidebar.dart';
+import 'widgets/desktop_sidebar_item.dart' show DesktopSidebarServerAction;
 import 'widgets/desktop_top_bar.dart';
 import 'widgets/desktop_unified_background.dart';
 import 'widgets/focus_traversal_manager.dart';
@@ -209,6 +210,330 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   String _buildServerSubtitleText(ServerProfile server) {
     final remark = (server.remark ?? '').trim();
     return remark;
+  }
+
+  ServerProfile? _serverById(String serverId) {
+    for (final server in widget.appState.servers) {
+      if (server.id == serverId) return server;
+    }
+    return null;
+  }
+
+  void _showInfo(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  void _handleSidebarServerAction(
+    String serverId,
+    DesktopSidebarServerAction action,
+  ) {
+    switch (action) {
+      case DesktopSidebarServerAction.editIcon:
+        unawaited(_editServerIcon(serverId));
+        break;
+      case DesktopSidebarServerAction.editRemark:
+        unawaited(_editServerRemark(serverId));
+        break;
+      case DesktopSidebarServerAction.editPassword:
+        unawaited(_editServerPassword(serverId));
+        break;
+      case DesktopSidebarServerAction.editRoute:
+        unawaited(_editServerRoute(serverId));
+        break;
+      case DesktopSidebarServerAction.deleteServer:
+        unawaited(_deleteServer(serverId));
+        break;
+    }
+  }
+
+  Future<void> _editServerIcon(String serverId) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+
+    final iconCtrl = TextEditingController(text: server.iconUrl ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            _uiLanguage.pick(
+              zh: '修改图标',
+              en: 'Edit icon',
+            ),
+          ),
+          content: TextField(
+            controller: iconCtrl,
+            decoration: InputDecoration(
+              labelText: _uiLanguage.pick(zh: '图标地址', en: 'Icon URL'),
+              hintText: 'https://example.com/icon.png',
+            ),
+            keyboardType: TextInputType.url,
+          ),
+          actions: [
+            TextButton(
+              onPressed: iconCtrl.clear,
+              child: Text(_uiLanguage.pick(zh: '清空', en: 'Clear')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(iconCtrl.text.trim()),
+              child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
+            ),
+          ],
+        );
+      },
+    );
+    iconCtrl.dispose();
+    if (result == null) return;
+
+    await widget.appState.updateServerMeta(serverId, iconUrl: result);
+    _showInfo(_uiLanguage.pick(zh: '图标已更新', en: 'Icon updated'));
+  }
+
+  Future<void> _editServerRemark(String serverId) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+
+    final remarkCtrl = TextEditingController(text: server.remark ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            _uiLanguage.pick(
+              zh: '修改备注',
+              en: 'Edit remark',
+            ),
+          ),
+          content: TextField(
+            controller: remarkCtrl,
+            decoration: InputDecoration(
+              labelText: _uiLanguage.pick(zh: '备注', en: 'Remark'),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(remarkCtrl.text),
+              child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
+            ),
+          ],
+        );
+      },
+    );
+    remarkCtrl.dispose();
+    if (result == null) return;
+
+    await widget.appState.updateServerMeta(serverId, remark: result);
+    _showInfo(_uiLanguage.pick(zh: '备注已更新', en: 'Remark updated'));
+  }
+
+  Future<void> _editServerPassword(String serverId) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+
+    final usernameCtrl = TextEditingController(text: server.username);
+    final passwordCtrl = TextEditingController();
+    final showUsername = server.serverType != MediaServerType.plex;
+    final secretLabel = _uiLanguage.pick(
+      zh: server.serverType == MediaServerType.plex ? '令牌' : '密码',
+      en: server.serverType == MediaServerType.plex ? 'Token' : 'Password',
+    );
+
+    final payload = await showDialog<Map<String, String>>(
+      context: context,
+      builder: (dialogContext) {
+        var obscure = true;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                _uiLanguage.pick(
+                  zh: '修改密码',
+                  en: 'Edit password',
+                ),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (showUsername) ...[
+                    TextField(
+                      controller: usernameCtrl,
+                      decoration: InputDecoration(
+                        labelText: _uiLanguage.pick(zh: '用户名', en: 'Username'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  TextField(
+                    controller: passwordCtrl,
+                    obscureText: obscure,
+                    decoration: InputDecoration(
+                      labelText: secretLabel,
+                      suffixIcon: IconButton(
+                        tooltip: _uiLanguage.pick(zh: '显示/隐藏', en: 'Show/Hide'),
+                        onPressed: () =>
+                            setDialogState(() => obscure = !obscure),
+                        icon: Icon(
+                          obscure
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop({
+                    'username': usernameCtrl.text.trim(),
+                    'password': passwordCtrl.text,
+                  }),
+                  child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    usernameCtrl.dispose();
+    passwordCtrl.dispose();
+    if (payload == null) return;
+
+    final nextPassword = (payload['password'] ?? '').trim();
+    if (nextPassword.isEmpty) {
+      _showInfo(_uiLanguage.pick(zh: '密码不能为空', en: 'Password is required'));
+      return;
+    }
+
+    try {
+      await widget.appState.updateServerPassword(
+        serverId,
+        password: nextPassword,
+        username: showUsername ? payload['username'] : null,
+      );
+
+      if (serverId == widget.appState.activeServerId &&
+          server.serverType.isEmbyLike) {
+        await widget.appState.refreshDomains();
+        await widget.appState.refreshLibraries();
+        await widget.appState.loadHome(forceRefresh: true);
+        await _loadMediaStats(forceRefresh: true);
+      }
+
+      _showInfo(_uiLanguage.pick(zh: '密码已更新', en: 'Password updated'));
+    } catch (e) {
+      _showInfo(e.toString());
+    }
+  }
+
+  Future<void> _editServerRoute(String serverId) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+
+    final routeCtrl = TextEditingController(text: server.baseUrl);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(
+            _uiLanguage.pick(
+              zh: '修改线路',
+              en: 'Edit route',
+            ),
+          ),
+          content: TextField(
+            controller: routeCtrl,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: _uiLanguage.pick(zh: '线路地址', en: 'Route URL'),
+              hintText: 'https://emby.example.com:8920',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop(routeCtrl.text.trim()),
+              child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
+            ),
+          ],
+        );
+      },
+    );
+    routeCtrl.dispose();
+    if (result == null) return;
+
+    try {
+      await widget.appState.updateServerRoute(serverId, url: result);
+      if (serverId == widget.appState.activeServerId &&
+          server.serverType.isEmbyLike) {
+        await widget.appState.refreshDomains();
+        await widget.appState.refreshLibraries();
+        await widget.appState.loadHome(forceRefresh: true);
+        await _loadMediaStats(forceRefresh: true);
+      }
+      _showInfo(_uiLanguage.pick(zh: '线路已更新', en: 'Route updated'));
+    } catch (e) {
+      _showInfo(e.toString());
+    }
+  }
+
+  Future<void> _deleteServer(String serverId) async {
+    final server = _serverById(serverId);
+    if (server == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text(_uiLanguage.pick(
+            zh: '删除服务器？',
+            en: 'Delete server?',
+          )),
+          content: Text(
+            _uiLanguage.pick(
+              zh: '将删除“${server.name}”。',
+              en: 'This will remove "${server.name}".',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(_uiLanguage.pick(zh: '删除', en: 'Delete')),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+
+    await widget.appState.removeServer(serverId);
+    _showInfo(_uiLanguage.pick(zh: '服务器已删除', en: 'Server deleted'));
   }
 
   Future<void> _loadMediaStats({bool forceRefresh = false}) async {
@@ -860,6 +1185,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                               servers: sidebarServers,
                               selectedServerId: widget.appState.activeServerId,
                               onSelected: _handleServerSelected,
+                              onServerAction: _handleSidebarServerAction,
                               collapsed: _sidebarCollapsed,
                             ),
                             topBar: DesktopTopBar(

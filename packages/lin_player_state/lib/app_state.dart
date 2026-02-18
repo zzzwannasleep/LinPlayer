@@ -2420,6 +2420,148 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateServerRoute(
+    String serverId, {
+    required String url,
+  }) async {
+    final server = _servers.firstWhereOrNull((s) => s.id == serverId);
+    if (server == null) return;
+
+    final raw = url.trim();
+    if (raw.isEmpty) {
+      throw const FormatException('Missing route url');
+    }
+
+    final fixedUrl = server.serverType == MediaServerType.webdav
+        ? WebDavApi.normalizeBaseUri(raw).toString()
+        : _normalizeServerBaseUrl(_normalizeUrl(raw, defaultScheme: 'https'));
+    if (!_isValidHttpUrl(fixedUrl)) {
+      throw FormatException('Invalid route url: $raw');
+    }
+
+    server.baseUrl = fixedUrl;
+    server.lastErrorCode = null;
+    server.lastErrorMessage = null;
+    if (_activeServerId == server.id) {
+      _error = null;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await _persistServers(prefs);
+    notifyListeners();
+  }
+
+  Future<void> updateServerPassword(
+    String serverId, {
+    required String password,
+    String? username,
+  }) async {
+    final server = _servers.firstWhereOrNull((s) => s.id == serverId);
+    if (server == null) return;
+
+    final fixedPassword = password.trim();
+    if (fixedPassword.isEmpty) {
+      throw const FormatException('Missing password');
+    }
+    final fixedUsername = (username ?? server.username).trim();
+
+    _loading = true;
+    notifyListeners();
+
+    try {
+      switch (server.serverType) {
+        case MediaServerType.emby:
+        case MediaServerType.jellyfin:
+          if (fixedUsername.isEmpty) {
+            throw const FormatException('Missing username');
+          }
+          final rawBaseUrl = server.baseUrl.trim();
+          if (rawBaseUrl.isEmpty) {
+            throw const FormatException('Missing server base url');
+          }
+
+          Uri? uri;
+          try {
+            uri = Uri.parse(rawBaseUrl);
+          } catch (_) {}
+          if (uri == null || uri.host.isEmpty) {
+            try {
+              uri = Uri.parse('https://$rawBaseUrl');
+            } catch (_) {}
+          }
+
+          final scheme =
+              (uri != null && (uri.scheme == 'http' || uri.scheme == 'https'))
+                  ? uri.scheme
+                  : 'https';
+          final port =
+              (uri != null && uri.hasPort) ? uri.port.toString() : null;
+          final hostOrUrl = (uri != null && uri.host.isNotEmpty)
+              ? uri.host +
+                  ((uri.path.isNotEmpty && uri.path != '/') ? uri.path : '')
+              : rawBaseUrl;
+
+          final adapter = ServerAdapterFactory.forLogin(
+            serverType: server.serverType,
+            deviceId: _deviceId,
+          );
+          final auth = await adapter.authenticate(
+            hostOrUrl: hostOrUrl,
+            scheme: scheme,
+            port: port,
+            username: fixedUsername,
+            password: fixedPassword,
+          );
+
+          server.username = fixedUsername;
+          server.baseUrl = auth.baseUrl;
+          server.token = auth.token;
+          server.userId = auth.userId;
+          server.apiPrefix = auth.apiPrefix;
+          break;
+        case MediaServerType.webdav:
+          if (fixedUsername.isEmpty) {
+            throw const FormatException('Missing username');
+          }
+          final baseUri = WebDavApi.normalizeBaseUri(server.baseUrl);
+          final api = WebDavApi(
+            baseUri: baseUri,
+            username: fixedUsername,
+            password: fixedPassword,
+          );
+          await api.validateRoot();
+          server.username = fixedUsername;
+          server.baseUrl = baseUri.toString();
+          server.token = fixedPassword;
+          server.userId = '';
+          server.apiPrefix = '';
+          break;
+        case MediaServerType.plex:
+          server.token = fixedPassword;
+          break;
+      }
+
+      server.lastErrorCode = null;
+      server.lastErrorMessage = null;
+      if (_activeServerId == server.id) {
+        _error = null;
+      }
+    } catch (e) {
+      final message = e.toString();
+      server.lastErrorCode = _extractHttpStatusCode(message);
+      server.lastErrorMessage = message;
+      if (_activeServerId == server.id) {
+        _error = message;
+      }
+      rethrow;
+    } finally {
+      final prefs = await SharedPreferences.getInstance();
+      await _persistServers(prefs);
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> refreshDomains() async {
     if (baseUrl == null || token == null) return;
     _loading = true;
