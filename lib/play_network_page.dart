@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -159,11 +160,24 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
   String? get _userId => widget.server?.userId ?? widget.appState.userId;
+  bool get _useDesktopPlaybackUi =>
+      !widget.isTv &&
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.linux);
 
   static const Duration _controlsAutoHideDelay = Duration(seconds: 3);
   Timer? _controlsHideTimer;
   bool _controlsVisible = true;
   bool _isScrubbing = false;
+  _DesktopSidePanel _desktopSidePanel = _DesktopSidePanel.none;
+  bool _desktopEpisodeGridMode = false;
+  bool _desktopSpeedPanelVisible = false;
+  bool _desktopDanmakuOnlineLoading = false;
+  bool _desktopDanmakuManualLoading = false;
+  bool _desktopLineLoading = false;
+  double _danmakuTimeOffsetSeconds = 0.0;
 
   final GlobalKey<DanmakuStageState> _danmakuKey =
       GlobalKey<DanmakuStageState>();
@@ -174,9 +188,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   double _danmakuScale = 1.0;
   double _danmakuSpeed = 1.0;
   bool _danmakuBold = true;
-  int _danmakuMaxLines = 10;
-  int _danmakuTopMaxLines = 10;
-  int _danmakuBottomMaxLines = 10;
+  int _danmakuMaxLines = 30;
+  int _danmakuTopMaxLines = 30;
+  int _danmakuBottomMaxLines = 30;
   bool _danmakuPreventOverlap = true;
   bool _danmakuShowHeatmap = true;
   List<double> _danmakuHeatmap = const [];
@@ -308,6 +322,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _skipIntroHandled = false;
     _controlsVisible = true;
     _isScrubbing = false;
+    _desktopSidePanel = _DesktopSidePanel.none;
+    _desktopSpeedPanelVisible = false;
+    _desktopDanmakuOnlineLoading = false;
+    _desktopDanmakuManualLoading = false;
+    _desktopLineLoading = false;
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     try {
@@ -1652,8 +1671,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       _nextDanmakuIndex = 0;
       return;
     }
+    final cursorPosition = _effectiveDanmakuTimelinePosition(position);
     final items = _danmakuSources[_danmakuSourceIndex].items;
-    _nextDanmakuIndex = DanmakuParser.lowerBoundByTime(items, position);
+    _nextDanmakuIndex = DanmakuParser.lowerBoundByTime(items, cursorPosition);
     _danmakuKey.currentState?.clear();
   }
 
@@ -1684,12 +1704,19 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final stage = _danmakuKey.currentState;
     if (stage == null) return;
 
+    final cursorPosition = _effectiveDanmakuTimelinePosition(position);
     final items = _danmakuSources[_danmakuSourceIndex].items;
     while (_nextDanmakuIndex < items.length &&
-        items[_nextDanmakuIndex].time <= position) {
+        items[_nextDanmakuIndex].time <= cursorPosition) {
       stage.emit(items[_nextDanmakuIndex]);
       _nextDanmakuIndex++;
     }
+  }
+
+  Duration _effectiveDanmakuTimelinePosition(Duration playbackPosition) {
+    final shifted = playbackPosition -
+        Duration(milliseconds: (_danmakuTimeOffsetSeconds * 1000).round());
+    return shifted < Duration.zero ? Duration.zero : shifted;
   }
 
   Future<void> _pickDanmakuFile() async {
@@ -2556,8 +2583,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       return;
     }
 
-    final refreshSeconds =
-        widget.appState.bufferSpeedRefreshSeconds.clamp(0.2, 3.0).toDouble();
+    final refreshSeconds = _useDesktopPlaybackUi
+        ? 0.2
+        : widget.appState.bufferSpeedRefreshSeconds.clamp(0.2, 3.0).toDouble();
     final refreshMs = (refreshSeconds * 1000).round();
 
     _netSpeedTimer = Timer(Duration(milliseconds: refreshMs), () async {
@@ -2686,7 +2714,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     // ignore: unawaited_futures
     _exitImmersiveMode();
-    if (scheduleHide && !_remoteEnabled) {
+    final canScheduleHide = scheduleHide &&
+        !_remoteEnabled &&
+        _desktopSidePanel == _DesktopSidePanel.none &&
+        !_desktopSpeedPanelVisible;
+    if (canScheduleHide) {
       _scheduleControlsHide();
     } else {
       _controlsHideTimer?.cancel();
@@ -2701,7 +2733,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
-    setState(() => _controlsVisible = false);
+    setState(() {
+      _controlsVisible = false;
+      _desktopSidePanel = _DesktopSidePanel.none;
+      _desktopSpeedPanelVisible = false;
+    });
     // ignore: unawaited_futures
     _enterImmersiveMode();
     if (_remoteEnabled) _focusTvSurface();
@@ -2726,7 +2762,11 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _controlsHideTimer?.cancel();
     _controlsHideTimer = null;
     if (_controlsVisible) {
-      setState(() => _controlsVisible = false);
+      setState(() {
+        _controlsVisible = false;
+        _desktopSidePanel = _DesktopSidePanel.none;
+        _desktopSpeedPanelVisible = false;
+      });
     }
     // ignore: unawaited_futures
     _enterImmersiveMode();
@@ -2738,6 +2778,10 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _controlsHideTimer = null;
     if (_remoteEnabled) return;
     if (!_controlsVisible || _isScrubbing) return;
+    if (_desktopSidePanel != _DesktopSidePanel.none ||
+        _desktopSpeedPanelVisible) {
+      return;
+    }
     _controlsHideTimer = Timer(_controlsAutoHideDelay, () {
       if (!mounted || _isScrubbing || _remoteEnabled) return;
       setState(() => _controlsVisible = false);
@@ -3092,22 +3136,84 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     );
   }
 
-  Future<void> _switchVersion() async {
+  Future<List<Map<String, dynamic>>> _ensureMediaSourcesLoaded({
+    bool forceRefresh = false,
+  }) async {
+    if (!forceRefresh && _availableMediaSources.isNotEmpty) {
+      return List<Map<String, dynamic>>.from(_availableMediaSources);
+    }
+    final access = _serverAccess;
+    if (access == null) return const <Map<String, dynamic>>[];
+    final info = await access.adapter
+        .fetchPlaybackInfo(access.auth, itemId: widget.itemId);
+    final sources = List<Map<String, dynamic>>.from(
+      info.mediaSources.cast<Map<String, dynamic>>(),
+    );
+    _availableMediaSources = List<Map<String, dynamic>>.from(sources);
+    return sources;
+  }
+
+  Future<void> _rememberSeriesMediaSourceIndex({
+    required List<Map<String, dynamic>> sources,
+    required String selectedSourceId,
+  }) async {
+    final sid = (widget.seriesId ?? '').trim();
+    final serverId = widget.server?.id ?? widget.appState.activeServerId;
+    if (serverId == null || serverId.isEmpty || sid.isEmpty) return;
+    final idx = sources.indexWhere(
+      (ms) => (ms['Id']?.toString() ?? '') == selectedSourceId,
+    );
+    if (idx < 0) return;
+    await widget.appState.setSeriesMediaSourceIndex(
+      serverId: serverId,
+      seriesId: sid,
+      mediaSourceIndex: idx,
+    );
+  }
+
+  Future<void> _switchMediaSourceById(
+    String sourceId, {
+    List<Map<String, dynamic>>? knownSources,
+  }) async {
+    final selected = sourceId.trim();
+    if (selected.isEmpty) return;
+    final current = (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
+    if (selected == current) return;
+
     final pos = _playerService.isInitialized ? _lastPosition : Duration.zero;
     _maybeReportPlaybackProgress(pos, force: true);
 
-    var sources = _availableMediaSources;
-    if (sources.isEmpty) {
-      try {
-        final access = _serverAccess;
-        if (access == null) throw Exception('Not connected');
-        final info = await access.adapter
-            .fetchPlaybackInfo(access.auth, itemId: widget.itemId);
-        sources = info.mediaSources.cast<Map<String, dynamic>>();
-        _availableMediaSources = List<Map<String, dynamic>>.from(sources);
-      } catch (_) {
-        sources = const [];
-      }
+    final sources = knownSources ??
+        await _ensureMediaSourcesLoaded(
+            forceRefresh: _availableMediaSources.isEmpty);
+    await _rememberSeriesMediaSourceIndex(
+      sources: sources,
+      selectedSourceId: selected,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _selectedMediaSourceId = selected;
+      _selectedAudioStreamIndex = null;
+      _selectedSubtitleStreamIndex = null;
+      _overrideStartPosition = pos;
+      _overrideResumeImmediately = true;
+      _loading = true;
+      _playError = null;
+    });
+    await _init();
+  }
+
+  Future<void> _switchVersion() async {
+    late final List<Map<String, dynamic>> sources;
+    try {
+      sources = await _ensureMediaSourcesLoaded();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('鏃犳硶鑾峰彇鐗堟湰鍒楄〃')),
+      );
+      return;
     }
 
     if (sources.isEmpty) {
@@ -3149,36 +3255,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
     if (!mounted) return;
     if (selected == null || selected.trim().isEmpty) return;
-    if (selected.trim() == current) return;
-
-    final sid = (widget.seriesId ?? '').trim();
-    final serverId = widget.server?.id ?? widget.appState.activeServerId;
-    if (serverId != null && serverId.isNotEmpty && sid.isNotEmpty) {
-      final idx = sources.indexWhere(
-        (ms) => (ms['Id']?.toString() ?? '') == selected.trim(),
-      );
-      if (idx >= 0) {
-        // ignore: unawaited_futures
-        unawaited(
-          widget.appState.setSeriesMediaSourceIndex(
-            serverId: serverId,
-            seriesId: sid,
-            mediaSourceIndex: idx,
-          ),
-        );
-      }
-    }
-
-    setState(() {
-      _selectedMediaSourceId = selected.trim();
-      _selectedAudioStreamIndex = null;
-      _selectedSubtitleStreamIndex = null;
-      _overrideStartPosition = pos;
-      _overrideResumeImmediately = true;
-      _loading = true;
-      _playError = null;
-    });
-    await _init();
+    await _switchMediaSourceById(selected, knownSources: sources);
   }
 
   @override
@@ -3189,6 +3266,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final isPlaying = initialized ? _playerService.isPlaying : false;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
     final remoteEnabled = widget.isTv || widget.appState.forceRemoteControlKeys;
+    final useDesktopCinematic = _useDesktopPlaybackUi;
     _remoteEnabled = remoteEnabled;
 
     return Focus(
@@ -3298,737 +3376,2688 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         return KeyEventResult.ignored;
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
-        extendBodyBehindAppBar: true,
-        appBar: PreferredSize(
-          preferredSize: _controlsVisible
-              ? const Size.fromHeight(kToolbarHeight)
-              : Size.zero,
-          child: AnimatedOpacity(
-            opacity: _controlsVisible ? 1 : 0,
-            duration: const Duration(milliseconds: 200),
-            child: IgnorePointer(
-              ignoring: !_controlsVisible,
-              child: SafeArea(
-                top: false,
-                bottom: false,
-                child: GlassAppBar(
-                  enableBlur: enableBlur,
-                  child: AppBar(
-                    backgroundColor: Colors.transparent,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    scrolledUnderElevation: 0,
-                    shadowColor: Colors.transparent,
-                    surfaceTintColor: Colors.transparent,
-                    forceMaterialTransparency: true,
-                    title: Text(widget.title),
-                    centerTitle: true,
-                    actions: [
-                      IconButton(
-                        tooltip: '重新加载',
-                        icon: const Icon(Icons.refresh),
-                        onPressed: _loading
-                            ? null
-                            : () async {
+        backgroundColor:
+            useDesktopCinematic ? Colors.transparent : Colors.black,
+        extendBodyBehindAppBar: !useDesktopCinematic,
+        appBar: useDesktopCinematic
+            ? null
+            : PreferredSize(
+                preferredSize: _controlsVisible
+                    ? const Size.fromHeight(kToolbarHeight)
+                    : Size.zero,
+                child: AnimatedOpacity(
+                  opacity: _controlsVisible ? 1 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible,
+                    child: SafeArea(
+                      top: false,
+                      bottom: false,
+                      child: GlassAppBar(
+                        enableBlur: enableBlur,
+                        child: AppBar(
+                          backgroundColor: Colors.transparent,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          scrolledUnderElevation: 0,
+                          shadowColor: Colors.transparent,
+                          surfaceTintColor: Colors.transparent,
+                          forceMaterialTransparency: true,
+                          title: Text(widget.title),
+                          centerTitle: true,
+                          actions: [
+                            IconButton(
+                              tooltip: '重新加载',
+                              icon: const Icon(Icons.refresh),
+                              onPressed: _loading
+                                  ? null
+                                  : () async {
+                                      setState(() {
+                                        _loading = true;
+                                        _playError = null;
+                                      });
+                                      await _init();
+                                    },
+                            ),
+                            IconButton(
+                              tooltip: '音轨',
+                              icon: const Icon(Icons.audiotrack),
+                              onPressed: () => _showAudioTracks(context),
+                            ),
+                            IconButton(
+                              tooltip: '字幕',
+                              icon: const Icon(Icons.subtitles),
+                              onPressed: () => _showSubtitleTracks(context),
+                            ),
+                            IconButton(
+                              tooltip: '弹幕',
+                              icon: const Icon(Icons.comment_outlined),
+                              onPressed: _showDanmakuSheet,
+                            ),
+                            IconButton(
+                              tooltip: '软硬解切换（当前：${_hwdecOn ? '硬解' : '软解'}）',
+                              icon: const Icon(Icons.memory),
+                              onPressed: () async {
                                 setState(() {
+                                  _hwdecOn = !_hwdecOn;
                                   _loading = true;
                                   _playError = null;
                                 });
                                 await _init();
                               },
-                      ),
-                      IconButton(
-                        tooltip: '音轨',
-                        icon: const Icon(Icons.audiotrack),
-                        onPressed: () => _showAudioTracks(context),
-                      ),
-                      IconButton(
-                        tooltip: '字幕',
-                        icon: const Icon(Icons.subtitles),
-                        onPressed: () => _showSubtitleTracks(context),
-                      ),
-                      IconButton(
-                        tooltip: '弹幕',
-                        icon: const Icon(Icons.comment_outlined),
-                        onPressed: _showDanmakuSheet,
-                      ),
-                      IconButton(
-                        tooltip: '软硬解切换（当前：${_hwdecOn ? '硬解' : '软解'}）',
-                        icon: const Icon(Icons.memory),
-                        onPressed: () async {
-                          setState(() {
-                            _hwdecOn = !_hwdecOn;
-                            _loading = true;
-                            _playError = null;
-                          });
-                          await _init();
-                        },
-                      ),
-                      IconButton(
-                        tooltip: _orientationTooltip,
-                        icon: Icon(_orientationIcon),
-                        onPressed: _cycleOrientationMode,
-                      ),
-                      PopupMenuButton<_PlayerMenuAction>(
-                        tooltip: '更多',
-                        icon: const Icon(Icons.more_vert),
-                        color: const Color(0xFF202020),
-                        onSelected: (action) async {
-                          switch (action) {
-                            case _PlayerMenuAction.anime4k:
-                              await _showAnime4kSheet();
-                              break;
-                            case _PlayerMenuAction.switchCore:
-                              await _switchCore();
-                              break;
-                            case _PlayerMenuAction.switchVersion:
-                              await _switchVersion();
-                              break;
-                          }
-                        },
-                        itemBuilder: (ctx) {
-                          final scheme = Theme.of(ctx).colorScheme;
-                          return [
-                            PopupMenuItem(
-                              value: _PlayerMenuAction.anime4k,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.auto_fix_high,
-                                    color: scheme.primary,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Text(
-                                    'Anime4K：${_anime4kPreset.label}',
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                ],
-                              ),
                             ),
-                            PopupMenuItem(
-                              value: _PlayerMenuAction.switchVersion,
-                              child: Row(
-                                children: [
-                                  Icon(Icons.video_file_outlined,
-                                      color: scheme.primary),
-                                  const SizedBox(width: 10),
-                                  const Text(
-                                    '版本选择',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                ],
-                              ),
+                            IconButton(
+                              tooltip: _orientationTooltip,
+                              icon: Icon(_orientationIcon),
+                              onPressed: _cycleOrientationMode,
                             ),
-                            if (!kIsWeb &&
-                                defaultTargetPlatform == TargetPlatform.android)
-                              PopupMenuItem(
-                                value: _PlayerMenuAction.switchCore,
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.tune, color: scheme.secondary),
-                                    const SizedBox(width: 10),
-                                    const Text(
-                                      '切换内核',
-                                      style: TextStyle(color: Colors.white),
+                            PopupMenuButton<_PlayerMenuAction>(
+                              tooltip: '更多',
+                              icon: const Icon(Icons.more_vert),
+                              color: const Color(0xFF202020),
+                              onSelected: (action) async {
+                                switch (action) {
+                                  case _PlayerMenuAction.anime4k:
+                                    await _showAnime4kSheet();
+                                    break;
+                                  case _PlayerMenuAction.switchCore:
+                                    await _switchCore();
+                                    break;
+                                  case _PlayerMenuAction.switchVersion:
+                                    await _switchVersion();
+                                    break;
+                                }
+                              },
+                              itemBuilder: (ctx) {
+                                final scheme = Theme.of(ctx).colorScheme;
+                                return [
+                                  PopupMenuItem(
+                                    value: _PlayerMenuAction.anime4k,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.auto_fix_high,
+                                          color: scheme.primary,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          'Anime4K：${_anime4kPreset.label}',
+                                          style: const TextStyle(
+                                              color: Colors.white),
+                                        ),
+                                      ],
                                     ),
-                                  ],
+                                  ),
+                                  PopupMenuItem(
+                                    value: _PlayerMenuAction.switchVersion,
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.video_file_outlined,
+                                            color: scheme.primary),
+                                        const SizedBox(width: 10),
+                                        const Text(
+                                          '版本选择',
+                                          style: TextStyle(color: Colors.white),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (!kIsWeb &&
+                                      defaultTargetPlatform ==
+                                          TargetPlatform.android)
+                                    PopupMenuItem(
+                                      value: _PlayerMenuAction.switchCore,
+                                      child: Row(
+                                        children: [
+                                          Icon(Icons.tune,
+                                              color: scheme.secondary),
+                                          const SizedBox(width: 10),
+                                          const Text(
+                                            '切换内核',
+                                            style:
+                                                TextStyle(color: Colors.white),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ];
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+        body: useDesktopCinematic
+            ? _buildDesktopCinematicBody(
+                context,
+                controlsEnabled: controlsEnabled,
+                duration: duration,
+                isPlaying: isPlaying,
+              )
+            : Column(
+                children: [
+                  Expanded(
+                    child: Container(
+                      color: Colors.black,
+                      child: initialized
+                          ? Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Video(
+                                  controller: _playerService.controller,
+                                  controls: NoVideoControls,
+                                  subtitleViewConfiguration:
+                                      _subtitleViewConfiguration,
+                                ),
+                                Positioned.fill(
+                                  child: DanmakuStage(
+                                    key: _danmakuKey,
+                                    enabled: _danmakuEnabled,
+                                    opacity: _danmakuOpacity,
+                                    scale: _danmakuScale,
+                                    speed: _danmakuSpeed,
+                                    timeScale: _playerService.player.state.rate,
+                                    bold: _danmakuBold,
+                                    scrollMaxLines: _danmakuMaxLines,
+                                    topMaxLines: _danmakuTopMaxLines,
+                                    bottomMaxLines: _danmakuBottomMaxLines,
+                                    preventOverlap: _danmakuPreventOverlap,
+                                  ),
+                                ),
+                                if (_screenBrightness < 0.999)
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: ColoredBox(
+                                        color: Colors.black.withValues(
+                                          alpha: (1.0 - _screenBrightness)
+                                              .clamp(0.0, 0.8)
+                                              .toDouble(),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_buffering)
+                                  Container(
+                                    color: Colors.black54,
+                                    alignment: Alignment.center,
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const CircularProgressIndicator(),
+                                        if (_bufferingPct != null)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 12),
+                                            child: Text(
+                                              '缓冲中 ${(_bufferingPct! <= 1 ? _bufferingPct! * 100 : _bufferingPct!).clamp(0, 100).toStringAsFixed(0)}%',
+                                              style: const TextStyle(
+                                                  color: Colors.white),
+                                            ),
+                                          ),
+                                        if (widget.appState.showBufferSpeed)
+                                          Padding(
+                                            padding: EdgeInsets.only(
+                                              top: _bufferingPct != null
+                                                  ? 6
+                                                  : 12,
+                                            ),
+                                            child: Text(
+                                              '网速：${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                Positioned.fill(
+                                  child: LayoutBuilder(
+                                    builder: (ctx, constraints) {
+                                      final w = constraints.maxWidth;
+                                      final h = constraints.maxHeight;
+                                      final sideDragEnabled =
+                                          widget.appState.gestureBrightness ||
+                                              widget.appState.gestureVolume;
+                                      return GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: _toggleControls,
+                                        onDoubleTapDown: controlsEnabled
+                                            ? (d) => _doubleTapDownPosition =
+                                                d.localPosition
+                                            : null,
+                                        onDoubleTap: controlsEnabled
+                                            ? () {
+                                                final pos =
+                                                    _doubleTapDownPosition ??
+                                                        Offset(w / 2, 0);
+                                                // ignore: unawaited_futures
+                                                _handleDoubleTap(pos, w);
+                                              }
+                                            : null,
+                                        onHorizontalDragStart:
+                                            (controlsEnabled &&
+                                                    widget.appState.gestureSeek)
+                                                ? _onSeekDragStart
+                                                : null,
+                                        onHorizontalDragUpdate:
+                                            (controlsEnabled &&
+                                                    widget.appState.gestureSeek)
+                                                ? (d) => _onSeekDragUpdate(
+                                                      d,
+                                                      width: w,
+                                                      duration: duration,
+                                                    )
+                                                : null,
+                                        onHorizontalDragEnd: (controlsEnabled &&
+                                                widget.appState.gestureSeek)
+                                            ? _onSeekDragEnd
+                                            : null,
+                                        onVerticalDragStart: (controlsEnabled &&
+                                                sideDragEnabled)
+                                            ? (d) =>
+                                                _onSideDragStart(d, width: w)
+                                            : null,
+                                        onVerticalDragUpdate:
+                                            (controlsEnabled && sideDragEnabled)
+                                                ? (d) => _onSideDragUpdate(d,
+                                                    height: h)
+                                                : null,
+                                        onVerticalDragEnd:
+                                            (controlsEnabled && sideDragEnabled)
+                                                ? _onSideDragEnd
+                                                : null,
+                                        onLongPressStart: (controlsEnabled &&
+                                                widget.appState
+                                                    .gestureLongPressSpeed)
+                                            ? _onLongPressStart
+                                            : null,
+                                        onLongPressMoveUpdate:
+                                            (controlsEnabled &&
+                                                    widget.appState
+                                                        .gestureLongPressSpeed &&
+                                                    widget.appState
+                                                        .longPressSlideSpeed)
+                                                ? (d) => _onLongPressMoveUpdate(
+                                                      d,
+                                                      height: h,
+                                                    )
+                                                : null,
+                                        onLongPressEnd: (controlsEnabled &&
+                                                widget.appState
+                                                    .gestureLongPressSpeed)
+                                            ? _onLongPressEnd
+                                            : null,
+                                        child: const SizedBox.expand(),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                if (_gestureOverlayText != null)
+                                  Center(
+                                    child: IgnorePointer(
+                                      child: Material(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 14,
+                                            vertical: 10,
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                _gestureOverlayIcon ??
+                                                    Icons.info_outline,
+                                                size: 20,
+                                                color: Colors.white,
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                _gestureOverlayText!,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (_skipIntroPromptVisible)
+                                  Align(
+                                    alignment: Alignment.topRight,
+                                    child: SafeArea(
+                                      bottom: false,
+                                      child: Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                            12, 12, 12, 0),
+                                        child: Material(
+                                          color: Colors.black54,
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                          clipBehavior: Clip.antiAlias,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                  Icons.skip_next,
+                                                  size: 18,
+                                                  color: Colors.white,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Builder(builder: (context) {
+                                                  final end =
+                                                      _introTimestamps?.end;
+                                                  final endText = (end !=
+                                                              null &&
+                                                          end > Duration.zero)
+                                                      ? '（至 ${_fmtClock(end)}）'
+                                                      : '';
+                                                  return Text(
+                                                    '检测到片头$endText',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 13,
+                                                    ),
+                                                  );
+                                                }),
+                                                const SizedBox(width: 10),
+                                                InkWell(
+                                                  onTap: _skipIntro,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                  child: Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.18),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              999),
+                                                    ),
+                                                    child: const Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.fast_forward,
+                                                          size: 18,
+                                                          color: Colors.white,
+                                                        ),
+                                                        SizedBox(width: 4),
+                                                        Text(
+                                                          '跳过',
+                                                          style: TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: 13,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                InkWell(
+                                                  onTap:
+                                                      _dismissSkipIntroPrompt,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                  child: Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.12),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              999),
+                                                    ),
+                                                    child: const Text(
+                                                      '不跳过',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (controlsEnabled &&
+                                    _showResumeHint &&
+                                    _resumeHintPosition != null)
+                                  Align(
+                                    alignment: Alignment.topCenter,
+                                    child: SafeArea(
+                                      bottom: false,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        child: Material(
+                                          color: Colors.black54,
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                          clipBehavior: Clip.antiAlias,
+                                          child: InkWell(
+                                            onTap: _resumeToHistoryPosition,
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 12,
+                                                vertical: 10,
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.history,
+                                                    size: 18,
+                                                    color: Colors.white,
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 13,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                if (controlsEnabled &&
+                                    _showStartOverHint &&
+                                    _startOverHintPosition != null)
+                                  Align(
+                                    alignment: Alignment.topCenter,
+                                    child: SafeArea(
+                                      bottom: false,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        child: Material(
+                                          color: Colors.black54,
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                          clipBehavior: Clip.antiAlias,
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                  Icons.history,
+                                                  size: 18,
+                                                  color: Colors.white,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 10),
+                                                InkWell(
+                                                  onTap: _restartFromBeginning,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          999),
+                                                  child: Container(
+                                                    padding: const EdgeInsets
+                                                        .symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white
+                                                          .withValues(
+                                                              alpha: 0.18),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              999),
+                                                    ),
+                                                    child: const Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.replay,
+                                                          size: 18,
+                                                          color: Colors.white,
+                                                        ),
+                                                        SizedBox(width: 4),
+                                                        Text(
+                                                          '从头开始',
+                                                          style: TextStyle(
+                                                            color: Colors.white,
+                                                            fontSize: 13,
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                Align(
+                                  alignment: Alignment.bottomCenter,
+                                  child: SafeArea(
+                                    top: false,
+                                    minimum: const EdgeInsets.fromLTRB(
+                                        12, 0, 12, 12),
+                                    child: AnimatedOpacity(
+                                      opacity: _controlsVisible ? 1 : 0,
+                                      duration:
+                                          const Duration(milliseconds: 200),
+                                      child: IgnorePointer(
+                                        ignoring: !_controlsVisible,
+                                        child: Listener(
+                                          onPointerDown: (_) => _showControls(),
+                                          child: Focus(
+                                            canRequestFocus: false,
+                                            onKeyEvent: (node, event) {
+                                              if (!_remoteEnabled) {
+                                                return KeyEventResult.ignored;
+                                              }
+                                              if (event is! KeyDownEvent) {
+                                                return KeyEventResult.ignored;
+                                              }
+                                              if (event.logicalKey ==
+                                                  LogicalKeyboardKey
+                                                      .arrowDown) {
+                                                final moved =
+                                                    FocusScope.of(context)
+                                                        .focusInDirection(
+                                                  TraversalDirection.down,
+                                                );
+                                                if (moved) {
+                                                  return KeyEventResult.handled;
+                                                }
+                                                _hideControlsForRemote();
+                                                return KeyEventResult.handled;
+                                              }
+                                              return KeyEventResult.ignored;
+                                            },
+                                            child: PlaybackControls(
+                                              enabled: controlsEnabled,
+                                              playPauseFocusNode:
+                                                  _tvPlayPauseFocusNode,
+                                              position: _lastPosition,
+                                              buffered: _lastBuffer,
+                                              duration: duration,
+                                              isPlaying: isPlaying,
+                                              playbackRate: _playerService
+                                                  .player.state.rate,
+                                              onSetPlaybackRate: (rate) async {
+                                                _showControls();
+                                                if (!_playerService
+                                                    .isInitialized) {
+                                                  return;
+                                                }
+                                                await _playerService.player
+                                                    .setRate(rate);
+                                                if (mounted) setState(() {});
+                                              },
+                                              heatmap: _danmakuHeatmap,
+                                              showHeatmap:
+                                                  _danmakuShowHeatmap &&
+                                                      _danmakuHeatmap
+                                                          .isNotEmpty,
+                                              seekBackwardSeconds:
+                                                  _seekBackSeconds,
+                                              seekForwardSeconds:
+                                                  _seekForwardSeconds,
+                                              showSystemTime: widget.appState
+                                                  .showSystemTimeInControls,
+                                              showBattery: widget.appState
+                                                  .showBatteryInControls,
+                                              showBufferSpeed: widget
+                                                  .appState.showBufferSpeed,
+                                              buffering: _buffering,
+                                              bufferSpeedX: _bufferSpeedX,
+                                              netSpeedBytesPerSecond:
+                                                  _netSpeedBytesPerSecond,
+                                              onRequestThumbnail:
+                                                  _thumbnailer == null
+                                                      ? null
+                                                      : (pos) => _thumbnailer!
+                                                              .getThumbnail(
+                                                            pos,
+                                                          ),
+                                              onOpenEpisodePicker:
+                                                  _canShowEpisodePickerButton
+                                                      ? _toggleEpisodePicker
+                                                      : null,
+                                              onScrubStart: _onScrubStart,
+                                              onScrubEnd: _onScrubEnd,
+                                              onSeek: (pos) async {
+                                                await _playerService.seek(
+                                                  pos,
+                                                  flushBuffer:
+                                                      _flushBufferOnSeek,
+                                                );
+                                                _lastPosition = pos;
+                                                _syncDanmakuCursor(pos);
+                                                _maybeReportPlaybackProgress(
+                                                  pos,
+                                                  force: true,
+                                                );
+                                                if (mounted) setState(() {});
+                                              },
+                                              onPlay: () {
+                                                _showControls();
+                                                return _playerService.play();
+                                              },
+                                              onPause: () {
+                                                _showControls();
+                                                return _playerService.pause();
+                                              },
+                                              onSeekBackward: () async {
+                                                _showControls();
+                                                final target = _lastPosition -
+                                                    Duration(
+                                                        seconds:
+                                                            _seekBackSeconds);
+                                                final pos =
+                                                    target < Duration.zero
+                                                        ? Duration.zero
+                                                        : target;
+                                                await _playerService.seek(
+                                                  pos,
+                                                  flushBuffer:
+                                                      _flushBufferOnSeek,
+                                                );
+                                                _lastPosition = pos;
+                                                _syncDanmakuCursor(pos);
+                                                _maybeReportPlaybackProgress(
+                                                  pos,
+                                                  force: true,
+                                                );
+                                                if (mounted) setState(() {});
+                                              },
+                                              onSeekForward: () async {
+                                                _showControls();
+                                                final d = duration;
+                                                final target = _lastPosition +
+                                                    Duration(
+                                                        seconds:
+                                                            _seekForwardSeconds);
+                                                final pos =
+                                                    (d > Duration.zero &&
+                                                            target > d)
+                                                        ? d
+                                                        : target;
+                                                await _playerService.seek(
+                                                  pos,
+                                                  flushBuffer:
+                                                      _flushBufferOnSeek,
+                                                );
+                                                _lastPosition = pos;
+                                                _syncDanmakuCursor(pos);
+                                                _maybeReportPlaybackProgress(
+                                                  pos,
+                                                  force: true,
+                                                );
+                                                if (mounted) setState(() {});
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                _buildEpisodePickerOverlay(
+                                    enableBlur: enableBlur),
+                              ],
+                            )
+                          : _playError != null
+                              ? Center(
+                                  child: Text(
+                                  '播放失败：$_playError',
+                                  style:
+                                      const TextStyle(color: Colors.redAccent),
+                                ))
+                              : const Center(
+                                  child: CircularProgressIndicator()),
+                    ),
+                  ),
+                  if (_loading) const LinearProgressIndicator(),
+                ],
+              ),
+      ),
+    );
+  }
+
+  static const Duration _desktopAnimDuration = Duration(milliseconds: 220);
+
+  void _toggleDesktopPanel(_DesktopSidePanel panel) {
+    final next = _desktopSidePanel == panel ? _DesktopSidePanel.none : panel;
+    setState(() {
+      _desktopSidePanel = next;
+      _desktopSpeedPanelVisible = false;
+    });
+    if (next == _DesktopSidePanel.episode) {
+      // ignore: unawaited_futures
+      unawaited(_ensureEpisodePickerLoaded());
+    } else if (next == _DesktopSidePanel.line &&
+        _availableMediaSources.isEmpty) {
+      // ignore: unawaited_futures
+      unawaited(_loadDesktopLineSources());
+    }
+    if (next == _DesktopSidePanel.none) {
+      _scheduleControlsHide();
+    } else {
+      _showControls(scheduleHide: false);
+    }
+  }
+
+  Future<void> _loadDesktopLineSources({bool forceRefresh = false}) async {
+    if (_desktopLineLoading) return;
+    setState(() => _desktopLineLoading = true);
+    try {
+      final sources =
+          await _ensureMediaSourcesLoaded(forceRefresh: forceRefresh);
+      if (!mounted) return;
+      setState(() => _availableMediaSources = sources);
+    } catch (_) {
+      // Keep current cache and show empty state.
+    } finally {
+      if (mounted) setState(() => _desktopLineLoading = false);
+    }
+  }
+
+  String _desktopEpisodeMark(
+    MediaItem episode, {
+    int fallbackSeason = 1,
+    int fallbackEpisode = 1,
+  }) {
+    final season = (episode.seasonNumber ?? fallbackSeason).clamp(1, 999);
+    final ep = (episode.episodeNumber ?? fallbackEpisode).clamp(1, 999);
+    return 'S${season.toString().padLeft(2, '0')}E${ep.toString().padLeft(2, '0')}';
+  }
+
+  String _desktopTopCenterTitle() {
+    final item = _episodePickerItem;
+    final title = (item?.name.trim().isNotEmpty ?? false)
+        ? item!.name.trim()
+        : widget.title.trim();
+    final season = (item?.seasonNumber ?? 1).clamp(1, 999);
+    final episode = (item?.episodeNumber ?? 1).clamp(1, 999);
+    final mark =
+        'S${season.toString().padLeft(2, '0')}E${episode.toString().padLeft(2, '0')}';
+    return '第${season.toString().padLeft(2, '0')}季  $mark  $title';
+  }
+
+  String _desktopNetSpeedMbPerSecondLabel() {
+    final bytes = _netSpeedBytesPerSecond;
+    if (bytes == null || !bytes.isFinite || bytes <= 0) return '-- MB/S';
+    final mb = bytes / (1024 * 1024);
+    if (mb >= 10) return '${mb.toStringAsFixed(1)} MB/S';
+    return '${mb.toStringAsFixed(2)} MB/S';
+  }
+
+  Widget _buildDesktopCinematicBody(
+    BuildContext context, {
+    required bool controlsEnabled,
+    required Duration duration,
+    required bool isPlaying,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final shellColor =
+        isDark ? const Color(0xB017191D) : const Color(0xD9FFFFFF);
+    final shellBorder = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : Colors.black.withValues(alpha: 0.08);
+
+    return SafeArea(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildDesktopBackdrop(isDark: isDark),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: _buildDesktopGlassPanel(
+              context: context,
+              blurSigma: 14,
+              color: shellColor,
+              borderRadius: BorderRadius.circular(30),
+              borderColor: shellBorder,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: _buildDesktopVideoSurface(
+                  context,
+                  isDark: isDark,
+                  controlsEnabled: controlsEnabled,
+                  duration: duration,
+                  isPlaying: isPlaying,
+                ),
+              ),
+            ),
+          ),
+          if (_loading)
+            const Align(
+              alignment: Alignment.topCenter,
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopBackdrop({required bool isDark}) {
+    final background =
+        isDark ? const Color(0xFF060607) : const Color(0xFFF2F4F7);
+    final centerGlowA = isDark
+        ? const Color(0xFF3A4F7C).withValues(alpha: 0.42)
+        : const Color(0xFFA8BCE8).withValues(alpha: 0.52);
+    final centerGlowB = isDark
+        ? const Color(0xFF5A3148).withValues(alpha: 0.35)
+        : const Color(0xFFF4C5DA).withValues(alpha: 0.48);
+    final cornerGlow = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.black.withValues(alpha: 0.04);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(color: background),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(-0.2, -0.45),
+                radius: 1.2,
+                colors: [centerGlowA, centerGlowB, background],
+              ),
+            ),
+          ),
+          Positioned(
+            left: -120,
+            top: -80,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration:
+                  BoxDecoration(shape: BoxShape.circle, color: cornerGlow),
+            ),
+          ),
+          Positioned(
+            right: -90,
+            bottom: -130,
+            child: Container(
+              width: 340,
+              height: 340,
+              decoration:
+                  BoxDecoration(shape: BoxShape.circle, color: cornerGlow),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopVideoSurface(
+    BuildContext context, {
+    required bool isDark,
+    required bool controlsEnabled,
+    required Duration duration,
+    required bool isPlaying,
+  }) {
+    final panelColor =
+        isDark ? const Color(0x99111113) : const Color(0xD9FFFFFF);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.08);
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 14,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(30),
+      borderColor: panelBorder,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(30),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(color: Colors.black),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_playerService.isInitialized) ...[
+                Video(
+                  controller: _playerService.controller,
+                  controls: NoVideoControls,
+                  subtitleViewConfiguration: _subtitleViewConfiguration,
+                ),
+                Positioned.fill(
+                  child: DanmakuStage(
+                    key: _danmakuKey,
+                    enabled: _danmakuEnabled,
+                    opacity: _danmakuOpacity,
+                    scale: _danmakuScale,
+                    speed: _danmakuSpeed,
+                    timeScale: _playerService.player.state.rate,
+                    bold: _danmakuBold,
+                    scrollMaxLines: _danmakuMaxLines,
+                    topMaxLines: _danmakuTopMaxLines,
+                    bottomMaxLines: _danmakuBottomMaxLines,
+                    preventOverlap: _danmakuPreventOverlap,
+                  ),
+                ),
+                if (_screenBrightness < 0.999)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: ColoredBox(
+                        color: Colors.black.withValues(
+                          alpha: (1.0 - _screenBrightness)
+                              .clamp(0.0, 0.8)
+                              .toDouble(),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (_buffering)
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: Colors.black54,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 12),
+                            Text(
+                              '网速：${_desktopNetSpeedMbPerSecondLabel()}',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (ctx, constraints) {
+                      final w = constraints.maxWidth;
+                      final h = constraints.maxHeight;
+                      final sideDragEnabled =
+                          widget.appState.gestureBrightness ||
+                              widget.appState.gestureVolume;
+                      return GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: _toggleControls,
+                        onDoubleTapDown: controlsEnabled
+                            ? (d) => _doubleTapDownPosition = d.localPosition
+                            : null,
+                        onDoubleTap: controlsEnabled
+                            ? () {
+                                final pos =
+                                    _doubleTapDownPosition ?? Offset(w / 2, 0);
+                                // ignore: unawaited_futures
+                                _handleDoubleTap(pos, w);
+                              }
+                            : null,
+                        onHorizontalDragStart:
+                            (controlsEnabled && widget.appState.gestureSeek)
+                                ? _onSeekDragStart
+                                : null,
+                        onHorizontalDragUpdate:
+                            (controlsEnabled && widget.appState.gestureSeek)
+                                ? (d) => _onSeekDragUpdate(
+                                      d,
+                                      width: w,
+                                      duration: duration,
+                                    )
+                                : null,
+                        onHorizontalDragEnd:
+                            (controlsEnabled && widget.appState.gestureSeek)
+                                ? _onSeekDragEnd
+                                : null,
+                        onVerticalDragStart:
+                            (controlsEnabled && sideDragEnabled)
+                                ? (d) => _onSideDragStart(d, width: w)
+                                : null,
+                        onVerticalDragUpdate:
+                            (controlsEnabled && sideDragEnabled)
+                                ? (d) => _onSideDragUpdate(d, height: h)
+                                : null,
+                        onVerticalDragEnd: (controlsEnabled && sideDragEnabled)
+                            ? _onSideDragEnd
+                            : null,
+                        onLongPressStart: (controlsEnabled &&
+                                widget.appState.gestureLongPressSpeed)
+                            ? _onLongPressStart
+                            : null,
+                        onLongPressMoveUpdate: (controlsEnabled &&
+                                widget.appState.gestureLongPressSpeed &&
+                                widget.appState.longPressSlideSpeed)
+                            ? (d) => _onLongPressMoveUpdate(d, height: h)
+                            : null,
+                        onLongPressEnd: (controlsEnabled &&
+                                widget.appState.gestureLongPressSpeed)
+                            ? _onLongPressEnd
+                            : null,
+                        child: const SizedBox.expand(),
+                      );
+                    },
+                  ),
+                ),
+                if (_gestureOverlayText != null)
+                  Center(
+                    child: IgnorePointer(
+                      child: Material(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _gestureOverlayIcon ?? Icons.info_outline,
+                                size: 20,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                _gestureOverlayText!,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
                                 ),
                               ),
-                          ];
-                        },
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Positioned.fill(
+                  child: SafeArea(
+                    minimum: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                    child: Stack(
+                      children: [
+                        Align(
+                          alignment: Alignment.topCenter,
+                          child: AnimatedOpacity(
+                            opacity: _controlsVisible ? 1 : 0,
+                            duration: _desktopAnimDuration,
+                            child: IgnorePointer(
+                              ignoring: !_controlsVisible,
+                              child: _buildDesktopTopStatusBar(
+                                context,
+                                isDark: isDark,
+                                controlsEnabled: controlsEnabled,
+                              ),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: AnimatedSlide(
+                            duration: _desktopAnimDuration,
+                            curve: Curves.easeOutCubic,
+                            offset: (_controlsVisible &&
+                                    _desktopSidePanel != _DesktopSidePanel.none)
+                                ? Offset.zero
+                                : const Offset(1, 0),
+                            child: AnimatedOpacity(
+                              duration: _desktopAnimDuration,
+                              opacity: (_controlsVisible &&
+                                      _desktopSidePanel !=
+                                          _DesktopSidePanel.none)
+                                  ? 1
+                                  : 0,
+                              child: IgnorePointer(
+                                ignoring: !_controlsVisible ||
+                                    _desktopSidePanel == _DesktopSidePanel.none,
+                                child: _buildDesktopSidePanel(
+                                  context,
+                                  isDark: isDark,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.bottomCenter,
+                          child: AnimatedOpacity(
+                            opacity: _controlsVisible ? 1 : 0,
+                            duration: _desktopAnimDuration,
+                            child: IgnorePointer(
+                              ignoring: !_controlsVisible,
+                              child: _buildDesktopPlaybackControls(
+                                context,
+                                isDark: isDark,
+                                controlsEnabled: controlsEnabled,
+                                duration: duration,
+                                isPlaying: isPlaying,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ] else if (_playError != null)
+                Center(
+                  child: Text(
+                    '播放失败：$_playError',
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                )
+              else
+                const Center(child: CircularProgressIndicator()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopTopStatusBar(
+    BuildContext context, {
+    required bool isDark,
+    required bool controlsEnabled,
+  }) {
+    final panelColor =
+        isDark ? const Color(0xB8111214) : const Color(0xEAF9FAFD);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.14)
+        : Colors.black.withValues(alpha: 0.08);
+    final titleColor = isDark ? Colors.white : Colors.black87;
+    final subtitleColor = isDark ? Colors.white70 : Colors.black54;
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 14,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(18),
+      borderColor: panelBorder,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: '返回',
+              onPressed: Navigator.of(context).canPop()
+                  ? () => Navigator.of(context).pop()
+                  : null,
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _desktopTopCenterTitle(),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: titleColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.black.withValues(alpha: 0.36)
+                          : Colors.black.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.12)
+                            : Colors.black.withValues(alpha: 0.08),
+                      ),
+                    ),
+                    child: Text(
+                      '缓冲网速 ${_desktopNetSpeedMbPerSecondLabel()}',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            color: subtitleColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _desktopTopActionChip(
+                    context,
+                    isDark: isDark,
+                    icon: Icons.route_outlined,
+                    label: '切换线路',
+                    active: _desktopSidePanel == _DesktopSidePanel.line,
+                    onTap: controlsEnabled
+                        ? () => _toggleDesktopPanel(_DesktopSidePanel.line)
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  _desktopTopActionChip(
+                    context,
+                    isDark: isDark,
+                    icon: Icons.audiotrack_outlined,
+                    label: '音轨选择',
+                    active: _desktopSidePanel == _DesktopSidePanel.audio,
+                    onTap: controlsEnabled
+                        ? () => _toggleDesktopPanel(_DesktopSidePanel.audio)
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  _desktopTopActionChip(
+                    context,
+                    isDark: isDark,
+                    icon: Icons.subtitles_outlined,
+                    label: '字幕选择',
+                    active: _desktopSidePanel == _DesktopSidePanel.subtitle,
+                    onTap: controlsEnabled
+                        ? () => _toggleDesktopPanel(_DesktopSidePanel.subtitle)
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  _desktopTopActionChip(
+                    context,
+                    isDark: isDark,
+                    icon: Icons.comment_outlined,
+                    label: '弹幕',
+                    active: _desktopSidePanel == _DesktopSidePanel.danmaku,
+                    onTap: controlsEnabled
+                        ? () => _toggleDesktopPanel(_DesktopSidePanel.danmaku)
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  _desktopTopActionChip(
+                    context,
+                    isDark: isDark,
+                    icon: _anime4kPreset.isOff
+                        ? Icons.auto_fix_high_outlined
+                        : Icons.auto_fix_high,
+                    label: 'Anime4K',
+                    onTap: controlsEnabled ? _showAnime4kSheet : null,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _desktopTopActionChip(
+    BuildContext context, {
+    required bool isDark,
+    required IconData icon,
+    required String label,
+    required VoidCallback? onTap,
+    bool active = false,
+  }) {
+    final fg = active
+        ? (isDark ? Colors.white : Colors.black87)
+        : (isDark ? Colors.white70 : Colors.black54);
+    final bg = active
+        ? (isDark
+            ? Colors.white.withValues(alpha: 0.22)
+            : Colors.black.withValues(alpha: 0.12))
+        : (isDark
+            ? Colors.black.withValues(alpha: 0.26)
+            : Colors.black.withValues(alpha: 0.04));
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.12)
+                  : Colors.black.withValues(alpha: 0.08),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: fg),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopSidePanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final width = (MediaQuery.sizeOf(context).width * 0.34)
+        .clamp(360.0, 480.0)
+        .toDouble();
+    final panelColor =
+        isDark ? const Color(0xEE121417) : const Color(0xF3F9FAFD);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.black.withValues(alpha: 0.08);
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 18,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(18),
+      borderColor: panelBorder,
+      child: SizedBox(
+        width: width,
+        child: Column(
+          children: [
+            _buildDesktopPanelHeader(context, title: _desktopSidePanel.title),
+            const Divider(height: 1),
+            Expanded(
+              child: switch (_desktopSidePanel) {
+                _DesktopSidePanel.line =>
+                  _buildDesktopLinePanel(context, isDark: isDark),
+                _DesktopSidePanel.audio =>
+                  _buildDesktopAudioPanel(context, isDark: isDark),
+                _DesktopSidePanel.subtitle =>
+                  _buildDesktopSubtitlePanel(context, isDark: isDark),
+                _DesktopSidePanel.danmaku =>
+                  _buildDesktopDanmakuPanel(context, isDark: isDark),
+                _DesktopSidePanel.episode =>
+                  _buildDesktopEpisodePanel(context, isDark: isDark),
+                _DesktopSidePanel.none => const SizedBox.shrink(),
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDesktopPanelHeader(
+    BuildContext context, {
+    required String title,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ),
+          IconButton(
+            tooltip: '关闭',
+            onPressed: () {
+              setState(() => _desktopSidePanel = _DesktopSidePanel.none);
+              _scheduleControlsHide();
+            },
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopLinePanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final current = (_mediaSourceId ?? _selectedMediaSourceId ?? '').trim();
+    final sortedSources =
+        List<Map<String, dynamic>>.from(_availableMediaSources)
+          ..sort(_compareMediaSourcesByQuality);
+
+    if (_desktopLineLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (sortedSources.length <= 1) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '当前剧集暂无可切换线路',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  // ignore: unawaited_futures
+                  unawaited(_loadDesktopLineSources(forceRefresh: true));
+                },
+                icon: const Icon(Icons.refresh),
+                label: const Text('刷新线路'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      itemCount: sortedSources.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, i) {
+        final source = sortedSources[i];
+        final sourceId = (source['Id']?.toString() ?? '').trim();
+        final selected = sourceId.isNotEmpty && sourceId == current;
+        return ListTile(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          tileColor: isDark
+              ? Colors.white.withValues(alpha: selected ? 0.16 : 0.06)
+              : Colors.black.withValues(alpha: selected ? 0.1 : 0.04),
+          title: Text(_mediaSourceTitle(source)),
+          subtitle: Text(_mediaSourceSubtitle(source)),
+          trailing:
+              selected ? const Icon(Icons.check_circle_outline_rounded) : null,
+          onTap: sourceId.isEmpty
+              ? null
+              : () async {
+                  await _switchMediaSourceById(
+                    sourceId,
+                    knownSources: sortedSources,
+                  );
+                },
+        );
+      },
+    );
+  }
+
+  Widget _buildDesktopAudioPanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final audios = List<AudioTrack>.from(_tracks.audio);
+    final current = _playerService.player.state.track.audio;
+    if (!_playerService.isInitialized) {
+      return const Center(child: Text('当前未开始播放'));
+    }
+    if (audios.isEmpty) {
+      return const Center(child: Text('暂无可选音轨'));
+    }
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      children: audios
+          .map(
+            (a) => ListTile(
+              dense: true,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              title: Text(a.title ?? a.language ?? '音轨 ${a.id}'),
+              subtitle: Text(a.codec ?? ''),
+              trailing: current == a ? const Icon(Icons.check) : null,
+              onTap: () {
+                _playerService.player.setAudioTrack(a);
+                setState(() {});
+              },
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildDesktopSubtitlePanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    if (!_playerService.isInitialized) {
+      return const Center(child: Text('当前未开始播放'));
+    }
+    final subs = List<SubtitleTrack>.from(_tracks.subtitle);
+    final value = _playerService.player.state.track.subtitle;
+    final messenger = ScaffoldMessenger.of(context);
+
+    Future<void> pickAndAddSubtitle() async {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['srt', 'ass', 'ssa', 'vtt', 'sub'],
+      );
+      if (result == null || result.files.isEmpty) return;
+      final f = result.files.first;
+      final path = (f.path ?? '').trim();
+      if (path.isEmpty) {
+        messenger.showSnackBar(const SnackBar(content: Text('无法读取字幕文件路径')));
+        return;
+      }
+      try {
+        await _playerService.player.setSubtitleTrack(
+          SubtitleTrack.uri(path, title: f.name),
+        );
+        if (!mounted) return;
+        setState(() => _tracks = _playerService.player.state.tracks);
+      } catch (e) {
+        messenger.showSnackBar(SnackBar(content: Text('添加字幕失败：$e')));
+      }
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      children: [
+        Text(
+          '字幕轨道',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        const SizedBox(height: 6),
+        RadioGroup<SubtitleTrack>(
+          groupValue: value,
+          onChanged: (next) {
+            if (next == null) return;
+            _playerService.player.setSubtitleTrack(next);
+            setState(() {});
+          },
+          child: Column(
+            children: [
+              RadioListTile<SubtitleTrack>(
+                value: SubtitleTrack.no(),
+                title: const Text('关闭'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+              for (final s in subs)
+                RadioListTile<SubtitleTrack>(
+                  value: s,
+                  title: Text(_subtitleTrackTitle(s)),
+                  subtitle: Text(_subtitleTrackSubtitle(s)),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: pickAndAddSubtitle,
+          icon: const Icon(Icons.upload_file_outlined),
+          label: const Text('导入本地字幕'),
+        ),
+        const Divider(height: 20),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('字幕同步'),
+          subtitle: Slider(
+            min: -10.0,
+            max: 10.0,
+            divisions: 200,
+            value: _subtitleDelaySeconds.clamp(-10.0, 10.0).toDouble(),
+            label: '${_subtitleDelaySeconds.toStringAsFixed(1)}s',
+            onChanged: (v) async {
+              setState(() => _subtitleDelaySeconds = v);
+              await _applyMpvSubtitleOptions();
+            },
+          ),
+          trailing: TextButton(
+            onPressed: () async {
+              setState(() => _subtitleDelaySeconds = 0.0);
+              await _applyMpvSubtitleOptions();
+            },
+            child: const Text('重置'),
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('字幕大小'),
+          subtitle: Slider(
+            min: 12,
+            max: 60,
+            divisions: 48,
+            value: _subtitleFontSize.clamp(12.0, 60.0).toDouble(),
+            onChanged: (v) async {
+              setState(() => _subtitleFontSize = v);
+              await _applyMpvSubtitleOptions();
+            },
+          ),
+          trailing: Text('${_subtitleFontSize.round()}'),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('字幕位置'),
+          subtitle: Slider(
+            min: 0,
+            max: 20,
+            divisions: 20,
+            value: _subtitlePositionStep.toDouble().clamp(0, 20),
+            onChanged: (v) async {
+              setState(() => _subtitlePositionStep = v.round());
+              await _applyMpvSubtitleOptions();
+            },
+          ),
+          trailing: Text('$_subtitlePositionStep'),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('设置为粗体'),
+          value: _subtitleBold,
+          onChanged: (v) async {
+            setState(() => _subtitleBold = v);
+            await _applyMpvSubtitleOptions();
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('强制覆盖 ASS/SSA 字幕'),
+          value: _subtitleAssOverrideForce,
+          onChanged: (v) async {
+            setState(() => _subtitleAssOverrideForce = v);
+            await _applyMpvSubtitleOptions();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopDanmakuPanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final hasSources = _danmakuSources.isNotEmpty;
+    final selectedSource = (_danmakuSourceIndex >= 0 &&
+            _danmakuSourceIndex < _danmakuSources.length)
+        ? _danmakuSourceIndex
+        : null;
+    final appState = widget.appState;
+
+    Future<void> loadOnline() async {
+      if (_desktopDanmakuOnlineLoading) return;
+      setState(() => _desktopDanmakuOnlineLoading = true);
+      try {
+        await _loadOnlineDanmakuForNetwork(showToast: true);
+      } finally {
+        if (mounted) setState(() => _desktopDanmakuOnlineLoading = false);
+      }
+    }
+
+    Future<void> manualSearch() async {
+      if (_desktopDanmakuManualLoading) return;
+      setState(() => _desktopDanmakuManualLoading = true);
+      try {
+        await _manualMatchOnlineDanmakuForCurrent(showToast: true);
+      } finally {
+        if (mounted) setState(() => _desktopDanmakuManualLoading = false);
+      }
+    }
+
+    Future<void> persistSelectionName() async {
+      if (!appState.danmakuRememberSelectedSource) return;
+      final idx = _danmakuSourceIndex;
+      if (idx < 0 || idx >= _danmakuSources.length) return;
+      await appState
+          .setDanmakuLastSelectedSourceName(_danmakuSources[idx].name);
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('启用弹幕'),
+          value: _danmakuEnabled,
+          onChanged: (v) {
+            setState(() => _danmakuEnabled = v);
+            if (!v) _danmakuKey.currentState?.clear();
+            // ignore: unawaited_futures
+            appState.setDanmakuEnabled(v);
+          },
+        ),
+        OutlinedButton.icon(
+          onPressed: () async {
+            await _pickDanmakuFile();
+            if (mounted) setState(() {});
+          },
+          icon: const Icon(Icons.upload_file_outlined),
+          label: const Text('导入本地弹幕'),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: _desktopDanmakuOnlineLoading ? null : loadOnline,
+          icon: _desktopDanmakuOnlineLoading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.cloud_download_outlined),
+          label: const Text('加载在线弹幕'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed:
+              (_desktopDanmakuOnlineLoading || _desktopDanmakuManualLoading)
+                  ? null
+                  : manualSearch,
+          icon: _desktopDanmakuManualLoading
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.search),
+          label: const Text('手动搜索弹幕'),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<int>(
+          initialValue: selectedSource,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: '弹幕源',
+            isDense: true,
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (var i = 0; i < _danmakuSources.length; i++)
+              DropdownMenuItem(
+                value: i,
+                child: Text(
+                  _danmakuSources[i].name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: !hasSources
+              ? null
+              : (v) async {
+                  if (v == null) return;
+                  setState(() {
+                    _danmakuSourceIndex = v;
+                    _danmakuEnabled = true;
+                    _rebuildDanmakuHeatmap();
+                    _syncDanmakuCursor(_lastPosition);
+                  });
+                  await persistSelectionName();
+                },
+        ),
+        const SizedBox(height: 10),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('弹幕同步'),
+          subtitle: Slider(
+            min: -10.0,
+            max: 10.0,
+            divisions: 200,
+            value: _danmakuTimeOffsetSeconds.clamp(-10.0, 10.0).toDouble(),
+            label: '${_danmakuTimeOffsetSeconds.toStringAsFixed(1)}s',
+            onChanged: (v) {
+              setState(() => _danmakuTimeOffsetSeconds = v);
+              _syncDanmakuCursor(_lastPosition);
+            },
+          ),
+          trailing: TextButton(
+            onPressed: () {
+              setState(() => _danmakuTimeOffsetSeconds = 0.0);
+              _syncDanmakuCursor(_lastPosition);
+            },
+            child: const Text('重置'),
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('滚动弹幕最大行数'),
+          subtitle: Slider(
+            min: 10,
+            max: 200,
+            divisions: 190,
+            value: _danmakuMaxLines.clamp(10, 200).toDouble(),
+            label: '$_danmakuMaxLines',
+            onChanged: (v) => setState(() => _danmakuMaxLines = v.round()),
+            onChangeEnd: (v) {
+              // ignore: unawaited_futures
+              appState.setDanmakuMaxLines(v.round());
+            },
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('顶部弹幕最大行数'),
+          subtitle: Slider(
+            min: 10,
+            max: 200,
+            divisions: 190,
+            value: _danmakuTopMaxLines.clamp(10, 200).toDouble(),
+            label: '$_danmakuTopMaxLines',
+            onChanged: (v) => setState(() => _danmakuTopMaxLines = v.round()),
+            onChangeEnd: (v) {
+              // ignore: unawaited_futures
+              appState.setDanmakuTopMaxLines(v.round());
+            },
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('底部弹幕最大行数'),
+          subtitle: Slider(
+            min: 10,
+            max: 200,
+            divisions: 190,
+            value: _danmakuBottomMaxLines.clamp(10, 200).toDouble(),
+            label: '$_danmakuBottomMaxLines',
+            onChanged: (v) =>
+                setState(() => _danmakuBottomMaxLines = v.round()),
+            onChangeEnd: (v) {
+              // ignore: unawaited_futures
+              appState.setDanmakuBottomMaxLines(v.round());
+            },
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('弹幕大小缩放'),
+          subtitle: Slider(
+            min: 0.1,
+            max: 3.0,
+            divisions: 29,
+            value: _danmakuScale.clamp(0.1, 3.0).toDouble(),
+            label: _danmakuScale.toStringAsFixed(2),
+            onChanged: (v) => setState(() => _danmakuScale = v),
+            onChangeEnd: (v) {
+              // ignore: unawaited_futures
+              appState.setDanmakuScale(v);
+            },
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('弹幕透明度'),
+          subtitle: Slider(
+            min: 0,
+            max: 1.0,
+            divisions: 100,
+            value: _danmakuOpacity.clamp(0.0, 1.0).toDouble(),
+            label: '${(_danmakuOpacity * 100).round()}%',
+            onChanged: (v) => setState(() => _danmakuOpacity = v),
+            onChangeEnd: (v) {
+              // ignore: unawaited_futures
+              appState.setDanmakuOpacity(v);
+            },
+          ),
+        ),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('弹幕滚动速度'),
+          subtitle: Slider(
+            min: 0.1,
+            max: 3.0,
+            divisions: 29,
+            value: _danmakuSpeed.clamp(0.1, 3.0).toDouble(),
+            label: _danmakuSpeed.toStringAsFixed(2),
+            onChanged: (v) => setState(() => _danmakuSpeed = v),
+            onChangeEnd: (v) {
+              // ignore: unawaited_futures
+              appState.setDanmakuSpeed(v);
+            },
+          ),
+        ),
+        const Divider(height: 18),
+        Text(
+          '杂项',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('设置为粗体'),
+          value: _danmakuBold,
+          onChanged: (v) {
+            setState(() => _danmakuBold = v);
+            // ignore: unawaited_futures
+            appState.setDanmakuBold(v);
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('合并重复弹幕'),
+          value: appState.danmakuMergeDuplicates,
+          onChanged: (v) {
+            // ignore: unawaited_futures
+            appState.setDanmakuMergeDuplicates(v);
+            setState(() {});
+          },
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('防止弹幕重叠'),
+          value: _danmakuPreventOverlap,
+          onChanged: (v) {
+            setState(() => _danmakuPreventOverlap = v);
+            // ignore: unawaited_futures
+            appState.setDanmakuPreventOverlap(v);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopEpisodePanel(
+    BuildContext context, {
+    required bool isDark,
+  }) {
+    final seasons = _episodeSeasons;
+    if (_episodePickerLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_episodePickerError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_episodePickerError!, textAlign: TextAlign.center),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _ensureEpisodePickerLoaded,
+                icon: const Icon(Icons.refresh),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    if (seasons.isEmpty) {
+      return const Center(child: Text('暂无可选剧集'));
+    }
+
+    final selectedSeasonId = (_episodeSelectedSeasonId != null &&
+            seasons.any((s) => s.id == _episodeSelectedSeasonId))
+        ? _episodeSelectedSeasonId!
+        : seasons.first.id;
+    final selectedSeason = seasons.firstWhere((s) => s.id == selectedSeasonId);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: selectedSeason.id,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: '季度',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final entry in seasons.asMap().entries)
+                      DropdownMenuItem(
+                        value: entry.value.id,
+                        child: Text(_seasonLabel(entry.value, entry.key)),
+                      ),
+                  ],
+                  onChanged: (v) {
+                    if (v == null || v.isEmpty) return;
+                    if (v == _episodeSelectedSeasonId) return;
+                    setState(() => _episodeSelectedSeasonId = v);
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              ToggleButtons(
+                isSelected: [_desktopEpisodeGridMode, !_desktopEpisodeGridMode],
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
+                borderRadius: BorderRadius.circular(10),
+                onPressed: (index) {
+                  setState(() => _desktopEpisodeGridMode = index == 0);
+                },
+                children: const [
+                  Tooltip(message: '正方形模式', child: Icon(Icons.grid_view)),
+                  Tooltip(message: '条形模式', child: Icon(Icons.view_agenda)),
+                ],
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: '关闭',
+                onPressed: () {
+                  setState(() => _desktopSidePanel = _DesktopSidePanel.none);
+                  _scheduleControlsHide();
+                },
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: FutureBuilder<List<MediaItem>>(
+              future: _episodesFutureForSeasonId(selectedSeason.id),
+              builder: (ctx, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('加载失败：${snapshot.error}',
+                              textAlign: TextAlign.center),
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() {
+                                _episodeEpisodesCache.remove(selectedSeason.id);
+                                _episodeEpisodesFutureCache
+                                    .remove(selectedSeason.id);
+                              });
+                            },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('重试'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+                final eps = snapshot.data ?? const <MediaItem>[];
+                if (eps.isEmpty) {
+                  return const Center(child: Text('暂无剧集'));
+                }
+                return _desktopEpisodeGridMode
+                    ? _buildDesktopEpisodeGrid(
+                        context, eps, selectedSeason, isDark)
+                    : _buildDesktopEpisodeList(
+                        context, eps, selectedSeason, isDark);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopEpisodeGrid(
+    BuildContext context,
+    List<MediaItem> episodes,
+    MediaItem season,
+    bool isDark,
+  ) {
+    final columns = MediaQuery.sizeOf(context).width >= 1400 ? 5 : 4;
+    return GridView.builder(
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns,
+        mainAxisSpacing: 8,
+        crossAxisSpacing: 8,
+        childAspectRatio: 1.0,
+      ),
+      itemCount: episodes.length,
+      itemBuilder: (ctx, index) {
+        final e = episodes[index];
+        final mark = _desktopEpisodeMark(
+          e,
+          fallbackSeason: season.seasonNumber ?? 1,
+          fallbackEpisode: index + 1,
+        );
+        final isCurrent = e.id == widget.itemId;
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _playEpisodeFromPicker(e),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.04),
+              border: Border.all(
+                color: isCurrent
+                    ? Theme.of(context).colorScheme.primary
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.black.withValues(alpha: 0.10)),
+              ),
+            ),
+            child: Center(
+              child: Text(
+                mark,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDesktopEpisodeList(
+    BuildContext context,
+    List<MediaItem> episodes,
+    MediaItem season,
+    bool isDark,
+  ) {
+    return ListView.separated(
+      itemCount: episodes.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (ctx, index) {
+        final e = episodes[index];
+        final isCurrent = e.id == widget.itemId;
+        final epNo = e.episodeNumber ?? (index + 1);
+        final mark = _desktopEpisodeMark(
+          e,
+          fallbackSeason: season.seasonNumber ?? 1,
+          fallbackEpisode: epNo,
+        );
+        final title = e.name.trim().isNotEmpty ? e.name.trim() : mark;
+        final access = _serverAccess;
+        final img = access?.adapter.imageUrl(
+          access.auth,
+          itemId: e.hasImage ? e.id : season.id,
+          maxWidth: 520,
+        );
+        return InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _playEpisodeFromPicker(e),
+          child: Ink(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.04),
+              border: Border.all(
+                color: isCurrent
+                    ? Theme.of(context).colorScheme.primary
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.black.withValues(alpha: 0.10)),
+              ),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: 92,
+                    height: 56,
+                    child: img == null
+                        ? const ColoredBox(
+                            color: Color(0x22000000),
+                            child: Icon(
+                              Icons.image_outlined,
+                              color: Colors.white54,
+                            ),
+                          )
+                        : Image.network(
+                            img,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) {
+                              return const ColoredBox(
+                                color: Color(0x22000000),
+                                child: Icon(
+                                  Icons.image_not_supported_outlined,
+                                  color: Colors.white54,
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        mark,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDesktopPlaybackControls(
+    BuildContext context, {
+    required bool isDark,
+    required bool controlsEnabled,
+    required Duration duration,
+    required bool isPlaying,
+  }) {
+    final sliderMaxMs = math.max(duration.inMilliseconds, 1);
+    final sliderValueMs = _lastPosition.inMilliseconds.clamp(0, sliderMaxMs);
+    final sliderEnabled = controlsEnabled && duration > Duration.zero;
+    final iconColor = isDark ? Colors.white : Colors.black87;
+    final secondaryIconColor = isDark ? Colors.white70 : Colors.black54;
+    final panelColor =
+        isDark ? const Color(0xB1121418) : const Color(0xECFBFCFF);
+    final panelBorder = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.08);
+    final timelineActive = isDark ? Colors.white : Colors.black87;
+    final timelineBuffered = Colors.white.withValues(alpha: 0.34);
+    final timelineInactive = isDark
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.black.withValues(alpha: 0.10);
+    final rate =
+        _playerService.isInitialized ? _playerService.player.state.rate : 1.0;
+    final speedHint = '${rate.toStringAsFixed(2)}x';
+
+    return _buildDesktopGlassPanel(
+      context: context,
+      blurSigma: 18,
+      color: panelColor,
+      borderRadius: BorderRadius.circular(24),
+      borderColor: panelBorder,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Text(
+                  _fmtClock(_lastPosition),
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: secondaryIconColor,
+                      ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      activeTrackColor: timelineActive,
+                      secondaryActiveTrackColor: timelineBuffered,
+                      inactiveTrackColor: timelineInactive,
+                      thumbShape:
+                          const RoundSliderThumbShape(enabledThumbRadius: 6),
+                      overlayShape:
+                          const RoundSliderOverlayShape(overlayRadius: 12),
+                    ),
+                    child: Slider(
+                      min: 0,
+                      max: sliderMaxMs.toDouble(),
+                      value: sliderValueMs.toDouble(),
+                      secondaryTrackValue: _lastBuffer.inMilliseconds
+                          .clamp(0, sliderMaxMs)
+                          .toDouble(),
+                      onChangeStart:
+                          sliderEnabled ? (_) => _onScrubStart() : null,
+                      onChanged: sliderEnabled
+                          ? (value) => setState(
+                                () => _lastPosition =
+                                    Duration(milliseconds: value.round()),
+                              )
+                          : null,
+                      onChangeEnd: sliderEnabled
+                          ? (value) async {
+                              final target =
+                                  Duration(milliseconds: value.round());
+                              await _playerService.seek(
+                                target,
+                                flushBuffer: _flushBufferOnSeek,
+                              );
+                              _lastPosition = target;
+                              _syncDanmakuCursor(target);
+                              _maybeReportPlaybackProgress(target, force: true);
+                              _onScrubEnd();
+                              if (mounted) setState(() {});
+                            }
+                          : null,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  _fmtClock(duration),
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: secondaryIconColor,
+                      ),
+                ),
+              ],
+            ),
+            if (_desktopSpeedPanelVisible) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Container(
+                  width: 290,
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.black.withValues(alpha: 0.42)
+                        : Colors.black.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: panelBorder),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            '倍速',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: secondaryIconColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            speedHint,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(
+                                  color: iconColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ],
+                      ),
+                      Slider(
+                        min: 0.1,
+                        max: 5.0,
+                        divisions: 49,
+                        value: rate.clamp(0.1, 5.0).toDouble(),
+                        onChanged: !controlsEnabled
+                            ? null
+                            : (value) {
+                                // ignore: unawaited_futures
+                                _playerService.player.setRate(value);
+                                setState(() {});
+                              },
+                      ),
+                      DefaultTextStyle(
+                        style: Theme.of(context).textTheme.labelSmall!.copyWith(
+                              color: secondaryIconColor,
+                            ),
+                        child: const Row(
+                          children: [
+                            Text('0.1x'),
+                            Spacer(),
+                            Text('0.5x'),
+                            Spacer(),
+                            Text('1x'),
+                            Spacer(),
+                            Text('2x'),
+                            Spacer(),
+                            Text('3x'),
+                            Spacer(),
+                            Text('5x'),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
+            ],
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const SizedBox(width: 156),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _desktopControlButton(
+                        context,
+                        isDark: isDark,
+                        icon: Icons.fast_rewind_rounded,
+                        tooltip: '快退',
+                        onTap: controlsEnabled
+                            ? () async {
+                                _showControls();
+                                await _seekRelative(
+                                  Duration(seconds: -_seekBackSeconds),
+                                  showOverlay: false,
+                                );
+                              }
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _desktopControlButton(
+                        context,
+                        isDark: isDark,
+                        icon: isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        tooltip: isPlaying ? '暂停' : '播放',
+                        emphasized: true,
+                        onTap: controlsEnabled
+                            ? () => _togglePlayPause(showOverlay: false)
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      _desktopControlButton(
+                        context,
+                        isDark: isDark,
+                        icon: Icons.fast_forward_rounded,
+                        tooltip: '快进',
+                        onTap: controlsEnabled
+                            ? () async {
+                                _showControls();
+                                await _seekRelative(
+                                  Duration(seconds: _seekForwardSeconds),
+                                  showOverlay: false,
+                                );
+                              }
+                            : null,
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 180,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          side: BorderSide(color: panelBorder),
+                        ),
+                        onPressed: !controlsEnabled
+                            ? null
+                            : () {
+                                final next = !_desktopSpeedPanelVisible;
+                                setState(() {
+                                  _desktopSidePanel = _DesktopSidePanel.none;
+                                  _desktopSpeedPanelVisible = next;
+                                });
+                                if (next) {
+                                  _showControls(scheduleHide: false);
+                                } else {
+                                  _scheduleControlsHide();
+                                }
+                              },
+                        child: Text('倍速 $speedHint'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: '选集',
+                        onPressed: controlsEnabled
+                            ? () =>
+                                _toggleDesktopPanel(_DesktopSidePanel.episode)
+                            : null,
+                        icon: Icon(
+                          _desktopSidePanel == _DesktopSidePanel.episode
+                              ? Icons.close
+                              : Icons.format_list_numbered,
+                          color: iconColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _desktopControlButton(
+    BuildContext context, {
+    required bool isDark,
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+    bool emphasized = false,
+  }) {
+    final size = emphasized ? 54.0 : 46.0;
+    final bg = emphasized
+        ? (isDark
+            ? Colors.white.withValues(alpha: 0.2)
+            : Colors.black.withValues(alpha: 0.12))
+        : (isDark
+            ? Colors.black.withValues(alpha: 0.35)
+            : Colors.black.withValues(alpha: 0.05));
+    final border = isDark
+        ? Colors.white.withValues(alpha: emphasized ? 0.28 : 0.14)
+        : Colors.black.withValues(alpha: emphasized ? 0.18 : 0.1);
+    final iconColor = isDark ? Colors.white : Colors.black87;
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Ink(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: border),
+            ),
+            child: Icon(icon, color: iconColor),
           ),
         ),
-        body: Column(
-          children: [
-            Expanded(
-              child: Container(
-                color: Colors.black,
-                child: initialized
-                    ? Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          Video(
-                            controller: _playerService.controller,
-                            controls: NoVideoControls,
-                            subtitleViewConfiguration:
-                                _subtitleViewConfiguration,
-                          ),
-                          Positioned.fill(
-                            child: DanmakuStage(
-                              key: _danmakuKey,
-                              enabled: _danmakuEnabled,
-                              opacity: _danmakuOpacity,
-                              scale: _danmakuScale,
-                              speed: _danmakuSpeed,
-                              timeScale: _playerService.player.state.rate,
-                              bold: _danmakuBold,
-                              scrollMaxLines: _danmakuMaxLines,
-                              topMaxLines: _danmakuTopMaxLines,
-                              bottomMaxLines: _danmakuBottomMaxLines,
-                              preventOverlap: _danmakuPreventOverlap,
-                            ),
-                          ),
-                          if (_screenBrightness < 0.999)
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: ColoredBox(
-                                  color: Colors.black.withValues(
-                                    alpha: (1.0 - _screenBrightness)
-                                        .clamp(0.0, 0.8)
-                                        .toDouble(),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_buffering)
-                            Container(
-                              color: Colors.black54,
-                              alignment: Alignment.center,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const CircularProgressIndicator(),
-                                  if (_bufferingPct != null)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 12),
-                                      child: Text(
-                                        '缓冲中 ${(_bufferingPct! <= 1 ? _bufferingPct! * 100 : _bufferingPct!).clamp(0, 100).toStringAsFixed(0)}%',
-                                        style: const TextStyle(
-                                            color: Colors.white),
-                                      ),
-                                    ),
-                                  if (widget.appState.showBufferSpeed)
-                                    Padding(
-                                      padding: EdgeInsets.only(
-                                        top: _bufferingPct != null ? 6 : 12,
-                                      ),
-                                      child: Text(
-                                        '网速：${_netSpeedBytesPerSecond == null ? '—' : formatBytesPerSecond(_netSpeedBytesPerSecond!)}',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          Positioned.fill(
-                            child: LayoutBuilder(
-                              builder: (ctx, constraints) {
-                                final w = constraints.maxWidth;
-                                final h = constraints.maxHeight;
-                                final sideDragEnabled =
-                                    widget.appState.gestureBrightness ||
-                                        widget.appState.gestureVolume;
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _toggleControls,
-                                  onDoubleTapDown: controlsEnabled
-                                      ? (d) => _doubleTapDownPosition =
-                                          d.localPosition
-                                      : null,
-                                  onDoubleTap: controlsEnabled
-                                      ? () {
-                                          final pos = _doubleTapDownPosition ??
-                                              Offset(w / 2, 0);
-                                          // ignore: unawaited_futures
-                                          _handleDoubleTap(pos, w);
-                                        }
-                                      : null,
-                                  onHorizontalDragStart: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? _onSeekDragStart
-                                      : null,
-                                  onHorizontalDragUpdate: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? (d) => _onSeekDragUpdate(
-                                            d,
-                                            width: w,
-                                            duration: duration,
-                                          )
-                                      : null,
-                                  onHorizontalDragEnd: (controlsEnabled &&
-                                          widget.appState.gestureSeek)
-                                      ? _onSeekDragEnd
-                                      : null,
-                                  onVerticalDragStart:
-                                      (controlsEnabled && sideDragEnabled)
-                                          ? (d) => _onSideDragStart(d, width: w)
-                                          : null,
-                                  onVerticalDragUpdate: (controlsEnabled &&
-                                          sideDragEnabled)
-                                      ? (d) => _onSideDragUpdate(d, height: h)
-                                      : null,
-                                  onVerticalDragEnd:
-                                      (controlsEnabled && sideDragEnabled)
-                                          ? _onSideDragEnd
-                                          : null,
-                                  onLongPressStart: (controlsEnabled &&
-                                          widget.appState.gestureLongPressSpeed)
-                                      ? _onLongPressStart
-                                      : null,
-                                  onLongPressMoveUpdate: (controlsEnabled &&
-                                          widget
-                                              .appState.gestureLongPressSpeed &&
-                                          widget.appState.longPressSlideSpeed)
-                                      ? (d) => _onLongPressMoveUpdate(
-                                            d,
-                                            height: h,
-                                          )
-                                      : null,
-                                  onLongPressEnd: (controlsEnabled &&
-                                          widget.appState.gestureLongPressSpeed)
-                                      ? _onLongPressEnd
-                                      : null,
-                                  child: const SizedBox.expand(),
-                                );
-                              },
-                            ),
-                          ),
-                          if (_gestureOverlayText != null)
-                            Center(
-                              child: IgnorePointer(
-                                child: Material(
-                                  color: Colors.black54,
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 10,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          _gestureOverlayIcon ??
-                                              Icons.info_outline,
-                                          size: 20,
-                                          color: Colors.white,
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _gestureOverlayText!,
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_skipIntroPromptVisible)
-                            Align(
-                              alignment: Alignment.topRight,
-                              child: SafeArea(
-                                bottom: false,
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(999),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.skip_next,
-                                            size: 18,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Builder(builder: (context) {
-                                            final end = _introTimestamps?.end;
-                                            final endText = (end != null &&
-                                                    end > Duration.zero)
-                                                ? '（至 ${_fmtClock(end)}）'
-                                                : '';
-                                            return Text(
-                                              '检测到片头$endText',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 13,
-                                              ),
-                                            );
-                                          }),
-                                          const SizedBox(width: 10),
-                                          InkWell(
-                                            onTap: _skipIntro,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.18),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: const Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.fast_forward,
-                                                    size: 18,
-                                                    color: Colors.white,
-                                                  ),
-                                                  SizedBox(width: 4),
-                                                  Text(
-                                                    '跳过',
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          InkWell(
-                                            onTap: _dismissSkipIntroPrompt,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.12),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: const Text(
-                                                '不跳过',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 13,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (controlsEnabled &&
-                              _showResumeHint &&
-                              _resumeHintPosition != null)
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: SafeArea(
-                                bottom: false,
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(999),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: InkWell(
-                                      onTap: _resumeToHistoryPosition,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 10,
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(
-                                              Icons.history,
-                                              size: 18,
-                                              color: Colors.white,
-                                            ),
-                                            const SizedBox(width: 6),
-                                            Text(
-                                              '跳转到 ${_fmtClock(_resumeHintPosition!)} 继续观看',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 13,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (controlsEnabled &&
-                              _showStartOverHint &&
-                              _startOverHintPosition != null)
-                            Align(
-                              alignment: Alignment.topCenter,
-                              child: SafeArea(
-                                bottom: false,
-                                child: Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 12),
-                                  child: Material(
-                                    color: Colors.black54,
-                                    borderRadius: BorderRadius.circular(999),
-                                    clipBehavior: Clip.antiAlias,
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.history,
-                                            size: 18,
-                                            color: Colors.white,
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Text(
-                                            '已从 ${_fmtClock(_startOverHintPosition!)} 继续播放',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          InkWell(
-                                            onTap: _restartFromBeginning,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            child: Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white
-                                                    .withValues(alpha: 0.18),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: const Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    Icons.replay,
-                                                    size: 18,
-                                                    color: Colors.white,
-                                                  ),
-                                                  SizedBox(width: 4),
-                                                  Text(
-                                                    '从头开始',
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          Align(
-                            alignment: Alignment.bottomCenter,
-                            child: SafeArea(
-                              top: false,
-                              minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                              child: AnimatedOpacity(
-                                opacity: _controlsVisible ? 1 : 0,
-                                duration: const Duration(milliseconds: 200),
-                                child: IgnorePointer(
-                                  ignoring: !_controlsVisible,
-                                  child: Listener(
-                                    onPointerDown: (_) => _showControls(),
-                                    child: Focus(
-                                      canRequestFocus: false,
-                                      onKeyEvent: (node, event) {
-                                        if (!_remoteEnabled) {
-                                          return KeyEventResult.ignored;
-                                        }
-                                        if (event is! KeyDownEvent) {
-                                          return KeyEventResult.ignored;
-                                        }
-                                        if (event.logicalKey ==
-                                            LogicalKeyboardKey.arrowDown) {
-                                          final moved = FocusScope.of(context)
-                                              .focusInDirection(
-                                            TraversalDirection.down,
-                                          );
-                                          if (moved) {
-                                            return KeyEventResult.handled;
-                                          }
-                                          _hideControlsForRemote();
-                                          return KeyEventResult.handled;
-                                        }
-                                        return KeyEventResult.ignored;
-                                      },
-                                      child: PlaybackControls(
-                                        enabled: controlsEnabled,
-                                        playPauseFocusNode:
-                                            _tvPlayPauseFocusNode,
-                                        position: _lastPosition,
-                                        buffered: _lastBuffer,
-                                        duration: duration,
-                                        isPlaying: isPlaying,
-                                        playbackRate:
-                                            _playerService.player.state.rate,
-                                        onSetPlaybackRate: (rate) async {
-                                          _showControls();
-                                          if (!_playerService.isInitialized) {
-                                            return;
-                                          }
-                                          await _playerService.player
-                                              .setRate(rate);
-                                          if (mounted) setState(() {});
-                                        },
-                                        heatmap: _danmakuHeatmap,
-                                        showHeatmap: _danmakuShowHeatmap &&
-                                            _danmakuHeatmap.isNotEmpty,
-                                        seekBackwardSeconds: _seekBackSeconds,
-                                        seekForwardSeconds: _seekForwardSeconds,
-                                        showSystemTime: widget
-                                            .appState.showSystemTimeInControls,
-                                        showBattery: widget
-                                            .appState.showBatteryInControls,
-                                        showBufferSpeed:
-                                            widget.appState.showBufferSpeed,
-                                        buffering: _buffering,
-                                        bufferSpeedX: _bufferSpeedX,
-                                        netSpeedBytesPerSecond:
-                                            _netSpeedBytesPerSecond,
-                                        onRequestThumbnail: _thumbnailer == null
-                                            ? null
-                                            : (pos) =>
-                                                _thumbnailer!.getThumbnail(
-                                                  pos,
-                                                ),
-                                        onOpenEpisodePicker:
-                                            _canShowEpisodePickerButton
-                                                ? _toggleEpisodePicker
-                                                : null,
-                                        onScrubStart: _onScrubStart,
-                                        onScrubEnd: _onScrubEnd,
-                                        onSeek: (pos) async {
-                                          await _playerService.seek(
-                                            pos,
-                                            flushBuffer: _flushBufferOnSeek,
-                                          );
-                                          _lastPosition = pos;
-                                          _syncDanmakuCursor(pos);
-                                          _maybeReportPlaybackProgress(
-                                            pos,
-                                            force: true,
-                                          );
-                                          if (mounted) setState(() {});
-                                        },
-                                        onPlay: () {
-                                          _showControls();
-                                          return _playerService.play();
-                                        },
-                                        onPause: () {
-                                          _showControls();
-                                          return _playerService.pause();
-                                        },
-                                        onSeekBackward: () async {
-                                          _showControls();
-                                          final target = _lastPosition -
-                                              Duration(
-                                                  seconds: _seekBackSeconds);
-                                          final pos = target < Duration.zero
-                                              ? Duration.zero
-                                              : target;
-                                          await _playerService.seek(
-                                            pos,
-                                            flushBuffer: _flushBufferOnSeek,
-                                          );
-                                          _lastPosition = pos;
-                                          _syncDanmakuCursor(pos);
-                                          _maybeReportPlaybackProgress(
-                                            pos,
-                                            force: true,
-                                          );
-                                          if (mounted) setState(() {});
-                                        },
-                                        onSeekForward: () async {
-                                          _showControls();
-                                          final d = duration;
-                                          final target = _lastPosition +
-                                              Duration(
-                                                  seconds: _seekForwardSeconds);
-                                          final pos =
-                                              (d > Duration.zero && target > d)
-                                                  ? d
-                                                  : target;
-                                          await _playerService.seek(
-                                            pos,
-                                            flushBuffer: _flushBufferOnSeek,
-                                          );
-                                          _lastPosition = pos;
-                                          _syncDanmakuCursor(pos);
-                                          _maybeReportPlaybackProgress(
-                                            pos,
-                                            force: true,
-                                          );
-                                          if (mounted) setState(() {});
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          _buildEpisodePickerOverlay(enableBlur: enableBlur),
-                        ],
-                      )
-                    : _playError != null
-                        ? Center(
-                            child: Text(
-                            '播放失败：$_playError',
-                            style: const TextStyle(color: Colors.redAccent),
-                          ))
-                        : const Center(child: CircularProgressIndicator()),
-              ),
-            ),
-            if (_loading) const LinearProgressIndicator(),
-          ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopGlassPanel({
+    required BuildContext context,
+    required Widget child,
+    BorderRadius borderRadius = const BorderRadius.all(Radius.circular(20)),
+    Color? color,
+    Color? borderColor,
+    double blurSigma = 16,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final resolvedColor =
+        color ?? (isDark ? const Color(0xAA15171C) : const Color(0xEAF9FAFD));
+    final resolvedBorder = borderColor ??
+        (isDark
+            ? Colors.white.withValues(alpha: 0.12)
+            : Colors.black.withValues(alpha: 0.08));
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: resolvedColor,
+            borderRadius: borderRadius,
+            border: Border.all(color: resolvedBorder),
+          ),
+          child: child,
         ),
       ),
     );
@@ -4514,3 +6543,18 @@ enum _PlayerMenuAction { anime4k, switchCore, switchVersion }
 enum _OrientationMode { auto, landscape, portrait }
 
 enum _GestureMode { none, brightness, volume, seek, speed }
+
+enum _DesktopSidePanel { none, line, audio, subtitle, danmaku, episode }
+
+extension on _DesktopSidePanel {
+  String get title {
+    return switch (this) {
+      _DesktopSidePanel.none => '',
+      _DesktopSidePanel.line => '线路切换',
+      _DesktopSidePanel.audio => '音轨选择',
+      _DesktopSidePanel.subtitle => '字幕选择',
+      _DesktopSidePanel.danmaku => '弹幕',
+      _DesktopSidePanel.episode => '选集',
+    };
+  }
+}
