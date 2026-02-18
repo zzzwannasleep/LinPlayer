@@ -6,6 +6,7 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:lin_player_state/lin_player_state.dart';
 
 import '../../server_adapters/server_access.dart';
+import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_extension.dart';
 import '../widgets/desktop_media_card.dart';
 
@@ -16,12 +17,14 @@ class DesktopSearchPage extends StatefulWidget {
     required this.query,
     required this.onOpenItem,
     this.refreshSignal = 0,
+    this.language = DesktopUiLanguage.zhCn,
   });
 
   final AppState appState;
   final String query;
   final ValueChanged<MediaItem> onOpenItem;
   final int refreshSignal;
+  final DesktopUiLanguage language;
 
   @override
   State<DesktopSearchPage> createState() => _DesktopSearchPageState();
@@ -33,6 +36,13 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
   List<MediaItem> _results = const <MediaItem>[];
   int _searchSeq = 0;
   String _activeQuery = '';
+
+  String _t({
+    required String zh,
+    required String en,
+  }) {
+    return widget.language.pick(zh: zh, en: en);
+  }
 
   @override
   void initState() {
@@ -78,7 +88,10 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
     if (access == null) {
       setState(() {
         _loading = false;
-        _error = 'No active media server session';
+        _error = _t(
+          zh: '\u5f53\u524d\u672a\u8fde\u63a5\u5a92\u4f53\u670d\u52a1\u5668',
+          en: 'No active media server session',
+        );
         _results = const <MediaItem>[];
       });
       return;
@@ -134,7 +147,10 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
     if (query.isEmpty) {
       body = Center(
         child: Text(
-          'Type in the top search box to find media',
+          _t(
+            zh: '\u8bf7\u5728\u9876\u90e8\u641c\u7d22\u6846\u8f93\u5165\u5173\u952e\u8bcd',
+            en: 'Type in the top search box to find media',
+          ),
           style: TextStyle(color: desktopTheme.textMuted),
         ),
       );
@@ -145,7 +161,10 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
     } else if (_results.isEmpty) {
       body = Center(
         child: Text(
-          'No results for "$query"',
+          _t(
+            zh: '\u672a\u627e\u5230\u201c$query\u201d\u7684\u7ed3\u679c',
+            en: 'No results for "$query"',
+          ),
           style: TextStyle(color: desktopTheme.textMuted),
         ),
       );
@@ -196,7 +215,12 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
                   children: [
                     Expanded(
                       child: Text(
-                        query.isEmpty ? 'Search' : 'Results for "$query"',
+                        query.isEmpty
+                            ? _t(zh: '\u641c\u7d22', en: 'Search')
+                            : _t(
+                                zh: '\u201c$query\u201d\u7684\u7ed3\u679c',
+                                en: 'Results for "$query"',
+                              ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -208,7 +232,10 @@ class _DesktopSearchPageState extends State<DesktopSearchPage> {
                     ),
                     if (query.isNotEmpty)
                       Text(
-                        '${_results.length} items',
+                        _t(
+                          zh: '\u5171 ${_results.length} \u9879',
+                          en: '${_results.length} items',
+                        ),
                         style: TextStyle(
                           color: desktopTheme.textMuted,
                           fontSize: 13,

@@ -10,6 +10,7 @@ import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
 import '../../server_adapters/server_access.dart';
+import '../models/desktop_ui_language.dart';
 import '../view_models/desktop_detail_view_model.dart';
 import '../widgets/desktop_media_meta.dart';
 
@@ -17,11 +18,13 @@ class DesktopDetailPage extends StatefulWidget {
   const DesktopDetailPage({
     super.key,
     required this.viewModel,
+    this.language = DesktopUiLanguage.zhCn,
     this.onOpenItem,
     this.onPlayPressed,
   });
 
   final DesktopDetailViewModel viewModel;
+  final DesktopUiLanguage language;
   final ValueChanged<MediaItem>? onOpenItem;
   final VoidCallback? onPlayPressed;
 
@@ -35,6 +38,13 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
   int _selectedSubtitleStreamIndex = -1;
   bool? _playedOverride;
   bool _launchingExternalMpv = false;
+
+  String _t({
+    required String zh,
+    required String en,
+  }) {
+    return widget.language.pick(zh: zh, en: en);
+  }
 
   @override
   void initState() {
@@ -63,7 +73,14 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     final opened = await launchUrlString(url);
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('\u65e0\u6cd5\u6253\u5f00\u94fe\u63a5')),
+        SnackBar(
+          content: Text(
+            _t(
+              zh: '\u65e0\u6cd5\u6253\u5f00\u94fe\u63a5',
+              en: 'Unable to open link',
+            ),
+          ),
+        ),
       );
     }
   }
@@ -147,7 +164,12 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     final vm = widget.viewModel;
     final access = vm.access;
     if (access == null) {
-      _showMessage('\u672a\u8fde\u63a5\u5a92\u4f53\u670d\u52a1\u5668');
+      _showMessage(
+        _t(
+          zh: '\u672a\u8fde\u63a5\u5a92\u4f53\u670d\u52a1\u5668',
+          en: 'No connected media server',
+        ),
+      );
       return;
     }
 
@@ -157,7 +179,11 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     );
     if (playable == null || playable.id.trim().isEmpty) {
       _showMessage(
-          '\u5f53\u524d\u6761\u76ee\u65e0\u53ef\u64ad\u653e\u8d44\u6e90');
+        _t(
+          zh: '\u5f53\u524d\u6761\u76ee\u65e0\u53ef\u64ad\u653e\u8d44\u6e90',
+          en: 'No playable media found for this item',
+        ),
+      );
       return;
     }
 
@@ -178,7 +204,12 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
       final mediaSourceId =
           (selectedSource?['Id'] ?? info.mediaSourceId).toString().trim();
       if (mediaSourceId.isEmpty) {
-        _showMessage('\u65e0\u6cd5\u89e3\u6790\u5a92\u4f53\u6e90');
+        _showMessage(
+          _t(
+            zh: '\u65e0\u6cd5\u89e3\u6790\u5a92\u4f53\u6e90',
+            en: 'Unable to resolve media source',
+          ),
+        );
         return;
       }
 
@@ -197,11 +228,23 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
       );
       _showMessage(
         launched
-            ? '\u5df2\u8c03\u7528\u5916\u90e8 MPV'
-            : '\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25\uff0c\u8bf7\u5728\u8bbe\u7f6e\u4e2d\u914d\u7f6e MPV \u8def\u5f84',
+            ? _t(
+                zh: '\u5df2\u8c03\u7528\u5916\u90e8 MPV',
+                en: 'Launched external MPV',
+              )
+            : _t(
+                zh: '\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25\uff0c\u8bf7\u5728\u8bbe\u7f6e\u4e2d\u914d\u7f6e MPV \u8def\u5f84',
+                en:
+                    'Failed to launch MPV. Configure MPV executable path in settings.',
+              ),
       );
     } catch (_) {
-      _showMessage('\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25');
+      _showMessage(
+        _t(
+          zh: '\u8c03\u7528\u5916\u90e8 MPV \u5931\u8d25',
+          en: 'Failed to launch external MPV',
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _launchingExternalMpv = false);
@@ -253,6 +296,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                     onToggleWatched: () {
                       setState(() => _playedOverride = !watched);
                     },
+                    language: widget.language,
                     onLaunchExternalMpv: () {
                       unawaited(
                         _launchExternalMpv(
@@ -297,10 +341,15 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: _SeasonEpisodesSection(
-                      title: _seasonSectionTitle(item, isEpisode),
+                      title: _seasonSectionTitle(
+                        item,
+                        isEpisode,
+                        language: widget.language,
+                      ),
                       episodes: vm.episodes,
                       currentItemId: item.id,
                       access: vm.access,
+                      language: widget.language,
                       onTap: widget.onOpenItem,
                     ),
                   ),
@@ -312,6 +361,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                   padding: const EdgeInsets.symmetric(horizontal: 24),
                   child: _ExternalLinksSection(
                     links: links,
+                    language: widget.language,
                     onOpenLink: _openExternalLink,
                   ),
                 ),
@@ -327,6 +377,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                       selectedAudio: trackState.selectedAudio,
                       selectedSubtitle: trackState.selectedSubtitle,
                       subtitleStreams: trackState.subtitleStreams,
+                      language: widget.language,
                     ),
                   ),
                 ),
@@ -354,12 +405,24 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
         selectedAudioValue: '',
         selectedSubtitleValue: 'off',
         videoDisplay: _fallbackVideoLabel(item),
-        audioDisplay: '\u9ed8\u8ba4\u97f3\u9891',
-        subtitleDisplay: '\u5173\u95ed',
+        audioDisplay: _t(
+          zh: '\u9ed8\u8ba4\u97f3\u9891',
+          en: 'Default audio',
+        ),
+        subtitleDisplay: _t(
+          zh: '\u5173\u95ed',
+          en: 'Off',
+        ),
         videoOptions: const [],
         audioOptions: const [],
-        subtitleOptions: const [
-          DropdownOption(value: 'off', label: '\u5173\u95ed'),
+        subtitleOptions: [
+          DropdownOption(
+            value: 'off',
+            label: _t(
+              zh: '\u5173\u95ed',
+              en: 'Off',
+            ),
+          ),
         ],
       );
     }
@@ -406,7 +469,13 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     ];
 
     final subtitleOptions = <DropdownOption>[
-      const DropdownOption(value: 'off', label: '\u5173\u95ed'),
+      DropdownOption(
+        value: 'off',
+        label: _t(
+          zh: '\u5173\u95ed',
+          en: 'Off',
+        ),
+      ),
       for (final stream in subtitleStreams)
         DropdownOption(
           value: (_asInt(stream['Index']) ?? -1).toString(),
@@ -435,10 +504,16 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
       videoDisplay: _mediaSourceLabel(resolvedSource,
           fallback: _fallbackVideoLabel(item)),
       audioDisplay: selectedAudio == null
-          ? '\u9ed8\u8ba4\u97f3\u9891'
+          ? _t(
+              zh: '\u9ed8\u8ba4\u97f3\u9891',
+              en: 'Default audio',
+            )
           : _audioStreamLabel(selectedAudio),
       subtitleDisplay: selectedSubtitle == null
-          ? '\u5173\u95ed'
+          ? _t(
+              zh: '\u5173\u95ed',
+              en: 'Off',
+            )
           : _subtitleStreamLabel(selectedSubtitle),
       videoOptions: videoOptions,
       audioOptions: audioOptions,
@@ -451,6 +526,7 @@ class _HeroPanel extends StatelessWidget {
   const _HeroPanel({
     required this.item,
     required this.access,
+    required this.language,
     required this.watched,
     required this.isFavorite,
     required this.trackState,
@@ -466,6 +542,7 @@ class _HeroPanel extends StatelessWidget {
 
   final MediaItem item;
   final ServerAccess? access;
+  final DesktopUiLanguage language;
   final bool watched;
   final bool isFavorite;
   final _TrackSelectionState trackState;
@@ -508,7 +585,10 @@ class _HeroPanel extends StatelessWidget {
       ),
       _MetaValue(
         icon: Icons.schedule_rounded,
-        text: _formatRuntime(item.runTimeTicks),
+        text: _formatRuntime(
+          item.runTimeTicks,
+          language: language,
+        ),
       ),
     ];
 
@@ -593,6 +673,7 @@ class _HeroPanel extends StatelessWidget {
                               episodeMark: episodeMark,
                               subtitle: subtitle,
                               metadata: metadata,
+                              language: language,
                               watched: watched,
                               isFavorite: isFavorite,
                               trackState: trackState,
@@ -623,6 +704,7 @@ class _HeroPanel extends StatelessWidget {
                                 episodeMark: episodeMark,
                                 subtitle: subtitle,
                                 metadata: metadata,
+                                language: language,
                                 watched: watched,
                                 isFavorite: isFavorite,
                                 trackState: trackState,
@@ -654,6 +736,7 @@ class _HeroInfoColumn extends StatelessWidget {
     required this.episodeMark,
     required this.subtitle,
     required this.metadata,
+    required this.language,
     required this.watched,
     required this.isFavorite,
     required this.trackState,
@@ -671,6 +754,7 @@ class _HeroInfoColumn extends StatelessWidget {
   final String episodeMark;
   final String subtitle;
   final List<_MetaValue> metadata;
+  final DesktopUiLanguage language;
   final bool watched;
   final bool isFavorite;
   final _TrackSelectionState trackState;
@@ -687,7 +771,13 @@ class _HeroInfoColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = _EpisodeDetailColors.of(context);
     final title =
-        item.name.trim().isEmpty ? '\u672a\u547d\u540d\u5267\u96c6' : item.name;
+        item.name.trim().isEmpty
+            ? _dtr(
+                language: language,
+                zh: '\u672a\u547d\u540d\u5267\u96c6',
+                en: 'Untitled Episode',
+              )
+            : item.name;
     final subtitleLine = <String>[
       if (episodeMark.trim().isNotEmpty) episodeMark.trim(),
       if (subtitle.trim().isNotEmpty) subtitle.trim(),
@@ -731,7 +821,11 @@ class _HeroInfoColumn extends StatelessWidget {
             runSpacing: 12,
             children: [
               _TechDropdown(
-                label: '\u89c6\u9891',
+                label: _dtr(
+                  language: language,
+                  zh: '\u89c6\u9891',
+                  en: 'Video',
+                ),
                 value: trackState.videoDisplay,
                 icon: Icons.videocam_outlined,
                 options: trackState.videoOptions,
@@ -739,7 +833,11 @@ class _HeroInfoColumn extends StatelessWidget {
                 onSelected: onSelectVideo,
               ),
               _TechDropdown(
-                label: '\u97f3\u9891',
+                label: _dtr(
+                  language: language,
+                  zh: '\u97f3\u9891',
+                  en: 'Audio',
+                ),
                 value: trackState.audioDisplay,
                 icon: Icons.audiotrack_outlined,
                 options: trackState.audioOptions,
@@ -747,7 +845,11 @@ class _HeroInfoColumn extends StatelessWidget {
                 onSelected: onSelectAudio,
               ),
               _TechDropdown(
-                label: '\u5b57\u5e55',
+                label: _dtr(
+                  language: language,
+                  zh: '\u5b57\u5e55',
+                  en: 'Subtitle',
+                ),
                 value: trackState.subtitleDisplay,
                 icon: Icons.subtitles_outlined,
                 options: trackState.subtitleOptions,
@@ -759,6 +861,7 @@ class _HeroInfoColumn extends StatelessWidget {
         ],
         SizedBox(height: showTrackSelectors ? 22 : 18),
         _ActionButtons(
+          language: language,
           watched: watched,
           isFavorite: isFavorite,
           onPlay: onPlay,
@@ -767,7 +870,10 @@ class _HeroInfoColumn extends StatelessWidget {
           onLaunchExternalMpv: onLaunchExternalMpv,
         ),
         const SizedBox(height: 18),
-        _OverviewText(overview: item.overview),
+        _OverviewText(
+          language: language,
+          overview: item.overview,
+        ),
       ],
     );
   }
@@ -878,8 +984,12 @@ class _MetaInfoLabel extends StatelessWidget {
 }
 
 class _OverviewText extends StatefulWidget {
-  const _OverviewText({required this.overview});
+  const _OverviewText({
+    required this.language,
+    required this.overview,
+  });
 
+  final DesktopUiLanguage language;
   final String overview;
 
   @override
@@ -893,7 +1003,11 @@ class _OverviewTextState extends State<_OverviewText> {
   Widget build(BuildContext context) {
     final colors = _EpisodeDetailColors.of(context);
     final text = widget.overview.trim().isEmpty
-        ? '\u6682\u65e0\u5267\u60c5\u7b80\u4ecb\u3002'
+        ? _dtr(
+            language: widget.language,
+            zh: '\u6682\u65e0\u5267\u60c5\u7b80\u4ecb\u3002',
+            en: 'No overview available.',
+          )
         : widget.overview.trim();
     final canExpand = text.length > 90;
 
@@ -915,7 +1029,17 @@ class _OverviewTextState extends State<_OverviewText> {
           GestureDetector(
             onTap: () => setState(() => _expanded = !_expanded),
             child: Text(
-              _expanded ? '\u6536\u8d77' : '\u66f4\u591a',
+              _expanded
+                  ? _dtr(
+                      language: widget.language,
+                      zh: '\u6536\u8d77',
+                      en: 'Collapse',
+                    )
+                  : _dtr(
+                      language: widget.language,
+                      zh: '\u66f4\u591a',
+                      en: 'More',
+                    ),
               style: TextStyle(
                 fontSize: 13,
                 color: colors.textTertiary,
@@ -931,6 +1055,7 @@ class _OverviewTextState extends State<_OverviewText> {
 
 class _ActionButtons extends StatelessWidget {
   const _ActionButtons({
+    required this.language,
     required this.watched,
     required this.isFavorite,
     required this.onPlay,
@@ -939,6 +1064,7 @@ class _ActionButtons extends StatelessWidget {
     required this.onLaunchExternalMpv,
   });
 
+  final DesktopUiLanguage language;
   final bool watched;
   final bool isFavorite;
   final VoidCallback? onPlay;
@@ -956,7 +1082,13 @@ class _ActionButtons extends StatelessWidget {
         ElevatedButton.icon(
           onPressed: onPlay,
           icon: const Icon(Icons.play_arrow_rounded),
-          label: const Text('\u64ad\u653e'),
+          label: Text(
+            _dtr(
+              language: language,
+              zh: '\u64ad\u653e',
+              en: 'Play',
+            ),
+          ),
           style: ButtonStyle(
             backgroundColor: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.hovered)) {
@@ -977,9 +1109,19 @@ class _ActionButtons extends StatelessWidget {
         OutlinedButton.icon(
           onPressed: onToggleWatched,
           icon: const Icon(Icons.check_rounded),
-          label: Text(watched
-              ? '\u5df2\u64ad\u653e'
-              : '\u6807\u8bb0\u5df2\u64ad\u653e'),
+          label: Text(
+            watched
+                ? _dtr(
+                    language: language,
+                    zh: '\u5df2\u64ad\u653e',
+                    en: 'Watched',
+                  )
+                : _dtr(
+                    language: language,
+                    zh: '\u6807\u8bb0\u5df2\u64ad\u653e',
+                    en: 'Mark watched',
+                  ),
+          ),
           style: ButtonStyle(
             side: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.hovered)) {
@@ -1010,7 +1152,11 @@ class _ActionButtons extends StatelessWidget {
           onTap: onToggleFavorite,
         ),
         PopupMenuButton<String>(
-          tooltip: '\u66f4\u591a',
+          tooltip: _dtr(
+            language: language,
+            zh: '\u66f4\u591a',
+            en: 'More',
+          ),
           onSelected: (value) {
             switch (value) {
               case 'mark_unwatched':
@@ -1027,21 +1173,41 @@ class _ActionButtons extends StatelessWidget {
             }
           },
           itemBuilder: (context) => [
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'add_list',
-              child: Text('\u6dfb\u52a0\u5230\u5217\u8868'),
+              child: Text(
+                _dtr(
+                  language: language,
+                  zh: '\u6dfb\u52a0\u5230\u5217\u8868',
+                  en: 'Add to list',
+                ),
+              ),
             ),
             PopupMenuItem(
               value: watched ? 'mark_unwatched' : 'mark_watched',
               child: Text(
                 watched
-                    ? '\u6807\u8bb0\u4e3a\u672a\u64ad\u653e'
-                    : '\u6807\u8bb0\u4e3a\u5df2\u64ad\u653e',
+                    ? _dtr(
+                        language: language,
+                        zh: '\u6807\u8bb0\u4e3a\u672a\u64ad\u653e',
+                        en: 'Mark unwatched',
+                      )
+                    : _dtr(
+                        language: language,
+                        zh: '\u6807\u8bb0\u4e3a\u5df2\u64ad\u653e',
+                        en: 'Mark watched',
+                      ),
               ),
             ),
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'launch_external_mpv',
-              child: Text('\u8c03\u7528\u5916\u90e8 MPV'),
+              child: Text(
+                _dtr(
+                  language: language,
+                  zh: '\u8c03\u7528\u5916\u90e8 MPV',
+                  en: 'Open in external MPV',
+                ),
+              ),
             ),
           ],
           child: const _CircleIconButton(
@@ -1134,7 +1300,7 @@ class _TechDropdownState extends State<_TechDropdown> {
       onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: PopupMenuButton<String>(
-        tooltip: '${widget.label}\u9009\u9879',
+        tooltip: '${widget.label} options',
         onSelected: widget.onSelected,
         itemBuilder: (context) {
           if (widget.options.isEmpty) {
@@ -1142,7 +1308,7 @@ class _TechDropdownState extends State<_TechDropdown> {
               PopupMenuItem<String>(
                 enabled: false,
                 value: '',
-                child: Text('\u65e0\u53ef\u7528\u9009\u9879'),
+                child: Text('No options'),
               ),
             ];
           }
@@ -1217,6 +1383,7 @@ class _SeasonEpisodesSection extends StatelessWidget {
     required this.episodes,
     required this.currentItemId,
     required this.access,
+    required this.language,
     this.onTap,
   });
 
@@ -1224,6 +1391,7 @@ class _SeasonEpisodesSection extends StatelessWidget {
   final List<MediaItem> episodes;
   final String currentItemId;
   final ServerAccess? access;
+  final DesktopUiLanguage language;
   final ValueChanged<MediaItem>? onTap;
 
   @override
@@ -1247,7 +1415,11 @@ class _SeasonEpisodesSection extends StatelessWidget {
               height: 112,
               child: Center(
                 child: Text(
-                  '\u6682\u65e0\u5267\u96c6',
+                  _dtr(
+                    language: language,
+                    zh: '\u6682\u65e0\u5267\u96c6',
+                    en: 'No episodes',
+                  ),
                   style: TextStyle(color: colors.textSecondary),
                 ),
               ),
@@ -1257,6 +1429,7 @@ class _SeasonEpisodesSection extends StatelessWidget {
               episodes: episodes,
               currentItemId: currentItemId,
               access: access,
+              language: language,
               onTap: onTap,
             ),
         ],
@@ -1270,12 +1443,14 @@ class _EpisodeHorizontalList extends StatefulWidget {
     required this.episodes,
     required this.currentItemId,
     required this.access,
+    required this.language,
     this.onTap,
   });
 
   final List<MediaItem> episodes;
   final String currentItemId;
   final ServerAccess? access;
+  final DesktopUiLanguage language;
   final ValueChanged<MediaItem>? onTap;
 
   @override
@@ -1373,6 +1548,7 @@ class _EpisodeHorizontalListState extends State<_EpisodeHorizontalList> {
             return _EpisodeThumbnailCard(
               item: episode,
               imageUrls: imageUrls,
+              language: widget.language,
               isCurrent: episode.id == widget.currentItemId,
               onTap: widget.onTap == null
                   ? null
@@ -1392,12 +1568,14 @@ class _EpisodeThumbnailCard extends StatefulWidget {
   const _EpisodeThumbnailCard({
     required this.item,
     required this.imageUrls,
+    required this.language,
     required this.isCurrent,
     this.onTap,
   });
 
   final MediaItem item;
   final List<String> imageUrls;
+  final DesktopUiLanguage language;
   final bool isCurrent;
   final VoidCallback? onTap;
 
@@ -1506,7 +1684,10 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
                         ),
                       ),
                       child: Text(
-                        _episodeListLabel(widget.item),
+                        _episodeListLabel(
+                          widget.item,
+                          language: widget.language,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1532,8 +1713,12 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
                           color: colors.primary,
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text(
-                          '\u5f53\u524d',
+                        child: Text(
+                          _dtr(
+                            language: widget.language,
+                            zh: '\u5f53\u524d',
+                            en: 'Now',
+                          ),
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
@@ -1555,10 +1740,12 @@ class _EpisodeThumbnailCardState extends State<_EpisodeThumbnailCard> {
 class _ExternalLinksSection extends StatelessWidget {
   const _ExternalLinksSection({
     required this.links,
+    required this.language,
     required this.onOpenLink,
   });
 
   final List<_ExternalLink> links;
+  final DesktopUiLanguage language;
   final ValueChanged<String> onOpenLink;
 
   @override
@@ -1569,7 +1756,11 @@ class _ExternalLinksSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '\u5916\u90e8\u94fe\u63a5',
+            _dtr(
+              language: language,
+              zh: '\u5916\u90e8\u94fe\u63a5',
+              en: 'External Links',
+            ),
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -1737,6 +1928,7 @@ class _MediaInfoSection extends StatelessWidget {
     required this.selectedAudio,
     required this.selectedSubtitle,
     required this.subtitleStreams,
+    required this.language,
   });
 
   final MediaItem item;
@@ -1744,6 +1936,7 @@ class _MediaInfoSection extends StatelessWidget {
   final Map<String, dynamic>? selectedAudio;
   final Map<String, dynamic>? selectedSubtitle;
   final List<Map<String, dynamic>> subtitleStreams;
+  final DesktopUiLanguage language;
 
   @override
   Widget build(BuildContext context) {
@@ -1758,9 +1951,9 @@ class _MediaInfoSection extends StatelessWidget {
     final sourceTime = _formatDateTime(item.premiereDate);
     final fileHeader = sourceTime == '--'
         ? '$fileContainer \u00b7 ${_formatBytes(sourceSize)} \u00b7 '
-            '\u5a92\u4f53\u6dfb\u52a0\u65f6\u95f4\u672a\u77e5'
+            '${_dtr(language: language, zh: '\u5a92\u4f53\u6dfb\u52a0\u65f6\u95f4\u672a\u77e5', en: 'Added time unknown')}'
         : '$fileContainer \u00b7 ${_formatBytes(sourceSize)} \u00b7 '
-            '\u5a92\u4f53\u4e8e $sourceTime \u6dfb\u52a0';
+            '${_dtr(language: language, zh: '\u5a92\u4f53\u4e8e $sourceTime \u6dfb\u52a0', en: 'Added on $sourceTime')}';
 
     final videoStreams = _mediaStreamsByType(selectedSource, 'video');
     final video = videoStreams.isEmpty ? null : videoStreams.first;
@@ -1769,24 +1962,37 @@ class _MediaInfoSection extends StatelessWidget {
 
     final cards = [
       _MediaInfoCardData(
-        title: '\u89c6\u9891',
+        title: _dtr(language: language, zh: '\u89c6\u9891', en: 'Video'),
         icon: Icons.videocam_outlined,
-        specs: _videoSpecs(video, selectedSource),
+        specs: _videoSpecs(
+          video,
+          selectedSource,
+          language: language,
+        ),
       ),
       _MediaInfoCardData(
-        title: '\u97f3\u9891',
+        title: _dtr(language: language, zh: '\u97f3\u9891', en: 'Audio'),
         icon: Icons.audiotrack_outlined,
-        specs: _audioSpecs(selectedAudio),
+        specs: _audioSpecs(
+          selectedAudio,
+          language: language,
+        ),
       ),
       _MediaInfoCardData(
-        title: '\u5b57\u5e55 1',
+        title: _dtr(language: language, zh: '\u5b57\u5e55 1', en: 'Subtitle 1'),
         icon: Icons.subtitles_outlined,
-        specs: _subtitleSpecs(subtitle1),
+        specs: _subtitleSpecs(
+          subtitle1,
+          language: language,
+        ),
       ),
       _MediaInfoCardData(
-        title: '\u5b57\u5e55 2',
+        title: _dtr(language: language, zh: '\u5b57\u5e55 2', en: 'Subtitle 2'),
         icon: Icons.closed_caption_disabled_outlined,
-        specs: _subtitleSpecs(subtitle2),
+        specs: _subtitleSpecs(
+          subtitle2,
+          language: language,
+        ),
       ),
     ];
 
@@ -2174,9 +2380,25 @@ class _EpisodeDetailColors {
   }
 }
 
-String _seasonSectionTitle(MediaItem item, bool isEpisode) {
+String _dtr({
+  required DesktopUiLanguage language,
+  required String zh,
+  required String en,
+}) {
+  return language.pick(zh: zh, en: en);
+}
+
+String _seasonSectionTitle(
+  MediaItem item,
+  bool isEpisode, {
+  required DesktopUiLanguage language,
+}) {
   final season = isEpisode ? (item.seasonNumber ?? 1) : 1;
-  return '\u66f4\u591a\u6765\u81ea\uff1a\u7b2c $season \u5b63';
+  return _dtr(
+    language: language,
+    zh: '\u66f4\u591a\u6765\u81ea\uff1a\u7b2c $season \u5b63',
+    en: 'More from: Season $season',
+  );
 }
 
 String _episodeMark(MediaItem item) {
@@ -2196,10 +2418,19 @@ String _subtitleLine(MediaItem item) {
   return values.join(' \u00b7 ');
 }
 
-String _episodeListLabel(MediaItem item) {
+String _episodeListLabel(
+  MediaItem item, {
+  required DesktopUiLanguage language,
+}) {
   final index = item.episodeNumber ?? 0;
   final title = item.name.trim();
-  if (title.isEmpty) return '$index. \u7b2c$index\u96c6';
+  if (title.isEmpty) {
+    return _dtr(
+      language: language,
+      zh: '$index. \u7b2c$index\u96c6',
+      en: '$index. Episode $index',
+    );
+  }
   return '$index. $title';
 }
 
@@ -2221,15 +2452,28 @@ String _formatDateTime(String? raw) {
   return '${date.year}/${date.month}/${date.day} $hh:$mm';
 }
 
-String _formatRuntime(int? ticks) {
+String _formatRuntime(
+  int? ticks, {
+  required DesktopUiLanguage language,
+}) {
   if (ticks == null || ticks <= 0) return '--';
   final totalSeconds = ticks ~/ 10000000;
   if (totalSeconds <= 0) return '--';
   final duration = Duration(seconds: totalSeconds);
   final hours = duration.inHours;
   final minutes = duration.inMinutes.remainder(60);
-  if (hours <= 0) return '${duration.inMinutes}\u5206\u949f';
-  return '$hours\u5c0f\u65f6$minutes\u5206\u949f';
+  if (hours <= 0) {
+    return _dtr(
+      language: language,
+      zh: '${duration.inMinutes}\u5206\u949f',
+      en: '${duration.inMinutes} min',
+    );
+  }
+  return _dtr(
+    language: language,
+    zh: '$hours\u5c0f\u65f6$minutes\u5206\u949f',
+    en: '${hours}h ${minutes}m',
+  );
 }
 
 String _formatBytes(int? sizeBytes) {
@@ -2454,23 +2698,30 @@ String _subtitleStreamLabel(Map<String, dynamic> stream) {
 Map<String, String> _videoSpecs(
   Map<String, dynamic>? videoStream,
   Map<String, dynamic>? source,
+  {
+  required DesktopUiLanguage language,
+}
 ) {
   return {
-    '\u89c6\u9891\u683c\u5f0f': _videoFormatLabel(videoStream, source),
-    '\u7f16\u7801\u683c\u5f0f':
+    _dtr(language: language, zh: '\u89c6\u9891\u683c\u5f0f', en: 'Format'):
+        _videoFormatLabel(videoStream, source),
+    _dtr(language: language, zh: '\u7f16\u7801\u683c\u5f0f', en: 'Codec'):
         _fallback((videoStream?['Codec'] ?? '').toString().toUpperCase()),
-    '\u7f16\u7801\u89c4\u683c':
+    _dtr(language: language, zh: '\u7f16\u7801\u89c4\u683c', en: 'Profile'):
         _fallback((videoStream?['Profile'] ?? '').toString()),
-    '\u7f16\u7801\u7ea7\u522b':
+    _dtr(language: language, zh: '\u7f16\u7801\u7ea7\u522b', en: 'Level'):
         _fallback((videoStream?['Level'] ?? '').toString()),
-    '\u6e90\u5206\u8fa8\u7387': _formatResolution(
+    _dtr(language: language, zh: '\u6e90\u5206\u8fa8\u7387', en: 'Resolution'):
+        _formatResolution(
       _asInt(videoStream?['Width']),
       _asInt(videoStream?['Height']),
     ),
-    '\u89c6\u9891\u6bd4\u4f8b':
+    _dtr(language: language, zh: '\u89c6\u9891\u6bd4\u4f8b', en: 'Aspect'):
         _fallback((videoStream?['AspectRatio'] ?? '').toString()),
-    '\u5e27\u901f\u7387': _formatFrameRate(videoStream),
-    '\u6bd4\u7279\u7387': _formatBitRate(_asInt(videoStream?['BitRate'])),
+    _dtr(language: language, zh: '\u5e27\u901f\u7387', en: 'Frame Rate'):
+        _formatFrameRate(videoStream),
+    _dtr(language: language, zh: '\u6bd4\u7279\u7387', en: 'Bitrate'):
+        _formatBitRate(_asInt(videoStream?['BitRate'])),
   };
 }
 
@@ -2507,40 +2758,55 @@ String _singleFormatText(String raw) {
   return words.first.toUpperCase();
 }
 
-Map<String, String> _audioSpecs(Map<String, dynamic>? audioStream) {
+Map<String, String> _audioSpecs(
+  Map<String, dynamic>? audioStream, {
+  required DesktopUiLanguage language,
+}) {
   return {
-    '\u6807\u9898\u540d\u79f0':
+    _dtr(language: language, zh: '\u6807\u9898\u540d\u79f0', en: 'Title'):
         audioStream == null ? '--' : _audioStreamLabel(audioStream),
-    '\u8bed\u8a00\u79cd\u7c7b':
+    _dtr(language: language, zh: '\u8bed\u8a00\u79cd\u7c7b', en: 'Language'):
         _fallback((audioStream?['Language'] ?? '').toString()),
-    '\u7f16\u7801\u683c\u5f0f':
+    _dtr(language: language, zh: '\u7f16\u7801\u683c\u5f0f', en: 'Codec'):
         _fallback((audioStream?['Codec'] ?? '').toString().toUpperCase()),
-    '\u7f16\u7801\u89c4\u683c':
+    _dtr(language: language, zh: '\u7f16\u7801\u89c4\u683c', en: 'Profile'):
         _fallback((audioStream?['Profile'] ?? '').toString()),
-    '\u97f3\u6548\u5e03\u5c40':
+    _dtr(language: language, zh: '\u97f3\u6548\u5e03\u5c40', en: 'Layout'):
         _fallback((audioStream?['ChannelLayout'] ?? '').toString()),
-    '\u97f3\u9891\u58f0\u9053':
+    _dtr(language: language, zh: '\u97f3\u9891\u58f0\u9053', en: 'Channels'):
         _fallback((audioStream?['Channels'] ?? '').toString()),
-    '\u6bd4\u7279\u7387': _formatBitRate(_asInt(audioStream?['BitRate'])),
-    '\u91c7\u6837\u7387': _formatSampleRate(_asInt(audioStream?['SampleRate'])),
+    _dtr(language: language, zh: '\u6bd4\u7279\u7387', en: 'Bitrate'):
+        _formatBitRate(_asInt(audioStream?['BitRate'])),
+    _dtr(language: language, zh: '\u91c7\u6837\u7387', en: 'Sample Rate'):
+        _formatSampleRate(_asInt(audioStream?['SampleRate'])),
   };
 }
 
-Map<String, String> _subtitleSpecs(Map<String, dynamic>? subtitleStream) {
+Map<String, String> _subtitleSpecs(
+  Map<String, dynamic>? subtitleStream, {
+  required DesktopUiLanguage language,
+}) {
   return {
-    '\u6807\u9898\u540d\u79f0': subtitleStream == null
-        ? '\u65e0\u5b57\u5e55'
+    _dtr(language: language, zh: '\u6807\u9898\u540d\u79f0', en: 'Title'):
+        subtitleStream == null
+            ? _dtr(language: language, zh: '\u65e0\u5b57\u5e55', en: 'No subtitle')
         : _subtitleStreamLabel(subtitleStream),
-    '\u8bed\u8a00\u79cd\u7c7b':
+    _dtr(language: language, zh: '\u8bed\u8a00\u79cd\u7c7b', en: 'Language'):
         _fallback((subtitleStream?['Language'] ?? '').toString()),
-    '\u7f16\u7801\u683c\u5f0f':
+    _dtr(language: language, zh: '\u7f16\u7801\u683c\u5f0f', en: 'Codec'):
         _fallback((subtitleStream?['Codec'] ?? '').toString().toUpperCase()),
-    '\u9ed8\u8ba4': subtitleStream == null
+    _dtr(language: language, zh: '\u9ed8\u8ba4', en: 'Default'):
+        subtitleStream == null
         ? '--'
-        : (subtitleStream['IsDefault'] == true ? '\u662f' : '\u5426'),
-    '\u5f3a\u5236': subtitleStream == null
+        : (subtitleStream['IsDefault'] == true
+            ? _dtr(language: language, zh: '\u662f', en: 'Yes')
+            : _dtr(language: language, zh: '\u5426', en: 'No')),
+    _dtr(language: language, zh: '\u5f3a\u5236', en: 'Forced'):
+        subtitleStream == null
         ? '--'
-        : (subtitleStream['IsForced'] == true ? '\u662f' : '\u5426'),
+        : (subtitleStream['IsForced'] == true
+            ? _dtr(language: language, zh: '\u662f', en: 'Yes')
+            : _dtr(language: language, zh: '\u5426', en: 'No')),
   };
 }
 

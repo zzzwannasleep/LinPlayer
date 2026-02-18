@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -43,6 +43,8 @@ class _SettingsPageState extends State<SettingsPage> {
   double? _uiScaleDraft;
   double? _tvBackgroundOpacityDraft;
   double? _tvBackgroundBlurSigmaDraft;
+  double? _desktopBackgroundOpacityDraft;
+  double? _desktopBackgroundBlurSigmaDraft;
   bool _checkingUpdate = false;
   String _currentVersionFull = '';
   bool _tvRemoteBusy = false;
@@ -1064,6 +1066,65 @@ class _SettingsPageState extends State<SettingsPage> {
     await widget.appState.setTvBackgroundImage(result);
   }
 
+  Future<void> _editDesktopBackgroundImage(BuildContext context) async {
+    final controller =
+        TextEditingController(text: widget.appState.desktopBackgroundImage);
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: const Text('自定义背景图'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  hintText: '图片 URL 或本地路径',
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                onPressed: () async {
+                  final result = await FilePicker.platform.pickFiles(
+                    dialogTitle: '选择背景图片',
+                    allowMultiple: false,
+                    type: FileType.image,
+                    withData: false,
+                  );
+                  final path = result?.files.single.path;
+                  if (path == null || path.trim().isEmpty) return;
+                  controller.text = path.trim();
+                },
+                icon: const Icon(Icons.folder_open_outlined),
+                label: const Text('选择本地图片'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(null),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dctx).pop(''),
+            child: const Text('清空'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dctx).pop(controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    await widget.appState.setDesktopBackgroundImage(result);
+  }
+
   Future<void> _editTvBackgroundRandomApi(BuildContext context) async {
     final defaultApi = widget.appState.tvBackgroundRandomApiUrl.trim().isEmpty
         ? 'https://bing.img.run/rand.php'
@@ -1480,7 +1541,8 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
               _Section(
                 title: '外观',
-                subtitle: isTv ? '自定义背景 / UI 缩放 / 模糊与透明度' : '主题、缩放与界面语言',
+                subtitle:
+                    isTv ? '自定义背景 / UI 缩放 / 模糊与透明度' : '主题、缩放、背景与界面语言',
                 enableBlur: enableBlur,
                 child: Column(
                   children: [
@@ -1801,9 +1863,155 @@ class _SettingsPageState extends State<SettingsPage> {
                     if (isDesktop) ...[
                       ListTile(
                         contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.image_outlined),
+                        title: const Text('自定义背景图'),
+                        subtitle: Text(
+                          appState.desktopBackgroundImage.trim().isEmpty
+                              ? '未设置'
+                              : appState.desktopBackgroundImage.trim(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: FilledButton(
+                          onPressed: () => _editDesktopBackgroundImage(context),
+                          child: const Text('设置'),
+                        ),
+                        onTap: () => _editDesktopBackgroundImage(context),
+                      ),
+                      if (appState.desktopBackgroundImage.trim().isNotEmpty) ...[
+                        const Divider(height: 1),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.opacity_outlined),
+                          title: const Text('背景透明度'),
+                          subtitle: Builder(
+                            builder: (context) {
+                              final value = (_desktopBackgroundOpacityDraft ??
+                                      appState.desktopBackgroundOpacity)
+                                  .clamp(0.0, 1.0)
+                                  .toDouble();
+                              final pct = (value * 100).round();
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text('当前：$pct%（0-100%）'),
+                                      ),
+                                      TextButton(
+                                        onPressed: ((appState
+                                                            .desktopBackgroundOpacity -
+                                                        1.0)
+                                                    .abs() <
+                                                0.001) &&
+                                                _desktopBackgroundOpacityDraft ==
+                                                    null
+                                            ? null
+                                            : () {
+                                                setState(() =>
+                                                    _desktopBackgroundOpacityDraft =
+                                                        null);
+                                                // ignore: unawaited_futures
+                                                appState
+                                                    .setDesktopBackgroundOpacity(
+                                                        1.0);
+                                              },
+                                        child: const Text('重置'),
+                                      ),
+                                    ],
+                                  ),
+                                  AppSlider(
+                                    value: value,
+                                    min: 0.0,
+                                    max: 1.0,
+                                    divisions: 20,
+                                    label: '$pct%',
+                                    onChanged: (v) => setState(() =>
+                                        _desktopBackgroundOpacityDraft = v),
+                                    onChangeEnd: (v) {
+                                      setState(() =>
+                                          _desktopBackgroundOpacityDraft = null);
+                                      // ignore: unawaited_futures
+                                      appState.setDesktopBackgroundOpacity(v);
+                                    },
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: const Icon(Icons.blur_on_outlined),
+                          title: const Text('背景模糊度'),
+                          subtitle: Builder(
+                            builder: (context) {
+                              final value = (_desktopBackgroundBlurSigmaDraft ??
+                                      appState.desktopBackgroundBlurSigma)
+                                  .clamp(0.0, 30.0)
+                                  .toDouble();
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '当前：${value.toStringAsFixed(0)}（0-30）',
+                                        ),
+                                      ),
+                                      TextButton(
+                                        onPressed: ((appState
+                                                            .desktopBackgroundBlurSigma -
+                                                        0.0)
+                                                    .abs() <
+                                                0.001) &&
+                                                _desktopBackgroundBlurSigmaDraft ==
+                                                    null
+                                            ? null
+                                            : () {
+                                                setState(() =>
+                                                    _desktopBackgroundBlurSigmaDraft =
+                                                        null);
+                                                // ignore: unawaited_futures
+                                                appState
+                                                    .setDesktopBackgroundBlurSigma(
+                                                        0.0);
+                                              },
+                                        child: const Text('重置'),
+                                      ),
+                                    ],
+                                  ),
+                                  AppSlider(
+                                    value: value,
+                                    min: 0.0,
+                                    max: 30.0,
+                                    divisions: 30,
+                                    label: value.toStringAsFixed(0),
+                                    onChanged: (v) => setState(() =>
+                                        _desktopBackgroundBlurSigmaDraft = v),
+                                    onChangeEnd: (v) {
+                                      setState(() =>
+                                          _desktopBackgroundBlurSigmaDraft =
+                                              null);
+                                      // ignore: unawaited_futures
+                                      appState.setDesktopBackgroundBlurSigma(v);
+                                    },
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                      const Divider(height: 1),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.translate_outlined),
                         title: const Text('界面语言'),
-                        subtitle: const Text('仅影响桌面端 UI 文案'),
+                        subtitle: const Text('影响桌面端所有页面文案'),
                         trailing: ConstrainedBox(
                           constraints:
                               BoxConstraints(maxWidth: trailingMaxWidth),
@@ -1839,16 +2047,6 @@ class _SettingsPageState extends State<SettingsPage> {
                       subtitle: const Text('在首页“继续观看”下方显示媒体库快速访问栏'),
                       contentPadding: EdgeInsets.zero,
                     ),
-                    if (!isTv) ...[
-                      const Divider(height: 1),
-                      SwitchListTile(
-                        value: appState.useDynamicColor,
-                        onChanged: (v) => appState.setUseDynamicColor(v),
-                        title: const Text('莫奈取色（Material You）'),
-                        subtitle: const Text('Android 12+ 生效，其它平台自动回退'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                    ],
                   ],
                 ),
               ),

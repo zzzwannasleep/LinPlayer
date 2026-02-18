@@ -60,6 +60,17 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     unawaited(_bootstrap(forceRefresh: false));
   }
 
+  bool _hasCachedHomeContent() {
+    final libraries = widget.appState.libraries;
+    if (libraries.isEmpty) return false;
+    for (final library in libraries) {
+      if (widget.appState.getHome('lib_${library.id}').isNotEmpty) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   void didUpdateWidget(covariant DesktopLibraryPage oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -69,8 +80,9 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   }
 
   Future<void> _bootstrap({required bool forceRefresh}) async {
+    final showBlockingLoading = forceRefresh || !_hasCachedHomeContent();
     setState(() {
-      _loading = true;
+      _loading = showBlockingLoading;
       _error = null;
     });
 
@@ -78,7 +90,7 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
       if (widget.appState.libraries.isEmpty || forceRefresh) {
         await widget.appState.refreshLibraries();
       }
-      await widget.appState.loadHome(forceRefresh: true);
+      await widget.appState.loadHome(forceRefresh: forceRefresh);
 
       if (!mounted) return;
       if (_continueFuture == null) {
@@ -258,12 +270,21 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
         '${seconds.toString().padLeft(2, '0')}';
   }
 
+  double _contentHorizontalPadding(double width) {
+    if (width >= 1700) return 34;
+    if (width >= 1360) return 28;
+    if (width >= 1080) return 24;
+    return 18;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
         final theme = DesktopThemeExtension.of(context);
+        final horizontalPadding =
+            _contentHorizontalPadding(MediaQuery.sizeOf(context).width);
         final access = resolveServerAccess(appState: widget.appState);
         final libraries = widget.appState.libraries
             .where((library) => !widget.appState.isLibraryHidden(library.id))
@@ -396,7 +417,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
               slivers: [
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 44),
+                    padding:
+                        EdgeInsets.fromLTRB(horizontalPadding, 0, horizontalPadding, 44),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: contentChildren,
@@ -684,6 +706,15 @@ class _CategoryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = DesktopThemeExtension.of(context);
     final imageCandidates = <String>[];
+    final libraryCoverCandidates = _libraryImageCandidates(
+      access: access,
+      library: library,
+    );
+    for (final url in libraryCoverCandidates) {
+      if (!imageCandidates.contains(url)) {
+        imageCandidates.add(url);
+      }
+    }
     for (final item in preview.take(8)) {
       final urls = _coverImageCandidates(access: access, item: item);
       for (final url in urls) {
@@ -1199,6 +1230,35 @@ String? _imageUrlById({
     imageType: imageType,
     maxWidth: maxWidth,
   );
+}
+
+List<String> _libraryImageCandidates({
+  required ServerAccess? access,
+  required LibraryInfo library,
+}) {
+  final urls = <String>[];
+  final libraryId = library.id.trim();
+  if (libraryId.isEmpty) return urls;
+
+  void add({
+    required String imageType,
+    required int maxWidth,
+  }) {
+    final url = _imageUrlById(
+      access: access,
+      itemId: libraryId,
+      imageType: imageType,
+      maxWidth: maxWidth,
+    );
+    if (url == null || url.trim().isEmpty || urls.contains(url)) return;
+    urls.add(url);
+  }
+
+  add(imageType: 'Primary', maxWidth: 900);
+  add(imageType: 'Thumb', maxWidth: 900);
+  add(imageType: 'Backdrop', maxWidth: 1280);
+  add(imageType: 'Banner', maxWidth: 1280);
+  return urls;
 }
 
 List<String> _coverImageCandidates({

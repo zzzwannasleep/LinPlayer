@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
@@ -83,6 +82,8 @@ class _DesktopWorkspace extends StatefulWidget {
 }
 
 class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
+  static const double _kTopBarFadeDistance = 220.0;
+
   _DesktopSection _section = _DesktopSection.library;
   DesktopHomeTab _homeTab = DesktopHomeTab.home;
   bool _sidebarCollapsed = true;
@@ -623,6 +624,12 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     setState(() => _topBarVisibility = next);
   }
 
+  void _updateTopBarVisibilityByScrollDelta(double delta) {
+    if (delta.abs() < 0.1) return;
+    final next = _topBarVisibility - (delta / _kTopBarFadeDistance);
+    _setTopBarVisibility(next);
+  }
+
   bool _handleContentScrollNotification(ScrollNotification notification) {
     if (notification.depth != 0) return false;
     final axis = axisDirectionToAxis(notification.metrics.axisDirection);
@@ -636,33 +643,17 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
     if (notification is ScrollUpdateNotification) {
       final delta = notification.scrollDelta ?? 0;
-      if (delta.abs() < 0.5) return false;
-      _setTopBarVisibility(delta > 0 ? 0.0 : 1.0);
+      _updateTopBarVisibilityByScrollDelta(delta);
       return false;
     }
 
-    if (notification is OverscrollNotification && notification.overscroll < 0) {
+    if (notification is OverscrollNotification) {
+      _updateTopBarVisibilityByScrollDelta(notification.overscroll);
+      return false;
+    }
+
+    if (notification is ScrollEndNotification && pixels <= 1) {
       _setTopBarVisibility(1.0);
-      return false;
-    }
-
-    if (notification is UserScrollNotification) {
-      switch (notification.direction) {
-        case ScrollDirection.forward:
-          _setTopBarVisibility(1.0);
-          break;
-        case ScrollDirection.reverse:
-          _setTopBarVisibility(0.0);
-          break;
-        case ScrollDirection.idle:
-          _setTopBarVisibility(pixels <= 0 ? 1.0 : 0.0);
-          break;
-      }
-      return false;
-    }
-
-    if (notification is ScrollEndNotification) {
-      _setTopBarVisibility(pixels <= 0 ? 1.0 : 0.0);
       return false;
     }
 
@@ -686,6 +677,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           appState: widget.appState,
           query: _searchQuery,
           refreshSignal: _refreshSignal,
+          language: _uiLanguage,
           onOpenItem: _openDetail,
         );
       case _DesktopSection.detail:
@@ -702,6 +694,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         return DesktopDetailPage(
           key: ValueKey<String>(vm.detail.id),
           viewModel: vm,
+          language: _uiLanguage,
           onOpenItem: _openDetail,
           onPlayPressed: _onPlayCurrentDetail,
         );
@@ -791,7 +784,26 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                           ),
                         ),
                         content: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 180),
+                          duration: const Duration(milliseconds: 300),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          transitionBuilder: (child, animation) {
+                            final curved = CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                              reverseCurve: Curves.easeInCubic,
+                            );
+                            return FadeTransition(
+                              opacity: curved,
+                              child: SlideTransition(
+                                position: Tween<Offset>(
+                                  begin: const Offset(0.018, 0.012),
+                                  end: Offset.zero,
+                                ).animate(curved),
+                                child: child,
+                              ),
+                            );
+                          },
                           child: NotificationListener<ScrollNotification>(
                             onNotification: _handleContentScrollNotification,
                             child: _buildContent(),
