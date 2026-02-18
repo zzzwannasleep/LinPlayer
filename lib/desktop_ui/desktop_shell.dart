@@ -21,9 +21,11 @@ import 'pages/desktop_server_page.dart';
 import 'pages/desktop_webdav_home_page.dart';
 import 'theme/desktop_theme_extension.dart';
 import 'view_models/desktop_detail_view_model.dart';
+import 'widgets/desktop_page_route.dart';
 import 'widgets/desktop_shortcut_wrapper.dart';
 import 'widgets/desktop_sidebar.dart';
 import 'widgets/desktop_top_bar.dart';
+import 'widgets/desktop_unified_background.dart';
 import 'widgets/focus_traversal_manager.dart';
 import 'widgets/window_padding_container.dart';
 
@@ -72,6 +74,8 @@ class DesktopShell extends StatelessWidget {
 
 enum _DesktopSection { library, search, detail }
 
+enum _DesktopSectionTransition { push, pull, fade, flip, stack }
+
 class _DesktopWorkspace extends StatefulWidget {
   const _DesktopWorkspace({super.key, required this.appState});
 
@@ -95,6 +99,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   bool _loadingMediaStats = false;
   int _mediaStatsRequestVersion = 0;
   double _topBarVisibility = 1.0;
+  _DesktopSectionTransition _sectionTransition = _DesktopSectionTransition.fade;
 
   @override
   void initState() {
@@ -178,6 +183,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     _hideSidebar();
     if (_section != _DesktopSection.library || _topBarVisibility < 1.0) {
       setState(() {
+        _sectionTransition = _DesktopSectionTransition.fade;
         _section = _DesktopSection.library;
         _topBarVisibility = 1.0;
       });
@@ -226,6 +232,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   void _handleHomeTabChanged(DesktopHomeTab tab) {
     setState(() {
+      _sectionTransition = _DesktopSectionTransition.stack;
       _homeTab = tab;
       _section = _DesktopSection.library;
       _topBarVisibility = 1.0;
@@ -245,6 +252,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     final next = DesktopDetailViewModel(appState: widget.appState, item: item);
     _detailViewModel?.dispose();
     setState(() {
+      _sectionTransition = _DesktopSectionTransition.push;
       _detailViewModel = next;
       _section = _DesktopSection.detail;
       _topBarVisibility = 1.0;
@@ -279,7 +287,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         widget.appState.playerCore == PlayerCore.exo;
 
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      buildDesktopPageRoute(
+        transition: DesktopPageTransitionStyle.push,
         builder: (_) => useExoCore
             ? ExoPlayNetworkPage(
                 title: playable.name,
@@ -328,7 +337,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      buildDesktopPageRoute(
+        transition: DesktopPageTransitionStyle.stack,
         builder: (_) => SettingsPage(appState: widget.appState),
       ),
     );
@@ -339,10 +349,15 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       unawaited(widget.appState.refreshDomains());
     }
 
+    final desktopTheme = DesktopThemeExtension.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sheetBackground = desktopTheme.surface.withValues(
+      alpha: isDark ? 0.95 : 0.98,
+    );
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xF012141A),
+      backgroundColor: sheetBackground,
       builder: (sheetContext) {
         return AnimatedBuilder(
           animation: widget.appState,
@@ -442,7 +457,8 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               trailing: selected
-                                  ? const Icon(Icons.check, color: Colors.green)
+                                  ? Icon(Icons.check,
+                                      color: desktopTheme.accent)
                                   : null,
                               onLongPress: !entry.isCustom
                                   ? null
@@ -608,6 +624,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
   void _handleSearchSubmitted(String value) {
     setState(() {
+      _sectionTransition = _DesktopSectionTransition.flip;
       _searchQuery = value.trim();
       _searchController.value = TextEditingValue(
         text: _searchQuery,
@@ -664,7 +681,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     switch (_section) {
       case _DesktopSection.library:
         return DesktopLibraryPage(
-          key: ValueKey<int>(_refreshSignal),
+          key: ValueKey<String>('library-${_homeTab.name}-$_refreshSignal'),
           appState: widget.appState,
           refreshSignal: _refreshSignal,
           onOpenItem: _openDetail,
@@ -701,6 +718,70 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     }
   }
 
+  Widget _buildContentTransition(Widget child, Animation<double> animation) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+
+    switch (_sectionTransition) {
+      case _DesktopSectionTransition.push:
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.24, end: 1.0).animate(curved),
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.07, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      case _DesktopSectionTransition.pull:
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.30, end: 1.0).animate(curved),
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(-0.06, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      case _DesktopSectionTransition.fade:
+        return FadeTransition(
+          opacity: curved,
+          child: child,
+        );
+      case _DesktopSectionTransition.flip:
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.2, end: 1.0).animate(curved),
+          child: AnimatedBuilder(
+            animation: curved,
+            child: child,
+            builder: (context, child) {
+              final matrix = Matrix4.identity()
+                ..setEntry(3, 2, 0.0013)
+                ..rotateY((1 - curved.value) * 0.09);
+              return Transform(
+                alignment: Alignment.center,
+                transform: matrix,
+                child: child,
+              );
+            },
+          ),
+        );
+      case _DesktopSectionTransition.stack:
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0.0, end: 1.0).animate(curved),
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.965, end: 1.0).animate(curved),
+            child: child,
+          ),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final themed = _withDesktopTheme(Theme.of(context));
@@ -712,8 +793,27 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         child: Builder(
           builder: (context) {
             final desktopTheme = DesktopThemeExtension.of(context);
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final hasCustomBackground =
+                widget.appState.desktopBackgroundImage.trim().isNotEmpty;
             final isDetailSection = _section == _DesktopSection.detail;
-            final detailBackground = desktopTheme.background;
+            final baseBackground = desktopTheme.background;
+            final contentBackgroundStart = isDetailSection
+                ? desktopTheme.background
+                : desktopTheme.backgroundGradientStart;
+            final contentBackgroundEnd = isDetailSection
+                ? desktopTheme.background
+                : desktopTheme.backgroundGradientEnd;
+            final overlayBackgroundStart = hasCustomBackground
+                ? contentBackgroundStart.withValues(
+                    alpha: isDark ? 0.68 : 0.82,
+                  )
+                : contentBackgroundStart;
+            final overlayBackgroundEnd = hasCustomBackground
+                ? contentBackgroundEnd.withValues(
+                    alpha: isDark ? 0.74 : 0.88,
+                  )
+                : contentBackgroundEnd;
             final title = switch (_section) {
               _DesktopSection.library => _uiLanguage.pick(
                   zh: _homeTab == DesktopHomeTab.home
@@ -734,86 +834,82 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
             final sidebarServers = _buildSidebarServers();
 
             return ColoredBox(
-              color:
-                  isDetailSection ? detailBackground : desktopTheme.background,
-              child: SafeArea(
-                child: DesktopShortcutWrapper(
-                  child: FocusTraversalManager(
-                    child: WindowPaddingContainer(
-                      padding: EdgeInsets.zero,
-                      dragRegionHeight: 0,
-                      child: DesktopNavigationLayout(
-                        backgroundStartColor:
-                            isDetailSection ? detailBackground : null,
-                        backgroundEndColor:
-                            isDetailSection ? detailBackground : null,
-                        sidebarWidth: 264,
-                        sidebarVisible: !_sidebarCollapsed,
-                        onDismissSidebar: _hideSidebar,
-                        sidebar: DesktopSidebar(
-                          servers: sidebarServers,
-                          selectedServerId: widget.appState.activeServerId,
-                          onSelected: _handleServerSelected,
-                          collapsed: _sidebarCollapsed,
-                        ),
-                        topBar: DesktopTopBar(
-                          title: title,
-                          serverName: widget.appState.activeServer?.name ?? '',
-                          movieCount: _mediaStats?.movieCount,
-                          seriesCount: _mediaStats?.seriesCount,
-                          statsLoading: _loadingMediaStats,
-                          language: _uiLanguage,
-                          showSearch: _section != _DesktopSection.library,
-                          homeTab: _homeTab,
-                          onHomeTabChanged: _handleHomeTabChanged,
-                          showBack: _section == _DesktopSection.detail,
-                          onBack: () => setState(() {
-                            _section = _DesktopSection.library;
-                            _topBarVisibility = 1.0;
-                          }),
-                          onToggleSidebar: _toggleSidebar,
-                          searchController: _searchController,
-                          onSearchChanged: _handleSearchChanged,
-                          onSearchSubmitted: _handleSearchSubmitted,
-                          onRefresh: _refreshCurrentPage,
-                          onOpenRouteManager: _openRouteManager,
-                          onOpenSettings: _openSettings,
-                          searchHint: _uiLanguage.pick(
-                            zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
-                            en: 'Search series or movies',
-                          ),
-                        ),
-                        content: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 300),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, animation) {
-                            final curved = CurvedAnimation(
-                              parent: animation,
-                              curve: Curves.easeOutCubic,
-                              reverseCurve: Curves.easeInCubic,
-                            );
-                            return FadeTransition(
-                              opacity: curved,
-                              child: SlideTransition(
-                                position: Tween<Offset>(
-                                  begin: const Offset(0.018, 0.012),
-                                  end: Offset.zero,
-                                ).animate(curved),
-                                child: child,
+              color: baseBackground,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Positioned.fill(
+                    child: DesktopUnifiedBackground(
+                      appState: widget.appState,
+                      baseColor: baseBackground,
+                    ),
+                  ),
+                  SafeArea(
+                    child: DesktopShortcutWrapper(
+                      child: FocusTraversalManager(
+                        child: WindowPaddingContainer(
+                          padding: EdgeInsets.zero,
+                          dragRegionHeight: 0,
+                          child: DesktopNavigationLayout(
+                            backgroundStartColor: overlayBackgroundStart,
+                            backgroundEndColor: overlayBackgroundEnd,
+                            sidebarWidth: 264,
+                            sidebarVisible: !_sidebarCollapsed,
+                            onDismissSidebar: _hideSidebar,
+                            sidebar: DesktopSidebar(
+                              servers: sidebarServers,
+                              selectedServerId: widget.appState.activeServerId,
+                              onSelected: _handleServerSelected,
+                              collapsed: _sidebarCollapsed,
+                            ),
+                            topBar: DesktopTopBar(
+                              title: title,
+                              serverName:
+                                  widget.appState.activeServer?.name ?? '',
+                              movieCount: _mediaStats?.movieCount,
+                              seriesCount: _mediaStats?.seriesCount,
+                              statsLoading: _loadingMediaStats,
+                              language: _uiLanguage,
+                              showSearch: _section != _DesktopSection.library,
+                              homeTab: _homeTab,
+                              onHomeTabChanged: _handleHomeTabChanged,
+                              showBack: _section == _DesktopSection.detail,
+                              onBack: () => setState(() {
+                                _sectionTransition =
+                                    _DesktopSectionTransition.pull;
+                                _section = _DesktopSection.library;
+                                _topBarVisibility = 1.0;
+                              }),
+                              onToggleSidebar: _toggleSidebar,
+                              searchController: _searchController,
+                              onSearchChanged: _handleSearchChanged,
+                              onSearchSubmitted: _handleSearchSubmitted,
+                              onRefresh: _refreshCurrentPage,
+                              onOpenRouteManager: _openRouteManager,
+                              onOpenSettings: _openSettings,
+                              searchHint: _uiLanguage.pick(
+                                zh: '\u641c\u7d22\u5267\u96c6\u6216\u7535\u5f71',
+                                en: 'Search series or movies',
                               ),
-                            );
-                          },
-                          child: NotificationListener<ScrollNotification>(
-                            onNotification: _handleContentScrollNotification,
-                            child: _buildContent(),
+                            ),
+                            content: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 360),
+                              switchInCurve: Curves.easeOutCubic,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: _buildContentTransition,
+                              child: NotificationListener<ScrollNotification>(
+                                onNotification:
+                                    _handleContentScrollNotification,
+                                child: _buildContent(),
+                              ),
+                            ),
+                            topBarVisibility: _topBarVisibility,
                           ),
                         ),
-                        topBarVisibility: _topBarVisibility,
                       ),
                     ),
                   ),
-                ),
+                ],
               ),
             );
           },

@@ -12,6 +12,7 @@ import '../../server_adapters/server_access.dart';
 import '../models/desktop_ui_language.dart';
 import '../theme/desktop_theme_extension.dart';
 import '../widgets/desktop_media_card.dart';
+import '../widgets/desktop_page_route.dart';
 import '../widgets/desktop_top_bar.dart' show DesktopHomeTab;
 import 'desktop_continue_watching_page.dart';
 import 'desktop_favorites_items_page.dart';
@@ -168,7 +169,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     required String title,
   }) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      buildDesktopPageRoute(
+        transition: DesktopPageTransitionStyle.push,
         builder: (_) => LibraryItemsPage(
           appState: widget.appState,
           parentId: parentId,
@@ -180,7 +182,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
 
   Future<void> _openContinueWatchingPage() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      buildDesktopPageRoute(
+        transition: DesktopPageTransitionStyle.stack,
         builder: (_) => DesktopContinueWatchingPage(
           appState: widget.appState,
           language: widget.language,
@@ -196,7 +199,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   }) async {
     if (items.isEmpty) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(
+      buildDesktopPageRoute(
+        transition: DesktopPageTransitionStyle.stack,
         builder: (_) => DesktopFavoritesItemsPage(
           appState: widget.appState,
           title: title,
@@ -417,8 +421,8 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
               slivers: [
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding:
-                        EdgeInsets.fromLTRB(horizontalPadding, 0, horizontalPadding, 44),
+                    padding: EdgeInsets.fromLTRB(
+                        horizontalPadding, 0, horizontalPadding, 44),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: contentChildren,

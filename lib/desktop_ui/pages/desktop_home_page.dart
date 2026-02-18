@@ -101,6 +101,11 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     });
   }
 
+  Color _sheetBackgroundColor(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark ? const Color(0xF012141A) : const Color(0xF7FFFFFF);
+  }
+
   Future<void> _openSearch() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -155,7 +160,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     return showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xF012141A),
+      backgroundColor: _sheetBackgroundColor(context),
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
@@ -278,7 +283,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                                 setSheetState(() => opacityDraft = v),
                             onChangeEnd: (v) {
                               setSheetState(() => opacityDraft = null);
-                              unawaited(appState.setDesktopBackgroundOpacity(v));
+                              unawaited(
+                                  appState.setDesktopBackgroundOpacity(v));
                             },
                           ),
                           const SizedBox(height: 8),
@@ -322,7 +328,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xF012141A),
+      backgroundColor: _sheetBackgroundColor(context),
       builder: (sheetContext) {
         return SafeArea(
           child: Column(
@@ -392,7 +398,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      backgroundColor: const Color(0xF012141A),
+      backgroundColor: _sheetBackgroundColor(context),
       builder: (sheetContext) {
         return AnimatedBuilder(
           animation: widget.appState,
@@ -456,7 +462,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                             final entry = entries[index];
                             final domain = entry.domain;
                             final selected = current == domain.url;
-                            final remark = widget.appState.domainRemark(domain.url);
+                            final remark =
+                                widget.appState.domainRemark(domain.url);
                             return ListTile(
                               dense: true,
                               contentPadding: EdgeInsets.zero,
@@ -485,7 +492,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                               onTap: () async {
                                 await widget.appState.setBaseUrl(domain.url);
                                 await widget.appState.refreshLibraries();
-                                await widget.appState.loadHome(forceRefresh: true);
+                                await widget.appState
+                                    .loadHome(forceRefresh: true);
                                 _reloadContinueWatching(forceRefresh: true);
                                 if (!sheetContext.mounted) return;
                                 Navigator.of(sheetContext).pop();
@@ -788,7 +796,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     final tag = _episodeTag(item);
     if (tag.isNotEmpty) pieces.add(tag);
     if (item.playbackPositionTicks > 0) {
-      pieces.add('观看到 ${_formatPosition(_ticksToDuration(item.playbackPositionTicks))}');
+      pieces.add(
+          '观看到 ${_formatPosition(_ticksToDuration(item.playbackPositionTicks))}');
     }
     return pieces.join(' · ');
   }
@@ -866,9 +875,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     int? maxWidth,
   }) {
     if (access == null) return null;
-    final targetId = item.hasImage
-        ? item.id
-        : (item.parentId ?? item.seriesId ?? item.id);
+    final targetId =
+        item.hasImage ? item.id : (item.parentId ?? item.seriesId ?? item.id);
     return access.adapter.imageUrl(
       access.auth,
       itemId: targetId,
@@ -1041,8 +1049,9 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: (isDark ? scheme.surface : scheme.surfaceContainerHighest)
-                    .withValues(alpha: isDark ? 0.34 : 0.92),
+                color:
+                    (isDark ? scheme.surface : scheme.surfaceContainerHighest)
+                        .withValues(alpha: isDark ? 0.34 : 0.92),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: scheme.outlineVariant
@@ -1059,7 +1068,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                   ),
                   const SizedBox(width: 12),
                   TextButton.icon(
-                    onPressed: () => _reloadContinueWatching(forceRefresh: true),
+                    onPressed: () =>
+                        _reloadContinueWatching(forceRefresh: true),
                     icon: const Icon(Icons.refresh),
                     label: const Text('重试'),
                   ),
@@ -1128,8 +1138,9 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                     child: _ContinueWatchingCard(
                       title: item.name,
                       subtitle: _continueSubtitle(item),
-                      imageUrl:
-                          imageCandidates.isEmpty ? null : imageCandidates.first,
+                      imageUrl: imageCandidates.isEmpty
+                          ? null
+                          : imageCandidates.first,
                       fallbackImageUrls: imageCandidates.length > 1
                           ? imageCandidates.sublist(1)
                           : const <String>[],
@@ -1234,7 +1245,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
     return AnimatedBuilder(
       animation: widget.appState,
       builder: (context, _) {
-        final allHomeEntries = widget.appState.homeEntries.toList(growable: false);
+        final allHomeEntries =
+            widget.appState.homeEntries.toList(growable: false);
         final visibleEntries = _entriesForCurrentTab(allHomeEntries);
         final visibleLibraries = _visibleLibraries();
         final access = resolveServerAccess(appState: widget.appState);
@@ -1242,7 +1254,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
         final horizontalPadding = _contentHorizontalPadding(width);
         final scheme = Theme.of(context).colorScheme;
         final isDark = scheme.brightness == Brightness.dark;
-        final baseBackgroundColor = DesktopUnifiedBackground.baseColorForBrightness(
+        final baseBackgroundColor =
+            DesktopUnifiedBackground.baseColorForBrightness(
           Theme.of(context).brightness,
         );
 
@@ -1326,7 +1339,8 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                               horizontalPadding: horizontalPadding,
                               access: access,
                             ),
-                            if (visibleEntries.isNotEmpty) const SizedBox(height: 28),
+                            if (visibleEntries.isNotEmpty)
+                              const SizedBox(height: 28),
                             for (var i = 0; i < visibleEntries.length; i++) ...[
                               _buildCategorySection(
                                 horizontalPadding: horizontalPadding,
@@ -1366,11 +1380,12 @@ class _DesktopHomePageState extends State<DesktopHomePage> {
                                     color: (isDark
                                             ? scheme.surface
                                             : scheme.surfaceContainerHighest)
-                                        .withValues(alpha: isDark ? 0.30 : 0.90),
+                                        .withValues(
+                                            alpha: isDark ? 0.30 : 0.90),
                                     borderRadius: BorderRadius.circular(14),
                                     border: Border.all(
-                                      color: scheme.outlineVariant
-                                          .withValues(alpha: isDark ? 0.30 : 0.55),
+                                      color: scheme.outlineVariant.withValues(
+                                          alpha: isDark ? 0.30 : 0.55),
                                     ),
                                   ),
                                   child: Text(
@@ -2422,9 +2437,8 @@ class _HoverScaleSurfaceState extends State<_HoverScaleSurface> {
 
   @override
   Widget build(BuildContext context) {
-    final scale = _pressed
-        ? widget.pressedScale
-        : (_active ? widget.hoverScale : 1.0);
+    final scale =
+        _pressed ? widget.pressedScale : (_active ? widget.hoverScale : 1.0);
 
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
@@ -2442,8 +2456,8 @@ class _HoverScaleSurfaceState extends State<_HoverScaleSurface> {
           DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
             onInvoke: (intent) {
               FocusScope.of(context).focusedChild?.focusInDirection(
-                intent.direction,
-              );
+                    intent.direction,
+                  );
               return null;
             },
           ),
