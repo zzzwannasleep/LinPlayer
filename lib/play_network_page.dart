@@ -178,6 +178,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   bool _desktopDanmakuOnlineLoading = false;
   bool _desktopDanmakuManualLoading = false;
   bool _desktopLineLoading = false;
+  bool _desktopRouteSwitching = false;
+  static const int _desktopRouteHistoryLimit = 5;
+  final List<String> _desktopRouteHistory = <String>[];
   bool _desktopFullscreen = false;
   double _danmakuTimeOffsetSeconds = 0.0;
 
@@ -3338,7 +3341,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   @override
   Widget build(BuildContext context) {
     final initialized = _playerService.isInitialized;
-    final controlsEnabled = initialized && !_loading && _playError == null;
+    final controlsEnabled =
+        initialized && !_loading && _playError == null && !_desktopRouteSwitching;
     final duration = initialized ? _playerService.duration : Duration.zero;
     final isPlaying = initialized ? _playerService.isPlaying : false;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
@@ -3624,6 +3628,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                               fit: StackFit.expand,
                               children: [
                                 Video(
+                                  key: ValueKey(_playerService.controller),
                                   controller: _playerService.controller,
                                   controls: NoVideoControls,
                                   subtitleViewConfiguration:
@@ -4361,11 +4366,40 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       }
     }
 
+    final knownUrls = <String>{
+      for (final d in customEntries) d.url,
+      for (final d in pluginDomains) d.url,
+      (_baseUrl ?? '').trim(),
+    };
+    final historyEntries = <DomainInfo>[];
+    for (final raw in _desktopRouteHistory) {
+      final url = raw.trim();
+      if (url.isEmpty || knownUrls.contains(url)) continue;
+      historyEntries.add(
+        DomainInfo(name: '上次线路 ${historyEntries.length + 1}', url: url),
+      );
+      knownUrls.add(url);
+      if (historyEntries.length >= _desktopRouteHistoryLimit) break;
+    }
+
     return buildRouteEntries(
       currentUrl: _baseUrl,
-      customEntries: customEntries,
+      customEntries: [...historyEntries, ...customEntries],
       pluginDomains: pluginDomains,
     );
+  }
+
+  void _rememberDesktopRouteHistory(String url) {
+    final v = url.trim();
+    if (v.isEmpty) return;
+    _desktopRouteHistory.removeWhere((e) => e == v);
+    _desktopRouteHistory.insert(0, v);
+    if (_desktopRouteHistory.length > _desktopRouteHistoryLimit) {
+      _desktopRouteHistory.removeRange(
+        _desktopRouteHistoryLimit,
+        _desktopRouteHistory.length,
+      );
+    }
   }
 
   Future<void> _switchPlaybackRoute(String url) async {
@@ -4375,6 +4409,14 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (currentUrl == nextUrl) return;
     final serverId = _playbackServerId;
     if (serverId == null || serverId.isEmpty) return;
+    if (_desktopRouteSwitching) return;
+
+    if (mounted) {
+      setState(() => _desktopRouteSwitching = true);
+    } else {
+      _desktopRouteSwitching = true;
+    }
+    _rememberDesktopRouteHistory(currentUrl);
 
     final resumePos =
         _playerService.isInitialized ? _lastPosition : Duration.zero;
@@ -4441,7 +4483,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           hasVideo;
       if (!switchOk) {
         await restorePreviousRoute(
-          message: 'New route has no video. Restored previous route.',
+          message: '新线路无画面，已还原到原线路',
         );
         return;
       }
@@ -4454,6 +4496,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('线路切换失败：$e')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _desktopRouteSwitching = false);
+      } else {
+        _desktopRouteSwitching = false;
+      }
     }
   }
 
@@ -4770,6 +4818,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             children: [
               if (_playerService.isInitialized) ...[
                 Video(
+                  key: ValueKey(_playerService.controller),
                   controller: _playerService.controller,
                   controls: NoVideoControls,
                   subtitleViewConfiguration: _subtitleViewConfiguration,
@@ -5026,6 +5075,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final chipBorder = isDark
         ? Colors.white.withValues(alpha: 0.18)
         : Colors.black.withValues(alpha: 0.12);
+    final switchingRoute = _desktopRouteSwitching;
 
     return _buildDesktopGlassPanel(
       context: context,
@@ -5089,9 +5139,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                   _desktopTopActionChip(
                     context,
                     isDark: isDark,
-                    icon: Icons.route_outlined,
-                    label: '切换线路',
-                    active: false,
+                    icon: switchingRoute ? Icons.sync : Icons.route_outlined,
+                    label: switchingRoute ? '切换中' : '切换线路',
+                    active: switchingRoute,
                     onTap: controlsEnabled
                         ? () {
                             // ignore: unawaited_futures

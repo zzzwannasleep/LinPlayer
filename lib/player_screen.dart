@@ -114,6 +114,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   bool _desktopSpaceKeyPressed = false;
   bool _desktopEpisodeGridMode = false;
   bool _desktopSpeedPanelVisible = false;
+  bool _desktopLineSwitching = false;
   bool _desktopFullscreen = false;
   int? _desktopSelectedSeason;
   bool _desktopDanmakuOnlineLoading = false;
@@ -2197,6 +2198,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           fit: StackFit.expand,
                           children: [
                             Video(
+                              key: ValueKey(_playerService.controller),
                               controller: _playerService.controller,
                               controls: NoVideoControls,
                               subtitleViewConfiguration:
@@ -2697,6 +2699,7 @@ class _PlayerScreenState extends State<PlayerScreen>
             children: [
               if (_playerService.isInitialized) ...[
                 Video(
+                  key: ValueKey(_playerService.controller),
                   controller: _playerService.controller,
                   controls: NoVideoControls,
                   subtitleViewConfiguration: _subtitleViewConfiguration,
@@ -4292,39 +4295,54 @@ class _PlayerScreenState extends State<PlayerScreen>
   Future<void> _switchDesktopLine(int index) async {
     if (index < 0 || index >= _playlist.length) return;
     if (index == _currentlyPlayingIndex) return;
+    if (_desktopLineSwitching) return;
+
+    if (mounted) {
+      setState(() => _desktopLineSwitching = true);
+    } else {
+      _desktopLineSwitching = true;
+    }
 
     final wasPlaying = _playerService.isPlaying;
     final resumePosition = _position;
 
-    await _playFile(
-      _playlist[index],
-      index,
-      autoPlay: wasPlaying,
-    );
+    try {
+      await _playFile(
+        _playlist[index],
+        index,
+        autoPlay: wasPlaying,
+      );
 
-    if (!mounted || !_playerService.isInitialized || _playError != null) return;
-    if (resumePosition <= Duration.zero) return;
+      if (!mounted || !_playerService.isInitialized || _playError != null) return;
+      if (resumePosition <= Duration.zero) return;
 
-    final deadline = DateTime.now().add(const Duration(seconds: 2));
-    while (mounted &&
-        _duration <= Duration.zero &&
-        DateTime.now().isBefore(deadline)) {
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      final deadline = DateTime.now().add(const Duration(seconds: 2));
+      while (mounted &&
+          _duration <= Duration.zero &&
+          DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+
+      if (!mounted || !_playerService.isInitialized || _playError != null) return;
+      if (_duration <= Duration.zero) return;
+
+      final target = _safeSeekTarget(resumePosition, _duration);
+      if (target <= Duration.zero) return;
+
+      await _playerService.seek(
+        target,
+        flushBuffer: _flushBufferOnSeek,
+      );
+      if (!mounted) return;
+      setState(() => _position = target);
+      _syncDanmakuCursor(target);
+    } finally {
+      if (mounted) {
+        setState(() => _desktopLineSwitching = false);
+      } else {
+        _desktopLineSwitching = false;
+      }
     }
-
-    if (!mounted || !_playerService.isInitialized || _playError != null) return;
-    if (_duration <= Duration.zero) return;
-
-    final target = _safeSeekTarget(resumePosition, _duration);
-    if (target <= Duration.zero) return;
-
-    await _playerService.seek(
-      target,
-      flushBuffer: _flushBufferOnSeek,
-    );
-    if (!mounted) return;
-    setState(() => _position = target);
-    _syncDanmakuCursor(target);
   }
 
   Widget _buildDesktopLinePanel(
@@ -4368,12 +4386,11 @@ class _PlayerScreenState extends State<PlayerScreen>
           trailing: selected
               ? const Icon(Icons.check_circle_outline_rounded)
               : Text(info.mark),
-          onTap: () {
-            if (selected) return;
-            // Avoid immediate seek during line switch; some desktop streams
-            // may decode audio first and briefly render a black video frame.
-            unawaited(_switchDesktopLine(index));
-          },
+          onTap: (selected || _desktopLineSwitching)
+              ? null
+              : () async {
+                  await _switchDesktopLine(index);
+                },
         );
       },
     );

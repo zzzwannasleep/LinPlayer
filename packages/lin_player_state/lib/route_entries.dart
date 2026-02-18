@@ -7,14 +7,33 @@ List<RouteEntry> buildRouteEntries({
   required List<DomainInfo> customEntries,
   required List<DomainInfo> pluginDomains,
 }) {
-  final hasCurrentInList = currentUrl != null &&
-      (customEntries.any((d) => d.url == currentUrl) ||
-          pluginDomains.any((d) => d.url == currentUrl));
+  final current = (currentUrl ?? '').trim();
+  final hasCurrentInList = current.isNotEmpty &&
+      (customEntries.any((d) => d.url == current) ||
+          pluginDomains.any((d) => d.url == current));
 
-  return <RouteEntry>[
-    if (currentUrl != null && !hasCurrentInList)
-      (domain: DomainInfo(name: '登录线路', url: currentUrl), isCustom: false),
-    for (final d in customEntries) (domain: d, isCustom: true),
-    for (final d in pluginDomains) (domain: d, isCustom: false),
-  ];
+  final seen = <String>{};
+  final entries = <RouteEntry>[];
+
+  void add(DomainInfo domain, {required bool isCustom}) {
+    final url = domain.url.trim();
+    if (url.isEmpty || seen.contains(url)) return;
+    seen.add(url);
+    entries.add((domain: domain, isCustom: isCustom));
+  }
+
+  if (current.isNotEmpty && !hasCurrentInList) {
+    add(
+      DomainInfo(name: '登录线路', url: current),
+      isCustom: false,
+    );
+  }
+  for (final d in customEntries) {
+    add(d, isCustom: true);
+  }
+  for (final d in pluginDomains) {
+    add(d, isCustom: false);
+  }
+
+  return entries;
 }
