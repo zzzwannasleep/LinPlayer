@@ -4,10 +4,28 @@ name: Build Nightly (All Packages)
 run-name: Nightly (Run #${{ github.run_number }})
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version_full:
+        description: "Full version like 1.2.3+45 (overrides build_name/build_number)"
+        type: string
+        required: false
+      build_name:
+        description: "Build name like 1.2.3"
+        type: string
+        required: false
+      build_number:
+        description: "Build number (integer) like 45"
+        type: string
+        required: false
 concurrency:
   group: nightly-release
   cancel-in-progress: true
+
+env:
+  VERSION_FULL_INPUT: ${{ github.event.inputs.version_full }}
+  BUILD_NAME_INPUT: ${{ github.event.inputs.build_name }}
+  BUILD_NUMBER_INPUT: ${{ github.event.inputs.build_number }}
 
 jobs:
   build-android:

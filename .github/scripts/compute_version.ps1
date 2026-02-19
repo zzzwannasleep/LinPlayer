@@ -2,6 +2,19 @@ $ErrorActionPreference = 'Stop'
 
 $buildName = $env:BUILD_NAME_INPUT
 $buildNumber = $env:BUILD_NUMBER_INPUT
+$versionFullInput = $env:VERSION_FULL_INPUT
+
+if (-not [string]::IsNullOrWhiteSpace($versionFullInput)) {
+  if ($versionFullInput -notmatch '\+') {
+    throw "VERSION_FULL_INPUT must look like 1.2.3+45 (got: $versionFullInput)"
+  }
+  $parts = $versionFullInput -split '\+', 2
+  $buildName = $parts[0]
+  $buildNumber = $parts[1]
+  if ([string]::IsNullOrWhiteSpace($buildName)) {
+    throw "VERSION_FULL_INPUT build name is empty (got: $versionFullInput)"
+  }
+}
 
 $rawVersion = ''
 if (Test-Path 'pubspec.yaml') {

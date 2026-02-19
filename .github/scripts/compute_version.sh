@@ -3,6 +3,20 @@ set -euo pipefail
 
 build_name="${BUILD_NAME_INPUT:-}"
 build_number="${BUILD_NUMBER_INPUT:-}"
+version_full_input="${VERSION_FULL_INPUT:-}"
+
+if [[ -n "${version_full_input:-}" ]]; then
+  if [[ "${version_full_input}" != *"+"* ]]; then
+    echo "VERSION_FULL_INPUT must look like 1.2.3+45 (got: ${version_full_input})" >&2
+    exit 1
+  fi
+  build_name="${version_full_input%%+*}"
+  build_number="${version_full_input##*+}"
+  if [[ -z "${build_name:-}" ]]; then
+    echo "VERSION_FULL_INPUT build name is empty (got: ${version_full_input})" >&2
+    exit 1
+  fi
+fi
 
 raw_version="$(awk '$1 == "version:" { print $2; exit }' pubspec.yaml 2>/dev/null || true)"
 if [[ -z "${build_name:-}" && -n "${raw_version:-}" ]]; then
