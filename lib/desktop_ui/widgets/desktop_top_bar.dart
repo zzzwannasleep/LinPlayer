@@ -20,7 +20,7 @@ class DesktopTopBar extends StatelessWidget {
     this.statsLoading = false,
     this.language = DesktopUiLanguage.zhCn,
     this.showSearch = true,
-    this.showBack = false,
+    this.backEnabled = true,
     this.onBack,
     this.onToggleSidebar,
     this.onRefresh,
@@ -41,7 +41,7 @@ class DesktopTopBar extends StatelessWidget {
   final bool statsLoading;
   final DesktopUiLanguage language;
   final bool showSearch;
-  final bool showBack;
+  final bool backEnabled;
   final VoidCallback? onBack;
   final VoidCallback? onToggleSidebar;
   final VoidCallback? onRefresh;
@@ -92,14 +92,22 @@ class DesktopTopBar extends StatelessWidget {
                     child: Row(
                       children: [
                         _HeaderIconButton(
-                          icon: showBack
-                              ? Icons.arrow_back_rounded
-                              : Icons.menu_rounded,
-                          tooltip: showBack
-                              ? _t(zh: '\u8fd4\u56de', en: 'Back')
-                              : _t(zh: '\u83dc\u5355', en: 'Menu'),
-                          onTap: showBack ? onBack : onToggleSidebar,
-                          color: iconColor,
+                          icon: Icons.arrow_back_rounded,
+                          tooltip:
+                              _t(zh: '\u8fd4\u56de (Esc)', en: 'Back (Esc)'),
+                          onTap: backEnabled ? onBack : null,
+                          color: (backEnabled && onBack != null)
+                              ? iconColor
+                              : iconColor.withValues(alpha: 0.38),
+                        ),
+                        const SizedBox(width: 6),
+                        _HeaderIconButton(
+                          icon: Icons.menu_rounded,
+                          tooltip: _t(zh: '\u83dc\u5355', en: 'Menu'),
+                          onTap: onToggleSidebar,
+                          color: onToggleSidebar != null
+                              ? iconColor
+                              : iconColor.withValues(alpha: 0.38),
                         ),
                         const SizedBox(width: 10),
                         _LogoBadge(theme: theme),

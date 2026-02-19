@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:lin_player_core/state/media_server_type.dart';
 import 'package:lin_player_prefs/lin_player_prefs.dart';
 import 'package:lin_player_server_adapters/lin_player_server_adapters.dart';
@@ -79,6 +80,10 @@ enum _DesktopSection { library, search, detail }
 
 enum _DesktopSectionTransition { push, pull, fade, flip, stack }
 
+class _DesktopBackIntent extends Intent {
+  const _DesktopBackIntent();
+}
+
 class _DesktopWorkspace extends StatefulWidget {
   const _DesktopWorkspace({super.key, required this.appState});
 
@@ -92,6 +97,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
   static const double _kTopBarFadeDistance = 220.0;
 
   _DesktopSection _section = _DesktopSection.library;
+  final List<_DesktopSection> _sectionStack = <_DesktopSection>[
+    _DesktopSection.library,
+  ];
   DesktopHomeTab _homeTab = DesktopHomeTab.home;
   bool _sidebarCollapsed = true;
   final TextEditingController _searchController = TextEditingController();
@@ -187,6 +195,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     if (_section != _DesktopSection.library || _topBarVisibility < 1.0) {
       setState(() {
         _sectionTransition = _DesktopSectionTransition.fade;
+        _sectionStack
+          ..clear()
+          ..add(_DesktopSection.library);
         _section = _DesktopSection.library;
         _topBarVisibility = 1.0;
       });
@@ -1011,6 +1022,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     setState(() {
       _sectionTransition = _DesktopSectionTransition.stack;
       _homeTab = tab;
+      _sectionStack
+        ..clear()
+        ..add(_DesktopSection.library);
       _section = _DesktopSection.library;
       _topBarVisibility = 1.0;
     });
@@ -1025,12 +1039,44 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     setState(() => _sidebarCollapsed = true);
   }
 
-  void _openDetail(MediaItem item) {
-    final next = DesktopDetailViewModel(appState: widget.appState, item: item);
+  void _onBackRequested() {
+    unawaited(_handleBackRequested());
+  }
+
+  Future<void> _handleBackRequested() async {
+    if (!_sidebarCollapsed) {
+      setState(() => _sidebarCollapsed = true);
+      return;
+    }
+
+    if (_sectionStack.length > 1) {
+      setState(() {
+        _sectionTransition = _DesktopSectionTransition.pull;
+        _sectionStack.removeLast();
+        _section = _sectionStack.last;
+        _topBarVisibility = 1.0;
+      });
+      return;
+    }
+
+    await widget.appState.leaveServer();
+  }
+
+  void _openDetail(MediaItem item, [ServerProfile? server]) {
+    final next = DesktopDetailViewModel(
+      appState: widget.appState,
+      item: item,
+      server: server,
+    );
     _detailViewModel?.dispose();
     setState(() {
       _sectionTransition = _DesktopSectionTransition.push;
       _detailViewModel = next;
+      if (_sectionStack.isEmpty) {
+        _sectionStack.add(_DesktopSection.detail);
+      } else if (_sectionStack.last != _DesktopSection.detail) {
+        _sectionStack.add(_DesktopSection.detail);
+      }
       _section = _DesktopSection.detail;
       _topBarVisibility = 1.0;
     });
@@ -1407,6 +1453,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         text: _searchQuery,
         selection: TextSelection.collapsed(offset: _searchQuery.length),
       );
+      if (_sectionStack.isEmpty) {
+        _sectionStack.add(_DesktopSection.search);
+      } else if (_sectionStack.last != _DesktopSection.search) {
+        _sectionStack.add(_DesktopSection.search);
+      }
       _section = _DesktopSection.search;
       _topBarVisibility = 1.0;
     });
@@ -1623,6 +1674,19 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                   ),
                   SafeArea(
                     child: DesktopShortcutWrapper(
+                      enabled: true,
+                      shortcuts: <ShortcutActivator, Intent>{
+                        const SingleActivator(LogicalKeyboardKey.escape):
+                            _DesktopBackIntent(),
+                      },
+                      actions: <Type, Action<Intent>>{
+                        _DesktopBackIntent: CallbackAction<_DesktopBackIntent>(
+                          onInvoke: (_) {
+                            _onBackRequested();
+                            return null;
+                          },
+                        ),
+                      },
                       child: FocusTraversalManager(
                         child: WindowPaddingContainer(
                           padding: EdgeInsets.zero,
@@ -1651,13 +1715,9 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                               showSearch: _section != _DesktopSection.library,
                               homeTab: _homeTab,
                               onHomeTabChanged: _handleHomeTabChanged,
-                              showBack: _section == _DesktopSection.detail,
-                              onBack: () => setState(() {
-                                _sectionTransition =
-                                    _DesktopSectionTransition.pull;
-                                _section = _DesktopSection.library;
-                                _topBarVisibility = 1.0;
-                              }),
+                              backEnabled: _sectionStack.length > 1 ||
+                                  widget.appState.hasActiveServer,
+                              onBack: _onBackRequested,
                               onToggleSidebar: _toggleSidebar,
                               searchController: _searchController,
                               onSearchChanged: _handleSearchChanged,
