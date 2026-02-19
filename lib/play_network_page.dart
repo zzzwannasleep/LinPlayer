@@ -21,6 +21,7 @@ import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
 import 'services/built_in_proxy/built_in_proxy_service.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
+import 'widgets/list_picker_dialog.dart';
 
 class PlayNetworkPage extends StatefulWidget {
   const PlayNetworkPage({
@@ -1882,45 +1883,45 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.layers_outlined),
                     title: const Text('弹幕源'),
-                    trailing: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: _danmakuSourceIndex >= 0
-                            ? _danmakuSourceIndex
-                            : null,
-                        hint: const Text('请选择'),
-                        items: [
-                          for (var i = 0; i < _danmakuSources.length; i++)
-                            DropdownMenuItem(
-                              value: i,
-                              child: Text(
-                                _danmakuSources[i].name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: !hasSources
-                            ? null
-                            : (v) {
-                                if (v == null) return;
-                                setState(() {
-                                  _danmakuSourceIndex = v;
-                                  _danmakuEnabled = true;
-                                  _rebuildDanmakuHeatmap();
-                                  _syncDanmakuCursor(_lastPosition);
-                                });
-                                if (widget.appState
-                                        .danmakuRememberSelectedSource &&
-                                    v >= 0 &&
-                                    v < _danmakuSources.length) {
-                                  // ignore: unawaited_futures
-                                  widget.appState
-                                      .setDanmakuLastSelectedSourceName(
-                                          _danmakuSources[v].name);
-                                }
-                                setSheetState(() {});
-                              },
-                      ),
+                    subtitle: Text(
+                      selectedName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: OutlinedButton(
+                      onPressed: !hasSources
+                          ? null
+                          : () async {
+                              final names = _danmakuSources
+                                  .map((e) => e.name)
+                                  .toList(growable: false);
+                              final picked = await showListPickerDialog(
+                                context: context,
+                                title: '选择弹幕源',
+                                items: names,
+                                initialIndex: _danmakuSourceIndex >= 0
+                                    ? _danmakuSourceIndex
+                                    : null,
+                                height: 320,
+                              );
+                              if (!mounted || picked == null) return;
+                              setState(() {
+                                _danmakuSourceIndex = picked;
+                                _danmakuEnabled = true;
+                                _rebuildDanmakuHeatmap();
+                                _syncDanmakuCursor(_lastPosition);
+                              });
+                              if (widget.appState.danmakuRememberSelectedSource &&
+                                  picked >= 0 &&
+                                  picked < _danmakuSources.length) {
+                                // ignore: unawaited_futures
+                                widget.appState.setDanmakuLastSelectedSourceName(
+                                  _danmakuSources[picked].name,
+                                );
+                              }
+                              setSheetState(() {});
+                            },
+                      child: const Text('选择'),
                     ),
                   ),
                   const Divider(height: 1),
@@ -5756,6 +5757,26 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           .setDanmakuLastSelectedSourceName(_danmakuSources[idx].name);
     }
 
+    Future<void> pickDanmakuSource() async {
+      if (!hasSources) return;
+      final names = _danmakuSources.map((e) => e.name).toList(growable: false);
+      final picked = await showListPickerDialog(
+        context: context,
+        title: '选择弹幕源',
+        items: names,
+        initialIndex: selectedSource,
+        height: 320,
+      );
+      if (!mounted || picked == null) return;
+      setState(() {
+        _danmakuSourceIndex = picked;
+        _danmakuEnabled = true;
+        _rebuildDanmakuHeatmap();
+        _syncDanmakuCursor(_lastPosition);
+      });
+      await persistSelectionName();
+    }
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       children: [
@@ -5806,37 +5827,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
           label: const Text('手动搜索弹幕'),
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<int>(
-          initialValue: selectedSource,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: '弹幕源',
-            isDense: true,
-            border: OutlineInputBorder(),
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.layers_outlined),
+          title: const Text('弹幕源'),
+          subtitle: Text(
+            selectedSource == null ? '未选择' : _danmakuSources[selectedSource].name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          items: [
-            for (var i = 0; i < _danmakuSources.length; i++)
-              DropdownMenuItem(
-                value: i,
-                child: Text(
-                  _danmakuSources[i].name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ],
-          onChanged: !hasSources
-              ? null
-              : (v) async {
-                  if (v == null) return;
-                  setState(() {
-                    _danmakuSourceIndex = v;
-                    _danmakuEnabled = true;
-                    _rebuildDanmakuHeatmap();
-                    _syncDanmakuCursor(_lastPosition);
-                  });
-                  await persistSelectionName();
-                },
+          trailing: OutlinedButton(
+            onPressed: hasSources ? pickDanmakuSource : null,
+            child: const Text('选择'),
+          ),
+          onTap: hasSources ? pickDanmakuSource : null,
         ),
         const SizedBox(height: 10),
         ListTile(
@@ -6657,13 +6661,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final bg = emphasized
         ? (isDark
             ? Colors.white.withValues(alpha: 0.2)
-            : Colors.black.withValues(alpha: 0.12))
+            : Colors.white.withValues(alpha: 0.96))
         : (isDark
             ? Colors.black.withValues(alpha: 0.35)
-            : Colors.black.withValues(alpha: 0.05));
+            : Colors.white.withValues(alpha: 0.92));
     final border = isDark
         ? Colors.white.withValues(alpha: emphasized ? 0.28 : 0.14)
-        : Colors.black.withValues(alpha: emphasized ? 0.18 : 0.1);
+        : Colors.black.withValues(alpha: emphasized ? 0.12 : 0.08);
     final iconColor = isDark ? Colors.white : Colors.black87;
 
     return Tooltip(

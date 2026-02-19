@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lin_player_player/lin_player_player.dart';
 
+import 'list_picker_dialog.dart';
+
 Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
   required BuildContext context,
   required List<String> apiUrls,
@@ -19,8 +21,17 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
   var searching = false;
   var searched = false;
   var autoSearchScheduled = false;
+  var apiSourceIndex = -1; // -1 = all
   String? errorText;
   var candidates = const <DandanplaySearchCandidate>[];
+
+  String formatApiUrl(String input) {
+    final raw = input.trim();
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.host.isEmpty) return raw;
+    final path = uri.path.isEmpty || uri.path == '/' ? '' : uri.path;
+    return '${uri.host}$path';
+  }
 
   Future<void> doSearch(
     StateSetter setDialogState,
@@ -46,8 +57,12 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
     });
 
     try {
+      final effectiveApiUrls = apiSourceIndex < 0 ||
+              apiSourceIndex >= apiUrls.length
+          ? apiUrls
+          : [apiUrls[apiSourceIndex]];
       final results = await searchOnlineDanmakuCandidates(
-        apiUrls: apiUrls,
+        apiUrls: effectiveApiUrls,
         keyword: keyword,
         episodeHint:
             (episodeHint != null && episodeHint > 0) ? episodeHint : null,
@@ -116,6 +131,50 @@ Future<DandanplaySearchCandidate?> showDanmakuManualSearchDialog({
                     ),
                     onSubmitted: (_) => doSearch(setDialogState, dialogContext),
                   ),
+                  if (apiUrls.length > 1) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '弹幕源：${apiSourceIndex < 0 ? '全部' : formatApiUrl(apiUrls[apiSourceIndex])}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final options = <String>[
+                              '全部在线源',
+                              ...apiUrls.map(formatApiUrl),
+                            ];
+                            final picked = await showListPickerDialog(
+                              context: dialogContext,
+                              title: '选择在线弹幕源',
+                              items: options,
+                              initialIndex:
+                                  apiSourceIndex < 0 ? 0 : apiSourceIndex + 1,
+                              height: 260,
+                            );
+                            if (!dialogContext.mounted || picked == null) {
+                              return;
+                            }
+                            final next = picked == 0 ? -1 : picked - 1;
+                            if (next == apiSourceIndex) return;
+                            setDialogState(() => apiSourceIndex = next);
+                            if (!searching &&
+                                searched &&
+                                keywordController.text.trim().isNotEmpty) {
+                              await doSearch(setDialogState, dialogContext);
+                            }
+                          },
+                          icon: const Icon(Icons.layers_outlined),
+                          label: const Text('选择源'),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     children: [

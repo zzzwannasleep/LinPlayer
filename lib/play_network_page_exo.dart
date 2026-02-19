@@ -20,6 +20,7 @@ import 'play_network_page.dart';
 import 'server_adapters/server_access.dart';
 import 'services/app_route_observer.dart';
 import 'widgets/danmaku_manual_search_dialog.dart';
+import 'widgets/list_picker_dialog.dart';
 
 class ExoPlayNetworkPage extends StatefulWidget {
   const ExoPlayNetworkPage({
@@ -1671,46 +1672,46 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.layers_outlined),
                     title: const Text('弹幕源'),
-                    trailing: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        value: _danmakuSourceIndex >= 0
-                            ? _danmakuSourceIndex
-                            : null,
-                        hint: const Text('请选择'),
-                        items: [
-                          for (var i = 0; i < _danmakuSources.length; i++)
-                            DropdownMenuItem(
-                              value: i,
-                              child: Text(
-                                _danmakuSources[i].name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: !hasSources
-                            ? null
-                            : (v) async {
-                                if (v == null) return;
-                                setState(() {
-                                  _danmakuSourceIndex = v;
-                                  _danmakuEnabled = true;
-                                  _rebuildDanmakuHeatmap();
-                                  _syncDanmakuCursor(_position);
-                                });
-                                if (widget.appState
-                                        .danmakuRememberSelectedSource &&
-                                    v >= 0 &&
-                                    v < _danmakuSources.length) {
-                                  // ignore: unawaited_futures
-                                  widget.appState
-                                      .setDanmakuLastSelectedSourceName(
-                                          _danmakuSources[v].name);
-                                }
-                                await _ensureDanmakuVisible();
-                                setSheetState(() {});
-                              },
-                      ),
+                    subtitle: Text(
+                      selectedName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: OutlinedButton(
+                      onPressed: !hasSources
+                          ? null
+                          : () async {
+                              final names = _danmakuSources
+                                  .map((e) => e.name)
+                                  .toList(growable: false);
+                              final picked = await showListPickerDialog(
+                                context: context,
+                                title: '选择弹幕源',
+                                items: names,
+                                initialIndex: _danmakuSourceIndex >= 0
+                                    ? _danmakuSourceIndex
+                                    : null,
+                                height: 320,
+                              );
+                              if (!mounted || picked == null) return;
+                              setState(() {
+                                _danmakuSourceIndex = picked;
+                                _danmakuEnabled = true;
+                                _rebuildDanmakuHeatmap();
+                                _syncDanmakuCursor(_position);
+                              });
+                              if (widget.appState.danmakuRememberSelectedSource &&
+                                  picked >= 0 &&
+                                  picked < _danmakuSources.length) {
+                                // ignore: unawaited_futures
+                                widget.appState.setDanmakuLastSelectedSourceName(
+                                  _danmakuSources[picked].name,
+                                );
+                              }
+                              await _ensureDanmakuVisible();
+                              setSheetState(() {});
+                            },
+                      child: const Text('选择'),
                     ),
                   ),
                   const Divider(height: 1),

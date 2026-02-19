@@ -160,10 +160,42 @@ class DanmakuStageState extends State<DanmakuStage>
     final desiredBottomRows = widget.bottomMaxLines.clamp(0, 200);
     final desiredScrollRows = widget.scrollMaxLines.clamp(0, 200);
 
-    final topRows = math.min(cappedTotalRows, desiredTopRows);
-    final bottomRows = math.min(cappedTotalRows - topRows, desiredBottomRows);
-    final maxScrollAreaRows = cappedTotalRows - topRows - bottomRows;
-    final scrollRows = math.min(maxScrollAreaRows, desiredScrollRows);
+    // Allocate rows with scrolling as the primary layer. This keeps the danmaku
+    // behavior sane even when top/bottom limits are configured too large (e.g.
+    // 30/30/30 on a 1080p screen could otherwise leave 0 scrolling rows).
+    final reservedStaticMin =
+        (desiredTopRows > 0 ? 1 : 0) + (desiredBottomRows > 0 ? 1 : 0);
+    final maxScrollRows = math.max(0, cappedTotalRows - reservedStaticMin);
+    final scrollRows = math.min(maxScrollRows, desiredScrollRows);
+    final remaining = cappedTotalRows - scrollRows;
+
+    int topRows = 0;
+    int bottomRows = 0;
+    if (remaining > 0 && (desiredTopRows > 0 || desiredBottomRows > 0)) {
+      if (desiredTopRows <= 0) {
+        bottomRows = math.min(remaining, desiredBottomRows);
+      } else if (desiredBottomRows <= 0) {
+        topRows = math.min(remaining, desiredTopRows);
+      } else {
+        final desiredStaticTotal = desiredTopRows + desiredBottomRows;
+        topRows = ((remaining * desiredTopRows) / desiredStaticTotal)
+            .round()
+            .clamp(0, desiredTopRows);
+        bottomRows = math.min(remaining - topRows, desiredBottomRows);
+
+        // Try to give both top & bottom at least one row if we have room.
+        if (remaining >= 2) {
+          if (topRows == 0) {
+            topRows = 1;
+            bottomRows = math.min(remaining - topRows, desiredBottomRows);
+          }
+          if (bottomRows == 0) {
+            bottomRows = 1;
+            topRows = math.min(remaining - bottomRows, desiredTopRows);
+          }
+        }
+      }
+    }
 
     switch (item.type) {
       case DanmakuType.scrolling:
@@ -478,6 +510,8 @@ class DanmakuStageState extends State<DanmakuStage>
   Widget build(BuildContext context) {
     if (!widget.enabled) return const SizedBox.shrink();
 
+    final textScale = widget.scale.clamp(0.1, 3.0);
+
     return IgnorePointer(
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -497,8 +531,7 @@ class DanmakuStageState extends State<DanmakuStage>
                         top: a.top,
                         child: _DanmakuText(
                           a.item.text,
-                          fontSize:
-                              _baseFontSize * widget.scale.clamp(0.5, 1.6),
+                          fontSize: _baseFontSize * textScale,
                           bold: widget.bold,
                         ),
                       );
@@ -514,8 +547,7 @@ class DanmakuStageState extends State<DanmakuStage>
                       child: Center(
                         child: _DanmakuText(
                           a.item.text,
-                          fontSize:
-                              _baseFontSize * widget.scale.clamp(0.5, 1.6),
+                          fontSize: _baseFontSize * textScale,
                           bold: widget.bold,
                         ),
                       ),
