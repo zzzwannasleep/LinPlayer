@@ -1583,12 +1583,12 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                 : desktopTheme.backgroundGradientEnd;
             final overlayBackgroundStart = hasCustomBackground
                 ? contentBackgroundStart.withValues(
-                    alpha: isDark ? 0.68 : 0.82,
+                    alpha: isDark ? 0.58 : 0.76,
                   )
                 : contentBackgroundStart;
             final overlayBackgroundEnd = hasCustomBackground
                 ? contentBackgroundEnd.withValues(
-                    alpha: isDark ? 0.74 : 0.88,
+                    alpha: isDark ? 0.64 : 0.82,
                   )
                 : contentBackgroundEnd;
             final title = switch (_section) {

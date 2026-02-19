@@ -265,7 +265,7 @@ class AppState extends ChangeNotifier {
   bool _autoSkipIntro = false;
   bool _enableBlurEffects = true;
   String _desktopBackgroundImage = '';
-  double _desktopBackgroundOpacity = 0.32;
+  double _desktopBackgroundOpacity = 0.65;
   double _desktopBackgroundBlurSigma = 12.0;
   bool _showHomeLibraryQuickAccess = true;
   bool _showHomeRandomRecommendations = true;
@@ -908,7 +908,7 @@ class AppState extends ChangeNotifier {
     _desktopBackgroundImage =
         prefs.getString(_kDesktopBackgroundImageKey) ?? '';
     _desktopBackgroundOpacity =
-        (prefs.getDouble(_kDesktopBackgroundOpacityKey) ?? 0.32)
+        (prefs.getDouble(_kDesktopBackgroundOpacityKey) ?? 0.65)
             .clamp(0.0, 1.0)
             .toDouble();
     _desktopBackgroundBlurSigma =
@@ -1507,7 +1507,7 @@ class AppState extends ChangeNotifier {
     final nextDesktopBackgroundImage =
         (data['desktopBackgroundImage'] ?? '').toString().trim();
     final nextDesktopBackgroundOpacity =
-        _readDouble(data['desktopBackgroundOpacity'], fallback: 0.32)
+        _readDouble(data['desktopBackgroundOpacity'], fallback: 0.65)
             .clamp(0.0, 1.0)
             .toDouble();
     final nextDesktopBackgroundBlurSigma =

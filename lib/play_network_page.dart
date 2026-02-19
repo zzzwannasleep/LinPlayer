@@ -956,7 +956,13 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   String _buildDanmakuMatchName(MediaItem item) {
     final seriesName = item.seriesName.trim();
-    if (seriesName.isNotEmpty) return seriesName;
+    if (seriesName.isNotEmpty) {
+      final episodeNo = item.episodeNumber;
+      if (episodeNo != null && episodeNo > 0) {
+        return '$seriesName 第$episodeNo集';
+      }
+      return seriesName;
+    }
     final name = item.name.trim();
     final raw = name.isNotEmpty ? name : widget.title;
     final hint = suggestDandanplaySearchInput(stripFileExtension(raw));
@@ -2323,7 +2329,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final deadline = DateTime.now().add(timeout);
     while (mounted && DateTime.now().isBefore(deadline)) {
       if (_playError != null || !_playerService.isInitialized) return false;
-      final params = _lastVideoParams ?? _playerService.player.state.videoParams;
+      final params =
+          _lastVideoParams ?? _playerService.player.state.videoParams;
       if (_hasVideoSignal(params)) return true;
       await Future<void>.delayed(const Duration(milliseconds: 120));
     }
@@ -2334,7 +2341,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (resumePos <= Duration.zero) return;
     if (!_playerService.isInitialized || _playError != null) return;
 
-    final hasVideo = await _waitForVideoSignal(timeout: const Duration(seconds: 2));
+    final hasVideo =
+        await _waitForVideoSignal(timeout: const Duration(seconds: 2));
     if (!hasVideo) return;
 
     final deadline = DateTime.now().add(const Duration(seconds: 2));
@@ -2780,10 +2788,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _applyDanmakuPauseState(true);
   }
 
-  Duration get _activeControlsAutoHideDelay =>
-      _useDesktopPlaybackUi ? _desktopControlsAutoHideDelay : _controlsAutoHideDelay;
+  Duration get _activeControlsAutoHideDelay => _useDesktopPlaybackUi
+      ? _desktopControlsAutoHideDelay
+      : _controlsAutoHideDelay;
 
-  bool get _desktopBarsHovered => _desktopTopBarHovered || _desktopBottomBarHovered;
+  bool get _desktopBarsHovered =>
+      _desktopTopBarHovered || _desktopBottomBarHovered;
 
   bool get _editableTextFocused {
     final focusContext = FocusManager.instance.primaryFocus?.context;
@@ -2797,8 +2807,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     required bool hover,
   }) {
     if (!_useDesktopPlaybackUi) return;
-    final changed =
-        top ? _desktopTopBarHovered != hover : _desktopBottomBarHovered != hover;
+    final changed = top
+        ? _desktopTopBarHovered != hover
+        : _desktopBottomBarHovered != hover;
     if (!changed) return;
 
     setState(() {
@@ -3442,14 +3453,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   @override
   Widget build(BuildContext context) {
     final initialized = _playerService.isInitialized;
-    final controlsEnabled =
-        initialized && !_loading && _playError == null && !_desktopRouteSwitching;
+    final controlsEnabled = initialized &&
+        !_loading &&
+        _playError == null &&
+        !_desktopRouteSwitching;
     final duration = initialized ? _playerService.duration : Duration.zero;
     final isPlaying = initialized ? _playerService.isPlaying : false;
     final enableBlur = !widget.isTv && widget.appState.enableBlurEffects;
     final useDesktopCinematic = _useDesktopPlaybackUi;
-    final remoteEnabled =
-        widget.isTv || (!useDesktopCinematic && widget.appState.forceRemoteControlKeys);
+    final remoteEnabled = widget.isTv ||
+        (!useDesktopCinematic && widget.appState.forceRemoteControlKeys);
     _remoteEnabled = remoteEnabled;
 
     return Focus(
@@ -4527,7 +4540,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     final resumePos =
         _playerService.isInitialized ? _lastPosition : Duration.zero;
     _maybeReportPlaybackProgress(resumePos, force: true);
-    final previousSources = List<Map<String, dynamic>>.from(_availableMediaSources);
+    final previousSources =
+        List<Map<String, dynamic>>.from(_availableMediaSources);
     final previousSelectedSourceId = _selectedMediaSourceId;
     final previousAudioIndex = _selectedAudioStreamIndex;
     final previousSubtitleIndex = _selectedSubtitleStreamIndex;
@@ -4818,7 +4832,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               blurSigma: _desktopFullscreen ? 0 : 14,
               color: _desktopFullscreen ? Colors.transparent : shellColor,
               borderRadius: shellRadius,
-              borderColor: _desktopFullscreen ? Colors.transparent : shellBorder,
+              borderColor:
+                  _desktopFullscreen ? Colors.transparent : shellBorder,
               child: Padding(
                 padding: _desktopFullscreen
                     ? EdgeInsets.zero
@@ -6345,63 +6360,64 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               ),
               child: Row(
                 children: [
-                Text(
-                  _fmtClock(_lastPosition),
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: secondaryIconColor,
+                  Text(
+                    _fmtClock(_lastPosition),
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: secondaryIconColor,
+                        ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 5,
+                        activeTrackColor: timelineActive,
+                        secondaryActiveTrackColor: timelineBuffered,
+                        inactiveTrackColor: timelineInactive,
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 5),
+                        overlayShape:
+                            const RoundSliderOverlayShape(overlayRadius: 12),
                       ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      trackHeight: 5,
-                      activeTrackColor: timelineActive,
-                      secondaryActiveTrackColor: timelineBuffered,
-                      inactiveTrackColor: timelineInactive,
-                      thumbShape:
-                          const RoundSliderThumbShape(enabledThumbRadius: 5),
-                      overlayShape:
-                          const RoundSliderOverlayShape(overlayRadius: 12),
-                    ),
-                    child: Slider(
-                      min: 0,
-                      max: sliderMaxMs.toDouble(),
-                      value: sliderValueMs.toDouble(),
-                      secondaryTrackValue: bufferedMs.toDouble(),
-                      onChangeStart:
-                          sliderEnabled ? (_) => _onScrubStart() : null,
-                      onChanged: sliderEnabled
-                          ? (value) => setState(
-                                () => _lastPosition =
-                                    Duration(milliseconds: value.round()),
-                              )
-                          : null,
-                      onChangeEnd: sliderEnabled
-                          ? (value) async {
-                              final target =
-                                  Duration(milliseconds: value.round());
-                              await _playerService.seek(
-                                target,
-                                flushBuffer: _flushBufferOnSeek,
-                              );
-                              _lastPosition = target;
-                              _syncDanmakuCursor(target);
-                              _maybeReportPlaybackProgress(target, force: true);
-                              _onScrubEnd();
-                              if (mounted) setState(() {});
-                            }
-                          : null,
+                      child: Slider(
+                        min: 0,
+                        max: sliderMaxMs.toDouble(),
+                        value: sliderValueMs.toDouble(),
+                        secondaryTrackValue: bufferedMs.toDouble(),
+                        onChangeStart:
+                            sliderEnabled ? (_) => _onScrubStart() : null,
+                        onChanged: sliderEnabled
+                            ? (value) => setState(
+                                  () => _lastPosition =
+                                      Duration(milliseconds: value.round()),
+                                )
+                            : null,
+                        onChangeEnd: sliderEnabled
+                            ? (value) async {
+                                final target =
+                                    Duration(milliseconds: value.round());
+                                await _playerService.seek(
+                                  target,
+                                  flushBuffer: _flushBufferOnSeek,
+                                );
+                                _lastPosition = target;
+                                _syncDanmakuCursor(target);
+                                _maybeReportPlaybackProgress(target,
+                                    force: true);
+                                _onScrubEnd();
+                                if (mounted) setState(() {});
+                              }
+                            : null,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  _fmtClock(duration),
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: secondaryIconColor,
-                      ),
-                ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _fmtClock(duration),
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: secondaryIconColor,
+                        ),
+                  ),
                 ],
               ),
             ),
@@ -6494,140 +6510,141 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                 border: Border.all(color: Colors.transparent),
               ),
               child: Row(
-              children: [
-                const SizedBox(width: 156),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _desktopControlButton(
-                        context,
-                        isDark: isDark,
-                        icon: Icons.fast_rewind_rounded,
-                        tooltip: '快退',
-                        onTap: controlsEnabled
-                            ? () async {
-                                _showControls();
-                                await _seekRelative(
-                                  Duration(seconds: -_seekBackSeconds),
-                                  showOverlay: false,
-                                );
-                              }
-                            : null,
-                      ),
-                      const SizedBox(width: 8),
-                      _desktopControlButton(
-                        context,
-                        isDark: isDark,
-                        icon: isPlaying
-                            ? Icons.pause_rounded
-                            : Icons.play_arrow_rounded,
-                        tooltip: isPlaying ? '暂停' : '播放',
-                        emphasized: true,
-                        onTap: controlsEnabled
-                            ? () => _togglePlayPause(showOverlay: false)
-                            : null,
-                      ),
-                      const SizedBox(width: 8),
-                      _desktopControlButton(
-                        context,
-                        isDark: isDark,
-                        icon: Icons.fast_forward_rounded,
-                        tooltip: '快进',
-                        onTap: controlsEnabled
-                            ? () async {
-                                _showControls();
-                                await _seekRelative(
-                                  Duration(seconds: _seekForwardSeconds),
-                                  showOverlay: false,
-                                );
-                              }
-                            : null,
-                      ),
-                    ],
+                children: [
+                  const SizedBox(width: 156),
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _desktopControlButton(
+                          context,
+                          isDark: isDark,
+                          icon: Icons.fast_rewind_rounded,
+                          tooltip: '快退',
+                          onTap: controlsEnabled
+                              ? () async {
+                                  _showControls();
+                                  await _seekRelative(
+                                    Duration(seconds: -_seekBackSeconds),
+                                    showOverlay: false,
+                                  );
+                                }
+                              : null,
+                        ),
+                        const SizedBox(width: 8),
+                        _desktopControlButton(
+                          context,
+                          isDark: isDark,
+                          icon: isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          tooltip: isPlaying ? '暂停' : '播放',
+                          emphasized: true,
+                          onTap: controlsEnabled
+                              ? () => _togglePlayPause(showOverlay: false)
+                              : null,
+                        ),
+                        const SizedBox(width: 8),
+                        _desktopControlButton(
+                          context,
+                          isDark: isDark,
+                          icon: Icons.fast_forward_rounded,
+                          tooltip: '快进',
+                          onTap: controlsEnabled
+                              ? () async {
+                                  _showControls();
+                                  await _seekRelative(
+                                    Duration(seconds: _seekForwardSeconds),
+                                    showOverlay: false,
+                                  );
+                                }
+                              : null,
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                SizedBox(
-                  width: 236,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          backgroundColor: chipBg,
-                          foregroundColor: iconColor,
-                          side: BorderSide(color: chipBorder),
-                          shape: const StadiumBorder(),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
+                  SizedBox(
+                    width: 236,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor: chipBg,
+                            foregroundColor: iconColor,
+                            side: BorderSide(color: chipBorder),
+                            shape: const StadiumBorder(),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                          ),
+                          onPressed: !controlsEnabled
+                              ? null
+                              : () {
+                                  final next = !_desktopSpeedPanelVisible;
+                                  setState(() {
+                                    _desktopSidePanel = _DesktopSidePanel.none;
+                                    _desktopSpeedPanelVisible = next;
+                                  });
+                                  if (next) {
+                                    _showControls(scheduleHide: false);
+                                  } else {
+                                    _scheduleControlsHide();
+                                  }
+                                },
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.speed_outlined, size: 18),
+                              const SizedBox(width: 6),
+                              Text(speedHint),
+                            ],
                           ),
                         ),
-                        onPressed: !controlsEnabled
-                            ? null
-                            : () {
-                                final next = !_desktopSpeedPanelVisible;
-                                setState(() {
-                                  _desktopSidePanel = _DesktopSidePanel.none;
-                                  _desktopSpeedPanelVisible = next;
-                                });
-                                if (next) {
-                                  _showControls(scheduleHide: false);
-                                } else {
-                                  _scheduleControlsHide();
-                                }
-                              },
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.speed_outlined, size: 18),
-                            const SizedBox(width: 6),
-                            Text(speedHint),
-                          ],
+                        const SizedBox(width: 4),
+                        IconButton(
+                          tooltip: _desktopFullscreen
+                              ? 'Exit fullscreen'
+                              : 'Fullscreen',
+                          style: IconButton.styleFrom(
+                            backgroundColor: chipBg,
+                            foregroundColor: iconColor,
+                            side: BorderSide(color: chipBorder),
+                          ),
+                          onPressed:
+                              controlsEnabled ? _toggleDesktopFullscreen : null,
+                          icon: Icon(
+                            _desktopFullscreen
+                                ? Icons.fullscreen_exit
+                                : Icons.fullscreen,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip:
-                            _desktopFullscreen ? 'Exit fullscreen' : 'Fullscreen',
-                        style: IconButton.styleFrom(
-                          backgroundColor: chipBg,
-                          foregroundColor: iconColor,
-                          side: BorderSide(color: chipBorder),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          tooltip: '选集',
+                          style: IconButton.styleFrom(
+                            backgroundColor: chipBg,
+                            foregroundColor: iconColor,
+                            side: BorderSide(color: chipBorder),
+                          ),
+                          onPressed: controlsEnabled
+                              ? () =>
+                                  _toggleDesktopPanel(_DesktopSidePanel.episode)
+                              : null,
+                          icon: Icon(
+                            _desktopSidePanel == _DesktopSidePanel.episode
+                                ? Icons.close
+                                : Icons.format_list_numbered,
+                          ),
                         ),
-                        onPressed:
-                            controlsEnabled ? _toggleDesktopFullscreen : null,
-                        icon: Icon(
-                          _desktopFullscreen
-                              ? Icons.fullscreen_exit
-                              : Icons.fullscreen,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: '选集',
-                        style: IconButton.styleFrom(
-                          backgroundColor: chipBg,
-                          foregroundColor: iconColor,
-                          side: BorderSide(color: chipBorder),
-                        ),
-                        onPressed: controlsEnabled
-                            ? () =>
-                                _toggleDesktopPanel(_DesktopSidePanel.episode)
-                            : null,
-                        icon: Icon(
-                          _desktopSidePanel == _DesktopSidePanel.episode
-                              ? Icons.close
-                              : Icons.format_list_numbered,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           ],
         ),
       ),

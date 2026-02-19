@@ -214,21 +214,36 @@ class DandanplayApiClient {
     final base = Uri.parse(normalizeDanmakuApiBaseUrl(baseUrl));
     final basePath = base.path.replaceAll(RegExp(r'/+$'), '');
     final path = '$basePath$apiPath';
+    final sortedQuery = (query == null || query.isEmpty)
+        ? null
+        : Map<String, String>.fromEntries(
+            query.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+          );
     return base.replace(
       path: path,
-      queryParameters: query?.isEmpty == true ? null : query,
+      queryParameters: sortedQuery,
       fragment: '',
     );
   }
 
-  Map<String, String> _signatureHeaders(Uri uri) {
+  bool _isAuthFailureStatus(int statusCode) =>
+      statusCode == 401 || statusCode == 403;
+
+  Map<String, String> _signatureHeaders(
+    Uri uri, {
+    bool includeQuery = false,
+    bool timestampMilliseconds = false,
+    bool useHexDigest = false,
+  }) {
     if (!_hasAuth) return const {};
-    final ts =
-        (DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000).toString();
-    final path = uri.path;
-    final raw = '$appId$ts$path$appSecret';
+    final ts = timestampMilliseconds
+        ? DateTime.now().toUtc().millisecondsSinceEpoch.toString()
+        : (DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000).toString();
+    final path = uri.path.toLowerCase();
+    final target = includeQuery && uri.hasQuery ? '$path?${uri.query}' : path;
+    final raw = '$appId$ts$target$appSecret';
     final digest = sha256.convert(utf8.encode(raw));
-    final sig = base64.encode(digest.bytes);
+    final sig = useHexDigest ? digest.toString() : base64.encode(digest.bytes);
     return {
       'X-AppId': appId,
       'X-Timestamp': ts,
@@ -237,24 +252,195 @@ class DandanplayApiClient {
   }
 
   Future<http.Response> _postJson(Uri uri, Object body) async {
-    final headers = <String, String>{
+    final baseHeaders = <String, String>{
       'Accept': 'application/json',
       'Content-Type': 'application/json',
-      ..._signatureHeaders(uri),
     };
-    final resp = await _client
-        .post(uri, headers: headers, body: jsonEncode(body))
-        .timeout(_timeout);
-    return resp;
+    final payload = jsonEncode(body);
+
+    Future<http.Response> attempt(Map<String, String> headers) =>
+        _client.post(uri, headers: headers, body: payload).timeout(_timeout);
+
+    if (!_hasAuth) return attempt(baseHeaders);
+
+    final isOfficial = isOfficialDandanplayUrl(baseUrl);
+    final strategies = isOfficial
+        ? const <({bool query, bool ms, bool hex})>[
+            (query: false, ms: false, hex: false),
+          ]
+        : const <({bool query, bool ms, bool hex})>[
+            (query: false, ms: false, hex: false),
+            (query: true, ms: false, hex: false),
+            (query: false, ms: false, hex: true),
+            (query: true, ms: false, hex: true),
+            (query: false, ms: true, hex: false),
+            (query: true, ms: true, hex: false),
+            (query: false, ms: true, hex: true),
+            (query: true, ms: true, hex: true),
+          ];
+
+    http.Response? last;
+    for (final s in strategies) {
+      final headers = <String, String>{
+        ...baseHeaders,
+        ..._signatureHeaders(
+          uri,
+          includeQuery: s.query,
+          timestampMilliseconds: s.ms,
+          useHexDigest: s.hex,
+        ),
+      };
+      final resp = await attempt(headers);
+      last = resp;
+      if (!_isAuthFailureStatus(resp.statusCode)) return resp;
+    }
+
+    if (isOfficial) {
+      final headers = <String, String>{
+        ...baseHeaders,
+        'X-AppId': appId,
+        'X-AppSecret': appSecret,
+      };
+      final resp = await attempt(headers);
+      last = resp;
+      if (!_isAuthFailureStatus(resp.statusCode)) return resp;
+    }
+    return last!;
   }
 
   Future<http.Response> _get(Uri uri) async {
-    final headers = <String, String>{
+    final baseHeaders = <String, String>{
       'Accept': 'application/json',
-      ..._signatureHeaders(uri),
     };
-    final resp = await _client.get(uri, headers: headers).timeout(_timeout);
-    return resp;
+
+    Future<http.Response> attempt(Map<String, String> headers) =>
+        _client.get(uri, headers: headers).timeout(_timeout);
+
+    if (!_hasAuth) return attempt(baseHeaders);
+
+    final isOfficial = isOfficialDandanplayUrl(baseUrl);
+    final strategies = isOfficial
+        ? const <({bool query, bool ms, bool hex})>[
+            (query: false, ms: false, hex: false),
+          ]
+        : const <({bool query, bool ms, bool hex})>[
+            (query: false, ms: false, hex: false),
+            (query: true, ms: false, hex: false),
+            (query: false, ms: false, hex: true),
+            (query: true, ms: false, hex: true),
+            (query: false, ms: true, hex: false),
+            (query: true, ms: true, hex: false),
+            (query: false, ms: true, hex: true),
+            (query: true, ms: true, hex: true),
+          ];
+
+    http.Response? last;
+    for (final s in strategies) {
+      final headers = <String, String>{
+        ...baseHeaders,
+        ..._signatureHeaders(
+          uri,
+          includeQuery: s.query,
+          timestampMilliseconds: s.ms,
+          useHexDigest: s.hex,
+        ),
+      };
+      final resp = await attempt(headers);
+      last = resp;
+      if (!_isAuthFailureStatus(resp.statusCode)) return resp;
+    }
+
+    if (isOfficial) {
+      final headers = <String, String>{
+        ...baseHeaders,
+        'X-AppId': appId,
+        'X-AppSecret': appSecret,
+      };
+      final resp = await attempt(headers);
+      last = resp;
+      if (!_isAuthFailureStatus(resp.statusCode)) return resp;
+    }
+    return last!;
+  }
+
+  String _decodeBody(http.Response resp) {
+    final bytes = resp.bodyBytes;
+    if (bytes.isEmpty) return '';
+    try {
+      return utf8.decode(bytes);
+    } on FormatException {
+      return latin1.decode(bytes);
+    }
+  }
+
+  dynamic _decodeJson(http.Response resp) {
+    final body = _decodeBody(resp).trim();
+    if (body.isEmpty) return null;
+    return jsonDecode(body);
+  }
+
+  Map<String, dynamic> _decodeJsonMap(http.Response resp) {
+    final decoded = _decodeJson(resp);
+    if (decoded is Map) return decoded.cast<String, dynamic>();
+    throw const FormatException('Expected a JSON object.');
+  }
+
+  String _extractErrorDetails(http.Response resp) {
+    final err = resp.headers['x-error-message']?.trim();
+    if (err != null && err.isNotEmpty) return err;
+
+    try {
+      final decoded = _decodeJson(resp);
+      if (decoded is Map) {
+        final map = decoded.cast<dynamic, dynamic>();
+        final msg = _firstNonEmptyString(
+          map['errorMessage'],
+          map['message'],
+          map['error'],
+          map['msg'],
+          map['detail'],
+        );
+        if (msg.isNotEmpty) return msg;
+      }
+    } catch (_) {
+      // Ignore parse errors.
+    }
+
+    final text = _decodeBody(resp).trim();
+    if (text.isEmpty) return '';
+    const maxLen = 160;
+    return text.length > maxLen ? '${text.substring(0, maxLen)}…' : text;
+  }
+
+  String _formatHttpError({
+    required String action,
+    required Uri uri,
+    required http.Response resp,
+  }) {
+    final details = _extractErrorDetails(resp);
+    final endpoint =
+        uri.host.isEmpty ? uri.path : '${uri.host}${uri.path}'.trim();
+
+    final sb = StringBuffer('$action (HTTP ${resp.statusCode})');
+    if (details.isNotEmpty) sb.write(': $details');
+    if (endpoint.isNotEmpty) sb.write(' [$endpoint]');
+
+    if (_isAuthFailureStatus(resp.statusCode)) {
+      if (isOfficialDandanplayUrl(baseUrl) && !_hasAuth) {
+        sb.write(' 提示：官方API已强制鉴权，请在弹幕设置中填写AppId/AppSecret，或使用代理/自建danmu_api。');
+      } else if (resp.headers['x-error-message'] == 'Invalid Timestamp') {
+        sb.write(' 提示：请检查系统时间是否准确。');
+      } else if (!isOfficialDandanplayUrl(baseUrl)) {
+        final basePath = Uri.tryParse(baseUrl)?.path ?? '';
+        if (basePath.isEmpty || basePath == '/') {
+          sb.write(' 提示：如果你使用的是danmu_api，请确认URL是否包含token路径段（如/87654321）。');
+        }
+      }
+    } else if (resp.statusCode == 404 && !isOfficialDandanplayUrl(baseUrl)) {
+      sb.write(' 提示：如果你使用的是danmu_api，baseUrl可能需要包含token路径段（如/87654321）。');
+    }
+
+    return sb.toString();
   }
 
   Future<DandanplayMatchResponse> match({
@@ -274,11 +460,13 @@ class DandanplayApiClient {
     };
     final resp = await _postJson(uri, body);
     if (resp.statusCode != 200) {
-      final err = resp.headers['x-error-message'];
-      throw Exception(
-          '闁告牕缍婇崢銈嗗緞鏉堫偉袝(${resp.statusCode})${err == null || err.isEmpty ? '' : '闁?err'}');
+      throw Exception(_formatHttpError(
+        action: '弹幕匹配失败',
+        uri: uri,
+        resp: resp,
+      ));
     }
-    final map = jsonDecode(resp.body) as Map<String, dynamic>;
+    final map = _decodeJsonMap(resp);
     return DandanplayMatchResponse.fromJson(map);
   }
 
@@ -296,13 +484,33 @@ class DandanplayApiClient {
         'chConvert': chConvert.toString(),
       },
     );
-    final resp = await _get(uri);
-    if (resp.statusCode != 200 && resp.statusCode != 302) {
-      final err = resp.headers['x-error-message'];
-      throw Exception(
-          '闁兼儳鍢茶ぐ鍥ь嚕閻熸壆顔庡鎯扮簿鐟?${resp.statusCode})${err == null || err.isEmpty ? '' : '闁?err'}');
+    var effectiveUri = uri;
+    var resp = await _get(effectiveUri);
+    if (resp.statusCode == 302) {
+      final location = resp.headers['location']?.trim();
+      if (location != null && location.isNotEmpty) {
+        final parsed = Uri.tryParse(location);
+        if (parsed != null) {
+          effectiveUri = parsed.hasScheme ? parsed : uri.resolveUri(parsed);
+          if (effectiveUri.host == uri.host) {
+            resp = await _get(effectiveUri);
+          } else {
+            resp = await _client.get(
+              effectiveUri,
+              headers: const {'Accept': 'application/json'},
+            ).timeout(_timeout);
+          }
+        }
+      }
     }
-    final map = jsonDecode(resp.body) as Map<String, dynamic>;
+    if (resp.statusCode != 200) {
+      throw Exception(_formatHttpError(
+        action: '获取弹幕失败',
+        uri: effectiveUri,
+        resp: resp,
+      ));
+    }
+    final map = _decodeJsonMap(resp);
     return DandanplayCommentResponse.fromJson(map);
   }
 
@@ -321,15 +529,14 @@ class DandanplayApiClient {
     final uri = _buildUri('/api/v2/search/episodes', query: query);
     final resp = await _get(uri);
     if (resp.statusCode != 200) {
-      final err = resp.headers['x-error-message'];
-      throw Exception(
-        'Search episodes failed (${resp.statusCode})'
-        '${err == null || err.isEmpty ? '' : ': $err'}',
-      );
+      throw Exception(_formatHttpError(
+        action: '搜索弹幕条目失败',
+        uri: uri,
+        resp: resp,
+      ));
     }
 
-    final decoded = jsonDecode(resp.body);
-    return _extractSearchEpisodes(decoded);
+    return _extractSearchEpisodes(_decodeJson(resp));
   }
 
   List<DandanplaySearchEpisodeResult> _extractSearchEpisodes(dynamic decoded) {
@@ -401,7 +608,8 @@ int? _asInt(dynamic value) {
   return int.tryParse(value.toString().trim());
 }
 
-String _firstNonEmptyString(dynamic a, [dynamic b, dynamic c, dynamic d, dynamic e]) {
+String _firstNonEmptyString(dynamic a,
+    [dynamic b, dynamic c, dynamic d, dynamic e]) {
   final values = [a, b, c, d, e];
   for (final v in values) {
     final s = (v ?? '').toString().trim();
@@ -671,7 +879,8 @@ Future<DanmakuSource?> loadOnlineDanmakuByEpisodeId({
       shiftSeconds: 0,
     );
     if (items.isEmpty) return null;
-    final normalizedTitle = title.trim().isEmpty ? 'Episode $episodeId' : title.trim();
+    final normalizedTitle =
+        title.trim().isEmpty ? 'Episode $episodeId' : title.trim();
     return DanmakuSource(
       name: 'online($sourceHost): $normalizedTitle',
       items: items,
@@ -757,13 +966,15 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
             episodeHint: hint.episodeHint,
           );
           if (candidates.isNotEmpty) {
-            pickedFromSearch = _pickSearchCandidate(candidates, hint.episodeHint);
+            pickedFromSearch =
+                _pickSearchCandidate(candidates, hint.episodeHint);
           }
         }
       }
       if (pickedFromMatch == null && pickedFromSearch == null) continue;
 
-      final episodeId = pickedFromMatch?.episodeId ?? pickedFromSearch!.episodeId;
+      final episodeId =
+          pickedFromMatch?.episodeId ?? pickedFromSearch!.episodeId;
       final shiftSeconds = pickedFromMatch?.shiftSeconds ?? 0;
       final comments = await client.getComments(
         episodeId: episodeId,
@@ -779,9 +990,12 @@ Future<List<DanmakuSource>> loadOnlineDanmakuSources({
 
       final host = Uri.tryParse(inputBaseUrl)?.host ?? inputBaseUrl;
       final animeTitle =
-          (pickedFromMatch?.animeTitle ?? pickedFromSearch?.animeTitle ?? '').trim();
-      final episodeTitle =
-          (pickedFromMatch?.episodeTitle ?? pickedFromSearch?.episodeTitle ?? '').trim();
+          (pickedFromMatch?.animeTitle ?? pickedFromSearch?.animeTitle ?? '')
+              .trim();
+      final episodeTitle = (pickedFromMatch?.episodeTitle ??
+              pickedFromSearch?.episodeTitle ??
+              '')
+          .trim();
       final title =
           '${animeTitle.isEmpty ? 'Unknown' : animeTitle} $episodeTitle'.trim();
       sources.add(

@@ -309,7 +309,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
   String _buildDanmakuMatchName(MediaItem item) {
     final seriesName = item.seriesName.trim();
-    if (seriesName.isNotEmpty) return seriesName;
+    if (seriesName.isNotEmpty) {
+      final episodeNo = item.episodeNumber;
+      if (episodeNo != null && episodeNo > 0) {
+        return '$seriesName 第$episodeNo集';
+      }
+      return seriesName;
+    }
     final name = item.name.trim();
     final raw = name.isNotEmpty ? name : widget.title;
     final hint = suggestDandanplaySearchInput(stripFileExtension(raw));
