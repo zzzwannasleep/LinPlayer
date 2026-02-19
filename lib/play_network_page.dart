@@ -3392,7 +3392,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('鏃犳硶鑾峰彇鐗堟湰鍒楄〃')),
+        const SnackBar(content: Text('无法获取版本列表')),
       );
       return;
     }

@@ -167,7 +167,7 @@ class _SearchPageState extends State<SearchPage> {
     try {
       final access = resolveServerAccess(appState: widget.appState);
       if (access == null) {
-        throw Exception('鏈繛鎺ユ湇鍔″櫒');
+        throw Exception('未连接服务器');
       }
       final fetched = await access.adapter.fetchItems(
         access.auth,

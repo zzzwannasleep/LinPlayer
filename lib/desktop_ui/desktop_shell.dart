@@ -261,14 +261,14 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         return AlertDialog(
           title: Text(
             _uiLanguage.pick(
-              zh: '淇敼鍥炬爣',
+              zh: '修改图标',
               en: 'Edit icon',
             ),
           ),
           content: TextField(
             controller: iconCtrl,
             decoration: InputDecoration(
-              labelText: _uiLanguage.pick(zh: '鍥炬爣鍦板潃', en: 'Icon URL'),
+              labelText: _uiLanguage.pick(zh: '图标地址', en: 'Icon URL'),
               hintText: 'https://example.com/icon.png',
             ),
             keyboardType: TextInputType.url,
@@ -276,16 +276,16 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           actions: [
             TextButton(
               onPressed: iconCtrl.clear,
-              child: Text(_uiLanguage.pick(zh: '娓呯┖', en: 'Clear')),
+              child: Text(_uiLanguage.pick(zh: '清空', en: 'Clear')),
             ),
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(_uiLanguage.pick(zh: '鍙栨秷', en: 'Cancel')),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
             ),
             FilledButton(
               onPressed: () =>
                   Navigator.of(dialogContext).pop(iconCtrl.text.trim()),
-              child: Text(_uiLanguage.pick(zh: '淇濆瓨', en: 'Save')),
+              child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
             ),
           ],
         );
@@ -309,24 +309,24 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         return AlertDialog(
           title: Text(
             _uiLanguage.pick(
-              zh: '淇敼澶囨敞',
+              zh: '修改备注',
               en: 'Edit remark',
             ),
           ),
           content: TextField(
             controller: remarkCtrl,
             decoration: InputDecoration(
-              labelText: _uiLanguage.pick(zh: '澶囨敞', en: 'Remark'),
+              labelText: _uiLanguage.pick(zh: '备注', en: 'Remark'),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(_uiLanguage.pick(zh: '鍙栨秷', en: 'Cancel')),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(remarkCtrl.text),
-              child: Text(_uiLanguage.pick(zh: '淇濆瓨', en: 'Save')),
+              child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
             ),
           ],
         );
@@ -347,7 +347,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     final passwordCtrl = TextEditingController();
     final showUsername = server.serverType != MediaServerType.plex;
     final secretLabel = _uiLanguage.pick(
-      zh: server.serverType == MediaServerType.plex ? '浠ょ墝' : '瀵嗙爜',
+      zh: server.serverType == MediaServerType.plex ? '令牌' : '密码',
       en: server.serverType == MediaServerType.plex ? 'Token' : 'Password',
     );
 
@@ -358,12 +358,12 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text(
-                _uiLanguage.pick(
-                  zh: '淇敼瀵嗙爜',
-                  en: 'Edit password',
+                title: Text(
+                  _uiLanguage.pick(
+                    zh: '修改密码',
+                    en: 'Edit password',
+                  ),
                 ),
-              ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -383,7 +383,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
                       labelText: secretLabel,
                       suffixIcon: IconButton(
                         tooltip:
-                            _uiLanguage.pick(zh: '鏄剧ず/闅愯棌', en: 'Show/Hide'),
+                            _uiLanguage.pick(zh: '显示/隐藏', en: 'Show/Hide'),
                         onPressed: () =>
                             setDialogState(() => obscure = !obscure),
                         icon: Icon(
@@ -399,14 +399,14 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(),
-                  child: Text(_uiLanguage.pick(zh: '鍙栨秷', en: 'Cancel')),
+                  child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
                 ),
                 FilledButton(
                   onPressed: () => Navigator.of(dialogContext).pop({
                     'username': usernameCtrl.text.trim(),
                     'password': passwordCtrl.text,
                   }),
-                  child: Text(_uiLanguage.pick(zh: '淇濆瓨', en: 'Save')),
+                  child: Text(_uiLanguage.pick(zh: '保存', en: 'Save')),
                 ),
               ],
             );
@@ -421,7 +421,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
 
     final nextPassword = (payload['password'] ?? '').trim();
     if (nextPassword.isEmpty) {
-      _showInfo(_uiLanguage.pick(zh: '瀵嗙爜涓嶈兘涓虹┖', en: 'Password is required'));
+      _showInfo(_uiLanguage.pick(zh: '密码不能为空', en: 'Password is required'));
       return;
     }
 
@@ -934,7 +934,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(_uiLanguage.pick(
-            zh: '鍒犻櫎鏈嶅姟鍣紵',
+            zh: '删除服务器？',
             en: 'Delete server?',
           )),
           content: Text(
@@ -946,11 +946,11 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(_uiLanguage.pick(zh: '鍙栨秷', en: 'Cancel')),
+              child: Text(_uiLanguage.pick(zh: '取消', en: 'Cancel')),
             ),
             FilledButton(
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(_uiLanguage.pick(zh: '鍒犻櫎', en: 'Delete')),
+              child: Text(_uiLanguage.pick(zh: '删除', en: 'Delete')),
             ),
           ],
         );
@@ -959,7 +959,7 @@ class _DesktopWorkspaceState extends State<_DesktopWorkspace> {
     if (confirmed != true) return;
 
     await widget.appState.removeServer(serverId);
-    _showInfo(_uiLanguage.pick(zh: '鏈嶅姟鍣ㄥ凡鍒犻櫎', en: 'Server deleted'));
+    _showInfo(_uiLanguage.pick(zh: '服务器已删除', en: 'Server deleted'));
   }
 
   Future<void> _loadMediaStats({bool forceRefresh = false}) async {
