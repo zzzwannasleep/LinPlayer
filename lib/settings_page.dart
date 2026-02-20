@@ -40,6 +40,7 @@ class _SettingsPageState extends State<SettingsPage> {
   static const _subtitleOff = 'off';
   double? _mpvCacheDraftMb;
   double? _bufferBackRatioDraft;
+  double? _markPlayedThresholdDraftPct;
   double? _uiScaleDraft;
   double? _tvBackgroundOpacityDraft;
   double? _tvBackgroundBlurSigmaDraft;
@@ -2071,6 +2072,68 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       secondary: const Icon(Icons.format_list_numbered),
                       contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.task_alt_outlined),
+                      title: const Text('标记阈值'),
+                      subtitle: Builder(
+                        builder: (context) {
+                          const defaultValue = 90;
+                          final value = (_markPlayedThresholdDraftPct ??
+                                  appState.markPlayedThresholdPercent
+                                      .toDouble())
+                              .round()
+                              .clamp(75, 100);
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('观看进度达到该比例时自动标记为已播放'),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text('当前：$value%（75-100%）'),
+                                  ),
+                                  TextButton(
+                                    onPressed: value == defaultValue &&
+                                            _markPlayedThresholdDraftPct == null
+                                        ? null
+                                        : () {
+                                            setState(() =>
+                                                _markPlayedThresholdDraftPct =
+                                                    null);
+                                            // ignore: unawaited_futures
+                                            appState
+                                                .setMarkPlayedThresholdPercent(
+                                                    defaultValue);
+                                          },
+                                    child: const Text('重置'),
+                                  ),
+                                ],
+                              ),
+                              AppSlider(
+                                value: value.toDouble(),
+                                min: 75,
+                                max: 100,
+                                divisions: 25,
+                                label: '$value%',
+                                onChanged: (v) => setState(
+                                  () => _markPlayedThresholdDraftPct = v,
+                                ),
+                                onChangeEnd: (v) {
+                                  final next = v.round().clamp(75, 100);
+                                  setState(() =>
+                                      _markPlayedThresholdDraftPct = null);
+                                  // ignore: unawaited_futures
+                                  appState.setMarkPlayedThresholdPercent(next);
+                                },
+                              ),
+                            ],
+                          );
+                        },
+                      ),
                     ),
                     const Divider(height: 1),
                     ListTile(

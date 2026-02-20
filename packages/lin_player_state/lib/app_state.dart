@@ -149,6 +149,7 @@ class AppState extends ChangeNotifier {
   static const _kFlushBufferOnSeekKey = 'flushBufferOnSeek_v1';
   static const _kUnlimitedStreamCacheKey = 'unlimitedStreamCache_v1';
   static const _kAutoSkipIntroKey = 'autoSkipIntro_v1';
+  static const _kMarkPlayedThresholdPercentKey = 'markPlayedThresholdPercent_v1';
   // Legacy key (<= 1.0.0): was used for "unlimited cover cache", but the intent
   // is actually "unlimited stream cache". We still read it for migration.
   static const _kLegacyUnlimitedCoverCacheKey = 'unlimitedCoverCache_v1';
@@ -263,6 +264,7 @@ class AppState extends ChangeNotifier {
   bool _flushBufferOnSeek = true;
   bool _unlimitedStreamCache = false;
   bool _autoSkipIntro = false;
+  int _markPlayedThresholdPercent = 90;
   bool _enableBlurEffects = true;
   String _desktopBackgroundImage = '';
   double _desktopBackgroundOpacity = 0.65;
@@ -715,6 +717,7 @@ class AppState extends ChangeNotifier {
   bool get flushBufferOnSeek => _flushBufferOnSeek;
   bool get unlimitedStreamCache => _unlimitedStreamCache;
   bool get autoSkipIntro => _autoSkipIntro;
+  int get markPlayedThresholdPercent => _markPlayedThresholdPercent;
   bool get enableBlurEffects => _enableBlurEffects;
   String get desktopBackgroundImage => _desktopBackgroundImage;
   double get desktopBackgroundOpacity => _desktopBackgroundOpacity;
@@ -904,6 +907,16 @@ class AppState extends ChangeNotifier {
       await prefs.setBool(_kUnlimitedStreamCacheKey, _unlimitedStreamCache);
     }
     _autoSkipIntro = prefs.getBool(_kAutoSkipIntroKey) ?? false;
+    final rawMarkPlayedThresholdPercent =
+        prefs.getInt(_kMarkPlayedThresholdPercentKey) ?? 90;
+    _markPlayedThresholdPercent =
+        rawMarkPlayedThresholdPercent.clamp(75, 100);
+    if (_markPlayedThresholdPercent != rawMarkPlayedThresholdPercent) {
+      await prefs.setInt(
+        _kMarkPlayedThresholdPercentKey,
+        _markPlayedThresholdPercent,
+      );
+    }
     _enableBlurEffects = prefs.getBool(_kEnableBlurEffectsKey) ?? true;
     _desktopBackgroundImage =
         prefs.getString(_kDesktopBackgroundImageKey) ?? '';
@@ -1154,6 +1167,7 @@ class AppState extends ChangeNotifier {
         'flushBufferOnSeek': _flushBufferOnSeek,
         'unlimitedStreamCache': _unlimitedStreamCache,
         'autoSkipIntro': _autoSkipIntro,
+        'markPlayedThresholdPercent': _markPlayedThresholdPercent,
         'enableBlurEffects': _enableBlurEffects,
         'desktopBackgroundImage': _desktopBackgroundImage,
         'desktopBackgroundOpacity': _desktopBackgroundOpacity,
@@ -1502,6 +1516,9 @@ class AppState extends ChangeNotifier {
       fallback: false,
     );
     final nextAutoSkipIntro = _readBool(data['autoSkipIntro'], fallback: false);
+    final nextMarkPlayedThresholdPercent =
+        _readInt(data['markPlayedThresholdPercent'], fallback: 90)
+            .clamp(75, 100);
     final nextEnableBlurEffects =
         _readBool(data['enableBlurEffects'], fallback: true);
     final nextDesktopBackgroundImage =
@@ -1715,6 +1732,7 @@ class AppState extends ChangeNotifier {
     _flushBufferOnSeek = nextFlushBufferOnSeek;
     _unlimitedStreamCache = nextUnlimitedStreamCache;
     _autoSkipIntro = nextAutoSkipIntro;
+    _markPlayedThresholdPercent = nextMarkPlayedThresholdPercent;
     _enableBlurEffects = nextEnableBlurEffects;
     _desktopBackgroundImage = nextDesktopBackgroundImage;
     _desktopBackgroundOpacity = nextDesktopBackgroundOpacity;
@@ -1825,6 +1843,10 @@ class AppState extends ChangeNotifier {
     await prefs.setBool(_kFlushBufferOnSeekKey, _flushBufferOnSeek);
     await prefs.setBool(_kUnlimitedStreamCacheKey, _unlimitedStreamCache);
     await prefs.setBool(_kAutoSkipIntroKey, _autoSkipIntro);
+    await prefs.setInt(
+      _kMarkPlayedThresholdPercentKey,
+      _markPlayedThresholdPercent,
+    );
     await prefs.setBool(_kEnableBlurEffectsKey, _enableBlurEffects);
     if (_desktopBackgroundImage.isEmpty) {
       await prefs.remove(_kDesktopBackgroundImageKey);
@@ -3447,6 +3469,15 @@ class AppState extends ChangeNotifier {
     _autoSkipIntro = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kAutoSkipIntroKey, enabled);
+    notifyListeners();
+  }
+
+  Future<void> setMarkPlayedThresholdPercent(int percent) async {
+    final v = percent.clamp(75, 100);
+    if (_markPlayedThresholdPercent == v) return;
+    _markPlayedThresholdPercent = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kMarkPlayedThresholdPercentKey, v);
     notifyListeners();
   }
 

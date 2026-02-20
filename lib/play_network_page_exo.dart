@@ -172,6 +172,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   int? _pendingLocalProgressTicks;
   bool _reportedStart = false;
   bool _reportedStop = false;
+  bool _markPlayedThresholdReached = false;
+  bool _autoMarkedPlayed = false;
 
   MediaItem? _episodePickerItem;
   bool _episodePickerItemLoading = false;
@@ -2304,6 +2306,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
 
     _reportedStart = false;
     _reportedStop = false;
+    _markPlayedThresholdReached = false;
+    _autoMarkedPlayed = false;
     _lastLocalProgressSecond = -1;
     _pendingLocalProgressTicks = null;
     _localProgressWriteInFlight = false;
@@ -3120,6 +3124,44 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (_reportedStop) return;
     if (_deferProgressReporting) return;
     _persistLocalProgress(position, force: force);
+    _maybeAutoMarkPlayed(position);
+  }
+
+  bool _isPlayedByThreshold(Duration position, Duration duration) {
+    if (duration <= Duration.zero) return false;
+    final durUs = duration.inMicroseconds;
+    if (durUs <= 0) return false;
+    final threshold =
+        widget.appState.markPlayedThresholdPercent.clamp(75, 100);
+    final posUs = position.inMicroseconds;
+    return posUs * 100 >= durUs * threshold;
+  }
+
+  void _maybeAutoMarkPlayed(Duration position) {
+    if (_reportedStop) return;
+    if (_autoMarkedPlayed) return;
+
+    final duration = _duration;
+    if (!_isPlayedByThreshold(position, duration)) return;
+
+    _markPlayedThresholdReached = true;
+    _autoMarkedPlayed = true;
+    // ignore: unawaited_futures
+    _autoMarkPlayedBestEffort(position);
+  }
+
+  Future<void> _autoMarkPlayedBestEffort(Duration position) async {
+    final access = _serverAccess;
+    if (access == null) return;
+
+    try {
+      await access.adapter.updatePlaybackPosition(
+        access.auth,
+        itemId: widget.itemId,
+        positionTicks: _toTicks(position),
+        played: true,
+      );
+    } catch (_) {}
   }
 
   Future<void> _reportPlaybackStoppedBestEffort(
@@ -3130,7 +3172,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     final pos = _position;
     final dur = _duration;
     final played = completed ||
-        (dur > Duration.zero && pos >= dur - const Duration(seconds: 20));
+        _markPlayedThresholdReached ||
+        _isPlayedByThreshold(pos, dur);
     final ticks = _toTicks(pos);
     _persistLocalProgress(pos, force: true);
     await _flushPendingLocalProgress();

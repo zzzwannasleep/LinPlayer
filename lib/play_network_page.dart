@@ -113,6 +113,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   int? _pendingLocalProgressTicks;
   bool _reportedStart = false;
   bool _reportedStop = false;
+  bool _markPlayedThresholdReached = false;
+  bool _autoMarkedPlayed = false;
   StreamSubscription<VideoParams>? _videoParamsSub;
   VideoParams? _lastVideoParams;
   _OrientationMode _orientationMode = _OrientationMode.auto;
@@ -315,6 +317,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _localProgressWriteInFlight = false;
     _reportedStart = false;
     _reportedStop = false;
+    _markPlayedThresholdReached = false;
+    _autoMarkedPlayed = false;
     _nextDanmakuIndex = 0;
     _danmakuKey.currentState?.clear();
     _lastUiTickAt = null;
@@ -2476,6 +2480,46 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (_reportedStop) return;
     if (_deferProgressReporting) return;
     _persistLocalProgress(position, force: force);
+    _maybeAutoMarkPlayed(position);
+  }
+
+  bool _isPlayedByThreshold(Duration position, Duration duration) {
+    if (duration <= Duration.zero) return false;
+    final durUs = duration.inMicroseconds;
+    if (durUs <= 0) return false;
+    final threshold =
+        widget.appState.markPlayedThresholdPercent.clamp(75, 100);
+    final posUs = position.inMicroseconds;
+    return posUs * 100 >= durUs * threshold;
+  }
+
+  void _maybeAutoMarkPlayed(Duration position) {
+    if (_reportedStop) return;
+    if (_autoMarkedPlayed) return;
+
+    final duration = _playerService.duration;
+    if (!_isPlayedByThreshold(position, duration)) return;
+
+    _markPlayedThresholdReached = true;
+    _autoMarkedPlayed = true;
+    // ignore: unawaited_futures
+    _autoMarkPlayedBestEffort(position);
+  }
+
+  Future<void> _autoMarkPlayedBestEffort(Duration position) async {
+    final access = _serverAccess;
+    if (access == null) return;
+    if (access.auth.baseUrl.isEmpty || access.auth.token.isEmpty) return;
+    if (access.auth.userId.isEmpty) return;
+
+    try {
+      await access.adapter.updatePlaybackPosition(
+        access.auth,
+        itemId: widget.itemId,
+        positionTicks: _toTicks(position),
+        played: true,
+      );
+    } catch (_) {}
   }
 
   Future<void> _reportPlaybackStoppedBestEffort(
@@ -2487,7 +2531,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         _playerService.isInitialized ? _playerService.position : _lastPosition;
     final dur = _playerService.duration;
     final played = completed ||
-        (dur > Duration.zero && pos >= dur - const Duration(seconds: 20));
+        _markPlayedThresholdReached ||
+        _isPlayedByThreshold(pos, dur);
     final ticks = _toTicks(pos);
     _persistLocalProgress(pos, force: true);
     await _flushPendingLocalProgress();
