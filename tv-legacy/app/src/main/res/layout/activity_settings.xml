@@ -24,6 +24,14 @@
             android:text="UA"
             android:textSize="14sp" />
 
+        <Button
+            android:id="@+id/btn_open_servers"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/tv_focusable_bg"
+            android:text="@string/open_servers" />
+
         <EditText
             android:id="@+id/subscription_input"
             android:layout_width="match_parent"

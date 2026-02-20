@@ -33,13 +33,19 @@ public final class SettingsActivity extends AppCompatActivity {
         TextView uaText = findViewById(R.id.ua_text);
         uaText.setText(NetworkConfig.userAgent());
 
+        Button openServersBtn = findViewById(R.id.btn_open_servers);
+        openServersBtn.setOnClickListener(v -> startActivity(new Intent(this, ServersActivity.class)));
+
         EditText subscriptionInput = findViewById(R.id.subscription_input);
         subscriptionInput.setText(AppPrefs.getSubscriptionUrl(this));
 
         Button saveSubBtn = findViewById(R.id.btn_save_sub);
         saveSubBtn.setOnClickListener(
                 v -> {
-                    String url = subscriptionInput.getText() != null ? subscriptionInput.getText().toString() : "";
+                    String url =
+                            subscriptionInput.getText() != null
+                                    ? subscriptionInput.getText().toString()
+                                    : "";
                     AppPrefs.setSubscriptionUrl(this, url);
                     ProxyService.applyConfig(this);
                 });
@@ -76,4 +82,3 @@ public final class SettingsActivity extends AppCompatActivity {
         unregisterReceiver(statusReceiver);
     }
 }
-

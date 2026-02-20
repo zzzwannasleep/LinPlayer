@@ -9,6 +9,45 @@
     <string name="stop_proxy">Stop Proxy</string>
     <string name="status_unknown">status: unknown</string>
 
+    <string name="servers_title">Servers</string>
+    <string name="open_servers">Servers</string>
+    <string name="servers_hint">Click to activate. Long press to edit.</string>
+    <string name="view_list">List</string>
+    <string name="view_grid">Grid</string>
+    <string name="add_server">Add</string>
+    <string name="edit_server">Edit Server</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+
+    <string name="qr_title">Scan QR</string>
+    <string name="qr_loading">Loading...</string>
+
+    <string name="server_base_url_hint">Base URL (with http/https)</string>
+    <string name="server_api_key_hint">API key / token (Emby/Jellyfin/Plex)</string>
+    <string name="server_username_hint">Username (WebDAV)</string>
+    <string name="server_password_hint">Password (WebDAV)</string>
+    <string name="server_display_name_hint">Display name (optional)</string>
+    <string name="server_remark_hint">Remark (optional)</string>
+    <string name="server_activate">Set as active after save</string>
+
+    <string-array name="server_type_entries">
+        <item>Emby</item>
+        <item>Jellyfin</item>
+        <item>Plex</item>
+        <item>WebDAV</item>
+    </string-array>
+
+    <string name="media_section">Media Server</string>
+    <string name="media_server_url_hint">Server URL (Emby/Jellyfin)</string>
+    <string name="media_api_key_hint">API key / token</string>
+    <string name="save_media_server">Save Media Server</string>
+
+    <string-array name="media_backend_entries">
+        <item>Demo</item>
+        <item>Emby</item>
+        <item>Jellyfin</item>
+    </string-array>
+
     <string name="open_episodes">Episodes</string>
     <string name="play">Play</string>
     <string name="episode_list_title">Episode List</string>

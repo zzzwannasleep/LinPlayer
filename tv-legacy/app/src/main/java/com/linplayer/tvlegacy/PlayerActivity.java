@@ -13,6 +13,14 @@ import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory;
 import com.google.android.exoplayer2.ui.PlayerView;
 import com.google.android.exoplayer2.upstream.DataSource;
+import com.linplayer.tvlegacy.servers.ServerConfig;
+import com.linplayer.tvlegacy.servers.ServerStore;
+import java.io.IOException;
+import okhttp3.Credentials;
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 public final class PlayerActivity extends AppCompatActivity {
     static final String EXTRA_URL = "url";
@@ -48,7 +56,35 @@ public final class PlayerActivity extends AppCompatActivity {
         }
 
         PlayerView playerView = findViewById(R.id.player_view);
-        DataSource.Factory dataSourceFactory = ExoNetwork.dataSourceFactory(this);
+
+        OkHttpClient playbackClient = NetworkClients.okHttp(this);
+        ServerConfig active = ServerStore.getActive(this);
+        if (active != null && active.isType("webdav")) {
+            String base = normalizeBaseUrl(active.baseUrl);
+            String play = url.trim();
+            if (!base.isEmpty() && play.startsWith(base)) {
+                String auth = Credentials.basic(active.username, active.password);
+                playbackClient =
+                        playbackClient
+                                .newBuilder()
+                                .addInterceptor(
+                                        new Interceptor() {
+                                            @Override
+                                            public Response intercept(Chain chain)
+                                                    throws IOException {
+                                                Request r =
+                                                        chain.request()
+                                                                .newBuilder()
+                                                                .header("Authorization", auth)
+                                                                .build();
+                                                return chain.proceed(r);
+                                            }
+                                        })
+                                .build();
+            }
+        }
+
+        DataSource.Factory dataSourceFactory = ExoNetwork.dataSourceFactory(this, playbackClient);
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(dataSourceFactory);
         player =
                 new SimpleExoPlayer.Builder(this)
@@ -70,5 +106,10 @@ public final class PlayerActivity extends AppCompatActivity {
             player = null;
         }
     }
-}
 
+    private static String normalizeBaseUrl(String baseUrl) {
+        String v = baseUrl != null ? baseUrl.trim() : "";
+        while (v.endsWith("/")) v = v.substring(0, v.length() - 1);
+        return v;
+    }
+}

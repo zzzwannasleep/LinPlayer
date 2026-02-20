@@ -11,8 +11,12 @@ final class ExoNetwork {
 
     static DataSource.Factory dataSourceFactory(Context context) {
         OkHttpClient client = NetworkClients.okHttp(context);
-        OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(client);
+        return dataSourceFactory(context, client);
+    }
+
+    static DataSource.Factory dataSourceFactory(Context context, OkHttpClient client) {
+        OkHttpClient c = client != null ? client : NetworkClients.okHttp(context);
+        OkHttpDataSource.Factory okHttpFactory = new OkHttpDataSource.Factory(c);
         return new DefaultDataSource.Factory(context, okHttpFactory);
     }
 }
-

@@ -28,9 +28,6 @@ final class PerAppProxySelector extends ProxySelector {
         if (host.isEmpty()) return listNoProxy();
         if ("localhost".equals(host) || "127.0.0.1".equals(host)) return listNoProxy();
 
-        int[] ip = parseIpv4Literal(host);
-        if (ip != null && isPrivateIpv4(ip)) return listNoProxy();
-
         List<Proxy> proxies = new ArrayList<>(1);
         proxies.add(upstream);
         return proxies;
@@ -51,32 +48,4 @@ final class PerAppProxySelector extends ProxySelector {
         proxies.add(Proxy.NO_PROXY);
         return proxies;
     }
-
-    private static int[] parseIpv4Literal(String host) {
-        String[] parts = host.split("\\.");
-        if (parts.length != 4) return null;
-        int[] out = new int[4];
-        for (int i = 0; i < 4; i++) {
-            int n;
-            try {
-                n = Integer.parseInt(parts[i]);
-            } catch (NumberFormatException e) {
-                return null;
-            }
-            if (n < 0 || n > 255) return null;
-            out[i] = n;
-        }
-        return out;
-    }
-
-    private static boolean isPrivateIpv4(int[] ip) {
-        int a = ip[0];
-        int b = ip[1];
-        if (a == 10) return true;
-        if (a == 127) return true;
-        if (a == 169 && b == 254) return true;
-        if (a == 192 && b == 168) return true;
-        return a == 172 && b >= 16 && b <= 31;
-    }
 }
-

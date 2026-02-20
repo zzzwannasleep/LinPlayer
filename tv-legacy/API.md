@@ -30,6 +30,14 @@ Key：
 - `subscription_url`：订阅 URL（字符串）
 - `proxy_enabled`：代理是否启用（布尔）
 - `last_status`：上次状态文本（字符串，用于 UI 展示）
+- `media_backend`：媒体后端类型（legacy，已弃用）
+- `media_base_url`：媒体服务器地址（legacy，已弃用）
+- `media_api_key`：媒体服务器 API key / token（legacy，已弃用）
+- `servers_json`：服务器列表（JSON 字符串数组）
+- `active_server_id`：当前激活的服务器 id（字符串）
+- `server_view_mode`：服务器页显示模式（字符串：`list` / `grid`）
+- `remote_token`：扫码控制的 token（字符串）
+- `remote_port`：扫码控制 HTTP server 端口（int，随机端口）
 
 对应代码：`tv-legacy/app/src/main/java/com/linplayer/tvlegacy/AppPrefs.java`
 
@@ -89,7 +97,7 @@ Key：
 
 用途：
 - 兜底让 ExoPlayer 某些链路（或其他库）内部走 `HttpURLConnection` 时也能被导向代理
-- 同时对 `localhost/127.0.0.1` 与常见私网段（10/172.16-31/192.168/169.254）自动绕过，避免回环/内网被代理导致自引用
+- 对 `localhost/127.0.0.1` 自动绕过，避免回环地址被代理导致自引用
 
 对应代码：
 - `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyEnv.java`
@@ -137,11 +145,11 @@ Key：
 ### 7.1 用户输入订阅 URL
 
 UI 入口：
-- 主界面输入框 `Subscription URL`
+- Settings 页面 `Subscription URL`
 - 点击 `Save Subscription` 写入 `subscription_url`
 
 对应代码：
-- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/MainActivity.java`
+- `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/SettingsActivity.java`
 
 ### 7.2 配置生成逻辑
 
@@ -197,32 +205,36 @@ UI 入口：
 
 ---
 
-## 9.（规划）手机扫码控制 HTTP API（未实现）
+## 9. 手机扫码控制 HTTP API（已实现，MVP）
 
-如需用手机网页控制（保存订阅、开关代理、查看状态/日志、下发下载任务），建议新增本地 HTTP server：
+TV 端启动后可在“Servers”页右侧看到二维码，手机扫码后打开网页即可添加服务器（MVP）。
 
-- bind：`0.0.0.0:<randomPort>`
-- 鉴权：`token`（Query 参数或 `Authorization: Bearer <token>`）
-- WebSocket：`/ws` 推送状态与日志
+- bind：`0.0.0.0:<randomPort>`（随机端口，启动后固定到 `remote_port`）
+- 鉴权：`token`（Query 参数或 JSON body）
 
-建议最小 API：
-- `GET /api/info`：App 版本、IP、端口、代理状态
-- `GET /api/proxy/status`
-- `POST /api/proxy/enable`：`{ "enabled": true|false }`
-- `POST /api/proxy/subscription`：`{ "url": "..." }`
-- `GET /api/proxy/logs`（若做日志落盘）
-- `POST /api/downloads`（若做下载队列）
+已实现 API：
+- `GET /`：内置网页表单（添加服务器）
+- `GET /api/info?token=...`：App 版本、当前服务器、代理状态
+- `POST /api/addServer`：添加服务器（JSON，含 `token`）
 
-### 9.1 兼容现有 LinPlayer TV Remote Web UI（可选，推荐）
+`POST /api/addServer`（示例字段）：
+- `type`：`emby` / `jellyfin` / `plex` / `webdav`
+- `baseUrl`：服务器地址（支持不带 scheme，会自动补 `http://`）
+- `apiKey`：Emby/Jellyfin API key 或 Plex Token
+- `username` / `password`：WebDAV 账号密码
+- `displayName` / `remark`：显示名/备注（可选）
+- `activate`：添加后设为当前服务器（默认 true）
+
+### 9.1（规划）兼容现有 LinPlayer TV Remote Web UI（可选）
 
 仓库主工程（Flutter 版）已内置一套手机网页控制 UI：`assets/tv_remote/`，其后端（TV 端）接口在
 `lib/services/tv_remote/tv_remote_service.dart`。
 
-如果 TV Legacy 也实现同名接口，理论上可以直接复用这套前端页面（减少重复开发）：
+如果 TV Legacy 后续实现同名接口，理论上可以直接复用这套前端页面（减少重复开发）：
 
-- `GET /api/info?token=...`
-- `GET /api/settings?token=...`
-- `POST /api/settings`
+- `GET /api/info?token=...`（已实现）
+- `GET /api/settings?token=...`（未实现）
+- `POST /api/settings`（未实现）
   - JSON：`{ "token": "...", "values": { "tvBuiltInProxyEnabled": true, "tvBuiltInProxySubscriptionUrl": "..." } }`
 
 其中建议在 TV Legacy 内部做映射：

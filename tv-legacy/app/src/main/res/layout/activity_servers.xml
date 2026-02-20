@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:padding="24dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="2"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btn_back"
+                android:layout_width="120dp"
+                android:layout_height="wrap_content"
+                android:background="@drawable/tv_focusable_bg"
+                android:text="@string/back" />
+
+            <TextView
+                android:id="@+id/servers_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:text="@string/servers_title"
+                android:textSize="22sp" />
+
+            <Button
+                android:id="@+id/btn_view_list"
+                android:layout_width="120dp"
+                android:layout_height="wrap_content"
+                android:background="@drawable/tv_focusable_bg"
+                android:text="@string/view_list" />
+
+            <Button
+                android:id="@+id/btn_view_grid"
+                android:layout_width="120dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/tv_focusable_bg"
+                android:text="@string/view_grid" />
+
+            <Button
+                android:id="@+id/btn_add_server"
+                android:layout_width="140dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/tv_focusable_bg"
+                android:text="@string/add_server" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/servers_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/servers_hint"
+            android:textSize="13sp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/server_list"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="12dp"
+            android:layout_weight="1"
+            android:clipToPadding="false" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="18dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/qr_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/qr_title"
+            android:textSize="18sp" />
+
+        <ImageView
+            android:id="@+id/qr_image"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="12dp"
+            android:layout_weight="1"
+            android:adjustViewBounds="true"
+            android:contentDescription="@string/qr_title" />
+
+        <TextView
+            android:id="@+id/qr_url"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/qr_loading"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+</LinearLayout>
+

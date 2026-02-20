@@ -21,9 +21,17 @@
             android:textSize="22sp" />
 
         <Button
+            android:id="@+id/btn_open_servers"
+            android:layout_width="160dp"
+            android:layout_height="wrap_content"
+            android:background="@drawable/tv_focusable_bg"
+            android:text="@string/open_servers" />
+
+        <Button
             android:id="@+id/btn_open_settings"
             android:layout_width="160dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
             android:background="@drawable/tv_focusable_bg"
             android:text="@string/open_settings" />
     </LinearLayout>
@@ -52,4 +60,3 @@
         android:clipToPadding="false" />
 
 </LinearLayout>
-

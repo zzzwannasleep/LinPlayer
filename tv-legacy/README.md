@@ -20,6 +20,12 @@ Open this folder (`tv-legacy/`) in Android Studio.
 - Home: show grid → show details
 - Show details → episode list → episode details → player
 - Settings: proxy + subscription (UI to be refined later)
+- Servers: manage media servers + QR remote
+
+Media sources (WIP):
+- Add servers in `Servers` page (supports `Emby` / `Jellyfin` / `Plex` / `WebDAV`).
+- If no servers exist, the app will open `Servers` first.
+- The right side shows a QR code for a built-in remote web page (scan on phone to add a server quickly).
 
 Notes:
 - `local.properties` is intentionally not committed; Android Studio will generate it.

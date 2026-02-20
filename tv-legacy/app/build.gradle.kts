@@ -41,4 +41,7 @@ dependencies {
     // Playback (legacy ExoPlayer 2, API 19 compatible)
     implementation("com.google.android.exoplayer:exoplayer:2.19.1")
     implementation("com.google.android.exoplayer:extension-okhttp:2.19.1")
+
+    // QR code (Android 4.4 compatible)
+    implementation("com.google.zxing:core:3.5.3")
 }

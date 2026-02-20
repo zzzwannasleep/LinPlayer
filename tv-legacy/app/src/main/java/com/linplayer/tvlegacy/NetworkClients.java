@@ -9,7 +9,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 
-final class NetworkClients {
+public final class NetworkClients {
     private static final Object LOCK = new Object();
 
     private static OkHttpClient directClient;
@@ -17,7 +17,7 @@ final class NetworkClients {
 
     private NetworkClients() {}
 
-    static OkHttpClient okHttp(Context context) {
+    public static OkHttpClient okHttp(Context context) {
         boolean enabled = AppPrefs.isProxyEnabled(context);
         return enabled ? proxyOkHttp() : directOkHttp();
     }
@@ -65,4 +65,3 @@ final class NetworkClients {
                         });
     }
 }
-
