@@ -3,6 +3,7 @@ package com.linplayer.tvlegacy;
 import android.content.Intent;
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.Nullable;
@@ -19,7 +20,10 @@ public final class ShowDetailActivity extends AppCompatActivity {
     private Episode firstEpisode;
 
     private TextView titleText;
+    private TextView metaText;
     private TextView overviewText;
+    private ImageView posterView;
+    private ImageView backdropView;
     private Button playBtn;
 
     @Override
@@ -30,8 +34,12 @@ public final class ShowDetailActivity extends AppCompatActivity {
         showId = getIntent().getStringExtra(EXTRA_SHOW_ID);
 
         titleText = findViewById(R.id.show_title);
+        metaText = findViewById(R.id.show_meta);
         overviewText = findViewById(R.id.show_overview);
+        posterView = findViewById(R.id.show_poster);
+        backdropView = findViewById(R.id.show_backdrop);
         titleText.setText("Loading...");
+        metaText.setText("");
         overviewText.setText("");
 
         Button backBtn = findViewById(R.id.btn_back);
@@ -69,17 +77,24 @@ public final class ShowDetailActivity extends AppCompatActivity {
                                 show = v;
                                 if (v == null) {
                                     titleText.setText("Unknown show");
+                                    metaText.setText("");
                                     overviewText.setText("");
+                                    ImageLoader.load(posterView, "", 0);
+                                    ImageLoader.load(backdropView, "", 0);
                                     return;
                                 }
                                 titleText.setText(v.title);
                                 overviewText.setText(v.overview);
+                                metaText.setText(buildMetaLine(v));
+                                ImageLoader.load(posterView, v.posterUrl, dpToPx(520));
+                                ImageLoader.load(backdropView, v.backdropUrl, dpToPx(1280));
                             }
 
                             @Override
                             public void onError(Throwable error) {
                                 if (isFinishing() || isDestroyed()) return;
                                 titleText.setText("Load failed");
+                                metaText.setText("");
                                 overviewText.setText(String.valueOf(error.getMessage()));
                             }
                         });
@@ -104,5 +119,29 @@ public final class ShowDetailActivity extends AppCompatActivity {
                                 firstEpisode = null;
                             }
                         });
+    }
+
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
+
+    private static String buildMetaLine(Show show) {
+        if (show == null) return "";
+        StringBuilder sb = new StringBuilder();
+        String year = show.year != null ? show.year.trim() : "";
+        String rating = show.rating != null ? show.rating.trim() : "";
+        String genres = show.genres != null ? show.genres.trim() : "";
+
+        if (!year.isEmpty()) sb.append(year);
+        if (!rating.isEmpty()) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append("Rating ").append(rating);
+        }
+        if (!genres.isEmpty()) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append(genres);
+        }
+        return sb.toString();
     }
 }

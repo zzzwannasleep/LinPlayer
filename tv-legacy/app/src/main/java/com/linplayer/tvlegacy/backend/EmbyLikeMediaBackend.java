@@ -52,7 +52,8 @@ final class EmbyLikeMediaBackend implements MediaBackend {
                                 apiUrl("Users/" + uid + "/Items")
                                         .addQueryParameter("IncludeItemTypes", "Series")
                                         .addQueryParameter("Recursive", "true")
-                                        .addQueryParameter("Fields", "Overview")
+                                        .addQueryParameter(
+                                                "Fields", "Overview,ProductionYear,Genres,CommunityRating")
                                         .addQueryParameter("SortBy", "SortName")
                                         .addQueryParameter("SortOrder", "Ascending")
                                         .addQueryParameter("Limit", "50")
@@ -84,7 +85,8 @@ final class EmbyLikeMediaBackend implements MediaBackend {
                         String uid = requireUserId();
                         HttpUrl url =
                                 apiUrl("Users/" + uid + "/Items/" + showId.trim())
-                                        .addQueryParameter("Fields", "Overview")
+                                        .addQueryParameter(
+                                                "Fields", "Overview,ProductionYear,Genres,CommunityRating")
                                         .build();
                         JSONObject item = getJsonObject(url);
                         Show show = parseShow(item);
@@ -196,6 +198,7 @@ final class EmbyLikeMediaBackend implements MediaBackend {
                         .addQueryParameter("UserId", uid)
                         .addQueryParameter("SortBy", "IndexNumber")
                         .addQueryParameter("SortOrder", "Ascending")
+                        .addQueryParameter("Fields", "Overview")
                         .addQueryParameter("Limit", "200")
                         .build();
         JSONObject root = getJsonObject(url);
@@ -213,19 +216,14 @@ final class EmbyLikeMediaBackend implements MediaBackend {
             String name = it.optString("Name", "");
             int season = it.optInt("ParentIndexNumber", 0);
             int ep = it.optInt("IndexNumber", 0);
-            String prefix = "";
-            if (season > 0 && ep > 0) {
-                prefix = "S" + season + "E" + ep + " ";
-            } else if (ep > 0) {
-                prefix = "EP " + ep + " ";
-            }
 
             int index = list.size() + 1;
             String title =
-                    (prefix + (name != null && !name.trim().isEmpty() ? name.trim() : "Episode " + index))
-                            .trim();
+                    (name != null && !name.trim().isEmpty() ? name.trim() : "Episode " + index).trim();
             String mediaUrl = streamUrl(id.trim());
-            list.add(new Episode(id.trim(), index, title, mediaUrl));
+            String overview = it.optString("Overview", "");
+            String thumbUrl = primaryImageUrl(id.trim(), 640);
+            list.add(new Episode(id.trim(), index, title, mediaUrl, season, ep, overview, thumbUrl));
         }
         return Collections.unmodifiableList(list);
     }
@@ -263,7 +261,7 @@ final class EmbyLikeMediaBackend implements MediaBackend {
         }
     }
 
-    private static List<Show> parseShows(JSONArray items) {
+    private List<Show> parseShows(JSONArray items) {
         if (items == null) return Collections.emptyList();
         List<Show> list = new ArrayList<>(items.length());
         for (int i = 0; i < items.length(); i++) {
@@ -275,7 +273,7 @@ final class EmbyLikeMediaBackend implements MediaBackend {
         return Collections.unmodifiableList(list);
     }
 
-    private static Show parseShow(JSONObject it) {
+    private Show parseShow(JSONObject it) {
         if (it == null) return null;
         String id = it.optString("Id", "");
         if (id == null || id.trim().isEmpty()) return null;
@@ -284,7 +282,44 @@ final class EmbyLikeMediaBackend implements MediaBackend {
         String title = name != null && !name.trim().isEmpty() ? name.trim() : id.trim();
         String overview = it.optString("Overview", "");
         String ov = overview != null ? overview : "";
-        return new Show(id.trim(), title, ov);
+
+        int yearInt = it.optInt("ProductionYear", 0);
+        String year = yearInt > 0 ? String.valueOf(yearInt) : "";
+
+        String genres = "";
+        JSONArray ga = it.optJSONArray("Genres");
+        if (ga != null && ga.length() > 0) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < ga.length(); i++) {
+                String g = ga.optString(i, "");
+                if (g == null || g.trim().isEmpty()) continue;
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(g.trim());
+            }
+            genres = sb.toString();
+        }
+
+        double ratingValue = it.optDouble("CommunityRating", 0);
+        String rating = ratingValue > 0 ? String.format(java.util.Locale.US, "%.1f", ratingValue) : "";
+
+        String posterUrl = primaryImageUrl(id.trim(), 480);
+        String backdropUrl = backdropImageUrl(id.trim(), 1280);
+
+        return new Show(id.trim(), title, ov, posterUrl, backdropUrl, year, genres, rating);
+    }
+
+    private String primaryImageUrl(String itemId, int maxWidth) {
+        if (itemId == null || itemId.trim().isEmpty()) return "";
+        HttpUrl.Builder b = apiUrl("Items/" + itemId.trim() + "/Images/Primary");
+        if (maxWidth > 0) b.addQueryParameter("maxWidth", String.valueOf(maxWidth));
+        return b.build().toString();
+    }
+
+    private String backdropImageUrl(String itemId, int maxWidth) {
+        if (itemId == null || itemId.trim().isEmpty()) return "";
+        HttpUrl.Builder b = apiUrl("Items/" + itemId.trim() + "/Images/Backdrop/0");
+        if (maxWidth > 0) b.addQueryParameter("maxWidth", String.valueOf(maxWidth));
+        return b.build().toString();
     }
 
     private static String normalizeBaseUrl(String baseUrl) {
@@ -293,4 +328,3 @@ final class EmbyLikeMediaBackend implements MediaBackend {
         return v;
     }
 }
-

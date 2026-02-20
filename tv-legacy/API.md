@@ -98,6 +98,8 @@ Key：
 用途：
 - 兜底让 ExoPlayer 某些链路（或其他库）内部走 `HttpURLConnection` 时也能被导向代理
 - 对 `localhost/127.0.0.1` 自动绕过，避免回环地址被代理导致自引用
+- 同时设置 `http.proxyHost/http.proxyPort/https.proxyHost/https.proxyPort`，确保
+  `HttpURLConnection`（含 ExoPlayer 默认网络栈）也能走代理（仍然只影响本 App 进程）
 
 对应代码：
 - `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ProxyEnv.java`
@@ -106,10 +108,13 @@ Key：
 
 ## 5. ExoPlayer 接入约定（走代理 + 统一 UA）
 
-推荐使用 `extension-okhttp`，让播放链路也复用同一个 OkHttpClient：
+TV Legacy（API 19）为了兼容 Android 4.4，播放链路使用 ExoPlayer 默认的 `HttpURLConnection`
+数据源（`DefaultHttpDataSource`）。
 
-- DataSourceFactory：`ExoNetwork.dataSourceFactory(context)`
-  - 内部使用 `NetworkClients.okHttp(context)`
+- DataSourceFactory：`ExoNetwork.dataSourceFactory(context, headers)`
+  - UA：统一 `LinPlayer/<versionName>`
+  - WebDAV 播放：在匹配 `baseUrl` 时附加 `Authorization: Basic ...`
+  - 代理：由 `ProxyEnv.enable()` 的 `ProxySelector` + 进程级 `http(s).proxy*` systemProp 兜底生效
 
 对应代码：
 - `tv-legacy/app/src/main/java/com/linplayer/tvlegacy/ExoNetwork.java`
@@ -213,9 +218,13 @@ TV 端启动后可在“Servers”页右侧看到二维码，手机扫码后打�
 - 鉴权：`token`（Query 参数或 JSON body）
 
 已实现 API：
-- `GET /`：内置网页表单（添加服务器）
+- `GET /`：内置网页 UI（添加服务器 / 批量解析 / 代理设置 / 播放页遥控）
 - `GET /api/info?token=...`：App 版本、当前服务器、代理状态
 - `POST /api/addServer`：添加服务器（JSON，含 `token`）
+- `POST /api/bulkAddServers`：批量解析添加服务器（JSON，含 `token`）
+- `POST /api/setProxySettings`：写入订阅链接 + 开关代理（JSON，含 `token`）
+- `GET /api/player/status?token=...`：播放页状态（是否在播、进度等）
+- `POST /api/player/control`：播放页遥控（播放/暂停/seek/停止）
 
 `POST /api/addServer`（示例字段）：
 - `type`：`emby` / `jellyfin` / `plex` / `webdav`
@@ -224,6 +233,22 @@ TV 端启动后可在“Servers”页右侧看到二维码，手机扫码后打�
 - `username` / `password`：WebDAV 账号密码
 - `displayName` / `remark`：显示名/备注（可选）
 - `activate`：添加后设为当前服务器（默认 true）
+
+`POST /api/bulkAddServers`：
+- body：`{ token, text, defaultType, activateFirst }`
+- `text` 支持两种格式：
+  - JSON：`[{...server...}, {...}]`
+  - 行文本：`type|baseUrl|apiKey(token)|username|password|displayName|remark|activate`
+
+`POST /api/setProxySettings`：
+- body：`{ token, enabled, subscriptionUrl }`
+
+`GET /api/player/status`：
+- 返回：`{ ok, active, title, playing, positionMs, durationMs }`
+
+`POST /api/player/control`：
+- body：`{ token, action, value }`
+- `action`：`toggle` / `play` / `pause` / `stop` / `seekByMs` / `seekToMs`
 
 ### 9.1（规划）兼容现有 LinPlayer TV Remote Web UI（可选）
 
@@ -258,8 +283,8 @@ TV Legacy 的首页/详情页目前通过一个“媒体数据后端”抽象拿
 - `Callback<T>` 回调一律切回主线程（可直接更新 UI）。
 
 数据模型（MVP）：
-- `Show`：`id`, `title`, `overview`
-- `Episode`：`id`, `index`, `title`, `mediaUrl`
+- `Show`：`id`, `title`, `overview`, `posterUrl`, `backdropUrl`, `year`, `genres`, `rating`
+- `Episode`：`id`, `index`, `title`, `mediaUrl`, `seasonNumber`, `episodeNumber`, `overview`, `thumbUrl`
 
 接口（MVP）：
 - `listShows(cb)`：首页剧集列表

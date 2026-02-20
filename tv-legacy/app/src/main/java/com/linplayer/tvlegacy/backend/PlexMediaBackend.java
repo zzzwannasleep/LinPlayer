@@ -194,7 +194,9 @@ final class PlexMediaBackend implements MediaBackend {
             if (it == null) continue;
             String mediaUrl = buildPartUrl(it.partKey);
             String title = it.title != null && !it.title.trim().isEmpty() ? it.title.trim() : ("Episode " + idx);
-            out.add(new Episode(it.id, idx, title, mediaUrl));
+            String overview = it.summary != null ? it.summary : "";
+            String thumbUrl = buildAssetUrl(it.thumbKey);
+            out.add(new Episode(it.id, idx, title, mediaUrl, it.season, it.episode, overview, thumbUrl));
             idx++;
         }
         return Collections.unmodifiableList(out);
@@ -202,6 +204,15 @@ final class PlexMediaBackend implements MediaBackend {
 
     private String buildPartUrl(String partKey) {
         String key = partKey != null ? partKey.trim() : "";
+        if (key.isEmpty() || baseUrl == null) return "";
+        HttpUrl resolved = baseUrl.resolve(key.startsWith("/") ? key.substring(1) : key);
+        if (resolved == null) return "";
+        HttpUrl u = resolved.newBuilder().addQueryParameter("X-Plex-Token", token).build();
+        return u.toString();
+    }
+
+    private String buildAssetUrl(String assetKey) {
+        String key = assetKey != null ? assetKey.trim() : "";
         if (key.isEmpty() || baseUrl == null) return "";
         HttpUrl resolved = baseUrl.resolve(key.startsWith("/") ? key.substring(1) : key);
         if (resolved == null) return "";
@@ -225,20 +236,54 @@ final class PlexMediaBackend implements MediaBackend {
         }
     }
 
-    private static List<Show> parseShows(String xml) throws Exception {
+    private List<Show> parseShows(String xml) throws Exception {
         List<Show> out = new ArrayList<>();
         XmlPullParser p = newParser(xml);
         int e = p.getEventType();
+        ShowItem cur = null;
         while (e != XmlPullParser.END_DOCUMENT) {
             if (e == XmlPullParser.START_TAG) {
                 String name = p.getName();
                 if ("Directory".equals(name)) {
                     String id = attr(p, "ratingKey");
-                    String title = attr(p, "title");
-                    String overview = attr(p, "summary");
                     if (!id.isEmpty()) {
-                        out.add(new Show(id, title.isEmpty() ? id : title, overview));
+                        cur = new ShowItem();
+                        cur.id = id;
+                        cur.title = attr(p, "title");
+                        cur.overview = attr(p, "summary");
+                        cur.thumbKey = attr(p, "thumb");
+                        cur.artKey = attr(p, "art");
+                        cur.year = attr(p, "year");
+                        cur.rating = attr(p, "rating");
+                    } else {
+                        cur = null;
                     }
+                } else if ("Genre".equals(name)) {
+                    if (cur != null) {
+                        String tag = attr(p, "tag");
+                        if (!tag.isEmpty()) cur.genres.add(tag);
+                    }
+                }
+            } else if (e == XmlPullParser.END_TAG) {
+                if ("Directory".equals(p.getName()) && cur != null) {
+                    String title =
+                            cur.title != null && !cur.title.trim().isEmpty()
+                                    ? cur.title.trim()
+                                    : cur.id;
+                    String overview = cur.overview != null ? cur.overview : "";
+                    String posterUrl = buildAssetUrl(cur.thumbKey);
+                    String backdropUrl = buildAssetUrl(cur.artKey);
+                    out.add(
+                            new Show(
+                                    cur.id,
+                                    title,
+                                    overview,
+                                    posterUrl,
+                                    backdropUrl,
+                                    cur.year,
+                                    joinComma(cur.genres),
+                                    cur.rating));
+                    cur = null;
                 }
             }
             e = p.next();
@@ -246,19 +291,49 @@ final class PlexMediaBackend implements MediaBackend {
         return Collections.unmodifiableList(out);
     }
 
-    private static Show parseShow(String xml) throws Exception {
+    private Show parseShow(String xml) throws Exception {
         XmlPullParser p = newParser(xml);
         int e = p.getEventType();
+        ShowItem cur = null;
         while (e != XmlPullParser.END_DOCUMENT) {
             if (e == XmlPullParser.START_TAG) {
                 String name = p.getName();
                 if ("Directory".equals(name) || "Video".equals(name)) {
                     String id = attr(p, "ratingKey");
-                    String title = attr(p, "title");
-                    String overview = attr(p, "summary");
                     if (!id.isEmpty()) {
-                        return new Show(id, title.isEmpty() ? id : title, overview);
+                        cur = new ShowItem();
+                        cur.id = id;
+                        cur.title = attr(p, "title");
+                        cur.overview = attr(p, "summary");
+                        cur.thumbKey = attr(p, "thumb");
+                        cur.artKey = attr(p, "art");
+                        cur.year = attr(p, "year");
+                        cur.rating = attr(p, "rating");
                     }
+                } else if ("Genre".equals(name)) {
+                    if (cur != null) {
+                        String tag = attr(p, "tag");
+                        if (!tag.isEmpty()) cur.genres.add(tag);
+                    }
+                }
+            } else if (e == XmlPullParser.END_TAG) {
+                if (cur != null && ("Directory".equals(p.getName()) || "Video".equals(p.getName()))) {
+                    String title =
+                            cur.title != null && !cur.title.trim().isEmpty()
+                                    ? cur.title.trim()
+                                    : cur.id;
+                    String overview = cur.overview != null ? cur.overview : "";
+                    String posterUrl = buildAssetUrl(cur.thumbKey);
+                    String backdropUrl = buildAssetUrl(cur.artKey);
+                    return new Show(
+                            cur.id,
+                            title,
+                            overview,
+                            posterUrl,
+                            backdropUrl,
+                            cur.year,
+                            joinComma(cur.genres),
+                            cur.rating);
                 }
             }
             e = p.next();
@@ -296,6 +371,8 @@ final class PlexMediaBackend implements MediaBackend {
                         cur = new EpisodeItem();
                         cur.id = attr(p, "ratingKey");
                         cur.title = attr(p, "title");
+                        cur.summary = attr(p, "summary");
+                        cur.thumbKey = attr(p, "thumb");
                         cur.season = parseInt(attr(p, "parentIndex"), 0);
                         cur.episode = parseInt(attr(p, "index"), 0);
                         cur.partKey = "";
@@ -357,8 +434,34 @@ final class PlexMediaBackend implements MediaBackend {
     private static final class EpisodeItem {
         String id;
         String title;
+        String summary;
+        String thumbKey;
         int season;
         int episode;
         String partKey;
+    }
+
+    private static final class ShowItem {
+        String id;
+        String title;
+        String overview;
+        String thumbKey;
+        String artKey;
+        String year;
+        String rating;
+        final List<String> genres = new ArrayList<>();
+    }
+
+    private static String joinComma(List<String> list) {
+        if (list == null || list.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String s : list) {
+            if (s == null) continue;
+            String v = s.trim();
+            if (v.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(v);
+        }
+        return sb.toString();
     }
 }

@@ -13,6 +13,7 @@ import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.source.DefaultMediaSourceFactory;
 import com.google.android.exoplayer2.ui.PlayerView;
 import com.google.android.exoplayer2.upstream.DataSource;
+import com.linplayer.tvlegacy.remote.PlaybackSession;
 import com.linplayer.tvlegacy.servers.ServerConfig;
 import com.linplayer.tvlegacy.servers.ServerStore;
 import okhttp3.Credentials;
@@ -78,12 +79,14 @@ public final class PlayerActivity extends AppCompatActivity {
         player.setMediaItem(item);
         player.prepare();
         player.play();
+        PlaybackSession.attach(player, titleText.getText() != null ? titleText.getText().toString() : "");
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         if (player != null) {
+            PlaybackSession.detach(player);
             player.release();
             player = null;
         }

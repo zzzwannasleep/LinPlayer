@@ -46,8 +46,20 @@
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="220dp"
-            android:layout_marginTop="16dp"
-            android:background="#1FFFFFFF" />
+            android:layout_marginTop="16dp">
+
+            <ImageView
+                android:id="@+id/episode_thumb"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#1FFFFFFF"
+                android:scaleType="centerCrop" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/tv_backdrop_overlay" />
+        </FrameLayout>
 
         <TextView
             android:id="@+id/episode_desc"
@@ -67,4 +79,3 @@
 
     </LinearLayout>
 </ScrollView>
-

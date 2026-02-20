@@ -3,6 +3,8 @@ package com.linplayer.tvlegacy.remote;
 import android.content.Context;
 import com.linplayer.tvlegacy.AppPrefs;
 import com.linplayer.tvlegacy.BuildConfig;
+import com.linplayer.tvlegacy.ProxyService;
+import com.linplayer.tvlegacy.R;
 import com.linplayer.tvlegacy.servers.ServerConfig;
 import com.linplayer.tvlegacy.servers.ServerStore;
 import java.io.BufferedInputStream;
@@ -16,8 +18,12 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -30,6 +36,7 @@ final class RemoteHttpServer {
     private Thread acceptThread;
     private int port;
     private String token = "";
+    private volatile String cachedIndexHtml;
 
     RemoteHttpServer(Context context) {
         this.appContext = context.getApplicationContext();
@@ -285,6 +292,102 @@ final class RemoteHttpServer {
             return;
         }
 
+        if ("/api/bulkAddServers".equals(path)) {
+            if (!"POST".equals(method)) {
+                writePlain(out, 405, "method not allowed");
+                return;
+            }
+            try {
+                JSONObject req = new JSONObject(body != null ? body : "");
+                String token = req.optString("token", "");
+                if (!checkToken(token)) {
+                    writeJson(out, jsonError("unauthorized"));
+                    return;
+                }
+
+                String text = req.optString("text", "");
+                String defaultType = req.optString("defaultType", "emby");
+                boolean activateFirst = readBool(req.opt("activateFirst"), true);
+                JSONObject resp = handleBulkAdd(text, defaultType, activateFirst);
+                writeJson(out, resp);
+            } catch (JSONException e) {
+                writeJson(out, jsonError("invalid json"));
+            }
+            return;
+        }
+
+        if ("/api/setProxySettings".equals(path)) {
+            if (!"POST".equals(method)) {
+                writePlain(out, 405, "method not allowed");
+                return;
+            }
+            try {
+                JSONObject req = new JSONObject(body != null ? body : "");
+                String token = req.optString("token", "");
+                if (!checkToken(token)) {
+                    writeJson(out, jsonError("unauthorized"));
+                    return;
+                }
+
+                boolean enabled = readBool(req.opt("enabled"), false);
+                String subscriptionUrl = req.optString("subscriptionUrl", "");
+                AppPrefs.setSubscriptionUrl(appContext, subscriptionUrl);
+                AppPrefs.setProxyEnabled(appContext, enabled);
+                if (enabled) {
+                    ProxyService.applyConfig(appContext);
+                    ProxyService.start(appContext);
+                } else {
+                    ProxyService.stop(appContext);
+                }
+
+                JSONObject resp = new JSONObject();
+                resp.put("ok", true);
+                resp.put("enabled", AppPrefs.isProxyEnabled(appContext));
+                resp.put("subscriptionUrl", AppPrefs.getSubscriptionUrl(appContext));
+                resp.put("status", AppPrefs.getLastStatus(appContext));
+                writeJson(out, resp);
+            } catch (JSONException e) {
+                writeJson(out, jsonError("invalid json"));
+            }
+            return;
+        }
+
+        if ("/api/player/status".equals(path)) {
+            String tokenParam = query.get("token");
+            if (!checkToken(tokenParam)) {
+                writePlain(out, 401, "unauthorized");
+                return;
+            }
+            writeJson(out, PlaybackSession.status());
+            return;
+        }
+
+        if ("/api/player/control".equals(path)) {
+            if (!"POST".equals(method)) {
+                writePlain(out, 405, "method not allowed");
+                return;
+            }
+            try {
+                JSONObject req = new JSONObject(body != null ? body : "");
+                String token = req.optString("token", "");
+                if (!checkToken(token)) {
+                    writeJson(out, jsonError("unauthorized"));
+                    return;
+                }
+                String action = req.optString("action", "");
+                long value = 0;
+                try {
+                    value = req.has("value") ? req.getLong("value") : 0;
+                } catch (Exception ignored) {
+                    value = 0;
+                }
+                writeJson(out, PlaybackSession.control(action, value));
+            } catch (JSONException e) {
+                writeJson(out, jsonError("invalid json"));
+            }
+            return;
+        }
+
         writePlain(out, 404, "not found");
     }
 
@@ -292,6 +395,236 @@ final class RemoteHttpServer {
         String t = token != null ? token.trim() : "";
         String cur = getToken();
         return !cur.isEmpty() && cur.equals(t);
+    }
+
+    private JSONObject handleBulkAdd(String text, String defaultType, boolean activateFirst) {
+        List<String> errors = new ArrayList<>();
+        List<ParsedServer> items = parseBulk(text, defaultType, errors);
+        int added = 0;
+        boolean activatedAny = false;
+        for (int i = 0; i < items.size(); i++) {
+            ParsedServer ps = items.get(i);
+            if (ps == null || ps.config == null) continue;
+            boolean activate = ps.activate;
+            if (!activatedAny && activateFirst && added == 0) {
+                activate = true;
+            }
+            try {
+                ServerStore.upsert(appContext, ps.config, activate);
+                added++;
+                if (activate) activatedAny = true;
+            } catch (Exception e) {
+                errors.add("save failed: " + String.valueOf(e.getMessage()));
+            }
+        }
+        try {
+            JSONObject resp = new JSONObject();
+            resp.put("ok", true);
+            resp.put("added", added);
+            resp.put("activeServerId", ServerStore.getActiveId(appContext));
+            resp.put("errors", new JSONArray(errors));
+            return resp;
+        } catch (JSONException e) {
+            return jsonError("json error");
+        }
+    }
+
+    private static List<ParsedServer> parseBulk(
+            String text, String defaultType, List<String> errors) {
+        String t = text != null ? text.trim() : "";
+        String def = defaultType != null ? defaultType.trim().toLowerCase() : "emby";
+        if (!isKnownType(def)) def = "emby";
+
+        if (t.isEmpty()) return Collections.emptyList();
+
+        // JSON mode (array or object).
+        if (t.startsWith("[") || t.startsWith("{")) {
+            try {
+                List<ParsedServer> out = new ArrayList<>();
+                if (t.startsWith("[")) {
+                    JSONArray arr = new JSONArray(t);
+                    for (int i = 0; i < arr.length(); i++) {
+                        JSONObject o = arr.optJSONObject(i);
+                        if (o == null) continue;
+                        ParsedServer ps = parseServerObject(o, def, errors, "json[" + i + "]");
+                        if (ps != null) out.add(ps);
+                    }
+                } else {
+                    JSONObject o = new JSONObject(t);
+                    ParsedServer ps = parseServerObject(o, def, errors, "json");
+                    if (ps != null) out.add(ps);
+                }
+                return Collections.unmodifiableList(out);
+            } catch (Exception ignored) {
+                // Fall back to line mode.
+            }
+        }
+
+        String[] lines = t.split("\\r?\\n");
+        List<ParsedServer> out = new ArrayList<>();
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i] != null ? lines[i].trim() : "";
+            if (line.isEmpty()) continue;
+            if (line.startsWith("#")) continue;
+            ParsedServer ps = parseServerLine(line, def, errors, "line " + (i + 1));
+            if (ps != null) out.add(ps);
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static ParsedServer parseServerObject(
+            JSONObject o, String defaultType, List<String> errors, String label) {
+        if (o == null) return null;
+        String type =
+                safe(o.optString("type", defaultType))
+                        .toLowerCase()
+                        .trim();
+        if (!isKnownType(type)) type = defaultType;
+
+        String baseUrl = normalizeBaseUrl(o.optString("baseUrl", ""));
+        String apiKey = o.optString("apiKey", o.optString("token", ""));
+        String username = o.optString("username", "");
+        String password = o.optString("password", "");
+        String displayName = o.optString("displayName", "");
+        String remark = o.optString("remark", "");
+        boolean activate = readBool(o.opt("activate"), false);
+
+        ParsedServer ps =
+                validateAndBuild(type, baseUrl, apiKey, username, password, displayName, remark, activate);
+        if (ps == null) {
+            errors.add(label + ": invalid server");
+        }
+        return ps;
+    }
+
+    private static ParsedServer parseServerLine(
+            String line, String defaultType, List<String> errors, String label) {
+        if (line == null) return null;
+        String raw = line.trim();
+        if (raw.isEmpty()) return null;
+
+        String[] parts;
+        if (raw.contains("|")) {
+            parts = raw.split("\\|", -1);
+        } else if (raw.contains(",")) {
+            parts = raw.split(",", -1);
+        } else {
+            parts = raw.split("\\s+", -1);
+        }
+        for (int i = 0; i < parts.length; i++) {
+            parts[i] = parts[i] != null ? parts[i].trim() : "";
+        }
+
+        int idx = 0;
+        String type = defaultType;
+        if (parts.length > 0 && isKnownType(parts[0].toLowerCase())) {
+            type = parts[0].toLowerCase();
+            idx = 1;
+        }
+
+        String baseUrl = idx < parts.length ? normalizeBaseUrl(parts[idx]) : "";
+        int restStart = idx + 1;
+        int restCount = Math.max(0, parts.length - restStart);
+
+        String apiKey = "";
+        String username = "";
+        String password = "";
+        String displayName = "";
+        String remark = "";
+        boolean activate = false;
+
+        if ("webdav".equals(type)) {
+            if (restCount > 0) username = parts[restStart];
+            if (restCount > 1) password = parts[restStart + 1];
+            if (restCount == 3) {
+                remark = parts[restStart + 2];
+            } else if (restCount == 4) {
+                Boolean b = parseBoolOrNull(parts[restStart + 3]);
+                if (b != null) {
+                    remark = parts[restStart + 2];
+                    activate = b;
+                } else {
+                    displayName = parts[restStart + 2];
+                    remark = parts[restStart + 3];
+                }
+            } else if (restCount >= 5) {
+                displayName = parts[restStart + 2];
+                remark = parts[restStart + 3];
+                Boolean b = parseBoolOrNull(parts[restStart + 4]);
+                if (b != null) activate = b;
+            }
+        } else {
+            if (restCount > 0) apiKey = parts[restStart];
+            if (restCount == 2) {
+                remark = parts[restStart + 1];
+            } else if (restCount == 3) {
+                Boolean b = parseBoolOrNull(parts[restStart + 2]);
+                if (b != null) {
+                    remark = parts[restStart + 1];
+                    activate = b;
+                } else {
+                    displayName = parts[restStart + 1];
+                    remark = parts[restStart + 2];
+                }
+            } else if (restCount >= 4) {
+                displayName = parts[restStart + 1];
+                remark = parts[restStart + 2];
+                Boolean b = parseBoolOrNull(parts[restStart + 3]);
+                if (b != null) activate = b;
+            }
+        }
+
+        ParsedServer ps =
+                validateAndBuild(type, baseUrl, apiKey, username, password, displayName, remark, activate);
+        if (ps == null) {
+            errors.add(label + ": invalid format");
+        }
+        return ps;
+    }
+
+    private static ParsedServer validateAndBuild(
+            String type,
+            String baseUrl,
+            String apiKey,
+            String username,
+            String password,
+            String displayName,
+            String remark,
+            boolean activate) {
+        String t = type != null ? type.trim().toLowerCase() : "emby";
+        String b = baseUrl != null ? baseUrl.trim() : "";
+        String k = apiKey != null ? apiKey.trim() : "";
+        String u = username != null ? username.trim() : "";
+        String p = password != null ? password : "";
+        if (b.isEmpty()) return null;
+
+        if ("webdav".equals(t)) {
+            if (u.isEmpty()) return null;
+        } else if ("plex".equals(t)) {
+            if (k.isEmpty()) return null;
+        } else {
+            if (k.isEmpty()) return null;
+            if (!"emby".equals(t) && !"jellyfin".equals(t)) t = "emby";
+        }
+
+        ServerConfig cfg = new ServerConfig("", t, b, k, u, p, displayName, remark);
+        return new ParsedServer(cfg, activate);
+    }
+
+    private static boolean isKnownType(String type) {
+        String t = type != null ? type.trim().toLowerCase() : "";
+        return "emby".equals(t) || "jellyfin".equals(t) || "plex".equals(t) || "webdav".equals(t);
+    }
+
+    private static Boolean parseBoolOrNull(String value) {
+        String s = value != null ? value.trim().toLowerCase() : "";
+        if ("true".equals(s) || "1".equals(s) || "yes".equals(s) || "y".equals(s)) return Boolean.TRUE;
+        if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "n".equals(s)) return Boolean.FALSE;
+        return null;
+    }
+
+    private static String safe(String s) {
+        return s != null ? s : "";
     }
 
     private static JSONObject jsonError(String msg) {
@@ -457,89 +790,39 @@ final class RemoteHttpServer {
         }
     }
 
-    private static String indexHtml() {
-        return "<!doctype html>"
-                + "<html><head><meta charset='utf-8'/>"
-                + "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-                + "<title>LinPlayer TV Legacy</title>"
-                + "<style>"
-                + "body{font-family:system-ui,-apple-system,Segoe UI,Roboto; padding:16px; background:#0b0b0b; color:#fff;}"
-                + ".card{max-width:760px;margin:0 auto;background:#141414;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:14px;}"
-                + "label{display:block;margin-top:10px;opacity:.9}"
-                + "input,select,button{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:#0f0f0f;color:#fff;box-sizing:border-box;font-size:16px}"
-                + "button{margin-top:12px;cursor:pointer}"
-                + "pre{white-space:pre-wrap;word-break:break-word;font-size:12px;opacity:.85}"
-                + ".row{display:grid;grid-template-columns:1fr 1fr;gap:10px}"
-                + "@media(max-width:640px){.row{grid-template-columns:1fr}}"
-                + "</style></head><body>"
-                + "<div class='card'>"
-                + "<h2>LinPlayer · TV 扫码输入</h2>"
-                + "<div id='info' style='opacity:.85'>Connecting…</div>"
-                + "<hr style='opacity:.2;margin:14px 0'/>"
-                + "<form id='f'>"
-                + "<label>类型</label>"
-                + "<select id='type'>"
-                + "<option value='emby'>Emby</option>"
-                + "<option value='jellyfin'>Jellyfin</option>"
-                + "<option value='webdav'>WebDAV</option>"
-                + "<option value='plex'>Plex（Token）</option>"
-                + "</select>"
-                + "<label>Base URL</label>"
-                + "<input id='baseUrl' placeholder='例如：http://192.168.1.2:8096 或 https://example.com'/>"
-                + "<label>API key / Token（Emby/Jellyfin/Plex）</label>"
-                + "<input id='apiKey' placeholder='Plex 填 token'/>"
-                + "<div class='row'>"
-                + "<div><label>WebDAV 用户名</label><input id='username'/></div>"
-                + "<div><label>WebDAV 密码</label><input id='password' type='password'/></div>"
-                + "</div>"
-                + "<div class='row'>"
-                + "<div><label>显示名（可选）</label><input id='displayName'/></div>"
-                + "<div><label>备注（可选）</label><input id='remark'/></div>"
-                + "</div>"
-                + "<label style='display:flex;align-items:center;gap:10px;margin-top:12px'>"
-                + "<input id='activate' type='checkbox' checked style='width:20px;height:20px;margin:0'/>添加后设为当前服务器</label>"
-                + "<button type='submit'>添加到 TV</button>"
-                + "</form>"
-                + "<pre id='log'></pre>"
-                + "</div>"
-                + "<script>"
-                + "const qs=new URLSearchParams(location.search);"
-                + "const token=qs.get('token')||'';"
-                + "const info=document.getElementById('info');"
-                + "const logEl=document.getElementById('log');"
-                + "const log=(s)=>{logEl.textContent=(new Date().toLocaleTimeString())+' '+s+'\\n'+logEl.textContent};"
-                + "const loadInfo=async()=>{"
-                + " if(!token){info.textContent='缺少 token：请重新扫码打开。';return;}"
-                + " try{const res=await fetch('/api/info?token='+encodeURIComponent(token),{cache:'no-store'});"
-                + " const data=await res.json();"
-                + " if(!data.ok) throw new Error(data.error||'unknown');"
-                + " const app=data.app||{}; const s=data.server||{};"
-                + " info.textContent=(app.name||'LinPlayer')+' '+(app.version||'')+(s.activeServerName?(' · 当前：'+s.activeServerName):'');"
-                + " }catch(e){info.textContent='连接失败：'+e;}"
-                + "}; loadInfo();"
-                + "document.getElementById('f').addEventListener('submit',async(e)=>{"
-                + " e.preventDefault();"
-                + " if(!token){log('缺少 token');return;}"
-                + " const payload={"
-                + " token,"
-                + " type:document.getElementById('type').value,"
-                + " baseUrl:document.getElementById('baseUrl').value,"
-                + " apiKey:document.getElementById('apiKey').value,"
-                + " username:document.getElementById('username').value,"
-                + " password:document.getElementById('password').value,"
-                + " displayName:document.getElementById('displayName').value,"
-                + " remark:document.getElementById('remark').value,"
-                + " activate:document.getElementById('activate').checked"
-                + " };"
-                + " log('提交中…');"
-                + " try{const res=await fetch('/api/addServer',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});"
-                + " const data=await res.json();"
-                + " if(!data.ok) throw new Error(data.error||'unknown');"
-                + " log('成功：已添加'); await loadInfo();"
-                + " }catch(e){log('失败：'+e);}"
-                + "});"
-                + "</script>"
-                + "</body></html>";
+    private String indexHtml() {
+        String cached = cachedIndexHtml;
+        if (cached != null && !cached.isEmpty()) return cached;
+        InputStream in = null;
+        try {
+            in = appContext.getResources().openRawResource(R.raw.remote_index);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(16 * 1024);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) >= 0) {
+                baos.write(buf, 0, n);
+            }
+            cachedIndexHtml = baos.toString("UTF-8");
+            return cachedIndexHtml;
+        } catch (Exception e) {
+            return "<!doctype html><html><body><pre>remote ui missing</pre></body></html>";
+        } finally {
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (IOException ignored) {
+                }
+            }
+        }
+    }
+
+    private static final class ParsedServer {
+        final ServerConfig config;
+        final boolean activate;
+
+        ParsedServer(ServerConfig config, boolean activate) {
+            this.config = config;
+            this.activate = activate;
+        }
     }
 }
-

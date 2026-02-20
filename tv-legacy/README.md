@@ -25,7 +25,15 @@ Open this folder (`tv-legacy/`) in Android Studio.
 Media sources (WIP):
 - Add servers in `Servers` page (supports `Emby` / `Jellyfin` / `Plex` / `WebDAV`).
 - If no servers exist, the app will open `Servers` first.
-- The right side shows a QR code for a built-in remote web page (scan on phone to add a server quickly).
+- The right side shows a QR code for a built-in remote web page (scan on phone to configure quickly):
+  - Add server / bulk add servers
+  - Set subscription URL + enable/disable proxy
+  - Basic player controls (play/pause/seek/stop)
+
+CI:
+- GitHub Actions workflow builds `tv-legacy` debug APK:
+  - `.github/workflows/build-lowversion-tv.yml`
+  - Output name: `LinPlayer-LowVersion-TV-<versionName>.apk`
 
 Notes:
 - `local.properties` is intentionally not committed; Android Studio will generate it.

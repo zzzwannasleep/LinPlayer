@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>LinPlayer TV Legacy</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0b0d; color:#fff; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 18px; }
+      .card { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 16px; }
+      h2 { margin: 0 0 10px 0; font-size: 18px; }
+      .muted { opacity: .8; font-size: 13px; }
+      hr { border: 0; border-top: 1px solid rgba(255,255,255,.12); margin: 14px 0; }
+      label { display:block; margin: 10px 0 6px; font-size: 13px; opacity:.9; }
+      input, textarea, select, button { width:100%; box-sizing:border-box; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background:#111116; color:#fff; font-size: 15px; }
+      textarea { min-height: 120px; resize: vertical; }
+      button { cursor: pointer; background: #14141b; }
+      button:active { transform: translateY(1px); }
+      details { border: 1px solid rgba(255,255,255,.10); border-radius: 14px; padding: 10px 12px; background: rgba(255,255,255,.04); }
+      details + details { margin-top: 12px; }
+      summary { cursor:pointer; font-weight: 600; }
+      .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      @media(max-width:640px){ .row { grid-template-columns: 1fr; } }
+      .btnRow { display:grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
+      .btnRow4 { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+      pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; opacity:.85; margin: 12px 0 0; }
+      .chk { display:flex; align-items:center; gap: 10px; margin-top: 10px; }
+      .chk input { width: 18px; height: 18px; margin: 0; }
+      .hint { margin-top: 8px; font-size: 12px; opacity: .75; line-height: 1.4; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h2>LinPlayer TV Legacy · 扫码设置</h2>
+        <div id="info" class="muted">Connecting...</div>
+        <hr />
+
+        <details open>
+          <summary>添加服务器</summary>
+          <form id="addForm">
+            <label>类型</label>
+            <select id="type">
+              <option value="emby">Emby</option>
+              <option value="jellyfin">Jellyfin</option>
+              <option value="plex">Plex (Token)</option>
+              <option value="webdav">WebDAV</option>
+            </select>
+
+            <label>Base URL</label>
+            <input id="baseUrl" placeholder="例如：http://192.168.1.2:8096 或 https://example.com" />
+
+            <label>API key / Token（Emby/Jellyfin/Plex）</label>
+            <input id="apiKey" placeholder="Plex 填 token" />
+
+            <div class="row">
+              <div>
+                <label>WebDAV 用户名</label>
+                <input id="username" />
+              </div>
+              <div>
+                <label>WebDAV 密码</label>
+                <input id="password" type="password" />
+              </div>
+            </div>
+
+            <div class="row">
+              <div>
+                <label>显示名（可选）</label>
+                <input id="displayName" />
+              </div>
+              <div>
+                <label>备注（可选）</label>
+                <input id="remark" />
+              </div>
+            </div>
+
+            <label class="chk">
+              <input id="activate" type="checkbox" checked />
+              添加后设为当前服务器
+            </label>
+
+            <div class="btnRow">
+              <button type="submit">添加到 TV</button>
+              <button type="button" id="btnClearAdd">清空</button>
+            </div>
+          </form>
+        </details>
+
+        <details>
+          <summary>批量解析（可选）</summary>
+          <label>批量文本（每行一个）</label>
+          <textarea id="bulkText" placeholder="示例：&#10;emby|http://192.168.1.2:8096|API_KEY|备注&#10;plex|http://192.168.1.5:32400|PLEX_TOKEN|备注&#10;webdav|https://example.com/dav|user|pass|备注"></textarea>
+          <div class="row">
+            <div>
+              <label>默认类型</label>
+              <select id="bulkDefaultType">
+                <option value="emby">Emby</option>
+                <option value="jellyfin">Jellyfin</option>
+                <option value="plex">Plex</option>
+                <option value="webdav">WebDAV</option>
+              </select>
+            </div>
+            <div>
+              <label class="chk" style="margin-top:34px">
+                <input id="bulkActivateFirst" type="checkbox" checked />
+                首个设为当前
+              </label>
+            </div>
+          </div>
+          <div class="btnRow">
+            <button type="button" id="btnBulkAdd">批量添加</button>
+            <button type="button" id="btnBulkClear">清空</button>
+          </div>
+          <div class="hint">支持简写：emby|baseUrl|apiKey|remark；plex|baseUrl|token|remark；webdav|baseUrl|user|pass|remark。也支持完整格式：type|baseUrl|apiKey(token)|username|password|displayName|remark|activate(true/false)。</div>
+        </details>
+
+        <details>
+          <summary>代理（mihomo）</summary>
+          <label>订阅链接</label>
+          <input id="subUrl" placeholder="https://..." />
+          <label class="chk">
+            <input id="proxyEnabled" type="checkbox" />
+            开启代理（仅影响本 App）
+          </label>
+          <div class="btnRow">
+            <button type="button" id="btnApplyProxy">保存并应用</button>
+            <button type="button" id="btnStopProxy">关闭代理</button>
+          </div>
+          <div class="hint">开启后：OkHttp/播放请求全量走代理；关闭后默认直连。</div>
+        </details>
+
+        <details>
+          <summary>播放页遥控</summary>
+          <div id="playerInfo" class="muted">No active player</div>
+          <div class="btnRow4">
+            <button type="button" data-player-act="seekByMs" data-player-val="-30000">-30s</button>
+            <button type="button" data-player-act="toggle">播放/暂停</button>
+            <button type="button" data-player-act="seekByMs" data-player-val="30000">+30s</button>
+            <button type="button" data-player-act="stop">停止</button>
+          </div>
+          <div class="hint">如果当前 TV 没有在播放，这里会显示不可用。</div>
+        </details>
+
+        <pre id="log"></pre>
+      </div>
+    </div>
+
+    <script>
+      const qs = new URLSearchParams(location.search);
+      const token = qs.get('token') || '';
+      const infoEl = document.getElementById('info');
+      const logEl = document.getElementById('log');
+      const playerInfoEl = document.getElementById('playerInfo');
+
+      const log = (s) => {
+        logEl.textContent = `${new Date().toLocaleTimeString()} ${s}\n` + logEl.textContent;
+      };
+
+      const apiGet = async (path) => {
+        const res = await fetch(path, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      };
+
+      const apiPost = async (path, payload) => {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (data && data.ok === false) throw new Error(data.error || 'error');
+        return data;
+      };
+
+      const loadInfo = async () => {
+        if (!token) {
+          infoEl.textContent = '缺少 token：请重新扫码打开';
+          return;
+        }
+        try {
+          const data = await apiGet(`/api/info?token=${encodeURIComponent(token)}`);
+          const app = data.app || {};
+          const server = data.server || {};
+          const proxy = data.proxy || {};
+          infoEl.textContent = `${app.name || 'LinPlayer'} ${app.version || ''}` +
+            (server.activeServerName ? ` · 当前：${server.activeServerName}` : '');
+          document.getElementById('subUrl').value = proxy.subscriptionUrl || '';
+          document.getElementById('proxyEnabled').checked = !!proxy.enabled;
+        } catch (e) {
+          infoEl.textContent = `连接失败：${e}`;
+        }
+      };
+
+      const loadPlayer = async () => {
+        if (!token) return;
+        try {
+          const data = await apiGet(`/api/player/status?token=${encodeURIComponent(token)}`);
+          if (!data || !data.ok || !data.active) {
+            playerInfoEl.textContent = 'No active player';
+            return;
+          }
+          const title = data.title || '';
+          const pos = Math.floor((data.positionMs || 0) / 1000);
+          const dur = Math.floor((data.durationMs || 0) / 1000);
+          const playing = data.playing ? 'Playing' : 'Paused';
+          playerInfoEl.textContent = `${playing} · ${pos}s / ${dur}s` + (title ? ` · ${title}` : '');
+        } catch (_) {
+          // ignore
+        }
+      };
+
+      loadInfo();
+      loadPlayer();
+      setInterval(loadPlayer, 1200);
+
+      document.getElementById('btnClearAdd').addEventListener('click', () => {
+        for (const id of ['baseUrl','apiKey','username','password','displayName','remark']) {
+          document.getElementById(id).value = '';
+        }
+      });
+
+      document.getElementById('addForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!token) return log('缺少 token');
+        const payload = {
+          token,
+          type: document.getElementById('type').value,
+          baseUrl: document.getElementById('baseUrl').value,
+          apiKey: document.getElementById('apiKey').value,
+          username: document.getElementById('username').value,
+          password: document.getElementById('password').value,
+          displayName: document.getElementById('displayName').value,
+          remark: document.getElementById('remark').value,
+          activate: document.getElementById('activate').checked,
+        };
+        log('提交中...');
+        try {
+          await apiPost('/api/addServer', payload);
+          log('成功：已添加');
+          await loadInfo();
+        } catch (e2) {
+          log(`失败：${e2}`);
+        }
+      });
+
+      document.getElementById('btnBulkAdd').addEventListener('click', async () => {
+        if (!token) return log('缺少 token');
+        const text = document.getElementById('bulkText').value || '';
+        log('批量提交中...');
+        try {
+          const data = await apiPost('/api/bulkAddServers', {
+            token,
+            text,
+            defaultType: document.getElementById('bulkDefaultType').value,
+            activateFirst: document.getElementById('bulkActivateFirst').checked,
+          });
+          log(`成功：added=${data.added || 0} errors=${(data.errors||[]).length}`);
+          if (data.errors && data.errors.length) {
+            for (const err of data.errors.slice(0, 20)) log(`- ${err}`);
+          }
+          await loadInfo();
+        } catch (e) {
+          log(`失败：${e}`);
+        }
+      });
+      document.getElementById('btnBulkClear').addEventListener('click', () => {
+        document.getElementById('bulkText').value = '';
+      });
+
+      document.getElementById('btnApplyProxy').addEventListener('click', async () => {
+        if (!token) return log('缺少 token');
+        log('保存代理设置...');
+        try {
+          await apiPost('/api/setProxySettings', {
+            token,
+            enabled: document.getElementById('proxyEnabled').checked,
+            subscriptionUrl: document.getElementById('subUrl').value,
+          });
+          log('成功：已保存并应用');
+          await loadInfo();
+        } catch (e) {
+          log(`失败：${e}`);
+        }
+      });
+      document.getElementById('btnStopProxy').addEventListener('click', async () => {
+        if (!token) return log('缺少 token');
+        document.getElementById('proxyEnabled').checked = false;
+        log('关闭代理...');
+        try {
+          await apiPost('/api/setProxySettings', {
+            token,
+            enabled: false,
+            subscriptionUrl: document.getElementById('subUrl').value,
+          });
+          log('成功：已关闭');
+          await loadInfo();
+        } catch (e) {
+          log(`失败：${e}`);
+        }
+      });
+
+      for (const btn of document.querySelectorAll('button[data-player-act]')) {
+        btn.addEventListener('click', async () => {
+          if (!token) return log('缺少 token');
+          const act = btn.getAttribute('data-player-act') || '';
+          const val = parseInt(btn.getAttribute('data-player-val') || '0', 10) || 0;
+          try {
+            await apiPost('/api/player/control', { token, action: act, value: val });
+            await loadPlayer();
+          } catch (e) {
+            log(`播放器操作失败：${e}`);
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

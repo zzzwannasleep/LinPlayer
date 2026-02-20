@@ -3,6 +3,7 @@ package com.linplayer.tvlegacy;
 import android.content.Intent;
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.annotation.Nullable;
@@ -17,6 +18,7 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
     private String showId;
     private int episodeIndex;
     private String showTitle = "Unknown show";
+    private Show show;
     private Episode episode;
 
     @Override
@@ -36,6 +38,7 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
         TextView titleText = findViewById(R.id.episode_title);
         TextView metaText = findViewById(R.id.episode_meta);
         TextView descText = findViewById(R.id.episode_desc);
+        ImageView thumbView = findViewById(R.id.episode_thumb);
 
         titleText.setText("Loading...");
         metaText.setText("EP " + episodeIndex);
@@ -67,8 +70,12 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
                             @Override
                             public void onSuccess(Show show) {
                                 if (isFinishing() || isDestroyed()) return;
+                                EpisodeDetailActivity.this.show = show;
                                 showTitle = show != null ? show.title : "Unknown show";
                                 metaText.setText(showTitle + " · EP " + episodeIndex);
+                                if (episode == null && show != null) {
+                                    ImageLoader.load(thumbView, show.backdropUrl, dpToPx(1280));
+                                }
                             }
 
                             @Override
@@ -93,8 +100,18 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
                                 } else {
                                     titleText.setText("Episode " + episodeIndex);
                                 }
-                                descText.setText(
-                                        "Episode detail UI placeholder. Replace with real metadata later.");
+
+                                metaText.setText(buildEpisodeMeta(showTitle, v, episodeIndex));
+
+                                String desc = v != null ? v.overview : "";
+                                if (desc == null || desc.trim().isEmpty()) desc = "No overview";
+                                descText.setText(desc);
+
+                                String thumb = v != null ? v.thumbUrl : "";
+                                if ((thumb == null || thumb.trim().isEmpty()) && show != null) {
+                                    thumb = show.backdropUrl;
+                                }
+                                ImageLoader.load(thumbView, thumb, dpToPx(1280));
                             }
 
                             @Override
@@ -106,5 +123,27 @@ public final class EpisodeDetailActivity extends AppCompatActivity {
                                         "Load episode failed: " + String.valueOf(error.getMessage()));
                             }
                         });
+    }
+
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
+
+    private static String buildEpisodeMeta(String showTitle, Episode episode, int index) {
+        String st = showTitle != null ? showTitle.trim() : "";
+        StringBuilder sb = new StringBuilder();
+        if (!st.isEmpty()) sb.append(st);
+
+        int season = episode != null ? episode.seasonNumber : 0;
+        int ep = episode != null ? episode.episodeNumber : 0;
+        if (season > 0 && ep > 0) {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append("S").append(season).append("E").append(ep);
+        } else {
+            if (sb.length() > 0) sb.append(" · ");
+            sb.append("EP ").append(index);
+        }
+        return sb.toString();
     }
 }

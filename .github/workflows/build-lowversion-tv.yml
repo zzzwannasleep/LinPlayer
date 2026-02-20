@@ -1,0 +1,72 @@
+name: Build LowVersion TV (tv-legacy)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "tv-legacy/**"
+      - ".github/workflows/build-lowversion-tv.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "tv-legacy/**"
+      - ".github/workflows/build-lowversion-tv.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-tv-legacy:
+    name: Build APK (API 19)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          build-root-directory: tv-legacy
+
+      - name: Assemble debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tv-legacy/gradlew -p tv-legacy :app:assembleDebug
+
+      - name: Rename APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_NAME="$(sed -n 's/.*versionName\\s*=\\s*\"\\([^\"]*\\)\".*/\\1/p' tv-legacy/app/build.gradle.kts | head -n 1)"
+          if [[ -z "${VERSION_NAME:-}" ]]; then
+            VERSION_NAME="unknown"
+          fi
+          mkdir -p dist
+          cp -v tv-legacy/app/build/outputs/apk/debug/app-debug.apk "dist/LinPlayer-LowVersion-TV-${VERSION_NAME}.apk"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinPlayer-LowVersion-TV
+          path: dist/LinPlayer-LowVersion-TV-*.apk
+

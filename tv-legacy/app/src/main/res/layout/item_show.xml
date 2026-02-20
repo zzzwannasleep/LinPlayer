@@ -9,10 +9,12 @@
     android:orientation="vertical"
     android:padding="12dp">
 
-    <FrameLayout
+    <ImageView
+        android:id="@+id/show_poster"
         android:layout_width="match_parent"
         android:layout_height="150dp"
-        android:background="#26FFFFFF" />
+        android:background="#26FFFFFF"
+        android:scaleType="centerCrop" />
 
     <TextView
         android:id="@+id/show_title"
@@ -25,4 +27,3 @@
         android:textSize="14sp" />
 
 </LinearLayout>
-

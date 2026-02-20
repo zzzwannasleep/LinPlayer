@@ -38,16 +38,59 @@
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="220dp"
-            android:layout_marginTop="16dp"
-            android:background="#1FFFFFFF" />
+            android:layout_marginTop="16dp">
 
-        <TextView
-            android:id="@+id/show_overview"
+            <ImageView
+                android:id="@+id/show_backdrop"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="#1FFFFFFF"
+                android:scaleType="centerCrop" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/tv_backdrop_overlay" />
+        </FrameLayout>
+
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Overview"
-            android:textSize="14sp" />
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/show_poster"
+                android:layout_width="160dp"
+                android:layout_height="240dp"
+                android:background="#26FFFFFF"
+                android:scaleType="centerCrop" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/show_meta"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:alpha="0.85"
+                    android:text="Meta"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/show_overview"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:lineSpacingExtra="2dp"
+                    android:text="Overview"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -75,4 +118,3 @@
 
     </LinearLayout>
 </ScrollView>
-

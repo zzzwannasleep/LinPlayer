@@ -3,6 +3,7 @@ package com.linplayer.tvlegacy;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
@@ -34,6 +35,7 @@ final class ShowAdapter extends RecyclerView.Adapter<ShowAdapter.Vh> {
     public void onBindViewHolder(@NonNull Vh holder, int position) {
         Show show = shows.get(position);
         holder.title.setText(show.title);
+        ImageLoader.load(holder.poster, show.posterUrl, 640);
         holder.itemView.setOnClickListener(v -> listener.onShowClicked(show));
     }
 
@@ -43,12 +45,13 @@ final class ShowAdapter extends RecyclerView.Adapter<ShowAdapter.Vh> {
     }
 
     static final class Vh extends RecyclerView.ViewHolder {
+        final ImageView poster;
         final TextView title;
 
         Vh(@NonNull View itemView) {
             super(itemView);
+            poster = itemView.findViewById(R.id.show_poster);
             title = itemView.findViewById(R.id.show_title);
         }
     }
 }
-
