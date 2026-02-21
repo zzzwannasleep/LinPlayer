@@ -44,6 +44,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
   int? _selectedAudioStreamIndex;
   int _selectedSubtitleStreamIndex = -1;
   bool? _playedOverride;
+  bool _markingPlayed = false;
   bool _launchingExternalMpv = false;
   bool _jumpingToEpisode = false;
 
@@ -114,6 +115,83 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _toggleItemPlayedMark({
+    required MediaItem item,
+    required bool currentPlayed,
+  }) async {
+    if (_markingPlayed) return;
+
+    final access = resolveServerAccess(
+          appState: widget.viewModel.appState,
+          server: widget.viewModel.server,
+        ) ??
+        widget.viewModel.access;
+    if (access == null) {
+      _showMessage(
+        _t(
+          zh: '\u672a\u8fde\u63a5\u670d\u52a1\u5668',
+          en: 'Not connected to server',
+        ),
+      );
+      return;
+    }
+
+    final nextPlayed = !currentPlayed;
+    final runTimeTicks = item.runTimeTicks ?? 0;
+    final nextPositionTicks = nextPlayed
+        ? math.max(
+            item.playbackPositionTicks,
+            runTimeTicks > 0 ? runTimeTicks : 1,
+          )
+        : 0;
+
+    setState(() {
+      _markingPlayed = true;
+      _playedOverride = nextPlayed;
+    });
+
+    try {
+      await access.adapter.updatePlaybackPosition(
+        access.auth,
+        itemId: item.id,
+        positionTicks: nextPositionTicks,
+        played: nextPlayed,
+      );
+
+      unawaited(widget.viewModel.load(forceRefresh: true));
+      try {
+        await widget.viewModel.appState.loadContinueWatching(forceRefresh: true);
+      } catch (_) {
+        // Ignore refresh errors; playback mark already succeeded.
+      }
+      unawaited(widget.viewModel.appState.loadHome(forceRefresh: true));
+
+      if (!mounted) return;
+      _showMessage(
+        nextPlayed
+            ? _t(
+                zh: '\u5df2\u6807\u8bb0\u4e3a\u5df2\u64ad\u653e',
+                en: 'Marked as watched',
+              )
+            : _t(
+                zh: '\u5df2\u6807\u8bb0\u4e3a\u672a\u64ad\u653e',
+                en: 'Marked as unwatched',
+              ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _playedOverride = currentPlayed);
+      _showMessage(
+        _t(
+          zh: '\u6807\u8bb0\u5931\u8d25\uff1a$e',
+          en: 'Failed to mark watched: $e',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _markingPlayed = false);
+    }
   }
 
   MediaItem? _resolvePlayableItemForExternalMpv({
@@ -587,7 +665,12 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
                     onPlay: widget.onPlayPressed,
                     onToggleFavorite: vm.toggleFavorite,
                     onToggleWatched: () {
-                      setState(() => _playedOverride = !watched);
+                      unawaited(
+                        _toggleItemPlayedMark(
+                          item: item,
+                          currentPlayed: watched,
+                        ),
+                      );
                     },
                     language: widget.language,
                     onLaunchExternalMpv: () {
