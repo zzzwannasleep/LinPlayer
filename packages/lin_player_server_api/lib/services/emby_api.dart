@@ -936,6 +936,38 @@ class EmbyApi {
     return PagedResult(items, total);
   }
 
+  Future<PagedResult<MediaItem>> fetchNextUp({
+    required String token,
+    required String baseUrl,
+    required String userId,
+    int limit = 30,
+  }) async {
+    final url = Uri.parse(
+      _apiUrl(
+        baseUrl,
+        'Shows/NextUp'
+        '?UserId=$userId'
+        '&Limit=$limit'
+        '&EnableUserData=true'
+        '&EnableImages=true'
+        '&ImageTypeLimit=1'
+        '&EnableImageTypes=Primary,Thumb,Backdrop'
+        '&Fields=Overview,ParentId,ProviderIds',
+      ),
+    );
+    final resp = await _client.get(url,
+        headers: _jsonHeaders(token: token, userId: userId));
+    if (resp.statusCode != 200) {
+      throw Exception('FetchNextUp failed (${resp.statusCode})');
+    }
+    final map = jsonDecode(resp.body) as Map<String, dynamic>;
+    final items = (map['Items'] as List<dynamic>? ?? [])
+        .map((e) => MediaItem.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final total = map['TotalRecordCount'] as int? ?? items.length;
+    return PagedResult(items, total);
+  }
+
   Future<PagedResult<MediaItem>> fetchLatestMovies({
     required String token,
     required String baseUrl,
@@ -1173,7 +1205,7 @@ class EmbyApi {
         'PositionTicks': positionTicks,
         'IsPaused': isPaused,
         'CanSeek': true,
-        'EventName': 'timeupdate',
+        'EventName': 'TimeUpdate',
       },
     );
   }

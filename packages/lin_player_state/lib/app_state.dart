@@ -2873,7 +2873,10 @@ class AppState extends ChangeNotifier {
 
   List<MediaItem> _mergeContinueWatching(
     List<MediaItem> localItems,
-    List<MediaItem> remoteItems,
+    List<MediaItem> remoteItems, {
+    required bool keepLocalOnly,
+    required bool remotePreferredForEpisodes,
+  }
   ) {
     final mergedByKey = <String, MediaItem>{};
     for (final item in localItems) {
@@ -2893,15 +2896,24 @@ class AppState extends ChangeNotifier {
       final local = mergedByKey[key];
       final chosen = local == null
           ? item
-          : _pickPreferredContinueWatchingItem(item, local);
+          : (remotePreferredForEpisodes &&
+                  item.type.toLowerCase().trim() == 'episode' &&
+                  local.type.toLowerCase().trim() == 'episode' &&
+                  item.id.trim().isNotEmpty &&
+                  local.id.trim().isNotEmpty &&
+                  item.id.trim() != local.id.trim())
+              ? item
+              : _pickPreferredContinueWatchingItem(item, local);
       if (used.add(key)) ordered.add(chosen);
       mergedByKey.remove(key);
       if (ordered.length >= 20) return ordered;
     }
 
-    for (final entry in mergedByKey.entries) {
-      if (used.add(entry.key)) ordered.add(entry.value);
-      if (ordered.length >= 20) break;
+    if (keepLocalOnly) {
+      for (final entry in mergedByKey.entries) {
+        if (used.add(entry.key)) ordered.add(entry.value);
+        if (ordered.length >= 20) break;
+      }
     }
     return ordered;
   }
@@ -2911,6 +2923,11 @@ class AppState extends ChangeNotifier {
   }) {
     final localSnapshot =
         (_continueWatching ?? const <MediaItem>[]).toList(growable: false);
+
+    if (baseUrl == null || token == null || userId == null) {
+      return Future.value(localSnapshot);
+    }
+
     final inFlight = _continueWatchingInFlight;
 
     if (!forceRefresh) {
@@ -2925,7 +2942,12 @@ class AppState extends ChangeNotifier {
     return future.then((remoteItems) async {
       final merged = localSnapshot.isEmpty
           ? remoteItems
-          : _mergeContinueWatching(localSnapshot, remoteItems);
+          : _mergeContinueWatching(
+              localSnapshot,
+              remoteItems,
+              keepLocalOnly: !forceRefresh,
+              remotePreferredForEpisodes: forceRefresh,
+            );
       _continueWatching = merged;
       await _persistContinueWatchingCache();
       return merged;
@@ -2946,7 +2968,7 @@ class AppState extends ChangeNotifier {
       serverType: serverType,
       deviceId: _deviceId,
     );
-    final res = await api.fetchContinueWatching(
+    final resumeRes = await api.fetchContinueWatching(
       token: token!,
       baseUrl: baseUrl!,
       userId: userId!,
@@ -2955,22 +2977,32 @@ class AppState extends ChangeNotifier {
       limit: 60,
     );
 
+    List<MediaItem> nextUpItems = const <MediaItem>[];
+    try {
+      final res = await api.fetchNextUp(
+        token: token!,
+        baseUrl: baseUrl!,
+        userId: userId!,
+        limit: 60,
+      );
+      nextUpItems = res.items.where((e) => !e.played).toList(growable: false);
+    } catch (_) {
+      nextUpItems = const <MediaItem>[];
+    }
+
     final seen = <String>{};
     final deduped = <MediaItem>[];
-    for (final item in res.items) {
-      final type = item.type.toLowerCase().trim();
-      final key = type == 'episode'
-          ? ((item.seriesId ?? '').trim().isNotEmpty
-              ? 'series:${item.seriesId}'
-              : (item.seriesName.trim().isNotEmpty
-                  ? 'seriesName:${item.seriesName.trim()}'
-                  : 'item:${item.id}'))
-          : 'item:${item.id}';
-      if (seen.add(key)) {
+    void appendAll(List<MediaItem> items) {
+      for (final item in items) {
+        final key = _continueWatchingEntryKey(item);
+        if (!seen.add(key)) continue;
         deduped.add(item);
+        if (deduped.length >= 20) break;
       }
-      if (deduped.length >= 20) break;
     }
+
+    appendAll(resumeRes.items);
+    if (deduped.length < 20) appendAll(nextUpItems);
     return deduped;
   }
 
