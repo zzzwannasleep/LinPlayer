@@ -170,12 +170,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   int _lastLocalProgressSecond = -1;
   bool _localProgressWriteInFlight = false;
   int? _pendingLocalProgressTicks;
-
-  static const Duration _kServerProgressSyncInterval = Duration(seconds: 5);
-  Timer? _serverProgressTimer;
-  bool _serverProgressSyncInFlight = false;
-  int _lastServerProgressSecond = -1;
-
+  ServerPlaybackProgressSync? _serverProgressSync;
   bool _reportedStart = false;
   bool _reportedStop = false;
   bool _markPlayedThresholdReached = false;
@@ -206,6 +201,24 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     WidgetsBinding.instance.addObserver(this);
     _serverAccess =
         resolveServerAccess(appState: widget.appState, server: widget.server);
+    final access = _serverAccess;
+    _serverProgressSync = access == null
+        ? null
+        : ServerPlaybackProgressSync(
+            adapter: access.adapter,
+            auth: access.auth,
+            itemId: widget.itemId,
+            getPosition: () {
+              final c = _controller;
+              if (c != null && c.value.isInitialized) {
+                return c.value.position;
+              }
+              return _position;
+            },
+            isPlaying: () => _isPlaying,
+            getPlaySessionId: () => _playSessionId,
+            getMediaSourceId: () => _mediaSourceId,
+          );
     _danmakuEnabled = widget.appState.danmakuEnabled;
     _danmakuOpacity = widget.appState.danmakuOpacity;
     _danmakuScale = widget.appState.danmakuScale;
@@ -250,8 +263,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     // User navigated away from the playback page: stop playback & buffering.
     _uiTimer?.cancel();
     _uiTimer = null;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
+    _serverProgressSync?.stop();
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
@@ -270,8 +282,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     _controlsHideTimer = null;
     _uiTimer?.cancel();
     _uiTimer = null;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
+    _serverProgressSync?.dispose();
+    _serverProgressSync = null;
     _resumeHintTimer?.cancel();
     _resumeHintTimer = null;
     _startOverHintTimer?.cancel();
@@ -2289,9 +2301,8 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
   Future<void> _init() async {
     _uiTimer?.cancel();
     _uiTimer = null;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
-    _lastServerProgressSecond = -1;
+    _serverProgressSync?.stop();
+    _serverProgressSync?.reset();
     _playError = null;
     _loading = true;
     _buffering = false;
@@ -2358,7 +2369,9 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (!mounted) return;
     setState(() {});
 
-    final remoteStartFuture = _fetchServerProgressDurationBestEffort();
+    final remoteStartFuture =
+        _serverProgressSync?.fetchServerProgressDurationBestEffort() ??
+            Future<Duration?>.value(null);
     final localStartFuture = _readLocalProgressDuration();
 
     try {
@@ -2647,26 +2660,6 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       final prefs = await SharedPreferences.getInstance();
       final ticks = prefs.getInt(_localProgressKey);
       if (ticks == null || ticks <= 0) return null;
-      return Duration(microseconds: (ticks / 10).round());
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<Duration?> _fetchServerProgressDurationBestEffort() async {
-    final access = _serverAccess;
-    if (access == null) return null;
-    if (access.auth.baseUrl.trim().isEmpty || access.auth.token.trim().isEmpty) {
-      return null;
-    }
-    if (access.auth.userId.trim().isEmpty) return null;
-
-    try {
-      final detail = await access.adapter
-          .fetchItemDetail(access.auth, itemId: widget.itemId)
-          .timeout(const Duration(seconds: 5));
-      final ticks = detail.playbackPositionTicks;
-      if (ticks <= 0) return null;
       return Duration(microseconds: (ticks / 10).round());
     } catch (_) {
       return null;
@@ -3136,80 +3129,13 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
     if (mounted) setState(() {});
   }
 
-  void _ensureServerProgressTimerStarted() {
-    if (_serverProgressTimer != null) return;
-    final access = _serverAccess;
-    if (access == null) return;
-    if (access.auth.baseUrl.trim().isEmpty || access.auth.token.trim().isEmpty) {
-      return;
-    }
-    if (access.auth.userId.trim().isEmpty) return;
-
-    _serverProgressTimer =
-        Timer.periodic(_kServerProgressSyncInterval, (_) {
-      // ignore: unawaited_futures
-      _syncServerProgressBestEffort();
-    });
-  }
-
-  Future<void> _syncServerProgressBestEffort({Duration? position}) async {
-    if (_reportedStop) return;
-    if (_deferProgressReporting) return;
-    final access = _serverAccess;
-    if (access == null) return;
-    if (access.auth.baseUrl.trim().isEmpty || access.auth.token.trim().isEmpty) {
-      return;
-    }
-    if (access.auth.userId.trim().isEmpty) return;
-    if (_serverProgressSyncInFlight) return;
-
-    final controller = _controller;
-    final raw = position ??
-        ((controller != null && controller.value.isInitialized)
-            ? controller.value.position
-            : _position);
-    final safe = raw < Duration.zero ? Duration.zero : raw;
-    final second = safe.inSeconds;
-    if (second == _lastServerProgressSecond) return;
-
-    _serverProgressSyncInFlight = true;
-    try {
-      final ticks = _toTicks(safe);
-      final paused = !_isPlaying;
-      final ps = _playSessionId;
-      final ms = _mediaSourceId;
-      if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-        try {
-          await access.adapter.reportPlaybackProgress(
-            access.auth,
-            itemId: widget.itemId,
-            mediaSourceId: ms,
-            playSessionId: ps,
-            positionTicks: ticks,
-            isPaused: paused,
-          ).timeout(const Duration(seconds: 5));
-        } catch (_) {}
-      }
-      try {
-        await access.adapter.updatePlaybackPosition(
-          access.auth,
-          itemId: widget.itemId,
-          positionTicks: ticks,
-        ).timeout(const Duration(seconds: 5));
-      } catch (_) {}
-      _lastServerProgressSecond = second;
-    } finally {
-      _serverProgressSyncInFlight = false;
-    }
-  }
-
   Future<void> _reportPlaybackStartBestEffort() async {
     if (_reportedStart || _reportedStop) return;
     final access = _serverAccess;
     if (access == null) return;
 
     _reportedStart = true;
-    _ensureServerProgressTimerStarted();
+    _serverProgressSync?.start();
     final posTicks = _toTicks(_position);
     final paused = !_isPlaying;
     try {
@@ -3276,8 +3202,7 @@ class _ExoPlayNetworkPageState extends State<ExoPlayNetworkPage>
       {bool completed = false}) async {
     if (_reportedStop) return;
     _reportedStop = true;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
+    _serverProgressSync?.stop();
 
     final controller = _controller;
     final pos = (controller != null && controller.value.isInitialized)

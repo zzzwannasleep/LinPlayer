@@ -111,12 +111,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
   int _lastLocalProgressSecond = -1;
   bool _localProgressWriteInFlight = false;
   int? _pendingLocalProgressTicks;
-
-  static const Duration _kServerProgressSyncInterval = Duration(seconds: 5);
-  Timer? _serverProgressTimer;
-  bool _serverProgressSyncInFlight = false;
-  int _lastServerProgressSecond = -1;
-
+  ServerPlaybackProgressSync? _serverProgressSync;
   bool _reportedStart = false;
   bool _reportedStop = false;
   bool _markPlayedThresholdReached = false;
@@ -235,6 +230,20 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     WidgetsBinding.instance.addObserver(this);
     _serverAccess =
         resolveServerAccess(appState: widget.appState, server: widget.server);
+    final access = _serverAccess;
+    _serverProgressSync = access == null
+        ? null
+        : ServerPlaybackProgressSync(
+            adapter: access.adapter,
+            auth: access.auth,
+            itemId: widget.itemId,
+            getPosition: () => _playerService.isInitialized
+                ? _playerService.position
+                : _lastPosition,
+            isPlaying: () => _playerService.isPlaying,
+            getPlaySessionId: () => _playSessionId,
+            getMediaSourceId: () => _mediaSourceId,
+          );
     _hwdecOn = widget.appState.preferHardwareDecode;
     _anime4kPreset = widget.appState.anime4kPreset;
     _danmakuEnabled = widget.appState.danmakuEnabled;
@@ -281,8 +290,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     // User navigated away from the playback page: stop playback & buffering.
     _netSpeedTimer?.cancel();
     _netSpeedTimer = null;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
+    _serverProgressSync?.stop();
     // ignore: unawaited_futures
     _reportPlaybackStoppedBestEffort();
     // ignore: unawaited_futures
@@ -323,9 +331,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _lastLocalProgressSecond = -1;
     _pendingLocalProgressTicks = null;
     _localProgressWriteInFlight = false;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
-    _lastServerProgressSecond = -1;
+    _serverProgressSync?.stop();
+    _serverProgressSync?.reset();
     _reportedStart = false;
     _reportedStop = false;
     _markPlayedThresholdReached = false;
@@ -369,7 +376,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         } catch (_) {}
       }
 
-      final remoteStartFuture = _fetchServerProgressDurationBestEffort();
+      final remoteStartFuture =
+          _serverProgressSync?.fetchServerProgressDurationBestEffort() ??
+              Future<Duration?>.value(null);
       final localStartFuture = _readLocalProgressDuration();
       final streamUrl = await _buildStreamUrl();
       final access = _serverAccess;
@@ -2104,26 +2113,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     }
   }
 
-  Future<Duration?> _fetchServerProgressDurationBestEffort() async {
-    final access = _serverAccess;
-    if (access == null) return null;
-    if (access.auth.baseUrl.trim().isEmpty || access.auth.token.trim().isEmpty) {
-      return null;
-    }
-    if (access.auth.userId.trim().isEmpty) return null;
-
-    try {
-      final detail = await access.adapter
-          .fetchItemDetail(access.auth, itemId: widget.itemId)
-          .timeout(const Duration(seconds: 5));
-      final ticks = detail.playbackPositionTicks;
-      if (ticks <= 0) return null;
-      return Duration(microseconds: (ticks / 10).round());
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _clearLocalProgress() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2488,70 +2477,6 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (mounted) setState(() {});
   }
 
-  void _ensureServerProgressTimerStarted() {
-    if (_serverProgressTimer != null) return;
-    final access = _serverAccess;
-    if (access == null) return;
-    if (access.auth.baseUrl.trim().isEmpty || access.auth.token.trim().isEmpty) {
-      return;
-    }
-    if (access.auth.userId.trim().isEmpty) return;
-
-    _serverProgressTimer =
-        Timer.periodic(_kServerProgressSyncInterval, (_) {
-      // ignore: unawaited_futures
-      _syncServerProgressBestEffort();
-    });
-  }
-
-  Future<void> _syncServerProgressBestEffort({Duration? position}) async {
-    if (_reportedStop) return;
-    if (_deferProgressReporting) return;
-    final access = _serverAccess;
-    if (access == null) return;
-    if (access.auth.baseUrl.trim().isEmpty || access.auth.token.trim().isEmpty) {
-      return;
-    }
-    if (access.auth.userId.trim().isEmpty) return;
-    if (_serverProgressSyncInFlight) return;
-
-    final raw = position ??
-        (_playerService.isInitialized ? _playerService.position : _lastPosition);
-    final safe = raw < Duration.zero ? Duration.zero : raw;
-    final second = safe.inSeconds;
-    if (second == _lastServerProgressSecond) return;
-
-    _serverProgressSyncInFlight = true;
-    try {
-      final ticks = _toTicks(safe);
-      final paused = !_playerService.isPlaying;
-      final ps = _playSessionId;
-      final ms = _mediaSourceId;
-      if (ps != null && ps.isNotEmpty && ms != null && ms.isNotEmpty) {
-        try {
-          await access.adapter.reportPlaybackProgress(
-            access.auth,
-            itemId: widget.itemId,
-            mediaSourceId: ms,
-            playSessionId: ps,
-            positionTicks: ticks,
-            isPaused: paused,
-          ).timeout(const Duration(seconds: 5));
-        } catch (_) {}
-      }
-      try {
-        await access.adapter.updatePlaybackPosition(
-          access.auth,
-          itemId: widget.itemId,
-          positionTicks: ticks,
-        ).timeout(const Duration(seconds: 5));
-      } catch (_) {}
-      _lastServerProgressSecond = second;
-    } finally {
-      _serverProgressSyncInFlight = false;
-    }
-  }
-
   Future<void> _reportPlaybackStartBestEffort() async {
     if (_reportedStart || _reportedStop) return;
     final access = _serverAccess;
@@ -2559,7 +2484,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     if (access.auth.baseUrl.isEmpty || access.auth.token.isEmpty) return;
 
     _reportedStart = true;
-    _ensureServerProgressTimerStarted();
+    _serverProgressSync?.start();
     final posTicks = _toTicks(_lastPosition);
     final paused = !_playerService.isPlaying;
     try {
@@ -2628,8 +2553,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
       {bool completed = false}) async {
     if (_reportedStop) return;
     _reportedStop = true;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
+    _serverProgressSync?.stop();
 
     final pos =
         _playerService.isInitialized ? _playerService.position : _lastPosition;
@@ -2903,8 +2827,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _tvOkLongPressTimer = null;
     _netSpeedTimer?.cancel();
     _netSpeedTimer = null;
-    _serverProgressTimer?.cancel();
-    _serverProgressTimer = null;
+    _serverProgressSync?.dispose();
+    _serverProgressSync = null;
     _errorSub?.cancel();
     _bufferingSub?.cancel();
     _bufferingPctSub?.cancel();

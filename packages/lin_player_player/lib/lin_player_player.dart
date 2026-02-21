@@ -13,5 +13,6 @@ export 'src/player/danmaku_processing.dart';
 export 'src/player/danmaku_stage.dart';
 export 'src/player/net_speed.dart';
 export 'src/player/playback_controls.dart';
+export 'src/player/server_playback_progress_sync.dart';
 export 'src/player/thumbnail_generator.dart';
 export 'src/player/track_preferences.dart';

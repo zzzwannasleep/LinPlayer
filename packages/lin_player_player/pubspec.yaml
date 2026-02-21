@@ -16,6 +16,8 @@ dependencies:
     path: ../lin_player_core
   lin_player_prefs:
     path: ../lin_player_prefs
+  lin_player_server_adapters:
+    path: ../lin_player_server_adapters
   lin_player_server_api:
     path: ../lin_player_server_api
   lin_player_ui:
