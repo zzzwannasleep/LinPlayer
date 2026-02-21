@@ -15,6 +15,22 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
+    val targetAbis =
+        (project.findProperty("target-platform")?.toString() ?: "")
+            .split(',')
+            .map { it.trim().lowercase() }
+            .filter { it.isNotEmpty() }
+            .mapNotNull { platform ->
+                when (platform) {
+                    "android-arm" -> "armeabi-v7a"
+                    "android-arm64" -> "arm64-v8a"
+                    "android-x86" -> "x86"
+                    "android-x64", "android-x86_64" -> "x86_64"
+                    else -> null
+                }
+            }
+            .distinct()
+
     val isCi = System.getenv("CI")?.trim()?.lowercase() == "true"
     val allowCiDebugSigning =
         System.getenv("LINPLAYER_ALLOW_CI_DEBUG_SIGNING")?.trim()?.lowercase()
@@ -87,6 +103,20 @@ android {
                 )
             }
             signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
+        }
+    }
+
+    // Flutter's Gradle plugin keeps a default ABI allowlist to avoid shipping unsupported ABIs.
+    // When `-Ptarget-platform=...` is set (e.g. `flutter build apk --target-platform android-arm`),
+    // override the allowlist so we don't accidentally bundle native libs for other ABIs
+    // (which can make the APK crash on devices that pick the wrong ABI at runtime).
+    val isSplitPerAbi = project.hasProperty("split-per-abi")
+    if (!isSplitPerAbi && targetAbis.isNotEmpty()) {
+        buildTypes.configureEach {
+            ndk {
+                abiFilters.clear()
+                abiFilters.addAll(targetAbis)
+            }
         }
     }
 }

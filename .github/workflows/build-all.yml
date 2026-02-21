@@ -133,7 +133,7 @@ jobs:
           cp -v build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "$OUT_DIR/LinPlayer-Android-arm64-v8a.apk"
 
           # TV build: force TV mode even on non-TV Android devices (phone / tablet / boxes).
-          flutter build apk --release --target-platform android-arm --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" --dart-define=LINPLAYER_FORCE_TV=true "${DART_DEFINE_ARGS[@]}"
+          flutter build apk --release --target-platform android-arm,android-arm64 --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" --dart-define=LINPLAYER_FORCE_TV=true "${DART_DEFINE_ARGS[@]}"
           cp -v build/app/outputs/flutter-apk/app-release.apk "$OUT_DIR/LinPlayer-Android-TV.apk"
 
           flutter build apk --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER" "${DART_DEFINE_ARGS[@]}"
