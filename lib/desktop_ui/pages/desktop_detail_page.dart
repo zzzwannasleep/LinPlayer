@@ -156,10 +156,17 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
 
       unawaited(widget.viewModel.load(forceRefresh: true));
       try {
-        await widget.viewModel.appState.loadContinueWatching(
-          forceRefresh: true,
-          forceNewRequest: true,
-        );
+        if (item.type.trim().toLowerCase() == 'episode') {
+          await widget.viewModel.appState.updateContinueWatchingAfterPlaybackMark(
+            item: item,
+            played: nextPlayed,
+          );
+        } else {
+          await widget.viewModel.appState.loadContinueWatching(
+            forceRefresh: true,
+            forceNewRequest: true,
+          );
+        }
       } catch (_) {
         // Ignore refresh errors; playback mark already succeeded.
       }

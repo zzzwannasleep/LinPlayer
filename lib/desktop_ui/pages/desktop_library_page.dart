@@ -42,21 +42,22 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
 
   bool _loading = true;
   String? _error;
-  Future<List<MediaItem>>? _continueFuture;
-  List<MediaItem> _continueItems = const <MediaItem>[];
   final Set<String> _favoriteItemIds = <String>{};
+  final Set<String> _markingPlayedIds = <String>{};
 
   @override
   void initState() {
     super.initState();
     final hasLocalContinue = widget.appState.hasCachedContinueWatching;
-    _continueFuture = widget.appState.loadContinueWatching(forceRefresh: false);
-    unawaited(
-      _bindContinueFuture(
-        _continueFuture!,
-        refreshRemoteAfterBind: hasLocalContinue,
-      ),
-    );
+    unawaited(widget.appState.loadContinueWatching(forceRefresh: false));
+    if (hasLocalContinue) {
+      unawaited(
+        widget.appState.loadContinueWatching(
+          forceRefresh: true,
+          forceNewRequest: true,
+        ),
+      );
+    }
     unawaited(_restoreFavoriteIds());
     unawaited(_bootstrap(forceRefresh: false));
   }
@@ -94,14 +95,13 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
       await widget.appState.loadHome(forceRefresh: forceRefresh);
 
       if (!mounted) return;
-      if (_continueFuture == null) {
-        _continueFuture = widget.appState.loadContinueWatching(
-          forceRefresh: false,
-        );
-        unawaited(_bindContinueFuture(_continueFuture!));
-      }
       if (forceRefresh) {
-        unawaited(_refreshContinueWatchingInBackground());
+        unawaited(
+          widget.appState.loadContinueWatching(
+            forceRefresh: true,
+            forceNewRequest: true,
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;
@@ -111,34 +111,6 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
         setState(() => _loading = false);
       }
     }
-  }
-
-  Future<void> _bindContinueFuture(
-    Future<List<MediaItem>> future, {
-    bool refreshRemoteAfterBind = false,
-  }) async {
-    try {
-      final items = await future;
-      if (!mounted) return;
-      setState(() {
-        _continueItems = items;
-        _continueFuture = Future.value(items);
-      });
-      if (refreshRemoteAfterBind) {
-        unawaited(_refreshContinueWatchingInBackground());
-      }
-    } catch (_) {
-      // Keep current list when refresh fails.
-    }
-  }
-
-  Future<void> _refreshContinueWatchingInBackground() async {
-    final future = widget.appState.loadContinueWatching(
-      forceRefresh: true,
-      forceNewRequest: true,
-    );
-    setState(() => _continueFuture = future);
-    await _bindContinueFuture(future);
   }
 
   String get _favoriteStorageKey {
@@ -229,6 +201,71 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   }
 
   bool _isFavorite(String itemId) => _favoriteItemIds.contains(itemId);
+
+  Future<void> _toggleContinueWatchingPlayed({
+    required ServerAccess access,
+    required MediaItem item,
+  }) async {
+    if (_markingPlayedIds.contains(item.id)) return;
+
+    final currentPlayed = item.played;
+    final nextPlayed = !currentPlayed;
+
+    setState(() => _markingPlayedIds.add(item.id));
+    try {
+      await access.adapter.updatePlaybackPosition(
+        access.auth,
+        itemId: item.id,
+        positionTicks: 0,
+        played: nextPlayed,
+      );
+
+      try {
+        await widget.appState.updateContinueWatchingAfterPlaybackMark(
+          item: item,
+          played: nextPlayed,
+        );
+      } catch (_) {
+        // Ignore cache update errors; playback mark already succeeded.
+      }
+      unawaited(widget.appState.loadHome(forceRefresh: true));
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nextPlayed
+                ? _t(
+                    language: widget.language,
+                    zh: '\u5df2\u6807\u8bb0\u4e3a\u5df2\u64ad\u653e',
+                    en: 'Marked as watched',
+                  )
+                : _t(
+                    language: widget.language,
+                    zh: '\u5df2\u6807\u8bb0\u4e3a\u672a\u64ad\u653e',
+                    en: 'Marked as unwatched',
+                  ),
+          ),
+          duration: const Duration(milliseconds: 1200),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              language: widget.language,
+              zh: '\u6807\u8bb0\u5931\u8d25\uff1a$e',
+              en: 'Failed to update: $e',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _markingPlayedIds.remove(item.id));
+    }
+  }
 
   List<MediaItem> _applyActiveTabFilter(List<MediaItem> items) {
     if (widget.activeTab == DesktopHomeTab.home) return items;
@@ -458,20 +495,16 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
     required ServerAccess? access,
     required bool favoriteMode,
   }) {
-    return FutureBuilder<List<MediaItem>>(
-      future: _continueFuture ??
-          widget.appState.loadContinueWatching(
-            forceRefresh: false,
-          ),
-      builder: (context, snapshot) {
-        final sourceItems = snapshot.data ?? _continueItems;
-        final items = _applyActiveTabFilter(sourceItems);
-        if (favoriteMode &&
-            items.isEmpty &&
-            snapshot.connectionState != ConnectionState.waiting) {
-          return const SizedBox.shrink();
-        }
-        return _PosterRailSection(
+    final sourceItems = widget.appState.continueWatching;
+    final items = _applyActiveTabFilter(sourceItems);
+    final loading =
+        widget.appState.isContinueWatchingLoading && sourceItems.isEmpty;
+
+    if (favoriteMode && items.isEmpty && !loading) {
+      return const SizedBox.shrink();
+    }
+
+    return _PosterRailSection(
           prefixTitle: '',
           highlightedTitle: _t(
             language: widget.language,
@@ -480,12 +513,20 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
           ),
           items: items,
           access: access,
-          loading: snapshot.connectionState == ConnectionState.waiting &&
-              sourceItems.isEmpty,
+          loading: loading,
           language: widget.language,
           onOpenItem: widget.onOpenItem,
           isFavorite: _isFavorite,
           onToggleFavorite: _toggleFavorite,
+          onTogglePlayed: access == null
+              ? null
+              : (item) {
+                  if (_markingPlayedIds.contains(item.id)) return null;
+                  return () => _toggleContinueWatchingPlayed(
+                        access: access,
+                        item: item,
+                      );
+                },
           cardWidth: 224,
           cardImageAspectRatio: 16 / 9,
           railHeight: 242,
@@ -512,8 +553,6 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
                   }
                   unawaited(_openContinueWatchingPage());
                 },
-        );
-      },
     );
   }
 }
@@ -885,6 +924,7 @@ class _PosterRailSection extends StatelessWidget {
     required this.onOpenItem,
     required this.isFavorite,
     required this.onToggleFavorite,
+    this.onTogglePlayed,
     this.onViewAllTap,
     this.cardWidth = 160,
     this.cardImageAspectRatio = 2 / 3,
@@ -905,6 +945,7 @@ class _PosterRailSection extends StatelessWidget {
   final ValueChanged<MediaItem> onOpenItem;
   final bool Function(String itemId) isFavorite;
   final ValueChanged<String> onToggleFavorite;
+  final VoidCallback? Function(MediaItem item)? onTogglePlayed;
   final VoidCallback? onViewAllTap;
   final double cardWidth;
   final double cardImageAspectRatio;
@@ -1010,6 +1051,7 @@ class _PosterRailSection extends StatelessWidget {
                   subtitleOverride: subtitleBuilder?.call(item),
                   subtitleMaxLines: subtitleMaxLines,
                   onTap: () => onOpenItem(item),
+                  onTogglePlayed: onTogglePlayed?.call(item),
                   onToggleFavorite: () => onToggleFavorite(item.id),
                 );
               },

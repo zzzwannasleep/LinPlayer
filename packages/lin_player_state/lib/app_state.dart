@@ -663,6 +663,9 @@ class AppState extends ChangeNotifier {
       userId != null;
   bool get hasCachedContinueWatching =>
       (_continueWatching ?? const <MediaItem>[]).isNotEmpty;
+  List<MediaItem> get continueWatching =>
+      List.unmodifiable(_continueWatching ?? const <MediaItem>[]);
+  bool get isContinueWatchingLoading => _continueWatchingInFlight != null;
 
   String? get baseUrl {
     final v = activeServer?.baseUrl;
@@ -2963,6 +2966,157 @@ class AppState extends ChangeNotifier {
         _continueWatchingInFlight = null;
       }
     });
+  }
+
+  Future<void> updateContinueWatchingAfterPlaybackMark({
+    required MediaItem item,
+    required bool played,
+  }) async {
+    // Make sure any in-flight refresh doesn't override this explicit user action.
+    _continueWatchingRequestId += 1;
+
+    final key = _continueWatchingEntryKey(item);
+    final snapshot = (_continueWatching ?? const <MediaItem>[])
+        .toList(growable: true);
+
+    int indexOfKey = -1;
+    for (var i = 0; i < snapshot.length; i++) {
+      if (_continueWatchingEntryKey(snapshot[i]) == key) {
+        indexOfKey = i;
+        break;
+      }
+    }
+
+    List<MediaItem> normalize(List<MediaItem> items) {
+      final usedKeys = <String>{};
+      final usedIds = <String>{};
+      final out = <MediaItem>[];
+      for (final entry in items) {
+        final id = entry.id.trim();
+        if (id.isNotEmpty && !usedIds.add(id)) continue;
+        final entryKey = _continueWatchingEntryKey(entry);
+        if (!usedKeys.add(entryKey)) continue;
+        out.add(entry);
+        if (out.length >= 20) break;
+      }
+      return out;
+    }
+
+    Future<void> commit(List<MediaItem> items) async {
+      _continueWatching = normalize(items);
+      await _persistContinueWatchingCache();
+      notifyListeners();
+    }
+
+    if (!played) {
+      if (indexOfKey >= 0) {
+        snapshot[indexOfKey] = item;
+      } else {
+        snapshot.insert(0, item);
+      }
+      await commit(snapshot);
+      return;
+    }
+
+    final type = item.type.toLowerCase().trim();
+    if (type == 'episode') {
+      final next = await _tryResolveNextUpAfterEpisode(
+        episode: item,
+        excludeItemId: item.id,
+      );
+      if (next != null) {
+        final nextKey = _continueWatchingEntryKey(next);
+        final cleaned = <MediaItem>[];
+        for (final entry in snapshot) {
+          final entryKey = _continueWatchingEntryKey(entry);
+          if (entryKey == key || entryKey == nextKey) continue;
+          if (entry.id.trim().isNotEmpty &&
+              entry.id.trim() == next.id.trim()) {
+            continue;
+          }
+          cleaned.add(entry);
+        }
+        final insertAt = indexOfKey >= 0
+            ? indexOfKey.clamp(0, cleaned.length)
+            : 0;
+        cleaned.insert(insertAt, next);
+        await commit(cleaned);
+        return;
+      }
+      snapshot.removeWhere((entry) => _continueWatchingEntryKey(entry) == key);
+      await commit(snapshot);
+      return;
+    }
+
+    snapshot.removeWhere((entry) => _continueWatchingEntryKey(entry) == key);
+    await commit(snapshot);
+  }
+
+  Future<MediaItem?> _tryResolveNextUpAfterEpisode({
+    required MediaItem episode,
+    required String excludeItemId,
+  }) async {
+    final baseUrl = this.baseUrl;
+    final token = this.token;
+    final userId = this.userId;
+    if (baseUrl == null || token == null || userId == null) return null;
+
+    final seriesId = (episode.seriesId ?? '').trim();
+    final seriesName = episode.seriesName.trim();
+    if (seriesId.isEmpty && seriesName.isEmpty) return null;
+
+    bool matches(MediaItem item) {
+      if (item.played) return false;
+      final id = item.id.trim();
+      if (id.isEmpty || id == excludeItemId.trim()) return false;
+      final itemSeriesId = (item.seriesId ?? '').trim();
+      if (seriesId.isNotEmpty && itemSeriesId.isNotEmpty) {
+        return itemSeriesId == seriesId;
+      }
+      return item.seriesName.trim().isNotEmpty &&
+          item.seriesName.trim() == seriesName;
+    }
+
+    final api = EmbyApi(
+      hostOrUrl: baseUrl,
+      preferredScheme: 'https',
+      apiPrefix: apiPrefix,
+      serverType: serverType,
+      deviceId: _deviceId,
+    );
+
+    if (seriesId.isNotEmpty) {
+      try {
+        final res = await api.fetchNextUp(
+          token: token,
+          baseUrl: baseUrl,
+          userId: userId,
+          limit: 10,
+          seriesId: seriesId,
+        );
+        for (final item in res.items) {
+          if (matches(item)) return item;
+        }
+      } catch (_) {
+        // Fall back to global next up.
+      }
+    }
+
+    try {
+      final res = await api.fetchNextUp(
+        token: token,
+        baseUrl: baseUrl,
+        userId: userId,
+        limit: 60,
+      );
+      for (final item in res.items) {
+        if (matches(item)) return item;
+      }
+    } catch (_) {
+      return null;
+    }
+
+    return null;
   }
 
   Future<List<MediaItem>> _fetchContinueWatching() async {

@@ -941,13 +941,16 @@ class EmbyApi {
     required String baseUrl,
     required String userId,
     int limit = 30,
+    String? seriesId,
   }) async {
+    final resolvedSeriesId = (seriesId ?? '').trim();
     final url = Uri.parse(
       _apiUrl(
         baseUrl,
         'Shows/NextUp'
         '?UserId=$userId'
         '&Limit=$limit'
+        '${resolvedSeriesId.isEmpty ? '' : '&SeriesId=${Uri.encodeComponent(resolvedSeriesId)}'}'
         '&EnableUserData=true'
         '&EnableImages=true'
         '&ImageTypeLimit=1'

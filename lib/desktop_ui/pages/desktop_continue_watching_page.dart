@@ -31,6 +31,7 @@ class _DesktopContinueWatchingPageState
   bool _loading = true;
   String? _error;
   List<MediaItem> _items = const <MediaItem>[];
+  final Set<String> _markingPlayedIds = <String>{};
 
   @override
   void initState() {
@@ -67,6 +68,54 @@ class _DesktopContinueWatchingPageState
   void _openItem(MediaItem item) {
     widget.onOpenItem(item);
     Navigator.of(context).pop();
+  }
+
+  Future<void> _togglePlayed({
+    required ServerAccess access,
+    required MediaItem item,
+  }) async {
+    if (_markingPlayedIds.contains(item.id)) return;
+    final currentPlayed = item.played;
+    final nextPlayed = !currentPlayed;
+
+    setState(() => _markingPlayedIds.add(item.id));
+    try {
+      await access.adapter.updatePlaybackPosition(
+        access.auth,
+        itemId: item.id,
+        positionTicks: 0,
+        played: nextPlayed,
+      );
+      await widget.appState.updateContinueWatchingAfterPlaybackMark(
+        item: item,
+        played: nextPlayed,
+      );
+      unawaited(widget.appState.loadHome(forceRefresh: true));
+
+      if (!mounted) return;
+      setState(() => _items = widget.appState.continueWatching);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nextPlayed
+                ? widget.language.pick(zh: '\u5df2\u6807\u8bb0\u4e3a\u5df2\u64ad\u653e', en: 'Marked as watched')
+                : widget.language.pick(zh: '\u5df2\u6807\u8bb0\u4e3a\u672a\u64ad\u653e', en: 'Marked as unwatched'),
+          ),
+          duration: const Duration(milliseconds: 1200),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.language.pick(zh: '\u6807\u8bb0\u5931\u8d25\uff1a$e', en: 'Failed to update: $e'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _markingPlayedIds.remove(item.id));
+    }
   }
 
   String _itemTitle(MediaItem item) {
@@ -195,6 +244,9 @@ class _DesktopContinueWatchingPageState
               subtitleOverride: _itemSubtitle(item),
               subtitleMaxLines: 2,
               onTap: () => _openItem(item),
+              onTogglePlayed: access == null || _markingPlayedIds.contains(item.id)
+                  ? null
+                  : () => _togglePlayed(access: access, item: item),
             );
           },
         );
