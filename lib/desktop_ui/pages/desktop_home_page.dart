@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
@@ -69,7 +68,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
   @override
   void didPopNext() {
     if (!mounted) return;
-    _reloadContinueWatching(forceRefresh: true);
+    _reloadContinueWatching(forceRefresh: true, forceNewRequest: true);
     unawaited(widget.appState.loadHome(forceRefresh: true));
   }
 
@@ -104,6 +103,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
       setState(() {
         _continueWatchingFuture = widget.appState.loadContinueWatching(
           forceRefresh: forceContinueRefresh,
+          forceNewRequest: forceContinueRefresh,
         );
       });
     } catch (e) {
@@ -119,10 +119,14 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
     }
   }
 
-  void _reloadContinueWatching({bool forceRefresh = true}) {
+  void _reloadContinueWatching({
+    bool forceRefresh = true,
+    bool forceNewRequest = false,
+  }) {
     setState(() {
       _continueWatchingFuture = widget.appState.loadContinueWatching(
         forceRefresh: forceRefresh,
+        forceNewRequest: forceNewRequest,
       );
     });
   }
@@ -520,7 +524,10 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                                 await widget.appState.refreshLibraries();
                                 await widget.appState
                                     .loadHome(forceRefresh: true);
-                                _reloadContinueWatching(forceRefresh: true);
+                                _reloadContinueWatching(
+                                  forceRefresh: true,
+                                  forceNewRequest: true,
+                                );
                                 if (!sheetContext.mounted) return;
                                 Navigator.of(sheetContext).pop();
                               },
@@ -709,10 +716,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
 
     final previousPlayed = _isPlayed(item);
     final nextPlayed = !previousPlayed;
-    final runTimeTicks = item.runTimeTicks ?? 0;
-    final nextPositionTicks = nextPlayed
-        ? max(item.playbackPositionTicks, runTimeTicks > 0 ? runTimeTicks : 1)
-        : 0;
+    final nextPositionTicks = 0;
 
     setState(() {
       _updatingPlayedIds.add(item.id);
@@ -731,7 +735,7 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
         played: nextPlayed,
       );
       if (!mounted) return;
-      _reloadContinueWatching(forceRefresh: true);
+      _reloadContinueWatching(forceRefresh: true, forceNewRequest: true);
       unawaited(widget.appState.loadHome(forceRefresh: true));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1095,7 +1099,10 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                   const SizedBox(width: 12),
                   TextButton.icon(
                     onPressed: () =>
-                        _reloadContinueWatching(forceRefresh: true),
+                        _reloadContinueWatching(
+                          forceRefresh: true,
+                          forceNewRequest: true,
+                        ),
                     icon: const Icon(Icons.refresh),
                     label: const Text('重试'),
                   ),
@@ -1135,7 +1142,10 @@ class _DesktopHomePageState extends State<DesktopHomePage> with RouteAware {
                 actionLabel: '刷新',
                 onAction: _refreshing
                     ? null
-                    : () => _reloadContinueWatching(forceRefresh: true),
+                    : () => _reloadContinueWatching(
+                          forceRefresh: true,
+                          forceNewRequest: true,
+                        ),
               ),
               const SizedBox(height: 14),
               _HorizontalCarousel(

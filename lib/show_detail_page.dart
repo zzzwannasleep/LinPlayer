@@ -2783,7 +2783,12 @@ class _EpisodeDetailPageState extends State<EpisodeDetailPage> {
       if (!mounted) return;
       setState(() => _detail = detail);
 
-      unawaited(widget.appState.loadContinueWatching(forceRefresh: true));
+      unawaited(
+        widget.appState.loadContinueWatching(
+          forceRefresh: true,
+          forceNewRequest: true,
+        ),
+      );
       unawaited(widget.appState.loadHome(forceRefresh: true));
 
       ScaffoldMessenger.of(context).showSnackBar(

@@ -133,7 +133,10 @@ class _DesktopLibraryPageState extends State<DesktopLibraryPage> {
   }
 
   Future<void> _refreshContinueWatchingInBackground() async {
-    final future = widget.appState.loadContinueWatching(forceRefresh: true);
+    final future = widget.appState.loadContinueWatching(
+      forceRefresh: true,
+      forceNewRequest: true,
+    );
     setState(() => _continueFuture = future);
     await _bindContinueFuture(future);
   }

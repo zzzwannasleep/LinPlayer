@@ -243,6 +243,7 @@ class AppState extends ChangeNotifier {
   Future<List<MediaItem>>? _randomRecommendationsInFlight;
   List<MediaItem>? _continueWatching;
   Future<List<MediaItem>>? _continueWatchingInFlight;
+  int _continueWatchingRequestId = 0;
   late final String _deviceId = _randomId();
   ThemeMode _themeMode = ThemeMode.system;
   double _uiScaleFactor = 1.0;
@@ -2920,6 +2921,7 @@ class AppState extends ChangeNotifier {
 
   Future<List<MediaItem>> loadContinueWatching({
     bool forceRefresh = false,
+    bool forceNewRequest = false,
   }) {
     final localSnapshot =
         (_continueWatching ?? const <MediaItem>[]).toList(growable: false);
@@ -2933,13 +2935,17 @@ class AppState extends ChangeNotifier {
     if (!forceRefresh) {
       if (localSnapshot.isNotEmpty) return Future.value(localSnapshot);
       if (inFlight != null) return inFlight;
-    } else if (inFlight != null) {
+    } else if (inFlight != null && !forceNewRequest) {
       return inFlight;
     }
 
+    final requestId = ++_continueWatchingRequestId;
     final future = _fetchContinueWatching();
     _continueWatchingInFlight = future;
     return future.then((remoteItems) async {
+      if (requestId != _continueWatchingRequestId) {
+        return remoteItems;
+      }
       final merged = localSnapshot.isEmpty
           ? remoteItems
           : _mergeContinueWatching(
@@ -2950,6 +2956,7 @@ class AppState extends ChangeNotifier {
             );
       _continueWatching = merged;
       await _persistContinueWatchingCache();
+      notifyListeners();
       return merged;
     }).whenComplete(() {
       if (_continueWatchingInFlight == future) {
@@ -2976,6 +2983,9 @@ class AppState extends ChangeNotifier {
       // otherwise end up with too few unique shows.
       limit: 60,
     );
+    final resumeItems = resumeRes.items
+        .where((item) => !item.played)
+        .toList(growable: false);
 
     List<MediaItem> nextUpItems = const <MediaItem>[];
     try {
@@ -3001,7 +3011,7 @@ class AppState extends ChangeNotifier {
       }
     }
 
-    appendAll(resumeRes.items);
+    appendAll(resumeItems);
     if (deduped.length < 20) appendAll(nextUpItems);
     return deduped;
   }

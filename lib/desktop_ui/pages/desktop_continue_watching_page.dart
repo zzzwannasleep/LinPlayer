@@ -44,8 +44,10 @@ class _DesktopContinueWatchingPageState
       _error = null;
     });
     try {
-      final fetched = await widget.appState
-          .loadContinueWatching(forceRefresh: forceRefresh);
+      final fetched = await widget.appState.loadContinueWatching(
+        forceRefresh: forceRefresh,
+        forceNewRequest: forceRefresh,
+      );
       if (!mounted) return;
       setState(() {
         _items = fetched;

@@ -139,13 +139,7 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
     }
 
     final nextPlayed = !currentPlayed;
-    final runTimeTicks = item.runTimeTicks ?? 0;
-    final nextPositionTicks = nextPlayed
-        ? math.max(
-            item.playbackPositionTicks,
-            runTimeTicks > 0 ? runTimeTicks : 1,
-          )
-        : 0;
+    final nextPositionTicks = 0;
 
     setState(() {
       _markingPlayed = true;
@@ -162,7 +156,10 @@ class _DesktopDetailPageState extends State<DesktopDetailPage> {
 
       unawaited(widget.viewModel.load(forceRefresh: true));
       try {
-        await widget.viewModel.appState.loadContinueWatching(forceRefresh: true);
+        await widget.viewModel.appState.loadContinueWatching(
+          forceRefresh: true,
+          forceNewRequest: true,
+        );
       } catch (_) {
         // Ignore refresh errors; playback mark already succeeded.
       }

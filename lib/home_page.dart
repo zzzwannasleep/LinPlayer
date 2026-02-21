@@ -1638,7 +1638,10 @@ class _ContinueWatchingSectionState extends State<_ContinueWatchingSection>
   }
 
   Future<List<MediaItem>> _fetch({bool forceRefresh = false}) {
-    return widget.appState.loadContinueWatching(forceRefresh: forceRefresh);
+    return widget.appState.loadContinueWatching(
+      forceRefresh: forceRefresh,
+      forceNewRequest: forceRefresh,
+    );
   }
 
   void _reload() {
