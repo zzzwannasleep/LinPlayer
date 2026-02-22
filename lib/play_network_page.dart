@@ -5653,7 +5653,9 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
             ),
             const SizedBox(width: 6),
             Expanded(
-              child: Center(
+              child: Align(
+                alignment: Alignment.center,
+                heightFactor: 1,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 560),
                   child: Container(
