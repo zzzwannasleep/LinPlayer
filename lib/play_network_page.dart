@@ -5,6 +5,7 @@ import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lin_player_player/lin_player_player.dart';
@@ -162,6 +163,12 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
 
   double? _longPressBaseRate;
   Offset? _longPressStartPos;
+  static const Duration _desktopSecondarySpeedHoldDelay =
+      Duration(milliseconds: 220);
+  Timer? _desktopSecondarySpeedTimer;
+  int? _desktopSecondarySpeedPointer;
+  double? _desktopSecondarySpeedBaseRate;
+  bool _desktopSecondarySpeedActive = false;
 
   String? get _baseUrl => widget.server?.baseUrl ?? widget.appState.baseUrl;
   String? get _token => widget.server?.token ?? widget.appState.token;
@@ -2155,6 +2162,16 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     return h > 0 ? '${two(h)}:${two(m)}:${two(s)}' : '${two(m)}:${two(s)}';
   }
 
+  static String _fmtRate(double rate) {
+    final v = rate.clamp(0.1, 5.0).toDouble();
+    final asInt = v.roundToDouble();
+    if ((v - asInt).abs() < 0.001) return asInt.toStringAsFixed(0);
+    if (((v * 10) - (v * 10).roundToDouble()).abs() < 0.001) {
+      return v.toStringAsFixed(1);
+    }
+    return v.toStringAsFixed(2);
+  }
+
   static int? _asInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
@@ -2825,6 +2842,8 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _gestureOverlayTimer = null;
     _tvOkLongPressTimer?.cancel();
     _tvOkLongPressTimer = null;
+    _desktopSecondarySpeedTimer?.cancel();
+    _desktopSecondarySpeedTimer = null;
     _netSpeedTimer?.cancel();
     _netSpeedTimer = null;
     _serverProgressSync?.dispose();
@@ -3407,6 +3426,62 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
     _hideGestureOverlay();
   }
 
+  void _onDesktopSecondarySpeedPointerDown(
+    PointerDownEvent event, {
+    required bool controlsEnabled,
+  }) {
+    if (!controlsEnabled) return;
+    if (!_useDesktopPlaybackUi) return;
+    if (!_gesturesEnabled) return;
+    if (_playerService.isExternalPlayback) return;
+    if ((event.buttons & kSecondaryMouseButton) == 0) return;
+    if (_desktopSecondarySpeedPointer != null) return;
+
+    final pointer = event.pointer;
+    _desktopSecondarySpeedPointer = pointer;
+    _desktopSecondarySpeedTimer?.cancel();
+    _desktopSecondarySpeedTimer = Timer(_desktopSecondarySpeedHoldDelay, () {
+      if (!mounted) return;
+      if (_desktopSecondarySpeedPointer != pointer) return;
+      if (!_gesturesEnabled) return;
+      if (_playerService.isExternalPlayback) return;
+      final player = _playerService.player;
+      _desktopSecondarySpeedBaseRate = player.state.rate;
+      _desktopSecondarySpeedActive = true;
+      // ignore: unawaited_futures
+      player.setRate(2.0);
+      _setGestureOverlay(icon: Icons.speed, text: '倍速 2x');
+    });
+  }
+
+  void _onDesktopSecondarySpeedPointerUp(PointerUpEvent event) {
+    if (event.pointer != _desktopSecondarySpeedPointer) return;
+    _cancelDesktopSecondarySpeedHold();
+  }
+
+  void _onDesktopSecondarySpeedPointerCancel(PointerCancelEvent event) {
+    if (event.pointer != _desktopSecondarySpeedPointer) return;
+    _cancelDesktopSecondarySpeedHold();
+  }
+
+  void _cancelDesktopSecondarySpeedHold() {
+    _desktopSecondarySpeedTimer?.cancel();
+    _desktopSecondarySpeedTimer = null;
+    _desktopSecondarySpeedPointer = null;
+    final base = _desktopSecondarySpeedBaseRate;
+    _desktopSecondarySpeedBaseRate = null;
+    final wasActive = _desktopSecondarySpeedActive;
+    _desktopSecondarySpeedActive = false;
+    if (wasActive &&
+        base != null &&
+        _playerService.isInitialized &&
+        !_playerService.isExternalPlayback) {
+      // ignore: unawaited_futures
+      _playerService.player.setRate(base);
+      _hideGestureOverlay();
+    }
+  }
+
   Future<void> _switchCore() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
       if (!mounted) return;
@@ -3947,76 +4022,95 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                                       final sideDragEnabled =
                                           widget.appState.gestureBrightness ||
                                               widget.appState.gestureVolume;
-                                      return GestureDetector(
+                                      return Listener(
                                         behavior: HitTestBehavior.translucent,
-                                        onTap: _toggleControls,
-                                        onDoubleTapDown: controlsEnabled
-                                            ? (d) => _doubleTapDownPosition =
-                                                d.localPosition
-                                            : null,
-                                        onDoubleTap: controlsEnabled
-                                            ? () {
-                                                final pos =
-                                                    _doubleTapDownPosition ??
-                                                        Offset(w / 2, 0);
-                                                // ignore: unawaited_futures
-                                                _handleDoubleTap(pos, w);
-                                              }
-                                            : null,
-                                        onHorizontalDragStart:
-                                            (controlsEnabled &&
-                                                    widget.appState.gestureSeek)
-                                                ? _onSeekDragStart
-                                                : null,
-                                        onHorizontalDragUpdate:
-                                            (controlsEnabled &&
-                                                    widget.appState.gestureSeek)
-                                                ? (d) => _onSeekDragUpdate(
-                                                      d,
-                                                      width: w,
-                                                      duration: duration,
-                                                    )
-                                                : null,
-                                        onHorizontalDragEnd: (controlsEnabled &&
-                                                widget.appState.gestureSeek)
-                                            ? _onSeekDragEnd
-                                            : null,
-                                        onVerticalDragStart: (controlsEnabled &&
-                                                sideDragEnabled)
-                                            ? (d) =>
-                                                _onSideDragStart(d, width: w)
-                                            : null,
-                                        onVerticalDragUpdate:
-                                            (controlsEnabled && sideDragEnabled)
-                                                ? (d) => _onSideDragUpdate(d,
-                                                    height: h)
-                                                : null,
-                                        onVerticalDragEnd:
-                                            (controlsEnabled && sideDragEnabled)
-                                                ? _onSideDragEnd
-                                                : null,
-                                        onLongPressStart: (controlsEnabled &&
-                                                widget.appState
-                                                    .gestureLongPressSpeed)
-                                            ? _onLongPressStart
-                                            : null,
-                                        onLongPressMoveUpdate:
-                                            (controlsEnabled &&
-                                                    widget.appState
-                                                        .gestureLongPressSpeed &&
-                                                    widget.appState
-                                                        .longPressSlideSpeed)
-                                                ? (d) => _onLongPressMoveUpdate(
-                                                      d,
-                                                      height: h,
-                                                    )
-                                                : null,
-                                        onLongPressEnd: (controlsEnabled &&
-                                                widget.appState
-                                                    .gestureLongPressSpeed)
-                                            ? _onLongPressEnd
-                                            : null,
-                                        child: const SizedBox.expand(),
+                                        onPointerDown: (e) =>
+                                            _onDesktopSecondarySpeedPointerDown(
+                                          e,
+                                          controlsEnabled: controlsEnabled,
+                                        ),
+                                        onPointerUp:
+                                            _onDesktopSecondarySpeedPointerUp,
+                                        onPointerCancel:
+                                            _onDesktopSecondarySpeedPointerCancel,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.translucent,
+                                          onTap: _toggleControls,
+                                          onDoubleTapDown: controlsEnabled
+                                              ? (d) =>
+                                                  _doubleTapDownPosition =
+                                                      d.localPosition
+                                              : null,
+                                          onDoubleTap: controlsEnabled
+                                              ? () {
+                                                  final pos =
+                                                      _doubleTapDownPosition ??
+                                                          Offset(w / 2, 0);
+                                                  // ignore: unawaited_futures
+                                                  _handleDoubleTap(pos, w);
+                                                }
+                                              : null,
+                                          onHorizontalDragStart:
+                                              (controlsEnabled &&
+                                                      widget.appState
+                                                          .gestureSeek)
+                                                  ? _onSeekDragStart
+                                                  : null,
+                                          onHorizontalDragUpdate:
+                                              (controlsEnabled &&
+                                                      widget.appState
+                                                          .gestureSeek)
+                                                  ? (d) => _onSeekDragUpdate(
+                                                        d,
+                                                        width: w,
+                                                        duration: duration,
+                                                      )
+                                                  : null,
+                                          onHorizontalDragEnd:
+                                              (controlsEnabled &&
+                                                      widget.appState
+                                                          .gestureSeek)
+                                                  ? _onSeekDragEnd
+                                                  : null,
+                                          onVerticalDragStart:
+                                              (controlsEnabled &&
+                                                      sideDragEnabled)
+                                                  ? (d) => _onSideDragStart(d,
+                                                      width: w)
+                                                  : null,
+                                          onVerticalDragUpdate:
+                                              (controlsEnabled &&
+                                                      sideDragEnabled)
+                                                  ? (d) => _onSideDragUpdate(d,
+                                                      height: h)
+                                                  : null,
+                                          onVerticalDragEnd:
+                                              (controlsEnabled &&
+                                                      sideDragEnabled)
+                                                  ? _onSideDragEnd
+                                                  : null,
+                                          onLongPressStart: (controlsEnabled &&
+                                                  widget.appState
+                                                      .gestureLongPressSpeed)
+                                              ? _onLongPressStart
+                                              : null,
+                                          onLongPressMoveUpdate: (controlsEnabled &&
+                                                  widget.appState
+                                                      .gestureLongPressSpeed &&
+                                                  widget.appState
+                                                      .longPressSlideSpeed)
+                                              ? (d) => _onLongPressMoveUpdate(
+                                                    d,
+                                                    height: h,
+                                                  )
+                                              : null,
+                                          onLongPressEnd: (controlsEnabled &&
+                                                  widget.appState
+                                                      .gestureLongPressSpeed)
+                                              ? _onLongPressEnd
+                                              : null,
+                                          child: const SizedBox.expand(),
+                                        ),
                                       );
                                     },
                                   ),
@@ -5304,61 +5398,73 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                       final sideDragEnabled =
                           widget.appState.gestureBrightness ||
                               widget.appState.gestureVolume;
-                      return GestureDetector(
+                      return Listener(
                         behavior: HitTestBehavior.translucent,
-                        onTap: _toggleControls,
-                        onDoubleTapDown: controlsEnabled
-                            ? (d) => _doubleTapDownPosition = d.localPosition
-                            : null,
-                        onDoubleTap: controlsEnabled
-                            ? () {
-                                final pos =
-                                    _doubleTapDownPosition ?? Offset(w / 2, 0);
-                                // ignore: unawaited_futures
-                                _handleDoubleTap(pos, w);
-                              }
-                            : null,
-                        onHorizontalDragStart:
-                            (controlsEnabled && widget.appState.gestureSeek)
-                                ? _onSeekDragStart
-                                : null,
-                        onHorizontalDragUpdate:
-                            (controlsEnabled && widget.appState.gestureSeek)
-                                ? (d) => _onSeekDragUpdate(
-                                      d,
-                                      width: w,
-                                      duration: duration,
-                                    )
-                                : null,
-                        onHorizontalDragEnd:
-                            (controlsEnabled && widget.appState.gestureSeek)
-                                ? _onSeekDragEnd
-                                : null,
-                        onVerticalDragStart:
-                            (controlsEnabled && sideDragEnabled)
-                                ? (d) => _onSideDragStart(d, width: w)
-                                : null,
-                        onVerticalDragUpdate:
-                            (controlsEnabled && sideDragEnabled)
-                                ? (d) => _onSideDragUpdate(d, height: h)
-                                : null,
-                        onVerticalDragEnd: (controlsEnabled && sideDragEnabled)
-                            ? _onSideDragEnd
-                            : null,
-                        onLongPressStart: (controlsEnabled &&
-                                widget.appState.gestureLongPressSpeed)
-                            ? _onLongPressStart
-                            : null,
-                        onLongPressMoveUpdate: (controlsEnabled &&
-                                widget.appState.gestureLongPressSpeed &&
-                                widget.appState.longPressSlideSpeed)
-                            ? (d) => _onLongPressMoveUpdate(d, height: h)
-                            : null,
-                        onLongPressEnd: (controlsEnabled &&
-                                widget.appState.gestureLongPressSpeed)
-                            ? _onLongPressEnd
-                            : null,
-                        child: const SizedBox.expand(),
+                        onPointerDown: (e) =>
+                            _onDesktopSecondarySpeedPointerDown(
+                          e,
+                          controlsEnabled: controlsEnabled,
+                        ),
+                        onPointerUp: _onDesktopSecondarySpeedPointerUp,
+                        onPointerCancel: _onDesktopSecondarySpeedPointerCancel,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _toggleControls,
+                          onDoubleTapDown: controlsEnabled
+                              ? (d) =>
+                                  _doubleTapDownPosition = d.localPosition
+                              : null,
+                          onDoubleTap: controlsEnabled
+                              ? () {
+                                  final pos = _doubleTapDownPosition ??
+                                      Offset(w / 2, 0);
+                                  // ignore: unawaited_futures
+                                  _handleDoubleTap(pos, w);
+                                }
+                              : null,
+                          onHorizontalDragStart:
+                              (controlsEnabled && widget.appState.gestureSeek)
+                                  ? _onSeekDragStart
+                                  : null,
+                          onHorizontalDragUpdate:
+                              (controlsEnabled && widget.appState.gestureSeek)
+                                  ? (d) => _onSeekDragUpdate(
+                                        d,
+                                        width: w,
+                                        duration: duration,
+                                      )
+                                  : null,
+                          onHorizontalDragEnd:
+                              (controlsEnabled && widget.appState.gestureSeek)
+                                  ? _onSeekDragEnd
+                                  : null,
+                          onVerticalDragStart:
+                              (controlsEnabled && sideDragEnabled)
+                                  ? (d) => _onSideDragStart(d, width: w)
+                                  : null,
+                          onVerticalDragUpdate:
+                              (controlsEnabled && sideDragEnabled)
+                                  ? (d) => _onSideDragUpdate(d, height: h)
+                                  : null,
+                          onVerticalDragEnd:
+                              (controlsEnabled && sideDragEnabled)
+                                  ? _onSideDragEnd
+                                  : null,
+                          onLongPressStart: (controlsEnabled &&
+                                  widget.appState.gestureLongPressSpeed)
+                              ? _onLongPressStart
+                              : null,
+                          onLongPressMoveUpdate: (controlsEnabled &&
+                                  widget.appState.gestureLongPressSpeed &&
+                                  widget.appState.longPressSlideSpeed)
+                              ? (d) => _onLongPressMoveUpdate(d, height: h)
+                              : null,
+                          onLongPressEnd: (controlsEnabled &&
+                                  widget.appState.gestureLongPressSpeed)
+                              ? _onLongPressEnd
+                              : null,
+                          child: const SizedBox.expand(),
+                        ),
                       );
                     },
                   ),
@@ -5573,105 +5679,108 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
               ),
             ),
             const SizedBox(width: 12),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: chipBg,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: chipBorder,
+            SizedBox(
+              height: 44,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: chipBg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: chipBorder,
+                        ),
+                      ),
+                      child: Text(
+                        '缓冲网速 ${_desktopNetSpeedMbPerSecondLabel()}',
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: subtitleColor,
+                                  fontWeight: FontWeight.w600,
+                                ),
                       ),
                     ),
-                    child: Text(
-                      '缓冲网速 ${_desktopNetSpeedMbPerSecondLabel()}',
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                            color: subtitleColor,
-                            fontWeight: FontWeight.w600,
-                          ),
+                    const SizedBox(width: 8),
+                    _desktopTopActionChip(
+                      context,
+                      isDark: isDark,
+                      icon: switchingRoute ? Icons.sync : Icons.route_outlined,
+                      label: switchingRoute ? '切换中' : '切换线路',
+                      active: switchingRoute,
+                      tooltip: _desktopRouteTooltipText(),
+                      onTap: controlsEnabled
+                          ? () {
+                              // ignore: unawaited_futures
+                              unawaited(_showDesktopRouteSheet());
+                            }
+                          : null,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  _desktopTopActionChip(
-                    context,
-                    isDark: isDark,
-                    icon: switchingRoute ? Icons.sync : Icons.route_outlined,
-                    label: switchingRoute ? '切换中' : '切换线路',
-                    active: switchingRoute,
-                    tooltip: _desktopRouteTooltipText(),
-                    onTap: controlsEnabled
-                        ? () {
-                            // ignore: unawaited_futures
-                            unawaited(_showDesktopRouteSheet());
-                          }
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _desktopTopActionChip(
-                    context,
-                    isDark: isDark,
-                    icon: Icons.video_file_outlined,
-                    label: '版本',
-                    active: (_selectedMediaSourceId ?? '').trim().isNotEmpty,
-                    tooltip: _desktopVersionTooltipText(),
-                    onTap: controlsEnabled
-                        ? () {
-                            // ignore: unawaited_futures
-                            unawaited(_showDesktopVersionSheet());
-                          }
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _desktopTopActionChip(
-                    context,
-                    isDark: isDark,
-                    icon: Icons.audiotrack_outlined,
-                    label: '音轨选择',
-                    active: false,
-                    onTap: controlsEnabled
-                        ? () => _showAudioTracks(context)
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _desktopTopActionChip(
-                    context,
-                    isDark: isDark,
-                    icon: Icons.subtitles_outlined,
-                    label: '字幕选择',
-                    active: false,
-                    onTap: controlsEnabled
-                        ? () => _showSubtitleTracks(context)
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _desktopTopActionChip(
-                    context,
-                    isDark: isDark,
-                    icon: Icons.comment_outlined,
-                    label: '弹幕',
-                    active: false,
-                    onTap: controlsEnabled
-                        ? () {
-                            // ignore: unawaited_futures
-                            unawaited(_showDanmakuSheet());
-                          }
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  _desktopTopActionChip(
-                    context,
-                    isDark: isDark,
-                    icon: _anime4kPreset.isOff
-                        ? Icons.auto_fix_high_outlined
-                        : Icons.auto_fix_high,
-                    label: 'Anime4K',
-                    onTap: controlsEnabled ? _showAnime4kSheet : null,
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    _desktopTopActionChip(
+                      context,
+                      isDark: isDark,
+                      icon: Icons.video_file_outlined,
+                      label: '版本',
+                      active: (_selectedMediaSourceId ?? '').trim().isNotEmpty,
+                      tooltip: _desktopVersionTooltipText(),
+                      onTap: controlsEnabled
+                          ? () {
+                              // ignore: unawaited_futures
+                              unawaited(_showDesktopVersionSheet());
+                            }
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _desktopTopActionChip(
+                      context,
+                      isDark: isDark,
+                      icon: Icons.audiotrack_outlined,
+                      label: '音轨选择',
+                      active: false,
+                      onTap: controlsEnabled ? () => _showAudioTracks(context) : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _desktopTopActionChip(
+                      context,
+                      isDark: isDark,
+                      icon: Icons.subtitles_outlined,
+                      label: '字幕选择',
+                      active: false,
+                      onTap:
+                          controlsEnabled ? () => _showSubtitleTracks(context) : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _desktopTopActionChip(
+                      context,
+                      isDark: isDark,
+                      icon: Icons.comment_outlined,
+                      label: '弹幕',
+                      active: false,
+                      onTap: controlsEnabled
+                          ? () {
+                              // ignore: unawaited_futures
+                              unawaited(_showDanmakuSheet());
+                            }
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    _desktopTopActionChip(
+                      context,
+                      isDark: isDark,
+                      icon: _anime4kPreset.isOff
+                          ? Icons.auto_fix_high_outlined
+                          : Icons.auto_fix_high,
+                      label: 'Anime4K',
+                      onTap: controlsEnabled ? _showAnime4kSheet : null,
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -6698,7 +6807,7 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
         .clamp(0, sliderMaxMs);
     final rate =
         _playerService.isInitialized ? _playerService.player.state.rate : 1.0;
-    final speedHint = '${rate.toStringAsFixed(2)}x';
+    final speedHint = '${_fmtRate(rate)}x';
 
     return _buildDesktopGlassPanel(
       context: context,
@@ -6781,86 +6890,116 @@ class _PlayNetworkPageState extends State<PlayNetworkPage>
                 ],
               ),
             ),
-            if (_desktopSpeedPanelVisible) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Container(
-                  width: 290,
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.black.withValues(alpha: 0.42)
-                        : Colors.black.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: panelBorder),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            '倍速',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
-                                ?.copyWith(
-                                  color: secondaryIconColor,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            speedHint,
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
-                                ?.copyWith(
-                                  color: iconColor,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ],
-                      ),
-                      Slider(
-                        min: 0.1,
-                        max: 5.0,
-                        divisions: 49,
-                        value: rate.clamp(0.1, 5.0).toDouble(),
-                        onChanged: !controlsEnabled
-                            ? null
-                            : (value) {
-                                // ignore: unawaited_futures
-                                _playerService.player.setRate(value);
-                                setState(() {});
-                              },
-                      ),
-                      DefaultTextStyle(
-                        style: Theme.of(context).textTheme.labelSmall!.copyWith(
-                              color: secondaryIconColor,
-                            ),
-                        child: const Row(
-                          children: [
-                            Text('0.1x'),
-                            Spacer(),
-                            Text('0.5x'),
-                            Spacer(),
-                            Text('1x'),
-                            Spacer(),
-                            Text('2x'),
-                            Spacer(),
-                            Text('3x'),
-                            Spacer(),
-                            Text('5x'),
-                          ],
+          if (_desktopSpeedPanelVisible) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                width: 290,
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.black.withValues(alpha: 0.42)
+                      : Colors.black.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: panelBorder),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '倍速',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(
+                                color: secondaryIconColor,
+                                fontWeight: FontWeight.w600,
+                              ),
                         ),
-                      ),
-                    ],
-                  ),
+                        const Spacer(),
+                        Text(
+                          speedHint,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(
+                                color: iconColor,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final option in const <double>[
+                          0.1,
+                          0.25,
+                          0.5,
+                          0.75,
+                          1,
+                          1.25,
+                          1.5,
+                          1.75,
+                          2,
+                          3,
+                          5,
+                        ])
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              backgroundColor:
+                                  (rate - option).abs() < 0.01
+                                      ? (isDark
+                                          ? Colors.white
+                                              .withValues(alpha: 0.20)
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withValues(alpha: 0.10))
+                                      : (isDark
+                                          ? Colors.white
+                                              .withValues(alpha: 0.08)
+                                          : Colors.white
+                                              .withValues(alpha: 0.92)),
+                              foregroundColor:
+                                  (rate - option).abs() < 0.01
+                                      ? iconColor
+                                      : secondaryIconColor,
+                              side: BorderSide(
+                                color: (rate - option).abs() < 0.01
+                                    ? Theme.of(context).colorScheme.primary
+                                    : panelBorder,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            onPressed: !controlsEnabled
+                                ? null
+                                : () {
+                                    // ignore: unawaited_futures
+                                    _playerService.player.setRate(option);
+                                    setState(() {});
+                                  },
+                            child: Text('${_fmtRate(option)}x'),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ],
+            ),
+          ],
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
