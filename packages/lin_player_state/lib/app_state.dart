@@ -2860,9 +2860,35 @@ class AppState extends ChangeNotifier {
       final seriesId = (item.seriesId ?? '').trim();
       if (seriesId.isNotEmpty) return 'series:$seriesId';
       final seriesName = item.seriesName.trim();
-      if (seriesName.isNotEmpty) return 'seriesName:$seriesName';
+      if (seriesName.isNotEmpty) {
+        return 'seriesName:${seriesName.toLowerCase()}';
+      }
     }
-    return 'item:${item.id}';
+    return 'item:${item.id.trim()}';
+  }
+
+  bool _isSameContinueWatchingEntry(MediaItem a, MediaItem b) {
+    final aType = a.type.toLowerCase().trim();
+    final bType = b.type.toLowerCase().trim();
+
+    if (aType == 'episode' && bType == 'episode') {
+      final aSeriesId = (a.seriesId ?? '').trim();
+      final bSeriesId = (b.seriesId ?? '').trim();
+      if (aSeriesId.isNotEmpty && bSeriesId.isNotEmpty) {
+        return aSeriesId == bSeriesId;
+      }
+
+      final aSeriesName = a.seriesName.trim().toLowerCase();
+      final bSeriesName = b.seriesName.trim().toLowerCase();
+      if (aSeriesName.isNotEmpty && bSeriesName.isNotEmpty) {
+        return aSeriesName == bSeriesName;
+      }
+    }
+
+    final aId = a.id.trim();
+    final bId = b.id.trim();
+    if (aId.isNotEmpty && bId.isNotEmpty) return aId == bId;
+    return _continueWatchingEntryKey(a) == _continueWatchingEntryKey(b);
   }
 
   MediaItem _pickPreferredContinueWatchingItem(MediaItem a, MediaItem b) {
@@ -2900,62 +2926,98 @@ class AppState extends ChangeNotifier {
     required bool remotePreferredForEpisodes,
   }
   ) {
-    final mergedByKey = <String, MediaItem>{};
+    MediaItem pick(MediaItem remote, MediaItem local) {
+      final remoteType = remote.type.toLowerCase().trim();
+      final localType = local.type.toLowerCase().trim();
+      final remoteId = remote.id.trim();
+      final localId = local.id.trim();
+
+      if (remotePreferredForEpisodes &&
+          remoteType == 'episode' &&
+          localType == 'episode' &&
+          remoteId.isNotEmpty &&
+          localId.isNotEmpty &&
+          remoteId != localId) {
+        if (remote.playbackPositionTicks > 0 || local.playbackPositionTicks > 0) {
+          return remote;
+        }
+      }
+      return _pickPreferredContinueWatchingItem(remote, local);
+    }
+
+    final mergedLocal = <MediaItem>[];
     for (final item in localItems) {
-      final key = _continueWatchingEntryKey(item);
-      final existing = mergedByKey[key];
-      if (existing == null) {
-        mergedByKey[key] = item;
+      final index = mergedLocal.indexWhere(
+        (existing) => _isSameContinueWatchingEntry(existing, item),
+      );
+      if (index < 0) {
+        mergedLocal.add(item);
       } else {
-        mergedByKey[key] = _pickPreferredContinueWatchingItem(existing, item);
+        mergedLocal[index] = _pickPreferredContinueWatchingItem(
+          mergedLocal[index],
+          item,
+        );
       }
     }
 
+    final remainingLocal = mergedLocal.toList(growable: true);
     final ordered = <MediaItem>[];
-    final used = <String>{};
-    for (final item in remoteItems) {
-      final key = _continueWatchingEntryKey(item);
-      final local = mergedByKey[key];
-      final chosen = local == null
-          ? item
-          : (remotePreferredForEpisodes &&
-                  item.type.toLowerCase().trim() == 'episode' &&
-                  local.type.toLowerCase().trim() == 'episode' &&
-                  item.id.trim().isNotEmpty &&
-                  local.id.trim().isNotEmpty &&
-                  item.id.trim() != local.id.trim())
-              ? (item.playbackPositionTicks > 0 || local.playbackPositionTicks > 0)
-                  ? item
-                  : _pickPreferredContinueWatchingItem(item, local)
-              : _pickPreferredContinueWatchingItem(item, local);
-      if (used.add(key)) ordered.add(chosen);
-      mergedByKey.remove(key);
-      if (ordered.length >= 20) break;
+
+    for (final remote in remoteItems) {
+      final localIndex = remainingLocal.indexWhere(
+        (local) => _isSameContinueWatchingEntry(local, remote),
+      );
+      final local = localIndex < 0 ? null : remainingLocal.removeAt(localIndex);
+      final chosen = local == null ? remote : pick(remote, local);
+
+      final existingIndex = ordered.indexWhere(
+        (existing) => _isSameContinueWatchingEntry(existing, chosen),
+      );
+      if (existingIndex >= 0) {
+        ordered[existingIndex] = _pickPreferredContinueWatchingItem(
+          ordered[existingIndex],
+          chosen,
+        );
+      } else {
+        ordered.add(chosen);
+        if (ordered.length >= 20) break;
+      }
     }
 
     if (keepLocalOnly) {
-      for (final entry in mergedByKey.entries) {
-        if (used.add(entry.key)) ordered.add(entry.value);
+      for (final entry in remainingLocal) {
         if (ordered.length >= 20) break;
-      }
-    } else {
-      for (final entry in mergedByKey.entries) {
-        if (!_shouldKeepLocalOnlyContinueWatchingEntryOnRefresh(entry.value)) {
-          continue;
+        final existingIndex = ordered.indexWhere(
+          (existing) => _isSameContinueWatchingEntry(existing, entry),
+        );
+        if (existingIndex >= 0) {
+          ordered[existingIndex] = _pickPreferredContinueWatchingItem(
+            ordered[existingIndex],
+            entry,
+          );
+        } else {
+          ordered.add(entry);
         }
-        if (used.contains(entry.key)) continue;
-
-        if (ordered.length >= 20 && ordered.isNotEmpty) {
-          final removedKey = _continueWatchingEntryKey(ordered.removeLast());
-          used.remove(removedKey);
-        }
-        if (ordered.length >= 20) break;
-
-        ordered.add(entry.value);
-        used.add(entry.key);
       }
+      return ordered.take(20).toList(growable: false);
     }
-    return ordered;
+
+    for (final entry in remainingLocal) {
+      if (!_shouldKeepLocalOnlyContinueWatchingEntryOnRefresh(entry)) continue;
+      final exists = ordered.any(
+        (existing) => _isSameContinueWatchingEntry(existing, entry),
+      );
+      if (exists) continue;
+
+      if (ordered.length >= 20 && ordered.isNotEmpty) {
+        ordered.removeLast();
+      }
+      if (ordered.length >= 20) break;
+
+      ordered.add(entry);
+    }
+
+    return ordered.take(20).toList(growable: false);
   }
 
   Future<List<MediaItem>> loadContinueWatching({
@@ -3011,29 +3073,31 @@ class AppState extends ChangeNotifier {
     // Make sure any in-flight refresh doesn't override this explicit user action.
     _continueWatchingRequestId += 1;
 
-    final key = _continueWatchingEntryKey(item);
     final snapshot = (_continueWatching ?? const <MediaItem>[])
         .toList(growable: true);
 
-    int indexOfKey = -1;
-    for (var i = 0; i < snapshot.length; i++) {
-      if (_continueWatchingEntryKey(snapshot[i]) == key) {
-        indexOfKey = i;
-        break;
-      }
-    }
+    final indexOfKey =
+        snapshot.indexWhere((entry) => _isSameContinueWatchingEntry(entry, item));
 
     List<MediaItem> normalize(List<MediaItem> items) {
-      final usedKeys = <String>{};
       final usedIds = <String>{};
       final out = <MediaItem>[];
       for (final entry in items) {
         final id = entry.id.trim();
         if (id.isNotEmpty && !usedIds.add(id)) continue;
-        final entryKey = _continueWatchingEntryKey(entry);
-        if (!usedKeys.add(entryKey)) continue;
-        out.add(entry);
-        if (out.length >= 20) break;
+
+        final existingIndex = out.indexWhere(
+          (existing) => _isSameContinueWatchingEntry(existing, entry),
+        );
+        if (existingIndex >= 0) {
+          out[existingIndex] = _pickPreferredContinueWatchingItem(
+            out[existingIndex],
+            entry,
+          );
+        } else {
+          out.add(entry);
+          if (out.length >= 20) break;
+        }
       }
       return out;
     }
@@ -3070,15 +3134,15 @@ class AppState extends ChangeNotifier {
         excludeItemId: item.id,
       );
       if (next != null) {
-        final nextKey = _continueWatchingEntryKey(next);
+        final nextId = next.id.trim();
         final cleaned = <MediaItem>[];
         for (final entry in snapshot) {
-          final entryKey = _continueWatchingEntryKey(entry);
-          if (entryKey == key || entryKey == nextKey) continue;
-          if (entry.id.trim().isNotEmpty &&
-              entry.id.trim() == next.id.trim()) {
+          final entryId = entry.id.trim();
+          if (entryId.isNotEmpty && nextId.isNotEmpty && entryId == nextId) {
             continue;
           }
+          if (_isSameContinueWatchingEntry(entry, item)) continue;
+          if (_isSameContinueWatchingEntry(entry, next)) continue;
           cleaned.add(entry);
         }
         final insertAt = indexOfKey >= 0
@@ -3088,12 +3152,12 @@ class AppState extends ChangeNotifier {
         await commit(cleaned);
         return;
       }
-      snapshot.removeWhere((entry) => _continueWatchingEntryKey(entry) == key);
+      snapshot.removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
       await commit(snapshot);
       return;
     }
 
-    snapshot.removeWhere((entry) => _continueWatchingEntryKey(entry) == key);
+    snapshot.removeWhere((entry) => _isSameContinueWatchingEntry(entry, item));
     await commit(snapshot);
   }
 
@@ -3347,12 +3411,20 @@ class AppState extends ChangeNotifier {
       nextUpItems = const <MediaItem>[];
     }
 
-    final seen = <String>{};
     final deduped = <MediaItem>[];
     void appendAll(List<MediaItem> items) {
       for (final item in items) {
-        final key = _continueWatchingEntryKey(item);
-        if (!seen.add(key)) continue;
+        final index = deduped.indexWhere(
+          (existing) => _isSameContinueWatchingEntry(existing, item),
+        );
+        if (index >= 0) {
+          deduped[index] = _pickPreferredContinueWatchingItem(
+            deduped[index],
+            item,
+          );
+          continue;
+        }
+
         deduped.add(item);
         if (deduped.length >= 20) break;
       }
