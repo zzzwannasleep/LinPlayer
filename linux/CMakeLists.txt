@@ -112,6 +112,15 @@ install(DIRECTORY "${NATIVE_ASSETS_DIR}"
    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
    COMPONENT Runtime)
 
+# 随应用内置 whisper.cpp 可执行文件（whisper-cli 及其 .so 依赖）。
+# 把二进制放进 linux/whisper/ 即会被打包到运行目录的 whisper/ 子目录，
+# 运行时由 DesktopBinaryManager.resolveWhisper 自动定位。目录不存在则跳过。
+if(EXISTS "${CMAKE_SOURCE_DIR}/whisper")
+  install(DIRECTORY "${CMAKE_SOURCE_DIR}/whisper/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/whisper"
+    COMPONENT Runtime)
+endif()
+
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")

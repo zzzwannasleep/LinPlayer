@@ -10,6 +10,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/providers/sync_providers.dart';
 import '../../../core/services/player_subtitle_loader.dart';
+import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../theme/tv_design_tokens.dart';
@@ -284,6 +285,14 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
               Navigator.pop(dialogContext);
             },
           ),
+          TvPanelOption(
+            title: '翻译字幕（生成中文）',
+            subtitle: '用已配置的翻译引擎把字幕译为中文',
+            onTap: () {
+              Navigator.pop(dialogContext);
+              _translateSubtitle();
+            },
+          ),
           for (final t in subs)
             TvPanelOption(
               title: _trackLabel(t),
@@ -295,6 +304,125 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
                 Navigator.pop(dialogContext);
               },
             ),
+        ],
+      ),
+    );
+  }
+
+  /// 翻译字幕轨为中文并加载（TV）。
+  Future<void> _translateSubtitle() async {
+    final engine = ref.read(activeTranslationEngineProvider);
+    final item = _item;
+    final source = _mediaSource;
+    if (engine == null) {
+      _info('请先在「设置 → 翻译」中配置翻译引擎');
+      return;
+    }
+    if (item == null || source == null) {
+      _info('无播放信息');
+      return;
+    }
+    final subtitles =
+        source.mediaStreams.where((s) => s.isSubtitle).toList();
+    if (subtitles.isEmpty) {
+      _info('该片源无字幕轨可翻译');
+      return;
+    }
+    final stream =
+        subtitles.length == 1 ? subtitles.first : await _pickStreamToTranslate(subtitles);
+    if (stream == null) return;
+
+    final progress = ValueNotifier<String>('准备中…');
+    if (!mounted) {
+      progress.dispose();
+      return;
+    }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: TvDesignTokens.surface,
+        content: Row(
+          children: [
+            const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: ValueListenableBuilder<String>(
+                valueListenable: progress,
+                builder: (_, v, __) => Text(v,
+                    style:
+                        const TextStyle(color: TvDesignTokens.textPrimary)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final path = await TranslationActions.translateEmbyStream(
+        api: ref.read(apiClientProvider),
+        service: ref.read(subtitleTranslationServiceProvider),
+        engine: engine,
+        itemId: item.id,
+        mediaSourceId: source.id,
+        stream: stream,
+        targetLang: ref.read(translationTargetLangProvider),
+        layout: ref.read(bilingualLayoutProvider),
+        authToken: ref.read(currentServerProvider)?.authToken,
+        onProgress: (done, total, stage) {
+          progress.value = total > 1 ? '$stage $done/$total' : stage;
+        },
+      );
+      await _service.loadLibassSubtitle(path);
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _info('翻译完成并已加载中文字幕');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _info('翻译失败: $e');
+      }
+    } finally {
+      progress.dispose();
+    }
+  }
+
+  Future<MediaStream?> _pickStreamToTranslate(List<MediaStream> subs) {
+    return showDialog<MediaStream>(
+      context: context,
+      builder: (ctx) => TvPanel(
+        title: '选择要翻译的字幕轨',
+        onClose: () => Navigator.pop(ctx),
+        children: [
+          for (final s in subs)
+            TvPanelOption(
+              title: s.readableLabel(siblings: subs),
+              subtitle: s.codec,
+              onTap: () => Navigator.pop(ctx, s),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _info(String msg) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: TvDesignTokens.surface,
+        content:
+            Text(msg, style: const TextStyle(color: TvDesignTokens.textPrimary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('好'),
+          ),
         ],
       ),
     );

@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/app_logger.dart';
+import '../../../core/services/translation/translation_engine.dart';
+import '../../../core/services/translation/subtitle_document.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
@@ -25,6 +27,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
   static const List<_SettingCategory> _categories = [
     _SettingCategory(Icons.play_circle_outline, '播放'),
     _SettingCategory(Icons.settings, '通用'),
+    _SettingCategory(Icons.translate, '翻译'),
     _SettingCategory(Icons.sync, '同步'),
     _SettingCategory(Icons.info_outline, '关于'),
   ];
@@ -96,8 +99,10 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
       case 1:
         return _buildGeneralSettings();
       case 2:
-        return const TvSyncSettings();
+        return _buildTranslationSettings();
       case 3:
+        return const TvSyncSettings();
+      case 4:
         return _buildAboutSettings();
       default:
         return const SizedBox.shrink();
@@ -209,6 +214,191 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(backgroundPlaybackProvider.notifier).state = !bgPlay,
       ),
     ]);
+  }
+
+  Widget _buildTranslationSettings() {
+    final kind = ref.watch(translationEngineKindProvider);
+    final target = ref.watch(translationTargetLangProvider);
+    final layout = ref.watch(bilingualLayoutProvider);
+
+    final items = <Widget>[
+      _choiceItem<TranslationEngineKind>(
+        title: '翻译引擎',
+        current: kind,
+        labelOf: (v) => v.label,
+        options: [
+          for (final e in TranslationEngineKind.values) MapEntry(e.label, e),
+        ],
+        onPick: (v) =>
+            ref.read(translationEngineKindProvider.notifier).state = v,
+      ),
+      _choiceItem<String>(
+        title: '目标语言',
+        current: target == 'cht' ? 'cht' : 'zh',
+        options: const [
+          MapEntry('简体中文', 'zh'),
+          MapEntry('繁体中文', 'cht'),
+        ],
+        onPick: (v) =>
+            ref.read(translationTargetLangProvider.notifier).state = v,
+      ),
+      _choiceItem<BilingualLayout>(
+        title: '双语排版',
+        current: layout,
+        labelOf: (v) => switch (v) {
+          BilingualLayout.translatedOnly => '仅译文',
+          BilingualLayout.translatedFirst => '译文+原文',
+          BilingualLayout.originalFirst => '原文+译文',
+        },
+        options: const [
+          MapEntry('仅译文', BilingualLayout.translatedOnly),
+          MapEntry('译文+原文', BilingualLayout.translatedFirst),
+          MapEntry('原文+译文', BilingualLayout.originalFirst),
+        ],
+        onPick: (v) => ref.read(bilingualLayoutProvider.notifier).state = v,
+      ),
+      ..._engineConfigItems(kind),
+    ];
+    return _settingsList('字幕翻译', items);
+  }
+
+  List<Widget> _engineConfigItems(TranslationEngineKind kind) {
+    switch (kind) {
+      case TranslationEngineKind.openai:
+      case TranslationEngineKind.anthropic:
+        final provider = kind == TranslationEngineKind.openai
+            ? openAiConfigProvider
+            : anthropicConfigProvider;
+        final cfg = ref.watch(provider);
+        return [
+          _textItem(
+            title: 'API 地址',
+            value: cfg.baseUrl,
+            onSubmit: (v) => ref.read(provider.notifier).state =
+                cfg.copyWith(baseUrl: v.trim()),
+          ),
+          _textItem(
+            title: 'API Key',
+            value: cfg.apiKey,
+            obscure: true,
+            onSubmit: (v) => ref.read(provider.notifier).state =
+                cfg.copyWith(apiKey: v.trim()),
+          ),
+          _textItem(
+            title: '模型',
+            value: cfg.model,
+            onSubmit: (v) => ref.read(provider.notifier).state =
+                cfg.copyWith(model: v.trim()),
+          ),
+        ];
+      case TranslationEngineKind.baiduGeneral:
+        final cfg = ref.watch(baiduGeneralConfigProvider);
+        return [
+          _textItem(
+            title: 'APP ID',
+            value: cfg.appId,
+            onSubmit: (v) => ref.read(baiduGeneralConfigProvider.notifier).state =
+                cfg.copyWith(appId: v.trim()),
+          ),
+          _textItem(
+            title: '密钥',
+            value: cfg.secretKey,
+            obscure: true,
+            onSubmit: (v) => ref.read(baiduGeneralConfigProvider.notifier).state =
+                cfg.copyWith(secretKey: v.trim()),
+          ),
+        ];
+      case TranslationEngineKind.baiduLlm:
+        final cfg = ref.watch(baiduLlmConfigProvider);
+        return [
+          _textItem(
+            title: 'APP ID',
+            value: cfg.appId,
+            onSubmit: (v) => ref.read(baiduLlmConfigProvider.notifier).state =
+                cfg.copyWith(appId: v.trim()),
+          ),
+          _textItem(
+            title: 'API Key',
+            value: cfg.apiKey,
+            obscure: true,
+            onSubmit: (v) => ref.read(baiduLlmConfigProvider.notifier).state =
+                cfg.copyWith(apiKey: v.trim()),
+          ),
+        ];
+      case TranslationEngineKind.tencent:
+        final cfg = ref.watch(tencentConfigProvider);
+        return [
+          _textItem(
+            title: 'SecretId',
+            value: cfg.secretId,
+            onSubmit: (v) => ref.read(tencentConfigProvider.notifier).state =
+                cfg.copyWith(secretId: v.trim()),
+          ),
+          _textItem(
+            title: 'SecretKey',
+            value: cfg.secretKey,
+            obscure: true,
+            onSubmit: (v) => ref.read(tencentConfigProvider.notifier).state =
+                cfg.copyWith(secretKey: v.trim()),
+          ),
+          _textItem(
+            title: '地域 Region',
+            value: cfg.region,
+            onSubmit: (v) => ref.read(tencentConfigProvider.notifier).state =
+                cfg.copyWith(region: v.trim().isEmpty ? 'ap-beijing' : v.trim()),
+          ),
+        ];
+    }
+  }
+
+  Widget _textItem({
+    required String title,
+    required String value,
+    required ValueChanged<String> onSubmit,
+    bool obscure = false,
+  }) {
+    final display = value.isEmpty
+        ? '未设置'
+        : (obscure ? '••••••${value.length > 4 ? value.substring(value.length - 4) : ''}' : value);
+    return _rowCard(
+      title: title,
+      subtitle: display,
+      trailing: const Icon(Icons.edit,
+          color: TvDesignTokens.textSecondary, size: 24),
+      onSelect: () => _showTextInput(title, value, obscure, onSubmit),
+    );
+  }
+
+  void _showTextInput(
+      String title, String value, bool obscure, ValueChanged<String> onSubmit) {
+    final controller = TextEditingController(text: value);
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: TvDesignTokens.surface,
+        title: Text(title, style: const TextStyle(color: TvDesignTokens.textPrimary)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: obscure,
+          style: const TextStyle(color: TvDesignTokens.textPrimary),
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              onSubmit(controller.text);
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildAboutSettings() {

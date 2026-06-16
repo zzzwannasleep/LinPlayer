@@ -213,6 +213,7 @@
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
+				AA0101010101010101010101 /* Bundle Whisper */,
 			);
 			buildRules = (
 			);
@@ -338,6 +339,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh && touch Flutter/ephemeral/tripwire";
+		};
+		AA0101010101010101010101 /* Bundle Whisper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle Whisper";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# 随应用内置 whisper.cpp 可执行文件：把 macos/whisper/ 拷入 .app 的 Resources/whisper。\n# 目录不存在则跳过，运行时由 DesktopBinaryManager.resolveWhisper 自动定位。\nif [ -d \"${SRCROOT}/whisper\" ]; then\n  DEST=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources/whisper\"\n  mkdir -p \"$DEST\"\n  cp -R \"${SRCROOT}/whisper/.\" \"$DEST/\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

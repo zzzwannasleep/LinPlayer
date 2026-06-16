@@ -17,6 +17,11 @@ import '../../../core/utils/danmaku_filter.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../core/api/danmaku/danmaku_source.dart';
 import '../../../core/api/danmaku/danmaku_service.dart';
+import '../../../core/services/translation/translation_engine.dart';
+import '../../../core/services/translation/subtitle_document.dart';
+import '../../../core/services/translation/whisper/desktop_binary_manager.dart';
+import '../../../core/services/translation/whisper/whisper_model.dart';
+import '../../../core/services/translation/whisper/whisper_model_manager.dart';
 import '../../../plugins/ui/plugin_management_screen.dart';
 
 part 'settings_backup_restore.dart';
@@ -25,6 +30,7 @@ part 'settings_general.dart';
 part 'settings_home.dart';
 part 'settings_player.dart';
 part 'settings_sync.dart';
+part 'settings_translation.dart';
 
 Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
   return {

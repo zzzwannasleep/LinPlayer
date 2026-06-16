@@ -43,6 +43,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   bool _isSeekingWithSlider = false;
   double? _sliderSeekValue;
   MediaSource? _currentMediaSource;
+  String? _videoUrl;
+  WhisperSubtitleController? _whisperController;
   String? _displayTitle;
   bool _suppressTrackSelectionListeners = false;
   bool _hasUserTouchedSubtitleSelection = false;
@@ -228,6 +230,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       ref.read(currentPlayingItemProvider.notifier).state = item;
       ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
       _currentMediaSource = mediaSource;
+      _videoUrl = videoUrl;
       _displayTitle = item.name;
 
       final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
@@ -1921,6 +1924,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       },
       canDisable: true,
       subtitle: true,
+      onTranslate: () => _translateSubtitle(subtitleStreams),
+      onWhisper: ref.read(whisperEnabledProvider)
+          ? () => _toggleWhisperStreaming()
+          : null,
+      whisperRunning: _whisperController?.isRunning ?? false,
     );
   }
 
@@ -1945,6 +1953,288 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     );
   }
 
+  /// 翻译字幕轨为中文并加载（桌面）。
+  Future<void> _translateSubtitle(List<MediaStream> subtitleStreams) async {
+    final engine = ref.read(activeTranslationEngineProvider);
+    if (engine == null) {
+      _translateMsg('请先在「设置 → 字幕翻译」中配置翻译引擎');
+      return;
+    }
+    final source = _currentMediaSource;
+    if (source == null) {
+      _translateMsg('无播放信息');
+      return;
+    }
+    MediaStream? stream;
+    final sel = ref.read(subtitleTrackProvider);
+    if (sel != null) {
+      for (final s in subtitleStreams) {
+        if (s.index == sel) {
+          stream = s;
+          break;
+        }
+      }
+    }
+    stream ??= subtitleStreams.length == 1
+        ? subtitleStreams.first
+        : await _pickStreamToTranslate(subtitleStreams);
+    if (stream == null) return;
+
+    final progress = ValueNotifier<String>('准备中…');
+    if (!mounted) {
+      progress.dispose();
+      return;
+    }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 16),
+              ValueListenableBuilder<String>(
+                valueListenable: progress,
+                builder: (_, v, __) =>
+                    Text(v, style: const TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final path = await TranslationActions.translateEmbyStream(
+        api: ref.read(apiClientProvider),
+        service: ref.read(subtitleTranslationServiceProvider),
+        engine: engine,
+        itemId: widget.itemId,
+        mediaSourceId: source.id,
+        stream: stream,
+        targetLang: ref.read(translationTargetLangProvider),
+        layout: ref.read(bilingualLayoutProvider),
+        authToken: ref.read(currentServerProvider)?.authToken,
+        onProgress: (done, total, stage) {
+          progress.value = total > 1 ? '$stage $done/$total' : stage;
+        },
+      );
+      await _playerService.loadLibassSubtitle(path);
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _translateMsg('翻译完成并已加载中文字幕');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _translateMsg('翻译失败: $e');
+      }
+    } finally {
+      progress.dispose();
+    }
+  }
+
+  Future<MediaStream?> _pickStreamToTranslate(List<MediaStream> subs) {
+    return showDialog<MediaStream>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('选择要翻译的字幕轨',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600)),
+              ),
+              for (final s in subs)
+                ListTile(
+                  title: Text(s.readableLabel(siblings: subs),
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: s.codec != null
+                      ? Text('编码: ${s.codec}',
+                          style: const TextStyle(color: Colors.white54))
+                      : null,
+                  onTap: () => Navigator.pop(ctx, s),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _translateMsg(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// 启动/停止 Whisper 实时字幕（桌面专属）。
+  Future<void> _toggleWhisperStreaming() async {
+    if (_whisperController?.isRunning ?? false) {
+      _whisperController?.stop();
+      if (mounted) setState(() {});
+      _translateMsg('已停止 Whisper 实时字幕');
+      return;
+    }
+    final engine = ref.read(activeTranslationEngineProvider);
+    if (engine == null) {
+      _translateMsg('请先在「设置 → 字幕翻译」中配置翻译引擎');
+      return;
+    }
+    final source = _videoUrl;
+    if (source == null) {
+      _translateMsg('无视频源');
+      return;
+    }
+
+    final manager = WhisperModelManager();
+    final model = ref.read(whisperModelProvider);
+    if (!await manager.isDownloaded(model)) {
+      _translateMsg('请先在「设置 → 字幕翻译 → Whisper」中下载 ${model.displayName} 模型');
+      return;
+    }
+    final modelFile = await manager.modelFile(model);
+
+    final binMgr = DesktopBinaryManager();
+    // whisper-cli：内置/PATH/已配置中定位。
+    final whisperPath =
+        await binMgr.resolveWhisper(configured: ref.read(whisperBinaryPathProvider));
+    if (whisperPath == null) {
+      _translateMsg('未找到 whisper-cli（应随应用内置，或在「设置」中指定其路径）');
+      return;
+    }
+    // ffmpeg：自动检测，缺失则征求许可下载。
+    var ffmpegPath =
+        await binMgr.resolveFfmpeg(configured: ref.read(ffmpegPathProvider));
+    if (ffmpegPath == null) {
+      ffmpegPath = await _promptDownloadFfmpeg(binMgr);
+      if (ffmpegPath == null) {
+        _translateMsg('未安装 ffmpeg，已取消');
+        return;
+      }
+      ref.read(ffmpegPathProvider.notifier).state = ffmpegPath;
+    }
+
+    final extractor = WhisperAudioExtractor(ffmpegPath: ffmpegPath);
+    final transcriber = WhisperTranscriber(
+      modelPath: modelFile.path,
+      binaryPath: whisperPath,
+    );
+
+    final controller = WhisperSubtitleController(
+      engine: engine,
+      translationService: ref.read(subtitleTranslationServiceProvider),
+      extractor: extractor,
+      transcriber: transcriber,
+      sourceLang: 'auto',
+      targetLang: ref.read(translationTargetLangProvider),
+      layout: ref.read(bilingualLayoutProvider),
+      onSubtitleUpdated: (path) async {
+        try {
+          await _playerService.loadLibassSubtitle(path);
+        } catch (_) {}
+      },
+    );
+    _whisperController = controller;
+    if (mounted) setState(() {});
+    _translateMsg('Whisper 实时字幕已启动，将随播放逐步生成');
+
+    final token = ref.read(currentServerProvider)?.authToken;
+    // 后台运行，不阻塞 UI。
+    unawaited(controller.start(
+      source: source,
+      total: _playerService.duration,
+      positionGetter: () => _playerService.position,
+      authToken: token,
+    ));
+  }
+
+  /// 征求许可后下载 ffmpeg，返回安装路径或 null（取消/失败）。
+  Future<String?> _promptDownloadFfmpeg(DesktopBinaryManager binMgr) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text('需要 ffmpeg', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Whisper 实时字幕需要 ffmpeg 抽取音频。系统中未检测到 ffmpeg，'
+          '是否现在下载官方静态构建？',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('下载')),
+        ],
+      ),
+    );
+    if (ok != true) return null;
+
+    final progress = ValueNotifier<String>('下载 ffmpeg…');
+    if (!mounted) {
+      progress.dispose();
+      return null;
+    }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              const SizedBox(width: 16),
+              ValueListenableBuilder<String>(
+                valueListenable: progress,
+                builder: (_, v, __) =>
+                    Text(v, style: const TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    try {
+      final path = await binMgr.downloadFfmpeg(onProgress: (r, t, p) {
+        progress.value =
+            t > 0 ? '下载 ffmpeg… ${(p * 100).toStringAsFixed(0)}%' : '下载 ffmpeg…';
+      });
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      return path;
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _translateMsg('ffmpeg 下载失败: $e');
+      }
+      return null;
+    } finally {
+      progress.dispose();
+    }
+  }
+
   void _showTrackSelectorDialog({
     required String title,
     required List<MediaStream> streams,
@@ -1952,6 +2242,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     required ValueChanged<int> onSelect,
     required bool subtitle,
     bool canDisable = false,
+    VoidCallback? onTranslate,
+    VoidCallback? onWhisper,
+    bool whisperRunning = false,
   }) {
     showDialog(
       context: context,
@@ -1981,6 +2274,35 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
                   ],
                 ),
               ),
+              if (onTranslate != null) ...[
+                ListTile(
+                  leading: const Icon(Icons.translate, color: Color(0xFF5B8DEF)),
+                  title: const Text('翻译字幕（生成中文）',
+                      style: TextStyle(color: Colors.white)),
+                  subtitle: const Text('用已配置的翻译引擎把字幕译为中文',
+                      style: TextStyle(color: Colors.white54)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onTranslate();
+                  },
+                ),
+              ],
+              if (onWhisper != null) ...[
+                ListTile(
+                  leading: Icon(
+                      whisperRunning ? Icons.stop_circle : Icons.record_voice_over,
+                      color: const Color(0xFF5B8DEF)),
+                  title: Text(
+                      whisperRunning ? '停止 Whisper 实时字幕' : 'Whisper 实时字幕（本地转写）',
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: const Text('无字幕片源边播边转写并译为中文（吃 CPU/显卡）',
+                      style: TextStyle(color: Colors.white54)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    onWhisper();
+                  },
+                ),
+              ],
               const Divider(color: Colors.white12, height: 1),
               Flexible(
                 child: DesktopSmoothScrollBuilder(
@@ -2223,6 +2545,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     _volumeSliderTimer?.cancel();
     _statsRefreshTimer?.cancel();
     _uiRefreshTimer?.cancel();
+    _whisperController?.stop();
     _focusNode.dispose();
     _playerService.dispose();
     super.dispose();

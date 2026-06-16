@@ -344,6 +344,13 @@ class _SubtitleSettingsContentState
               label: '导入外部字幕',
               onTap: () => _pickExternalSubtitle(),
             ),
+            const SizedBox(height: 8),
+            _SettingsButton(
+              icon: Icons.translate,
+              label: '翻译字幕（生成中文）',
+              onTap: () => _translateSubtitle(
+                  item, mediaSource, subtitles, selectedSubtitleIndex),
+            ),
             const SizedBox(height: 16),
             const _Divider(),
             const _SectionTitle('次字幕（第二字幕）'),
@@ -481,6 +488,139 @@ class _SubtitleSettingsContentState
         );
       }
     }
+  }
+
+  /// 翻译指定/选中的字幕轨为中文，并加载到播放器。
+  Future<void> _translateSubtitle(
+    MediaItem? item,
+    MediaSource mediaSource,
+    List<MediaStream> subtitles,
+    int? selectedIndex,
+  ) async {
+    final engine = ref.read(activeTranslationEngineProvider);
+    if (engine == null) {
+      _toast('请先在「设置 → 字幕翻译」中配置并填写翻译引擎');
+      return;
+    }
+    if (item == null) {
+      _toast('无播放信息');
+      return;
+    }
+    // 选择要翻译的源字幕轨。
+    MediaStream? source;
+    if (selectedIndex != null) {
+      source = subtitles
+          .where((s) => s.index == selectedIndex)
+          .cast<MediaStream?>()
+          .firstOrNull;
+    }
+    source ??= subtitles.length == 1 ? subtitles.first : null;
+    source ??= await _pickSubtitleStreamToTranslate(subtitles);
+    if (source == null) {
+      _toast(subtitles.isEmpty
+          ? '该片源无字幕轨可翻译；如需无字幕生成可用 Whisper（PC）'
+          : '已取消');
+      return;
+    }
+
+    final playerService = _PlayerScreenState.activePlayerService;
+    if (playerService == null) {
+      _toast('播放器未就绪');
+      return;
+    }
+
+    final api = ref.read(apiClientProvider);
+    final service = ref.read(subtitleTranslationServiceProvider);
+    final target = ref.read(translationTargetLangProvider);
+    final layout = ref.read(bilingualLayoutProvider);
+    final authToken = ref.read(currentServerProvider)?.authToken;
+    final progress = ValueNotifier<String>('准备中…');
+
+    if (!mounted) {
+      progress.dispose();
+      return;
+    }
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('翻译字幕'),
+        content: Row(
+          children: [
+            const SizedBox(
+                width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: ValueListenableBuilder<String>(
+                valueListenable: progress,
+                builder: (_, v, __) => Text(v),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      final path = await TranslationActions.translateEmbyStream(
+        api: api,
+        service: service,
+        engine: engine,
+        itemId: item.id,
+        mediaSourceId: mediaSource.id,
+        stream: source,
+        targetLang: target,
+        layout: layout,
+        authToken: authToken,
+        onProgress: (done, total, stage) {
+          progress.value = total > 1 ? '$stage $done/$total' : stage;
+        },
+      );
+      await playerService.loadLibassSubtitle(path);
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _toast('翻译完成并已加载中文字幕');
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        _toast('翻译失败: $e');
+      }
+    } finally {
+      progress.dispose();
+    }
+  }
+
+  Future<MediaStream?> _pickSubtitleStreamToTranslate(
+      List<MediaStream> subtitles) async {
+    if (subtitles.isEmpty) return null;
+    return showModalBottomSheet<MediaStream>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('选择要翻译的字幕轨',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            for (final s in subtitles)
+              ListTile(
+                leading: const Icon(Icons.subtitles),
+                title: Text(s.readableLabel(siblings: subtitles)),
+                subtitle: s.codec != null ? Text('编码: ${s.codec}') : null,
+                onTap: () => Navigator.pop(ctx, s),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _showFontSelector(BuildContext context) {

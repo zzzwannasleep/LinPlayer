@@ -31,6 +31,12 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _showDanmakuSettings(context),
           ),
           _SettingsCard(
+            icon: Icons.translate,
+            title: '字幕翻译',
+            subtitle: 'AI / 百度 / 腾讯翻译，Whisper 本地转写',
+            onTap: () => _showTranslationSettings(context),
+          ),
+          _SettingsCard(
             icon: Icons.sync,
             title: '同步服务',
             subtitle: 'Trakt、Bangumi 观看记录同步',
@@ -85,6 +91,13 @@ class SettingsScreen extends ConsumerWidget {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const SyncSettingsScreen()),
+    );
+  }
+
+  void _showTranslationSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const TranslationSettingsScreen()),
     );
   }
 

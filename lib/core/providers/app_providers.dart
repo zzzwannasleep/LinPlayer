@@ -4,4 +4,5 @@ export 'external_player_providers.dart';
 export 'playback_providers.dart';
 export 'server_providers.dart';
 export 'support_providers.dart';
+export 'translation_providers.dart';
 export 'watch_history_providers.dart';
