@@ -21,7 +21,6 @@ class TencentTranslationEngine extends TranslationEngine {
 
   static const _service = 'tmt';
   static const _host = TencentEngineConfig.endpoint;
-  static const _action = 'TextTranslateBatch';
   static const _version = '2018-03-21';
 
   @override
@@ -44,65 +43,95 @@ class TencentTranslationEngine extends TranslationEngine {
     if (texts.isEmpty) return const [];
     final source = TranslationLang.toTencent(sourceLang);
     final target = TranslationLang.toTencent(targetLang);
-    final payload = jsonEncode({
+
+    // TextTranslateBatch 不支持源语言 auto；源语言未知时退回支持 auto 的单条接口。
+    if (source == 'auto') {
+      final out = <String>[];
+      for (final t in texts) {
+        out.add(await _translateSingle(t, source, target));
+      }
+      return out;
+    }
+    return _translateBatch(texts, source, target);
+  }
+
+  Future<List<String>> _translateBatch(
+      List<String> texts, String source, String target) async {
+    final response = await _call('TextTranslateBatch', {
       'Source': source,
       'Target': target,
       'ProjectId': config.projectId,
       'SourceTextList': texts,
     });
+    final list = (response['TargetTextList'] as List?) ?? const [];
+    final out = list.map((e) => e.toString()).toList();
+    if (out.length != texts.length) {
+      throw TranslationException(
+          id, '回包条数(${out.length})与请求(${texts.length})不一致');
+    }
+    return out;
+  }
 
+  Future<String> _translateSingle(
+      String text, String source, String target) async {
+    final response = await _call('TextTranslate', {
+      'SourceText': text,
+      'Source': source,
+      'Target': target,
+      'ProjectId': config.projectId,
+    });
+    return (response['TargetText'] ?? '').toString();
+  }
+
+  /// 发起一次腾讯云 V3 签名请求，返回 Response 对象（出错抛异常）。
+  Future<Map> _call(String action, Map<String, dynamic> payloadMap) async {
+    final payload = jsonEncode(payloadMap);
     final now = DateTime.now().toUtc();
     final timestamp = now.millisecondsSinceEpoch ~/ 1000;
     final date =
         '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
     final authorization =
-        _buildAuthorization(payload, timestamp.toString(), date);
+        _buildAuthorization(action, payload, timestamp.toString(), date);
 
     try {
-      final resp = await _dio.post(
+      final httpResp = await _dio.post(
         'https://$_host',
         options: Options(headers: {
           'Authorization': authorization,
           'Content-Type': 'application/json; charset=utf-8',
           'Host': _host,
-          'X-TC-Action': _action,
+          'X-TC-Action': action,
           'X-TC-Timestamp': timestamp.toString(),
           'X-TC-Version': _version,
           'X-TC-Region': config.region,
         }),
         data: payload,
       );
-      final data = resp.data is String
-          ? jsonDecode(resp.data as String) as Map
-          : resp.data as Map;
+      final data = httpResp.data is String
+          ? jsonDecode(httpResp.data as String) as Map
+          : httpResp.data as Map;
       final response = data['Response'] as Map?;
-      final error = response?['Error'];
+      if (response == null) {
+        throw TranslationException(id, '腾讯翻译响应缺少 Response 字段');
+      }
+      final error = response['Error'];
       if (error != null) {
         throw TranslationException(
-          id,
-          '腾讯翻译错误 ${error['Code']}: ${error['Message']}',
-        );
+            id, '腾讯翻译错误 ${error['Code']}: ${error['Message']}');
       }
-      final list = (response?['TargetTextList'] as List?) ?? const [];
-      final out = list.map((e) => e.toString()).toList();
-      if (out.length != texts.length) {
-        throw TranslationException(
-          id,
-          '回包条数(${out.length})与请求(${texts.length})不一致',
-        );
-      }
-      return out;
+      return response;
     } on DioException catch (e) {
       throw TranslationException(id, '腾讯翻译请求失败: ${e.response?.statusCode}',
           cause: e.response?.data ?? e.message);
     }
   }
 
-  String _buildAuthorization(String payload, String timestamp, String date) {
+  String _buildAuthorization(
+      String action, String payload, String timestamp, String date) {
     const algorithm = 'TC3-HMAC-SHA256';
     const signedHeaders = 'content-type;host;x-tc-action';
     final canonicalHeaders =
-        'content-type:application/json; charset=utf-8\nhost:$_host\nx-tc-action:${_action.toLowerCase()}\n';
+        'content-type:application/json; charset=utf-8\nhost:$_host\nx-tc-action:${action.toLowerCase()}\n';
     final hashedPayload = _sha256Hex(payload);
     final canonicalRequest =
         'POST\n/\n\n$canonicalHeaders\n$signedHeaders\n$hashedPayload';

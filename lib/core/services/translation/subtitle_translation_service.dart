@@ -50,8 +50,14 @@ class SubtitleTranslationService {
     final raw = await _fetch(url, authToken);
     final ext = _extOf(url);
     final doc = SubtitleDocument.parseString(raw, ext: ext);
+    _logger.i(
+      _tag,
+      '源字幕拉取完成: ${raw.length}字节, 解析 ${doc.cues.length} 条, '
+      '引擎=${engine.id}, $sourceLang→$targetLang, ext=$ext',
+    );
     if (doc.isEmpty) {
-      throw StateError('源字幕解析为空，无法翻译');
+      throw StateError(
+          '源字幕解析为空（拉取 ${raw.length} 字节）。该轨可能无法被服务端导出为文本');
     }
 
     await translateDocument(

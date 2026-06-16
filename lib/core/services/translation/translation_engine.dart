@@ -219,121 +219,161 @@ class TranslationLang {
   /// 自动检测源语言。
   static const autoSource = 'auto';
 
-  /// ISO/Emby 码 → 百度码（日语为 jp，中文 zh，自动 auto）。
+  /// 把各式语言码归一为内部基准码（剥离地区后缀、三字母转两字母、繁简区分）。
+  ///
+  /// 例：`en-GB`→`en`、`zh-TW`→`zh-hant`、`jpn`→`ja`、`fre`→`fr`、`ita`→`it`。
+  static String norm(String code) {
+    final c = code.toLowerCase().trim().replaceAll('_', '-');
+    if (c.isEmpty || c == 'auto' || c == 'und') return 'auto';
+    // 繁体中文家族。
+    if (c == 'cht' ||
+        c == 'zh-tw' ||
+        c == 'zh-hant' ||
+        c == 'zh-hk' ||
+        c == 'zh-mo' ||
+        c == 'big5') {
+      return 'zh-hant';
+    }
+    // 简体/泛中文家族。
+    if (c == 'chs' ||
+        c == 'chi' ||
+        c == 'zho' ||
+        c == 'gb' ||
+        c.startsWith('zh')) {
+      return 'zh-hans';
+    }
+    final base = c.split('-').first;
+    const three = {
+      'eng': 'en', 'jpn': 'ja', 'kor': 'ko', 'fre': 'fr', 'fra': 'fr',
+      'ger': 'de', 'deu': 'de', 'rus': 'ru', 'spa': 'es', 'ita': 'it',
+      'por': 'pt', 'tha': 'th', 'vie': 'vi', 'ara': 'ar', 'hin': 'hi',
+      'ind': 'id', 'msa': 'ms', 'may': 'ms', 'tur': 'tr', 'nld': 'nl',
+      'dut': 'nl', 'pol': 'pl',
+    };
+    return three[base] ?? base;
+  }
+
+  /// 内部基准码 → 百度码（日语 jp，中文 zh/cht，未知回退 auto）。
   static String toBaidu(String code) {
-    switch (code.toLowerCase()) {
+    switch (norm(code)) {
       case 'auto':
         return 'auto';
-      case 'zh':
-      case 'chi':
-      case 'zho':
-      case 'chs':
+      case 'zh-hans':
         return 'zh';
-      case 'cht':
+      case 'zh-hant':
         return 'cht';
       case 'en':
-      case 'eng':
         return 'en';
       case 'ja':
-      case 'jpn':
         return 'jp';
       case 'ko':
-      case 'kor':
         return 'kor';
       case 'fr':
-      case 'fre':
-      case 'fra':
         return 'fra';
       case 'de':
-      case 'ger':
-      case 'deu':
         return 'de';
       case 'ru':
-      case 'rus':
         return 'ru';
       case 'es':
-      case 'spa':
         return 'spa';
+      case 'it':
+        return 'it';
+      case 'pt':
+        return 'pt';
+      case 'th':
+        return 'th';
+      case 'vi':
+        return 'vie';
+      case 'ar':
+        return 'ara';
+      case 'nl':
+        return 'nl';
+      case 'pl':
+        return 'pl';
       default:
         return 'auto';
     }
   }
 
-  /// ISO/Emby 码 → 腾讯码（日语 ja，中文 zh，自动 auto）。
+  /// 内部基准码 → 腾讯码（日语 ja，中文 zh/zh-TW，未知回退 auto）。
   static String toTencent(String code) {
-    switch (code.toLowerCase()) {
+    switch (norm(code)) {
       case 'auto':
         return 'auto';
-      case 'zh':
-      case 'chi':
-      case 'zho':
-      case 'chs':
+      case 'zh-hans':
         return 'zh';
-      case 'cht':
+      case 'zh-hant':
         return 'zh-TW';
       case 'en':
-      case 'eng':
         return 'en';
       case 'ja':
-      case 'jpn':
         return 'ja';
       case 'ko':
-      case 'kor':
         return 'ko';
       case 'fr':
-      case 'fre':
-      case 'fra':
         return 'fr';
       case 'de':
-      case 'ger':
-      case 'deu':
         return 'de';
       case 'ru':
-      case 'rus':
         return 'ru';
       case 'es':
-      case 'spa':
         return 'es';
+      case 'it':
+        return 'it';
+      case 'pt':
+        return 'pt';
+      case 'th':
+        return 'th';
+      case 'vi':
+        return 'vi';
+      case 'ar':
+        return 'ar';
+      case 'id':
+        return 'id';
+      case 'ms':
+        return 'ms';
+      case 'tr':
+        return 'tr';
+      case 'hi':
+        return 'hi';
       default:
         return 'auto';
     }
   }
 
-  /// ISO/Emby 码 → 人类可读语言名（喂给 AI 提示词）。
+  /// 内部基准码 → 人类可读语言名（喂给 AI 提示词）。
   static String humanName(String code) {
-    switch (code.toLowerCase()) {
+    switch (norm(code)) {
       case 'auto':
         return 'the source language';
-      case 'zh':
-      case 'chi':
-      case 'zho':
-      case 'chs':
+      case 'zh-hans':
         return 'Simplified Chinese';
-      case 'cht':
+      case 'zh-hant':
         return 'Traditional Chinese';
       case 'en':
-      case 'eng':
         return 'English';
       case 'ja':
-      case 'jpn':
         return 'Japanese';
       case 'ko':
-      case 'kor':
         return 'Korean';
       case 'fr':
-      case 'fre':
-      case 'fra':
         return 'French';
       case 'de':
-      case 'ger':
-      case 'deu':
         return 'German';
       case 'ru':
-      case 'rus':
         return 'Russian';
       case 'es':
-      case 'spa':
         return 'Spanish';
+      case 'it':
+        return 'Italian';
+      case 'pt':
+        return 'Portuguese';
+      case 'th':
+        return 'Thai';
+      case 'vi':
+        return 'Vietnamese';
+      case 'ar':
+        return 'Arabic';
       default:
         return code;
     }

@@ -2031,7 +2031,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
         Navigator.of(context, rootNavigator: true).pop();
         _translateMsg('翻译完成并已加载中文字幕');
       }
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger().eWithStack('DesktopPlayer', '字幕翻译失败', e, st);
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
         _translateMsg('翻译失败: $e');
