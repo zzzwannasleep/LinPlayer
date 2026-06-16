@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/providers/app_providers.dart';
@@ -281,42 +282,26 @@ class _AnimatedBranchContainer extends StatefulWidget {
 
 class _AnimatedBranchContainerState extends State<_AnimatedBranchContainer>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<Offset> _animation;
-  int _previousIndex = 0;
+  late final AnimationController _controller;
+  // 切换方向：true=向右（索引增大），false=向左。决定滑入动画的起始偏移。
+  bool _moveRight = true;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 240),
+      duration: AppMotion.medium,
       vsync: this,
     );
-    _animation = Tween<Offset>(
-      begin: Offset.zero,
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    ));
   }
 
   @override
   void didUpdateWidget(covariant _AnimatedBranchContainer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentIndex != widget.currentIndex) {
-      final bool moveRight = widget.currentIndex > _previousIndex;
-      _previousIndex = oldWidget.currentIndex;
-
-      // 设置动画方向
-      _animation = Tween<Offset>(
-        begin: Offset(moveRight ? 0.04 : -0.04, 0),
-        end: Offset.zero,
-      ).animate(CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeOutCubic,
-      ));
-
+      // 方向必须与“切换前”的索引比较（oldWidget.currentIndex），
+      // 旧实现用了滞后一拍的字段，导致方向错乱、看起来只能往一边切。
+      _moveRight = widget.currentIndex > oldWidget.currentIndex;
       _controller.forward(from: 0.0);
     }
   }
@@ -329,8 +314,26 @@ class _AnimatedBranchContainerState extends State<_AnimatedBranchContainer>
 
   @override
   Widget build(BuildContext context) {
-    return SlideTransition(
-      position: _animation,
+    final double beginX = _moveRight ? 0.04 : -0.04;
+    // 用 flutter_animate 驱动切换动效：外部 controller + autoPlay:false，
+    // 仅重放“滑入 + 淡入”，IndexedStack 不被重建，各分支导航状态得以保留。
+    return Animate(
+      controller: _controller,
+      autoPlay: false,
+      effects: [
+        SlideEffect(
+          begin: Offset(beginX, 0),
+          end: Offset.zero,
+          duration: AppMotion.medium,
+          curve: AppMotion.standard,
+        ),
+        const FadeEffect(
+          begin: 0.92,
+          end: 1.0,
+          duration: AppMotion.medium,
+          curve: AppMotion.standard,
+        ),
+      ],
       child: IndexedStack(
         index: widget.currentIndex,
         children: widget.children,
