@@ -69,7 +69,8 @@ class AppLogger {
 
   final Queue<LogEntry> _logs = Queue<LogEntry>();
   static const int _maxLogs = 20000;
-  static const int _maxFileBytes = 8 * 1024 * 1024; // 单文件 8MB，超限轮转
+  static const int _maxFileBytes = 50 * 1024 * 1024; // 单日志文件 50MB，超限轮转
+  static const int _maxLogDays = 7; // 保留最近 7 天日志
 
   IOSink? _sink;
   File? _logFile;
@@ -79,6 +80,47 @@ class AppLogger {
 
   String? get logFilePath => _logFile?.path;
 
+  /// 获取今天的日志文件名：linplayer-YYYY-MM-DD.log
+  String _getTodayFileName() {
+    final now = DateTime.now();
+    final year = now.year;
+    final month = now.month.toString().padLeft(2, '0');
+    final day = now.day.toString().padLeft(2, '0');
+    return 'linplayer-$year-$month-$day.log';
+  }
+
+  /// 清理超过保留期的旧日志文件
+  void _cleanOldLogs(Directory logDir) {
+    try {
+      final now = DateTime.now();
+      final cutoff = now.subtract(const Duration(days: _maxLogDays));
+
+      for (final entity in logDir.listSync()) {
+        if (entity is! File) continue;
+        final name = entity.uri.pathSegments.last;
+        if (!name.startsWith('linplayer-')) continue;
+
+        // 解析日期：linplayer-2026-06-16.log
+        final match =
+            RegExp(r'linplayer-(\d{4})-(\d{2})-(\d{2})').firstMatch(name);
+        if (match == null) continue;
+
+        final fileDate = DateTime(
+          int.parse(match.group(1)!),
+          int.parse(match.group(2)!),
+          int.parse(match.group(3)!),
+        );
+
+        if (fileDate.isBefore(cutoff)) {
+          entity.deleteSync();
+          developer.log('已删除旧日志: $name', name: 'AppLogger', level: 800);
+        }
+      }
+    } catch (e) {
+      developer.log('清理旧日志失败: $e', name: 'AppLogger', level: 900);
+    }
+  }
+
   /// 初始化文件日志（在 main 中尽早 await）。可重复调用，幂等。
   Future<void> init() async {
     if (_fileReady) return;
@@ -86,11 +128,17 @@ class AppLogger {
       final base = await getApplicationSupportDirectory();
       final dir = Directory('${base.path}/logs');
       if (!dir.existsSync()) dir.createSync(recursive: true);
-      final file = File('${dir.path}/linplayer.log');
 
-      // 轮转：超限则把当前文件转为 .1（覆盖旧的 .1）。
+      // 清理旧日志（保留最近 N 天）
+      _cleanOldLogs(dir);
+
+      // 打开今天的日志文件
+      final fileName = _getTodayFileName();
+      final file = File('${dir.path}/$fileName');
+
+      // 轮转：如果今天的文件已超限，重命名为 .1（覆盖旧的 .1）
       if (file.existsSync() && await file.length() > _maxFileBytes) {
-        final rotated = File('${dir.path}/linplayer.1.log');
+        final rotated = File('${dir.path}/$fileName.1');
         if (rotated.existsSync()) rotated.deleteSync();
         file.renameSync(rotated.path);
       }
@@ -190,56 +238,61 @@ class AppLogger {
 
   void clear() => _logs.clear();
 
-  /// 导出为纯文本（机器可解析）：`# key: value` 头部 + 原生单行日志。
-  String exportAsString() {
-    final buffer = StringBuffer()
-      ..writeln('# LinPlayer log export')
-      ..writeln('# exported_at: ${DateTime.now().toIso8601String()}')
-      ..writeln('# platform: ${Platform.operatingSystem} '
-          '${Platform.operatingSystemVersion}')
-      ..writeln('# locale: ${Platform.localeName}')
-      ..writeln('# dart: ${Platform.version}')
-      ..writeln('# entries: ${_logs.length}')
-      ..writeln('# log_file: ${_logFile?.path ?? '(memory only)'}')
-      ..writeln('#');
-    if (_logs.isEmpty) {
-      buffer.writeln('# (no log entries)');
+  /// 导出为纯文本（用于界面显示）：读取今天的日志文件内容。
+  Future<String> exportAsString() async {
+    try {
+      if (_logFile == null || !_logFile!.existsSync()) {
+        return '# 当天日志文件不存在\n# 内存日志条数: ${_logs.length}';
+      }
+
+      // 先 flush 确保最新日志已落盘
+      await _sink?.flush();
+
+      // 读取今天的日志文件
+      final content = await _logFile!.readAsString();
+      return content;
+    } catch (e) {
+      w('AppLogger', '读取日志文件失败: $e');
+      return '# 读取日志文件失败: $e\n# 内存日志条数: ${_logs.length}';
     }
-    for (final entry in _logs) {
-      buffer.writeln(entry.format());
-    }
-    return buffer.toString();
   }
 
-  /// 导出当前内存日志到独立文件，返回路径（用于「另存/分享」）。
+  /// 导出今天的日志文件到下载目录（复制文件）。
   Future<String> exportToFile() async {
-    final content = exportAsString();
-    final stamp = DateTime.now()
+    if (_logFile == null || !_logFile!.existsSync()) {
+      throw Exception('当天日志文件不存在');
+    }
+
+    // 先 flush 确保最新日志已落盘
+    await _sink?.flush();
+
+    final timestamp = DateTime.now()
         .toIso8601String()
         .replaceAll(':', '-')
         .replaceAll('.', '-');
-    final fileName = 'linplayer_logs_$stamp.txt';
+    final fileName = 'linplayer_log_$timestamp.txt';
 
-    // Android：优先导出到 Download 方便取出。
+    // Android：复制到 Download 方便取出。
     if (Platform.isAndroid) {
       try {
         final downloads = Directory('/storage/emulated/0/Download');
         if (downloads.existsSync()) {
-          final file = File('${downloads.path}/$fileName');
-          await file.writeAsString(content);
-          i('AppLogger', '日志已导出: ${file.path}');
-          return file.path;
+          final exportFile = File('${downloads.path}/$fileName');
+          await _logFile!.copy(exportFile.path);
+          i('AppLogger', '日志已导出: ${exportFile.path}');
+          return exportFile.path;
         }
       } catch (e) {
         w('AppLogger', '导出到 Download 失败，回退应用目录: $e');
       }
     }
 
+    // 其他平台：复制到应用文档目录
     final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/$fileName');
-    await file.writeAsString(content);
-    i('AppLogger', '日志已导出: ${file.path}');
-    return file.path;
+    final exportFile = File('${dir.path}/$fileName');
+    await _logFile!.copy(exportFile.path);
+    i('AppLogger', '日志已导出: ${exportFile.path}');
+    return exportFile.path;
   }
 
   /// 释放（flush + close），通常无需手动调用。
