@@ -272,6 +272,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     final current = _service.selectedSubtitleTrackId;
     showDialog(
       context: context,
+      barrierColor: Colors.transparent,
       builder: (dialogContext) => TvPanel(
         title: '字幕',
         onClose: () => Navigator.pop(dialogContext),
@@ -395,6 +396,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   Future<MediaStream?> _pickStreamToTranslate(List<MediaStream> subs) {
     return showDialog<MediaStream>(
       context: context,
+      barrierColor: Colors.transparent,
       builder: (ctx) => TvPanel(
         title: '选择要翻译的字幕轨',
         onClose: () => Navigator.pop(ctx),
@@ -435,6 +437,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     final current = _service.selectedAudioTrackId;
     showDialog(
       context: context,
+      barrierColor: Colors.transparent,
       builder: (dialogContext) => TvPanel(
         title: '音轨',
         onClose: () => Navigator.pop(dialogContext),

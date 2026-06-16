@@ -25,6 +25,7 @@ import '../../../core/services/subtitle_processor.dart';
 import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/utils/platform_utils.dart';
+import '../../../core/widgets/player_settings_panel.dart';
 
 part 'player_screen_state.dart';
 part 'player_screen_panels.dart';

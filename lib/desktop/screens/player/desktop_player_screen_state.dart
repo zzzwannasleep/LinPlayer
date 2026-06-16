@@ -1738,10 +1738,23 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
 
   Future<void> _showAnime4KMenu() async {
     final currentLevel = ref.read(anime4KLevelProvider);
-    final result = await showDialog<String>(
+    const levels = [
+      {'value': 'off', 'label': '关闭'},
+      {'value': 'modeA', 'label': '模式 A - 性能优先'},
+      {'value': 'modeB', 'label': '模式 B - 平衡'},
+      {'value': 'modeC', 'label': '模式 C - 质量优先'},
+    ];
+    final result = await showPlayerSettingsPanel<String>(
       context: context,
-      barrierColor: Colors.black54,
-      builder: (context) => _Anime4KLevelDialog(currentLevel: currentLevel),
+      title: 'Anime4K 超分设置',
+      width: 320,
+      children: levels
+          .map((level) => PanelOptionTile(
+                label: level['label']!,
+                selected: currentLevel == level['value'],
+                onTap: () => Navigator.pop(context, level['value']),
+              ))
+          .toList(),
     );
     if (result != null && mounted) {
       try {
@@ -1801,29 +1814,79 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     final anime4KLevel = ref.read(anime4KLevelProvider);
     final hardwareDecoding = ref.read(hardwareDecodingProvider);
 
-    showModalBottomSheet(
+    void go(VoidCallback action) {
+      Navigator.pop(context);
+      action();
+    }
+
+    showPlayerSettingsPanel(
       context: context,
-      backgroundColor: Colors.black87,
-      barrierColor: Colors.black54,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (context) => _MoreMenuSheet(
-        onShowAspectRatio: _showAspectRatioDialog,
-        onTakeScreenshot: _takeScreenshot,
-        onShowSubtitleSelector: _showSubtitleSelector,
-        onShowAudioSelector: _showAudioSelector,
-        onShowEpisodeSelector:
-            item?.seriesId != null ? _showEpisodeSelector : null,
-        onToggleHardwareDecoding: _toggleHardwareDecoding,
-        onToggleStats: _toggleStatsOverlay,
-        onToggleFullscreen: _toggleFullscreen,
-        onShowAnime4K: isMpv ? _showAnime4KMenu : null,
-        isStatsVisible: _showStatsOverlay,
-        isFullscreen: _isFullscreen,
-        hardwareDecodingEnabled: hardwareDecoding,
-        anime4KLabel: isMpv ? anime4KLevel : null,
-      ),
+      title: '更多选项',
+      width: 320,
+      children: [
+        PanelOptionTile(
+          label: '截图',
+          leading: const Icon(Icons.camera_alt_outlined),
+          selected: false,
+          onTap: () => go(_takeScreenshot),
+        ),
+        PanelOptionTile(
+          label: '字幕选择',
+          leading: const Icon(Icons.subtitles_outlined),
+          selected: false,
+          onTap: () => go(_showSubtitleSelector),
+        ),
+        PanelOptionTile(
+          label: '音轨选择',
+          leading: const Icon(Icons.audiotrack),
+          selected: false,
+          onTap: () => go(_showAudioSelector),
+        ),
+        if (item?.seriesId != null)
+          PanelOptionTile(
+            label: '选集',
+            leading: const Icon(Icons.playlist_play),
+            selected: false,
+            onTap: () => go(_showEpisodeSelector),
+          ),
+        PanelOptionTile(
+          label: '画面比例',
+          leading: const Icon(Icons.aspect_ratio),
+          selected: false,
+          onTap: () => go(_showAspectRatioDialog),
+        ),
+        const PanelDivider(),
+        PanelOptionTile(
+          label: '硬件解码',
+          subtitle: hardwareDecoding ? '当前已开启' : '当前已关闭',
+          leading: const Icon(Icons.memory),
+          selected: hardwareDecoding,
+          onTap: () => go(_toggleHardwareDecoding),
+        ),
+        if (isMpv)
+          PanelOptionTile(
+            label: 'Anime4K 超分',
+            subtitle: anime4KLevel == 'off'
+                ? '当前已关闭'
+                : '当前: ${_anime4KLevelLabel(anime4KLevel)}',
+            leading: const Icon(Icons.hd),
+            selected: anime4KLevel != 'off',
+            onTap: () => go(_showAnime4KMenu),
+          ),
+        PanelOptionTile(
+          label: '统计信息',
+          subtitle: _showStatsOverlay ? '显示中' : '已隐藏',
+          leading: const Icon(Icons.analytics),
+          selected: _showStatsOverlay,
+          onTap: () => go(_toggleStatsOverlay),
+        ),
+        PanelOptionTile(
+          label: _isFullscreen ? '退出全屏' : '进入全屏',
+          leading: Icon(_isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen),
+          selected: false,
+          onTap: () => go(_toggleFullscreen),
+        ),
+      ],
     );
   }
 
@@ -1831,45 +1894,24 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     final ratios = ['自动', '16:9', '4:3', '21:9', '全屏', '原始'];
     final currentRatio = ref.read(aspectRatioProvider);
 
-    showDialog(
+    showPlayerSettingsPanel(
       context: context,
-      barrierColor: Colors.black54,
-      builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 300),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('画面比例',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
-              ),
-              const Divider(color: Colors.white12, height: 1),
-              ...ratios.map((ratio) => ListTile(
-                    title: Text(ratio,
-                        style: const TextStyle(color: Colors.white)),
-                    trailing: currentRatio == ratio
-                        ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                        : null,
-                    onTap: () {
-                      ref.read(aspectRatioProvider.notifier).state = ratio;
-                      _playerService.setAspectRatio(ratio);
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('画面比例: $ratio')),
-                      );
-                    },
-                  )),
-            ],
-          ),
-        ),
-      ),
+      title: '画面比例',
+      width: 300,
+      children: ratios
+          .map((ratio) => PanelOptionTile(
+                label: ratio,
+                selected: currentRatio == ratio,
+                onTap: () {
+                  ref.read(aspectRatioProvider.notifier).state = ratio;
+                  _playerService.setAspectRatio(ratio);
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('画面比例: $ratio')),
+                  );
+                },
+              ))
+          .toList(),
     );
   }
 
@@ -1879,14 +1921,21 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     final item = ref.read(currentPlayingItemProvider);
     if (item?.seriesId == null) return;
 
-    showDialog(
+    final maxHeight = MediaQuery.of(context).size.height * 0.7;
+    showPlayerSettingsPanel(
       context: context,
-      barrierColor: Colors.black54,
-      builder: (context) => _EpisodeSelectorDialog(
-        seriesId: item!.seriesId!,
-        currentEpisodeId: item.id,
-        currentMediaSourceId: ref.read(selectedMediaSourceProvider),
-      ),
+      title: '选集',
+      width: 420,
+      children: [
+        SizedBox(
+          height: maxHeight,
+          child: _EpisodeSelectorList(
+            seriesId: item!.seriesId!,
+            currentEpisodeId: item.id,
+            currentMediaSourceId: ref.read(selectedMediaSourceProvider),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1997,21 +2046,23 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       context: context,
       barrierDismissible: false,
       builder: (ctx) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(
+              SizedBox(
                   width: 22,
                   height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Theme.of(ctx).colorScheme.primary)),
               const SizedBox(width: 16),
               ValueListenableBuilder<String>(
                 valueListenable: progress,
-                builder: (_, v, __) =>
-                    Text(v, style: const TextStyle(color: Colors.white)),
+                builder: (_, v, __) => Text(v),
               ),
             ],
           ),
@@ -2084,37 +2135,19 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   }
 
   Future<MediaStream?> _pickStreamToTranslate(List<MediaStream> subs) {
-    return showDialog<MediaStream>(
+    return showPlayerSettingsPanel<MediaStream>(
       context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),
-          child: ListView(
-            shrinkWrap: true,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('选择要翻译的字幕轨',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600)),
-              ),
-              for (final s in subs)
-                ListTile(
-                  title: Text(s.readableLabel(siblings: subs),
-                      style: const TextStyle(color: Colors.white)),
-                  subtitle: s.codec != null
-                      ? Text('编码: ${s.codec}',
-                          style: const TextStyle(color: Colors.white54))
-                      : null,
-                  onTap: () => Navigator.pop(ctx, s),
-                ),
-            ],
+      title: '选择要翻译的字幕轨',
+      width: 380,
+      children: [
+        for (final s in subs)
+          PanelOptionTile(
+            label: s.readableLabel(siblings: subs),
+            subtitle: s.codec != null ? '编码: ${s.codec}' : null,
+            selected: false,
+            onTap: () => Navigator.pop(context, s),
           ),
-        ),
-      ),
+      ],
     );
   }
 
@@ -2210,12 +2243,12 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text('需要 ffmpeg', style: TextStyle(color: Colors.white)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('需要 ffmpeg'),
         content: const Text(
           'Whisper 实时字幕需要 ffmpeg 抽取音频。系统中未检测到 ffmpeg，'
           '是否现在下载官方静态构建？',
-          style: TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
@@ -2238,21 +2271,23 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       context: context,
       barrierDismissible: false,
       builder: (ctx) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const SizedBox(
+              SizedBox(
                   width: 22,
                   height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2)),
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Theme.of(ctx).colorScheme.primary)),
               const SizedBox(width: 16),
               ValueListenableBuilder<String>(
                 valueListenable: progress,
-                builder: (_, v, __) =>
-                    Text(v, style: const TextStyle(color: Colors.white)),
+                builder: (_, v, __) => Text(v),
               ),
             ],
           ),
@@ -2289,123 +2324,51 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     VoidCallback? onWhisper,
     bool whisperRunning = false,
   }) {
-    showDialog(
+    showPlayerSettingsPanel(
       context: context,
-      barrierColor: Colors.black54,
-      builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Text(title,
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600)),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white70),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                  ],
-                ),
-              ),
-              if (onTranslate != null) ...[
-                ListTile(
-                  leading: Icon(
-                      translateStreaming
-                          ? Icons.stop_circle
-                          : Icons.translate,
-                      color: const Color(0xFF5B8DEF)),
-                  title: Text(
-                      translateStreaming ? '停止流式翻译' : '翻译字幕（生成中文）',
-                      style: const TextStyle(color: Colors.white)),
-                  subtitle: Text(
-                      translateStreaming
-                          ? '正在边播边译，叠加层显示中文'
-                          : '外挂字幕整轨翻译；内封字幕自动转流式翻译',
-                      style: const TextStyle(color: Colors.white54)),
-                  onTap: () {
-                    Navigator.pop(context);
-                    onTranslate();
-                  },
-                ),
-              ],
-              if (onWhisper != null) ...[
-                ListTile(
-                  leading: Icon(
-                      whisperRunning ? Icons.stop_circle : Icons.record_voice_over,
-                      color: const Color(0xFF5B8DEF)),
-                  title: Text(
-                      whisperRunning ? '停止 Whisper 实时字幕' : 'Whisper 实时字幕（本地转写）',
-                      style: const TextStyle(color: Colors.white)),
-                  subtitle: const Text('无字幕片源边播边转写并译为中文（吃 CPU/显卡）',
-                      style: TextStyle(color: Colors.white54)),
-                  onTap: () {
-                    Navigator.pop(context);
-                    onWhisper();
-                  },
-                ),
-              ],
-              const Divider(color: Colors.white12, height: 1),
-              Flexible(
-                child: DesktopSmoothScrollBuilder(
-                  builder: (context, controller) => ListView.builder(
-                    controller: controller,
-                    shrinkWrap: true,
-                    itemCount: canDisable ? streams.length + 1 : streams.length,
-                    itemBuilder: (context, index) {
-                      if (canDisable && index == 0) {
-                        final isSelected = selectedIndex == null;
-                        return ListTile(
-                          title: const Text('关闭字幕',
-                              style: TextStyle(color: Colors.white)),
-                          trailing: isSelected
-                              ? const Icon(Icons.check,
-                                  color: Color(0xFF5B8DEF))
-                              : null,
-                          onTap: () {
-                            _playerService.deselectSubtitleTrack();
-                            Navigator.pop(context);
-                          },
-                        );
-                      }
-                      final trackIndex = canDisable ? index - 1 : index;
-                      final stream = streams[trackIndex];
-                      final isSelected = selectedIndex == stream.index;
-                      final label = stream.readableLabel(siblings: streams);
-                      return ListTile(
-                        title: Text(label,
-                            style: const TextStyle(color: Colors.white)),
-                        subtitle: stream.codec != null
-                            ? Text(
-                                '编码: ${stream.codec}${subtitle ? (stream.isExternal == true ? ' (外挂)' : ' (内封)') : ''}',
-                                style: const TextStyle(color: Colors.white54),
-                              )
-                            : null,
-                        trailing: isSelected
-                            ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                            : null,
-                        onTap: () {
-                          onSelect(stream.index);
-                          Navigator.pop(context);
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
+      title: title,
+      width: 380,
+      children: [
+        if (onTranslate != null)
+          PanelActionTile(
+            icon: translateStreaming ? Icons.stop_circle : Icons.translate,
+            label: translateStreaming ? '停止流式翻译' : '翻译字幕（生成中文）',
+            onTap: () {
+              Navigator.pop(context);
+              onTranslate();
+            },
           ),
-        ),
-      ),
+        if (onWhisper != null)
+          PanelActionTile(
+            icon: whisperRunning ? Icons.stop_circle : Icons.record_voice_over,
+            label: whisperRunning ? '停止 Whisper 实时字幕' : 'Whisper 实时字幕',
+            onTap: () {
+              Navigator.pop(context);
+              onWhisper();
+            },
+          ),
+        if (onTranslate != null || onWhisper != null) const PanelDivider(),
+        if (canDisable)
+          PanelOptionTile(
+            label: '关闭字幕',
+            selected: selectedIndex == null,
+            onTap: () {
+              _playerService.deselectSubtitleTrack();
+              Navigator.pop(context);
+            },
+          ),
+        ...streams.map((stream) => PanelOptionTile(
+              label: stream.readableLabel(siblings: streams),
+              subtitle: stream.codec != null
+                  ? '编码: ${stream.codec}${subtitle ? (stream.isExternal == true ? ' (外挂)' : ' (内封)') : ''}'
+                  : null,
+              selected: selectedIndex == stream.index,
+              onTap: () {
+                onSelect(stream.index);
+                Navigator.pop(context);
+              },
+            )),
+      ],
     );
   }
 
@@ -3366,60 +3329,28 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   // ========== 跳过片头设置 ==========
 
   void _showSkipDialog() {
-    showDialog(
+    showPlayerSettingsPanel(
       context: context,
-      barrierColor: Colors.black38,
-      builder: (context) => Dialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('跳过片头设置',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 16),
-                _SkipTimeField(
-                    label: '片头开始 (秒)', provider: skipOpeningStartProvider),
-                const SizedBox(height: 12),
-                _SkipTimeField(
-                    label: '片头结束 (秒)', provider: skipOpeningEndProvider),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Text('自动跳过', style: TextStyle(color: Colors.white)),
-                    const Spacer(),
-                    Switch(
-                      value: ref.read(skipAutoModeProvider),
-                      onChanged: (value) {
-                        ref.read(skipAutoModeProvider.notifier).state = value;
-                        Navigator.pop(context);
-                      },
-                      activeThumbColor: const Color(0xFF5B8DEF),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('确定',
-                        style: TextStyle(color: Color(0xFF5B8DEF))),
-                  ),
-                ),
-              ],
-            ),
+      title: '跳过片头设置',
+      width: 340,
+      children: [
+        const PanelSectionTitle('时间区间'),
+        _SkipTimeField(
+            label: '片头开始 (秒)', provider: skipOpeningStartProvider),
+        const SizedBox(height: 4),
+        _SkipTimeField(
+            label: '片头结束 (秒)', provider: skipOpeningEndProvider),
+        const PanelDivider(),
+        Consumer(
+          builder: (context, ref, _) => PanelSwitchRow(
+            label: '自动跳过',
+            subtitle: '到达片头区间自动跳过，而不是显示按钮',
+            value: ref.watch(skipAutoModeProvider),
+            onChanged: (value) =>
+                ref.read(skipAutoModeProvider.notifier).state = value,
           ),
         ),
-      ),
+      ],
     );
   }
 

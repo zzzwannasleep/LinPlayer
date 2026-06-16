@@ -1900,201 +1900,74 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _showMoreMenu() {
+    void go(VoidCallback action) {
+      Navigator.pop(context);
+      action();
+    }
+
     _showRightPanel(
       title: '更多选项',
       children: [
-        ListTile(
-          leading: const Icon(Icons.route, color: Colors.white),
-          title: const Text('线路切换', style: TextStyle(color: Colors.white)),
-          onTap: () {
-            Navigator.pop(context);
-            _showLineSelector();
-          },
+        PanelOptionTile(
+          label: '线路切换',
+          leading: const Icon(Icons.route),
+          selected: false,
+          onTap: () => go(_showLineSelector),
         ),
-        ListTile(
-          leading: const Icon(Icons.screen_rotation, color: Colors.white),
-          title: const Text('旋转屏幕', style: TextStyle(color: Colors.white)),
-          onTap: () {
-            Navigator.pop(context);
-            _toggleOrientation();
-          },
+        PanelOptionTile(
+          label: '旋转屏幕',
+          leading: const Icon(Icons.screen_rotation),
+          selected: false,
+          onTap: () => go(_toggleOrientation),
         ),
-        ListTile(
-          leading: const Icon(Icons.timer, color: Colors.white),
-          title: const Text('定时关闭', style: TextStyle(color: Colors.white)),
-          onTap: () {
-            Navigator.pop(context);
-            _showTimerDialog();
-          },
+        PanelOptionTile(
+          label: '定时关闭',
+          leading: const Icon(Icons.timer),
+          selected: false,
+          onTap: () => go(_showTimerDialog),
         ),
         if (!isDesktopPlatform)
-          ListTile(
-            leading: const Icon(Icons.memory, color: Colors.white),
-            title: const Text('内核切换', style: TextStyle(color: Colors.white)),
-            onTap: () {
-              Navigator.pop(context);
-              _showCoreSwitchDialog();
-            },
+          PanelOptionTile(
+            label: '内核切换',
+            leading: const Icon(Icons.memory),
+            selected: false,
+            onTap: () => go(_showCoreSwitchDialog),
           ),
-        ListTile(
-          leading: const Icon(Icons.analytics, color: Colors.white),
-          title: const Text('统计信息', style: TextStyle(color: Colors.white)),
-          onTap: () {
-            Navigator.pop(context);
-            _showStats();
-          },
+        PanelOptionTile(
+          label: '统计信息',
+          leading: const Icon(Icons.analytics),
+          selected: false,
+          onTap: () => go(_showStats),
         ),
-        ListTile(
-          leading: const Icon(Icons.aspect_ratio, color: Colors.white),
-          title: const Text('画面比例', style: TextStyle(color: Colors.white)),
-          onTap: () {
-            Navigator.pop(context);
-            _showAspectRatioDialog();
-          },
+        PanelOptionTile(
+          label: '画面比例',
+          leading: const Icon(Icons.aspect_ratio),
+          selected: false,
+          onTap: () => go(_showAspectRatioDialog),
         ),
       ],
     );
   }
 
   void _showRightPanel(
-      {required String title, required List<Widget> children}) {
-    final screenSize = MediaQuery.of(context).size;
-
-    showGeneralDialog(
+      {required String title,
+      required List<Widget> children,
+      double? width}) {
+    // 统一走共享的右侧设置面板（透明遮罩 + 局部毛玻璃 + 宽度≤1/3 + 深浅自适应）。
+    showPlayerSettingsPanel(
       context: context,
-      barrierDismissible: true,
-      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.transparent,
-      transitionDuration: const Duration(milliseconds: 250),
-      pageBuilder: (dialogContext, animation, secondaryAnimation) {
-        return Align(
-          alignment: Alignment.centerRight,
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              width: screenSize.width * 0.35,
-              constraints: BoxConstraints(
-                maxHeight: screenSize.height * 0.8,
-              ),
-              margin: const EdgeInsets.only(right: 0),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.88),
-                borderRadius:
-                    const BorderRadius.horizontal(left: Radius.circular(16)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 20,
-                    offset: const Offset(-5, 0),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.horizontal(left: Radius.circular(16)),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 标题栏
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        border: Border(
-                          bottom: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            width: 1,
-                          ),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Text(
-                            title,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const Spacer(),
-                          Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: () => Navigator.pop(dialogContext),
-                              borderRadius: BorderRadius.circular(20),
-                              child: Container(
-                                padding: const EdgeInsets.all(6),
-                                child: const Icon(
-                                  Icons.close,
-                                  color: Colors.white70,
-                                  size: 20,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // 内容区域
-                    Flexible(
-                      child: Theme(
-                        data: Theme.of(dialogContext).copyWith(
-                          listTileTheme: const ListTileThemeData(
-                            textColor: Colors.white,
-                            iconColor: Colors.white70,
-                            selectedColor: Color(0xFF5B8DEF),
-                          ),
-                          radioTheme: RadioThemeData(
-                            fillColor:
-                                WidgetStateProperty.resolveWith((states) {
-                              if (states.contains(WidgetState.selected)) {
-                                return const Color(0xFF5B8DEF);
-                              }
-                              return Colors.white54;
-                            }),
-                          ),
-                        ),
-                        child: ListView(
-                          shrinkWrap: true,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          children: children,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-      transitionBuilder: (context, animation, secondaryAnimation, child) {
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1.0, 0.0),
-            end: Offset.zero,
-          ).animate(CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-          )),
-          child: child,
-        );
-      },
+      title: title,
+      width: width,
+      children: children,
     );
   }
 
   void _showSkipDialog() {
-    showDialog(
-      context: context,
-      barrierColor: Colors.black38,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.black87,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: _SkipDialog(currentPosition: _playerService.position),
-      ),
+    _showRightPanel(
+      title: '跳过片头',
+      children: [
+        _SkipDialog(currentPosition: _playerService.position),
+      ],
     );
   }
 
@@ -2134,36 +2007,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _showStats() {
+    final colors = PlayerPanelColors.resolve(context);
+    Widget statRow(String label, String value) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.textSecondary, fontSize: 14)),
+            ),
+            Text(value,
+                style: TextStyle(
+                    color: colors.text,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+    }
+
     _showRightPanel(
       title: '播放统计',
       children: [
-        ListTile(
-          title: const Text('播放速度', style: TextStyle(color: Colors.white70)),
-          trailing: Text('${_playerService.speed}x',
-              style: const TextStyle(color: Colors.white)),
-        ),
-        ListTile(
-          title: const Text('音量', style: TextStyle(color: Colors.white70)),
-          trailing: Text('${(_playerService.volume * 100).toInt()}%',
-              style: const TextStyle(color: Colors.white)),
-        ),
-        ListTile(
-          title: const Text('亮度', style: TextStyle(color: Colors.white70)),
-          trailing: Text('${(_playerService.brightness * 100).toInt()}%',
-              style: const TextStyle(color: Colors.white)),
-        ),
-        ListTile(
-          title: const Text('播放状态', style: TextStyle(color: Colors.white70)),
-          trailing: Text(_playerService.isPlaying ? '播放中' : '已暂停',
-              style: const TextStyle(color: Colors.white)),
-        ),
-        ListTile(
-          title: const Text('当前位置', style: TextStyle(color: Colors.white70)),
-          trailing: Text(
-            '${_formatDuration(_playerService.position)} / ${_formatDuration(_playerService.duration)}',
-            style: const TextStyle(color: Colors.white),
-          ),
-        ),
+        statRow('播放速度', '${_playerService.speed}x'),
+        statRow('音量', '${(_playerService.volume * 100).toInt()}%'),
+        statRow('亮度', '${(_playerService.brightness * 100).toInt()}%'),
+        statRow('播放状态', _playerService.isPlaying ? '播放中' : '已暂停'),
+        statRow('当前位置',
+            '${_formatDuration(_playerService.position)} / ${_formatDuration(_playerService.duration)}'),
       ],
     );
   }
@@ -2244,9 +2118,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _showRightPanel(
       title: '定时关闭',
       children: [
-        ...options.map((minutes) => ListTile(
-              title: Text('$minutes 分钟后关闭',
-                  style: const TextStyle(color: Colors.white)),
+        ...options.map((minutes) => PanelOptionTile(
+              label: '$minutes 分钟后关闭',
+              leading: const Icon(Icons.timer_outlined),
+              selected: false,
               onTap: () {
                 Navigator.pop(context);
                 _startSleepTimer(Duration(minutes: minutes));
@@ -2276,13 +2151,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void _showCoreSwitchDialog() {
     final currentCore = normalizePlayerCore(ref.read(playerCoreProvider));
     final children = <Widget>[
-      ListTile(
-        title: const Text('ExoPlayer', style: TextStyle(color: Colors.white)),
-        subtitle: const Text('Android 原生，轻量稳定',
-            style: TextStyle(fontSize: 12, color: Colors.white70)),
-        leading: currentCore == 'exoPlayer'
-            ? const Icon(Icons.check_circle, color: Color(0xFF5B8DEF))
-            : null,
+      PanelOptionTile(
+        label: 'ExoPlayer',
+        subtitle: 'Android 原生，轻量稳定',
+        selected: currentCore == 'exoPlayer',
         onTap: () {
           Navigator.pop(context);
           if (currentCore != 'exoPlayer') {
@@ -2291,13 +2163,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         },
       ),
       if (Platform.isAndroid)
-        ListTile(
-          title: const Text('MPV 原生', style: TextStyle(color: Colors.white)),
-          subtitle: const Text('libplayer.so 直调 libmpv，全格式/HDR/字幕',
-              style: TextStyle(fontSize: 12, color: Colors.white70)),
-          leading: currentCore == 'nativeMpv'
-              ? const Icon(Icons.check_circle, color: Color(0xFF5B8DEF))
-              : null,
+        PanelOptionTile(
+          label: 'MPV 原生',
+          subtitle: 'libplayer.so 直调 libmpv，全格式/HDR/字幕',
+          selected: currentCore == 'nativeMpv',
           onTap: () {
             Navigator.pop(context);
             if (currentCore != 'nativeMpv') {
@@ -2306,14 +2175,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           },
         ),
       if (!Platform.isAndroid)
-        ListTile(
-          title: const Text('MPV (media_kit)',
-              style: TextStyle(color: Colors.white)),
-          subtitle: const Text('libmpv FFI，全格式/HDR/高级字幕',
-              style: TextStyle(fontSize: 12, color: Colors.white70)),
-          leading: currentCore == 'mpv'
-              ? const Icon(Icons.check_circle, color: Color(0xFF5B8DEF))
-              : null,
+        PanelOptionTile(
+          label: 'MPV (media_kit)',
+          subtitle: 'libmpv FFI，全格式/HDR/高级字幕',
+          selected: currentCore == 'mpv',
           onTap: () {
             Navigator.pop(context);
             if (currentCore != 'mpv') {
@@ -2369,12 +2234,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         ...server.lines.asMap().entries.map((entry) {
           final idx = entry.key;
           final line = entry.value;
-          return ListTile(
-            leading: const Icon(Icons.route, color: Colors.white70),
-            title: Text(line.name, style: const TextStyle(color: Colors.white)),
-            trailing: idx == server.activeLineIndex
-                ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                : null,
+          return PanelOptionTile(
+            leading: const Icon(Icons.route),
+            label: line.name,
+            selected: idx == server.activeLineIndex,
             onTap: () async {
               ref
                   .read(serverListProvider.notifier)
@@ -2412,11 +2275,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _showRightPanel(
       title: '画面比例',
       children: ratios
-          .map((ratio) => ListTile(
-                title: Text(ratio, style: const TextStyle(color: Colors.white)),
-                trailing: ref.read(aspectRatioProvider) == ratio
-                    ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                    : null,
+          .map((ratio) => PanelOptionTile(
+                label: ratio,
+                selected: ref.read(aspectRatioProvider) == ratio,
                 onTap: () {
                   ref.read(aspectRatioProvider.notifier).state = ratio;
                   _playerService.setAspectRatio(ratio);

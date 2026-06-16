@@ -80,73 +80,66 @@ class _SkipDialogState extends ConsumerState<_SkipDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('跳过片头'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              const Text('开始时间'),
-              const Spacer(),
-              Text(_formatTime(_openingStart)),
-              IconButton(
-                icon: const Icon(Icons.location_on),
-                tooltip: '取当前时间',
-                onPressed: () {
-                  setState(() => _openingStart = widget.currentPosition);
-                },
+    final colors = PlayerPanelColors.resolve(context);
+
+    Widget timeRow(String label, Duration value, VoidCallback onPick) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 12, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: colors.text, fontSize: 14),
               ),
-            ],
-          ),
-          Row(
-            children: [
-              const Text('结束时间'),
-              const Spacer(),
-              Text(_formatTime(_openingEnd)),
-              IconButton(
-                icon: const Icon(Icons.location_on),
-                tooltip: '取当前时间',
-                onPressed: () {
-                  setState(() => _openingEnd = widget.currentPosition);
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              const Text('跳过模式'),
-              const Spacer(),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, label: Text('显示按钮')),
-                  ButtonSegment(value: true, label: Text('自动跳过')),
-                ],
-                selected: {_autoSkip},
-                onSelectionChanged: (value) {
-                  setState(() => _autoSkip = value.first);
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '当前: ${_autoSkip ? "自动跳过" : "显示跳过按钮"}',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).textTheme.bodySmall?.color,
             ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+            Text(
+              _formatTime(value),
+              style: TextStyle(
+                color: colors.accent,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.my_location, color: colors.textSecondary),
+              tooltip: '取当前时间',
+              onPressed: onPick,
+            ),
+          ],
         ),
-        TextButton(
-          onPressed: () {
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const PanelSectionTitle('时间区间'),
+        timeRow('开始时间', _openingStart,
+            () => setState(() => _openingStart = widget.currentPosition)),
+        timeRow('结束时间', _openingEnd,
+            () => setState(() => _openingEnd = widget.currentPosition)),
+        const PanelDivider(),
+        const PanelSectionTitle('跳过模式'),
+        PanelOptionTile(
+          label: '显示跳过按钮',
+          selected: !_autoSkip,
+          onTap: () => setState(() => _autoSkip = false),
+        ),
+        PanelOptionTile(
+          label: '自动跳过',
+          selected: _autoSkip,
+          onTap: () => setState(() => _autoSkip = true),
+        ),
+        const SizedBox(height: 12),
+        PanelActionTile(
+          icon: Icons.check_rounded,
+          label: '保存',
+          filled: true,
+          onTap: () {
             ref.read(skipOpeningStartProvider.notifier).state =
                 _openingStart.inSeconds;
             ref.read(skipOpeningEndProvider.notifier).state =
@@ -157,8 +150,8 @@ class _SkipDialogState extends ConsumerState<_SkipDialog> {
               const SnackBar(content: Text('跳过设置已保存')),
             );
           },
-          child: const Text('保存'),
         ),
+        const SizedBox(height: 8),
       ],
     );
   }
@@ -186,59 +179,73 @@ class _DanmakuSettingsContent extends ConsumerWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SwitchListTile(
-          title: const Text('显示弹幕', style: TextStyle(color: Colors.white)),
+        PanelSwitchRow(
+          label: '显示弹幕',
           value: danmakuEnabled,
           onChanged: (value) {
             ref.read(danmakuEnabledProvider.notifier).state = value;
           },
         ),
-        const Divider(color: Colors.white24),
-        const Text('不透明度', style: TextStyle(color: Colors.white70)),
-        Slider(
+        const PanelDivider(),
+        PanelSliderRow(
+          label: '不透明度',
           value: danmakuOpacity,
+          min: 0,
+          max: 1,
+          valueLabel: '${(danmakuOpacity * 100).round()}%',
           onChanged: (value) {
             ref.read(danmakuOpacityProvider.notifier).state = value;
           },
         ),
-        const Text('字号', style: TextStyle(color: Colors.white70)),
-        Slider(
+        PanelSliderRow(
+          label: '字号',
           value: danmakuFontSize,
+          min: 0,
+          max: 1,
+          valueLabel: danmakuFontSize.toStringAsFixed(2),
           onChanged: (value) {
             ref.read(danmakuFontSizeProvider.notifier).state = value;
           },
         ),
-        const Text('速度', style: TextStyle(color: Colors.white70)),
-        Slider(
+        PanelSliderRow(
+          label: '速度',
           value: danmakuSpeed,
+          min: 0,
+          max: 1,
+          valueLabel: danmakuSpeed.toStringAsFixed(2),
           onChanged: (value) {
             ref.read(danmakuSpeedProvider.notifier).state = value;
           },
         ),
-        const Text('密度', style: TextStyle(color: Colors.white70)),
-        Slider(
+        PanelSliderRow(
+          label: '密度',
           value: danmakuDensity,
+          min: 0,
+          max: 1,
+          valueLabel: danmakuDensity.toStringAsFixed(2),
           onChanged: (value) {
             ref.read(danmakuDensityProvider.notifier).state = value;
           },
         ),
-        const Text('延迟', style: TextStyle(color: Colors.white70)),
         Consumer(builder: (context, ref, _) {
           final delay = ref.watch(danmakuDelayProvider);
-          return Slider(
+          return PanelSliderRow(
+            label: '延迟',
             value: delay,
             min: -5.0,
             max: 5.0,
-            label: '${delay.toStringAsFixed(1)}s',
+            valueLabel: '${delay.toStringAsFixed(1)}s',
             onChanged: (value) {
               ref.read(danmakuDelayProvider.notifier).state = value;
             },
           );
         }),
-        const Text('去重', style: TextStyle(color: Colors.white70)),
+        const PanelDivider(),
         Consumer(builder: (context, ref, _) {
           final dedup = ref.watch(danmakuDedupProvider);
-          return Switch(
+          return PanelSwitchRow(
+            label: '去重',
+            subtitle: '合并内容重复的弹幕',
             value: dedup,
             onChanged: (v) => ref.read(danmakuDedupProvider.notifier).state = v,
           );
@@ -274,11 +281,7 @@ class _SubtitleSettingsContentState
     final selectedMediaSourceId = ref.watch(selectedMediaSourceProvider);
 
     if (subtitleAsync == null) {
-      return const _SettingsSection(
-        children: [
-          Center(child: Text('无播放信息', style: TextStyle(color: Colors.white70)))
-        ],
-      );
+      return const _SettingsSection(children: [_PanelEmpty(label: '无播放信息')]);
     }
 
     return subtitleAsync.when(
@@ -286,11 +289,7 @@ class _SubtitleSettingsContentState
         final fallbackMediaSource = info.mediaSources.firstOrNull;
         if (fallbackMediaSource == null) {
           return const _SettingsSection(
-            children: [
-              Center(
-                  child:
-                      Text('无可用字幕轨道', style: TextStyle(color: Colors.white70))),
-            ],
+            children: [_PanelEmpty(label: '无可用字幕轨道')],
           );
         }
         final mediaSource = selectedMediaSourceId != null
@@ -308,36 +307,18 @@ class _SubtitleSettingsContentState
           children: [
             const _SectionTitle('字幕轨道'),
             if (subtitles.isEmpty)
-              const ListTile(
-                leading: Icon(Icons.subtitles_off, color: Colors.white54),
-                title: Text('无可用字幕', style: TextStyle(color: Colors.white70)),
-              )
+              const _PanelEmpty(icon: Icons.subtitles_off, label: '无可用字幕')
             else
-              RadioGroup<int>(
-                groupValue: selectedSubtitleIndex,
-                onChanged: (value) {
-                  ref.read(subtitleTrackProvider.notifier).state = value;
-                },
-                child: Column(
-                  children: subtitles
-                      .map((stream) => RadioListTile<int>(
-                            title: Text(
-                              nameMap[stream.index] ??
-                                  stream.readableLabel(siblings: subtitles),
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 14),
-                            ),
-                            subtitle: stream.codec != null
-                                ? Text(
-                                    '编码: ${stream.codec}${stream.isExternal == true ? ' (外挂)' : ' (内封)'}',
-                                    style: const TextStyle(
-                                        color: Colors.white54, fontSize: 12))
-                                : null,
-                            value: stream.index,
-                          ))
-                      .toList(),
-                ),
-              ),
+              ...subtitles.map((stream) => PanelOptionTile(
+                    label: nameMap[stream.index] ??
+                        stream.readableLabel(siblings: subtitles),
+                    subtitle: stream.codec != null
+                        ? '编码: ${stream.codec}${stream.isExternal == true ? ' (外挂)' : ' (内封)'}'
+                        : null,
+                    selected: selectedSubtitleIndex == stream.index,
+                    onTap: () => ref.read(subtitleTrackProvider.notifier).state =
+                        stream.index,
+                  )),
             const SizedBox(height: 8),
             _SettingsButton(
               icon: Icons.upload_file,
@@ -351,39 +332,27 @@ class _SubtitleSettingsContentState
               onTap: () => _translateSubtitle(
                   item, mediaSource, subtitles, selectedSubtitleIndex),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
             const _Divider(),
             const _SectionTitle('次字幕（第二字幕）'),
-            RadioGroup<int?>(
-              groupValue: selectedSecondaryIndex,
-              onChanged: (value) {
-                ref.read(secondarySubtitleTrackProvider.notifier).state = value;
-              },
-              child: Column(
-                children: [
-                  const RadioListTile<int?>(
-                    title: Text('关闭',
-                        style: TextStyle(color: Colors.white70, fontSize: 13)),
-                    value: null,
-                  ),
-                  if (subtitles.isEmpty)
-                    const ListTile(
-                      title: Text('无可用次字幕',
-                          style: TextStyle(color: Colors.white70)),
-                    )
-                  else
-                    ...subtitles.map((stream) => RadioListTile<int?>(
-                          title: Text(
-                            nameMap[stream.index] ??
-                                stream.readableLabel(siblings: subtitles),
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 13),
-                          ),
-                          value: stream.index,
-                        )),
-                ],
-              ),
+            PanelOptionTile(
+              label: '关闭',
+              selected: selectedSecondaryIndex == null,
+              onTap: () => ref
+                  .read(secondarySubtitleTrackProvider.notifier)
+                  .state = null,
             ),
+            if (subtitles.isEmpty)
+              const _PanelEmpty(label: '无可用次字幕')
+            else
+              ...subtitles.map((stream) => PanelOptionTile(
+                    label: nameMap[stream.index] ??
+                        stream.readableLabel(siblings: subtitles),
+                    selected: selectedSecondaryIndex == stream.index,
+                    onTap: () => ref
+                        .read(secondarySubtitleTrackProvider.notifier)
+                        .state = stream.index,
+                  )),
             const _Divider(),
             const _SectionTitle('字体'),
             _SettingsItem(
@@ -403,28 +372,29 @@ class _SubtitleSettingsContentState
                   ref.read(subtitleDelayProvider.notifier).state = 0.0,
             ),
             const _Divider(),
-            const _SectionTitle('字幕大小'),
-            Slider(
+            PanelSliderRow(
+              label: '字幕大小',
               value: subtitleSize.clamp(0.0, 1.0),
+              min: 0,
+              max: 1,
+              valueLabel: '${(subtitleSize.clamp(0.0, 1.0) * 100).round()}%',
               onChanged: (value) =>
                   ref.read(subtitleSizeProvider.notifier).state = value,
-              activeColor: const Color(0xFF5B8DEF),
-              inactiveColor: Colors.white24,
             ),
-            const _SectionTitle('字幕位置'),
-            Slider(
+            PanelSliderRow(
+              label: '字幕位置',
               value: subtitlePosition.clamp(0.0, 1.0),
+              min: 0,
+              max: 1,
+              valueLabel:
+                  '${(subtitlePosition.clamp(0.0, 1.0) * 100).round()}%',
               onChanged: (value) =>
                   ref.read(subtitlePositionProvider.notifier).state = value,
-              activeColor: const Color(0xFF5B8DEF),
-              inactiveColor: Colors.white24,
             ),
             const _Divider(),
-            SwitchListTile(
-              title: const Text('字幕黑色背景',
-                  style: TextStyle(color: Colors.white, fontSize: 14)),
-              subtitle: const Text('为字幕添加半透明黑色背景',
-                  style: TextStyle(color: Colors.white54, fontSize: 12)),
+            PanelSwitchRow(
+              label: '字幕黑色背景',
+              subtitle: '为字幕添加半透明黑色背景',
               value: subtitleBackground,
               onChanged: (value) =>
                   ref.read(subtitleBackgroundProvider.notifier).state = value,
@@ -432,16 +402,9 @@ class _SubtitleSettingsContentState
           ],
         );
       },
-      loading: () => const _SettingsSection(
-        children: [
-          Center(child: CircularProgressIndicator(color: Colors.white54))
-        ],
-      ),
+      loading: () => const _SettingsSection(children: [_PanelLoading()]),
       error: (_, __) => const _SettingsSection(
-        children: [
-          Center(
-              child: Text('加载字幕信息失败', style: TextStyle(color: Colors.white70)))
-        ],
+        children: [_PanelEmpty(label: '加载字幕信息失败')],
       ),
     );
   }
@@ -803,11 +766,7 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
     final selectedMediaSourceId = ref.watch(selectedMediaSourceProvider);
 
     if (audioAsync == null) {
-      return const _SettingsSection(
-        children: [
-          Center(child: Text('无播放信息', style: TextStyle(color: Colors.white70)))
-        ],
-      );
+      return const _SettingsSection(children: [_PanelEmpty(label: '无播放信息')]);
     }
 
     return audioAsync.when(
@@ -815,11 +774,7 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
         final fallbackMediaSource = info.mediaSources.firstOrNull;
         if (fallbackMediaSource == null) {
           return const _SettingsSection(
-            children: [
-              Center(
-                  child:
-                      Text('无可用音轨', style: TextStyle(color: Colors.white70))),
-            ],
+            children: [_PanelEmpty(icon: Icons.audiotrack, label: '无可用音轨')],
           );
         }
         final mediaSource = selectedMediaSourceId != null
@@ -835,37 +790,19 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
           children: [
             const _SectionTitle('音频轨道'),
             if (audios.isEmpty)
-              const ListTile(
-                leading: Icon(Icons.audiotrack, color: Colors.white54),
-                title: Text('无可用音轨', style: TextStyle(color: Colors.white70)),
-              )
+              const _PanelEmpty(icon: Icons.audiotrack, label: '无可用音轨')
             else
-              RadioGroup<int>(
-                groupValue: selectedIndex,
-                onChanged: (value) {
-                  if (value != null) {
-                    ref.read(audioTrackProvider.notifier).state = value;
-                    _switchAudioTrack(audios, value);
-                  }
-                },
-                child: Column(
-                  children: audios
-                      .map((stream) => RadioListTile<int>(
-                            title: Text(
-                              stream.readableLabel(),
-                              style: const TextStyle(
-                                  color: Colors.white, fontSize: 14),
-                            ),
-                            subtitle: stream.codec != null
-                                ? Text('编码: ${stream.codec}',
-                                    style: const TextStyle(
-                                        color: Colors.white54, fontSize: 12))
-                                : null,
-                            value: stream.index,
-                          ))
-                      .toList(),
-                ),
-              ),
+              ...audios.map((stream) => PanelOptionTile(
+                    label: stream.readableLabel(),
+                    subtitle:
+                        stream.codec != null ? '编码: ${stream.codec}' : null,
+                    selected: selectedIndex == stream.index,
+                    onTap: () {
+                      ref.read(audioTrackProvider.notifier).state =
+                          stream.index;
+                      _switchAudioTrack(audios, stream.index);
+                    },
+                  )),
             const _Divider(),
             const _SectionTitle('音频同步'),
             _SyncControl(
@@ -880,16 +817,9 @@ class _AudioSettingsContentState extends ConsumerState<_AudioSettingsContent> {
           ],
         );
       },
-      loading: () => const _SettingsSection(
-        children: [
-          Center(child: CircularProgressIndicator(color: Colors.white54))
-        ],
-      ),
+      loading: () => const _SettingsSection(children: [_PanelLoading()]),
       error: (_, __) => const _SettingsSection(
-        children: [
-          Center(
-              child: Text('加载音频信息失败', style: TextStyle(color: Colors.white70)))
-        ],
+        children: [_PanelEmpty(label: '加载音频信息失败')],
       ),
     );
   }
@@ -990,50 +920,63 @@ class _EpisodeSelectorContentState
   Widget build(BuildContext context) {
     final seasonsAsync = ref.watch(seasonsProvider(widget.seriesId));
     final api = ref.read(apiClientProvider);
+    final colors = PlayerPanelColors.resolve(context);
 
-    return Column(
-      children: [
-        // 头部控制栏
-        Row(
-          children: [
-            // 季选择
-            seasonsAsync.when(
-              data: (seasons) {
-                if (seasons.isEmpty) return const SizedBox.shrink();
-                return DropdownButton<String>(
-                  value: _selectedSeasonId ?? seasons.first.id,
-                  items: seasons
-                      .map((season) => DropdownMenuItem(
-                            value: season.id,
-                            child: Text(season.name,
-                                style: const TextStyle(color: Colors.white)),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    setState(() => _selectedSeasonId = value);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Column(
+        children: [
+          // 头部控制栏
+          Row(
+            children: [
+              // 季选择
+              Flexible(
+                child: seasonsAsync.when(
+                  data: (seasons) {
+                    if (seasons.isEmpty) return const SizedBox.shrink();
+                    return DropdownButton<String>(
+                      value: _selectedSeasonId ?? seasons.first.id,
+                      isExpanded: true,
+                      underline: const SizedBox.shrink(),
+                      iconEnabledColor: colors.textSecondary,
+                      items: seasons
+                          .map((season) => DropdownMenuItem(
+                                value: season.id,
+                                child: Text(
+                                  season.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: colors.text),
+                                ),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => _selectedSeasonId = value);
+                      },
+                      dropdownColor: colors.surface,
+                    );
                   },
-                  dropdownColor: Colors.black87,
-                );
-              },
-              loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
-            ),
-            const Spacer(),
-            // 视图切换
-            IconButton(
-              icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view,
-                  color: Colors.white),
-              onPressed: () => setState(() => _isGridView = !_isGridView),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, __) => const SizedBox.shrink(),
+                ),
+              ),
+              const Spacer(),
+              // 视图切换
+              IconButton(
+                icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view,
+                    color: colors.text),
+                onPressed: () => setState(() => _isGridView = !_isGridView),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
 
-        // 集列表
-        Expanded(
-          child: _buildEpisodesList(api),
-        ),
-      ],
+          // 集列表
+          Expanded(
+            child: _buildEpisodesList(api),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1042,6 +985,7 @@ class _EpisodeSelectorContentState
       seriesId: widget.seriesId,
       seasonId: _selectedSeasonId,
     )));
+    final colors = PlayerPanelColors.resolve(context);
 
     return episodesAsync.when(
       data: (episodes) {
@@ -1064,11 +1008,12 @@ class _EpisodeSelectorContentState
                 child: Container(
                   decoration: BoxDecoration(
                     color: isCurrent
-                        ? const Color(0xFF5B8DEF).withValues(alpha: 0.2)
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
+                        ? colors.selectedFill
+                        : colors.controlTrack,
+                    borderRadius:
+                        BorderRadius.circular(PlayerPanelTokens.itemRadius),
                     border: isCurrent
-                        ? Border.all(color: const Color(0xFF5B8DEF), width: 2)
+                        ? Border.all(color: colors.accent, width: 2)
                         : null,
                   ),
                   child: Center(
@@ -1080,12 +1025,11 @@ class _EpisodeSelectorContentState
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 16,
-                            color: isCurrent ? const Color(0xFF5B8DEF) : null,
+                            color: isCurrent ? colors.accent : colors.text,
                           ),
                         ),
                         if (isWatched)
-                          const Icon(Icons.check,
-                              color: Color(0xFF5B8DEF), size: 16),
+                          Icon(Icons.check, color: colors.accent, size: 16),
                       ],
                     ),
                   ),
@@ -1113,7 +1057,7 @@ class _EpisodeSelectorContentState
                 child: Container(
                   width: 80,
                   height: 48,
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  color: colors.controlTrack,
                   child: imageUrls.isNotEmpty
                       ? MediaImage(
                           imageUrl: imageUrls.first,
@@ -1130,26 +1074,29 @@ class _EpisodeSelectorContentState
               title: Row(
                 children: [
                   if (isWatched)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 6),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
                       child: Icon(Icons.check_circle,
-                          size: 16, color: Color(0xFF5B8DEF)),
+                          size: 16, color: colors.accent),
                     ),
                   Expanded(
                     child: Text(
                       'E${episode.indexNumber} ${episode.name}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isCurrent ? colors.accent : colors.text,
+                      ),
                     ),
                   ),
                 ],
               ),
               subtitle: Text(
                 episode.formattedRuntime ?? '',
-                style: const TextStyle(fontSize: 12),
+                style: TextStyle(fontSize: 12, color: colors.textSecondary),
               ),
               trailing: isCurrent
-                  ? const Icon(Icons.play_circle, color: Color(0xFF5B8DEF))
+                  ? Icon(Icons.play_circle, color: colors.accent)
                   : null,
               selected: isCurrent,
               onTap: () => _playEpisode(episode),
@@ -1178,25 +1125,62 @@ class _SettingsSection extends StatelessWidget {
   }
 }
 
-/// 分组标题
+/// 面板内的空状态（图标 + 文案），自动适配深浅色。
+class _PanelEmpty extends StatelessWidget {
+  final IconData? icon;
+  final String label;
+  const _PanelEmpty({this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = PlayerPanelColors.resolve(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, color: colors.textSecondary, size: 28),
+            const SizedBox(height: 8),
+          ],
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: colors.textSecondary, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 面板内的加载态。
+class _PanelLoading extends StatelessWidget {
+  const _PanelLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = PlayerPanelColors.resolve(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 36),
+      child: Center(
+        child: SizedBox(
+          width: 26,
+          height: 26,
+          child: CircularProgressIndicator(strokeWidth: 2.4, color: colors.accent),
+        ),
+      ),
+    );
+  }
+}
+
+/// 分组标题（统一走共享的 TDesign 风格组件，自动适配深浅色）。
 class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => PanelSectionTitle(text);
 }
 
 /// 分隔线
@@ -1204,17 +1188,10 @@ class _Divider extends StatelessWidget {
   const _Divider();
 
   @override
-  Widget build(BuildContext context) {
-    return Divider(
-      color: Colors.white.withValues(alpha: 0.1),
-      height: 1,
-      indent: 16,
-      endIndent: 16,
-    );
-  }
+  Widget build(BuildContext context) => const PanelDivider();
 }
 
-/// 设置按钮
+/// 设置按钮（描边风格）
 class _SettingsButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1227,35 +1204,11 @@ class _SettingsButton extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Icon(icon, color: Colors.white70, size: 20),
-                const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      PanelActionTile(label: label, icon: icon, onTap: onTap);
 }
 
-/// 设置项（带箭头）
+/// 设置项（带下拉箭头，点击打开选择器）
 class _SettingsItem extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
@@ -1267,17 +1220,22 @@ class _SettingsItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = PlayerPanelColors.resolve(context);
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      title: Text(label,
-          style: const TextStyle(color: Colors.white, fontSize: 14)),
-      trailing: const Icon(Icons.arrow_drop_down, color: Colors.white54),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+      title: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: colors.text, fontSize: 14),
+      ),
+      trailing: Icon(Icons.arrow_drop_down, color: colors.textSecondary),
       onTap: onTap,
     );
   }
 }
 
-/// 同步控制组件
+/// 同步控制组件（-/+ 微调 + 自定义输入 + 重置），自动适配深浅色。
 class _SyncControl extends StatelessWidget {
   final double value;
   final VoidCallback onDecrease;
@@ -1295,45 +1253,40 @@ class _SyncControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = PlayerPanelColors.resolve(context);
+    Widget stepButton(IconData icon, VoidCallback onTap) {
+      return Material(
+        color: colors.controlTrack,
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Icon(icon, color: colors.text, size: 20),
+          ),
+        ),
+      );
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onDecrease,
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  child:
-                      const Icon(Icons.remove, color: Colors.white70, size: 20),
-                ),
-              ),
-            ),
+            stepButton(Icons.remove, onDecrease),
             const SizedBox(width: 16),
             Text(
               '${value >= 0 ? "+" : ""}${value.toStringAsFixed(1)}s',
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colors.text,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(width: 16),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: onIncrease,
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  child: const Icon(Icons.add, color: Colors.white70, size: 20),
-                ),
-              ),
-            ),
+            stepButton(Icons.add, onIncrease),
           ],
         ),
         const SizedBox(height: 8),
@@ -1343,7 +1296,7 @@ class _SyncControl extends StatelessWidget {
             TextButton(
               onPressed: onCustom,
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF5B8DEF),
+                foregroundColor: colors.accent,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
               child: const Text('自定义输入', style: TextStyle(fontSize: 13)),
@@ -1351,7 +1304,7 @@ class _SyncControl extends StatelessWidget {
             TextButton(
               onPressed: onReset,
               style: TextButton.styleFrom(
-                foregroundColor: Colors.white54,
+                foregroundColor: colors.textSecondary,
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
               child: const Text('重置', style: TextStyle(fontSize: 13)),

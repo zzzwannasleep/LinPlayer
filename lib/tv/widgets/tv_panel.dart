@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/tv_design_tokens.dart';
@@ -27,7 +30,7 @@ class _TvPanelState extends State<TvPanel>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<Offset> _offsetAnimation;
-  late Animation<double> _opacityAnimation;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
@@ -43,13 +46,11 @@ class _TvPanelState extends State<TvPanel>
       parent: _controller,
       curve: TvDesignTokens.panelSlideCurve,
     ));
-    _opacityAnimation = Tween<double>(
-      begin: 0.0,
-      end: 0.5,
-    ).animate(CurvedAnimation(
+    // 仅面板自身淡入，不再做全屏黑色遮罩。
+    _fadeAnimation = CurvedAnimation(
       parent: _controller,
       curve: TvDesignTokens.panelSlideCurve,
-    ));
+    );
     _controller.forward();
   }
 
@@ -66,16 +67,20 @@ class _TvPanelState extends State<TvPanel>
 
   @override
   Widget build(BuildContext context) {
+    // 宽度由内容决定，但绝不超过屏幕的 1/3。
+    final double maxWidth = MediaQuery.of(context).size.width / 3;
+    final double panelWidth = math.min(widget.width, maxWidth);
+    const borderRadius =
+        BorderRadius.horizontal(left: Radius.circular(20));
+
     return Stack(
       children: [
-        // 背景遮罩
-        AnimatedBuilder(
-          animation: _opacityAnimation,
-          builder: (context, child) => GestureDetector(
+        // 透明热区：点击面板外关闭，但不绘制任何黑色遮罩、不挡画面。
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: _close,
-            child: Container(
-              color: Colors.black.withOpacity(_opacityAnimation.value),
-            ),
+            child: const SizedBox.shrink(),
           ),
         ),
         // 面板
@@ -83,56 +88,87 @@ class _TvPanelState extends State<TvPanel>
           autofocus: true,
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent &&
-                event.logicalKey == LogicalKeyboardKey.escape) {
+                (event.logicalKey == LogicalKeyboardKey.escape ||
+                    event.logicalKey == LogicalKeyboardKey.goBack)) {
               _close();
               return KeyEventResult.handled;
             }
             return KeyEventResult.ignored;
           },
-          child: SlideTransition(
-            position: _offsetAnimation,
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Container(
-                width: widget.width,
-                color: TvDesignTokens.surface,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 标题栏
-                    Padding(
-                      padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-                      child: Row(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: SlideTransition(
+                position: _offsetAnimation,
+                child: ClipRRect(
+                  borderRadius: borderRadius,
+                  // 局部毛玻璃：仅面板区域，画面其余部分完全不被遮挡。
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                    child: Container(
+                      width: panelWidth,
+                      decoration: BoxDecoration(
+                        color: TvDesignTokens.surface.withValues(alpha: 0.86),
+                        borderRadius: borderRadius,
+                        border: const Border(
+                          left:
+                              BorderSide(color: TvDesignTokens.divider, width: 1),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 28,
+                            offset: const Offset(-8, 0),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            widget.title,
-                            style: const TextStyle(
-                              fontSize: TvDesignTokens.fontSizeXl,
-                              color: TvDesignTokens.textPrimary,
-                              fontWeight: FontWeight.bold,
+                          // 标题栏
+                          Padding(
+                            padding:
+                                const EdgeInsets.all(TvDesignTokens.spacingLg),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    widget.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: TvDesignTokens.fontSizeXl,
+                                      color: TvDesignTokens.textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: TvDesignTokens.spacingSm),
+                                TvFocusable(
+                                  onSelect: _close,
+                                  child: const Icon(
+                                    Icons.close,
+                                    color: TvDesignTokens.textSecondary,
+                                    size: 32,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const Spacer(),
-                          TvFocusable(
-                            onSelect: _close,
-                            child: const Icon(
-                              Icons.close,
-                              color: TvDesignTokens.textSecondary,
-                              size: 32,
+                          const Divider(color: TvDesignTokens.divider),
+                          // 内容
+                          Expanded(
+                            child: ListView(
+                              padding: const EdgeInsets.all(
+                                  TvDesignTokens.spacingLg),
+                              children: widget.children,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const Divider(color: TvDesignTokens.divider),
-                    // 内容
-                    Expanded(
-                      child: ListView(
-                        padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-                        children: widget.children,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -169,7 +205,8 @@ class TvPanelOption extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
         decoration: BoxDecoration(
-          color: isSelected ? TvDesignTokens.brand.withOpacity(0.15) : null,
+          color:
+              isSelected ? TvDesignTokens.brand.withValues(alpha: 0.15) : null,
           borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
         ),
         child: Row(
