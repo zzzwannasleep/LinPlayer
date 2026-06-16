@@ -139,6 +139,7 @@ jobs:
           flutter build apk --release --split-per-abi \
             --flavor mobile \
             --target-platform android-arm64 \
+            --dart-define=APP_VERSION="$VERSION" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 
@@ -262,6 +263,7 @@ jobs:
             --flavor tv \
             --target-platform android-arm \
             --dart-define=FLAVOR=tv \
+            --dart-define=APP_VERSION="$VERSION" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 
@@ -340,6 +342,7 @@ jobs:
           CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
 
           flutter build ios --release --no-codesign \
+            --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 
@@ -508,28 +511,50 @@ jobs:
           $cleanSecret = "$env:DANDANPLAY_APP_SECRET" -replace "[`r`n]", ""
 
           flutter build windows --release `
+            --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" `
             --dart-define=DANDANPLAY_APP_ID="$cleanId" `
             --dart-define=DANDANPLAY_APP_SECRET="$cleanSecret"
 
       - name: Upgrade libmpv-2.dll for PGS/SUP
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $outputDir = "build/windows/x64/runner/Release"
-          & "$env:GITHUB_WORKSPACE/windows/scripts/upgrade_libmpv_for_pgs.ps1" -BuildOutput $outputDir
-
+          $target = Join-Path $outputDir "libmpv-2.dll"
           $orig = Join-Path $outputDir "libmpv-2.dll.orig"
+          $used = $false
+
+          # 优先消费 libmpv-latest 预构建产物；失败则回退脚本现下。
+          try {
+            $tmp = Join-Path $env:RUNNER_TEMP "libmpv-pre"
+            New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+            gh release download "libmpv-latest" --repo "${{ github.repository }}" `
+              --pattern "libmpv-2.dll" --dir $tmp --clobber
+            $pre = Join-Path $tmp "libmpv-2.dll"
+            if ((Test-Path $pre) -and ((Get-Item $pre).Length -gt 60MB)) {
+              Copy-Item $target $orig -Force
+              Copy-Item $pre $target -Force
+              Write-Host "已使用 libmpv-latest 预构建的完整版 libmpv-2.dll"
+              $used = $true
+            }
+          } catch {
+            Write-Host "未取到 libmpv-latest 预构建，回退脚本下载: $_"
+          }
+
+          if (-not $used) {
+            & "$env:GITHUB_WORKSPACE/windows/scripts/upgrade_libmpv_for_pgs.ps1" -BuildOutput $outputDir
+          }
+
           if (-not (Test-Path -LiteralPath $orig)) {
             throw "libmpv-2.dll 未成功替换，PGS/SUP 可能无法显示"
           }
-
-          $target = Join-Path $outputDir "libmpv-2.dll"
           $targetInfo = Get-Item -LiteralPath $target
           $origInfo = Get-Item -LiteralPath $orig
           if ($targetInfo.Length -le $origInfo.Length) {
             throw "libmpv-2.dll 替换后大小未增长，可能仍缺少 PGS 解码器"
           }
-
-          Write-Host "libmpv-2.dll 已替换为完整版，目标大小: $($targetInfo.Length) bytes"
+          Write-Host "libmpv-2.dll 完整版就绪，大小: $($targetInfo.Length) bytes"
 
       - name: Package Windows Build
         shell: pwsh
@@ -600,6 +625,7 @@ jobs:
           CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
 
           flutter build linux --release \
+            --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 
@@ -666,6 +692,7 @@ jobs:
           CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
 
           flutter build macos --release \
+            --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 

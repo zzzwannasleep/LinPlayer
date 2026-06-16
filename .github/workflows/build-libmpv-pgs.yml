@@ -170,3 +170,82 @@ jobs:
             android/app/src/main/jniLibs/**/*.so
           if-no-files-found: warn
           retention-days: 7
+
+  # ============================================================
+  # Windows 完整版 libmpv（含 PGS/SUP 解码器）—— 取 shinchiro 完整构建
+  # ============================================================
+  assemble-windows-libmpv:
+    name: Assemble full libmpv (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Resolve latest shinchiro mpv-dev
+        id: src
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $rel = gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest | ConvertFrom-Json
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-.*\.7z$' } | Select-Object -First 1
+          if (-not $asset) { throw "未找到 mpv-dev-x86_64 资产" }
+          echo "url=$($asset.browser_download_url)" >> $env:GITHUB_OUTPUT
+          echo "name=$($asset.name)" >> $env:GITHUB_OUTPUT
+          Write-Host "Source: $($asset.name)"
+
+      - name: Download and extract libmpv-2.dll
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "${{ steps.src.outputs.url }}" -OutFile mpv-dev.7z
+          7z x mpv-dev.7z -ompv-dev | Out-Null
+          $dll = Get-ChildItem -Path mpv-dev -Recurse -Filter "libmpv-2.dll" | Select-Object -First 1
+          if (-not $dll) { throw "压缩包内未找到 libmpv-2.dll" }
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item $dll.FullName "out/libmpv-2.dll"
+          $size = (Get-Item out/libmpv-2.dll).Length
+          Write-Host "libmpv-2.dll size: $size"
+          if ($size -lt 60MB) { throw "libmpv-2.dll 体积过小，可能不是完整版" }
+
+      - name: Upload Windows libmpv
+        uses: actions/upload-artifact@v4
+        with:
+          name: libmpv-windows
+          path: out/libmpv-2.dll
+          retention-days: 7
+
+  # macOS：media_kit 随包 Mpv.framework 通常已含完整解码器；如需替换，把完整版
+  # 二进制放入 macos/libmpv/Mpv（构建末尾 Upgrade libmpv 阶段会覆盖）。便携自包含
+  # 的 macOS libmpv 需静态链接 ffmpeg，CI 自动产出不可靠，故此处不自动构建。
+  # Linux：使用系统 libmpv（发行版包通常完整含 PGS），无需在此构建。
+
+  # ============================================================
+  # 发布到 libmpv-latest（滚动预发布），供 build.yml 消费
+  # ============================================================
+  publish-libmpv:
+    name: Publish libmpv-latest
+    needs: [assemble-windows-libmpv]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download libmpv artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: libmpv-*
+          path: ./libmpv-assets
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lah ./libmpv-assets || true
+
+      - name: Publish/refresh libmpv-latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: libmpv-latest
+          name: 完整版 libmpv（最新）
+          prerelease: true
+          files: ./libmpv-assets/*
+          body: |
+            桌面端完整版 libmpv（含 PGS/SUP `hdmv_pgs_subtitle` 解码器），供 build.yml 自动消费。
+
+            - **Windows**：`libmpv-2.dll`（来自 shinchiro 完整构建）
+            - macOS：用随包 Mpv.framework 或手动放入 `macos/libmpv/Mpv`
+            - Linux：使用系统 `libmpv`

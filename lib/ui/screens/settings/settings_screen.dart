@@ -22,6 +22,9 @@ import '../../../core/services/translation/subtitle_document.dart';
 import '../../../core/services/translation/whisper/desktop_binary_manager.dart';
 import '../../../core/services/translation/whisper/whisper_model.dart';
 import '../../../core/services/translation/whisper/whisper_model_manager.dart';
+import '../../../core/providers/update_providers.dart';
+import '../../../core/services/update/app_update_service.dart';
+import '../../widgets/common/app_update_gate.dart';
 import '../../../plugins/ui/plugin_management_screen.dart';
 
 part 'settings_backup_restore.dart';

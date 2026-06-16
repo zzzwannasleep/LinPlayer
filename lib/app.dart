@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/providers/app_providers.dart';
 import 'core/theme/app_theme.dart';
 import 'routes/app_router.dart';
+import 'ui/widgets/common/app_update_gate.dart';
 
 class LinPlayerApp extends ConsumerWidget {
   const LinPlayerApp({super.key});
@@ -35,6 +36,8 @@ class LinPlayerApp extends ConsumerWidget {
         ThemeModeOption.system => ThemeMode.system,
       },
       routerConfig: router,
+      builder: (context, child) =>
+          AppUpdateGate(child: child ?? const SizedBox.shrink()),
     );
   }
 }

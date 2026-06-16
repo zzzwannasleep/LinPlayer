@@ -49,6 +49,12 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _showPlugins(context),
           ),
           _SettingsCard(
+            icon: Icons.system_update,
+            title: '检查更新',
+            subtitle: '当前 $kCurrentAppVersion · 每 24 小时自动检查',
+            onTap: () => _checkUpdate(context, ref),
+          ),
+          _SettingsCard(
             icon: Icons.info,
             title: '关于',
             subtitle: '版本、开源许可、致谢',
@@ -169,6 +175,24 @@ class SettingsScreen extends ConsumerWidget {
       context,
       MaterialPageRoute(builder: (context) => const PluginManagementScreen()),
     );
+  }
+
+  Future<void> _checkUpdate(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('正在检查更新…')));
+    final includePre = ref.read(updateIncludePrereleaseProvider);
+    final info = await ref
+        .read(appUpdateServiceProvider)
+        .checkForUpdate(includePrerelease: includePre);
+    if (!context.mounted) return;
+    if (info == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('已是最新版本（$kCurrentAppVersion）')),
+      );
+    } else {
+      ref.read(availableUpdateProvider.notifier).state = info;
+      await showUpdateDialog(context, info);
+    }
   }
 }
 

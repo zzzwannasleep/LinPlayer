@@ -1385,6 +1385,34 @@ class MpvPlayerAdapter implements PlayerAdapter {
     }
   }
 
+  // ---- 原生 mpv 属性/命令直通（供流式翻译 sub-step 预读等高级用法）----
+
+  Future<String?> mpvGetProperty(String name) async {
+    final np = _nativePlayer;
+    if (np == null) return null;
+    try {
+      return await np.getProperty(name);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> mpvSetProperty(String name, String value) async {
+    final np = _nativePlayer;
+    if (np == null) return;
+    try {
+      await np.setProperty(name, value);
+    } catch (_) {}
+  }
+
+  Future<void> mpvCommand(List<String> args) async {
+    final np = _nativePlayer;
+    if (np == null) return;
+    try {
+      await np.command(args);
+    } catch (_) {}
+  }
+
   @override
   Future<void> loadLibassSubtitle(String path) async {
     _logger.i('MpvAdapter', '加载外挂字幕: $path');

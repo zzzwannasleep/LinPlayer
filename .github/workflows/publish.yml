@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 1.0.0, must match a Pre-release)'
-        required: true
+        description: '要发布的版本号(如 1.0.0，需对应已存在的 *-pre 预发布)；留空=自动取最新 pre'
+        required: false
         type: string
 
 permissions:
@@ -17,121 +17,93 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Resolve version (input or latest pre-release)
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${{ inputs.version }}"
+          if [ -z "$VER" ]; then
+            echo "未指定版本，自动选取最新预发布(*-pre)…"
+            TAG=$(gh release list --repo "${{ github.repository }}" --limit 50 \
+              --json tagName,isPrerelease \
+              --jq 'map(select(.isPrerelease)) | .[0].tagName // empty')
+            if [ -z "$TAG" ]; then
+              echo "未找到任何预发布版本，无法发布"; exit 1
+            fi
+            VER=$(echo "$TAG" | sed -E 's/^v//; s/-pre$//')
+            echo "选取到最新预发布: $TAG -> 版本 $VER"
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "pretag=v$VER-pre" >> "$GITHUB_OUTPUT"
+
       - name: Download Pre-release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p /tmp/assets
-          gh release download "v${{ inputs.version }}-pre" \
+          gh release download "${{ steps.resolve.outputs.pretag }}" \
             --dir /tmp/assets \
             --repo "${{ github.repository }}"
-
           echo "Downloaded assets:"
           ls -lah /tmp/assets/
 
-      - name: Verify assets
+      - name: Verify assets (informational)
         run: |
-          set -euo pipefail
-
-          echo "Verifying downloaded assets..."
-
-          REQUIRED_FILES=(
-            "/tmp/assets/LinPlayer-Android-Mobile-v${{ inputs.version }}-arm64-v8a.apk"
-            "/tmp/assets/LinPlayer-Android-TV-v${{ inputs.version }}-armeabi-v7a.apk"
-            "/tmp/assets/LinPlayer-iOS-v${{ inputs.version }}-unsigned.zip"
-            "/tmp/assets/LinPlayer-AppleTV-v${{ inputs.version }}-unsigned-app.zip"
-            "/tmp/assets/LinPlayer-Windows-v${{ inputs.version }}.zip"
-            "/tmp/assets/LinPlayer-Linux-v${{ inputs.version }}.tar.gz"
-            "/tmp/assets/LinPlayer-macOS-v${{ inputs.version }}.zip"
+          VER="${{ steps.resolve.outputs.version }}"
+          EXPECTED=(
+            "LinPlayer-Android-Mobile-v$VER-arm64-v8a.apk"
+            "LinPlayer-Android-TV-v$VER-armeabi-v7a.apk"
+            "LinPlayer-iOS-v$VER-unsigned.zip"
+            "LinPlayer-AppleTV-v$VER-unsigned-app.zip"
+            "LinPlayer-Windows-v$VER.zip"
+            "LinPlayer-Linux-v$VER.tar.gz"
+            "LinPlayer-macOS-v$VER.zip"
           )
-
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "Missing required asset: $file"
-              exit 1
+          MISSING=0
+          for f in "${EXPECTED[@]}"; do
+            if [ -f "/tmp/assets/$f" ]; then
+              echo "✅ $f"
+            else
+              echo "⚠️ 缺少: $f（该平台将不在本次发布中）"
+              MISSING=$((MISSING+1))
             fi
-            echo "Found required asset: $(basename "$file")"
-            ls -lh "$file"
           done
+          echo "缺失 $MISSING 个平台产物（不阻断发布）"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version }}
-          name: Release v${{ inputs.version }}
+          tag_name: v${{ steps.resolve.outputs.version }}
+          name: Release v${{ steps.resolve.outputs.version }}
           prerelease: false
+          make_latest: true
           files: /tmp/assets/*
           generate_release_notes: true
           body: |
-            ## LinPlayer v${{ inputs.version }}
+            ## LinPlayer v${{ steps.resolve.outputs.version }}
+
+            自动更新：应用每 24 小时检查一次，发现此「最新发布」即提示升级。
 
             ### 下载
+            - **Android Mobile**：`LinPlayer-Android-Mobile-v${{ steps.resolve.outputs.version }}-arm64-v8a.apk`
+            - **Android TV**：`LinPlayer-Android-TV-v${{ steps.resolve.outputs.version }}-armeabi-v7a.apk`
+            - **iOS**：`LinPlayer-iOS-v${{ steps.resolve.outputs.version }}-unsigned.zip`（未签名 .app）
+            - **Apple TV**：`LinPlayer-AppleTV-v${{ steps.resolve.outputs.version }}-unsigned-app.zip`（未签名 .app）
+            - **Windows**：`LinPlayer-Windows-v${{ steps.resolve.outputs.version }}.zip`（解压运行）
+            - **Linux**：`LinPlayer-Linux-v${{ steps.resolve.outputs.version }}.tar.gz`
+            - **macOS**：`LinPlayer-macOS-v${{ steps.resolve.outputs.version }}.zip`
 
-            **Android Mobile**
-            - `LinPlayer-Android-Mobile-v${{ inputs.version }}-arm64-v8a.apk`：仅包含 64 位 `arm64-v8a`，适用于现代 Android 手机和平板。
-
-            **Android TV**
-            - `LinPlayer-Android-TV-v${{ inputs.version }}-armeabi-v7a.apk`：仅包含 32 位 `armeabi-v7a`，针对 Android TV 遥控器和焦点导航优化。
-
-            **iOS Mobile**
-            - `LinPlayer-iOS-v${{ inputs.version }}-unsigned.zip`：真实 iOS Release 构建产物，当前为未签名 `.app` 打包。
-
-            **Apple TV (tvOS)**
-            - `LinPlayer-AppleTV-v${{ inputs.version }}-unsigned-app.zip`：原生 Swift/SwiftUI 构建，当前为未签名 `.app` 打包。
-
-            **Windows**
-            - `LinPlayer-Windows-v${{ inputs.version }}.zip`：解压后运行其中的可执行文件。
-
-            **Linux**
-            - `LinPlayer-Linux-v${{ inputs.version }}.tar.gz`：解压后运行目录中的可执行文件。
-
-            **macOS**
-            - `LinPlayer-macOS-v${{ inputs.version }}.zip`：解压后打开 `.app`。
-
-            ### 安装说明
-
-            **Android Mobile**
-            1. 下载 `LinPlayer-Android-Mobile-v${{ inputs.version }}-arm64-v8a.apk`。
-            2. 允许安装未知来源应用。
-            3. 完成安装后启动应用。
-
-            **Android TV**
-            1. 下载 `LinPlayer-Android-TV-v${{ inputs.version }}-armeabi-v7a.apk`。
-            2. 通过 ADB 或文件管理器安装到 Android TV。
-            3. 使用遥控器方向键和确认键导航。
-
-            **iOS Mobile**
-            1. 下载 `LinPlayer-iOS-v${{ inputs.version }}-unsigned.zip`。
-            2. 在 macOS 上解压得到 `.app`。
-            3. 使用开发证书或分发证书重新签名后，再通过 Xcode、Apple Configurator 或其他分发流程安装。
-            4. 如需直接产出可安装 `.ipa`，请在 CI 或本地 Xcode 中补充 Apple 签名与导出配置。
-
-            **Apple TV (tvOS)**
-            1. 下载 `LinPlayer-AppleTV-v${{ inputs.version }}-unsigned-app.zip`。
-            2. 在 macOS 上解压得到 `.app`。
-            3. 使用 Apple 开发证书重新签名后，通过 Xcode 或 Apple Configurator 安装到 Apple TV。
-            4. 也可通过 TestFlight 分发，前提是已配置 App Store Connect。
-
-            **Windows**
-            1. 下载 ZIP 文件。
-            2. 解压到任意目录。
-            3. 运行其中的应用程序。
-
-            **Linux**
-            1. 下载 `.tar.gz` 文件。
-            2. 解压到任意目录。
-            3. 为可执行文件添加执行权限后运行。
-
-            **macOS**
-            1. 下载 ZIP 文件。
-            2. 解压得到 `.app`。
-            3. 首次打开如遇到安全提示，请在系统设置中允许运行。
+            ### 说明
+            - Windows/macOS 桌面端内置完整版 libmpv（支持 PGS/SUP 图形字幕）。
+            - iOS / Apple TV 为未签名构建，需自行用证书重签后安装。
 
       - name: Delete Pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete "v${{ inputs.version }}-pre" \
+          gh release delete "${{ steps.resolve.outputs.pretag }}" \
             --yes \
             --repo "${{ github.repository }}" \
             --cleanup-tag

@@ -532,6 +532,27 @@ class VideoPlayerService extends ChangeNotifier {
     await _adapter?.loadLibassSubtitle(path);
   }
 
+  /// 原生 mpv 属性读取（仅 media_kit/mpv 内核，其他返回 null）。
+  Future<String?> mpvGetProperty(String name) async {
+    final a = _adapter;
+    return a is MpvPlayerAdapter ? a.mpvGetProperty(name) : null;
+  }
+
+  /// 原生 mpv 属性设置（仅 mpv 内核）。
+  Future<void> mpvSetProperty(String name, String value) async {
+    final a = _adapter;
+    if (a is MpvPlayerAdapter) await a.mpvSetProperty(name, value);
+  }
+
+  /// 原生 mpv 命令（仅 mpv 内核）。
+  Future<void> mpvCommand(List<String> args) async {
+    final a = _adapter;
+    if (a is MpvPlayerAdapter) await a.mpvCommand(args);
+  }
+
+  /// 当前内核是否为 media_kit/mpv（流式 sub-step 预读仅此内核可用）。
+  bool get isMpvCore => _adapter is MpvPlayerAdapter;
+
   /// 加载字幕数据到内存（通过 libass）
   Future<void> loadLibassSubtitleMemory(Uint8List data,
       {String codec = 'ass'}) async {
