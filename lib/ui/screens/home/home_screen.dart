@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/providers/app_providers.dart';
@@ -393,6 +394,11 @@ class _HomeAppBarState extends ConsumerState<_HomeAppBar> {
     _serverMenuOverlay = null;
   }
 
+  void _navigateToServerManagement() {
+    HapticFeedback.mediumImpact();
+    context.go('/');
+  }
+
   @override
   void deactivate() {
     _hideServerMenu();
@@ -420,6 +426,7 @@ class _HomeAppBarState extends ConsumerState<_HomeAppBar> {
               GestureDetector(
                 key: _serverButtonKey,
                 onTap: _showServerSelector,
+                onLongPress: _navigateToServerManagement,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -462,7 +469,7 @@ class _HomeAppBarState extends ConsumerState<_HomeAppBar> {
               IconButton(
                 icon: const Icon(Icons.collections_bookmark),
                 onPressed: () {
-                  context.go('/libraries');
+                  context.push('/libraries');
                 },
               ),
               // 搜索按钮
@@ -951,7 +958,7 @@ class ContinueWatchingSection extends ConsumerWidget {
             HorizontalList(
               height: sizePreference.height + 50, // 高度 + 标题区域
               children: unplayedItems.asMap().entries.map((entry) {
-                return _ContinueWatchingCard(
+                return ContinueWatchingCard(
                   item: entry.value,
                   sizePreference: sizePreference,
                 ).appEntrance(index: entry.key);
@@ -966,83 +973,17 @@ class ContinueWatchingSection extends ConsumerWidget {
   }
 
   void _showContinueWatchingSheet(BuildContext context, WidgetRef ref) {
-    final resumeAsync = ref.read(resumeItemsProvider);
-    resumeAsync.when(
-      data: (items) {
-        if (items.isEmpty) return;
-
-        // 智能分析图片尺寸偏好
-        final sizePreference = ImageSizeHelper.analyzeForResumeSection(items);
-
-        showModalBottomSheet(
-          context: context,
-          isScrollControlled: true,
-          builder: (context) => DraggableScrollableSheet(
-            initialChildSize: 0.7,
-            minChildSize: 0.3,
-            maxChildSize: 0.9,
-            expand: false,
-            builder: (context, scrollController) {
-              return SafeArea(
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          const Text(
-                            '继续观看',
-                            style: TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.w700),
-                          ),
-                          const Spacer(),
-                          IconButton(
-                            icon: const Icon(Icons.close),
-                            onPressed: () => Navigator.pop(context),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    Expanded(
-                      child: GridView.builder(
-                        controller: scrollController,
-                        padding: const EdgeInsets.all(16),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          childAspectRatio: 1.5,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                        ),
-                        itemCount: items.length,
-                        itemBuilder: (context, index) {
-                          final item = items[index];
-                          return _ContinueWatchingCard(
-                            item: item,
-                            sizePreference: sizePreference,
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        );
-      },
-      loading: () {},
-      error: (_, __) {},
-    );
+    // 直接导航到继续观看列表页，而不使用 ModalBottomSheet
+    context.push('/resume');
   }
 }
 
-class _ContinueWatchingCard extends ConsumerWidget {
+/// 公开的继续观看卡片，供其他页面使用
+class ContinueWatchingCard extends ConsumerWidget {
   final MediaItem item;
   final ImageSizePreference sizePreference;
 
-  const _ContinueWatchingCard({
+  const ContinueWatchingCard({
     required this.item,
     required this.sizePreference,
   });
@@ -1334,7 +1275,7 @@ class LibrariesSection extends ConsumerWidget {
                     ),
                   ),
                   GestureDetector(
-                    onTap: () => context.go('/libraries'),
+                    onTap: () => context.push('/libraries'),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

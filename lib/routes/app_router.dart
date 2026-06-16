@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../core/providers/app_providers.dart';
+import '../core/providers/media_providers.dart';
 import '../core/theme/app_motion.dart';
 import '../plugins/plugin_system.dart';
 import '../ui/screens/detail/media_detail_screen.dart';
@@ -19,6 +20,9 @@ import '../ui/screens/server/icon_select_screen.dart';
 import '../ui/screens/server/server_lines_screen.dart';
 import '../ui/screens/server/server_list_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
+import '../ui/utils/image_size_helper.dart';
+import '../ui/utils/media_helpers.dart';
+import '../ui/widgets/common/media_widgets.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -79,18 +83,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                     ),
                   ),
                   GoRoute(
-                    path: 'resume',
-                    pageBuilder: (context, state) => _buildHorizontalPage(
-                      child: const _ResumeRouteScreen(),
-                      state: state,
-                      direction: _PageTransitionDirection.forward,
-                    ),
-                  ),
-                  GoRoute(
                     path: 'add',
                     pageBuilder: (context, state) => _buildHorizontalPage(
                       child: const AddServerScreen(),
                       state: state,
+                      direction: _PageTransitionDirection.forward,
                     ),
                   ),
                   GoRoute(
@@ -100,6 +97,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                         serverId: state.pathParameters['serverId']!,
                       ),
                       state: state,
+                      direction: _PageTransitionDirection.forward,
                     ),
                   ),
                   GoRoute(
@@ -109,6 +107,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                         serverId: state.pathParameters['serverId']!,
                       ),
                       state: state,
+                      direction: _PageTransitionDirection.forward,
                     ),
                   ),
                   GoRoute(
@@ -118,6 +117,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                         serverId: state.pathParameters['serverId']!,
                       ),
                       state: state,
+                      direction: _PageTransitionDirection.forward,
                     ),
                   ),
                 ],
@@ -157,6 +157,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state: state,
           direction: _PageTransitionDirection.forward,
         ),
+      ),
+      GoRoute(
+        path: '/resume',
+        builder: (context, state) => const _ResumeRouteScreen(),
       ),
       GoRoute(
         path: '/detail/:id',
@@ -275,49 +279,62 @@ class _AnimatedBranchContainer extends StatefulWidget {
       _AnimatedBranchContainerState();
 }
 
-class _AnimatedBranchContainerState extends State<_AnimatedBranchContainer> {
+class _AnimatedBranchContainerState extends State<_AnimatedBranchContainer>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _animation;
   int _previousIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 240),
+      vsync: this,
+    );
+    _animation = Tween<Offset>(
+      begin: Offset.zero,
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    ));
+  }
 
   @override
   void didUpdateWidget(covariant _AnimatedBranchContainer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentIndex != widget.currentIndex) {
+      final bool moveRight = widget.currentIndex > _previousIndex;
       _previousIndex = oldWidget.currentIndex;
+
+      // 设置动画方向
+      _animation = Tween<Offset>(
+        begin: Offset(moveRight ? 0.04 : -0.04, 0),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(
+        parent: _controller,
+        curve: Curves.easeOutCubic,
+      ));
+
+      _controller.forward(from: 0.0);
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    final bool moveRight = widget.currentIndex > _previousIndex;
-    return Stack(
-      fit: StackFit.expand,
-      children: List<Widget>.generate(widget.children.length, (index) {
-        final bool isActive = index == widget.currentIndex;
-        final bool isLeaving = index == _previousIndex && !isActive;
-        // 收敛位移、去掉叠加的 AnimatedOpacity（每个分支一次 saveLayer），
-        // Tab 切换只做单层轻量滑动。
-        final double targetOffset = isActive
-            ? 0
-            : isLeaving
-                ? (moveRight ? -0.04 : 0.04)
-                : (index > widget.currentIndex ? 0.04 : -0.04);
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
-        return IgnorePointer(
-          ignoring: !isActive,
-          child: TickerMode(
-            enabled: isActive || isLeaving,
-            child: AnimatedSlide(
-              duration: const Duration(milliseconds: 240),
-              curve: Curves.easeOutCubic,
-              offset: Offset(targetOffset, 0),
-              child: Offstage(
-                offstage: !isActive && !isLeaving,
-                child: widget.children[index],
-              ),
-            ),
-          ),
-        );
-      }),
+  @override
+  Widget build(BuildContext context) {
+    return SlideTransition(
+      position: _animation,
+      child: IndexedStack(
+        index: widget.currentIndex,
+        children: widget.children,
+      ),
     );
   }
 }
@@ -502,16 +519,102 @@ class _FloatingTabBar extends StatelessWidget {
   }
 }
 
-class _ResumeRouteScreen extends StatelessWidget {
+class _ResumeRouteScreen extends ConsumerWidget {
   const _ResumeRouteScreen();
 
   @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.only(top: 8, bottom: 24),
-          child: ContinueWatchingSection(),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resumeAsync = ref.watch(resumeItemsProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('继续观看'),
+      ),
+      body: resumeAsync.when(
+        data: (items) {
+          if (items.isEmpty) {
+            return const Center(
+              child: Text('暂无继续观看的内容'),
+            );
+          }
+
+          final sizePreference = ImageSizeHelper.analyzeForResumeSection(items);
+
+          return GridView.builder(
+            padding: const EdgeInsets.all(16),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 1.3,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 16,
+            ),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index];
+              final api = ref.read(apiClientProvider);
+              final imageUrls = resolveMediaItemImageUrls(
+                api,
+                item,
+                maxWidth: 400,
+                preferThumb: true,
+              );
+
+              return GestureDetector(
+                onTap: () => context.push(mediaRouteForItem(item)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // 封面图
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            MediaImage(
+                              imageUrl: imageUrls.isNotEmpty ? imageUrls.first : null,
+                              imageUrls: imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                              width: 400,
+                              height: 225,
+                              fit: BoxFit.cover,
+                            ),
+                            // 进度条
+                            if (item.progress != null)
+                              Positioned(
+                                bottom: 0,
+                                left: 0,
+                                right: 0,
+                                child: LinearProgressIndicator(
+                                  value: item.progress,
+                                  backgroundColor: Colors.white.withValues(alpha: 0.3),
+                                  valueColor: const AlwaysStoppedAnimation(Color(0xFF5B8DEF)),
+                                  minHeight: 3,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // 标题
+                    SizedBox(
+                      height: 16,
+                      child: Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Text('加载失败: $error'),
         ),
       ),
     );

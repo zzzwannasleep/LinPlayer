@@ -266,6 +266,14 @@ class MpvPlayerPlugin(
             // Always use SurfaceTexture for both gpu and gpu-next modes
             surfaceTextureEntry = textureRegistry.createSurfaceTexture()
             val surfaceTexture = surfaceTextureEntry.surfaceTexture()
+
+            // Set initial surface size using screen dimensions (landscape orientation)
+            // IMPORTANT: Must be set BEFORE creating Surface to avoid SurfaceSyncer errors
+            val dm = context.resources.displayMetrics
+            val screenW = if (dm.widthPixels > dm.heightPixels) dm.widthPixels else dm.heightPixels
+            val screenH = if (dm.widthPixels > dm.heightPixels) dm.heightPixels else dm.widthPixels
+            surfaceTexture.setDefaultBufferSize(screenW, screenH)
+
             val surface = Surface(surfaceTexture)
 
             // Create mpv context
@@ -278,12 +286,6 @@ class MpvPlayerPlugin(
             // Initialize mpv (registers JavaVM, starts event thread)
             MPVLib.init()
 
-            // Set initial surface size using screen dimensions (landscape orientation)
-            val dm = context.resources.displayMetrics
-            val screenW = if (dm.widthPixels > dm.heightPixels) dm.widthPixels else dm.heightPixels
-            val screenH = if (dm.widthPixels > dm.heightPixels) dm.heightPixels else dm.widthPixels
-
-            surfaceTextureEntry.surfaceTexture().setDefaultBufferSize(screenW, screenH)
             MPVLib.attachSurface(surface)
 
             // Notify mpv of initial render target dimensions

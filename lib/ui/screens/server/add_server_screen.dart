@@ -441,7 +441,7 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
       ref.read(authStateProvider.notifier).state = AuthState.authenticated;
 
       if (!mounted) return;
-      context.go('/home');
+      context.pushReplacement('/home');
     } catch (e) {
       setState(() { _errorMessage = _formatError(e); });
     } finally {
@@ -501,9 +501,9 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
         ref.read(serverListProvider.notifier).addServer(server);
         ref.read(currentServerProvider.notifier).state = server;
         ref.read(authStateProvider.notifier).state = AuthState.authenticated;
-        
+
         if (!mounted) return;
-        context.go('/home');
+        context.pushReplacement('/home');
       } else {
         final server = ServerConfig(
           id: DateTime.now().millisecondsSinceEpoch.toString(),
