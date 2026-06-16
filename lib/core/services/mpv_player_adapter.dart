@@ -55,6 +55,7 @@ class MpvPlayerAdapter implements PlayerAdapter {
   bool _currentSubIsAss = false;
   bool _usingExternalSubtitle = false;
   bool _pgsDecoderAvailable = true;
+  String _lastSubtitleCueText = '';
   bool _isSeekBuffering = false;
   Timer? _seekBufferingFallbackTimer;
   Timer? _seekBufferingPollTimer;
@@ -249,49 +250,47 @@ class MpvPlayerAdapter implements PlayerAdapter {
   }
 
   Future<void> _probePgsDecoderAvailability() async {
-    final np = _nativePlayer;
-    if (np == null || !_isDesktopPlatform) {
-      return;
-    }
+    if (!_isDesktopPlatform) return;
     try {
-      final decoderList = await np.getProperty('decoder-list');
-      _pgsDecoderAvailable = decoderList.contains('hdmv_pgs_subtitle');
-      if (!Platform.isWindows) {
-        final runtimeEvidence = _describeLibmpvRuntimeEvidence();
-        final platformLabel = Platform.operatingSystem;
-        if (!_pgsDecoderAvailable) {
+      // 注意：mpv 的 `decoder-list` 只含音视频解码器，不含字幕解码器，
+      // 故不能据它判断 PGS。改用「libmpv 是否完整版」判定。
+      if (Platform.isWindows) {
+        final bytes = _activeLibmpvDllBytes();
+        // 完整版 libmpv（含 ffmpeg/pgssub，约 117MB）才能解 PGS；
+        // media-kit 预编译桩约 30MB。阈值取 60MB。
+        _pgsDecoderAvailable = bytes != null && bytes > 60 * 1024 * 1024;
+        final evidence = _describeWindowsLibmpvRuntimeEvidence();
+        if (_pgsDecoderAvailable) {
+          _logger.i('MpvAdapter',
+              '检测到完整版 libmpv，PGS/SUP 图形字幕可渲染。运行时证据: $evidence');
+        } else {
           _logger.w(
             'MpvAdapter',
-            '当前 $platformLabel libmpv 未包含 hdmv_pgs_subtitle 解码器，PGS/SUP 图形字幕将无法渲染。'
-                '运行时证据: $runtimeEvidence',
-          );
-        } else {
-          _logger.i(
-            'MpvAdapter',
-            '当前 $platformLabel libmpv 已包含 hdmv_pgs_subtitle 解码器。'
-                '运行时证据: $runtimeEvidence',
+            '当前 libmpv 为精简版（无 PGS/SUP 解码器）。'
+                '请运行 windows/scripts/upgrade_libmpv_for_pgs.ps1 替换完整版 libmpv-2.dll。'
+                '运行时证据: $evidence',
           );
         }
         return;
       }
-      if (!_pgsDecoderAvailable) {
-        final runtimeEvidence = _describeWindowsLibmpvRuntimeEvidence();
-        _logger.w(
-          'MpvAdapter',
-          '当前 libmpv 未包含 hdmv_pgs_subtitle 解码器，PC 端 PGS/SUP 图形字幕将无法渲染。'
-              '请运行 windows/scripts/upgrade_libmpv_for_pgs.ps1 替换完整版 libmpv-2.dll。'
-              '运行时证据: $runtimeEvidence',
-        );
-      } else {
-        _logger.i(
-          'MpvAdapter',
-          '当前 libmpv 已包含 hdmv_pgs_subtitle 解码器。'
-              '运行时证据: ${_describeWindowsLibmpvRuntimeEvidence()}',
-        );
-      }
+      // macOS/Linux：随包 Mpv.framework 或系统 libmpv 通常含 pgssub，默认可用。
+      _pgsDecoderAvailable = true;
+      _logger.i('MpvAdapter',
+          '非 Windows 桌面，默认 libmpv 含 PGS/SUP 解码器。运行时证据: ${_describeLibmpvRuntimeEvidence()}');
     } catch (e) {
       _logger.w('MpvAdapter', '探测 PGS 解码器失败: $e');
     }
+  }
+
+  /// 当前运行目录下 libmpv-2.dll 的字节数（无法获取返回 null）。
+  int? _activeLibmpvDllBytes() {
+    try {
+      final dir = File(Platform.resolvedExecutable).parent;
+      final dll =
+          File('${dir.path}${Platform.pathSeparator}libmpv-2.dll');
+      if (dll.existsSync()) return dll.lengthSync();
+    } catch (_) {}
+    return null;
   }
 
   String _describeWindowsLibmpvRuntimeEvidence() {
@@ -567,6 +566,26 @@ class MpvPlayerAdapter implements PlayerAdapter {
     }
   }
 
+  /// 读取当前 cue 的起止时间并回调（供流式翻译）。
+  Future<void> _emitSubtitleCue(String text) async {
+    Duration? start, end;
+    final np = _nativePlayer;
+    if (np != null) {
+      try {
+        start = _parseSecondsToDuration(await np.getProperty('sub-start'));
+        end = _parseSecondsToDuration(await np.getProperty('sub-end'));
+      } catch (_) {}
+    }
+    _callbacks?.onSubtitleCue?.call(text, start, end);
+  }
+
+  Duration? _parseSecondsToDuration(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    final s = double.tryParse(raw);
+    if (s == null) return null;
+    return Duration(milliseconds: (s * 1000).round());
+  }
+
   void _setupStreamListeners() {
     if (_player == null) return;
 
@@ -613,6 +632,25 @@ class MpvPlayerAdapter implements PlayerAdapter {
       _errorMessage = error.toString();
       _logger.e('MpvAdapter', '播放器错误: $_errorMessage');
       _callbacks?.onError?.call();
+    }));
+    // 转发 libmpv 原生日志（warn 及以上），以便捕获崩溃前的 native 报错。
+    _subscriptions.add(_player!.stream.log.listen((log) {
+      final level = log.level.toLowerCase();
+      final msg = 'mpv[${log.prefix}] ${log.text}'.trimRight();
+      if (level == 'error' || level == 'fatal') {
+        _logger.e('MpvNative', msg);
+      } else {
+        _logger.w('MpvNative', msg);
+      }
+    }));
+    // 当前字幕 cue 文本变化 → 供流式翻译实时取词（含起止时间）。
+    _subscriptions.add(_player!.stream.subtitle.listen((lines) {
+      final text =
+          lines.where((l) => l.trim().isNotEmpty).join('\n').trim();
+      if (text == _lastSubtitleCueText) return;
+      _lastSubtitleCueText = text;
+      if (text.isEmpty) return;
+      unawaited(_emitSubtitleCue(text));
     }));
     _subscriptions.add(_player!.stream.tracks.listen((tracks) {
       _subtitleTracks = tracks.subtitle;

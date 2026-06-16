@@ -213,8 +213,13 @@ class VideoPlayerService extends ChangeNotifier {
         unawaited(_attemptStartupRetry());
         notifyListeners();
       },
+      onSubtitleCue: (text, start, end) =>
+          subtitleCueHandler?.call(text, start, end),
     ));
   }
+
+  /// 流式字幕翻译的取词处理器：当前字幕 cue 变化时回调（仅 mpv 内核触发）。
+  SubtitleCueCallback? subtitleCueHandler;
 
   void _setPendingPlayingState(bool? targetState, {bool notify = true}) {
     _pendingPlaybackTimer?.cancel();

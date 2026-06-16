@@ -45,6 +45,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   MediaSource? _currentMediaSource;
   String? _videoUrl;
   WhisperSubtitleController? _whisperController;
+  StreamingSubtitleTranslator? _streamTranslator;
   String? _displayTitle;
   bool _suppressTrackSelectionListeners = false;
   bool _hasUserTouchedSubtitleSelection = false;
@@ -1925,6 +1926,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       canDisable: true,
       subtitle: true,
       onTranslate: () => _translateSubtitle(subtitleStreams),
+      translateStreaming: _streamTranslator != null,
       onWhisper: ref.read(whisperEnabledProvider)
           ? () => _toggleWhisperStreaming()
           : null,
@@ -1955,6 +1957,12 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
 
   /// 翻译字幕轨为中文并加载（桌面）。
   Future<void> _translateSubtitle(List<MediaStream> subtitleStreams) async {
+    // 已在流式翻译中 → 再次点击即停止。
+    if (_streamTranslator != null) {
+      _stopStreamingTranslate();
+      _translateMsg('已停止流式翻译');
+      return;
+    }
     final engine = ref.read(activeTranslationEngineProvider);
     if (engine == null) {
       _translateMsg('请先在「设置 → 字幕翻译」中配置翻译引擎');
@@ -2035,11 +2043,44 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       AppLogger().eWithStack('DesktopPlayer', '字幕翻译失败', e, st);
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
+      }
+      // 内封字幕拉取不到（服务端不支持单轨导出）→ 自动改为流式翻译。
+      if (e.toString().contains('所有字幕地址均不可用')) {
+        _startStreamingTranslate(engine, stream);
+      } else if (mounted) {
         _translateMsg('翻译失败: $e');
       }
     } finally {
       progress.dispose();
     }
+  }
+
+  /// 内封字幕无法整轨下载时，启动流式翻译（边播边译，叠加层显示中文）。
+  void _startStreamingTranslate(TranslationEngine engine, MediaStream stream) {
+    _streamTranslator?.stop();
+    final translator = StreamingSubtitleTranslator(
+      engine: engine,
+      sourceLang: (stream.language?.isNotEmpty ?? false)
+          ? stream.language!
+          : 'auto',
+      targetLang: ref.read(translationTargetLangProvider),
+    );
+    translator.errorMessage.addListener(() {
+      final msg = translator.errorMessage.value;
+      if (msg != null && mounted) {
+        _translateMsg('流式翻译引擎错误: $msg');
+      }
+    });
+    _streamTranslator = translator;
+    translator.start(_playerService);
+    if (mounted) setState(() {});
+    _translateMsg('该字幕为内封、无法整轨下载，已改为流式翻译（边播边译）');
+  }
+
+  void _stopStreamingTranslate() {
+    _streamTranslator?.stop();
+    _streamTranslator = null;
+    if (mounted) setState(() {});
   }
 
   Future<MediaStream?> _pickStreamToTranslate(List<MediaStream> subs) {
@@ -2244,6 +2285,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     required bool subtitle,
     bool canDisable = false,
     VoidCallback? onTranslate,
+    bool translateStreaming = false,
     VoidCallback? onWhisper,
     bool whisperRunning = false,
   }) {
@@ -2277,11 +2319,19 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
               ),
               if (onTranslate != null) ...[
                 ListTile(
-                  leading: const Icon(Icons.translate, color: Color(0xFF5B8DEF)),
-                  title: const Text('翻译字幕（生成中文）',
-                      style: TextStyle(color: Colors.white)),
-                  subtitle: const Text('用已配置的翻译引擎把字幕译为中文',
-                      style: TextStyle(color: Colors.white54)),
+                  leading: Icon(
+                      translateStreaming
+                          ? Icons.stop_circle
+                          : Icons.translate,
+                      color: const Color(0xFF5B8DEF)),
+                  title: Text(
+                      translateStreaming ? '停止流式翻译' : '翻译字幕（生成中文）',
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                      translateStreaming
+                          ? '正在边播边译，叠加层显示中文'
+                          : '外挂字幕整轨翻译；内封字幕自动转流式翻译',
+                      style: const TextStyle(color: Colors.white54)),
                   onTap: () {
                     Navigator.pop(context);
                     onTranslate();
@@ -2547,6 +2597,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     _statsRefreshTimer?.cancel();
     _uiRefreshTimer?.cancel();
     _whisperController?.stop();
+    _streamTranslator?.dispose();
     _focusNode.dispose();
     _playerService.dispose();
     super.dispose();
@@ -2558,6 +2609,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     bool incrementPlayCount = false,
     bool force = false,
   }) async {
+    // 播放器进度/停止回调可能在播放页销毁后仍触发，此时严禁再用 ref。
+    if (!mounted) return;
     final scopeKey = buildWatchHistoryScopeKey(ref.read(currentServerProvider));
     if (scopeKey == null) {
       return;
@@ -2650,6 +2703,46 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
               children: [
                 // 视频区域
                 _playerService.buildVideo(),
+
+                // 流式翻译译文叠加层（中文显示在 mpv 原文字幕上方，构成双语）。
+                if (_streamTranslator != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 72,
+                    child: IgnorePointer(
+                      child: ValueListenableBuilder<String>(
+                        valueListenable: _streamTranslator!.displayText,
+                        builder: (context, text, _) {
+                          if (text.isEmpty) return const SizedBox.shrink();
+                          return Center(
+                            child: Container(
+                              margin:
+                                  const EdgeInsets.symmetric(horizontal: 24),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                text,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  shadows: [
+                                    Shadow(blurRadius: 4, color: Colors.black),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
 
                 // 缓冲指示器
                 if (_playerService.isBuffering)

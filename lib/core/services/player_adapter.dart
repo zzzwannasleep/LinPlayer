@@ -151,6 +151,10 @@ abstract class PlayerAdapter {
   Future<void> dispose();
 }
 
+/// 当前字幕 cue 回调：[text] 正在显示的原文，[start]/[end] 该 cue 的起止时间。
+typedef SubtitleCueCallback = void Function(
+    String text, Duration? start, Duration? end);
+
 /// 播放器状态回调
 class PlayerStateCallbacks {
   final VoidCallback? onPositionChanged;
@@ -160,6 +164,9 @@ class PlayerStateCallbacks {
   final VoidCallback? onCompleted;
   final VoidCallback? onError;
 
+  /// 当前字幕 cue 变化（用于流式翻译实时取词）。仅 mpv 内核会触发。
+  final SubtitleCueCallback? onSubtitleCue;
+
   const PlayerStateCallbacks({
     this.onPositionChanged,
     this.onDurationChanged,
@@ -167,6 +174,7 @@ class PlayerStateCallbacks {
     this.onBufferingStateChanged,
     this.onCompleted,
     this.onError,
+    this.onSubtitleCue,
   });
 }
 

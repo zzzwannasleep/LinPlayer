@@ -125,8 +125,9 @@ class AppLogger {
   Future<void> init() async {
     if (_fileReady) return;
     try {
-      final base = await getApplicationSupportDirectory();
-      final dir = Directory('${base.path}/logs');
+      // 滚动日志放系统 temp 下（不进 AppData/Roaming），属临时产物、随清理可弃。
+      final base = await getTemporaryDirectory();
+      final dir = Directory('${base.path}/linplayer_logs');
       if (!dir.existsSync()) dir.createSync(recursive: true);
 
       // 清理旧日志（保留最近 N 天）
@@ -238,19 +239,30 @@ class AppLogger {
 
   void clear() => _logs.clear();
 
-  /// 导出为纯文本（用于界面显示）：读取今天的日志文件内容。
+  /// 会话分隔标记前缀（与 init 写入的一致）。
+  static const _sessionMarker = '# ==== session start';
+
+  /// 仅保留日志文本中最后 [sessions] 个会话（含分隔头）。
+  String _trimToLastSessions(String content, int sessions) {
+    final indices = <int>[];
+    var idx = content.indexOf(_sessionMarker);
+    while (idx != -1) {
+      indices.add(idx);
+      idx = content.indexOf(_sessionMarker, idx + 1);
+    }
+    if (indices.length <= sessions) return content;
+    return content.substring(indices[indices.length - sessions]);
+  }
+
+  /// 导出为纯文本（用于界面显示）：仅最近两次会话。
   Future<String> exportAsString() async {
     try {
       if (_logFile == null || !_logFile!.existsSync()) {
         return '# 当天日志文件不存在\n# 内存日志条数: ${_logs.length}';
       }
-
-      // 先 flush 确保最新日志已落盘
       await _sink?.flush();
-
-      // 读取今天的日志文件
       final content = await _logFile!.readAsString();
-      return content;
+      return _trimToLastSessions(content, 2);
     } catch (e) {
       w('AppLogger', '读取日志文件失败: $e');
       return '# 读取日志文件失败: $e\n# 内存日志条数: ${_logs.length}';
@@ -266,19 +278,22 @@ class AppLogger {
     // 先 flush 确保最新日志已落盘
     await _sink?.flush();
 
+    // 仅导出最近两次会话（当前 + 上一次），更早的不带。
+    final content = _trimToLastSessions(await _logFile!.readAsString(), 2);
+
     final timestamp = DateTime.now()
         .toIso8601String()
         .replaceAll(':', '-')
         .replaceAll('.', '-');
     final fileName = 'linplayer_log_$timestamp.txt';
 
-    // Android：复制到 Download 方便取出。
+    // Android：写到 Download 方便取出。
     if (Platform.isAndroid) {
       try {
         final downloads = Directory('/storage/emulated/0/Download');
         if (downloads.existsSync()) {
           final exportFile = File('${downloads.path}/$fileName');
-          await _logFile!.copy(exportFile.path);
+          await exportFile.writeAsString(content);
           i('AppLogger', '日志已导出: ${exportFile.path}');
           return exportFile.path;
         }
@@ -287,10 +302,10 @@ class AppLogger {
       }
     }
 
-    // 其他平台：复制到应用文档目录
+    // 其他平台：写到应用文档目录
     final dir = await getApplicationDocumentsDirectory();
     final exportFile = File('${dir.path}/$fileName');
-    await _logFile!.copy(exportFile.path);
+    await exportFile.writeAsString(content);
     i('AppLogger', '日志已导出: ${exportFile.path}');
     return exportFile.path;
   }
