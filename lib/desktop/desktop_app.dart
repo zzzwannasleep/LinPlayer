@@ -78,10 +78,18 @@ Widget _wrapContent({
   if (addTitleBar) {
     content = Column(
       children: [
-        AppTitleBar(
-          brightness: brightness,
-          backgroundColor: materialTheme.scaffoldBackgroundColor,
-          leading: _SidebarToggleButton(brightness: brightness),
+        // 沉浸模式（播放页全屏）下隐藏自绘标题栏，实现真正全屏。
+        Consumer(
+          builder: (context, ref, _) {
+            if (ref.watch(desktopImmersiveModeProvider)) {
+              return const SizedBox.shrink();
+            }
+            return AppTitleBar(
+              brightness: brightness,
+              backgroundColor: materialTheme.scaffoldBackgroundColor,
+              leading: _SidebarToggleButton(brightness: brightness),
+            );
+          },
         ),
         Expanded(child: child),
       ],
@@ -199,10 +207,18 @@ class _MaterialDesktopApp extends ConsumerWidget {
         return DesktopShortcutsWrapper(
           child: Column(
             children: [
-              AppTitleBar(
-                brightness: brightness,
-                backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                leading: _SidebarToggleButton(brightness: brightness),
+              // 沉浸模式（播放页全屏）下隐藏自绘标题栏，实现真正全屏。
+              Consumer(
+                builder: (context, ref, _) {
+                  if (ref.watch(desktopImmersiveModeProvider)) {
+                    return const SizedBox.shrink();
+                  }
+                  return AppTitleBar(
+                    brightness: brightness,
+                    backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+                    leading: _SidebarToggleButton(brightness: brightness),
+                  );
+                },
               ),
               Expanded(child: child!),
             ],

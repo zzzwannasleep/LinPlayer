@@ -1468,12 +1468,13 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   }
 
   Future<void> _syncFullscreenState() async {
-    if (!Platform.isWindows) return;
     try {
-      final isFullscreen =
-          await _windowChannel.invokeMethod<bool>('isFullscreen');
+      final bool? isFullscreen = Platform.isWindows
+          ? await _windowChannel.invokeMethod<bool>('isFullscreen')
+          : await windowManager.isFullScreen();
       if (mounted && isFullscreen != null) {
         setState(() => _isFullscreen = isFullscreen);
+        ref.read(desktopImmersiveModeProvider.notifier).state = isFullscreen;
       }
     } on MissingPluginException {
       // Ignore on platforms without desktop window integration.
@@ -1494,9 +1495,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
             ) ??
             target;
       } else {
-        await SystemChrome.setEnabledSystemUIMode(
-          target ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
-        );
+        // macOS / Linux 走 window_manager 的原生窗口全屏。
+        await windowManager.setFullScreen(target);
+        fullscreen = await windowManager.isFullScreen();
       }
     } on MissingPluginException {
       fullscreen = target;
@@ -1506,6 +1507,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
 
     if (!mounted) return;
     setState(() => _isFullscreen = fullscreen);
+    // 通知应用根隐藏/恢复自绘标题栏，实现真正的全屏。
+    ref.read(desktopImmersiveModeProvider.notifier).state = fullscreen;
     if (_showControls && _playerService.isPlaying) {
       _startHideControlsTimer();
     }
@@ -2553,6 +2556,16 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // 离开播放页时退出全屏并恢复标题栏，避免窗口停在无边框全屏、标题栏却消失的状态。
+    if (_isFullscreen) {
+      if (Platform.isWindows) {
+        _windowChannel.invokeMethod<bool>(
+            'setFullscreen', {'fullscreen': false});
+      } else {
+        windowManager.setFullScreen(false);
+      }
+    }
+    ref.read(desktopImmersiveModeProvider.notifier).state = false;
     _cancelHideControlsTimer();
     _skipButtonTimer?.cancel();
     _speedLongPressTimer?.cancel();

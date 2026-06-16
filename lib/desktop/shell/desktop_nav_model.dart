@@ -6,6 +6,13 @@ import '../../core/providers/app_providers.dart';
 /// 侧边栏是否收起（三端外壳共用，由标题栏的汉堡按钮切换）。
 final sidebarCollapsedProvider = StateProvider<bool>((ref) => false);
 
+/// 沉浸模式：播放页进入真正全屏时置 true，应用根据此隐藏自绘标题栏 [AppTitleBar]。
+///
+/// Windows/Linux 隐藏了系统标题栏、改由 Flutter 自绘标题栏（见 desktop_window_chrome.dart）。
+/// 该自绘标题栏渲染在路由内容之上，因此即便原生窗口已无边框全屏，标题栏仍会留在画面顶部。
+/// 播放页全屏时通过本 Provider 通知应用根隐藏标题栏，实现真正的全屏。
+final desktopImmersiveModeProvider = StateProvider<bool>((ref) => false);
+
 /// 桌面端主导航项（三种外壳共用）。
 class DesktopNavItem {
   final String path;

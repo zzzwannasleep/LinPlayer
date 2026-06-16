@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:window_manager/window_manager.dart';
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
@@ -26,6 +27,7 @@ import '../../../core/services/video_player_service.dart';
 import '../../../core/services/watch_history/watch_history_models.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/widgets/player_settings_panel.dart';
+import '../../shell/desktop_nav_model.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 
 part 'desktop_player_screen_state.dart';
