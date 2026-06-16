@@ -369,7 +369,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/scripts/upgrade_libmpv.sh\"\n";
+			shellScript = "sh \"${SRCROOT}/scripts/upgrade_libmpv.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
