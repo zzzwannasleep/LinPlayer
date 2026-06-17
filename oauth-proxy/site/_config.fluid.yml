@@ -1,62 +1,89 @@
 favicon: /img/linplayer-icon.png
 apple_touch_icon: /img/linplayer-icon.png
-tab_title_separator: " ✦ "
+tab_title_separator: " · "
+
+banner:
+  parallax: false
+
+fun_features:
+  typing:
+    enable: false
+
+scroll_down_arrow:
+  enable: false
 
 navbar:
   blog_title: LinPlayer
   menu:
     - { key: 'home', name: '首页', link: '/', icon: 'iconfont icon-home-fill' }
     - { key: 'wiki', name: '文档', link: '/archives/', icon: 'iconfont icon-archive-fill' }
-    - { key: 'categories', name: '分类', link: '/categories/', icon: 'iconfont icon-category-fill' }
-    - { key: 'tags', name: '标签', link: '/tags/', icon: 'iconfont icon-tags-fill' }
     - { key: 'about', name: '关于', link: '/about/', icon: 'iconfont icon-user-fill' }
 
 index:
-  banner_img: https://bing.img.run/uhd.php
+  banner_img: /img/pixel-candy-sky.svg
   slogan:
     enable: true
-    text: 'LinPlayer 的像素放映厅 · 文档 / 插件 / 内核 / 灵感'
+    text: 'LinPlayer 的糖霜像素档案馆'
     api: false
   banner_img_height: 100
-  banner_mask_alpha: 0.48
-
-post:
-  banner_img: https://bing.img.run/uhd.php
-  banner_img_height: 72
-  toc:
-    enable: true
-    placement: right
-  copyright:
+  banner_mask_alpha: 0
+  post_meta:
+    date: false
+    category: false
+    tag: false
+  post_sticky:
     enable: false
 
+post:
+  banner_img: /img/pixel-candy-sky.svg
+  banner_img_height: 58
+  banner_mask_alpha: 0
+  toc:
+    enable: false
+  copyright:
+    enable: false
+  meta:
+    author:
+      enable: false
+    date:
+      enable: false
+    wordcount:
+      enable: false
+    min2read:
+      enable: false
+    views:
+      enable: false
+
 archive:
-  banner_img: https://bing.img.run/uhd.php
-  banner_img_height: 68
+  banner_img: /img/pixel-candy-sky.svg
+  banner_img_height: 50
+  banner_mask_alpha: 0
 
 category:
-  banner_img: https://bing.img.run/uhd.php
-  banner_img_height: 68
+  banner_img: /img/pixel-candy-sky.svg
+  banner_img_height: 50
+  banner_mask_alpha: 0
 
 tag:
-  banner_img: https://bing.img.run/uhd.php
-  banner_img_height: 68
+  banner_img: /img/pixel-candy-sky.svg
+  banner_img_height: 50
+  banner_mask_alpha: 0
 
 about:
-  banner_img: https://bing.img.run/uhd.php
-  banner_img_height: 72
+  banner_img: /img/pixel-candy-sky.svg
+  banner_img_height: 56
+  banner_mask_alpha: 0
 
 page:
-  banner_img: https://bing.img.run/uhd.php
-  banner_img_height: 68
+  banner_img: /img/pixel-candy-sky.svg
+  banner_img_height: 50
+  banner_mask_alpha: 0
 
 footer:
-  content: '<a href="https://github.com/zzzwannasleep/LinPlayer" target="_blank" rel="noopener">LinPlayer</a> · pixel dream archive · built with Hexo + Fluid'
+  content: '<a href="https://github.com/zzzwannasleep/LinPlayer" target="_blank" rel="noopener">LinPlayer</a> · sugar pixel docs · built with Hexo + Fluid'
 
 dark_mode:
   enable: false
-
-custom_js:
-  - /js/pixel-dream.js
 
 custom_css:
   - /css/pixel-dream.css
