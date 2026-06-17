@@ -293,6 +293,9 @@ class _AnimatedBranchContainerState extends State<_AnimatedBranchContainer>
       duration: AppMotion.medium,
       vsync: this,
     );
+    // 首帧停在动画终点，否则 autoPlay:false 会让初始画面停在 SlideEffect 的
+    // begin 偏移（向右 4%），表现为“首次进入时 UI 整体往右歪、切换一下才回正”。
+    _controller.value = 1.0;
   }
 
   @override

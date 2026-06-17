@@ -9,8 +9,16 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('设置'),
       ),
+      // 底部预留浮动 TabBar 的高度（MainShell 已把它注入 MediaQuery.padding.bottom）。
+      // ListView 显式设置 padding 会忽略 MediaQuery 内边距，故需手动叠加，
+      // 否则最后一张卡片会被底部 Tab 挡住。
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.of(context).padding.bottom,
+        ),
         children: [
           _SettingsCard(
             icon: Icons.palette,

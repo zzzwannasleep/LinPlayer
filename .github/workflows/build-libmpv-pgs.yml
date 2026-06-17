@@ -41,7 +41,55 @@ jobs:
           
           echo "=== Modified flavors/default.sh (subtitle decoders) ==="
           grep -n "enable-decoder=.*sub\|ssa\|ass\|srt\|pgs" "$CONFIG_FILE"
-      
+
+      # ========================================================================
+      # 开启 libplacebo + Vulkan：mpv gpu-next 的 Dolby Vision / HDR tone-map 依赖
+      # libplacebo。没有它，DV Profile 5(IPTPQc2) 会被当普通 YUV 解 → 画面发紫。
+      # 注意：libplacebo 的 Android 交叉编译 + 与本仓库锁定的 mpv 提交的版本匹配
+      # 需要在 CI 上多轮迭代验证（无法本地校验）。构建失败时不会 commit 新库，
+      # 因此不会破坏现有可用的 PGS 库。
+      # ========================================================================
+      - name: Enable libplacebo + Vulkan (gpu-next / Dolby Vision)
+        run: |
+          BS=/tmp/libmpv-build/buildscripts
+          DEPINFO="$BS/include/depinfo.sh"
+          MPVSH="$BS/scripts/mpv.sh"
+
+          # 1) 依赖版本 + 依赖树：新增 libplacebo（依赖 shaderc 做运行时 GLSL→SPIR-V）。
+          sed -i '/^v_libvpx=.*/a v_libplacebo=v6.338.2' "$DEPINFO"
+          sed -i 's/^dep_shaderc=()$/dep_shaderc=()\ndep_libplacebo=(shaderc)/' "$DEPINFO"
+          sed -i 's/^\tdep_mpv=(ffmpeg libass fftools_ffi)$/\tdep_mpv=(ffmpeg libass libplacebo fftools_ffi)/' "$DEPINFO"
+          sed -i 's/^\tdep_mpv=(ffmpeg libass)$/\tdep_mpv=(ffmpeg libass libplacebo)/' "$DEPINFO"
+
+          # 2) mpv：libplacebo 必开（DV/HDR 正确着色的关键，gpu-next 在 Android 上
+          #    走 OpenGL ES 即可生效）；vulkan 设 auto，能编上就用、编不上不阻断。
+          sed -i 's/-Dlibplacebo=disabled/-Dlibplacebo=enabled/' "$MPVSH"
+          sed -i 's/-Dvulkan=disabled/-Dvulkan=auto/' "$MPVSH"
+
+          # 3) libplacebo 构建脚本（meson 交叉编译）。opengl 必开；vulkan/shaderc/dovi
+          #    设 auto 以提高跨 NDK/版本的成功率——libdovi(Rust)/shaderc pkg-config 等
+          #    缺失时退化而非整体失败，仍保留 gpu-next 的 HDR/DV 着色修正能力。
+          cat > "$BS/scripts/libplacebo.sh" <<'PLACEBO'
+          #!/bin/bash -e
+          . ../../include/depinfo.sh
+          . ../../include/path.sh
+          build=_build$ndk_suffix
+          if [ "$1" == "clean" ]; then rm -rf "$build"; exit 0; fi
+          [ "$1" == "build" ] || exit 255
+          unset CC CXX
+          meson setup "$build" --cross-file "$prefix_dir"/crossfile.txt \
+            --prefer-static --default-library static \
+            -Dopengl=enabled -Dvulkan=auto -Dshaderc=auto -Ddovi=auto \
+            -Dglslang=disabled -Dlcms=disabled \
+            -Ddemos=false -Dtests=false -Dbench=false -Dfuzz=false
+          ninja -C "$build" -j$cores
+          DESTDIR="$prefix_dir" ninja -C "$build" install
+          PLACEBO
+          chmod +x "$BS/scripts/libplacebo.sh"
+
+          echo "=== mpv.sh after patch ==="; grep -nE "vulkan|libplacebo" "$MPVSH"
+          echo "=== depinfo.sh after patch ==="; grep -nE "v_libplacebo|libplacebo|shaderc|dep_mpv" "$DEPINFO"
+
       - name: Setup build environment
         run: |
           sudo apt-get update
@@ -75,7 +123,16 @@ jobs:
           
           # 下载依赖
           ./download.sh
-          
+
+          # libplacebo 源码（含 glad / Vulkan-Headers 等子模块，必须 --recursive）。
+          # shaderc 由其脚本用 NDK 自带源码构建，但 build.sh 需要 deps/shaderc 目录存在。
+          . ./include/depinfo.sh
+          if [ ! -d deps/libplacebo ]; then
+            git clone --recursive --branch "${v_libplacebo}" --depth 1 \
+              https://code.videolan.org/videolan/libplacebo.git deps/libplacebo
+          fi
+          mkdir -p deps/shaderc
+
           # 应用补丁
           ./patch.sh
           
@@ -106,6 +163,24 @@ jobs:
               fi
             else
               echo "⚠️ $arch: libavcodec.so not found at $CODEC_LIB"
+            fi
+          done
+
+      - name: Verify libplacebo / Vulkan in libmpv
+        run: |
+          echo "=== Verifying libplacebo + Vulkan (gpu-next / Dolby Vision) ==="
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            MPV_LIB="/tmp/libmpv-build/buildscripts/prefix/$arch/lib/libmpv.so"
+            [ -f "$MPV_LIB" ] || { echo "⚠️ $arch: libmpv.so not found"; continue; }
+            if strings "$MPV_LIB" | grep -qiE "libplacebo|pl_vulkan|placebo"; then
+              echo "✅ $arch: libplacebo present"
+            else
+              echo "❌ $arch: libplacebo NOT found (gpu-next/DV 不可用)"
+            fi
+            if strings "$MPV_LIB" | grep -qiE "vkCreateInstance|VK_KHR|vulkan"; then
+              echo "✅ $arch: Vulkan symbols present"
+            else
+              echo "❌ $arch: Vulkan NOT found"
             fi
           done
       

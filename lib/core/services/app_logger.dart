@@ -75,6 +75,7 @@ class AppLogger {
   IOSink? _sink;
   File? _logFile;
   bool _fileReady = false;
+  bool _initStarted = false; // init() 幂等防护，避免并发/重入重复 openWrite
   final List<String> _pending = <String>[]; // 文件就绪前缓冲
   Timer? _flushTimer;
 
@@ -123,7 +124,11 @@ class AppLogger {
 
   /// 初始化文件日志（在 main 中尽早 await）。可重复调用，幂等。
   Future<void> init() async {
-    if (_fileReady) return;
+    // 幂等：已就绪或正在初始化都直接返回。init() 是 async，仅靠 _fileReady
+    // 无法挡住「第一次 await 期间的重入」，会导致重复 openWrite / sink 进入
+    // 异常态（StreamSink is bound to a stream）。用 _initStarted 兜住。
+    if (_fileReady || _initStarted) return;
+    _initStarted = true;
     try {
       // 滚动日志放系统 temp 下（不进 AppData/Roaming），属临时产物、随清理可弃。
       final base = await getTemporaryDirectory();
@@ -163,6 +168,7 @@ class AppLogger {
       i('AppLogger', '日志系统已初始化，文件: ${file.path}');
     } catch (e) {
       // 文件不可用（如部分平台权限）时退化为内存 + 控制台。
+      _initStarted = false; // 允许后续重试
       developer.log('日志文件初始化失败: $e', name: 'AppLogger', level: 900);
     }
   }
@@ -200,10 +206,19 @@ class AppLogger {
         level: level.developerLevel,
         name: tag);
 
-    // 落盘。
+    // 落盘。务必 fail-safe：sink 一旦进入异常态（如 StreamSink is bound /
+    // 已关闭），writeln 会抛异常；而本类被 installErrorHandlers 用作全局
+    // 错误出口，若此处抛出会被错误处理器再次记录 → 自我放大的错误循环。
+    // 因此任何写入异常都吞掉并停用文件落盘，退回内存缓冲。
     if (_fileReady) {
-      _sink?.writeln(line);
-      if (level == LogLevel.error) _sink?.flush();
+      try {
+        _sink?.writeln(line);
+        if (level == LogLevel.error) _sink?.flush();
+      } catch (e) {
+        _fileReady = false;
+        developer.log('日志落盘失败，已停用文件输出: $e',
+            name: 'AppLogger', level: 900);
+      }
     } else {
       _pending.add(line);
       if (_pending.length > 1000) _pending.removeAt(0);

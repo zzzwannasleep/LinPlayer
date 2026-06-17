@@ -66,7 +66,8 @@ class PlayerPanelColors {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     if (isDark) {
       return PlayerPanelColors(
-        surface: AppColors.darkSurface.withValues(alpha: 0.82),
+        // 遮罩浓度调低：面板更通透，画面隐约可见（毛玻璃仍保证文字可读）。
+        surface: AppColors.darkSurface.withValues(alpha: 0.62),
         headerSurface: Colors.white.withValues(alpha: 0.04),
         text: AppColors.darkText,
         textSecondary: AppColors.darkTextSecondary,
@@ -77,7 +78,8 @@ class PlayerPanelColors {
       );
     }
     return PlayerPanelColors(
-      surface: AppColors.lightSurface.withValues(alpha: 0.88),
+      // 遮罩浓度调低（见深色注释）。
+      surface: AppColors.lightSurface.withValues(alpha: 0.72),
       headerSurface: Colors.black.withValues(alpha: 0.03),
       text: AppColors.lightText,
       textSecondary: AppColors.lightTextSecondary,

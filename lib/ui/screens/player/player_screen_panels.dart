@@ -1,5 +1,9 @@
 part of 'player_screen.dart';
 
+/// 标题文字：**仅当文字超出可用宽度时才匀速滚动**，否则静止、左对齐。
+///
+/// 之前的实现无条件 `repeat()` 一直来回滚，短标题也在动、很晃眼；现在用
+/// [TextPainter] 测量实际宽度，未溢出就当普通 [Text] 渲染。
 class _MarqueeText extends StatefulWidget {
   final String text;
   final TextStyle style;
@@ -10,44 +14,169 @@ class _MarqueeText extends StatefulWidget {
   State<_MarqueeText> createState() => _MarqueeTextState();
 }
 
-class _MarqueeTextState extends State<_MarqueeText>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
+class _MarqueeTextState extends State<_MarqueeText> {
+  final ScrollController _scrollController = ScrollController();
+  bool _scrollScheduled = false;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(seconds: 8),
-      vsync: this,
-    );
-    _animation = Tween<double>(begin: 1.0, end: -1.0).animate(_controller);
-    _controller.repeat();
+  void didUpdateWidget(covariant _MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 标题变了：重置滚动状态，回到开头重新判断是否需要滚。
+    if (oldWidget.text != widget.text) {
+      _scrollScheduled = false;
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 仅在「确实溢出」时调度一次滚动循环（用 post-frame 避免在 build 里产生副作用）。
+  void _ensureScrollLoop() {
+    if (_scrollScheduled) return;
+    _scrollScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _runLoop();
+    });
+  }
+
+  Future<void> _runLoop() async {
+    if (!mounted || !_scrollController.hasClients) return;
+    const double velocity = 40; // 逻辑像素/秒，匀速。
+    const pause = Duration(milliseconds: 1000); // 两端停顿。
+    final maxExtent = _scrollController.position.maxScrollExtent;
+    if (maxExtent <= 0) return; // 不溢出，不滚。
+    final forwardMs = (maxExtent / velocity * 1000).round();
+    await _scrollController.animateTo(
+      maxExtent,
+      duration: Duration(milliseconds: forwardMs),
+      curve: Curves.linear,
+    );
+    if (!mounted || !_scrollController.hasClients) return;
+    await Future<void>.delayed(pause);
+    if (!mounted || !_scrollController.hasClients) return;
+    await _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
+    if (!mounted) return;
+    await Future<void>.delayed(pause);
+    if (mounted) _runLoop();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ClipRect(
-      child: AnimatedBuilder(
-        animation: _animation,
-        builder: (context, child) {
-          return FractionalTranslation(
-            translation: Offset(_animation.value, 0),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          maxLines: 1,
+          textDirection: Directionality.of(context),
+        )..layout();
+        final overflowing = painter.width > constraints.maxWidth + 0.5;
+
+        if (!overflowing) {
+          // 未超长：静止左对齐，绝不滚动。
+          _scrollScheduled = false;
+          return Align(
+            alignment: Alignment.centerLeft,
             child: Text(
               widget.text,
               maxLines: 1,
-              overflow: TextOverflow.visible,
+              softWrap: false,
+              overflow: TextOverflow.clip,
               style: widget.style,
             ),
           );
-        },
+        }
+
+        _ensureScrollLoop();
+        return ClipRect(
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            scrollDirection: Axis.horizontal,
+            physics: const NeverScrollableScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 48),
+              child: Text(
+                widget.text,
+                maxLines: 1,
+                softWrap: false,
+                style: widget.style,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 中央拇指区主控件按钮：透明背景的大号白色图标。
+class _CenterControlButton extends StatelessWidget {
+  const _CenterControlButton({
+    required this.icon,
+    required this.onTap,
+    this.size = 36,
+    this.tooltip,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+  final double size;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(icon, color: Colors.white, size: size),
+      tooltip: tooltip,
+      onPressed: onTap,
+      padding: EdgeInsets.all(size * 0.18),
+      constraints: const BoxConstraints(),
+      splashRadius: size * 0.85,
+    );
+  }
+}
+
+/// 底栏次级功能项：上图标 + 下文字（TDesign 文本），整块可点。
+class _BottomBarAction extends StatelessWidget {
+  const _BottomBarAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 22),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.92),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

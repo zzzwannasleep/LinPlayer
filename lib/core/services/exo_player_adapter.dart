@@ -27,22 +27,20 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   List<Map<dynamic, dynamic>> _tracks = [];
   String _subtitleText = '';
-  String _subtitleBitmapBase64 = '';
   double _subtitleSize = 0.5;
   double _subtitlePosition = 0.0;
   bool _subtitleBackground = false;
   String _subtitleFont = '默认';
   bool _isBitmapSubtitle = false;
-  bool _hasBitmapPosition = false;
-  double _bitmapLeft = 0.0;
-  double _bitmapTop = 0.0;
-  double _bitmapWidth = 1.0;
 
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
 
   final ValueNotifier<String> subtitleNotifier = ValueNotifier('');
-  final ValueNotifier<String?> bitmapNotifier = ValueNotifier(null);
+  // 位图字幕（PGS / libass 渲染的 ASS）当前帧的全部分片，各自带占帧比例的
+  // left/top/width/height，便于按视频内容区精确定位、原比例绘制。
+  final ValueNotifier<List<BitmapSubtitleCue>> bitmapNotifier =
+      ValueNotifier(const []);
   final ValueNotifier<int> _subtitleSettingsVersion = ValueNotifier(0);
 
   int _videoWidth = 0;
@@ -117,7 +115,6 @@ class ExoPlayerAdapter implements PlayerAdapter {
       _isCompleted = false;
       _tracks = [];
       _subtitleText = '';
-      _subtitleBitmapBase64 = '';
       _videoWidth = 0;
       _videoHeight = 0;
       _enableAssSupport = useLibass;
@@ -217,10 +214,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
       });
       _subtitleText = '';
       subtitleNotifier.value = '';
-      _subtitleBitmapBase64 = '';
-      bitmapNotifier.value = null;
+      bitmapNotifier.value = const [];
       _isBitmapSubtitle = false;
-      _hasBitmapPosition = false;
     } catch (e, stackTrace) {
       _logger.eWithStack('ExoPlayer', '关闭字幕失败', e, stackTrace);
     }
@@ -373,8 +368,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
       case 'subtitle':
         _subtitleText = event['value'] as String? ?? '';
         subtitleNotifier.value = _subtitleText;
-        bitmapNotifier.value = null;
-        _subtitleBitmapBase64 = '';
+        bitmapNotifier.value = const [];
         if (_subtitleText.isEmpty) {
           _isBitmapSubtitle = false;
         }
@@ -383,24 +377,29 @@ class ExoPlayerAdapter implements PlayerAdapter {
         final data = event['value'] as Map?;
         if (data != null) {
           final images = data['images'] as List?;
+          final positions = data['positions'] as List?;
           if (images != null && images.isNotEmpty) {
-            _subtitleBitmapBase64 = images.first as String;
-            bitmapNotifier.value = _subtitleBitmapBase64;
-            _isBitmapSubtitle = true;
-            final positions = data['positions'] as List?;
-            if (positions != null && positions.isNotEmpty) {
-              final pos = positions.first as Map?;
-              _bitmapLeft = (pos?['left'] as num?)?.toDouble() ?? 0.0;
-              _bitmapTop = (pos?['top'] as num?)?.toDouble() ?? 0.0;
-              _bitmapWidth = (pos?['width'] as num?)?.toDouble() ?? 1.0;
-              _hasBitmapPosition = true;
-            } else {
-              _hasBitmapPosition = false;
+            // 渲染**所有**分片（ASS 一帧常有多段文字/字幕特效），按下标取各自几何。
+            final cues = <BitmapSubtitleCue>[];
+            for (var i = 0; i < images.length; i++) {
+              try {
+                final bytes = base64Decode(images[i] as String);
+                final pos = (positions != null && i < positions.length)
+                    ? positions[i] as Map?
+                    : null;
+                cues.add(BitmapSubtitleCue(
+                  bytes: bytes,
+                  left: (pos?['left'] as num?)?.toDouble(),
+                  top: (pos?['top'] as num?)?.toDouble(),
+                  width: (pos?['width'] as num?)?.toDouble(),
+                  height: (pos?['height'] as num?)?.toDouble(),
+                ));
+              } catch (_) {}
             }
+            bitmapNotifier.value = cues;
+            _isBitmapSubtitle = true;
           } else {
-            _subtitleBitmapBase64 = '';
-            bitmapNotifier.value = null;
-            _hasBitmapPosition = false;
+            bitmapNotifier.value = const [];
           }
           _subtitleText = data['text'] as String? ?? '';
           subtitleNotifier.value = _subtitleText;
@@ -572,6 +571,65 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _callbacks?.onPositionChanged?.call();
   }
 
+  /// 绘制当前帧全部位图字幕分片。
+  /// - 有完整 left/top/width/height（libass 渲染的 ASS）：按占帧比例 1:1 定位、
+  ///   `BoxFit.fill` 还原 libass 的字号/位置/样式，逐片叠加。
+  /// - 仅 left/top/width（部分图形字幕）：按宽度缩放、高度自适应。
+  /// - 无几何信息（如部分 PGS）：退化为底部居中。
+  Widget _buildBitmapCues(List<BitmapSubtitleCue> cues, Size videoSize) {
+    final children = <Widget>[];
+    for (final cue in cues) {
+      if (cue.hasFullGeometry) {
+        children.add(Positioned(
+          left: cue.left!.clamp(0.0, 1.0) * videoSize.width,
+          top: cue.top!.clamp(0.0, 1.0) * videoSize.height,
+          width: cue.width!.clamp(0.0, 1.0) * videoSize.width,
+          height: cue.height!.clamp(0.0, 1.0) * videoSize.height,
+          child: Image.memory(
+            cue.bytes,
+            fit: BoxFit.fill,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+          ),
+        ));
+      } else if (cue.hasLegacyGeometry) {
+        children.add(Positioned(
+          left: cue.left!.clamp(0.0, 1.0) * videoSize.width,
+          top: cue.top!.clamp(0.0, 1.0) * videoSize.height,
+          width: cue.width!.clamp(0.0, 1.0) * videoSize.width,
+          child: Image.memory(
+            cue.bytes,
+            fit: BoxFit.fitWidth,
+            gaplessPlayback: true,
+            filterQuality: FilterQuality.medium,
+          ),
+        ));
+      } else {
+        children.add(Positioned(
+          left: 0,
+          right: 0,
+          bottom: 20.0,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: videoSize.width - 16,
+                maxHeight: videoSize.height * 0.35,
+              ),
+              child: Image.memory(
+                cue.bytes,
+                fit: BoxFit.contain,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.medium,
+              ),
+            ),
+          ),
+        ));
+      }
+    }
+    if (children.isEmpty) return const SizedBox.shrink();
+    return Stack(fit: StackFit.expand, children: children);
+  }
+
   @override
   Widget buildVideo() {
     if (_textureId != null) {
@@ -585,51 +643,18 @@ class ExoPlayerAdapter implements PlayerAdapter {
           ValueListenableBuilder<int>(
             valueListenable: _subtitleSettingsVersion,
             builder: (context, _, __) {
-              return ValueListenableBuilder<String?>(
+              return ValueListenableBuilder<List<BitmapSubtitleCue>>(
                 valueListenable: bitmapNotifier,
-                builder: (context, bitmapB64, _) {
-                  if (bitmapB64 != null && bitmapB64.isNotEmpty) {
-                    try {
-                      final bytes = base64Decode(bitmapB64);
-                      if (_hasBitmapPosition && _isBitmapSubtitle) {
-                        return Positioned(
-                          left: (_bitmapLeft.clamp(0.0, 1.0)) * videoSize.width,
-                          top: (_bitmapTop.clamp(0.0, 1.0)) * videoSize.height,
-                          width: (_bitmapWidth.clamp(0.0, 1.0)) * videoSize.width,
-                          child: Image.memory(
-                            bytes,
-                            fit: BoxFit.fitWidth,
-                            gaplessPlayback: true,
-                            filterQuality: FilterQuality.medium,
-                          ),
-                        );
-                      }
-                      return Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: _isBitmapSubtitle ? 20.0 : 20.0 + (_subtitlePosition * 180.0),
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: videoSize.width - 16,
-                              maxHeight: videoSize.height * 0.35,
-                            ),
-                            child: Image.memory(
-                              bytes,
-                              fit: BoxFit.contain,
-                              gaplessPlayback: true,
-                              filterQuality: FilterQuality.medium,
-                            ),
-                          ),
-                        ),
-                      );
-                    } catch (_) {
-                      return const SizedBox.shrink();
-                    }
+                builder: (context, cues, _) {
+                  if (cues.isNotEmpty) {
+                    return _buildBitmapCues(cues, videoSize);
                   }
                   return ValueListenableBuilder<String>(
                     valueListenable: subtitleNotifier,
                     builder: (context, text, _) {
+                      // 位图/ libass 模式下不再回退到「扒标签的纯文本」渲染，
+                      // 避免与位图字幕重叠或显示错位的降级文本。
+                      if (_isBitmapSubtitle) return const SizedBox.shrink();
                       if (text.isEmpty) return const SizedBox.shrink();
                       final cleanText = _stripAssTags(text);
                       if (cleanText.isEmpty) return const SizedBox.shrink();
@@ -767,10 +792,31 @@ class ExoPlayerAdapter implements PlayerAdapter {
     _duration = Duration.zero;
     _tracks = [];
     _subtitleText = '';
-    _subtitleBitmapBase64 = '';
     _isBitmapSubtitle = false;
     subtitleNotifier.value = '';
-    bitmapNotifier.value = null;
+    bitmapNotifier.value = const [];
     _subtitleSettingsVersion.value = 0;
   }
+}
+
+/// 单个位图字幕分片。几何字段为占视频帧的比例（0~1），可能缺失。
+class BitmapSubtitleCue {
+  final Uint8List bytes;
+  final double? left;
+  final double? top;
+  final double? width;
+  final double? height;
+
+  const BitmapSubtitleCue({
+    required this.bytes,
+    this.left,
+    this.top,
+    this.width,
+    this.height,
+  });
+
+  bool get hasFullGeometry =>
+      left != null && top != null && width != null && height != null;
+  bool get hasLegacyGeometry =>
+      left != null && top != null && width != null;
 }

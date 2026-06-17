@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../../core/api/api_interfaces.dart';
@@ -26,6 +27,7 @@ import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../core/widgets/player_settings_panel.dart';
+import '../../../core/theme/app_motion.dart';
 
 part 'player_screen_state.dart';
 part 'player_screen_panels.dart';

@@ -618,6 +618,47 @@ class ExoPlayerPlugin(
         }
 
         private var isBitmapSubtitle: Boolean = false
+        private var toneMappingApplied: Boolean = false
+
+        /// 检测当前选中的视频轨是否为 HDR / 杜比视界；是则启用 Media3 的
+        /// effects 管线（DefaultVideoFrameProcessor）做 HDR→SDR tone-map。
+        /// 视频输出到 Flutter 的 SurfaceTexture（SDR 表面），若不 tone-map，
+        /// BT.2020 PQ 会直接灌到 SDR 表面 → 画面发灰/去饱和。
+        /// 仅在检测到 HDR 时启用，避免给普通 SDR 视频引入 GL 处理开销。
+        @OptIn(UnstableApi::class)
+        private fun maybeEnableHdrToneMapping(tracks: Tracks) {
+            if (toneMappingApplied) return
+            var isHdr = false
+            for (group in tracks.groups) {
+                if (group.type != C.TRACK_TYPE_VIDEO) continue
+                for (i in 0 until group.length) {
+                    if (!group.isTrackSelected(i)) continue
+                    val f = group.getTrackFormat(i)
+                    val transfer = f.colorInfo?.colorTransfer
+                    val mime = f.sampleMimeType ?: ""
+                    val codecs = f.codecs ?: ""
+                    if (transfer == C.COLOR_TRANSFER_ST2084 ||
+                        transfer == C.COLOR_TRANSFER_HLG ||
+                        mime.equals(MimeTypes.VIDEO_DOLBY_VISION, ignoreCase = true) ||
+                        codecs.startsWith("dvh", ignoreCase = true) ||
+                        codecs.startsWith("dav", ignoreCase = true)
+                    ) {
+                        isHdr = true
+                    }
+                }
+            }
+            if (!isHdr) return
+            try {
+                // 空 effects 列表即可让帧经 DefaultVideoFrameProcessor，
+                // 在 SDR 输出表面上自动对 HDR 源做 tone-mapping。
+                exoPlayer.setVideoEffects(emptyList())
+                toneMappingApplied = true
+                android.util.Log.i("ExoPlayerPlugin", "HDR/DV detected -> enabled SDR tone mapping")
+                emitEvent("hdrToneMapping", true)
+            } catch (e: Exception) {
+                android.util.Log.w("ExoPlayerPlugin", "enable HDR tone mapping failed: ${e.message}")
+            }
+        }
 
         override fun onCues(cueGroup: CueGroup) {
             onCues(cueGroup.cues)
@@ -671,6 +712,10 @@ class ExoPlayerPlugin(
                                 bmpInfo["top"] = cue.line
                             }
                             if (cue.size != Cue.DIMEN_UNSET) bmpInfo["width"] = cue.size
+                            // 关键：转发 bitmapHeight（高度占帧高的比例）。ass-media 渲染
+                            // ASS 时给每个事件一张精确定位的位图并带 left/top/width/height，
+                            // 之前漏掉 height 导致 Flutter 侧只能按宽度缩放、字号/位置失真。
+                            if (cue.bitmapHeight != Cue.DIMEN_UNSET) bmpInfo["height"] = cue.bitmapHeight
                         } catch (_: Exception) {}
                         bitmapParts.add(bmpInfo)
                     } catch (e: Exception) {
@@ -690,13 +735,15 @@ class ExoPlayerPlugin(
                 isBitmapSubtitle = true
                 if (bitmapParts.isNotEmpty()) {
                     val images = bitmapParts.map { it["data"] as String }
-                    val positions = bitmapParts.mapNotNull { m ->
-                        val left = m["left"] as? Float
-                        val top = m["top"] as? Float
-                        val width = m["width"] as? Float
-                        if (left != null || top != null || width != null) mapOf(
-                            "left" to (left ?: 0f), "top" to (top ?: 0f), "width" to (width ?: 1f)
-                        ) else null
+                    // positions 与 images 严格按下标对齐（旧实现用 mapNotNull 丢掉无位置项，
+                    // 导致两列表错位）。每项仅带已知的几何字段，缺失则交给 Flutter 兜底。
+                    val positions = bitmapParts.map { m ->
+                        val p = HashMap<String, Any>()
+                        (m["left"] as? Float)?.let { p["left"] = it }
+                        (m["top"] as? Float)?.let { p["top"] = it }
+                        (m["width"] as? Float)?.let { p["width"] = it }
+                        (m["height"] as? Float)?.let { p["height"] = it }
+                        p
                     }
                     emitEvent("subtitleBitmap", mapOf(
                         "images" to images,
@@ -820,6 +867,7 @@ class ExoPlayerPlugin(
             }
             currentTracks = trackList
             emitEvent("tracksChanged", trackList)
+            maybeEnableHdrToneMapping(tracks)
 
             if (lastLoadedSubtitleMimeType != null) {
                 instanceHandler.postDelayed({

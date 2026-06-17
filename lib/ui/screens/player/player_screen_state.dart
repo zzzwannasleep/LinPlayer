@@ -262,6 +262,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         ? DateTime.now().microsecondsSinceEpoch
         : null;
 
+    // 在 widget 仍 mounted 时捕获 scrobble 所需依赖：onStop 可能在退出
+    // 播放页（dispose）后才触发，那时再用 widget 级 ref 会抛
+    // "Cannot use ref after the widget was disposed"。
+    final watchedThreshold = ref.read(watchedThresholdProvider);
+    final syncController = ref.read(syncControllerProvider.notifier);
     _didScrobble = false;
     await _playerService.initialize(
       videoUrl: videoUrl,
@@ -293,7 +298,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         try {
           await api.playback.reportPlaybackStopped(info);
         } catch (_) {}
-        await _maybeScrobbleWatched(info, item);
+        await _maybeScrobbleWatched(
+            info, item, api, watchedThreshold, syncController);
       },
     );
 
@@ -1455,92 +1461,77 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   Widget _buildControlsOverlay(MediaItem? item) {
-    return SafeArea(
-      child: Column(
-        children: [
-          _buildTopBar(item),
-          Expanded(
-            child: Row(
-              children: [
-                _buildLeftSideControls(),
-                const Spacer(),
-                _buildRightSideControls(),
-              ],
+    // 上下渐变蒙版：让顶/底栏文字在任意画面上都清晰，中间画面不被遮。
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x99000000),
+                  Color(0x00000000),
+                  Color(0x00000000),
+                  Color(0xB3000000),
+                ],
+                stops: [0.0, 0.22, 0.7, 1.0],
+              ),
             ),
           ),
-          _buildProgressBar(),
-          _buildBottomBar(item),
-        ],
-      ),
-    );
+        ),
+        SafeArea(
+          child: Column(
+            children: [
+              _buildTopBar(item),
+              Expanded(child: _buildCenterControls()),
+              _buildProgressBar(),
+              _buildBottomBar(item),
+            ],
+          ),
+        ),
+      ],
+    ).animate().fadeIn(duration: AppMotion.fast);
   }
 
   Widget _buildTopBar(MediaItem? item) {
-    final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
-    final isMpv = coreString == 'mpv' || coreString == 'nativeMpv';
-
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+            iconSize: 20,
+            tooltip: '返回',
             onPressed: () => context.pop(),
           ),
+          // 标题：只占左侧；超长才匀速滚动，右侧留给操作按钮。
           Expanded(
             child: _MarqueeText(
               text: item?.name ?? widget.itemId,
-              style: const TextStyle(color: Colors.white, fontSize: 16),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-          if (isMpv)
-            IconButton(
-              icon: const Icon(Icons.hd, color: Colors.white),
-              tooltip: '超分 (Anime4K)',
-              onPressed: () async {
-                await _playerService.applySuperResolution(true);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已开启 Anime4K 超分辨率')),
-                  );
-                }
-              },
-            ),
-          IconButton(
-            icon: const Icon(Icons.skip_next, color: Colors.white),
-            tooltip: '跳过片头/片尾',
-            onPressed: _showSkipDialog,
-          ),
+          const SizedBox(width: 12),
           IconButton(
             icon: Icon(
-              ref.read(hardwareDecodingProvider)
-                  ? Icons.memory
-                  : Icons.slow_motion_video,
+              _playerService.isLocked ? Icons.lock : Icons.lock_open,
               color: Colors.white,
             ),
-            tooltip: '硬解/软解',
-            onPressed: () async {
-              final current = ref.read(hardwareDecodingProvider);
-              ref.read(hardwareDecodingProvider.notifier).state = !current;
-              // 重新初始化播放器以应用硬解/软解设置
-              final savedPosition = _playerService.position;
-              await _playerService.dispose();
-              _playerService = VideoPlayerService();
-              _activePlayerService = _playerService;
-              _playerService.addListener(_onPlayerUpdate);
-              await _initializePlayer();
-              if (savedPosition > Duration.zero) {
-                await _playerService.seekTo(savedPosition);
-              }
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(!current ? '已切换硬件解码' : '已切换软件解码')),
-                );
-              }
-            },
+            iconSize: 20,
+            tooltip: '锁定',
+            onPressed: _playerService.toggleLock,
           ),
           IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
+            icon: const Icon(Icons.more_horiz, color: Colors.white),
+            iconSize: 22,
+            tooltip: '更多',
             onPressed: _showMoreMenu,
           ),
         ],
@@ -1548,59 +1539,97 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
   }
 
-  Widget _buildLeftSideControls() {
-    return SizedBox(
-      width: 60,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.camera_alt, color: Colors.white),
-            tooltip: '截图',
-            onPressed: _takeScreenshot,
-          ),
-          IconButton(
-            icon: Icon(
-              _playerService.isLocked ? Icons.lock : Icons.lock_open,
-              color: Colors.white,
-            ),
-            tooltip: '锁定',
-            onPressed: _playerService.toggleLock,
-          ),
-        ],
-      ),
+  /// 中央主控件（拇指区）：上一集 · 快退 · 播放/暂停 · 快进 · 下一集。
+  Widget _buildCenterControls() {
+    final isPlaying = _playerService.isPlaying;
+    final step = ref.read(skipForwardStepProvider);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _CenterControlButton(
+          icon: Icons.skip_previous_rounded,
+          size: 30,
+          tooltip: '上一集',
+          onTap: _playPrevious,
+        ),
+        _CenterControlButton(
+          icon: Icons.replay_10_rounded,
+          size: 38,
+          tooltip: '快退 ${step}s',
+          onTap: () => _playerService.seekBy(Duration(seconds: -step)),
+        ),
+        _CenterControlButton(
+          icon: isPlaying
+              ? Icons.pause_circle_filled_rounded
+              : Icons.play_circle_fill_rounded,
+          size: 64,
+          tooltip: '播放/暂停',
+          onTap: _playerService.togglePlay,
+        ),
+        _CenterControlButton(
+          icon: Icons.forward_10_rounded,
+          size: 38,
+          tooltip: '快进 ${step}s',
+          onTap: () => _playerService.seekBy(Duration(seconds: step)),
+        ),
+        _CenterControlButton(
+          icon: Icons.skip_next_rounded,
+          size: 30,
+          tooltip: '下一集',
+          onTap: _playNext,
+        ),
+      ],
     );
   }
 
-  Widget _buildRightSideControls() {
-    return SizedBox(
-      width: 60,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.add, color: Colors.white),
-            onPressed: () {
-              final newSpeed = (_playerService.speed + 0.25).clamp(0.25, 4.0);
-              _playerService.setSpeed(newSpeed);
+  /// 切换硬解/软解：改 provider 后重建播放器并恢复进度。
+  /// （原先内联在顶栏按钮里，重构后挪进「更多」菜单，逻辑保持一致。）
+  Future<void> _toggleHardwareDecoding() async {
+    final current = ref.read(hardwareDecodingProvider);
+    ref.read(hardwareDecodingProvider.notifier).state = !current;
+    final savedPosition = _playerService.position;
+    await _playerService.dispose();
+    _playerService = VideoPlayerService();
+    _activePlayerService = _playerService;
+    _playerService.addListener(_onPlayerUpdate);
+    await _initializePlayer();
+    if (savedPosition > Duration.zero) {
+      await _playerService.seekTo(savedPosition);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(!current ? '已切换硬件解码' : '已切换软件解码')),
+      );
+    }
+  }
+
+  /// 开启 Anime4K 超分（仅 mpv 内核）。
+  Future<void> _applySuperResolution() async {
+    await _playerService.applySuperResolution(true);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已开启 Anime4K 超分辨率')),
+      );
+    }
+  }
+
+  /// 倍速选择面板（替代原先顶栏的 +/- 微调；长按手势仍可临时倍速）。
+  void _showSpeedDialog() {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+    final current = _playerService.speed;
+    _showRightPanel(
+      title: '播放速度',
+      children: [
+        for (final s in speeds)
+          PanelOptionTile(
+            label: s == 1.0 ? '正常 (1.0x)' : '${s}x',
+            selected: (current - s).abs() < 0.01,
+            onTap: () {
+              _playerService.setSpeed(s);
+              Navigator.of(context).maybePop();
             },
           ),
-          Text(
-            '${_playerService.speed}x',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.remove, color: Colors.white),
-            onPressed: () {
-              final newSpeed = (_playerService.speed - 0.25).clamp(0.25, 4.0);
-              _playerService.setSpeed(newSpeed);
-            },
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -1688,68 +1717,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
   }
 
+  /// 底栏：只保留**次级功能**（选集 / 字幕 / 音轨 / 弹幕）+ 全屏方向切换。
+  /// 主控件（播放、快进退、上下集）已移到中央拇指区；截图/超分/硬解等进「更多」。
   Widget _buildBottomBar(MediaItem? item) {
-    final isPlaying = _playerService.isPlaying;
-
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
-          IconButton(
-            icon: const Icon(Icons.skip_previous, color: Colors.white),
-            tooltip: '上一集',
-            onPressed: _playPrevious,
+          _BottomBarAction(
+            icon: Icons.playlist_play_rounded,
+            label: '选集',
+            onTap: () => _showEpisodeSelector(item),
           ),
-          IconButton(
-            icon: const Icon(Icons.replay_10, color: Colors.white),
-            tooltip: '快退 10s',
-            onPressed: () =>
-                _playerService.seekBy(const Duration(seconds: -10)),
+          _BottomBarAction(
+            icon: Icons.subtitles_outlined,
+            label: '字幕',
+            onTap: _showSubtitleSettings,
           ),
-          IconButton(
-            icon: Icon(
-              isPlaying ? Icons.pause : Icons.play_arrow,
-              color: Colors.white,
-              size: 40,
-            ),
-            tooltip: '播放/暂停',
-            onPressed: _playerService.togglePlay,
+          _BottomBarAction(
+            icon: Icons.audiotrack_rounded,
+            label: '音轨',
+            onTap: _showAudioSettings,
           ),
-          IconButton(
-            icon: const Icon(Icons.forward_10, color: Colors.white),
-            tooltip: '快进 10s',
-            onPressed: () => _playerService.seekBy(const Duration(seconds: 10)),
+          _BottomBarAction(
+            icon: Icons.chat_bubble_outline_rounded,
+            label: '弹幕',
+            onTap: _showDanmakuSettings,
           ),
-          IconButton(
-            icon: const Icon(Icons.skip_next, color: Colors.white),
-            tooltip: '下一集',
-            onPressed: _playNext,
-          ),
-          IconButton(
-            icon: const Icon(Icons.chat_bubble_outline, color: Colors.white),
-            tooltip: '弹幕设置',
-            onPressed: _showDanmakuSettings,
-          ),
-          IconButton(
-            icon: const Icon(Icons.search, color: Colors.white),
-            tooltip: '搜索弹幕',
-            onPressed: _showDanmakuSearch,
-          ),
-          IconButton(
-            icon: const Icon(Icons.subtitles, color: Colors.white),
-            tooltip: '字幕设置',
-            onPressed: _showSubtitleSettings,
-          ),
-          IconButton(
-            icon: const Icon(Icons.audiotrack, color: Colors.white),
-            tooltip: '音频设置',
-            onPressed: _showAudioSettings,
-          ),
-          IconButton(
-            icon: const Icon(Icons.playlist_play, color: Colors.white),
-            tooltip: '选集',
-            onPressed: () => _showEpisodeSelector(item),
+          _BottomBarAction(
+            icon: Icons.screen_rotation_rounded,
+            label: '旋转',
+            onTap: _toggleOrientation,
           ),
         ],
       ),
@@ -1811,12 +1810,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   /// 播放停止时判断是否「看完」（进度达到设置里的统一观看阈值），是则上报到
   /// 已连接的同步服务。onStop 可能因显式停止 + dispose 触发两次，用 [_didScrobble] 去重。
-  Future<void> _maybeScrobbleWatched(PlaybackStopInfo info, MediaItem item) async {
+  Future<void> _maybeScrobbleWatched(
+    PlaybackStopInfo info,
+    MediaItem item,
+    ApiClientFactory api,
+    int thresholdPercent,
+    SyncController syncController,
+  ) async {
     if (_didScrobble) return;
     final runtime = item.runTimeTicks;
     if (runtime == null || runtime <= 0) return;
-    // 复用设置页「观看阈值」（linplayer_watched_threshold，75~95，默认90）。
-    final thresholdPercent = ref.read(watchedThresholdProvider);
+    // 「观看阈值」（linplayer_watched_threshold，75~95，默认90）已在
+    // _initializePlayer 里 widget 仍 mounted 时捕获，避免 dispose 后用 ref。
     if (info.positionTicks / runtime < thresholdPercent / 100) return;
     _didScrobble = true;
 
@@ -1824,16 +1829,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     Map<String, String>? seriesProviderIds;
     if (item.type == 'Episode' && item.seriesId != null) {
       try {
-        final series =
-            await ref.read(apiClientProvider).media.getItemDetails(item.seriesId!);
+        final series = await api.media.getItemDetails(item.seriesId!);
         seriesProviderIds = series.providerIds;
       } catch (_) {}
     }
 
     try {
-      await ref
-          .read(syncControllerProvider.notifier)
-          .scrobbleWatched(item, seriesProviderIds: seriesProviderIds);
+      await syncController.scrobbleWatched(item,
+          seriesProviderIds: seriesProviderIds);
     } catch (_) {}
   }
 
@@ -1905,20 +1908,65 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       action();
     }
 
+    final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
+    final isMpv = coreString == 'mpv' || coreString == 'nativeMpv';
+    final hwOn = ref.read(hardwareDecodingProvider);
+
     _showRightPanel(
       title: '更多选项',
       children: [
+        const PanelSectionTitle('播放'),
+        PanelOptionTile(
+          label: '播放速度',
+          subtitle: '当前 ${_playerService.speed}x',
+          leading: const Icon(Icons.speed_rounded),
+          selected: false,
+          onTap: () => go(_showSpeedDialog),
+        ),
+        PanelOptionTile(
+          label: '跳过片头/片尾',
+          leading: const Icon(Icons.fast_forward_rounded),
+          selected: false,
+          onTap: () => go(_showSkipDialog),
+        ),
+        PanelOptionTile(
+          label: '画面比例',
+          leading: const Icon(Icons.aspect_ratio),
+          selected: false,
+          onTap: () => go(_showAspectRatioDialog),
+        ),
+        const PanelSectionTitle('画质 / 解码'),
+        PanelOptionTile(
+          label: hwOn ? '硬件解码（点击切软解）' : '软件解码（点击切硬解）',
+          leading: Icon(hwOn ? Icons.memory : Icons.slow_motion_video),
+          selected: false,
+          onTap: () => go(_toggleHardwareDecoding),
+        ),
+        if (isMpv)
+          PanelOptionTile(
+            label: '超分辨率 (Anime4K)',
+            leading: const Icon(Icons.hd_rounded),
+            selected: false,
+            onTap: () => go(_applySuperResolution),
+          ),
+        PanelOptionTile(
+          label: '截图',
+          leading: const Icon(Icons.camera_alt_outlined),
+          selected: false,
+          onTap: () => go(_takeScreenshot),
+        ),
+        const PanelSectionTitle('弹幕 / 其它'),
+        PanelOptionTile(
+          label: '搜索弹幕',
+          leading: const Icon(Icons.search_rounded),
+          selected: false,
+          onTap: () => go(_showDanmakuSearch),
+        ),
         PanelOptionTile(
           label: '线路切换',
           leading: const Icon(Icons.route),
           selected: false,
           onTap: () => go(_showLineSelector),
-        ),
-        PanelOptionTile(
-          label: '旋转屏幕',
-          leading: const Icon(Icons.screen_rotation),
-          selected: false,
-          onTap: () => go(_toggleOrientation),
         ),
         PanelOptionTile(
           label: '定时关闭',
@@ -1938,12 +1986,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           leading: const Icon(Icons.analytics),
           selected: false,
           onTap: () => go(_showStats),
-        ),
-        PanelOptionTile(
-          label: '画面比例',
-          leading: const Icon(Icons.aspect_ratio),
-          selected: false,
-          onTap: () => go(_showAspectRatioDialog),
         ),
       ],
     );

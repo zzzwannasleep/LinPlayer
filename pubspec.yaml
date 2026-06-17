@@ -74,7 +74,6 @@ dependencies:
     path: third_party/flutter_qjs
   # 插件系统：.lpk 打包解压（zip）
   archive: ^3.6.1
-
 dependency_overrides:
   # vendored 的 third_party/flutter_qjs 已放宽 ffi 约束为 >=1.0.0 <3.0.0，
   # 与项目 ffi ^2.2.0 兼容，无需 override。
