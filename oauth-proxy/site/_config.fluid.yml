@@ -1,38 +1,62 @@
-# Fluid 主题配置（仅覆盖关键项，未列出的走主题默认值）
-# 文档：https://hexo.fluid-dev.com/docs/
+favicon: /img/linplayer-icon.png
+apple_touch_icon: /img/linplayer-icon.png
+tab_title_separator: " ✦ "
 
-# 顶部导航
 navbar:
   blog_title: LinPlayer
   menu:
-    - { key: 'home', link: '/', icon: 'iconfont icon-home-fill' }
-    - { key: 'wiki', link: '/archives/', icon: 'iconfont icon-archive-fill' }
-    - { key: 'categories', link: '/categories/', icon: 'iconfont icon-category-fill' }
-    - { key: 'tags', link: '/tags/', icon: 'iconfont icon-tags-fill' }
-    - { key: 'about', link: '/about/', icon: 'iconfont icon-user-fill' }
+    - { key: 'home', name: '首页', link: '/', icon: 'iconfont icon-home-fill' }
+    - { key: 'wiki', name: '文档', link: '/archives/', icon: 'iconfont icon-archive-fill' }
+    - { key: 'categories', name: '分类', link: '/categories/', icon: 'iconfont icon-category-fill' }
+    - { key: 'tags', name: '标签', link: '/tags/', icon: 'iconfont icon-tags-fill' }
+    - { key: 'about', name: '关于', link: '/about/', icon: 'iconfont icon-user-fill' }
 
-# 首页（落地页）
 index:
+  banner_img: https://bing.img.run/uhd.php
   slogan:
     enable: true
-    text: 'Emby 第三方多端播放器 · 移动 / 桌面 / TV'
+    text: 'LinPlayer 的像素放映厅 · 文档 / 插件 / 内核 / 灵感'
     api: false
   banner_img_height: 100
-  banner_mask_alpha: 0.3
+  banner_mask_alpha: 0.48
 
-# 文章页：开启目录树，便于当作 Wiki 阅读
 post:
+  banner_img: https://bing.img.run/uhd.php
+  banner_img_height: 72
   toc:
     enable: true
     placement: right
   copyright:
     enable: false
 
-# 全站页脚
-footer:
-  content: '<a href="https://github.com/zzzwannasleep/LinPlayer" target="_blank">LinPlayer</a> · 由 Hexo + Fluid 构建 · GitHub Pages 托管'
+archive:
+  banner_img: https://bing.img.run/uhd.php
+  banner_img_height: 68
 
-# 暗色模式按钮
+category:
+  banner_img: https://bing.img.run/uhd.php
+  banner_img_height: 68
+
+tag:
+  banner_img: https://bing.img.run/uhd.php
+  banner_img_height: 68
+
+about:
+  banner_img: https://bing.img.run/uhd.php
+  banner_img_height: 72
+
+page:
+  banner_img: https://bing.img.run/uhd.php
+  banner_img_height: 68
+
+footer:
+  content: '<a href="https://github.com/zzzwannasleep/LinPlayer" target="_blank" rel="noopener">LinPlayer</a> · pixel dream archive · built with Hexo + Fluid'
+
 dark_mode:
-  enable: true
-  default: auto
+  enable: false
+
+custom_js:
+  - /js/pixel-dream.js
+
+custom_css:
+  - /css/pixel-dream.css

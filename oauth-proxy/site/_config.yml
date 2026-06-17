@@ -1,17 +1,19 @@
-# Hexo 站点配置 —— LinPlayer 落地页 + Wiki
-# 文档：https://hexo.io/docs/configuration
-
-# Site
-title: LinPlayer
-subtitle: Emby 第三方多端播放器
-description: LinPlayer 的文档与 Wiki —— 功能特性、播放内核、插件系统与使用说明。
-keywords: LinPlayer, Emby, 播放器, mpv, ExoPlayer, 字幕, 插件
+title: LinPlayer · Pixel Dream Archive
+subtitle: 闪亮像素风播放器档案馆
+description: LinPlayer 的像素风 Wiki 与更新记录，收纳功能、插件、播放内核与使用说明。
+keywords:
+  - LinPlayer
+  - Emby
+  - Hexo
+  - Pixel Blog
+  - mpv
+  - ExoPlayer
+  - 插件
+  - 字幕
 author: LinPlayer
 language: zh-CN
 timezone: Asia/Shanghai
 
-# URL
-# 自定义域名（GitHub Pages，CNAME = linplayer.902541.xyz），从根提供，root 用 /。
 url: https://linplayer.902541.xyz
 root: /
 permalink: wiki/:title/
@@ -20,7 +22,6 @@ pretty_urls:
   trailing_index: true
   trailing_html: true
 
-# Directory
 source_dir: source
 public_dir: public
 tag_dir: tags
@@ -30,7 +31,6 @@ code_dir: downloads/code
 i18n_dir: :lang
 skip_render:
 
-# Writing
 new_post_name: :title.md
 default_layout: post
 titlecase: false
@@ -49,22 +49,16 @@ highlight:
   auto_detect: false
   tab_replace: '  '
 
-# Home page setting
 index_generator:
   path: ''
   per_page: 10
   order_by: -date
 
-# Category & Tag
 default_category: 未分类
 category_map:
 tag_map:
 
-# Pagination
 per_page: 10
 pagination_dir: page
 
-# Extensions
 theme: fluid
-
-# Deployment 由 GitHub Actions 完成，这里不配置 hexo deploy。
