@@ -1,0 +1,7 @@
+# Hexo 构建产物与依赖（由 GitHub Actions 重新生成，不入库）
+node_modules/
+public/
+.deploy_git/
+db.json
+*.log
+.DS_Store
