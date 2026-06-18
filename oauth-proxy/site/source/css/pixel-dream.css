@@ -642,9 +642,15 @@ a:hover {
 /* =====================================================================
    ABOUT page — avatar, name, social icons
    ===================================================================== */
+/* keep the app icon clean — no theme drop-shadow / frame / background box */
+.about-avatar,
 .about-avatar img {
   border: 0 !important;
+  outline: 0 !important;
+  background: none !important;
   box-shadow: none !important;
+}
+.about-avatar img {
   border-radius: 18px;
 }
 .about-name {
