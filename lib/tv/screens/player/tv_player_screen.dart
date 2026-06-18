@@ -474,6 +474,16 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     _scheduleHide();
   }
 
+  /// 平板/Pad 触控：点击画面切换控制条显隐（遥控器仍用方向/确认键）。
+  void _toggleControls() {
+    if (_showControls) {
+      _hideTimer?.cancel();
+      setState(() => _showControls = false);
+    } else {
+      _revealControls();
+    }
+  }
+
   Future<void> _togglePlay() async {
     if (_service.isPlaying) {
       await _service.pause();
@@ -558,6 +568,15 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
             else
               const Center(
                 child: CircularProgressIndicator(color: TvDesignTokens.brand),
+              ),
+            // 触控层（位于视频之上、控制条之下）：控制条隐藏时点击画面唤出，
+            // 显示时点击空白处隐藏；控制条上的按钮在更上层会优先捕获各自的点击。
+            if (_ready)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onTap: _toggleControls,
+                ),
               ),
             if (_ready)
               AnimatedOpacity(

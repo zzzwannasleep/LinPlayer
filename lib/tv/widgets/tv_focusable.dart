@@ -67,7 +67,16 @@ class _TvFocusableState extends State<TvFocusable> {
       // - 焦点描边/光晕的阴影是“静态”的，仅做透明度淡入淡出，绝不对 blur 做动画
       //   （动画 blurRadius 是焦点网格掉帧的元凶）；
       // - 外层 RepaintBoundary 把每个卡片的重绘隔离开。
-      child: RepaintBoundary(
+      child: Builder(
+        builder: (context) => GestureDetector(
+          // TV 界面同时跑在平板/Pad 上：点击 = 聚焦 + 激活，等价于遥控器确认键。
+          // opaque 让整张卡片区域可点；嵌套的子手势（如内部按钮）仍由更深层捕获。
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            Focus.of(context).requestFocus();
+            widget.onSelect?.call();
+          },
+          child: RepaintBoundary(
         child: Padding(
           padding: widget.padding,
           child: Stack(
@@ -121,6 +130,8 @@ class _TvFocusableState extends State<TvFocusable> {
           ),
         ),
       ),
+        ),
+      ),
     );
   }
 }
@@ -160,8 +171,16 @@ class TvFocusableStatic extends StatelessWidget {
       },
       child: Builder(
         builder: (context) {
-          final focused = Focus.of(context).hasFocus;
-          return Container(
+          final focusNode = Focus.of(context);
+          final focused = focusNode.hasFocus;
+          return GestureDetector(
+            // 平板/Pad 触控：点击 = 聚焦 + 激活。
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              focusNode.requestFocus();
+              onSelect?.call();
+            },
+            child: Container(
             padding: padding,
             decoration: focused
                 ? BoxDecoration(
@@ -186,6 +205,7 @@ class TvFocusableStatic extends StatelessWidget {
                 opacity: focused ? 1.0 : TvDesignTokens.nonFocusOpacity,
                 child: child,
               ),
+            ),
             ),
           );
         },
