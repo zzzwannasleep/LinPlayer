@@ -21,8 +21,8 @@
   --berry: #ff9fcb;
   --ink: #5a2a66;
   --ink-soft: #8a4f86;
-  --panel: rgba(255, 250, 254, 0.86);
-  --panel-strong: rgba(255, 252, 255, 0.94);
+  --panel: rgba(255, 251, 254, 0.96);
+  --panel-strong: rgba(255, 253, 255, 0.985);
   --frame: #ffffff;
   --frame-2: #ffd6ee;
   --shadow: rgba(120, 50, 120, 0.22);
@@ -217,7 +217,7 @@ a:hover {
   padding: 0.9rem clamp(1.4rem, 4vw, 2.8rem) 1.1rem;
   border: 4px solid #fff;
   border-radius: 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 230, 246, 0.9));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 235, 248, 0.96));
   box-shadow:
     0 0 0 4px rgba(255, 112, 194, 0.45),
     0 0 0 9px rgba(255, 255, 255, 0.5),

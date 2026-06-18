@@ -23,7 +23,7 @@ index:
   banner_img: /img/pixel-scene.svg
   slogan:
     enable: true
-    text: 'LinPlayer 的糖霜像素档案馆'
+    text: 'LinPlayerのWiki'
     api: false
   banner_img_height: 100
   banner_mask_alpha: 0
