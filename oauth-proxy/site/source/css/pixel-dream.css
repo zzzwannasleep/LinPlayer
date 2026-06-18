@@ -643,10 +643,9 @@ a:hover {
    ABOUT page — avatar, name, social icons
    ===================================================================== */
 .about-avatar img {
-  border-radius: 6px;
-  border: 3px solid;
-  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
-  box-shadow: 0 0 0 3px var(--ring);
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 18px;
 }
 .about-name {
   color: var(--bar-text);

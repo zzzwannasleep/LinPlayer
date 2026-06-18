@@ -82,6 +82,22 @@
   var ICON_PLAY = "▶";
   var ICON_PAUSE = "❙❙";
 
+  /* playback state persists across page loads (multi-page static site) */
+  var STORE_KEY = "pixelPlayer.v1";
+  function loadState() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function saveState(patch) {
+    try {
+      var s = loadState();
+      for (var k in patch) {
+        if (Object.prototype.hasOwnProperty.call(patch, k)) s[k] = patch[k];
+      }
+      localStorage.setItem(STORE_KEY, JSON.stringify(s));
+    } catch (e) { /* storage blocked — degrade gracefully */ }
+  }
+
   function mountPlayer() {
     if (document.querySelector(".pixel-player")) {
       return;
@@ -105,11 +121,13 @@
       "</div>" +
       '<div class="pixel-player__state" aria-live="polite">loading</div>';
 
+    var saved = loadState();
+
     var audio = document.createElement("audio");
     audio.id = "pixel-dream-audio";
     audio.loop = true;
     audio.preload = "auto";
-    audio.volume = 0.34;
+    audio.volume = (typeof saved.volume === "number") ? saved.volume : 0.34;
     audio.src = TRACK_PATH;
     audio.setAttribute("aria-hidden", "true");
     audio.style.display = "none";
@@ -118,6 +136,10 @@
     var stateNode = player.querySelector(".pixel-player__state");
     var volume = player.querySelector(".pixel-player__vol");
     var unlockEvents = ["pointerdown", "keydown", "touchstart"];
+    var wantsPlay = saved.paused !== true; // honour the user's last intent
+    var seeked = false;
+
+    volume.value = Math.round(audio.volume * 100);
 
     var labels = {
       loading: "loading",
@@ -137,7 +159,23 @@
       volume.style.setProperty("--vol", volume.value + "%");
     }
 
+    // resume from the saved position; retries on metadata if not seekable yet
+    function restoreTime() {
+      if (seeked) return;
+      var t = saved.time;
+      if (!(typeof t === "number" && isFinite(t) && t > 0.5)) { seeked = true; return; }
+      try {
+        audio.currentTime = t;
+        seeked = true;
+      } catch (e) { /* not seekable yet — loadedmetadata will retry */ }
+    }
+
+    function persistTime() {
+      if (audio.currentTime > 0) saveState({ time: audio.currentTime });
+    }
+
     function playAudio() {
+      restoreTime();
       var p = audio.play();
       if (p && typeof p.then === "function") {
         p.then(function () {
@@ -152,10 +190,11 @@
     function pauseAudio() {
       audio.pause();
       setState("paused");
+      persistTime();
     }
 
     function handleUnlock() {
-      if (audio.paused && player.dataset.state !== "missing") {
+      if (wantsPlay && audio.paused && player.dataset.state !== "missing") {
         playAudio();
       }
     }
@@ -171,21 +210,38 @@
       });
     }
 
-    audio.addEventListener("playing", function () { setState("playing"); });
+    if (audio.readyState >= 1) { restoreTime(); }
+    audio.addEventListener("loadedmetadata", restoreTime);
+
+    audio.addEventListener("playing", function () {
+      setState("playing");
+      saveState({ paused: false });
+    });
     audio.addEventListener("pause", function () {
-      if (audio.currentTime > 0 && !audio.ended) {
-        setState("paused");
-      }
+      if (audio.currentTime > 0 && !audio.ended) setState("paused");
     });
     audio.addEventListener("error", function () { setState("missing"); });
 
+    // keep the saved position fresh, and flush it before leaving the page
+    var lastSave = 0;
+    audio.addEventListener("timeupdate", function () {
+      var now = Date.now();
+      if (now - lastSave > 1000) { lastSave = now; persistTime(); }
+    });
+    window.addEventListener("pagehide", persistTime);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) persistTime();
+    });
+
     btn.addEventListener("click", function () {
-      if (player.dataset.state === "missing") {
-        return;
-      }
+      if (player.dataset.state === "missing") return;
       if (audio.paused) {
+        wantsPlay = true;
+        saveState({ paused: false });
         playAudio();
       } else {
+        wantsPlay = false;
+        saveState({ paused: true });
         pauseAudio();
       }
     });
@@ -193,21 +249,147 @@
     volume.addEventListener("input", function () {
       audio.volume = Math.min(1, Math.max(0, volume.value / 100));
       paintVolume();
+      saveState({ volume: audio.volume });
     });
 
     document.body.appendChild(audio);
     document.body.appendChild(player);
 
-    setState("loading");
     paintVolume();
-    addUnlockListeners();
-    playAudio();
+
+    if (wantsPlay) {
+      setState("loading");
+      addUnlockListeners();
+      playAudio();
+    } else {
+      // user paused earlier — stay paused but keep the saved position
+      setState("paused");
+      restoreTime();
+    }
+  }
+
+  /* ---------- PJAX: swap content without reloading, so audio never stops ---------- */
+  var PERSIST_IDS = ["modalSearch", "scroll-top-button"];
+
+  function mountPjax() {
+    if (!window.history || !history.pushState || !window.fetch || !window.DOMParser ||
+        !window.Fluid || !Fluid.boot || !Fluid.boot.refresh) {
+      return; // unsupported — links just do normal full navigations
+    }
+
+    var NP = window.NProgress || null;
+    var loading = false;
+
+    // pull the search modal + scroll-top button out of the swap zone so their
+    // existing bindings survive (they're position:fixed, so location is cosmetic)
+    PERSIST_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.parentNode !== document.body) document.body.appendChild(el);
+    });
+
+    function updateNavActive() {
+      var path = location.pathname;
+      var items = document.querySelectorAll("#navbar .nav-item");
+      for (var i = 0; i < items.length; i++) {
+        var a = items[i].querySelector(".nav-link");
+        var href = a ? a.getAttribute("href") : "";
+        var on = href === "/" ? path === "/" :
+          (href && href !== "javascript:;" && path.indexOf(href.replace(/\/$/, "")) === 0);
+        items[i].classList.toggle("active", !!on);
+      }
+    }
+
+    function afterSwap(url) {
+      try { Fluid.boot.refresh(); } catch (e) { /* keep going */ }
+      updateNavActive();
+      var hash = url.indexOf("#") >= 0 ? url.slice(url.indexOf("#") + 1) : "";
+      var tgt = hash && document.getElementById(hash);
+      if (tgt) { tgt.scrollIntoView(); } else { window.scrollTo(0, 0); }
+    }
+
+    function navigate(url, push) {
+      if (loading) return;
+      loading = true;
+      if (NP) NP.start();
+      fetch(url, { headers: { "X-PJAX": "1" }, credentials: "same-origin" })
+        .then(function (res) { if (!res.ok) throw new Error(res.status); return res.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, "text/html");
+          var newMain = doc.querySelector("main");
+          var curMain = document.querySelector("main");
+          if (!newMain || !curMain) throw new Error("no main");
+
+          document.title = doc.title;
+
+          // drop duplicates of the persistent widgets, and let images load eagerly
+          PERSIST_IDS.forEach(function (id) {
+            var dup = newMain.querySelector("#" + id);
+            if (dup) dup.parentNode.removeChild(dup);
+          });
+          var lazy = newMain.querySelectorAll("img[lazyload]");
+          for (var i = 0; i < lazy.length; i++) lazy[i].removeAttribute("lazyload");
+
+          // swap the page-title plate in the header
+          var curIntro = document.querySelector(".page-intro");
+          var newIntro = doc.querySelector(".page-intro");
+          if (curIntro && newIntro) { curIntro.replaceWith(newIntro); }
+          else if (curIntro && !newIntro) { curIntro.remove(); }
+          else if (!curIntro && newIntro) {
+            var hdr = document.querySelector("header");
+            if (hdr) hdr.appendChild(newIntro);
+          }
+
+          curMain.replaceWith(newMain);
+
+          if (push) history.pushState({ pjax: 1 }, "", url);
+          afterSwap(url);
+          if (NP) NP.done();
+          loading = false;
+        })
+        .catch(function () {
+          loading = false;
+          if (NP) NP.done();
+          window.location.href = url; // graceful fallback
+        });
+    }
+
+    function eligible(a) {
+      if (!a || !a.getAttribute) return false;
+      if (a.target && a.target !== "_self") return false;
+      if (a.hasAttribute("download") || a.getAttribute("rel") === "external") return false;
+      var href = a.getAttribute("href");
+      if (!href || href.charAt(0) === "#" || href.indexOf("javascript:") === 0) return false;
+      if (a.origin !== location.origin) return false;
+      if (/\.(zip|rar|7z|pdf|png|jpe?g|gif|webp|svg|flac|mp3|mp4|xml|json|txt)$/i.test(a.pathname)) return false;
+      return true;
+    }
+
+    document.addEventListener("click", function (ev) {
+      if (ev.defaultPrevented || ev.button !== 0 ||
+          ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      var a = ev.target.closest ? ev.target.closest("a") : null;
+      if (!eligible(a)) return;
+      ev.preventDefault();
+      var url = a.href;
+      if (url.split("#")[0] === location.href.split("#")[0]) {
+        if (a.hash) {
+          var tgt = document.getElementById(a.hash.slice(1));
+          if (tgt) { history.pushState({ pjax: 1 }, "", url); tgt.scrollIntoView(); }
+        }
+        return;
+      }
+      navigate(url, true);
+    });
+
+    window.addEventListener("popstate", function () { navigate(location.href, false); });
+    try { history.replaceState({ pjax: 1 }, "", location.href); } catch (e) { /* noop */ }
   }
 
   function init() {
     mountGlitterBg();
     mountGlitter();
     mountPlayer();
+    mountPjax();
     document.addEventListener("visibilitychange", handleVisibilityChange);
   }
 
