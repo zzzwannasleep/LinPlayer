@@ -378,13 +378,12 @@ a:hover {
   box-shadow: none;
 }
 
-/* the silver title bar — plain horizontal title */
+/* the silver title bar — plain horizontal title (homepage = titles only) */
 .index-header {
   margin: 0;
-  padding: 0.6rem 1rem;
+  padding: 0.72rem 1.05rem;
   background: var(--glit) repeat, var(--bar);
   background-size: 110px, auto;
-  border-bottom: 3px solid var(--bevel-dk);
 }
 .index-header a {
   display: inline-block;
@@ -399,14 +398,9 @@ a:hover {
 }
 .index-header a:hover { color: var(--accent); }
 
+/* homepage shows article titles only — hide the excerpt body */
 .index-excerpt {
-  display: block;
-  max-width: 70ch;
-  margin: 0;
-  padding: 0.95rem 1.15rem 1.1rem;
-  color: var(--ink);
-  font-size: 1.02rem;
-  line-height: 1.8;
+  display: none !important;
 }
 .index-excerpt:hover {
   color: var(--ink);
@@ -661,21 +655,22 @@ a:hover {
 }
 .about-icons a {
   color: var(--accent) !important;
+  text-decoration: none !important;
+  border-bottom: 0 !important;
   transition: transform 140ms ease, color 140ms ease;
 }
 .about-icons a:hover { color: #1d4a93 !important; transform: translateY(-2px); }
 .about-icons i { font-size: 1.8rem; }
-/* Telegram glyph isn't in the icon font — render it as a masked SVG */
+/* Telegram glyph isn't in the icon font — render the logo as a background image */
 .about-icons i.pd-icon {
   display: inline-block;
   width: 1em;
   height: 1em;
   vertical-align: -0.16em;
-  background-color: currentColor;
+  background: center / contain no-repeat;
 }
 .about-icons i.pd-tg {
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.139-5.061 3.345-.479.329-.913.489-1.302.481-.428-.009-1.252-.242-1.865-.44-.752-.244-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.139-5.061 3.345-.479.329-.913.489-1.302.481-.428-.009-1.252-.242-1.865-.44-.752-.244-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'/%3E%3C/svg%3E") center / contain no-repeat;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%232a5fb5'%3E%3Cpath d='M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.139-5.061 3.345-.479.329-.913.489-1.302.481-.428-.009-1.252-.242-1.865-.44-.752-.244-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'/%3E%3C/svg%3E");
 }
 
 /* =====================================================================
