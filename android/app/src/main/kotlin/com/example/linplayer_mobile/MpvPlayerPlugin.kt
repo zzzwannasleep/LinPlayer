@@ -51,7 +51,11 @@ class MpvPlayerPlugin(
                 val useGpuNext = call.argument<Boolean>("useGpuNext") ?: false
                 // 用户自定义代理（仅 HTTP 代理可被 mpv 消费；为空则直连）
                 val httpProxy = call.argument<String>("httpProxy")
-                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, result)
+                // 网络播放磁盘缓存（按用户 300MB–8GB 设置；本地文件为空/0 表示不启用）
+                val videoCacheDir = call.argument<String>("videoCacheDir")
+                val diskCacheForwardBytes = call.argument<Number>("diskCacheForwardBytes")?.toLong() ?: 0L
+                val diskCacheBackBytes = call.argument<Number>("diskCacheBackBytes")?.toLong() ?: 0L
+                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result)
             }
             "play" -> {
                 val playerId = call.argument<String>("playerId") ?: ""
@@ -238,10 +242,13 @@ class MpvPlayerPlugin(
         surfaceViewId: Int?,
         useGpuNext: Boolean,
         httpProxy: String?,
+        videoCacheDir: String?,
+        diskCacheForwardBytes: Long,
+        diskCacheBackBytes: Long,
         result: MethodChannel.Result
     ) {
         // Always use SurfaceTexture (no SurfaceView polling needed)
-        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, result) }
+        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result) }
     }
 
     private fun createPlayerOnMainThread(
@@ -250,6 +257,9 @@ class MpvPlayerPlugin(
         hardwareDecoding: Boolean,
         useGpuNext: Boolean,
         httpProxy: String?,
+        videoCacheDir: String?,
+        diskCacheForwardBytes: Long,
+        diskCacheBackBytes: Long,
         result: MethodChannel.Result
     ) {
         // MPVLib is a singleton — only one mpv context can exist at a time.
@@ -285,7 +295,10 @@ class MpvPlayerPlugin(
 
             // Set mpv options (must be before init)
             android.util.Log.i(TAG, "Setting mpv options: hardwareDecoding=$hardwareDecoding, useGpuNext=$useGpuNext")
-            setMpvOptions(hardwareDecoding, useGpuNext = useGpuNext, httpProxy = httpProxy)
+            setMpvOptions(hardwareDecoding, useGpuNext = useGpuNext, httpProxy = httpProxy,
+                videoCacheDir = videoCacheDir,
+                diskCacheForwardBytes = diskCacheForwardBytes,
+                diskCacheBackBytes = diskCacheBackBytes)
 
             // Initialize mpv (registers JavaVM, starts event thread)
             MPVLib.init()
@@ -384,7 +397,14 @@ class MpvPlayerPlugin(
         }
     }
 
-    private fun setMpvOptions(hardwareDecoding: Boolean, useGpuNext: Boolean = false, httpProxy: String? = null) {
+    private fun setMpvOptions(
+        hardwareDecoding: Boolean,
+        useGpuNext: Boolean = false,
+        httpProxy: String? = null,
+        videoCacheDir: String? = null,
+        diskCacheForwardBytes: Long = 0L,
+        diskCacheBackBytes: Long = 0L,
+    ) {
         // 用户自定义 HTTP 代理（mpv 不支持 SOCKS，SOCKS 场景在 TV 上经 mihomo 本地口中转）
         if (!httpProxy.isNullOrEmpty()) {
             MPVLib.setOptionString("http-proxy", httpProxy)
@@ -465,8 +485,22 @@ class MpvPlayerPlugin(
         MPVLib.setOptionString("sub-codepage", "utf-8")
 
         // Cache
-        MPVLib.setOptionString("demuxer-max-bytes", "64MiB")
-        MPVLib.setOptionString("demuxer-max-back-bytes", "32MiB")
+        // 网络播放：按用户设置（300MB–8GB）把缓冲落到磁盘，避免大缓冲占满内存导致
+        // 低配机/TV OOM 闪退。videoCacheDir 为空（本地文件）时退回小额内存缓冲即可。
+        if (!videoCacheDir.isNullOrEmpty() && diskCacheForwardBytes > 0L) {
+            File(videoCacheDir).mkdirs()
+            MPVLib.setOptionString("cache", "yes")
+            MPVLib.setOptionString("cache-on-disk", "yes")
+            MPVLib.setOptionString("cache-dir", videoCacheDir)
+            MPVLib.setOptionString("demuxer-max-bytes", diskCacheForwardBytes.toString())
+            MPVLib.setOptionString("demuxer-max-back-bytes", diskCacheBackBytes.toString())
+            MPVLib.setOptionString("demuxer-readahead-secs", "180")
+            android.util.Log.i(TAG, "mpv disk cache: dir=$videoCacheDir fwd=$diskCacheForwardBytes back=$diskCacheBackBytes")
+        } else {
+            // 本地文件：无需大缓冲，沿用小额内存缓冲。
+            MPVLib.setOptionString("demuxer-max-bytes", "64MiB")
+            MPVLib.setOptionString("demuxer-max-back-bytes", "32MiB")
+        }
 
         // TLS
         val cacert = File(context.filesDir, "cacert.pem")

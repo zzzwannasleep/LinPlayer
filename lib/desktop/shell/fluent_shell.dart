@@ -30,6 +30,9 @@ class FluentDesktopShell extends ConsumerWidget {
       pane: NavigationPane(
         selected: selectedIndex,
         onChanged: navigationShell.goBranch,
+        // fluent_ui 默认 openWidth=320，对仅图标+短标签的导航来说右侧留白过多。
+        // 收窄到 220（与 Material/macOS 外壳一致），更紧凑也更协调。
+        size: const NavigationPaneSize(openWidth: 220),
         displayMode:
             collapsed ? PaneDisplayMode.compact : PaneDisplayMode.expanded,
         // 收起由标题栏汉堡按钮统一控制，隐藏 pane 内置的切换按钮避免重复。

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'player_adapter.dart';
 import 'app_logger.dart';
+import 'cache_service.dart';
 import '../network/proxy_settings.dart';
 
 /// Native mpv player adapter for Android.
@@ -107,6 +108,12 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
 
   // ---- Initialize ----
 
+  /// 是否为网络流地址（仅网络播放才需要磁盘缓存把缓冲挪出内存防 OOM）。
+  bool _isHttpUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.startsWith('http://') || lower.startsWith('https://');
+  }
+
   @override
   Future<void> initialize({
     required String videoUrl,
@@ -134,6 +141,20 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
       final mediaProxy = ProxyRuntime.instance.current;
       final httpProxy = mediaProxy.appliesToMedia ? mediaProxy.mpvHttpProxy : null;
 
+      // 网络播放：把按用户设置（300MB–8GB）算出的磁盘缓存参数透传给原生 mpv。
+      // 之前 Kotlin 侧硬编码 64+32MB 纯内存缓冲、忽略用户设置、也没开 cache-on-disk，
+      // 这正是"视频持久化缓存好像没做"的原因。本地文件播放不需要网络缓存。
+      String? videoCacheDir;
+      int diskCacheForwardBytes = 0;
+      int diskCacheBackBytes = 0;
+      if (_isHttpUrl(videoUrl)) {
+        final cacheMaxMB = await CacheService.getVideoCacheMaxSizeMB();
+        final totalBytes = cacheMaxMB * 1024 * 1024;
+        diskCacheForwardBytes = (totalBytes * 3) ~/ 4; // 前向:后向 = 3:1
+        diskCacheBackBytes = totalBytes ~/ 4;
+        videoCacheDir = await CacheService.videoStreamCacheDirPath;
+      }
+
       final params = <String, dynamic>{
         'videoUrl': videoUrl,
         'startPositionMs': startPosition?.inMilliseconds ?? 0,
@@ -141,6 +162,10 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
         'preferredSubtitleLanguage': preferredSubtitleLanguage,
         'useGpuNext': useGpuNext,
         'httpProxy': httpProxy,
+        // 为 0 / null 时 Kotlin 侧按"不启用磁盘缓存"处理（本地文件）。
+        'videoCacheDir': videoCacheDir,
+        'diskCacheForwardBytes': diskCacheForwardBytes,
+        'diskCacheBackBytes': diskCacheBackBytes,
       };
 
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('createPlayer', params);

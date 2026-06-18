@@ -294,6 +294,10 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
         },
       );
 
+      // 初始化为异步过程，若期间用户已返回（widget 销毁），直接收尾退出，
+      // 不再继续起播/选轨。VideoPlayerService 内部也已对 dispose 后的调用做短路。
+      if (!mounted) return;
+
       await Future.wait([
         _playerService.setSubtitleSize(ref.read(subtitleSizeProvider)),
         _playerService.setSubtitlePosition(ref.read(subtitlePositionProvider)),

@@ -443,6 +443,11 @@ class VideoPlayerService extends ChangeNotifier {
   }
 
   /// 初始化播放器
+  /// 已释放标记。在异步初始化途中用户返回（dispose 先于 initialize 完成）时，
+  /// 用它让 initialize/play 直接短路，避免在屏幕已销毁后才创建适配器、
+  /// 导致播放器在后台空跑出声却无画面。
+  bool _disposed = false;
+
   Future<void> initialize({
     required String videoUrl,
     required String itemId,
@@ -462,6 +467,8 @@ class VideoPlayerService extends ChangeNotifier {
     int? surfaceViewId,  // For gpu-next rendering on Android
     bool useGpuNext = false,  // gpu-next rendering mode
   }) async {
+    // 屏幕已销毁：不要再创建/初始化适配器，否则会留下后台空跑的孤儿播放器。
+    if (_disposed) return;
     _currentItemId = itemId;
     _mediaSourceId = mediaSourceId ?? itemId;
     _onStartReport = onStart;
@@ -494,6 +501,14 @@ class VideoPlayerService extends ChangeNotifier {
     // 释放旧适配器
     await _recreateAdapter();
 
+    // _recreateAdapter 期间可能发生 dispose（用户返回）。若已释放，立即把
+    // 刚建好的适配器销毁并退出，避免它继续初始化并播放。
+    if (_disposed) {
+      await _adapter?.dispose();
+      _adapter = null;
+      return;
+    }
+
     // 初始化
     final desiredHardwareDecoding =
         startWithSoftwareDecoding ? false : (hardwareDecoding ?? true);
@@ -514,6 +529,13 @@ class VideoPlayerService extends ChangeNotifier {
       if (!fallbackActivated) {
         Error.throwWithStackTrace(error, stackTrace);
       }
+    }
+
+    // 适配器初始化为异步过程，期间用户可能已返回销毁本服务。
+    if (_disposed) {
+      await _adapter?.dispose();
+      _adapter = null;
+      return;
     }
 
     // 加载 libass 字幕（如果启用）
@@ -609,7 +631,8 @@ class VideoPlayerService extends ChangeNotifier {
 
   /// 播放
   Future<void> play() async {
-    if (_adapter == null ||
+    if (_disposed ||
+        _adapter == null ||
         !isInitialized ||
         hasError ||
         isPlaying ||
@@ -966,6 +989,9 @@ class VideoPlayerService extends ChangeNotifier {
   /// 释放资源
   @override
   Future<void> dispose() async {
+    if (_disposed) return;
+    // 同步置位，让仍在途中的 initialize/play 立刻短路。
+    _disposed = true;
     _setPendingPlayingState(null, notify: false);
     _pendingPlaybackTimer?.cancel();
     _pendingPlaybackTimer = null;

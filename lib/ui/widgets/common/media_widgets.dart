@@ -134,6 +134,11 @@ class _FallbackNetworkImageState extends State<_FallbackNetworkImage> {
   static const int _maxRetryRounds = 2;
   static const Duration _retryDelay = Duration(milliseconds: 900);
 
+  /// 解码目标的最大边长上限。即使容器/屏幕很大，也把单张图片解码尺寸
+  /// 钳制在此范围内，避免单张全分辨率位图（背景图可达 4K）吃满内存缓存。
+  /// 1280 长边 ≈ 1280×720×4 ≈ 3.7MB，足够桌面/TV 清晰显示。
+  static const int _maxDecodeDim = 1280;
+
   int _currentIndex = 0;
   int _retryRound = 0;
   int _requestEpoch = 0;
@@ -148,17 +153,74 @@ class _FallbackNetworkImageState extends State<_FallbackNetworkImage> {
     }
   }
 
+  /// 计算解码（downsample）目标尺寸。
+  ///
+  /// 关键内存优化：之前 [cacheWidth]/[cacheHeight] 根本没传给 ExtendedImage，
+  /// 所有图片都按原始分辨率解码进内存——首页几张背景图就能撑爆缓存。
+  /// 现在统一推导一个解码目标：调用方显式给了就用；否则按容器/约束尺寸
+  /// × devicePixelRatio 推导，并钳制到 [_maxDecodeDim]，再交给
+  /// [ExtendedResizeImage] 让解码器直接以小尺寸出图。
+  ({int? width, int? height}) _resolveDecodeSize(
+    BoxConstraints constraints,
+    double dpr,
+  ) {
+    int? cap(int? v) =>
+        v == null ? null : (v < 1 ? 1 : (v > _maxDecodeDim ? _maxDecodeDim : v));
+
+    if (widget.cacheWidth != null || widget.cacheHeight != null) {
+      return (width: cap(widget.cacheWidth), height: cap(widget.cacheHeight));
+    }
+
+    double? w = widget.width;
+    if (w == null || !w.isFinite || w <= 0) w = constraints.maxWidth;
+    double? h = widget.height;
+    if (h == null || !h.isFinite || h <= 0) h = constraints.maxHeight;
+
+    final int? dw =
+        (w.isFinite && w > 0) ? (w * dpr).round() : null;
+    final int? dh =
+        (h.isFinite && h > 0) ? (h * dpr).round() : null;
+    return (width: cap(dw), height: cap(dh));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.maybeOf(context)?.devicePixelRatio ?? 1.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final decode = _resolveDecodeSize(constraints, dpr);
+        final base = PersistentNetworkImageProvider(
+          widget.imageUrls[_currentIndex],
+          cache: true,
+          cacheMaxAge: const Duration(days: 30),
+          retries: 5,
+          timeRetry: const Duration(milliseconds: 350),
+          requestKey: '$_requestEpoch:$_retryRound:$_currentIndex',
+        );
+        // 以推导出的小尺寸解码并缓存。maxBytes/compressionRatio 必须显式置 null，
+        // 否则 ExtendedResizeImage 默认 maxBytes=50KB 会无视 width/height 把图压成
+        // 50KB 的糊图。policy.fit 保持纵横比、避免 cover 显示时变形。
+        final ImageProvider<Object> provider;
+        if (decode.width != null || decode.height != null) {
+          provider = ExtendedResizeImage(
+            base,
+            width: decode.width,
+            height: decode.height,
+            maxBytes: null,
+            compressionRatio: null,
+            policy: ResizeImagePolicy.fit,
+          );
+        } else {
+          provider = base;
+        }
+        return _buildExtendedImage(provider);
+      },
+    );
+  }
+
+  Widget _buildExtendedImage(ImageProvider provider) {
     return ExtendedImage(
-      image: PersistentNetworkImageProvider(
-        widget.imageUrls[_currentIndex],
-        cache: true,
-        cacheMaxAge: const Duration(days: 30),
-        retries: 5,
-        timeRetry: const Duration(milliseconds: 350),
-        requestKey: '$_requestEpoch:$_retryRound:$_currentIndex',
-      ),
+      image: provider,
       width: widget.width,
       height: widget.height,
       fit: widget.fit,
