@@ -1,83 +1,155 @@
+/* =====================================================================
+   LinPlayer · Blingee Pixel runtime
+   - bottom-right pixel music player (autoplay + unlock-on-interaction)
+   - twinkling glitter overlay
+   - drifting cherry-blossom petals
+   - playful tab-title swap on visibility change
+   ===================================================================== */
 (function () {
+  "use strict";
+
+  var TRACK_PATH = "/assets/audio/Xploshi-NewYou.flac";
+  var TRACK_NAME = "Xploshi — New You";
   var leaveTitle = "烸個亾洧着屬纡洎己哋杺凊";
   var returnTitle = "莈洧邇啲ㄖ孓，莪過啲並鈈恏";
   var originalTitle = document.title;
   var restoreTimer = null;
+  var reduceMotion =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  function setTitle(text) {
-    document.title = text;
-  }
-
+  /* ---------- tab title play ---------- */
   function restoreOriginalTitle() {
     window.clearTimeout(restoreTimer);
     restoreTimer = window.setTimeout(function () {
-      setTitle(originalTitle);
+      document.title = originalTitle;
     }, 2400);
   }
 
   function handleVisibilityChange() {
     window.clearTimeout(restoreTimer);
     if (document.hidden) {
-      setTitle(leaveTitle);
+      document.title = leaveTitle;
       return;
     }
-
-    setTitle(returnTitle);
+    document.title = returnTitle;
     restoreOriginalTitle();
   }
 
-  function mountMusicToggle() {
-    if (document.querySelector(".music-toggle")) {
+  /* ---------- glitter overlay ---------- */
+  function mountGlitter() {
+    if (reduceMotion || document.getElementById("bling-layer")) {
       return;
     }
 
-    var trackPath = "/assets/audio/Xploshi-NewYou.flac";
-    var button = document.createElement("button");
-    button.type = "button";
-    button.className = "music-toggle";
-    button.setAttribute("aria-label", "切换背景音乐");
-    button.innerHTML =
-      '<span class="music-toggle__icon" aria-hidden="true">&#9835;</span>' +
-      '<span class="music-toggle__copy">' +
-      '<strong>Now playing</strong>' +
-      "<em>Xploshi - New You</em>" +
-      "</span>" +
-      '<span class="music-toggle__state">trying</span>';
+    var layer = document.createElement("div");
+    layer.id = "bling-layer";
+    layer.setAttribute("aria-hidden", "true");
+
+    var starColors = ["#ffffff", "#fff49d", "#ff9fcb", "#bfefff"];
+    var starCount = window.innerWidth < 600 ? 16 : 34;
+    var i;
+
+    for (i = 0; i < starCount; i++) {
+      var star = document.createElement("span");
+      star.className = "bling-star";
+      var size = 6 + Math.floor(Math.random() * 12);
+      star.style.left = (Math.random() * 100).toFixed(2) + "%";
+      star.style.top = (Math.random() * 100).toFixed(2) + "%";
+      star.style.width = size + "px";
+      star.style.height = size + "px";
+      star.style.color = starColors[i % starColors.length];
+      star.style.animationDelay = (Math.random() * 2.6).toFixed(2) + "s";
+      star.style.animationDuration = (1.8 + Math.random() * 1.8).toFixed(2) + "s";
+      layer.appendChild(star);
+    }
+
+    var petalColors = ["#ffb5de", "#ffd1e8", "#ff9fcb", "#fff0f7"];
+    var petalCount = window.innerWidth < 600 ? 8 : 16;
+
+    for (i = 0; i < petalCount; i++) {
+      var petal = document.createElement("span");
+      petal.className = "bling-petal";
+      var psize = 8 + Math.floor(Math.random() * 9);
+      petal.style.left = (Math.random() * 100).toFixed(2) + "%";
+      petal.style.width = psize + "px";
+      petal.style.height = psize + "px";
+      petal.style.background = petalColors[i % petalColors.length];
+      petal.style.animationDuration = (8 + Math.random() * 9).toFixed(2) + "s";
+      petal.style.animationDelay = (-Math.random() * 12).toFixed(2) + "s";
+      layer.appendChild(petal);
+    }
+
+    document.body.appendChild(layer);
+  }
+
+  /* ---------- pixel music player ---------- */
+  var ICON_PLAY = "▶";
+  var ICON_PAUSE = "❙❙";
+
+  function mountPlayer() {
+    if (document.querySelector(".pixel-player")) {
+      return;
+    }
+
+    var player = document.createElement("section");
+    player.className = "pixel-player";
+    player.setAttribute("aria-label", "Blingee 像素播放器");
+    player.innerHTML =
+      '<div class="pixel-player__deck">' +
+      '  <div class="pixel-player__disc" aria-hidden="true"></div>' +
+      '  <div class="pixel-player__info">' +
+      '    <div class="pixel-player__label">NOW PLAYING</div>' +
+      '    <div class="pixel-player__marquee"><span>' + TRACK_NAME + " ★ " + TRACK_NAME + "</span></div>" +
+      '    <div class="pixel-player__eq" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>' +
+      "  </div>" +
+      "</div>" +
+      '<div class="pixel-player__controls">' +
+      '  <button type="button" class="pixel-player__btn" data-act="toggle" aria-label="播放 / 暂停">' + ICON_PLAY + "</button>" +
+      '  <input class="pixel-player__vol" type="range" min="0" max="100" value="34" aria-label="音量">' +
+      "</div>" +
+      '<div class="pixel-player__state" aria-live="polite">loading</div>';
 
     var audio = document.createElement("audio");
     audio.id = "pixel-dream-audio";
     audio.loop = true;
     audio.preload = "auto";
     audio.volume = 0.34;
-    audio.style.display = "none";
-    audio.src = trackPath;
+    audio.src = TRACK_PATH;
     audio.setAttribute("aria-hidden", "true");
+    audio.style.display = "none";
 
-    var stateNode = button.querySelector(".music-toggle__state");
+    var btn = player.querySelector('[data-act="toggle"]');
+    var stateNode = player.querySelector(".pixel-player__state");
+    var volume = player.querySelector(".pixel-player__vol");
     var unlockEvents = ["pointerdown", "keydown", "touchstart"];
 
-    function setState(state) {
-      var labels = {
-        trying: "trying",
-        playing: "playing",
-        paused: "paused",
-        blocked: "click me",
-        missing: "missing"
-      };
+    var labels = {
+      loading: "loading",
+      playing: "playing ♪",
+      paused: "paused",
+      blocked: "tap to play",
+      missing: "track missing"
+    };
 
-      button.dataset.state = state;
+    function setState(state) {
+      player.dataset.state = state;
       stateNode.textContent = labels[state] || state;
+      btn.textContent = state === "playing" ? ICON_PAUSE : ICON_PLAY;
     }
 
-    async function playAudio() {
-      try {
-        await audio.play();
-        setState("playing");
-        removeUnlockListeners();
-        return true;
-      } catch (error) {
-        setState("blocked");
-        return false;
+    function paintVolume() {
+      volume.style.setProperty("--vol", volume.value + "%");
+    }
+
+    function playAudio() {
+      var p = audio.play();
+      if (p && typeof p.then === "function") {
+        p.then(function () {
+          setState("playing");
+          removeUnlockListeners();
+        }).catch(function () {
+          setState("blocked");
+        });
       }
     }
 
@@ -87,56 +159,58 @@
     }
 
     function handleUnlock() {
-      if (audio.paused) {
+      if (audio.paused && player.dataset.state !== "missing") {
         playAudio();
       }
     }
 
     function addUnlockListeners() {
-      unlockEvents.forEach(function (eventName) {
-        document.addEventListener(eventName, handleUnlock, { passive: true });
+      unlockEvents.forEach(function (evt) {
+        document.addEventListener(evt, handleUnlock, { passive: true });
       });
     }
-
     function removeUnlockListeners() {
-      unlockEvents.forEach(function (eventName) {
-        document.removeEventListener(eventName, handleUnlock, { passive: true });
+      unlockEvents.forEach(function (evt) {
+        document.removeEventListener(evt, handleUnlock, { passive: true });
       });
     }
 
-    audio.addEventListener("playing", function () {
-      setState("playing");
-    });
-
+    audio.addEventListener("playing", function () { setState("playing"); });
     audio.addEventListener("pause", function () {
       if (audio.currentTime > 0 && !audio.ended) {
         setState("paused");
       }
     });
+    audio.addEventListener("error", function () { setState("missing"); });
 
-    audio.addEventListener("error", function () {
-      setState("missing");
-    });
-
-    button.addEventListener("click", function () {
-      if (audio.paused) {
-        playAudio();
+    btn.addEventListener("click", function () {
+      if (player.dataset.state === "missing") {
         return;
       }
+      if (audio.paused) {
+        playAudio();
+      } else {
+        pauseAudio();
+      }
+    });
 
-      pauseAudio();
+    volume.addEventListener("input", function () {
+      audio.volume = Math.min(1, Math.max(0, volume.value / 100));
+      paintVolume();
     });
 
     document.body.appendChild(audio);
-    document.body.appendChild(button);
+    document.body.appendChild(player);
 
-    setState("trying");
+    setState("loading");
+    paintVolume();
     addUnlockListeners();
     playAudio();
   }
 
   function init() {
-    mountMusicToggle();
+    mountGlitter();
+    mountPlayer();
     document.addEventListener("visibilitychange", handleVisibilityChange);
   }
 
