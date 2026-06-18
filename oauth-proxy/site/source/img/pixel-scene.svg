@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" shape-rendering="crispEdges">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a8e1ff"/>
+      <stop offset="0.42" stop-color="#cdeeff"/>
+      <stop offset="0.68" stop-color="#ffe2f1"/>
+      <stop offset="1" stop-color="#fff0df"/>
+    </linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#aceb7e"/>
+      <stop offset="1" stop-color="#74c252"/>
+    </linearGradient>
+  </defs>
+
+  <!-- sky -->
+  <rect width="1600" height="1000" fill="url(#sky)"/>
+
+  <!-- sun -->
+  <circle cx="1250" cy="180" r="128" fill="#fff7c4" opacity="0.5"/>
+  <circle cx="1250" cy="180" r="80" fill="#fff09a"/>
+  <circle cx="1250" cy="180" r="56" fill="#fffbdb"/>
+  <g fill="#fff09a" opacity="0.85">
+    <rect x="1244" y="18" width="12" height="40"/>
+    <rect x="1244" y="302" width="12" height="40"/>
+    <rect x="1086" y="174" width="40" height="12"/>
+    <rect x="1374" y="174" width="40" height="12"/>
+    <rect x="1130" y="60" width="12" height="30"/>
+    <rect x="1356" y="270" width="12" height="30"/>
+    <rect x="1356" y="60" width="12" height="30"/>
+    <rect x="1130" y="270" width="12" height="30"/>
+  </g>
+
+  <!-- rainbow -->
+  <g fill="none" stroke-width="26">
+    <path d="M160 620 C 460 120 1140 120 1440 620" stroke="#ff8fc0"/>
+    <path d="M186 620 C 478 170 1122 170 1414 620" stroke="#ffb04c"/>
+    <path d="M212 620 C 496 220 1104 220 1388 620" stroke="#fff277"/>
+    <path d="M238 620 C 514 270 1086 270 1362 620" stroke="#96ee7e"/>
+    <path d="M264 620 C 532 320 1068 320 1336 620" stroke="#7ae4ff"/>
+    <path d="M290 620 C 550 368 1050 368 1310 620" stroke="#c89bff"/>
+  </g>
+
+  <!-- clouds -->
+  <g fill="#ffffff">
+    <rect x="486" y="172" width="120" height="38"/>
+    <rect x="452" y="192" width="200" height="38"/>
+    <rect x="430" y="212" width="252" height="34"/>
+    <rect x="820" y="108" width="104" height="34"/>
+    <rect x="792" y="128" width="166" height="34"/>
+    <rect x="776" y="146" width="206" height="30"/>
+  </g>
+  <g fill="#e7f7ff">
+    <rect x="430" y="240" width="252" height="10"/>
+    <rect x="776" y="172" width="206" height="10"/>
+  </g>
+
+  <!-- hills -->
+  <polygon points="0,744 240,694 500,724 780,676 1060,716 1340,672 1600,712 1600,1000 0,1000" fill="#bff08e"/>
+  <polygon points="0,808 260,762 540,794 840,748 1140,792 1420,752 1600,788 1600,1000 0,1000" fill="#97e06d"/>
+  <rect x="0" y="880" width="1600" height="120" fill="url(#grass)"/>
+  <g fill="#ffffff" opacity="0.5">
+    <rect x="0" y="876" width="1600" height="8"/>
+  </g>
+
+  <!-- LEFT cherry tree -->
+  <g fill="#6b4327">
+    <rect x="118" y="496" width="42" height="320"/>
+    <rect x="78" y="556" width="44" height="22"/>
+    <rect x="156" y="540" width="44" height="22"/>
+  </g>
+  <g>
+    <!-- canopy blocks (3 pink tones), 46px blocks on 44px grid, origin x=14 y=336 -->
+    <rect x="58" y="336" width="46" height="46" fill="#ffb0db"/>
+    <rect x="102" y="336" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="146" y="336" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="14" y="380" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="58" y="380" width="46" height="46" fill="#ffd0e8"/>
+    <rect x="102" y="380" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="146" y="380" width="46" height="46" fill="#ffb0db"/>
+    <rect x="190" y="380" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="14" y="424" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="58" y="424" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="102" y="424" width="46" height="46" fill="#ffd0e8"/>
+    <rect x="146" y="424" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="190" y="424" width="46" height="46" fill="#ffb0db"/>
+    <rect x="14" y="468" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="58" y="468" width="46" height="46" fill="#ffb0db"/>
+    <rect x="102" y="468" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="146" y="468" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="190" y="468" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="58" y="512" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="102" y="512" width="46" height="46" fill="#ffb0db"/>
+    <rect x="146" y="512" width="46" height="46" fill="#ff9ecb"/>
+  </g>
+
+  <!-- RIGHT cherry tree -->
+  <g fill="#6b4327">
+    <rect x="1440" y="496" width="42" height="320"/>
+    <rect x="1478" y="556" width="44" height="22"/>
+    <rect x="1400" y="540" width="44" height="22"/>
+  </g>
+  <g>
+    <rect x="1408" y="336" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="1452" y="336" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="1496" y="336" width="46" height="46" fill="#ffb0db"/>
+    <rect x="1364" y="380" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="1408" y="380" width="46" height="46" fill="#ffb0db"/>
+    <rect x="1452" y="380" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="1496" y="380" width="46" height="46" fill="#ffd0e8"/>
+    <rect x="1540" y="380" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="1364" y="424" width="46" height="46" fill="#ffb0db"/>
+    <rect x="1408" y="424" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="1452" y="424" width="46" height="46" fill="#ffd0e8"/>
+    <rect x="1496" y="424" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="1540" y="424" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="1364" y="468" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="1408" y="468" width="46" height="46" fill="#ffc7e4"/>
+    <rect x="1452" y="468" width="46" height="46" fill="#ff8fc0"/>
+    <rect x="1496" y="468" width="46" height="46" fill="#ffb0db"/>
+    <rect x="1540" y="468" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="1408" y="512" width="46" height="46" fill="#ff9ecb"/>
+    <rect x="1452" y="512" width="46" height="46" fill="#ffb0db"/>
+    <rect x="1496" y="512" width="46" height="46" fill="#ffc7e4"/>
+  </g>
+
+  <!-- falling blossom petals (static, in scene) -->
+  <g fill="#ffb0db">
+    <rect x="300" y="470" width="14" height="14"/>
+    <rect x="420" y="560" width="12" height="12"/>
+    <rect x="250" y="640" width="12" height="12"/>
+    <rect x="1180" y="500" width="14" height="14"/>
+    <rect x="1280" y="600" width="12" height="12"/>
+    <rect x="1330" y="690" width="12" height="12"/>
+  </g>
+
+  <!-- meadow flowers -->
+  <g>
+    <g transform="translate(360,900)"><rect x="-6" y="-18" width="12" height="12" fill="#ff8fc0"/><rect x="-6" y="6" width="12" height="12" fill="#ff8fc0"/><rect x="-18" y="-6" width="12" height="12" fill="#ff8fc0"/><rect x="6" y="-6" width="12" height="12" fill="#ff8fc0"/><rect x="-6" y="-6" width="12" height="12" fill="#fff19a"/></g>
+    <g transform="translate(560,860)"><rect x="-6" y="-18" width="12" height="12" fill="#fff"/><rect x="-6" y="6" width="12" height="12" fill="#fff"/><rect x="-18" y="-6" width="12" height="12" fill="#fff"/><rect x="6" y="-6" width="12" height="12" fill="#fff"/><rect x="-6" y="-6" width="12" height="12" fill="#ff8fc0"/></g>
+    <g transform="translate(760,920)"><rect x="-6" y="-18" width="12" height="12" fill="#c89bff"/><rect x="-6" y="6" width="12" height="12" fill="#c89bff"/><rect x="-18" y="-6" width="12" height="12" fill="#c89bff"/><rect x="6" y="-6" width="12" height="12" fill="#c89bff"/><rect x="-6" y="-6" width="12" height="12" fill="#fff19a"/></g>
+    <g transform="translate(980,872)"><rect x="-6" y="-18" width="12" height="12" fill="#ff8fc0"/><rect x="-6" y="6" width="12" height="12" fill="#ff8fc0"/><rect x="-18" y="-6" width="12" height="12" fill="#ff8fc0"/><rect x="6" y="-6" width="12" height="12" fill="#ff8fc0"/><rect x="-6" y="-6" width="12" height="12" fill="#fff19a"/></g>
+    <g transform="translate(1180,912)"><rect x="-6" y="-18" width="12" height="12" fill="#fff"/><rect x="-6" y="6" width="12" height="12" fill="#fff"/><rect x="-18" y="-6" width="12" height="12" fill="#fff"/><rect x="6" y="-6" width="12" height="12" fill="#fff"/><rect x="-6" y="-6" width="12" height="12" fill="#ff8fc0"/></g>
+    <g transform="translate(1380,866)"><rect x="-6" y="-18" width="12" height="12" fill="#7ae4ff"/><rect x="-6" y="6" width="12" height="12" fill="#7ae4ff"/><rect x="-18" y="-6" width="12" height="12" fill="#7ae4ff"/><rect x="6" y="-6" width="12" height="12" fill="#7ae4ff"/><rect x="-6" y="-6" width="12" height="12" fill="#fff19a"/></g>
+  </g>
+
+  <!-- sparkles -->
+  <g fill="#ffffff">
+    <g transform="translate(360,150)"><rect x="-3" y="-16" width="6" height="32"/><rect x="-16" y="-3" width="32" height="6"/></g>
+    <g transform="translate(700,260)"><rect x="-2" y="-11" width="4" height="22"/><rect x="-11" y="-2" width="22" height="4"/></g>
+    <g transform="translate(940,330)"><rect x="-3" y="-14" width="6" height="28"/><rect x="-14" y="-3" width="28" height="6"/></g>
+    <g transform="translate(560,360)"><rect x="-2" y="-9" width="4" height="18"/><rect x="-9" y="-2" width="18" height="4"/></g>
+    <g transform="translate(1100,90)"><rect x="-3" y="-14" width="6" height="28"/><rect x="-14" y="-3" width="28" height="6"/></g>
+    <g transform="translate(200,250)"><rect x="-2" y="-9" width="4" height="18"/><rect x="-9" y="-2" width="18" height="4"/></g>
+    <g transform="translate(1450,330)"><rect x="-3" y="-12" width="6" height="24"/><rect x="-12" y="-3" width="24" height="6"/></g>
+    <g transform="translate(820,460)"><rect x="-2" y="-9" width="4" height="18"/><rect x="-9" y="-2" width="18" height="4"/></g>
+  </g>
+</svg>

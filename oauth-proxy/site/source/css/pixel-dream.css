@@ -40,17 +40,18 @@ html {
 body {
   min-height: 100vh;
   overflow-x: hidden;
+  padding-top: 76px; /* clearance for the fixed candy navbar (no hero now) */
   color: var(--ink);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 1.06rem;
   line-height: 1.78;
   text-rendering: optimizeLegibility;
+  /* one continuous, code-drawn Blingee pixel scene behind the whole site */
   background:
-    url("/img/pixel-bling-tile.svg") center top / 220px 220px repeat,
-    radial-gradient(circle at 12% 12%, rgba(255, 255, 255, 0.55) 0 90px, transparent 92px),
-    radial-gradient(circle at 86% 8%, rgba(255, 244, 157, 0.45) 0 130px, transparent 132px),
-    linear-gradient(180deg, #a9e3ff 0%, #d6f0ff 16%, #ffd6ee 46%, #ffe9c9 70%, #ecffcf 100%);
-  background-attachment: fixed, fixed, fixed, fixed;
+    radial-gradient(ellipse 120% 58% at 50% 0%, rgba(255, 255, 255, 0.3), transparent 55%),
+    url("/img/pixel-scene.svg") center center / cover no-repeat,
+    linear-gradient(180deg, #a8e1ff 0%, #cdeeff 45%, #ffe2f1 72%, #fff0df 100%);
+  background-attachment: fixed, fixed, fixed;
 }
 
 /* keep theme wrappers see-through so the candy bg shows */
@@ -195,109 +196,60 @@ a:hover {
 }
 
 /* =====================================================================
-   BANNER — Blingee scenery + glittering title plaque
+   PAGE INTRO — compact in-flow title plate (replaces the old hero)
    ===================================================================== */
-#banner {
-  height: 100%;
-  min-height: 320px;
-  position: relative;
-  overflow: hidden;
-  background-size: cover !important;
-  background-position: center center !important;
-  image-rendering: auto;
-  box-shadow: inset 0 -10px 0 rgba(255, 255, 255, 0.25) !important;
-}
-
-/* twinkle dots sprinkled across the scenery */
-#banner::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 14% 18%, rgba(255, 255, 255, 0.95) 0 2.5px, transparent 3.5px),
-    radial-gradient(circle at 24% 30%, rgba(255, 255, 255, 0.7) 0 2px, transparent 3px),
-    radial-gradient(circle at 68% 22%, rgba(255, 255, 255, 0.95) 0 2.5px, transparent 3.5px),
-    radial-gradient(circle at 80% 16%, rgba(255, 255, 255, 0.8) 0 2px, transparent 3px),
-    radial-gradient(circle at 88% 40%, rgba(255, 255, 255, 0.92) 0 2.5px, transparent 3.5px),
-    radial-gradient(circle at 40% 70%, rgba(255, 255, 255, 0.85) 0 2px, transparent 3px),
-    radial-gradient(circle at 58% 80%, rgba(255, 255, 255, 0.9) 0 2.5px, transparent 3.5px);
-  pointer-events: none;
-  animation: bling-twinkle 2.4s steps(2) infinite;
-}
-
-/* lace ribbon along the bottom edge of the banner */
-#banner::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 56px;
-  background: url("/img/pixel-lace-border.svg") center bottom / auto 56px repeat-x;
-  pointer-events: none;
-}
-
-#banner .full-bg-img,
-#banner .mask {
-  height: 100%;
-  min-height: 100%;
-  background: transparent !important;
-}
-
-#banner .banner-shell {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  min-height: 100%;
-  padding: 0 1rem;
-}
-
-#banner .banner-text {
-  position: relative;
-  z-index: 2;
-  padding: clamp(1.4rem, 3vw, 2.6rem) clamp(1.6rem, 4vw, 3.4rem);
-  border-radius: 28px;
-  border: 4px solid #fff;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 214, 238, 0.42));
-  box-shadow:
-    0 0 0 4px rgba(255, 112, 194, 0.5),
-    0 0 0 10px rgba(255, 255, 255, 0.45),
-    0 18px 40px rgba(120, 50, 120, 0.3);
-  backdrop-filter: blur(3px);
-}
-
-#banner .banner-text::after {
-  content: "";
-  display: block;
-  width: min(360px, 76vw);
-  height: 22px;
-  margin: 1.2rem auto 0;
-  background: url("/img/pixel-lace-border.svg") center center / contain no-repeat;
-}
-
-#subtitle {
-  display: block;
-  max-width: min(18ch, 92vw);
-  margin-inline: auto;
-  color: #fff;
-  font-size: clamp(1.3rem, 4.4vw, 3.4rem);
-  line-height: 1.3;
-  letter-spacing: 0.05em;
-  text-shadow:
-    3px 3px 0 var(--pink-strong),
-    -3px 3px 0 var(--aqua),
-    3px -3px 0 var(--sun),
-    -3px -3px 0 var(--pink),
-    0 0 22px rgba(255, 255, 255, 0.7);
-  -webkit-text-stroke: 1px rgba(90, 42, 102, 0.25);
-}
-
+/* any leftover hero markup is fully removed */
+#banner,
+.header-inner,
 .scroll-down-bar {
   display: none !important;
+}
+
+.page-intro {
+  display: flex;
+  justify-content: center;
+  padding: clamp(1.4rem, 4vw, 2.6rem) 1rem 0.6rem;
+}
+
+.page-intro__plate {
+  position: relative;
+  max-width: min(900px, 92vw);
+  padding: 0.9rem clamp(1.4rem, 4vw, 2.8rem) 1.1rem;
+  border: 4px solid #fff;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 230, 246, 0.9));
+  box-shadow:
+    0 0 0 4px rgba(255, 112, 194, 0.45),
+    0 0 0 9px rgba(255, 255, 255, 0.5),
+    0 14px 30px rgba(120, 50, 120, 0.22);
+  text-align: center;
+  backdrop-filter: blur(2px);
+}
+
+/* little corner sparkles on the title plate */
+.page-intro__plate::before,
+.page-intro__plate::after {
+  content: "✦";
+  position: absolute;
+  top: -14px;
+  font-size: 1.4rem;
+  color: var(--sun);
+  text-shadow: 0 0 8px var(--pink), 2px 2px 0 #fff;
+  animation: bling-spin 5s linear infinite;
+}
+.page-intro__plate::before { left: -8px; transform: rotate(-12deg); }
+.page-intro__plate::after { right: -8px; transform: rotate(12deg); }
+
+.page-intro__title {
+  display: block;
+  color: var(--pink-strong);
+  font-size: clamp(1rem, 3vw, 1.9rem);
+  line-height: 1.35;
+  letter-spacing: 0.05em;
+  text-shadow:
+    2px 2px 0 #fff,
+    3px 3px 0 var(--pink-soft),
+    0 0 14px rgba(255, 255, 255, 0.6);
 }
 
 /* =====================================================================
@@ -308,11 +260,17 @@ a:hover {
 }
 
 #board {
-  margin-top: -2rem !important;
+  margin-top: 0.4rem !important;
   padding: 0.4rem 0 4.5rem;
   background: transparent !important;
   border-radius: 0 !important;
   box-shadow: none !important;
+}
+
+/* posts render outside #board — give their panel room under the navbar */
+#board-ctn {
+  padding-top: clamp(1rem, 3vw, 2rem);
+  padding-bottom: 3.5rem;
 }
 
 #board::before,
@@ -875,7 +833,8 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bling-star, .bling-petal, #banner::before,
+  .bling-star, .bling-petal, .page-intro__plate::before,
+  .page-intro__plate::after,
   .pixel-player__disc, .pixel-player__eq i, .index-card::before {
     animation: none !important;
   }
@@ -885,18 +844,13 @@ a:hover {
    RESPONSIVE
    ===================================================================== */
 @media (max-width: 991.98px) {
-  #board { margin-top: -1rem !important; }
   .navbar .nav-link { margin-left: 0; margin-bottom: 0.4rem; }
 }
 
 @media (max-width: 575.98px) {
-  body { font-size: 1rem; }
-  #subtitle {
-    max-width: 92vw;
-    font-size: clamp(1.05rem, 7vw, 1.6rem);
-    line-height: 1.4;
-  }
-  #banner .banner-text { padding: 1.2rem 1.3rem; }
+  body { font-size: 1rem; padding-top: 66px; }
+  .page-intro { padding-top: 1.2rem; }
+  .page-intro__title { font-size: clamp(0.95rem, 6vw, 1.4rem); }
   .index-header a { font-size: 0.82rem; }
   .index-excerpt, .markdown-body, .about-info { font-size: 0.98rem; }
   .pixel-player {

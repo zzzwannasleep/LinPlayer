@@ -20,7 +20,7 @@ navbar:
     - { key: 'about', name: '关于', link: '/about/', icon: 'iconfont icon-user-fill' }
 
 index:
-  banner_img: /img/scenery/blingee-river.png
+  banner_img: /img/pixel-scene.svg
   slogan:
     enable: true
     text: 'LinPlayer 的糖霜像素档案馆'
@@ -35,7 +35,7 @@ index:
     enable: false
 
 post:
-  banner_img: /img/scenery/blingee-garden.png
+  banner_img: /img/pixel-scene.svg
   banner_img_height: 58
   banner_mask_alpha: 0
   toc:
@@ -55,27 +55,27 @@ post:
       enable: false
 
 archive:
-  banner_img: /img/scenery/blingee-rainbow.png
+  banner_img: /img/pixel-scene.svg
   banner_img_height: 50
   banner_mask_alpha: 0
 
 category:
-  banner_img: /img/scenery/blingee-rainbow.png
+  banner_img: /img/pixel-scene.svg
   banner_img_height: 50
   banner_mask_alpha: 0
 
 tag:
-  banner_img: /img/scenery/blingee-rainbow.png
+  banner_img: /img/pixel-scene.svg
   banner_img_height: 50
   banner_mask_alpha: 0
 
 about:
-  banner_img: /img/scenery/blingee-garden.png
+  banner_img: /img/pixel-scene.svg
   banner_img_height: 56
   banner_mask_alpha: 0
 
 page:
-  banner_img: /img/scenery/blingee-rainbow.png
+  banner_img: /img/pixel-scene.svg
   banner_img_height: 50
   banner_mask_alpha: 0
 
