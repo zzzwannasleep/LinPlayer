@@ -620,6 +620,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     if (prev == next || _currentMediaSource == null) {
       return;
     }
+    // 用户切换/关闭字幕轨 → 结束流式翻译：清掉译文叠加层并恢复原文字幕可见性，
+    // 否则旧译文叠加层会与新选中的内封字幕叠加，造成双字幕（双外语）。
+    if (_streamTranslator != null) {
+      _stopStreamingTranslate();
+    }
     if (next == null) {
       _playerService.setSubtitleSelectionHint();
       await _playerService.deselectSubtitleTrack();
@@ -2122,6 +2127,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           ? stream.language!
           : 'auto',
       targetLang: ref.read(translationTargetLangProvider),
+      layout: ref.read(bilingualLayoutProvider),
     );
     translator.errorMessage.addListener(() {
       final msg = translator.errorMessage.value;

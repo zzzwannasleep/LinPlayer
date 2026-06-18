@@ -24,6 +24,8 @@ import '../../../core/services/app_logger.dart';
 import '../../../core/services/player_subtitle_loader.dart';
 import '../../../core/services/subtitle_processor.dart';
 import '../../../core/services/translation/translation_actions.dart';
+import '../../../core/services/translation/translation_engine.dart';
+import '../../../core/services/translation/streaming_subtitle_translator.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../core/widgets/player_settings_panel.dart';

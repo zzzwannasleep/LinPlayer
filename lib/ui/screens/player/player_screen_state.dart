@@ -13,9 +13,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // 本次播放是否已上报「看过」到同步服务，避免 onStop 多次触发导致重复写入。
   bool _didScrobble = false;
 
+  /// 内封字幕流式翻译器（无法整轨下载时边播边译，叠加层按双语排版显示）。
+  StreamingSubtitleTranslator? _streamTranslator;
+
   static VideoPlayerService? _activePlayerService;
 
   static VideoPlayerService? get activePlayerService => _activePlayerService;
+
+  /// 当前活跃的播放页实例，供字幕设置面板触发流式翻译回退。
+  static _PlayerScreenState? _activeState;
+
+  /// 供字幕设置面板在整轨翻译失败时回退到流式翻译。
+  static void startStreamingTranslateFromPanel(
+          TranslationEngine engine, MediaStream stream) =>
+      _activeState?._startStreamingTranslate(engine, stream);
 
   MediaSource? _resolveMediaSource(
     PlaybackInfo playbackInfo, {
@@ -121,6 +132,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _activeState = this;
     _playerService = VideoPlayerService();
     _playerService.addListener(_onPlayerUpdate);
 
@@ -850,7 +862,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
+  /// 内封字幕无法整轨下载时，启动流式翻译（边播边译，叠加层按双语排版显示）。
+  void _startStreamingTranslate(TranslationEngine engine, MediaStream stream) {
+    _streamTranslator?.stop();
+    final translator = StreamingSubtitleTranslator(
+      engine: engine,
+      sourceLang:
+          (stream.language?.isNotEmpty ?? false) ? stream.language! : 'auto',
+      targetLang: ref.read(translationTargetLangProvider),
+      layout: ref.read(bilingualLayoutProvider),
+    );
+    translator.errorMessage.addListener(() {
+      final msg = translator.errorMessage.value;
+      if (msg != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('流式翻译引擎错误: $msg')),
+        );
+      }
+    });
+    _streamTranslator = translator;
+    translator.start(_playerService);
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该字幕为内封、无法整轨下载，已改为流式翻译（边播边译）')),
+      );
+    }
+  }
+
+  void _stopStreamingTranslate() {
+    if (_streamTranslator == null) return;
+    _streamTranslator?.stop();
+    _streamTranslator = null;
+    if (mounted) setState(() {});
+  }
+
   Future<void> _onSubtitleTrackChanged(int? prev, int? next) async {
+    // 用户切换/关闭字幕轨 → 结束流式翻译：清掉译文叠加层并恢复原文字幕，
+    // 否则旧译文叠加层会与新选中字幕叠加，造成双字幕。
+    if (_streamTranslator != null) {
+      _stopStreamingTranslate();
+    }
     if (prev == next || next == null) {
       if (next == null && prev != null) {
         await _playerService.deselectSubtitleTrack();
@@ -1149,6 +1201,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _streamTranslator?.stop();
+    _streamTranslator = null;
+    if (_activeState == this) _activeState = null;
     _activePlayerService = null;
     _playerService.removeListener(_onPlayerUpdate);
     _playerService.dispose();
@@ -1197,6 +1252,48 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   fit: StackFit.expand,
                   children: [
                     _buildVideoArea(),
+                    // 流式翻译叠加层（按双语排版显示原文/译文，位于控制条之下）。
+                    if (_streamTranslator != null)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 64,
+                        child: IgnorePointer(
+                          child: ValueListenableBuilder<String>(
+                            valueListenable: _streamTranslator!.displayText,
+                            builder: (context, text, _) {
+                              if (text.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return Center(
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                      horizontal: 24),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    text,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w600,
+                                      shadows: [
+                                        Shadow(
+                                            blurRadius: 4, color: Colors.black),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
                     if (_playerService.isBuffering)
                       const Center(
                         child: CircularProgressIndicator(color: Colors.white),

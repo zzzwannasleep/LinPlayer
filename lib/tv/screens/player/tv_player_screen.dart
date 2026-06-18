@@ -10,7 +10,9 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/providers/sync_providers.dart';
 import '../../../core/services/player_subtitle_loader.dart';
+import '../../../core/services/translation/streaming_subtitle_translator.dart';
 import '../../../core/services/translation/translation_actions.dart';
+import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../theme/tv_design_tokens.dart';
@@ -38,6 +40,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   bool _didScrobble = false;
   bool _handledCompletion = false;
   MediaSource? _mediaSource;
+  StreamingSubtitleTranslator? _streamTranslator;
 
   String get _itemId => widget.episodeId ?? widget.mediaId ?? '';
 
@@ -52,6 +55,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _streamTranslator?.stop();
     _service.removeListener(_onTick);
     _service.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -281,6 +285,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
             title: '关闭',
             isSelected: current == null,
             onTap: () {
+              _stopStreamingTranslate();
               _service.deselectSubtitleTrack();
               ref.read(subtitleTrackProvider.notifier).state = null;
               Navigator.pop(dialogContext);
@@ -300,6 +305,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
               subtitle: (t['type'] == 'bitmap') ? '图形字幕' : t['codec']?.toString(),
               isSelected: t['id']?.toString() == current,
               onTap: () {
+                _stopStreamingTranslate();
                 final id = t['id']?.toString();
                 if (id != null) _service.selectSubtitleTrack(id);
                 Navigator.pop(dialogContext);
@@ -386,11 +392,43 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
+      }
+      // 内封字幕拉取不到（服务端不支持单轨导出）→ 自动改为流式翻译（边播边译）。
+      if (e.toString().contains('所有字幕地址均不可用')) {
+        _startStreamingTranslate(engine, stream);
+      } else if (mounted) {
         _info('翻译失败: $e');
       }
     } finally {
       progress.dispose();
     }
+  }
+
+  /// 内封字幕无法整轨下载时，启动流式翻译（叠加层按双语排版显示原文/译文）。
+  void _startStreamingTranslate(TranslationEngine engine, MediaStream stream) {
+    _streamTranslator?.stop();
+    final translator = StreamingSubtitleTranslator(
+      engine: engine,
+      sourceLang:
+          (stream.language?.isNotEmpty ?? false) ? stream.language! : 'auto',
+      targetLang: ref.read(translationTargetLangProvider),
+      layout: ref.read(bilingualLayoutProvider),
+    );
+    translator.errorMessage.addListener(() {
+      final msg = translator.errorMessage.value;
+      if (msg != null && mounted) _info('流式翻译引擎错误: $msg');
+    });
+    _streamTranslator = translator;
+    translator.start(_service);
+    if (mounted) setState(() {});
+    _info('该字幕为内封、无法整轨下载，已改为流式翻译（边播边译）');
+  }
+
+  void _stopStreamingTranslate() {
+    if (_streamTranslator == null) return;
+    _streamTranslator?.stop();
+    _streamTranslator = null;
+    if (mounted) setState(() {});
   }
 
   Future<MediaStream?> _pickStreamToTranslate(List<MediaStream> subs) {
@@ -576,6 +614,44 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
                   onTap: _toggleControls,
+                ),
+              ),
+            // 流式翻译叠加层（按双语排版显示原文/译文，位于控制条之下）。
+            if (_streamTranslator != null)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 96,
+                child: IgnorePointer(
+                  child: ValueListenableBuilder<String>(
+                    valueListenable: _streamTranslator!.displayText,
+                    builder: (context, text, _) {
+                      if (text.isEmpty) return const SizedBox.shrink();
+                      return Center(
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 48),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            text,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.w600,
+                              shadows: [
+                                Shadow(blurRadius: 4, color: Colors.black),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             if (_ready)

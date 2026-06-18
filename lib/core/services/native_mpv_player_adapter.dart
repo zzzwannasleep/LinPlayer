@@ -52,6 +52,10 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
 
+  // 流式翻译：仅翻译进行时开启 sub-text 取词轮询，避免常态开销。
+  bool _emitSubtitleCue = false;
+  String _lastSubText = '';
+
   @override
   bool get isInitialized => _isInitialized;
   @override
@@ -552,6 +556,55 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
     }
   }
 
+  // ---- 流式字幕翻译支持（原生 libmpv：sub-step 预读 + sub-text 取词）----
+
+  /// 原生 mpv 属性读取（供 sub-step 预读读取 sub-text / sub-delay 等）。
+  Future<String?> mpvGetProperty(String name) async {
+    if (_playerId == null) return null;
+    try {
+      return await _channel.invokeMethod<String>('getProperty', {
+        'playerId': _playerId,
+        'name': name,
+      });
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 原生 mpv 属性设置（供隐藏原文字幕 sub-visibility、还原 sub-delay 等）。
+  Future<void> mpvSetProperty(String name, String value) async {
+    if (_playerId == null) return;
+    try {
+      await _channel.invokeMethod('setProperty', {
+        'playerId': _playerId,
+        'name': name,
+        'value': value,
+      });
+    } catch (_) {}
+  }
+
+  /// 原生 mpv 命令（供 sub-step 从已缓冲区向前偷看 cue 文本）。
+  Future<void> mpvCommand(List<String> args) async {
+    if (_playerId == null) return;
+    try {
+      await _channel.invokeMethod('command', {
+        'playerId': _playerId,
+        'args': args,
+      });
+    } catch (_) {}
+  }
+
+  /// 流式翻译期间隐藏 mpv 自带字幕（原文/译文统一走叠加层按排版显示）。
+  void setNativeSubtitleHidden(bool hidden) {
+    unawaited(mpvSetProperty('sub-visibility', hidden ? 'no' : 'yes'));
+  }
+
+  /// 开启/关闭 sub-text 取词轮询（仅流式翻译进行时启用）。
+  void setSubtitleCueObservation(bool enabled) {
+    _emitSubtitleCue = enabled;
+    if (!enabled) _lastSubText = '';
+  }
+
   // ---- Video rendering ----
 
   /// Build the video widget.
@@ -664,6 +717,18 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
           _isPlaying = playing;
           _logger.d('NativeMpv', '播放状态变更: playing=$playing');
           _callbacks?.onPlayingStateChanged?.call();
+        }
+      }
+      // 流式翻译取词：仅翻译进行时轮询当前字幕原文，变化即抛给取词器。
+      if (_emitSubtitleCue) {
+        final sub = await _channel.invokeMethod<String>('getProperty', {
+          'playerId': _playerId,
+          'name': 'sub-text',
+        });
+        final text = sub ?? '';
+        if (text != _lastSubText) {
+          _lastSubText = text;
+          _callbacks?.onSubtitleCue?.call(text, null, null);
         }
       }
     } catch (_) {}

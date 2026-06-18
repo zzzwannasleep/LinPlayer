@@ -554,26 +554,54 @@ class VideoPlayerService extends ChangeNotifier {
     await _adapter?.loadLibassSubtitle(path);
   }
 
-  /// 原生 mpv 属性读取（仅 media_kit/mpv 内核，其他返回 null）。
+  /// 原生 mpv 属性读取（media_kit 与 Android 原生 mpv 内核，其他返回 null）。
   Future<String?> mpvGetProperty(String name) async {
     final a = _adapter;
-    return a is MpvPlayerAdapter ? a.mpvGetProperty(name) : null;
+    if (a is MpvPlayerAdapter) return a.mpvGetProperty(name);
+    if (a is NativeMpvPlayerAdapter) return a.mpvGetProperty(name);
+    return null;
   }
 
-  /// 原生 mpv 属性设置（仅 mpv 内核）。
+  /// 原生 mpv 属性设置（media_kit 与 Android 原生 mpv 内核）。
   Future<void> mpvSetProperty(String name, String value) async {
     final a = _adapter;
     if (a is MpvPlayerAdapter) await a.mpvSetProperty(name, value);
+    if (a is NativeMpvPlayerAdapter) await a.mpvSetProperty(name, value);
   }
 
-  /// 原生 mpv 命令（仅 mpv 内核）。
+  /// 原生 mpv 命令（media_kit 与 Android 原生 mpv 内核）。
   Future<void> mpvCommand(List<String> args) async {
     final a = _adapter;
     if (a is MpvPlayerAdapter) await a.mpvCommand(args);
+    if (a is NativeMpvPlayerAdapter) await a.mpvCommand(args);
   }
 
-  /// 当前内核是否为 media_kit/mpv（流式 sub-step 预读仅此内核可用）。
+  /// 当前内核是否为 media_kit/mpv。
   bool get isMpvCore => _adapter is MpvPlayerAdapter;
+
+  /// 是否支持 sub-step 从已缓冲区预读（凡是 libmpv 内核均可：media_kit + 原生 mpv）。
+  bool get supportsSubStep =>
+      _adapter is MpvPlayerAdapter || _adapter is NativeMpvPlayerAdapter;
+
+  /// 流式翻译期间隐藏/恢复播放器自带字幕渲染（原文/译文统一走叠加层按排版显示）。
+  /// mpv（media_kit / 原生）用 `sub-visibility`，ExoPlayer 用其渲染开关。
+  void setNativeSubtitleHidden(bool hidden) {
+    final a = _adapter;
+    if (a is MpvPlayerAdapter) {
+      unawaited(a.mpvSetProperty('sub-visibility', hidden ? 'no' : 'yes'));
+    } else if (a is NativeMpvPlayerAdapter) {
+      a.setNativeSubtitleHidden(hidden);
+    } else if (a is ExoPlayerAdapter) {
+      a.setNativeSubtitleHidden(hidden);
+    }
+  }
+
+  /// 开启/关闭字幕取词观察（仅 Android 原生 mpv 需要：轮询 `sub-text` 喂给取词器；
+  /// media_kit / Exo 已通过原生事件推送 cue，这里为空操作）。
+  void setSubtitleCueObservation(bool enabled) {
+    final a = _adapter;
+    if (a is NativeMpvPlayerAdapter) a.setSubtitleCueObservation(enabled);
+  }
 
   /// 加载字幕数据到内存（通过 libass）
   Future<void> loadLibassSubtitleMemory(Uint8List data,

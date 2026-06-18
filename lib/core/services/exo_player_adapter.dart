@@ -32,6 +32,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
   bool _subtitleBackground = false;
   String _subtitleFont = '默认';
   bool _isBitmapSubtitle = false;
+  // 流式翻译期间隐藏自带字幕渲染：原文/译文统一由叠加层按排版显示，
+  // 但原文 cue 仍照常抛给取词器供翻译。
+  bool _subtitlesHidden = false;
 
   PlayerStateCallbacks? _callbacks;
   Timer? _positionTimer;
@@ -221,6 +224,19 @@ class ExoPlayerAdapter implements PlayerAdapter {
     }
   }
 
+  /// 流式翻译期间隐藏 ExoPlayer 自带字幕渲染（原文/译文改由叠加层显示）。
+  /// 不动原生轨道选择，停止时调用 setNativeSubtitleHidden(false) 即恢复。
+  void setNativeSubtitleHidden(bool hidden) {
+    if (_subtitlesHidden == hidden) return;
+    _subtitlesHidden = hidden;
+    if (hidden) {
+      subtitleNotifier.value = '';
+      bitmapNotifier.value = const [];
+    } else {
+      subtitleNotifier.value = _subtitleText;
+    }
+  }
+
   @override
   Future<void> selectAudioTrack(String trackId) async {
     if (_playerId == null || !_isInitialized) return;
@@ -367,7 +383,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
         break;
       case 'subtitle':
         _subtitleText = event['value'] as String? ?? '';
-        subtitleNotifier.value = _subtitleText;
+        // 始终把原文 cue 抛给流式翻译取词器（即便隐藏了自带字幕渲染）。
+        _callbacks?.onSubtitleCue?.call(_subtitleText, null, null);
+        subtitleNotifier.value = _subtitlesHidden ? '' : _subtitleText;
         bitmapNotifier.value = const [];
         if (_subtitleText.isEmpty) {
           _isBitmapSubtitle = false;
@@ -402,7 +420,7 @@ class ExoPlayerAdapter implements PlayerAdapter {
             bitmapNotifier.value = const [];
           }
           _subtitleText = data['text'] as String? ?? '';
-          subtitleNotifier.value = _subtitleText;
+          subtitleNotifier.value = _subtitlesHidden ? '' : _subtitleText;
         }
         break;
       case 'subtitleType':

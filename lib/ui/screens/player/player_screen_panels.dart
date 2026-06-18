@@ -676,6 +676,11 @@ class _SubtitleSettingsContentState
     } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
+      }
+      // 内封字幕拉取不到（服务端不支持单轨导出）→ 自动改为流式翻译（边播边译）。
+      if (e.toString().contains('所有字幕地址均不可用')) {
+        _PlayerScreenState.startStreamingTranslateFromPanel(engine, source);
+      } else if (mounted) {
         _toast('翻译失败: $e');
       }
     } finally {
