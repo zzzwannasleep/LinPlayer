@@ -642,6 +642,11 @@ a:hover {
 /* =====================================================================
    ABOUT page — avatar, name, social icons
    ===================================================================== */
+/* the theme pulls the avatar up by -8rem to overlap a banner; we have no banner,
+   so drop the negative margin — the icon sits BELOW the "关于" title plate */
+.about-avatar {
+  margin: 1.4rem auto 0.8rem !important;
+}
 /* keep the app icon clean — no theme drop-shadow / frame / background box */
 .about-avatar,
 .about-avatar img {
