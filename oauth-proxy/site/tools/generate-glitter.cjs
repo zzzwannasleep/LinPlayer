@@ -9,8 +9,8 @@ let seed = 1357924680;
 function rnd() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }
 function pick(a) { return a[Math.floor(rnd() * a.length)]; }
 
-// saturated Y2K glitter palette, white-heavy
-const cols = ['#ffffff', '#ffffff', '#ffffff', '#ffe1f4', '#ff79c6', '#5fe6ff', '#ffe23b', '#c89bff', '#ff2f9a', '#9bff8f'];
+// retro silver / icy glitter palette, white-heavy (chrome-bling)
+const cols = ['#ffffff', '#ffffff', '#ffffff', '#eef3fb', '#dbe4f2', '#c7d2e6', '#b6c3da', '#e6e9f1', '#cfd9ec', '#aab6cc'];
 
 const M = 6;
 const COUNT = 54;

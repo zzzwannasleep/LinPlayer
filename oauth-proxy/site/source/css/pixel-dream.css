@@ -28,53 +28,55 @@
   --shadow: rgba(120, 50, 120, 0.22);
   --rainbow: linear-gradient(90deg,
     #ff7bc6 0%, #ffb14c 20%, #fff277 40%, #96ee7e 60%, #7ae4ff 80%, #c89bff 100%);
-  /* --- Y2K blinkie kit: beveled borders + glitter bars --- */
-  --bevel-lt: #ffffff;
-  --bevel-dk: #a23a86;
-  --ring: #ff2f8e;
-  --bar: linear-gradient(180deg, #ff6fc0, #b85bff);
-  --bar2: linear-gradient(180deg, #ff8fd0, #c46bff);
+  /* --- retro silver "chrome" blinkie kit: brushed-metal bars, engraved text --- */
+  --bevel-lt: #ffffff;       /* highlight edge */
+  --bevel-dk: #69717e;       /* steel shadow edge */
+  --ring: #828b9a;           /* steel outer ring */
+  --bar: linear-gradient(180deg, #fbfcfe 0%, #dde2ea 46%, #b7bfce 100%);  /* brushed silver */
+  --bar2: linear-gradient(180deg, #fdfeff 0%, #e3e7ef 50%, #c3cbd8 100%);
+  --bar-text: #363c49;       /* engraved dark slate */
+  --accent: #2a5fb5;         /* classic retro link blue */
+  --star: #8c93a1;           /* steel star accent */
   --glit: url("/img/glitter-2.svg");
+  --engrave: 0 1px 0 rgba(255, 255, 255, 0.9), 0 -1px 0 rgba(0, 0, 0, 0.14);
 }
 
-/* beveled "blinkie" frame: light top-left, dark bottom-right, hot ring */
+/* beveled "blinkie" frame: light top-left, dark bottom-right + steel ring */
 .bevel-frame {
   border: 3px solid;
   border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
-  box-shadow: 0 0 0 3px var(--ring), 0 10px 22px rgba(80, 20, 70, 0.32);
+  box-shadow: 0 0 0 3px var(--ring), 0 10px 22px rgba(60, 66, 80, 0.32);
 }
-/* outlined pixel text used on glitter bars */
+/* engraved pixel text used on silver bars */
 .glit-text {
-  color: #fff;
-  text-shadow:
-    2px 2px 0 #8a1456, -2px -2px 0 #8a1456,
-    2px -2px 0 #8a1456, -2px 2px 0 #8a1456,
-    0 0 5px rgba(0, 0, 0, 0.5);
+  color: var(--bar-text);
+  text-shadow: var(--engrave);
 }
 
 /* ---------- base ---------- */
+/* the wallpaper lives on <html> with fixed attachment so it always covers the
+   full scroll height — no seam at the bottom when the page is taller than the
+   viewport (a body-mounted fixed background clips to the body box and leaves a gap) */
 html {
   min-height: 100%;
   scroll-behavior: smooth;
-  background: var(--sky);
+  background:
+    url("/img/glitter-1.svg") repeat,
+    linear-gradient(135deg, #eef1f6 0%, #c9cfdb 36%, #aab2c2 66%, #d4d9e3 100%);
+  background-size: 160px 160px, auto;
+  background-attachment: fixed, fixed;
 }
 
 body {
   min-height: 100vh;
   overflow-x: hidden;
-  padding-top: 76px; /* clearance for the fixed candy navbar (no hero now) */
+  padding-top: 76px; /* clearance for the fixed silver navbar (no hero now) */
   color: var(--ink);
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 1.06rem;
   line-height: 1.78;
   text-rendering: optimizeLegibility;
-  /* seamless animated glitter (static frame here; JS adds the twinkle) over a
-     saturated Y2K candy gradient — authentic blinkie wallpaper */
-  background:
-    url("/img/glitter-1.svg") repeat,
-    linear-gradient(135deg, #ff5fb8 0%, #a26bff 34%, #4fc3ff 64%, #8af0c0 100%);
-  background-size: 160px 160px, auto;
-  background-attachment: fixed, fixed;
+  background: transparent;
 }
 
 /* animated 3-frame glitter wallpaper (built by pixel-dream.js), behind content */
@@ -116,33 +118,33 @@ footer,
 
 ::selection {
   color: #fff;
-  background: var(--pink);
+  background: #6b7588;
 }
 
 ::-webkit-scrollbar {
-  width: 13px;
+  width: 14px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.4);
+  background: #c7cdd9;
 }
 ::-webkit-scrollbar-thumb {
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  border-radius: 999px;
-  background: var(--rainbow);
-  background-size: 100% 220px;
+  border: 2px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  border-radius: 3px;
+  background: var(--bar);
 }
 
 a {
-  color: var(--pink-strong);
+  color: var(--accent);
   transition: color 160ms ease, transform 160ms ease, filter 160ms ease;
 }
 a:hover {
-  color: var(--pink);
-  filter: drop-shadow(0 0 6px rgba(255, 112, 194, 0.6));
+  color: #1d4a93;
+  filter: drop-shadow(0 0 5px rgba(42, 95, 181, 0.4));
 }
 
 :focus-visible {
-  outline: 3px dashed rgba(255, 112, 194, 0.8);
+  outline: 3px dashed var(--ring);
   outline-offset: 3px;
 }
 
@@ -176,12 +178,12 @@ a:hover {
 
 #navbar,
 .top-nav-collapse {
-  background: var(--glit) repeat, linear-gradient(180deg, #ff8fd0, #c46bff) !important;
+  background: var(--glit) repeat, var(--bar2) !important;
   background-size: 120px, auto !important;
   border: 0 !important;
   border-bottom: 3px solid var(--bevel-dk) !important;
   border-top: 3px solid var(--bevel-lt) !important;
-  box-shadow: 0 3px 0 var(--ring), 0 12px 22px rgba(80, 20, 70, 0.3) !important;
+  box-shadow: 0 3px 0 var(--ring), 0 12px 22px rgba(60, 66, 80, 0.28) !important;
 }
 
 .navbar .container {
@@ -189,26 +191,22 @@ a:hover {
 }
 
 .navbar-brand strong {
-  color: #fff !important;
-  font-size: clamp(0.72rem, 1vw, 0.92rem);
+  color: var(--bar-text) !important;
+  font-size: clamp(0.78rem, 1.1vw, 1rem);
   letter-spacing: 0.12em;
-  text-shadow:
-    2px 2px 0 #8a1456, -1px -1px 0 #8a1456,
-    1px -1px 0 #8a1456, -1px 1px 0 #8a1456;
+  text-shadow: var(--engrave);
 }
 
 .navbar .nav-link {
-  margin-left: 0.3rem;
-  padding: 0.7rem 0.85rem !important;
+  margin-left: 0.45rem;
+  padding: 0.7rem 0.95rem !important;
 }
 
 .navbar .nav-link span {
-  color: #fff !important;
-  font-size: 0.56rem;
-  letter-spacing: 0.05em;
-  text-shadow:
-    1.5px 1.5px 0 #8a1456, -1px -1px 0 #8a1456,
-    1px -1px 0 #8a1456, -1px 1px 0 #8a1456;
+  color: var(--bar-text) !important;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-shadow: var(--engrave);
 }
 
 .navbar .nav-link i,
@@ -219,7 +217,8 @@ a:hover {
 .navbar .nav-link:hover span,
 .navbar .nav-item.active .nav-link span,
 .navbar .nav-link.current span {
-  color: #fff49d !important;
+  color: var(--accent) !important;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .navbar .nav-link:hover {
   transform: translateY(-2px);
@@ -227,24 +226,28 @@ a:hover {
 
 #search-btn .nav-link i {
   display: inline-block;
-  color: #fff;
-  text-shadow: 1px 1px 0 #8a1456;
+  color: var(--bar-text);
+  font-size: 1rem;
+  text-shadow: var(--engrave);
 }
 
 .navbar-toggler {
-  border: 2px solid var(--pink-soft) !important;
-  border-radius: 12px;
+  border: 2px solid var(--bevel-dk) !important;
+  border-radius: 4px;
 }
 
 #mobile-grid-menu .mobile-grid-menu-inner {
-  background: rgba(255, 245, 251, 0.97) !important;
+  background: rgba(232, 236, 243, 0.98) !important;
 }
 #mobile-grid-menu .mobile-grid-item {
-  border: 3px solid #fff;
-  border-radius: 18px;
-  background: linear-gradient(180deg, var(--pink-soft), rgba(120, 229, 255, 0.4));
-  color: var(--ink);
-  box-shadow: 0 4px 0 rgba(255, 112, 194, 0.4);
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  background: var(--glit) repeat, var(--bar);
+  background-size: 90px, auto;
+  color: var(--bar-text);
+  text-shadow: var(--engrave);
+  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(60, 66, 80, 0.3);
 }
 
 /* =====================================================================
@@ -276,8 +279,8 @@ a:hover {
   box-shadow:
     0 0 0 3px var(--ring),
     0 0 0 5px #fff,
-    0 9px 0 rgba(110, 30, 80, 0.3),
-    0 16px 30px rgba(80, 20, 70, 0.3);
+    0 9px 0 rgba(60, 66, 80, 0.28),
+    0 16px 30px rgba(60, 66, 80, 0.3);
   text-align: center;
 }
 
@@ -289,22 +292,19 @@ a:hover {
   top: 50%;
   transform: translateY(-50%);
   font-size: 0.9rem;
-  color: #fff;
-  text-shadow: 1px 1px 0 #8a1456;
+  color: var(--star);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 .page-intro__plate::before { left: 0.5rem; }
 .page-intro__plate::after { right: 0.5rem; }
 
 .page-intro__title {
   display: block;
-  color: #fff;
+  color: var(--bar-text);
   font-size: clamp(1rem, 3vw, 1.9rem);
   line-height: 1.35;
   letter-spacing: 0.05em;
-  text-shadow:
-    2px 2px 0 #8a1456, -2px -2px 0 #8a1456,
-    2px -2px 0 #8a1456, -2px 2px 0 #8a1456,
-    0 0 6px rgba(0, 0, 0, 0.45);
+  text-shadow: var(--engrave);
 }
 
 /* =====================================================================
@@ -378,28 +378,35 @@ a:hover {
   box-shadow: none;
 }
 
-/* the glitter title bar */
+/* the silver title bar — text scrolls like a classic blinkie marquee */
 .index-header {
   margin: 0;
-  padding: 0.62rem 1rem;
+  padding: 0.6rem 0;
+  overflow: hidden;
+  white-space: nowrap;
   background: var(--glit) repeat, var(--bar);
   background-size: 110px, auto;
   border-bottom: 3px solid var(--bevel-dk);
 }
 .index-header a {
   display: inline-block;
-  color: #fff;
+  padding-left: 100%; /* start off the right edge, then scroll across */
+  color: var(--bar-text);
   font-size: clamp(0.78rem, 1.5vw, 1rem);
   line-height: 1.5;
-  text-shadow:
-    2px 2px 0 #8a1456, -1px -1px 0 #8a1456,
-    1px -1px 0 #8a1456, -1px 1px 0 #8a1456;
+  text-shadow: var(--engrave);
+  animation: bling-marquee 13s linear infinite;
 }
 .index-header a::before {
   content: "★ ";
-  color: #fff49d;
+  color: var(--star);
 }
-.index-header a:hover { color: #fff49d; }
+.index-header:hover a { animation-play-state: paused; }
+.index-header a:hover { color: var(--accent); }
+/* offset each card's marquee so they scroll at different positions */
+.index-card:nth-child(2n) .index-header a { animation-delay: -3.5s; }
+.index-card:nth-child(3n) .index-header a { animation-delay: -7s; }
+.index-card:nth-child(4n) .index-header a { animation-delay: -10.5s; }
 
 .index-excerpt {
   display: block;
@@ -455,9 +462,9 @@ a:hover {
 .about-info h1,
 .about-info h2,
 .about-info h3 {
-  color: var(--pink-strong);
+  color: #353b48;
   line-height: 1.55;
-  text-shadow: 2px 2px 0 #fff, 3px 3px 0 var(--pink-soft);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.95), 0 2px 2px rgba(60, 66, 80, 0.18);
 }
 .markdown-body h2 {
   margin-top: 2.2rem;
@@ -465,42 +472,42 @@ a:hover {
   position: relative;
 }
 .markdown-body h2::before {
-  content: "❀";
+  content: "◆";
   position: absolute;
   left: -0.1rem;
-  color: var(--pink);
-  -webkit-text-fill-color: var(--pink);
+  color: var(--accent);
+  -webkit-text-fill-color: var(--accent);
   text-shadow: none;
 }
 
 .markdown-body a,
 .about-info a,
 .footer-content a {
-  color: var(--pink-strong);
+  color: var(--accent);
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 0.16em;
-  text-decoration-color: var(--pink-soft);
+  text-decoration-color: #9bb6e0;
 }
 
 .markdown-body strong,
 .about-info strong {
   color: var(--ink);
-  background: linear-gradient(180deg, transparent 62%, var(--sun) 62%);
+  background: linear-gradient(180deg, transparent 62%, #cdd8ec 62%);
 }
 
 .markdown-body ul li::marker {
-  content: "✿ ";
-  color: var(--pink);
+  content: "◆ ";
+  color: var(--accent);
 }
 
 .markdown-body blockquote {
   margin: 1.8rem 0;
   padding: 1rem 1.25rem;
-  border: 2px solid var(--pink-soft);
-  border-left: 6px solid var(--pink);
+  border: 2px solid #c4ccda;
+  border-left: 6px solid var(--accent);
   border-radius: 4px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 181, 222, 0.4));
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.85), rgba(205, 216, 236, 0.5));
   color: var(--ink-soft);
 }
 
@@ -540,8 +547,8 @@ a:hover {
 }
 .markdown-body table thead th {
   background: var(--bar);
-  color: #fff;
-  text-shadow: 1px 1px 0 #8a1456;
+  color: var(--bar-text);
+  text-shadow: var(--engrave);
 }
 
 .markdown-body img,
@@ -574,15 +581,17 @@ a:hover {
   border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt) !important;
   background: var(--glit) repeat, var(--bar) !important;
   background-size: 100px, auto !important;
-  color: #fff !important;
-  text-shadow: 1px 1px 0 #8a1456, -1px -1px 0 #8a1456;
-  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(110, 30, 80, 0.4) !important;
+  color: var(--bar-text) !important;
+  text-shadow: var(--engrave);
+  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(60, 66, 80, 0.35) !important;
   transition: transform 120ms ease;
 }
 .post-prevnext a { padding: 0.85rem 1rem; }
 .pagination .page-number.current {
-  background: var(--glit) repeat, linear-gradient(180deg, #ffd23b, #ff7a1f) !important;
+  background: var(--glit) repeat, linear-gradient(180deg, #9fc0ee, #3a6dbf) !important;
   background-size: 100px, auto !important;
+  color: #fff !important;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
 }
 .post-prevnext a:hover,
 .pagination .page-number:hover,
@@ -619,12 +628,12 @@ a:hover {
   background: transparent !important;
 }
 .modal-title {
-  color: #fff;
+  color: var(--bar-text);
   font-family: "Press Start 2P", sans-serif;
   font-size: 0.9rem;
-  text-shadow: 2px 2px 0 #8a1456, -1px -1px 0 #8a1456;
+  text-shadow: var(--engrave);
 }
-.modal-header .close { color: #fff; opacity: 1; text-shadow: 1px 1px 0 #8a1456; }
+.modal-header .close { color: var(--bar-text); opacity: 1; text-shadow: var(--engrave); }
 
 /* footer */
 .footer-inner {
@@ -721,15 +730,15 @@ a:hover {
   border-radius: 50%;
   border: 3px solid #fff;
   background:
-    repeating-conic-gradient(from 0deg, #5a2a66 0deg 18deg, #7a3f86 18deg 36deg);
-  box-shadow: 0 0 0 3px rgba(255, 112, 194, 0.4);
+    repeating-conic-gradient(from 0deg, #3a3f4b 0deg 18deg, #565d6b 18deg 36deg);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 .pixel-player__disc::after {
   content: "";
   position: absolute;
   inset: 18px;
   border-radius: 50%;
-  background: var(--pink);
+  background: var(--accent);
   border: 2px solid #fff;
 }
 .pixel-player[data-state="playing"] .pixel-player__disc {
@@ -743,7 +752,7 @@ a:hover {
 .pixel-player__label {
   font-size: 0.42rem;
   letter-spacing: 0.08em;
-  color: var(--pink-strong);
+  color: var(--accent);
   text-shadow: 1px 1px 0 #fff;
 }
 .pixel-player__marquee {
@@ -796,15 +805,16 @@ a:hover {
   width: 40px;
   height: 36px;
   padding: 0;
-  border: 3px solid #fff;
-  border-radius: 12px;
-  background: linear-gradient(180deg, var(--pink), var(--pink-strong));
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  background: linear-gradient(180deg, #5b8bd8, #2a5fb5);
   color: #fff;
   font-family: inherit;
   font-size: 0.7rem;
   line-height: 1;
   cursor: pointer;
-  box-shadow: 0 4px 0 rgba(255, 63, 163, 0.55);
+  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(30, 60, 120, 0.5);
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 .pixel-player__btn:hover {
@@ -812,7 +822,7 @@ a:hover {
 }
 .pixel-player__btn:active {
   transform: translateY(2px);
-  box-shadow: 0 2px 0 rgba(255, 63, 163, 0.55);
+  box-shadow: 0 0 0 2px var(--ring), 0 2px 0 rgba(30, 60, 120, 0.5);
 }
 
 .pixel-player__vol {
@@ -822,7 +832,7 @@ a:hover {
   height: 10px;
   border: 2px solid #fff;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--pink) var(--vol, 34%), rgba(255, 255, 255, 0.7) var(--vol, 34%));
+  background: linear-gradient(90deg, var(--accent) var(--vol, 34%), rgba(255, 255, 255, 0.8) var(--vol, 34%));
   cursor: pointer;
   outline: none;
 }
@@ -852,7 +862,7 @@ a:hover {
   color: var(--ink-soft);
 }
 .pixel-player[data-state="playing"] .pixel-player__state { color: var(--grass); }
-.pixel-player[data-state="blocked"] .pixel-player__state { color: var(--pink-strong); }
+.pixel-player[data-state="blocked"] .pixel-player__state { color: var(--accent); }
 .pixel-player[data-state="missing"] .pixel-player__state { color: #c2185b; }
 
 /* hide the old toggle if present */
@@ -892,10 +902,11 @@ a:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .bling-star, .bling-petal, #glitter-bg .gframe,
-  .pixel-player__disc, .pixel-player__eq i {
+  .pixel-player__disc, .pixel-player__eq i, .index-header a {
     animation: none !important;
   }
   #glitter-bg .gframe--1 { opacity: 1; }
+  .index-header a { padding-left: 0; } /* keep marquee title visible without motion */
 }
 
 /* =====================================================================
