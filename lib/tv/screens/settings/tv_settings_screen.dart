@@ -124,6 +124,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     final threshold = ref.watch(watchedThresholdProvider);
     final skip = ref.watch(skipForwardStepProvider);
     final autoNext = ref.watch(autoPlayNextProvider);
+    final autoSkipSegments = ref.watch(autoSkipSegmentsProvider);
     final exoLibass = ref.watch(exoLibassProvider);
     final gpuNext = ref.watch(gpuNextEnabledProvider);
 
@@ -187,6 +188,13 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         value: autoNext,
         onToggle: () =>
             ref.read(autoPlayNextProvider.notifier).state = !autoNext,
+      ),
+      _toggleItem(
+        title: '自动跳过片头/片尾',
+        subtitle: '联网识别剧集片头片尾，进入时显示跳过按钮',
+        value: autoSkipSegments,
+        onToggle: () => ref.read(autoSkipSegmentsProvider.notifier).state =
+            !autoSkipSegments,
       ),
       _toggleItem(
         title: 'ExoPlayer ASS 字幕（libass）',

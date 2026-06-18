@@ -16,6 +16,7 @@ import '../../../core/services/app_logger.dart';
 import '../../../core/services/mpv_player_adapter.dart';
 import '../../../core/services/subtitle_track_matcher.dart';
 import '../../../core/services/translation/streaming_subtitle_translator.dart';
+import '../../../core/services/intro_skip_controller.dart';
 import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/translation/whisper/desktop_binary_manager.dart';

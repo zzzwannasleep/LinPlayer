@@ -108,6 +108,18 @@ final autoPlayNextProvider =
   );
 });
 
+/// 自动跳过片头/片尾（接入 introdb.app），默认开启，可关闭。
+final autoSkipSegmentsProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_auto_skip_segments'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_auto_skip_segments', value);
+    },
+  );
+});
+
 final watchedThresholdProvider =
     StateNotifierProvider<PreferenceNotifier<int>, int>((ref) {
   int normalize(int? value) {

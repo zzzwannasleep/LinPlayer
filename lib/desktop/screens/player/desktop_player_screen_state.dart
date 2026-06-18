@@ -47,6 +47,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   WhisperSubtitleController? _whisperController;
   StreamingSubtitleTranslator? _streamTranslator;
   String? _displayTitle;
+  late final IntroSkipController _introSkip;
   bool _suppressTrackSelectionListeners = false;
   bool _hasUserTouchedSubtitleSelection = false;
   bool _subtitleBootstrapInFlight = false;
@@ -55,6 +56,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _introSkip = IntroSkipController(service: ref.read(introSkipServiceProvider));
     _playerService = VideoPlayerService();
     _initializePlayer();
     _focusNode.requestFocus();
@@ -62,6 +64,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     _uiRefreshTimer = Timer.periodic(_uiRefreshInterval, (_) {
       if (!mounted) return;
       _checkSkipOpening();
+      _introSkip.onPosition(_playerService.position);
       setState(() {});
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -168,6 +171,18 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     }
   }
 
+  /// 点按「跳过片头/片尾」：片尾且开启自动连播则切下一集，否则 seek 到段末。
+  void _onIntroSkipPressed(SkipPrompt prompt) {
+    if (prompt.kind == SkipKind.outro &&
+        ref.read(autoPlayNextProvider) &&
+        ref.read(currentPlayingItemProvider)?.seriesId != null) {
+      unawaited(_playNext());
+    } else {
+      unawaited(_playerService.seekTo(prompt.target));
+      _introSkip.onPosition(prompt.target); // 立即收起按钮
+    }
+  }
+
   Future<void> _initializePlayer() async {
     if (_initializingPlayer) return;
     _initializingPlayer = true;
@@ -230,6 +245,12 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
 
       ref.read(currentPlayingItemProvider.notifier).state = item;
       ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
+      // 自动跳过片头/片尾：联网识别本集片段（仅剧集，受设置开关控制）。
+      unawaited(_introSkip.loadForItem(
+        item,
+        enabled: ref.read(autoSkipSegmentsProvider),
+        fetchItem: (id) => api.media.getItemDetails(id),
+      ));
       _currentMediaSource = mediaSource;
       _videoUrl = videoUrl;
       _displayTitle = item.name;
@@ -2584,6 +2605,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     _uiRefreshTimer?.cancel();
     _whisperController?.stop();
     _streamTranslator?.dispose();
+    _introSkip.dispose();
     _focusNode.dispose();
     _playerService.dispose();
     super.dispose();
@@ -2990,6 +3012,29 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
                 ],
               ),
             ),
+          ),
+        ),
+
+        // 自动跳过片头/片尾按钮：左下角、底栏之上，随控制栏一并显隐。
+        Positioned(
+          left: 24,
+          bottom: 96,
+          child: ValueListenableBuilder<SkipPrompt?>(
+            valueListenable: _introSkip.prompt,
+            builder: (context, prompt, _) {
+              if (prompt == null) return const SizedBox.shrink();
+              return ElevatedButton.icon(
+                onPressed: () => _onIntroSkipPressed(prompt),
+                icon: const Icon(Icons.skip_next, size: 18),
+                label: Text(prompt.label),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: 0.7),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 8),
+                ),
+              );
+            },
           ),
         ),
 

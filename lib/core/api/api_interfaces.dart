@@ -304,6 +304,17 @@ class MediaItem {
     return null;
   }
 
+  String? get imdbId {
+    final ids = providerIds;
+    if (ids == null || ids.isEmpty) return null;
+    for (final entry in ids.entries) {
+      if (entry.key.toLowerCase() == 'imdb' && entry.value.isNotEmpty) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
   double? get progress =>
       userData?.playbackPositionTicks != null && runTimeTicks != null
           ? userData!.playbackPositionTicks! / runTimeTicks!

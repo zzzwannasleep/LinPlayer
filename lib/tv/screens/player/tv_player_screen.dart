@@ -11,6 +11,7 @@ import '../../../core/providers/media_providers.dart';
 import '../../../core/providers/sync_providers.dart';
 import '../../../core/services/player_subtitle_loader.dart';
 import '../../../core/services/translation/streaming_subtitle_translator.dart';
+import '../../../core/services/intro_skip_controller.dart';
 import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/video_player_service.dart';
@@ -41,12 +42,14 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   bool _handledCompletion = false;
   MediaSource? _mediaSource;
   StreamingSubtitleTranslator? _streamTranslator;
+  late final IntroSkipController _introSkip;
 
   String get _itemId => widget.episodeId ?? widget.mediaId ?? '';
 
   @override
   void initState() {
     super.initState();
+    _introSkip = IntroSkipController(service: ref.read(introSkipServiceProvider));
     _service.addListener(_onTick);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
@@ -56,6 +59,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   void dispose() {
     _hideTimer?.cancel();
     _streamTranslator?.stop();
+    _introSkip.dispose();
     _service.removeListener(_onTick);
     _service.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -68,7 +72,41 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
       _handledCompletion = true;
       _onPlaybackComplete();
     }
+    _introSkip.onPosition(_service.position);
     setState(() {});
+  }
+
+  /// 点按「跳过片头/片尾」：片尾且开启自动连播则切下一集（无下一集回退 seek），
+  /// 其余情况 seek 到段末。
+  void _onIntroSkipPressed(SkipPrompt prompt) {
+    if (prompt.kind == SkipKind.outro &&
+        ref.read(autoPlayNextProvider) &&
+        _item?.seriesId != null) {
+      unawaited(_goNextEpisodeOrSeek(prompt.target));
+    } else {
+      _service.seekTo(prompt.target);
+      _introSkip.onPosition(prompt.target);
+    }
+    _revealControls();
+  }
+
+  Future<void> _goNextEpisodeOrSeek(Duration fallback) async {
+    final item = _item;
+    if (item != null && item.seriesId != null) {
+      try {
+        final episodes = await ref.read(apiClientProvider).media.getEpisodes(
+              item.seriesId!,
+              seasonId: item.seasonId,
+            );
+        final idx = episodes.indexWhere((e) => e.id == item.id);
+        if (idx >= 0 && idx < episodes.length - 1 && mounted) {
+          context.replace('/tv/player?mediaId=${episodes[idx + 1].id}');
+          return;
+        }
+      } catch (_) {}
+    }
+    _service.seekTo(fallback);
+    _introSkip.onPosition(fallback);
   }
 
   /// 播放自然结束：开启「自动播放下一集」且为剧集时跳到下一集，否则退出。
@@ -186,6 +224,12 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
       _item = item;
       _mediaSource = selection.mediaSource;
       ref.read(currentPlayingItemProvider.notifier).state = item;
+      // 自动跳过片头/片尾：联网识别本集片段（仅剧集，受设置开关控制）。
+      unawaited(_introSkip.loadForItem(
+        item,
+        enabled: ref.read(autoSkipSegmentsProvider),
+        fetchItem: (id) => api.media.getItemDetails(id),
+      ));
       await _service.play();
       if (mounted) {
         setState(() => _ready = true);
@@ -652,6 +696,32 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
                       );
                     },
                   ),
+                ),
+              ),
+            // 自动跳过片头/片尾按钮：左下角、随控制栏显隐；出现时自动获焦，
+            // 遥控器按确认即跳。
+            if (_ready && _showControls)
+              Positioned(
+                left: 48,
+                bottom: 120,
+                child: ValueListenableBuilder<SkipPrompt?>(
+                  valueListenable: _introSkip.prompt,
+                  builder: (context, prompt, _) {
+                    if (prompt == null) return const SizedBox.shrink();
+                    return ElevatedButton.icon(
+                      autofocus: true,
+                      onPressed: () => _onIntroSkipPressed(prompt),
+                      icon: const Icon(Icons.skip_next, size: 24),
+                      label: Text(prompt.label,
+                          style: const TextStyle(fontSize: 20)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.black.withValues(alpha: 0.7),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 24, vertical: 14),
+                      ),
+                    );
+                  },
                 ),
               ),
             if (_ready)

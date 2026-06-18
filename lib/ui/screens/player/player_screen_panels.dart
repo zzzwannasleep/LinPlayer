@@ -143,6 +143,28 @@ class _CenterControlButton extends StatelessWidget {
   }
 }
 
+/// 自动跳过片头/片尾按钮（左下角、随控制栏显隐）。
+class _IntroSkipButton extends StatelessWidget {
+  const _IntroSkipButton({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      icon: const Icon(Icons.skip_next, size: 18),
+      label: Text(label),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.black.withValues(alpha: 0.7),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      ),
+    );
+  }
+}
+
 /// 底栏次级功能项：上图标 + 下文字（TDesign 文本），整块可点。
 class _BottomBarAction extends StatelessWidget {
   const _BottomBarAction({

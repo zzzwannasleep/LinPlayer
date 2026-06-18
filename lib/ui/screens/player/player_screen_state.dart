@@ -16,6 +16,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// 内封字幕流式翻译器（无法整轨下载时边播边译，叠加层按双语排版显示）。
   StreamingSubtitleTranslator? _streamTranslator;
 
+  /// 自动跳过片头/片尾控制器（introdb），左下角按钮随控制栏显隐。
+  late final IntroSkipController _introSkip;
+
   static VideoPlayerService? _activePlayerService;
 
   static VideoPlayerService? get activePlayerService => _activePlayerService;
@@ -133,6 +136,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _activeState = this;
+    _introSkip = IntroSkipController(service: ref.read(introSkipServiceProvider));
     _playerService = VideoPlayerService();
     _playerService.addListener(_onPlayerUpdate);
 
@@ -244,6 +248,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     ref.read(currentPlayingItemProvider.notifier).state = item;
     ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
+
+    // 自动跳过片头/片尾：联网识别本集片段（仅剧集，受设置开关控制）。
+    unawaited(_introSkip.loadForItem(
+      item,
+      enabled: ref.read(autoSkipSegmentsProvider),
+      fetchItem: (id) => api.media.getItemDetails(id),
+    ));
 
     final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
     final coreType = switch (coreString) {
@@ -1149,6 +1160,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void _onPlayerUpdate() {
     setState(() {});
     _checkSkipOpening();
+    _introSkip.onPosition(_playerService.position);
+  }
+
+  /// 点按「跳过片头/片尾」：片尾且开启自动连播则切下一集，否则 seek 到段末。
+  void _onIntroSkipPressed(SkipPrompt prompt) {
+    if (prompt.kind == SkipKind.outro &&
+        ref.read(autoPlayNextProvider) &&
+        ref.read(currentPlayingItemProvider)?.seriesId != null) {
+      _playNext();
+    } else {
+      _playerService.seekTo(prompt.target);
+      _introSkip.onPosition(prompt.target); // 立即收起按钮
+    }
   }
 
   bool _showSkipButton = false;
@@ -1203,6 +1227,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _streamTranslator?.stop();
     _streamTranslator = null;
+    _introSkip.dispose();
     if (_activeState == this) _activeState = null;
     _activePlayerService = null;
     _playerService.removeListener(_onPlayerUpdate);
@@ -1587,6 +1612,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               _buildProgressBar(),
               _buildBottomBar(item),
             ],
+          ),
+        ),
+        // 自动跳过片头/片尾按钮：左下角、底栏之上，随控制栏一并显隐。
+        Positioned(
+          left: 16,
+          bottom: 78,
+          child: SafeArea(
+            child: ValueListenableBuilder<SkipPrompt?>(
+              valueListenable: _introSkip.prompt,
+              builder: (context, prompt, _) {
+                if (prompt == null) return const SizedBox.shrink();
+                return _IntroSkipButton(
+                  label: prompt.label,
+                  onTap: () => _onIntroSkipPressed(prompt),
+                );
+              },
+            ),
           ),
         ),
       ],

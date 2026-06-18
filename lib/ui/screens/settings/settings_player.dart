@@ -12,6 +12,7 @@ class PlayerSettingsScreen extends ConsumerWidget {
     final hardwareDecoding = ref.watch(hardwareDecodingProvider);
     final backgroundPlayback = ref.watch(backgroundPlaybackProvider);
     final autoPlayNext = ref.watch(autoPlayNextProvider);
+    final autoSkipSegments = ref.watch(autoSkipSegmentsProvider);
     final watchedThreshold = ref.watch(watchedThresholdProvider);
     final preferredSubtitleLanguage =
         ref.watch(preferredSubtitleLanguageProvider);
@@ -92,6 +93,13 @@ class PlayerSettingsScreen extends ConsumerWidget {
             value: autoPlayNext,
             onChanged: (value) =>
                 ref.read(autoPlayNextProvider.notifier).state = value,
+          ),
+          SwitchListTile(
+            title: const Text('自动跳过片头/片尾'),
+            subtitle: const Text('联网识别剧集片头片尾，进入时显示跳过按钮'),
+            value: autoSkipSegments,
+            onChanged: (value) =>
+                ref.read(autoSkipSegmentsProvider.notifier).state = value,
           ),
           /*
           ListTile(
