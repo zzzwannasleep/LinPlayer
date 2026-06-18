@@ -378,35 +378,26 @@ a:hover {
   box-shadow: none;
 }
 
-/* the silver title bar — text scrolls like a classic blinkie marquee */
+/* the silver title bar — plain horizontal title */
 .index-header {
   margin: 0;
-  padding: 0.6rem 0;
-  overflow: hidden;
-  white-space: nowrap;
+  padding: 0.6rem 1rem;
   background: var(--glit) repeat, var(--bar);
   background-size: 110px, auto;
   border-bottom: 3px solid var(--bevel-dk);
 }
 .index-header a {
   display: inline-block;
-  padding-left: 100%; /* start off the right edge, then scroll across */
   color: var(--bar-text);
   font-size: clamp(0.78rem, 1.5vw, 1rem);
   line-height: 1.5;
   text-shadow: var(--engrave);
-  animation: bling-marquee 13s linear infinite;
 }
 .index-header a::before {
   content: "★ ";
   color: var(--star);
 }
-.index-header:hover a { animation-play-state: paused; }
 .index-header a:hover { color: var(--accent); }
-/* offset each card's marquee so they scroll at different positions */
-.index-card:nth-child(2n) .index-header a { animation-delay: -3.5s; }
-.index-card:nth-child(3n) .index-header a { animation-delay: -7s; }
-.index-card:nth-child(4n) .index-header a { animation-delay: -10.5s; }
 
 .index-excerpt {
   display: block;
@@ -635,9 +626,10 @@ a:hover {
 }
 .modal-header .close { color: var(--bar-text); opacity: 1; text-shadow: var(--engrave); }
 
-/* footer */
+/* footer — sits lower, near the bottom edge */
 .footer-inner {
-  padding-bottom: 6.5rem;
+  padding-top: 1rem;
+  padding-bottom: 1.4rem;
 }
 .footer-content {
   display: inline-flex;
@@ -650,7 +642,40 @@ a:hover {
   border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
   background: var(--panel);
   color: var(--ink-soft);
-  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(110, 30, 80, 0.3);
+  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(60, 66, 80, 0.3);
+}
+
+/* =====================================================================
+   ABOUT page — avatar, name, social icons
+   ===================================================================== */
+.about-avatar img {
+  border-radius: 6px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.about-name {
+  color: var(--bar-text);
+  font-family: "Press Start 2P", sans-serif;
+  letter-spacing: 0.04em;
+}
+.about-icons a {
+  color: var(--accent) !important;
+  transition: transform 140ms ease, color 140ms ease;
+}
+.about-icons a:hover { color: #1d4a93 !important; transform: translateY(-2px); }
+.about-icons i { font-size: 1.8rem; }
+/* Telegram glyph isn't in the icon font — render it as a masked SVG */
+.about-icons i.pd-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.16em;
+  background-color: currentColor;
+}
+.about-icons i.pd-tg {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.139-5.061 3.345-.479.329-.913.489-1.302.481-.428-.009-1.252-.242-1.865-.44-.752-.244-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.139-5.061 3.345-.479.329-.913.489-1.302.481-.428-.009-1.252-.242-1.865-.44-.752-.244-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 /* =====================================================================
@@ -729,17 +754,21 @@ a:hover {
   height: 52px;
   border-radius: 50%;
   border: 3px solid #fff;
-  background:
-    repeating-conic-gradient(from 0deg, #3a3f4b 0deg 18deg, #565d6b 18deg 36deg);
+  background: #2a2f3a url("/assets/img/cover.jpg") center / cover no-repeat;
   box-shadow: 0 0 0 3px var(--ring);
 }
+/* little vinyl spindle hole over the cover */
 .pixel-player__disc::after {
   content: "";
   position: absolute;
-  inset: 18px;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
   border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid #fff;
+  background: #f3f5f9;
+  border: 2px solid #6b7280;
 }
 .pixel-player[data-state="playing"] .pixel-player__disc {
   animation: bling-spin 3.2s linear infinite;
@@ -902,11 +931,10 @@ a:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .bling-star, .bling-petal, #glitter-bg .gframe,
-  .pixel-player__disc, .pixel-player__eq i, .index-header a {
+  .pixel-player__disc, .pixel-player__eq i {
     animation: none !important;
   }
   #glitter-bg .gframe--1 { opacity: 1; }
-  .index-header a { padding-left: 0; } /* keep marquee title visible without motion */
 }
 
 /* =====================================================================

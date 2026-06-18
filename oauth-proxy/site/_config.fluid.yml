@@ -73,6 +73,12 @@ about:
   banner_img: /img/pixel-scene.svg
   banner_img_height: 56
   banner_mask_alpha: 0
+  avatar: /img/linplayer-icon.png
+  name: 'LinPlayer'
+  intro: '第三方 Emby 多端播放器 · 移动 / 桌面 / TV'
+  icons:
+    - { class: 'iconfont icon-github-fill', link: 'https://github.com/zzzwannasleep/LinPlayer', tip: 'GitHub 仓库' }
+    - { class: 'pd-icon pd-tg', link: 'https://t.me/MikuContactGroup', tip: 'Telegram 群组' }
 
 page:
   banner_img: /img/pixel-scene.svg
@@ -80,7 +86,7 @@ page:
   banner_mask_alpha: 0
 
 footer:
-  content: '<a href="https://github.com/zzzwannasleep/LinPlayer" target="_blank" rel="noopener">LinPlayer</a> · sugar pixel docs · built with Hexo + Fluid'
+  content: '<a href="https://github.com/zzzwannasleep/LinPlayer" target="_blank" rel="noopener">LinPlayer</a> Built with Hexo + Fluid'
 
 dark_mode:
   enable: false
