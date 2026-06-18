@@ -28,6 +28,28 @@
   --shadow: rgba(120, 50, 120, 0.22);
   --rainbow: linear-gradient(90deg,
     #ff7bc6 0%, #ffb14c 20%, #fff277 40%, #96ee7e 60%, #7ae4ff 80%, #c89bff 100%);
+  /* --- Y2K blinkie kit: beveled borders + glitter bars --- */
+  --bevel-lt: #ffffff;
+  --bevel-dk: #a23a86;
+  --ring: #ff2f8e;
+  --bar: linear-gradient(180deg, #ff6fc0, #b85bff);
+  --bar2: linear-gradient(180deg, #ff8fd0, #c46bff);
+  --glit: url("/img/glitter-2.svg");
+}
+
+/* beveled "blinkie" frame: light top-left, dark bottom-right, hot ring */
+.bevel-frame {
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  box-shadow: 0 0 0 3px var(--ring), 0 10px 22px rgba(80, 20, 70, 0.32);
+}
+/* outlined pixel text used on glitter bars */
+.glit-text {
+  color: #fff;
+  text-shadow:
+    2px 2px 0 #8a1456, -2px -2px 0 #8a1456,
+    2px -2px 0 #8a1456, -2px 2px 0 #8a1456,
+    0 0 5px rgba(0, 0, 0, 0.5);
 }
 
 /* ---------- base ---------- */
@@ -46,12 +68,36 @@ body {
   font-size: 1.06rem;
   line-height: 1.78;
   text-rendering: optimizeLegibility;
-  /* one continuous, code-drawn Blingee pixel scene behind the whole site */
+  /* seamless animated glitter (static frame here; JS adds the twinkle) over a
+     saturated Y2K candy gradient — authentic blinkie wallpaper */
   background:
-    radial-gradient(ellipse 120% 58% at 50% 0%, rgba(255, 255, 255, 0.3), transparent 55%),
-    url("/img/pixel-scene.svg") center center / cover no-repeat,
-    linear-gradient(180deg, #a8e1ff 0%, #cdeeff 45%, #ffe2f1 72%, #fff0df 100%);
-  background-attachment: fixed, fixed, fixed;
+    url("/img/glitter-1.svg") repeat,
+    linear-gradient(135deg, #ff5fb8 0%, #a26bff 34%, #4fc3ff 64%, #8af0c0 100%);
+  background-size: 160px 160px, auto;
+  background-attachment: fixed, fixed;
+}
+
+/* animated 3-frame glitter wallpaper (built by pixel-dream.js), behind content */
+#glitter-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+#glitter-bg .gframe {
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+  background-size: 160px 160px;
+  opacity: 0;
+  animation: bling-flip 0.45s steps(1) infinite;
+}
+#glitter-bg .gframe--1 { background-image: url("/img/glitter-1.svg"); animation-delay: 0s; }
+#glitter-bg .gframe--2 { background-image: url("/img/glitter-2.svg"); animation-delay: 0.15s; }
+#glitter-bg .gframe--3 { background-image: url("/img/glitter-3.svg"); animation-delay: 0.3s; }
+@keyframes bling-flip {
+  0%, 33.3% { opacity: 1; }
+  33.4%, 100% { opacity: 0; }
 }
 
 /* keep theme wrappers see-through so the candy bg shows */
@@ -130,11 +176,12 @@ a:hover {
 
 #navbar,
 .top-nav-collapse {
+  background: var(--glit) repeat, linear-gradient(180deg, #ff8fd0, #c46bff) !important;
+  background-size: 120px, auto !important;
   border: 0 !important;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 226, 244, 0.92)) !important;
-  border-bottom: 4px solid #fff !important;
-  box-shadow: 0 6px 0 rgba(255, 112, 194, 0.35), 0 14px 26px rgba(120, 50, 120, 0.16) !important;
-  backdrop-filter: blur(2px);
+  border-bottom: 3px solid var(--bevel-dk) !important;
+  border-top: 3px solid var(--bevel-lt) !important;
+  box-shadow: 0 3px 0 var(--ring), 0 12px 22px rgba(80, 20, 70, 0.3) !important;
 }
 
 .navbar .container {
@@ -142,10 +189,12 @@ a:hover {
 }
 
 .navbar-brand strong {
-  color: var(--ink) !important;
+  color: #fff !important;
   font-size: clamp(0.72rem, 1vw, 0.92rem);
   letter-spacing: 0.12em;
-  text-shadow: 2px 2px 0 #fff, 3px 3px 0 var(--pink-soft);
+  text-shadow:
+    2px 2px 0 #8a1456, -1px -1px 0 #8a1456,
+    1px -1px 0 #8a1456, -1px 1px 0 #8a1456;
 }
 
 .navbar .nav-link {
@@ -154,10 +203,12 @@ a:hover {
 }
 
 .navbar .nav-link span {
-  color: var(--ink) !important;
+  color: #fff !important;
   font-size: 0.56rem;
   letter-spacing: 0.05em;
-  text-shadow: 1.5px 1.5px 0 #fff;
+  text-shadow:
+    1.5px 1.5px 0 #8a1456, -1px -1px 0 #8a1456,
+    1px -1px 0 #8a1456, -1px 1px 0 #8a1456;
 }
 
 .navbar .nav-link i,
@@ -168,7 +219,7 @@ a:hover {
 .navbar .nav-link:hover span,
 .navbar .nav-item.active .nav-link span,
 .navbar .nav-link.current span {
-  color: var(--pink-strong) !important;
+  color: #fff49d !important;
 }
 .navbar .nav-link:hover {
   transform: translateY(-2px);
@@ -176,7 +227,8 @@ a:hover {
 
 #search-btn .nav-link i {
   display: inline-block;
-  color: var(--pink-strong);
+  color: #fff;
+  text-shadow: 1px 1px 0 #8a1456;
 }
 
 .navbar-toggler {
@@ -211,45 +263,48 @@ a:hover {
   padding: clamp(1.4rem, 4vw, 2.6rem) 1rem 0.6rem;
 }
 
+/* the title plate is a real glitter blinkie banner */
 .page-intro__plate {
   position: relative;
   max-width: min(900px, 92vw);
-  padding: 0.9rem clamp(1.4rem, 4vw, 2.8rem) 1.1rem;
-  border: 4px solid #fff;
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 235, 248, 0.96));
+  padding: 0.9rem clamp(1.6rem, 4vw, 3rem) 1rem;
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  background: var(--glit) repeat, var(--bar2);
+  background-size: 120px, auto;
   box-shadow:
-    0 0 0 4px rgba(255, 112, 194, 0.45),
-    0 0 0 9px rgba(255, 255, 255, 0.5),
-    0 14px 30px rgba(120, 50, 120, 0.22);
+    0 0 0 3px var(--ring),
+    0 0 0 5px #fff,
+    0 9px 0 rgba(110, 30, 80, 0.3),
+    0 16px 30px rgba(80, 20, 70, 0.3);
   text-align: center;
-  backdrop-filter: blur(2px);
 }
 
-/* little corner sparkles on the title plate */
+/* corner star studs */
 .page-intro__plate::before,
 .page-intro__plate::after {
-  content: "✦";
+  content: "★";
   position: absolute;
-  top: -14px;
-  font-size: 1.4rem;
-  color: var(--sun);
-  text-shadow: 0 0 8px var(--pink), 2px 2px 0 #fff;
-  animation: bling-spin 5s linear infinite;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  color: #fff;
+  text-shadow: 1px 1px 0 #8a1456;
 }
-.page-intro__plate::before { left: -8px; transform: rotate(-12deg); }
-.page-intro__plate::after { right: -8px; transform: rotate(12deg); }
+.page-intro__plate::before { left: 0.5rem; }
+.page-intro__plate::after { right: 0.5rem; }
 
 .page-intro__title {
   display: block;
-  color: var(--pink-strong);
+  color: #fff;
   font-size: clamp(1rem, 3vw, 1.9rem);
   line-height: 1.35;
   letter-spacing: 0.05em;
   text-shadow:
-    2px 2px 0 #fff,
-    3px 3px 0 var(--pink-soft),
-    0 0 14px rgba(255, 255, 255, 0.6);
+    2px 2px 0 #8a1456, -2px -2px 0 #8a1456,
+    2px -2px 0 #8a1456, -2px 2px 0 #8a1456,
+    0 0 6px rgba(0, 0, 0, 0.45);
 }
 
 /* =====================================================================
@@ -275,7 +330,6 @@ a:hover {
 
 #board::before,
 .index-card .index-info::before,
-.index-header a::before,
 #toc,
 .index-btm,
 .post-metas,
@@ -284,52 +338,30 @@ a:hover {
   display: none !important;
 }
 
-/* index list: every post becomes a candy sticker card */
+/* index list: every post is a beveled blinkie card with a glitter title bar */
 .index-card {
   position: relative;
-  margin: 0 auto 2.4rem;
-  padding: 1.4rem clamp(1.1rem, 2.6vw, 2rem) 1.5rem;
-  max-width: 880px;
-  border: 4px solid #fff;
-  border-radius: 26px;
-  background: var(--panel);
+  margin: 0 auto 2.2rem;
+  padding: 0;
+  max-width: 860px;
+  border-radius: 6px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  background: var(--panel-strong);
   box-shadow:
-    0 0 0 4px rgba(255, 112, 194, 0.32),
-    0 14px 30px rgba(120, 50, 120, 0.16);
-  overflow: visible;
+    0 0 0 3px var(--ring),
+    0 12px 26px rgba(80, 20, 70, 0.28);
+  overflow: hidden;
   content-visibility: auto;
-  contain-intrinsic-size: 220px;
-  transition: transform 200ms ease, box-shadow 200ms ease;
+  contain-intrinsic-size: 200px;
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 .index-card:hover {
-  transform: translateY(-4px) rotate(-0.4deg);
+  transform: translateY(-3px);
   box-shadow:
-    0 0 0 4px rgba(255, 112, 194, 0.5),
-    0 20px 38px rgba(120, 50, 120, 0.24);
-}
-
-/* corner sparkle sticker on each card */
-.index-card::before {
-  content: "✦";
-  display: block !important;
-  position: absolute;
-  top: -16px;
-  right: -10px;
-  font-size: 1.7rem;
-  color: var(--sun);
-  text-shadow: 0 0 8px var(--pink), 2px 2px 0 #fff;
-  transform: rotate(12deg);
-  animation: bling-spin 5s linear infinite;
-}
-
-.index-card::after {
-  content: "";
-  display: block;
-  width: min(320px, 70%);
-  height: 14px;
-  margin: 1rem auto 0;
-  background: url("/img/pixel-lace-border.svg") center center / auto 14px repeat-x;
-  opacity: 0.85;
+    0 0 0 3px var(--ring),
+    0 0 0 6px rgba(255, 47, 142, 0.35),
+    0 18px 34px rgba(80, 20, 70, 0.34);
 }
 
 .index-info {
@@ -337,34 +369,43 @@ a:hover {
   padding: 0 !important;
 }
 
-.index-img {
-  margin-bottom: 1rem;
-}
+.index-img { margin: 0; }
 .index-img img {
   width: 100%;
-  border-radius: 18px;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 4px rgba(255, 112, 194, 0.2);
+  display: block;
+  border: 0;
+  border-bottom: 3px solid var(--bevel-dk);
+  box-shadow: none;
 }
 
+/* the glitter title bar */
 .index-header {
-  margin-bottom: 0.7rem;
+  margin: 0;
+  padding: 0.62rem 1rem;
+  background: var(--glit) repeat, var(--bar);
+  background-size: 110px, auto;
+  border-bottom: 3px solid var(--bevel-dk);
 }
 .index-header a {
   display: inline-block;
-  color: var(--pink-strong);
-  font-size: clamp(0.85rem, 1.7vw, 1.12rem);
-  line-height: 1.55;
-  text-shadow: 2px 2px 0 #fff, 3px 3px 0 var(--pink-soft);
+  color: #fff;
+  font-size: clamp(0.78rem, 1.5vw, 1rem);
+  line-height: 1.5;
+  text-shadow:
+    2px 2px 0 #8a1456, -1px -1px 0 #8a1456,
+    1px -1px 0 #8a1456, -1px 1px 0 #8a1456;
 }
-.index-header a:hover {
-  color: var(--pink);
+.index-header a::before {
+  content: "★ ";
+  color: #fff49d;
 }
+.index-header a:hover { color: #fff49d; }
 
 .index-excerpt {
   display: block;
   max-width: 70ch;
   margin: 0;
+  padding: 0.95rem 1.15rem 1.1rem;
   color: var(--ink);
   font-size: 1.02rem;
   line-height: 1.8;
@@ -373,17 +414,18 @@ a:hover {
   color: var(--ink);
 }
 
-/* post body panel */
+/* post body panel — beveled blinkie frame */
 .post-content {
   position: relative;
   margin: 0 auto;
   padding: clamp(1.4rem, 3vw, 2.6rem) clamp(1.2rem, 3vw, 2.4rem) !important;
-  border: 4px solid #fff !important;
-  border-radius: 28px;
+  border-radius: 6px;
+  border: 3px solid !important;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt) !important;
   background: var(--panel-strong) !important;
   box-shadow:
-    0 0 0 4px rgba(255, 112, 194, 0.3),
-    0 16px 36px rgba(120, 50, 120, 0.16) !important;
+    0 0 0 3px var(--ring),
+    0 14px 32px rgba(80, 20, 70, 0.3) !important;
 }
 
 .about-info {
@@ -455,26 +497,27 @@ a:hover {
 .markdown-body blockquote {
   margin: 1.8rem 0;
   padding: 1rem 1.25rem;
-  border: 0;
+  border: 2px solid var(--pink-soft);
   border-left: 6px solid var(--pink);
-  border-radius: 18px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.6), rgba(255, 181, 222, 0.4));
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 181, 222, 0.4));
   color: var(--ink-soft);
 }
 
 .markdown-body code {
   padding: 0.16rem 0.46rem;
-  border: 1px solid rgba(255, 112, 194, 0.3);
-  border-radius: 8px;
-  background: rgba(255, 235, 247, 0.85);
+  border: 1px solid rgba(255, 112, 194, 0.45);
+  border-radius: 3px;
+  background: rgba(255, 235, 247, 0.9);
   color: #b32172;
 }
 
 .markdown-body pre {
-  border: 3px solid #fff;
-  border-radius: 18px;
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: #6b4d7e #2a1635 #2a1635 #6b4d7e;
   background: #3a2247 !important;
-  box-shadow: 0 0 0 3px rgba(255, 112, 194, 0.25), 0 14px 26px rgba(120, 50, 120, 0.18);
+  box-shadow: 0 0 0 3px var(--ring), 0 12px 24px rgba(80, 20, 70, 0.28);
 }
 .markdown-body pre code {
   background: transparent;
@@ -485,25 +528,28 @@ a:hover {
 .markdown-body table {
   border-collapse: separate;
   border-spacing: 0;
-  border: 3px solid #fff;
-  border-radius: 16px;
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.7);
 }
 .markdown-body table th,
 .markdown-body table td {
   border-color: rgba(118, 67, 112, 0.16) !important;
 }
 .markdown-body table thead th {
-  background: var(--pink-soft);
-  color: var(--ink);
+  background: var(--bar);
+  color: #fff;
+  text-shadow: 1px 1px 0 #8a1456;
 }
 
 .markdown-body img,
 .about-info img {
-  border-radius: 16px;
-  border: 3px solid #fff;
-  box-shadow: 0 0 0 4px rgba(255, 112, 194, 0.18);
+  border-radius: 4px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 /* rainbow pixel dividers */
@@ -516,26 +562,27 @@ a:hover {
   background: url("/img/pixel-lace-border.svg") center center / contain no-repeat;
 }
 
-/* pager / chips */
+/* pager / chips — rectangular beveled blinkie buttons */
 .post-prevnext a,
 .pagination .page-number,
 .pagination .extend,
 .category-list a,
 .archive-list a,
 .tagcloud a {
-  border: 3px solid #fff !important;
-  border-radius: 999px;
-  background: linear-gradient(180deg, var(--pink-soft), rgba(120, 229, 255, 0.45)) !important;
-  color: var(--ink) !important;
-  box-shadow: 0 4px 0 rgba(255, 112, 194, 0.4) !important;
-  transition: transform 150ms ease;
-}
-.post-prevnext a {
-  padding: 0.85rem 1rem;
-}
-.pagination .page-number.current {
-  background: var(--rainbow) !important;
+  border-radius: 4px !important;
+  border: 3px solid !important;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt) !important;
+  background: var(--glit) repeat, var(--bar) !important;
+  background-size: 100px, auto !important;
   color: #fff !important;
+  text-shadow: 1px 1px 0 #8a1456, -1px -1px 0 #8a1456;
+  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(110, 30, 80, 0.4) !important;
+  transition: transform 120ms ease;
+}
+.post-prevnext a { padding: 0.85rem 1rem; }
+.pagination .page-number.current {
+  background: var(--glit) repeat, linear-gradient(180deg, #ffd23b, #ff7a1f) !important;
+  background-size: 100px, auto !important;
 }
 .post-prevnext a:hover,
 .pagination .page-number:hover,
@@ -546,28 +593,38 @@ a:hover {
 }
 
 #scroll-top-button {
-  border: 3px solid #fff;
-  background: var(--rainbow);
-  box-shadow: 0 6px 0 rgba(255, 112, 194, 0.4), 0 12px 24px rgba(120, 50, 120, 0.2);
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  background: var(--glit) repeat, var(--bar);
+  background-size: 90px, auto;
+  box-shadow: 0 0 0 2px var(--ring), 0 5px 0 rgba(110, 30, 80, 0.4);
 }
 
 /* search modal */
 .modal-content {
-  border: 4px solid #fff !important;
-  border-radius: 24px !important;
+  border-radius: 6px !important;
+  border: 3px solid !important;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt) !important;
   background: var(--panel-strong) !important;
-  box-shadow: 0 0 0 4px rgba(255, 112, 194, 0.3), 0 20px 40px rgba(120, 50, 120, 0.25) !important;
+  box-shadow: 0 0 0 3px var(--ring), 0 20px 40px rgba(80, 20, 70, 0.35) !important;
 }
-.modal-header,
+.modal-header {
+  border: none !important;
+  background: var(--glit) repeat, var(--bar) !important;
+  background-size: 110px, auto !important;
+}
 .modal-body {
   border: none !important;
   background: transparent !important;
 }
 .modal-title {
-  color: var(--pink-strong);
+  color: #fff;
   font-family: "Press Start 2P", sans-serif;
   font-size: 0.9rem;
+  text-shadow: 2px 2px 0 #8a1456, -1px -1px 0 #8a1456;
 }
+.modal-header .close { color: #fff; opacity: 1; text-shadow: 1px 1px 0 #8a1456; }
 
 /* footer */
 .footer-inner {
@@ -579,11 +636,12 @@ a:hover {
   justify-content: center;
   gap: 0.35rem;
   padding: 0.7rem 1.2rem;
-  border: 3px solid #fff;
-  border-radius: 999px;
+  border-radius: 5px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
   background: var(--panel);
   color: var(--ink-soft);
-  box-shadow: 0 4px 0 rgba(255, 112, 194, 0.25);
+  box-shadow: 0 0 0 2px var(--ring), 0 4px 0 rgba(110, 30, 80, 0.3);
 }
 
 /* =====================================================================
@@ -632,14 +690,14 @@ a:hover {
   gap: 0.6rem;
   width: 248px;
   padding: 0.85rem;
-  border: 4px solid #fff;
-  border-radius: 20px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 226, 244, 0.96));
+  border-radius: 6px;
+  border: 3px solid;
+  border-color: var(--bevel-lt) var(--bevel-dk) var(--bevel-dk) var(--bevel-lt);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(255, 232, 246, 0.97));
   box-shadow:
-    0 0 0 4px rgba(255, 112, 194, 0.5),
-    0 0 0 9px rgba(255, 255, 255, 0.5),
-    0 18px 36px rgba(120, 50, 120, 0.3);
+    0 0 0 3px var(--ring),
+    0 0 0 5px #fff,
+    0 16px 34px rgba(80, 20, 70, 0.34);
   color: var(--ink);
   font-family: "Press Start 2P", "Segoe UI", sans-serif;
   user-select: none;
@@ -833,11 +891,11 @@ a:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bling-star, .bling-petal, .page-intro__plate::before,
-  .page-intro__plate::after,
-  .pixel-player__disc, .pixel-player__eq i, .index-card::before {
+  .bling-star, .bling-petal, #glitter-bg .gframe,
+  .pixel-player__disc, .pixel-player__eq i {
     animation: none !important;
   }
+  #glitter-bg .gframe--1 { opacity: 1; }
 }
 
 /* =====================================================================

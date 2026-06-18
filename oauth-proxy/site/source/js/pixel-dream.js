@@ -35,21 +35,34 @@
     restoreOriginalTitle();
   }
 
-  /* ---------- glitter overlay ---------- */
+  /* ---------- animated glitter wallpaper (3-frame twinkle, behind content) ---------- */
+  function mountGlitterBg() {
+    if (document.getElementById("glitter-bg")) {
+      return;
+    }
+    var bg = document.createElement("div");
+    bg.id = "glitter-bg";
+    bg.setAttribute("aria-hidden", "true");
+    for (var i = 1; i <= 3; i++) {
+      var frame = document.createElement("div");
+      frame.className = "gframe gframe--" + i;
+      bg.appendChild(frame);
+    }
+    document.body.appendChild(bg);
+  }
+
+  /* ---------- light foreground sparkle (twinkles over content) ---------- */
   function mountGlitter() {
     if (reduceMotion || document.getElementById("bling-layer")) {
       return;
     }
-
     var layer = document.createElement("div");
     layer.id = "bling-layer";
     layer.setAttribute("aria-hidden", "true");
 
-    var starColors = ["#ffffff", "#fff49d", "#ff9fcb", "#bfefff"];
-    var starCount = window.innerWidth < 600 ? 16 : 34;
-    var i;
-
-    for (i = 0; i < starCount; i++) {
+    var starColors = ["#ffffff", "#fff49d", "#ff79c6", "#6fe6ff", "#c89bff"];
+    var starCount = window.innerWidth < 600 ? 12 : 22;
+    for (var i = 0; i < starCount; i++) {
       var star = document.createElement("span");
       star.className = "bling-star";
       var size = 6 + Math.floor(Math.random() * 12);
@@ -59,26 +72,9 @@
       star.style.height = size + "px";
       star.style.color = starColors[i % starColors.length];
       star.style.animationDelay = (Math.random() * 2.6).toFixed(2) + "s";
-      star.style.animationDuration = (1.8 + Math.random() * 1.8).toFixed(2) + "s";
+      star.style.animationDuration = (1.6 + Math.random() * 1.6).toFixed(2) + "s";
       layer.appendChild(star);
     }
-
-    var petalColors = ["#ffb5de", "#ffd1e8", "#ff9fcb", "#fff0f7"];
-    var petalCount = window.innerWidth < 600 ? 8 : 16;
-
-    for (i = 0; i < petalCount; i++) {
-      var petal = document.createElement("span");
-      petal.className = "bling-petal";
-      var psize = 8 + Math.floor(Math.random() * 9);
-      petal.style.left = (Math.random() * 100).toFixed(2) + "%";
-      petal.style.width = psize + "px";
-      petal.style.height = psize + "px";
-      petal.style.background = petalColors[i % petalColors.length];
-      petal.style.animationDuration = (8 + Math.random() * 9).toFixed(2) + "s";
-      petal.style.animationDelay = (-Math.random() * 12).toFixed(2) + "s";
-      layer.appendChild(petal);
-    }
-
     document.body.appendChild(layer);
   }
 
@@ -209,6 +205,7 @@
   }
 
   function init() {
+    mountGlitterBg();
     mountGlitter();
     mountPlayer();
     document.addEventListener("visibilitychange", handleVisibilityChange);
