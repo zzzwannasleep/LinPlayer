@@ -6,7 +6,11 @@
         android:name="android.hardware.touchscreen"
         android:required="false" />
 
-    <application android:banner="@mipmap/ic_launcher">
+    <!-- extractNativeLibs=true：让 libmihomo.so 被解压到 nativeLibraryDir，
+         以便作为独立子进程执行（mihomo 代理内核）。 -->
+    <application
+        android:banner="@mipmap/ic_launcher"
+        android:extractNativeLibs="true">
         <activity android:name=".MainActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

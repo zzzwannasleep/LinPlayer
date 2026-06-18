@@ -1,7 +1,7 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
+import '../network/proxy_http_client.dart';
+import '../network/proxy_settings.dart';
 import 'api_interfaces.dart';
 
 class EmbyApiClient implements ApiClientFactory {
@@ -9,12 +9,14 @@ class EmbyApiClient implements ApiClientFactory {
   String _currentLine;
   String? _authToken;
   String? _userId;
+  void Function()? _proxyListenerCancel;
 
   EmbyApiClient({required String baseUrl, String? authToken, String? userId})
       : _currentLine = baseUrl,
         _authToken = authToken,
         _userId = userId {
     _dio = _createDio(baseUrl, authToken);
+    _registerProxyListener();
   }
 
   static Dio _createDio(String baseUrl, String? authToken) {
@@ -38,17 +40,14 @@ class EmbyApiClient implements ApiClientFactory {
       },
     ));
 
-    // 处理自签名证书和证书验证问题
-    (dio.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
-      final client = HttpClient();
-      client.badCertificateCallback =
-          (X509Certificate cert, String host, int port) {
-        // 在生产环境中应该验证证书，但这里允许自签名证书以提高兼容性
-        // TODO: 考虑添加证书指纹验证
-        return true;
-      };
-      return client;
-    };
+    // 自签名证书放行 + 用户自定义代理（HTTP/SOCKS）统一接入。
+    applyProxyToDio(dio);
+
+    // 兼容性拦截器：把鉴权 token 以 api_key 查询参数附加到所有请求，
+    // 同时保留 header 鉴权（X-Emby-Token）。部分服务端依赖查询参数授权，
+    // 而把冗长的 X-Emby-Authorization 串塞进 query 会触发 Cloudflare WAF，
+    // 因此这里只补 api_key，并主动剔除 query 中的 X-Emby-Authorization。
+    dio.interceptors.add(_EmbyAuthQueryCompatInterceptor());
 
     dio.interceptors
         .add(LogInterceptor(requestBody: true, responseBody: false));
@@ -57,6 +56,15 @@ class EmbyApiClient implements ApiClientFactory {
 
   void _rebuildDio() {
     _dio = _createDio(_currentLine, _authToken);
+    _registerProxyListener();
+  }
+
+  /// 监听全局代理变更，实时让当前 Dio 重建底层连接。
+  void _registerProxyListener() {
+    _proxyListenerCancel?.call();
+    final dio = _dio;
+    _proxyListenerCancel =
+        ProxyRuntime.instance.addListener(() => refreshDioProxy(dio));
   }
 
   String? get userId => _userId;
@@ -146,6 +154,24 @@ class EmbyApiClient implements ApiClientFactory {
       queryParameters: queryParameters,
       options: options,
     );
+  }
+}
+
+/// 兼容性拦截器：所有 Dio 请求附加 `api_key` 查询参数（同时保留 header 鉴权），
+/// 并剔除 query 中的 `X-Emby-Authorization`（其冗长字符串会触发 Cloudflare 等 CDN
+/// 的安全策略）。这样既兼容「依赖查询参数授权」的服务端，又不破坏走 CDN 的服务端。
+class _EmbyAuthQueryCompatInterceptor extends Interceptor {
+  @override
+  void onRequest(
+      RequestOptions options, RequestInterceptorHandler handler) {
+    final token = options.headers['X-Emby-Token'];
+    if (token is String &&
+        token.isNotEmpty &&
+        !options.queryParameters.containsKey('api_key')) {
+      options.queryParameters['api_key'] = token;
+    }
+    options.queryParameters.remove('X-Emby-Authorization');
+    handler.next(options);
   }
 }
 
@@ -274,6 +300,8 @@ class EmbyServerApi implements ServerApi {
       },
     ));
 
+    applyProxyToDio(dio);
+
     debugPrint('[EmbyAPI] getPublicInfo: baseUrl=$normalizedBaseUrl');
 
     try {
@@ -315,6 +343,7 @@ class EmbyServerApi implements ServerApi {
           'X-Emby-Client-Version': '1.0.0',
         },
       ));
+      applyProxyToDio(dio);
       await dio.get('System/Info/Public');
       return true;
     } catch (_) {

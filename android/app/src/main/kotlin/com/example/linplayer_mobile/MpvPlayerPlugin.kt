@@ -49,7 +49,9 @@ class MpvPlayerPlugin(
                 // Dart 传过来的 int 在 Android 端可能是 Long，用 Number 兼容
                 val surfaceViewId = call.argument<Number>("surfaceViewId")?.toInt()
                 val useGpuNext = call.argument<Boolean>("useGpuNext") ?: false
-                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, result)
+                // 用户自定义代理（仅 HTTP 代理可被 mpv 消费；为空则直连）
+                val httpProxy = call.argument<String>("httpProxy")
+                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, result)
             }
             "play" -> {
                 val playerId = call.argument<String>("playerId") ?: ""
@@ -235,10 +237,11 @@ class MpvPlayerPlugin(
         hardwareDecoding: Boolean,
         surfaceViewId: Int?,
         useGpuNext: Boolean,
+        httpProxy: String?,
         result: MethodChannel.Result
     ) {
         // Always use SurfaceTexture (no SurfaceView polling needed)
-        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, result) }
+        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, result) }
     }
 
     private fun createPlayerOnMainThread(
@@ -246,6 +249,7 @@ class MpvPlayerPlugin(
         startPositionMs: Int,
         hardwareDecoding: Boolean,
         useGpuNext: Boolean,
+        httpProxy: String?,
         result: MethodChannel.Result
     ) {
         // MPVLib is a singleton — only one mpv context can exist at a time.
@@ -281,7 +285,7 @@ class MpvPlayerPlugin(
 
             // Set mpv options (must be before init)
             android.util.Log.i(TAG, "Setting mpv options: hardwareDecoding=$hardwareDecoding, useGpuNext=$useGpuNext")
-            setMpvOptions(hardwareDecoding, useGpuNext = useGpuNext)
+            setMpvOptions(hardwareDecoding, useGpuNext = useGpuNext, httpProxy = httpProxy)
 
             // Initialize mpv (registers JavaVM, starts event thread)
             MPVLib.init()
@@ -380,7 +384,13 @@ class MpvPlayerPlugin(
         }
     }
 
-    private fun setMpvOptions(hardwareDecoding: Boolean, useGpuNext: Boolean = false) {
+    private fun setMpvOptions(hardwareDecoding: Boolean, useGpuNext: Boolean = false, httpProxy: String? = null) {
+        // 用户自定义 HTTP 代理（mpv 不支持 SOCKS，SOCKS 场景在 TV 上经 mihomo 本地口中转）
+        if (!httpProxy.isNullOrEmpty()) {
+            MPVLib.setOptionString("http-proxy", httpProxy)
+            android.util.Log.i(TAG, "mpv http-proxy enabled")
+        }
+
         // Video output - try gpu-next for better HDR/DV support, fallback to gpu if unavailable
         var actuallyUsingGpuNext = false
         if (useGpuNext) {

@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart';
 
+import '../network/proxy_http_client.dart';
+import '../network/proxy_settings.dart';
 import '../services/cache_service.dart';
 
 /// 持久化网络图片 Provider
@@ -256,15 +258,19 @@ class PersistentNetworkImageProvider
     );
   }
 
-  static final HttpClient _sharedHttpClient = HttpClient()
-    ..autoUncompress = false
-    ..badCertificateCallback = (X509Certificate cert, String host, int port) {
-      // 允许自签名证书，与 Dio 配置保持一致
-      return true;
-    };
+  // 共享 HttpClient 跟随用户代理配置；代理变更（revision 自增）时重建。
+  // createProxiedHttpClient 已内置自签名证书放行，与 Dio 配置保持一致。
+  static HttpClient? _sharedHttpClient;
+  static int _sharedClientRevision = -1;
 
   static HttpClient get httpClient {
-    HttpClient client = _sharedHttpClient;
+    final revision = ProxyRuntime.instance.revision;
+    if (_sharedHttpClient == null || _sharedClientRevision != revision) {
+      _sharedHttpClient?.close(force: true);
+      _sharedHttpClient = createProxiedHttpClient()..autoUncompress = false;
+      _sharedClientRevision = revision;
+    }
+    HttpClient client = _sharedHttpClient!;
     assert(() {
       if (debugNetworkImageHttpClientProvider != null) {
         client = debugNetworkImageHttpClientProvider!();

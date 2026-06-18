@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'player_adapter.dart';
 import 'app_logger.dart';
+import '../network/proxy_settings.dart';
 
 /// Native mpv player adapter for Android.
 ///
@@ -129,12 +130,17 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
       // gpu-next uses SurfaceTexture just like gpu mode.
       // SurfaceView is not used because it creates a separate window layer
       // that conflicts with Flutter overlay controls.
+      // 用户自定义代理：仅 HTTP 代理且开启「代理媒体流」时透传给 mpv（mpv 不支持 SOCKS）。
+      final mediaProxy = ProxyRuntime.instance.current;
+      final httpProxy = mediaProxy.appliesToMedia ? mediaProxy.mpvHttpProxy : null;
+
       final params = <String, dynamic>{
         'videoUrl': videoUrl,
         'startPositionMs': startPosition?.inMilliseconds ?? 0,
         'hardwareDecoding': hardwareDecoding,
         'preferredSubtitleLanguage': preferredSubtitleLanguage,
         'useGpuNext': useGpuNext,
+        'httpProxy': httpProxy,
       };
 
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('createPlayer', params);

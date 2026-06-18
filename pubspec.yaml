@@ -21,6 +21,10 @@ dependencies:
   # 网络
   dio: ^5.4.0
   crypto: ^3.0.3
+  # SOCKS4/5 代理支持（Dart HttpClient 原生只支持 HTTP 代理）
+  socks5_proxy: ^1.0.4
+  # 内置 zashboard 面板（仅 Android TV 使用，指向本地 mihomo external-ui）
+  webview_flutter: ^4.7.0
   
   # 图片加载
   extended_image: ^8.2.0

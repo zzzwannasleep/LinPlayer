@@ -101,6 +101,13 @@ android {
         getByName("main") {
             jniLibs.srcDirs("src/main/jniLibs")
         }
+        // TV 专属：mihomo 内核(libmihomo.so) 与 zashboard 面板仅打包进 tv flavor，
+        // mobile/iOS/desktop 不含。内核以 lib*.so 命名放入 jniLibs，安装时会被
+        // 解压到 nativeLibraryDir 并具备可执行权限（Android 10+ 仅允许从此目录执行二进制）。
+        getByName("tv") {
+            jniLibs.srcDirs("src/tv/jniLibs")
+            assets.srcDirs("src/tv/assets")
+        }
     }
 
     buildTypes {

@@ -14,6 +14,7 @@ import 'cache_service.dart';
 import 'mpv_config_manager.dart';
 import 'subtitle_track_matcher.dart';
 import 'subtitle_processor.dart';
+import '../network/proxy_settings.dart';
 
 class MpvPlayerAdapter implements PlayerAdapter {
   static final _logger = AppLogger();
@@ -166,6 +167,20 @@ class MpvPlayerAdapter implements PlayerAdapter {
     // 续播：优先通过 mpv 的 start 选项让加载时直接定位到续播点，
     // 避免 open 之后再 seek 的竞态（慢速/网络源下 seek 可能落空导致从头播放）。
     final np = _nativePlayer;
+
+    // 用户自定义代理：仅 HTTP 代理且开启「代理媒体流」时生效（mpv 不支持 SOCKS）。
+    // 每次 open 都显式写入，空串表示清除（直连），确保切换配置后即时反映。
+    if (np != null) {
+      final mediaProxy = ProxyRuntime.instance.current;
+      final proxyValue =
+          mediaProxy.appliesToMedia ? (mediaProxy.mpvHttpProxy ?? '') : '';
+      try {
+        await np.setProperty('http-proxy', proxyValue);
+      } catch (_) {
+        // 代理属性设置失败不应阻断播放。
+      }
+    }
+
     if (resumePosition != null && np != null) {
       final seconds = resumePosition.inMilliseconds / 1000.0;
       try {

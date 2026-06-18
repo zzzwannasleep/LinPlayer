@@ -10,6 +10,7 @@ class MainActivity : FlutterActivity() {
     private var exoPlayerPlugin: ExoPlayerPlugin? = null
     private var mpvPlayerPlugin: MpvPlayerPlugin? = null
     private var libassChannel: MethodChannel? = null
+    private var proxyChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -47,11 +48,21 @@ class MainActivity : FlutterActivity() {
         libassChannel!!.setMethodCallHandler { call, result ->
             handleLibassCall(this, call, result)
         }
+
+        // 注册 mihomo 代理内核桥接（仅 TV 构建含内核，其余构建调用 start 会返回内核缺失）
+        proxyChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.linplayer/proxy"
+        )
+        proxyChannel!!.setMethodCallHandler { call, result ->
+            ProxyBridge.handle(this, call, result)
+        }
     }
 
     override fun onDestroy() {
         exoPlayerPlugin?.disposeAll()
         mpvPlayerPlugin?.disposeAll()
+        ProxyBridge.stop()
         super.onDestroy()
     }
 }

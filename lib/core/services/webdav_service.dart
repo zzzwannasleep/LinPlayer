@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 
+import '../network/proxy_http_client.dart';
+
 /// WebDAV 客户端服务
 /// 
 /// 支持基本的 WebDAV 操作：
@@ -33,6 +35,7 @@ class WebDAVService {
         'User-Agent': 'LinPlayer/1.0.0',
       },
     ));
+    applyProxyToDio(_dio);
   }
 
   /// 测试连接

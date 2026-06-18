@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,11 +9,15 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/services/app_logger.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/translation/subtitle_document.dart';
+import '../../../core/providers/proxy_providers.dart';
+import '../../../core/network/proxy_settings.dart';
+import '../../services/mihomo_service.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
 import '../../widgets/tv_toast.dart';
 import 'tv_sync_settings.dart';
+import 'zashboard_screen.dart';
 
 /// TV 设置页 —— 左侧分类 + 右侧真实可持久化设置项。
 class TvSettingsScreen extends ConsumerStatefulWidget {
@@ -27,6 +33,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
   static const List<_SettingCategory> _categories = [
     _SettingCategory(Icons.play_circle_outline, '播放'),
     _SettingCategory(Icons.settings, '通用'),
+    _SettingCategory(Icons.vpn_key, '网络'),
     _SettingCategory(Icons.translate, '翻译'),
     _SettingCategory(Icons.sync, '同步'),
     _SettingCategory(Icons.info_outline, '关于'),
@@ -99,10 +106,12 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
       case 1:
         return _buildGeneralSettings();
       case 2:
-        return _buildTranslationSettings();
+        return _buildNetworkSettings();
       case 3:
-        return const TvSyncSettings();
+        return _buildTranslationSettings();
       case 4:
+        return const TvSyncSettings();
+      case 5:
         return _buildAboutSettings();
       default:
         return const SizedBox.shrink();
@@ -214,6 +223,192 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(backgroundPlaybackProvider.notifier).state = !bgPlay,
       ),
     ]);
+  }
+
+  Widget _buildNetworkSettings() {
+    final cfg = ref.watch(proxyConfigProvider);
+    final notifier = ref.read(proxyConfigProvider.notifier);
+
+    final items = <Widget>[
+      _choiceItem<ProxyType>(
+        title: '代理协议',
+        current: cfg.type,
+        labelOf: (v) => v.label,
+        options: [for (final t in ProxyType.values) MapEntry(t.label, t)],
+        onPick: (v) => notifier.save(cfg.copyWith(type: v)),
+      ),
+    ];
+
+    if (cfg.type != ProxyType.none) {
+      items.addAll([
+        _textItem(
+          title: '主机 (Host)',
+          value: cfg.host,
+          onSubmit: (v) => notifier.save(cfg.copyWith(host: v.trim())),
+        ),
+        _textItem(
+          title: '端口 (Port)',
+          value: cfg.port > 0 ? '${cfg.port}' : '',
+          onSubmit: (v) =>
+              notifier.save(cfg.copyWith(port: int.tryParse(v.trim()) ?? 0)),
+        ),
+        _textItem(
+          title: '用户名（可选）',
+          value: cfg.username,
+          onSubmit: (v) => notifier.save(cfg.copyWith(username: v)),
+        ),
+        _textItem(
+          title: '密码（可选）',
+          value: cfg.password,
+          obscure: true,
+          onSubmit: (v) => notifier.save(cfg.copyWith(password: v)),
+        ),
+        _toggleItem(
+          title: '代理媒体流播放',
+          subtitle: cfg.type.isSocks
+              ? 'libmpv 不支持 SOCKS，此项仅对 HTTP 代理生效'
+              : '关闭则播放直连、仅代理 API/图片等请求',
+          value: cfg.proxyMedia,
+          onToggle: () => notifier.save(cfg.copyWith(proxyMedia: !cfg.proxyMedia)),
+        ),
+      ]);
+    }
+
+    // 订阅代理(mihomo) —— 仅 Android TV 内置内核。
+    if (Platform.isAndroid) {
+      items
+        ..add(const SizedBox(height: TvDesignTokens.spacingLg))
+        ..addAll(_mihomoItems());
+    }
+
+    return _settingsList('代理设置', items);
+  }
+
+  List<Widget> _mihomoItems() {
+    final m = ref.watch(mihomoControllerProvider);
+    final ctrl = ref.read(mihomoControllerProvider.notifier);
+
+    final items = <Widget>[
+      const Padding(
+        padding: EdgeInsets.only(
+            left: 4, bottom: TvDesignTokens.spacingMd, top: TvDesignTokens.spacingMd),
+        child: Text('订阅代理 (mihomo)',
+            style: TextStyle(
+                fontSize: TvDesignTokens.fontSizeLg,
+                color: TvDesignTokens.textPrimary,
+                fontWeight: FontWeight.bold)),
+      ),
+    ];
+
+    if (!m.coreAvailable) {
+      items.add(_staticItem(
+        title: '内核未内置',
+        subtitle: '仅 Android TV 构建包含 mihomo 内核（libmihomo.so）。'
+            '运行 scripts/fetch_mihomo_tv.ps1 拉取后重新构建 tv flavor。',
+      ));
+      return items;
+    }
+
+    items.add(_toggleItem(
+      title: '启用订阅代理',
+      subtitle: m.running
+          ? '运行中 · 全局走 mihomo（含播放流），启用后会覆盖上方手动代理'
+          : '启动 mihomo 并把全局代理指向本地端口 ${MihomoPorts.mixedPort}',
+      value: m.enabled,
+      onToggle: () => m.enabled ? ctrl.disable() : ctrl.enable(),
+    ));
+
+    for (final s in m.subscriptions) {
+      items.add(_rowCard(
+        title: s.name,
+        subtitle: s.url,
+        trailing: const Icon(Icons.delete_outline,
+            color: TvDesignTokens.textSecondary, size: 24),
+        onSelect: () => ctrl.removeSubscription(s.id),
+      ));
+    }
+
+    items.add(_actionItem(
+      title: '添加订阅',
+      subtitle: '输入机场订阅链接',
+      onTap: _showAddSubscription,
+    ));
+    if (m.subscriptions.isNotEmpty) {
+      items.add(_actionItem(
+        title: '更新订阅',
+        subtitle: '重新拉取并重载配置',
+        onTap: () {
+          ctrl.refresh();
+          TvToast.show(context, '正在重载订阅…');
+        },
+      ));
+    }
+    if (m.running) {
+      items.add(_actionItem(
+        title: '打开 zashboard 面板',
+        subtitle: '选择节点 / 查看连接 / 测速',
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ZashboardScreen()),
+        ),
+      ));
+    }
+    return items;
+  }
+
+  void _showAddSubscription() {
+    final nameController = TextEditingController();
+    final urlController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: TvDesignTokens.surface,
+        title: const Text('添加订阅',
+            style: TextStyle(color: TvDesignTokens.textPrimary)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              style: const TextStyle(color: TvDesignTokens.textPrimary),
+              decoration: const InputDecoration(
+                labelText: '名称（可选）',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: urlController,
+              style: const TextStyle(color: TvDesignTokens.textPrimary),
+              decoration: const InputDecoration(
+                labelText: '订阅链接 (URL)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final url = urlController.text.trim();
+              if (url.isEmpty) {
+                Navigator.pop(dialogContext);
+                return;
+              }
+              ref
+                  .read(mihomoControllerProvider.notifier)
+                  .addSubscription(nameController.text, url);
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('添加'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildTranslationSettings() {

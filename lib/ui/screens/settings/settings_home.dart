@@ -45,6 +45,12 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _showTranslationSettings(context),
           ),
           _SettingsCard(
+            icon: Icons.vpn_key,
+            title: '代理设置',
+            subtitle: 'HTTP(S) / SOCKS 自定义代理',
+            onTap: () => _showNetworkSettings(context),
+          ),
+          _SettingsCard(
             icon: Icons.sync,
             title: '同步服务',
             subtitle: 'Trakt、Bangumi 观看记录同步',
@@ -98,6 +104,13 @@ class SettingsScreen extends ConsumerWidget {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const DanmakuSettingsScreen()),
+    );
+  }
+
+  void _showNetworkSettings(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const NetworkSettingsScreen()),
     );
   }
 
