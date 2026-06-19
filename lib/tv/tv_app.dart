@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/app_providers.dart';
 import '../core/services/font_service.dart';
 import '../core/theme/app_theme.dart';
+import '../ui/widgets/common/app_update_gate.dart';
 import 'theme/tv_metrics.dart';
 import 'theme/tv_theme.dart';
 import 'routes/tv_router.dart';
@@ -42,7 +43,7 @@ class LinPlayerTvApp extends ConsumerWidget {
         return Theme(
           data: AppTheme.withFontFamily(
               TvTheme.themeFor(context.tv), fontFamily),
-          child: child ?? const SizedBox.shrink(),
+          child: AppUpdateGate(child: child ?? const SizedBox.shrink()),
         );
       },
       routerConfig: tvRouter,

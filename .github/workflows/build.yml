@@ -124,11 +124,26 @@ jobs:
             fi
           done
 
+      - name: Decode release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "已解码发布签名 keystore（用于覆盖更新签名）"
+          else
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64，APK 将用 debug 签名，无法覆盖更新"
+          fi
+
       - name: Build Android Mobile Release APK (arm64-v8a)
         env:
           DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
           DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
           ORG_GRADLE_PROJECT_linplayerTargetAbis: arm64-v8a
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>/dev/null || true
 
@@ -136,9 +151,11 @@ jobs:
           CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r' | paste -sd ',' -)
           VERSION="${{ needs.prepare.outputs.version }}"
 
+          # --build-number 让 versionCode 随 CI run 递增，系统才认作「升级」。
           flutter build apk --release --split-per-abi \
             --flavor mobile \
             --target-platform android-arm64 \
+            --build-number="${{ github.run_number }}" \
             --dart-define=APP_VERSION="$VERSION" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
@@ -246,11 +263,26 @@ jobs:
             fi
           done
 
+      - name: Decode release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+            echo "已解码发布签名 keystore（用于覆盖更新签名）"
+          else
+            echo "::warning::未配置 ANDROID_KEYSTORE_BASE64，APK 将用 debug 签名，无法覆盖更新"
+          fi
+
       - name: Build Android TV Release APK (armeabi-v7a)
         env:
           DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
           DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
           ORG_GRADLE_PROJECT_linplayerTargetAbis: armeabi-v7a
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>/dev/null || true
 
@@ -259,9 +291,11 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
 
           # Android TV release only needs the 32-bit build.
+          # --build-number 让 versionCode 随 CI run 递增，系统才认作「升级」。
           flutter build apk --release --split-per-abi \
             --flavor tv \
             --target-platform android-arm \
+            --build-number="${{ github.run_number }}" \
             --dart-define=FLAVOR=tv \
             --dart-define=APP_VERSION="$VERSION" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
@@ -346,27 +380,35 @@ jobs:
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 
-      - name: Package iOS app bundle
+      - name: Package iOS IPA (unsigned)
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           APP_PATH=$(find build/ios/iphoneos -maxdepth 1 -type d -name "*.app" | head -n 1)
 
           if [ -z "$APP_PATH" ]; then
             echo "No iOS app bundle found in build output"
+            ls -la build/ios/iphoneos || true
             exit 1
           fi
 
           OUTPUT_NAME="LinPlayer-iOS-v$VERSION-unsigned"
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT_NAME.zip"
+          # iOS 安装包是 IPA：本质是含 Payload/ 目录的 zip（Payload/Runner.app）。
+          # 未签名，需自行用证书重签后再安装/侧载。
+          rm -rf Payload "$OUTPUT_NAME.ipa"
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          # -y 保留 .app 内部可能存在的符号链接，确保 bundle 结构完整
+          zip -qry "$OUTPUT_NAME.ipa" Payload
+          rm -rf Payload
 
-          echo "Created: $OUTPUT_NAME.zip"
-          ls -la build/ios/iphoneos
+          echo "Created: $OUTPUT_NAME.ipa"
+          ls -lh "$OUTPUT_NAME.ipa"
 
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-ios
-          path: LinPlayer-iOS-*.zip
+          path: LinPlayer-iOS-*.ipa
           retention-days: 30
 
       - name: Upload build logs

@@ -1,9 +1,25 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// 发布签名：CI 通过环境变量（ANDROID_KEYSTORE_PATH / *_PASSWORD / KEY_ALIAS）提供，
+// 本地通过 android/key.properties 提供。两者都没有时回退 debug 签名（仅供本地调试，
+// debug 签名每台机器不同，无法用于「覆盖更新」）。
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+fun signingProp(envName: String, propName: String): String? =
+    System.getenv(envName) ?: keystoreProperties.getProperty(propName)
+val releaseStorePath = signingProp("ANDROID_KEYSTORE_PATH", "storeFile")
+val hasReleaseSigning = releaseStorePath != null && file(releaseStorePath).exists()
 
 val ciTargetAbis = providers.gradleProperty("linplayerTargetAbis")
     .orNull
@@ -110,9 +126,25 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = file(releaseStorePath!!)
+                storePassword = signingProp("ANDROID_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingProp("ANDROID_KEY_ALIAS", "keyAlias")
+                keyPassword = signingProp("ANDROID_KEY_PASSWORD", "keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            // 有发布签名就用统一发布 key（可覆盖更新）；否则回退 debug（仅本地）。
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

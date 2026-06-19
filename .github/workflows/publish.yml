@@ -55,7 +55,7 @@ jobs:
           EXPECTED=(
             "LinPlayer-Android-Mobile-v$VER-arm64-v8a.apk"
             "LinPlayer-Android-TV-v$VER-armeabi-v7a.apk"
-            "LinPlayer-iOS-v$VER-unsigned.zip"
+            "LinPlayer-iOS-v$VER-unsigned.ipa"
             "LinPlayer-AppleTV-v$VER-unsigned-app.zip"
             "LinPlayer-Windows-v$VER.zip"
             "LinPlayer-Linux-v$VER.tar.gz"
@@ -89,15 +89,15 @@ jobs:
             ### 下载
             - **Android Mobile**：`LinPlayer-Android-Mobile-v${{ steps.resolve.outputs.version }}-arm64-v8a.apk`
             - **Android TV**：`LinPlayer-Android-TV-v${{ steps.resolve.outputs.version }}-armeabi-v7a.apk`
-            - **iOS**：`LinPlayer-iOS-v${{ steps.resolve.outputs.version }}-unsigned.zip`（未签名 .app）
-            - **Apple TV**：`LinPlayer-AppleTV-v${{ steps.resolve.outputs.version }}-unsigned-app.zip`（未签名 .app）
+            - **iOS**：`LinPlayer-iOS-v${{ steps.resolve.outputs.version }}-unsigned.ipa`（未签名 IPA，需自签后安装/侧载）
+            - **Apple TV**：`LinPlayer-AppleTV-v${{ steps.resolve.outputs.version }}-unsigned-app.zip`（未签名 .app 压缩包）
             - **Windows**：`LinPlayer-Windows-v${{ steps.resolve.outputs.version }}.zip`（解压运行）
             - **Linux**：`LinPlayer-Linux-v${{ steps.resolve.outputs.version }}.tar.gz`
-            - **macOS**：`LinPlayer-macOS-v${{ steps.resolve.outputs.version }}.zip`
+            - **macOS**：`LinPlayer-macOS-v${{ steps.resolve.outputs.version }}.zip`（解压得到 .app）
 
             ### 说明
             - Windows/macOS 桌面端内置完整版 libmpv（支持 PGS/SUP 图形字幕）。
-            - iOS / Apple TV 为未签名构建，需自行用证书重签后安装。
+            - iOS 产物为未签名 **IPA**、Apple TV 为未签名 **.app 压缩包**，均需自行用证书重签后安装。
 
       - name: Delete Pre-release
         env:

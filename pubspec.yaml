@@ -47,6 +47,8 @@ dependencies:
   path: ^1.9.0
   uuid: ^4.3.3
   win32: ^5.15.0
+  # 应用内更新：下载 APK 后调起系统安装器（Android/TV 覆盖更新）
+  open_filex: ^4.5.0
   
   # UI增强
   cupertino_icons: ^1.0.6

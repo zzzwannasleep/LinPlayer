@@ -965,12 +965,15 @@ a:hover {
 
 /* =====================================================================
    CODE HIGHLIGHT FIX
+   原则：跟随模式，不要反着来 ——
+     · 浅色模式（本站默认，dark_mode.enable: false）= 浅底 + 深字
+     · 深色模式（将来开启 Fluid 暗色时）= 深底 + 浅字
    开启行号后，Hexo/Fluid 用 figure.highlight > table(td.gutter / td.code)
-   的布局渲染代码块，主题自带的「浅色」高亮底色会盖掉上面 .markdown-body pre
-   的深色，导致浅底 + 近白字（#ffeefb）在浅色模式下完全看不见。
-   这里把整个高亮块强制成深底 + 浅字（即作者本来想要的深色终端观感），
-   并给 highlight.js 词法着色一套适配深底的浅色调色板。
+   渲染代码块，需覆盖上面 .markdown-body pre 的硬编码深底，并统一整块配色。
    ===================================================================== */
+
+/* ---- 浅色模式：浅底 + 深字 ---- */
+.markdown-body pre,
 .markdown-body figure.highlight,
 .markdown-body .highlight,
 .markdown-body figure.highlight table,
@@ -979,13 +982,14 @@ a:hover {
 .markdown-body figure.highlight pre,
 .markdown-body figure.highlight .code,
 .markdown-body figure.highlight .gutter {
-  background: #3a2247 !important;
+  background: #fbf4fb !important; /* 柔和浅紫白 */
 }
+.markdown-body pre,
 .markdown-body figure.highlight {
   border-radius: 5px;
   border: 3px solid;
-  border-color: #6b4d7e #2a1635 #2a1635 #6b4d7e;
-  box-shadow: 0 0 0 3px var(--ring), 0 12px 24px rgba(80, 20, 70, 0.28);
+  border-color: #ffffff #d9b8ea #d9b8ea #ffffff; /* 浅色立体边 */
+  box-shadow: 0 0 0 3px var(--ring), 0 12px 24px rgba(120, 50, 120, 0.18);
   overflow: hidden;
 }
 /* 内层 pre/table 不再叠边框、阴影、圆角，避免双层框 */
@@ -995,28 +999,29 @@ a:hover {
   box-shadow: none !important;
   border-radius: 0 !important;
 }
-/* 代码正文与内联 code（无行号时也会命中） */
+/* 代码正文（覆盖原来的近白字 #ffeefb）：深紫字，浅底上清晰 */
+.markdown-body pre code,
 .markdown-body figure.highlight,
 .markdown-body figure.highlight .code,
 .markdown-body figure.highlight .code pre,
 .markdown-body figure.highlight code {
-  color: #ffeefb !important;
+  color: #4a2356 !important;
 }
-/* 行号列：弱化为可读的浅紫，不抢正文 */
+/* 行号列：弱化为可读的中紫 */
 .markdown-body figure.highlight .gutter,
 .markdown-body figure.highlight .gutter pre {
-  color: rgba(255, 238, 251, 0.45) !important;
+  color: rgba(74, 35, 86, 0.42) !important;
 }
 /* 右上角语言标签（TEXT / JSON …） */
 .markdown-body figure.highlight figcaption,
 .markdown-body figure.highlight figcaption *,
 .markdown-body figure.highlight .caption {
-  color: rgba(255, 238, 251, 0.6) !important;
+  color: rgba(74, 35, 86, 0.55) !important;
 }
-/* highlight.js 词法着色：深底浅字调色板（与像素霓虹风一致的柔和高饱和色） */
+/* highlight.js 词法着色：浅底深字调色板 */
 .markdown-body figure.highlight .hljs-comment,
 .markdown-body figure.highlight .hljs-quote {
-  color: #b79bd0 !important;
+  color: #8a73a0 !important;
   font-style: italic;
 }
 .markdown-body figure.highlight .hljs-keyword,
@@ -1024,27 +1029,77 @@ a:hover {
 .markdown-body figure.highlight .hljs-built_in,
 .markdown-body figure.highlight .hljs-literal,
 .markdown-body figure.highlight .hljs-type {
-  color: #ff9fcb !important;
+  color: #b0228f !important;
 }
 .markdown-body figure.highlight .hljs-string,
 .markdown-body figure.highlight .hljs-attr,
 .markdown-body figure.highlight .hljs-attribute,
 .markdown-body figure.highlight .hljs-meta-string {
-  color: #b7e88f !important;
+  color: #2e7d32 !important;
 }
 .markdown-body figure.highlight .hljs-number,
 .markdown-body figure.highlight .hljs-symbol,
 .markdown-body figure.highlight .hljs-bullet {
-  color: #ffcf8b !important;
+  color: #b3521a !important;
 }
 .markdown-body figure.highlight .hljs-title,
 .markdown-body figure.highlight .hljs-section,
 .markdown-body figure.highlight .hljs-name,
 .markdown-body figure.highlight .hljs-selector-id,
 .markdown-body figure.highlight .hljs-selector-class {
-  color: #8fd3ff !important;
+  color: #1d6fb8 !important;
 }
 .markdown-body figure.highlight .hljs-meta,
 .markdown-body figure.highlight .hljs-tag {
-  color: #c9b6e0 !important;
+  color: #6a4d8a !important;
+}
+
+/* ---- 深色模式：深底 + 浅字（Fluid 暗色作用域，现 dark_mode 关闭则不生效）---- */
+html[data-user-color-scheme="dark"] .markdown-body pre,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight,
+html[data-user-color-scheme="dark"] .markdown-body .highlight,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight table,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight tr,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight td,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight pre,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .code,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .gutter {
+  background: #3a2247 !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body pre,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight {
+  border-color: #6b4d7e #2a1635 #2a1635 #6b4d7e;
+}
+html[data-user-color-scheme="dark"] .markdown-body pre code,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .code,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .code pre,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight code {
+  color: #ffeefb !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .gutter,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .gutter pre {
+  color: rgba(255, 238, 251, 0.45) !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-comment,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-quote {
+  color: #b79bd0 !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-keyword,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-built_in,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-literal,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-type {
+  color: #ff9fcb !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-string,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-attr {
+  color: #b7e88f !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-number,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-symbol {
+  color: #ffcf8b !important;
+}
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-title,
+html[data-user-color-scheme="dark"] .markdown-body figure.highlight .hljs-name {
+  color: #8fd3ff !important;
 }

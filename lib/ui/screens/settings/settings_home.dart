@@ -69,6 +69,12 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _checkUpdate(context, ref),
           ),
           _SettingsCard(
+            icon: Icons.alt_route,
+            title: '更新渠道',
+            subtitle: updateChannelLabel(ref.watch(updateChannelProvider)),
+            onTap: () => _pickUpdateChannel(context, ref),
+          ),
+          _SettingsCard(
             icon: Icons.info,
             title: '关于',
             subtitle: '版本、开源许可、致谢',
@@ -198,13 +204,47 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _pickUpdateChannel(BuildContext context, WidgetRef ref) async {
+    final current = ref.read(updateChannelProvider);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('更新渠道'),
+        content: RadioGroup<UpdateChannel>(
+          groupValue: current,
+          onChanged: (value) {
+            if (value != null) {
+              ref.read(updateChannelProvider.notifier).state = value;
+            }
+            Navigator.pop(ctx);
+          },
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<UpdateChannel>(
+                title: Text('稳定版（latest）'),
+                subtitle: Text('只接收正式发布，最稳定'),
+                value: UpdateChannel.stable,
+              ),
+              RadioListTile<UpdateChannel>(
+                title: Text('预览版（pre-release）'),
+                subtitle: Text('尝鲜，含预发布版本，可能有不稳定'),
+                value: UpdateChannel.prerelease,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _checkUpdate(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('正在检查更新…')));
-    final includePre = ref.read(updateIncludePrereleaseProvider);
-    final info = await ref
-        .read(appUpdateServiceProvider)
-        .checkForUpdate(includePrerelease: includePre);
+    final channel = ref.read(updateChannelProvider);
+    final info = await ref.read(appUpdateServiceProvider).checkForUpdate(
+          includePrerelease: channel == UpdateChannel.prerelease,
+        );
     if (!context.mounted) return;
     if (info == null) {
       messenger.showSnackBar(

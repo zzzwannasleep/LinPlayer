@@ -5,11 +5,29 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 
 /// 播放选项组件（线路/版本/音频/字幕/次字幕）
-class PlaybackOptions extends ConsumerWidget {
+///
+/// 选择项不再从底部弹出，而是顺着对应的选择栏就地展开，
+/// 列表内嵌在页面滚动里，版本再多（十几个单集版本）也能完整展示。
+class PlaybackOptions extends ConsumerStatefulWidget {
   final String itemId;
   final PlaybackInfo info;
 
   const PlaybackOptions({super.key, required this.itemId, required this.info});
+
+  @override
+  ConsumerState<PlaybackOptions> createState() => _PlaybackOptionsState();
+}
+
+class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
+  /// 当前展开的栏目（同一时间只展开一个），null 表示全部收起。
+  String? _expanded;
+
+  String get itemId => widget.itemId;
+  PlaybackInfo get info => widget.info;
+
+  void _toggle(String key) {
+    setState(() => _expanded = _expanded == key ? null : key);
+  }
 
   MediaSource? _resolveMediaSource(
       PlaybackInfo info, String? selectedSourceId) {
@@ -43,7 +61,7 @@ class PlaybackOptions extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final server = ref.watch(currentServerProvider);
     final selectedLineIndex = server?.activeLineIndex ?? 0;
     final selectedAudioIndex = ref.watch(audioTrackProvider);
@@ -110,348 +128,450 @@ class PlaybackOptions extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildDropdownTile(
-            context,
+          _buildSection(
+            sectionKey: 'line',
             icon: Icons.route,
             title: '线路选择',
             value: currentLine?.name ?? '当前线路',
-            onTap: () => _showLineSelector(context, ref),
+            options: _buildLineOptions,
           ),
           if (info.mediaSources.length > 1)
-            _buildDropdownTile(
-              context,
+            _buildSection(
+              sectionKey: 'version',
               icon: Icons.layers,
               title: '版本选择',
-              value: mediaSource.name ?? '默认',
-              onTap: () =>
-                  _showSourceSelector(context, ref, info, mediaSource.id),
+              value: _sourceTitle(mediaSource),
+              options: () => _buildVersionOptions(mediaSource.id),
             ),
-          _buildDropdownTile(
-            context,
+          _buildSection(
+            sectionKey: 'audio',
             icon: Icons.audiotrack,
             title: '音频选择',
-            value: selectedAudio?.displayTitle ?? '默认音轨',
-            onTap: () =>
-                _showStreamSelector(context, ref, audioStreams, 'Audio'),
+            value: selectedAudio == null
+                ? '默认音轨'
+                : selectedAudio.readableLabel(siblings: audioStreams),
+            options: () => _buildAudioOptions(audioStreams),
           ),
-          Consumer(
-            builder: (context, ref, _) {
-              final selectedSubtitleIndex = ref.watch(subtitleTrackProvider);
-              final selectedSubtitle = _resolveSelectedStream(
-                  subtitleStreams, selectedSubtitleIndex);
-              return _buildDropdownTile(
-                context,
-                icon: Icons.subtitles,
-                title: '字幕选择',
-                value: selectedSubtitle?.displayTitle ?? '无字幕',
-                onTap: () => _showStreamSelector(
-                    context, ref, subtitleStreams, 'Subtitle'),
-              );
-            },
+          _buildSection(
+            sectionKey: 'subtitle',
+            icon: Icons.subtitles,
+            title: '字幕选择',
+            value: selectedSubtitle == null
+                ? '无字幕'
+                : selectedSubtitle.readableLabel(siblings: subtitleStreams),
+            options: () => _buildSubtitleOptions(subtitleStreams),
           ),
-          _buildDropdownTile(
-            context,
+          _buildSection(
+            sectionKey: 'secondary',
             icon: Icons.subtitles_outlined,
             title: '次字幕选择',
-            value: selectedSecondarySubtitle?.displayTitle ?? '无',
-            onTap: () => _showSecondarySubtitleSelector(
-                context, ref, availableSecondarySubs),
+            value: selectedSecondarySubtitle == null
+                ? '无'
+                : selectedSecondarySubtitle.readableLabel(
+                    siblings: availableSecondarySubs),
+            options: () => _buildSecondarySubtitleOptions(availableSecondarySubs),
           ),
         ],
       ),
     );
   }
 
-  void _showLineSelector(BuildContext context, WidgetRef ref) {
-    final server = ref.read(currentServerProvider);
-    if (server == null) return;
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Consumer(
-        builder: (context, ref, _) {
-          final currentServer = ref.watch(currentServerProvider) ?? server;
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text(
-                    '选择线路',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const Divider(height: 1),
-                ...currentServer.lines.asMap().entries.map((entry) {
-                  final idx = entry.key;
-                  final line = entry.value;
-                  return ListTile(
-                    title: Text(line.name),
-                    trailing: idx == currentServer.activeLineIndex
-                        ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                        : null,
-                    onTap: () {
-                      ref
-                          .read(serverListProvider.notifier)
-                          .setActiveLine(currentServer.id, idx);
-                      final updatedServer = ref
-                          .read(serverListProvider)
-                          .firstWhere((s) => s.id == currentServer.id);
-                      ref.read(currentServerProvider.notifier).state =
-                          updatedServer;
-                      ref.read(selectedMediaSourceProvider.notifier).state =
-                          null;
-                      ref.read(audioTrackProvider.notifier).state = null;
-                      ref.read(subtitleTrackProvider.notifier).state = null;
-                      ref.read(secondarySubtitleTrackProvider.notifier).state =
-                          null;
-                      ref.invalidate(playbackInfoProvider(itemId));
-                      Navigator.pop(ctx);
-                    },
-                  );
-                }),
-              ],
-            ),
-          );
+  // ---------------------------------------------------------------------------
+  // 各栏目展开后的选项列表
+  // ---------------------------------------------------------------------------
+
+  List<Widget> _buildLineOptions() {
+    final server = ref.watch(currentServerProvider);
+    if (server == null || server.lines.isEmpty) {
+      return const [_EmptyOption(text: '无可用线路')];
+    }
+    return server.lines.asMap().entries.map((entry) {
+      final idx = entry.key;
+      final line = entry.value;
+      return _OptionRow(
+        title: line.name,
+        subtitle: '',
+        selected: idx == server.activeLineIndex,
+        onTap: () {
+          ref
+              .read(serverListProvider.notifier)
+              .setActiveLine(server.id, idx);
+          final updatedServer = ref
+              .read(serverListProvider)
+              .firstWhere((s) => s.id == server.id);
+          ref.read(currentServerProvider.notifier).state = updatedServer;
+          ref.read(selectedMediaSourceProvider.notifier).state = null;
+          ref.read(audioTrackProvider.notifier).state = null;
+          ref.read(subtitleTrackProvider.notifier).state = null;
+          ref.read(secondarySubtitleTrackProvider.notifier).state = null;
+          ref.invalidate(playbackInfoProvider(itemId));
+          setState(() => _expanded = null);
         },
-      ),
-    );
+      );
+    }).toList();
   }
 
-  void _showSourceSelector(BuildContext context, WidgetRef ref,
-      PlaybackInfo info, String currentSourceId) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Consumer(
-        builder: (context, ref, _) {
-          final selectedSourceId =
-              ref.watch(selectedMediaSourceProvider) ?? currentSourceId;
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text(
-                    '选择版本',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const Divider(height: 1),
-                ...info.mediaSources.map((source) {
-                  return ListTile(
-                    title: Text(source.name ?? '默认'),
-                    subtitle: Text(source.container ?? ''),
-                    trailing: source.id == selectedSourceId
-                        ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                        : null,
-                    onTap: () {
-                      ref.read(selectedMediaSourceProvider.notifier).state =
-                          source.id;
-                      ref.read(audioTrackProvider.notifier).state = null;
-                      ref.read(subtitleTrackProvider.notifier).state = null;
-                      ref.read(secondarySubtitleTrackProvider.notifier).state =
-                          null;
-                      Navigator.pop(ctx);
-                    },
-                  );
-                }),
-              ],
-            ),
-          );
+  List<Widget> _buildVersionOptions(String currentSourceId) {
+    final selectedSourceId =
+        ref.watch(selectedMediaSourceProvider) ?? currentSourceId;
+    return info.mediaSources.map((source) {
+      return _OptionRow(
+        title: _sourceTitle(source),
+        subtitle: _sourceSummary(source),
+        selected: source.id == selectedSourceId,
+        onTap: () {
+          ref.read(selectedMediaSourceProvider.notifier).state = source.id;
+          ref.read(audioTrackProvider.notifier).state = null;
+          ref.read(subtitleTrackProvider.notifier).state = null;
+          ref.read(secondarySubtitleTrackProvider.notifier).state = null;
+          setState(() => _expanded = null);
         },
-      ),
-    );
+      );
+    }).toList();
   }
 
-  void _showStreamSelector(BuildContext context, WidgetRef ref,
-      List<MediaStream> streams, String type) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Consumer(
-        builder: (context, ref, _) {
-          final currentIndex = type == 'Audio'
-              ? ref.watch(audioTrackProvider)
-              : ref.watch(subtitleTrackProvider);
-          final secondaryIndex = ref.watch(secondarySubtitleTrackProvider);
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Text(
-                        type == 'Audio' ? '选择音频轨道' : '选择字幕轨道',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                if (streams.isEmpty)
-                  const ListTile(title: Text('无可用轨道'))
-                else
-                  ...streams.map((stream) {
-                    final isSelected = currentIndex == stream.index;
-                    return ListTile(
-                      title: Text(stream.readableLabel(siblings: streams)),
-                      subtitle: stream.codec != null
-                          ? Text('编码: ${stream.codec}')
-                          : null,
-                      trailing: isSelected
-                          ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                          : null,
-                      onTap: () {
-                        if (type == 'Audio') {
-                          ref.read(audioTrackProvider.notifier).state =
-                              stream.index;
-                        } else {
-                          ref.read(subtitleTrackProvider.notifier).state =
-                              stream.index;
-                          if (secondaryIndex == stream.index) {
-                            ref
-                                .read(secondarySubtitleTrackProvider.notifier)
-                                .state = null;
-                          }
-                        }
-                        Navigator.pop(ctx);
-                      },
-                    );
-                  }),
-              ],
-            ),
-          );
+  List<Widget> _buildAudioOptions(List<MediaStream> streams) {
+    if (streams.isEmpty) {
+      return const [_EmptyOption(text: '无可用音轨')];
+    }
+    final currentIndex = ref.watch(audioTrackProvider);
+    return streams.map((stream) {
+      return _OptionRow(
+        title: stream.readableLabel(siblings: streams),
+        subtitle: _audioSummary(stream),
+        selected: currentIndex == stream.index,
+        onTap: () {
+          ref.read(audioTrackProvider.notifier).state = stream.index;
+          setState(() => _expanded = null);
         },
-      ),
-    );
+      );
+    }).toList();
   }
 
-  void _showSecondarySubtitleSelector(
-      BuildContext context, WidgetRef ref, List<MediaStream> streams) {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => Consumer(
-        builder: (context, ref, _) {
-          final secondaryIndex = ref.watch(secondarySubtitleTrackProvider);
-          return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      const Text(
-                        '选择次字幕轨道',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.w700),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  title: const Text('关闭次字幕'),
-                  trailing: secondaryIndex == null
-                      ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                      : null,
-                  onTap: () {
-                    ref.read(secondarySubtitleTrackProvider.notifier).state =
-                        null;
-                    Navigator.pop(ctx);
-                  },
-                ),
-                const Divider(height: 1),
-                if (streams.isEmpty)
-                  const ListTile(title: Text('无可用轨道'))
-                else
-                  ...streams.map((stream) {
-                    final isSelected = secondaryIndex == stream.index;
-                    return ListTile(
-                      title: Text(stream.readableLabel(siblings: streams)),
-                      subtitle: stream.codec != null
-                          ? Text('编码: ${stream.codec}')
-                          : null,
-                      trailing: isSelected
-                          ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                          : null,
-                      onTap: () {
-                        ref
-                            .read(secondarySubtitleTrackProvider.notifier)
-                            .state = stream.index;
-                        Navigator.pop(ctx);
-                      },
-                    );
-                  }),
-              ],
-            ),
-          );
+  List<Widget> _buildSubtitleOptions(List<MediaStream> streams) {
+    final currentIndex = ref.watch(subtitleTrackProvider);
+    final secondaryIndex = ref.watch(secondarySubtitleTrackProvider);
+    final rows = <Widget>[
+      _OptionRow(
+        title: '无字幕',
+        subtitle: '',
+        selected: currentIndex == null,
+        onTap: () {
+          ref.read(subtitleTrackProvider.notifier).state = null;
+          setState(() => _expanded = null);
         },
       ),
-    );
+    ];
+    if (streams.isEmpty) {
+      rows.add(const _EmptyOption(text: '无可用字幕'));
+      return rows;
+    }
+    rows.addAll(streams.map((stream) {
+      return _OptionRow(
+        title: stream.readableLabel(siblings: streams),
+        subtitle: _subtitleSummary(stream),
+        selected: currentIndex == stream.index,
+        onTap: () {
+          ref.read(subtitleTrackProvider.notifier).state = stream.index;
+          if (secondaryIndex == stream.index) {
+            ref.read(secondarySubtitleTrackProvider.notifier).state = null;
+          }
+          setState(() => _expanded = null);
+        },
+      );
+    }));
+    return rows;
   }
 
-  Widget _buildDropdownTile(
-    BuildContext context, {
+  List<Widget> _buildSecondarySubtitleOptions(List<MediaStream> streams) {
+    final secondaryIndex = ref.watch(secondarySubtitleTrackProvider);
+    final rows = <Widget>[
+      _OptionRow(
+        title: '关闭次字幕',
+        subtitle: '',
+        selected: secondaryIndex == null,
+        onTap: () {
+          ref.read(secondarySubtitleTrackProvider.notifier).state = null;
+          setState(() => _expanded = null);
+        },
+      ),
+    ];
+    if (streams.isEmpty) {
+      rows.add(const _EmptyOption(text: '无可用次字幕'));
+      return rows;
+    }
+    rows.addAll(streams.map((stream) {
+      return _OptionRow(
+        title: stream.readableLabel(siblings: streams),
+        subtitle: _subtitleSummary(stream),
+        selected: secondaryIndex == stream.index,
+        onTap: () {
+          ref.read(secondarySubtitleTrackProvider.notifier).state =
+              stream.index;
+          setState(() => _expanded = null);
+        },
+      );
+    }));
+    return rows;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 展开式选择栏外壳
+  // ---------------------------------------------------------------------------
+
+  Widget _buildSection({
+    required String sectionKey,
     required IconData icon,
     required String title,
     required String value,
-    required VoidCallback onTap,
+    required List<Widget> Function() options,
   }) {
+    final expanded = _expanded == sectionKey;
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Icon(icon, size: 24),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // 第一行：选项名称（放大字体）
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => _toggle(sectionKey),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Icon(icon, size: 24),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // 第一行：选项名称（放大字体）
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        // 第二行：当前选中内容（缩小字体）
+                        Text(
+                          value,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color:
+                                Theme.of(context).textTheme.bodySmall?.color,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
+                  ),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.arrow_drop_down, size: 24),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeInOut,
+            alignment: Alignment.topCenter,
+            child: expanded
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Divider(height: 1),
+                      ...options(),
+                    ],
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // 文案格式化
+  // ---------------------------------------------------------------------------
+
+  /// 版本标题：取 mediaSource 文件名，去掉容器后缀。
+  static String _sourceTitle(MediaSource source) {
+    final name = source.name?.trim();
+    if (name != null && name.isNotEmpty) return _stripExtension(name);
+    final path = source.path?.trim();
+    if (path != null && path.isNotEmpty) {
+      final seg = path.split(RegExp(r'[\\/]')).last;
+      if (seg.isNotEmpty) return _stripExtension(seg);
+    }
+    return '默认版本';
+  }
+
+  /// 版本副标题：清晰度 / 码率 / 大小 / 容器格式。
+  static String _sourceSummary(MediaSource source) {
+    final video = source.mediaStreams.where((s) => s.isVideo).firstOrNull;
+    final parts = <String>[];
+    final res = video?.resolution ?? '';
+    if (res.isNotEmpty) parts.add(res);
+
+    int? bitrate = video?.bitRate;
+    if ((bitrate == null || bitrate <= 0) &&
+        source.size != null &&
+        source.runTimeTicks != null &&
+        source.runTimeTicks! > 0) {
+      // ticks 为 100ns 单位：10,000,000 ticks = 1 秒
+      final seconds = source.runTimeTicks! / 10000000;
+      if (seconds > 0) {
+        bitrate = (source.size! * 8 / seconds).round();
+      }
+    }
+    final br = _formatBitrate(bitrate);
+    if (br.isNotEmpty) parts.add(br);
+
+    final size = _formatSize(source.size);
+    if (size.isNotEmpty) parts.add(size);
+
+    final container = source.container?.trim();
+    if (container != null && container.isNotEmpty) {
+      parts.add(container.toUpperCase());
+    }
+    return parts.join(' / ');
+  }
+
+  /// 音频副标题：编码 / 声道 / 码率 / 内封·外挂。
+  static String _audioSummary(MediaStream s) {
+    final parts = <String>[];
+    final codec = s.codec?.trim();
+    if (codec != null && codec.isNotEmpty) parts.add(codec.toUpperCase());
+    if (s.channels != null && s.channels! > 0) parts.add('${s.channels}声道');
+    final br = _formatBitrate(s.bitRate);
+    if (br.isNotEmpty) parts.add(br);
+    parts.add(s.isExternal == true ? '外挂' : '内封');
+    return parts.join(' / ');
+  }
+
+  /// 字幕副标题：编码 / 内封·外挂。
+  static String _subtitleSummary(MediaStream s) {
+    final parts = <String>[];
+    final codec = s.codec?.trim();
+    if (codec != null && codec.isNotEmpty) parts.add(codec.toUpperCase());
+    parts.add(s.isExternal == true ? '外挂' : '内封');
+    return parts.join(' / ');
+  }
+
+  static const _containerExtensions = {
+    'mkv', 'mp4', 'avi', 'ts', 'm2ts', 'mov', 'flv', 'wmv', 'webm',
+    'rmvb', 'rm', 'm4v', 'mpg', 'mpeg', 'iso', 'vob', '3gp', 'ogm',
+  };
+
+  static String _stripExtension(String name) {
+    final dot = name.lastIndexOf('.');
+    if (dot <= 0 || dot == name.length - 1) return name;
+    final ext = name.substring(dot + 1).toLowerCase();
+    // 仅去掉已知容器后缀，避免误删形如 "S01.1080p" 这类名称里的小数点段
+    if (_containerExtensions.contains(ext)) return name.substring(0, dot);
+    return name;
+  }
+
+  static String _formatSize(int? bytes) {
+    if (bytes == null || bytes <= 0) return '';
+    const gb = 1024 * 1024 * 1024;
+    const mb = 1024 * 1024;
+    if (bytes >= gb) return '${(bytes / gb).toStringAsFixed(2)} GB';
+    return '${(bytes / mb).toStringAsFixed(0)} MB';
+  }
+
+  static String _formatBitrate(int? bps) {
+    if (bps == null || bps <= 0) return '';
+    final mbps = bps / 1000000;
+    if (mbps >= 1) return '${mbps.toStringAsFixed(1)} Mbps';
+    return '${(bps / 1000).toStringAsFixed(0)} Kbps';
+  }
+}
+
+/// 展开后的单个可选项：第一行加粗放大，第二行简略信息缩小。
+class _OptionRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _OptionRow({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+  });
+
+  static const _accent = Color(0xFF5B8DEF);
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 第一行：文件名（无后缀）/ 轨道名，加粗稍大
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? _accent : null,
+                    ),
+                  ),
+                  if (subtitle.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    // 第二行：选项内容（缩小字体）
+                    // 第二行：清晰度 / 码率 / 大小 / 容器，正常稍小
                     Text(
-                      value,
+                      subtitle,
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         color: Theme.of(context).textTheme.bodySmall?.color,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
-                ),
+                ],
               ),
-              const Icon(Icons.arrow_drop_down, size: 24),
+            ),
+            if (selected) ...[
+              const SizedBox(width: 12),
+              const Icon(Icons.check, color: _accent, size: 20),
             ],
-          ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyOption extends StatelessWidget {
+  final String text;
+  const _EmptyOption({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 13,
+          color: Theme.of(context).textTheme.bodySmall?.color,
         ),
       ),
     );

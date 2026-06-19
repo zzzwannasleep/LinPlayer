@@ -9,8 +9,10 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/app_identity.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/providers/update_providers.dart';
 import '../../../core/services/app_logger.dart';
 import '../../../core/services/font_service.dart';
+import '../../../ui/widgets/common/app_update_gate.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/translation/subtitle_document.dart';
 import '../../../core/providers/proxy_providers.dart';
@@ -708,6 +710,23 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     return _settingsList(m, '关于', [
       _staticItem(m, title: '应用', subtitle: 'LinPlayer for TV'),
       _staticItem(m, title: '版本', subtitle: kAppVersion),
+      _choiceItem<UpdateChannel>(
+        m,
+        title: '更新渠道',
+        current: ref.watch(updateChannelProvider),
+        labelOf: updateChannelLabel,
+        options: const [
+          MapEntry('稳定版（latest）', UpdateChannel.stable),
+          MapEntry('预览版（pre-release）', UpdateChannel.prerelease),
+        ],
+        onPick: (v) => ref.read(updateChannelProvider.notifier).state = v,
+      ),
+      _actionItem(
+        m,
+        title: '检查更新',
+        subtitle: '当前 $kAppVersion · 启动与每 24 小时自动检查',
+        onTap: _checkUpdateTv,
+      ),
       _actionItem(
         m,
         title: '导出日志',
@@ -731,6 +750,21 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     } catch (e) {
       if (mounted) TvToast.show(context, '导出日志失败: $e');
     }
+  }
+
+  Future<void> _checkUpdateTv() async {
+    TvToast.show(context, '正在检查更新…');
+    final channel = ref.read(updateChannelProvider);
+    final info = await ref.read(appUpdateServiceProvider).checkForUpdate(
+          includePrerelease: channel == UpdateChannel.prerelease,
+        );
+    if (!mounted) return;
+    if (info == null) {
+      TvToast.show(context, '已是最新版本（$kAppVersion）');
+      return;
+    }
+    ref.read(availableUpdateProvider.notifier).state = info;
+    await showUpdateDialog(context, info);
   }
 
   // ============ 复用控件 ============

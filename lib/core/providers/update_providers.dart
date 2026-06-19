@@ -15,14 +15,32 @@ final updateAutoCheckProvider =
   );
 });
 
-/// 是否把预发布(pre)也纳入更新检查（默认仅稳定版）。
-final updateIncludePrereleaseProvider =
-    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
-  return PreferenceNotifier<bool>(
-    defaultValue: false,
-    readValue: (prefs) => prefs.getBool('linplayer_update_include_pre'),
+/// 更新渠道：稳定版（GitHub latest 正式发布）/ 预览版（含 *-pre 预发布）。
+enum UpdateChannel { stable, prerelease }
+
+UpdateChannel parseUpdateChannel(String? value) =>
+    value == 'prerelease' ? UpdateChannel.prerelease : UpdateChannel.stable;
+
+String updateChannelLabel(UpdateChannel c) =>
+    c == UpdateChannel.prerelease ? '预览版（pre-release）' : '稳定版（latest）';
+
+/// 当前更新渠道偏好。默认稳定版；兼容迁移旧的 include_pre 布尔开关。
+final updateChannelProvider =
+    StateNotifierProvider<PreferenceNotifier<UpdateChannel>, UpdateChannel>(
+        (ref) {
+  return PreferenceNotifier<UpdateChannel>(
+    defaultValue: UpdateChannel.stable,
+    readValue: (prefs) {
+      final raw = prefs.getString('linplayer_update_channel');
+      if (raw != null) return parseUpdateChannel(raw);
+      // 迁移：旧版本用 bool 记录是否含预发布。
+      if (prefs.getBool('linplayer_update_include_pre') == true) {
+        return UpdateChannel.prerelease;
+      }
+      return null; // 走 defaultValue（稳定版）
+    },
     writeValue: (prefs, value) async {
-      await prefs.setBool('linplayer_update_include_pre', value);
+      await prefs.setString('linplayer_update_channel', value.name);
     },
   );
 });

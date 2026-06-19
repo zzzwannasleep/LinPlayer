@@ -6,6 +6,7 @@ import 'package:macos_ui/macos_ui.dart' as macos;
 import '../core/providers/app_providers.dart';
 import '../core/services/font_service.dart';
 import '../core/theme/app_theme.dart';
+import '../ui/widgets/common/app_update_gate.dart';
 import 'platform/desktop_ui_style.dart';
 import 'routes/desktop_router.dart';
 import 'shell/desktop_nav_model.dart';
@@ -105,7 +106,9 @@ Widget _wrapContent({
       child: ScaffoldMessenger(
         child: ScrollConfiguration(
           behavior: const _DesktopAppScrollBehavior(),
-          child: DesktopShortcutsWrapper(child: content),
+          child: DesktopShortcutsWrapper(
+            child: AppUpdateGate(child: content),
+          ),
         ),
       ),
     ),
@@ -218,23 +221,26 @@ class _MaterialDesktopApp extends ConsumerWidget {
       builder: (context, child) {
         final brightness = Theme.of(context).brightness;
         return DesktopShortcutsWrapper(
-          child: Column(
-            children: [
-              // 沉浸模式（播放页全屏）下隐藏自绘标题栏，实现真正全屏。
-              Consumer(
-                builder: (context, ref, _) {
-                  if (ref.watch(desktopImmersiveModeProvider)) {
-                    return const SizedBox.shrink();
-                  }
-                  return AppTitleBar(
-                    brightness: brightness,
-                    backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-                    leading: _SidebarToggleButton(brightness: brightness),
-                  );
-                },
-              ),
-              Expanded(child: child!),
-            ],
+          child: AppUpdateGate(
+            child: Column(
+              children: [
+                // 沉浸模式（播放页全屏）下隐藏自绘标题栏，实现真正全屏。
+                Consumer(
+                  builder: (context, ref, _) {
+                    if (ref.watch(desktopImmersiveModeProvider)) {
+                      return const SizedBox.shrink();
+                    }
+                    return AppTitleBar(
+                      brightness: brightness,
+                      backgroundColor:
+                          Theme.of(context).scaffoldBackgroundColor,
+                      leading: _SidebarToggleButton(brightness: brightness),
+                    );
+                  },
+                ),
+                Expanded(child: child!),
+              ],
+            ),
           ),
         );
       },
