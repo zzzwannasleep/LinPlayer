@@ -1356,23 +1356,47 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       ),
                     if (_playerService.hasError)
                       Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.error_outline,
-                                color: Colors.white, size: 48),
-                            const SizedBox(height: 16),
-                            Text(
-                              '播放失败: ${_playerService.errorMessage}',
-                              style: const TextStyle(color: Colors.white),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton(
-                              onPressed: _initializePlayer,
-                              child: const Text('重试'),
-                            ),
-                          ],
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 420),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline,
+                                  color: Colors.white, size: 48),
+                              const SizedBox(height: 16),
+                              Text(
+                                friendlyPlaybackError(
+                                    _playerService.errorMessage),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                kPlaybackErrorFeedbackHint,
+                                style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.65),
+                                    fontSize: 11.5,
+                                    height: 1.6),
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 6),
+                              const SelectableText(
+                                kFeedbackChannelUrl,
+                                style: TextStyle(
+                                    color: Color(0xFF5B8DEF),
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton(
+                                onPressed: _initializePlayer,
+                                child: const Text('重试'),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     if (_playerService.isDragging &&

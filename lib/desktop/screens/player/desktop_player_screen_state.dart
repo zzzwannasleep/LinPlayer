@@ -51,6 +51,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   bool _suppressTrackSelectionListeners = false;
   bool _hasUserTouchedSubtitleSelection = false;
   bool _subtitleBootstrapInFlight = false;
+  // 初始化阶段（拉取 PlaybackInfo / 元数据）失败信息。播放器适配器尚未创建时
+  // _playerService.hasError 不会置位，需用它把网络超时等错误显示给用户。
+  String? _initErrorMessage;
 
   @override
   void initState() {
@@ -192,6 +195,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     if (_initializingPlayer) return;
     _initializingPlayer = true;
     _hasUserTouchedSubtitleSelection = false;
+    _initErrorMessage = null;
     final api = ref.read(apiClientProvider);
     List<MediaStream> deferredSubtitleStreams = const <MediaStream>[];
     try {
@@ -390,6 +394,15 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       }
 
       _startHideControlsTimer();
+    } catch (e, st) {
+      // 拉取 PlaybackInfo / 元数据失败（如服务器连接超时）。在适配器创建前抛出时，
+      // _playerService 不会进入错误态，必须在此兜底显示错误，否则页面会停在 loading 且
+      // 异常变成未捕获的异步错误。原始错误仅写日志（供导出反馈），界面只显示安全文案。
+      AppLogger().eWithStack(
+          'DesktopPlayer', '播放初始化失败: ${widget.itemId}', e, st);
+      if (mounted) {
+        _initErrorMessage = e.toString();
+      }
     } finally {
       _initializingPlayer = false;
       if (mounted) {
@@ -2621,6 +2634,14 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // 先取消所有定时器/订阅，确保即便后续 ref 调用抛错也不会留下仍在运行的
+    // 周期定时器（它们会在半销毁状态下继续 ref.read 触发连环崩溃）。
+    _cancelHideControlsTimer();
+    _skipButtonTimer?.cancel();
+    _speedLongPressTimer?.cancel();
+    _volumeSliderTimer?.cancel();
+    _statsRefreshTimer?.cancel();
+    _uiRefreshTimer?.cancel();
     // 离开播放页时退出全屏并恢复标题栏，避免窗口停在无边框全屏、标题栏却消失的状态。
     if (_isFullscreen) {
       if (Platform.isWindows) {
@@ -2630,13 +2651,12 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
         windowManager.setFullScreen(false);
       }
     }
-    ref.read(desktopImmersiveModeProvider.notifier).state = false;
-    _cancelHideControlsTimer();
-    _skipButtonTimer?.cancel();
-    _speedLongPressTimer?.cancel();
-    _volumeSliderTimer?.cancel();
-    _statsRefreshTimer?.cancel();
-    _uiRefreshTimer?.cancel();
+    // 整棵路由子树被销毁时 ProviderScope 可能已先行 dispose，此处 ref 访问会抛
+    // "Cannot use ref after the widget was disposed"。用 try/catch 包裹，避免 dispose
+    // 中途抛错导致 super.dispose() 不被调用、State 停留在半销毁的僵尸态。
+    try {
+      ref.read(desktopImmersiveModeProvider.notifier).state = false;
+    } catch (_) {}
     _whisperController?.stop();
     _streamTranslator?.dispose();
     _introSkip.dispose();
@@ -3005,26 +3025,50 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
                     ),
                   ),
 
-                // 错误显示
-                if (_playerService.hasError)
+                // 错误显示：只展示安全文案，绝不回显含播放地址的原始报错。
+                if (_playerService.hasError || _initErrorMessage != null)
                   Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.error_outline,
-                            color: Colors.white, size: 48),
-                        const SizedBox(height: 16),
-                        Text(
-                          '播放失败: ${_playerService.errorMessage}',
-                          style: const TextStyle(color: Colors.white),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: _initializePlayer,
-                          child: const Text('重试'),
-                        ),
-                      ],
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline,
+                              color: Colors.white, size: 48),
+                          const SizedBox(height: 16),
+                          Text(
+                            friendlyPlaybackError(
+                                _initErrorMessage ?? _playerService.errorMessage),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            kPlaybackErrorFeedbackHint,
+                            style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.65),
+                                fontSize: 12,
+                                height: 1.6),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 6),
+                          const SelectableText(
+                            kFeedbackChannelUrl,
+                            style: TextStyle(
+                                color: Color(0xFF5B8DEF),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _initializePlayer,
+                            child: const Text('重试'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
 

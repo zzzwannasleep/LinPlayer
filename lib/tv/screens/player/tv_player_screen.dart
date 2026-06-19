@@ -18,7 +18,9 @@ import '../../../core/services/translation/streaming_subtitle_translator.dart';
 import '../../../core/services/intro_skip_controller.dart';
 import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/services/translation/translation_engine.dart';
+import '../../../core/services/app_logger.dart';
 import '../../../core/services/video_player_service.dart';
+import '../../../core/utils/playback_error_text.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
@@ -351,8 +353,10 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         _scheduleHide();
       }
       await _loadSubtitles(preferredSubtitleLanguage, useLibass);
-    } catch (e) {
-      if (mounted) setState(() => _error = '播放失败：$e');
+    } catch (e, st) {
+      // 原始错误（可能含播放地址/api_key）只写日志供导出反馈，界面只显示安全文案。
+      AppLogger().eWithStack('TvPlayer', '播放失败', e, st);
+      if (mounted) setState(() => _error = e.toString());
     }
   }
 
@@ -985,21 +989,45 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
 
   Widget _buildError(TvMetrics m) {
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline,
-              color: TvDesignTokens.error, size: m.s(64)),
-          SizedBox(height: m.spacingLg),
-          Text(
-            _error ?? '播放失败',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: m.fontSizeMd,
-              color: TvDesignTokens.textPrimary,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: m.s(640)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline,
+                color: TvDesignTokens.error, size: m.s(64)),
+            SizedBox(height: m.spacingLg),
+            Text(
+              friendlyPlaybackError(_error),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: m.fontSizeLg,
+                color: TvDesignTokens.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          ),
-        ],
+            SizedBox(height: m.spacingMd),
+            Text(
+              kPlaybackErrorFeedbackHint,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: m.fontSizeSm,
+                color: TvDesignTokens.textSecondary,
+                height: 1.6,
+              ),
+            ),
+            SizedBox(height: m.spacingXs),
+            Text(
+              kFeedbackChannelUrl,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: m.fontSizeSm,
+                color: TvDesignTokens.brand,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -28,6 +28,7 @@ import '../../../core/services/translation/whisper/whisper_subtitle_controller.d
 import '../../../core/services/translation/whisper/whisper_transcriber.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/services/watch_history/watch_history_models.dart';
+import '../../../core/utils/playback_error_text.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/widgets/player_settings_panel.dart';
 import '../../../ui/widgets/common/danmaku_overlay.dart';

@@ -29,6 +29,7 @@ import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/translation/streaming_subtitle_translator.dart';
 import '../../../core/services/intro_skip_controller.dart';
+import '../../../core/utils/playback_error_text.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../core/widgets/player_settings_panel.dart';
