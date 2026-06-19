@@ -278,9 +278,6 @@ class MpvPlayerPlugin(
         try {
             val playerId = UUID.randomUUID().toString()
 
-            // Ensure JavaVM is registered with ffmpeg BEFORE mpv uses it.
-            MpvInitBridge.ensureJavaVmRegistered()
-
             // Always use SurfaceTexture for both gpu and gpu-next modes
             surfaceTextureEntry = textureRegistry.createSurfaceTexture()
             val surfaceTexture = surfaceTextureEntry.surfaceTexture()
@@ -294,8 +291,17 @@ class MpvPlayerPlugin(
 
             val surface = Surface(surfaceTexture)
 
-            // Create mpv context
+            // Create mpv context.
+            // 这一步会触发 MPVLib 的 init{}（首次访问时 System.loadLibrary("mpv"/"player")），
+            // 从而把 libmpv.so 及其依赖 libavcodec.so 真正加载进进程。
             MPVLib.create(context)
+
+            // 注册 JavaVM 给 ffmpeg（av_jni_set_java_vm，mediacodec 硬解必需）。
+            // 必须放在 MPVLib.create() 之后：nativeRegisterJavaVm 通过 dlsym 取
+            // av_jni_set_java_vm 符号，而该符号来自 libavcodec.so——首帧播放时若在
+            // libmpv 加载前调用，dlsym 返回 null、原生侧调用空指针 → SIGSEGV 闪退。
+            // 崩溃会重启进程，使每次播放又成"首帧" → 表现为"每次播放必闪退"。
+            MpvInitBridge.ensureJavaVmRegistered()
 
             // Set mpv options (must be before init)
             android.util.Log.i(TAG, "Setting mpv options: hardwareDecoding=$hardwareDecoding, useGpuNext=$useGpuNext")

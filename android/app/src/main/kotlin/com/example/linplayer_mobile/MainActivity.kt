@@ -1,6 +1,9 @@
 package com.example.linplayer_mobile
 
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -11,6 +14,7 @@ class MainActivity : FlutterActivity() {
     private var mpvPlayerPlugin: MpvPlayerPlugin? = null
     private var libassChannel: MethodChannel? = null
     private var proxyChannel: MethodChannel? = null
+    private var diagnosticsChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -56,6 +60,56 @@ class MainActivity : FlutterActivity() {
         )
         proxyChannel!!.setMethodCallHandler { call, result ->
             ProxyBridge.handle(this, call, result)
+        }
+
+        // 诊断：取上次进程退出原因（含原生崩溃 tombstone 回溯）。
+        // 原生 SIGSEGV（如 libmpv 闪退）在 Dart/Java 层抓不到、应用日志里只有"戛然而止"。
+        // 用 ActivityManager.getHistoricalProcessExitReasons（API 30+，免权限）能拿到
+        // 上次崩溃的原生回溯，启动后由 Dart 写入可导出的 App 日志，便于定位。
+        diagnosticsChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.linplayer/diagnostics"
+        )
+        diagnosticsChannel!!.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getRecentExitReasons" -> result.success(getRecentExitReasons())
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /** 读取最近的进程退出记录；崩溃/ANR 附带原生回溯文本（tombstone/anr trace）。 */
+    private fun getRecentExitReasons(): List<Map<String, Any?>> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
+        return try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val infos = am.getHistoricalProcessExitReasons(packageName, 0, 8)
+            infos.map { info ->
+                var trace: String? = null
+                val reason = info.reason
+                if (reason == ApplicationExitInfo.REASON_CRASH_NATIVE ||
+                    reason == ApplicationExitInfo.REASON_CRASH ||
+                    reason == ApplicationExitInfo.REASON_ANR
+                ) {
+                    try {
+                        info.traceInputStream?.use { stream ->
+                            trace = stream.readBytes().toString(Charsets.UTF_8)
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+                mapOf(
+                    "reason" to reason,
+                    "description" to (info.description ?: ""),
+                    "timestamp" to info.timestamp,
+                    "importance" to info.importance,
+                    "pid" to info.pid,
+                    "trace" to trace
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("Diagnostics", "getRecentExitReasons failed: ${e.message}")
+            emptyList()
         }
     }
 

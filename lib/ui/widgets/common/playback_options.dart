@@ -22,11 +22,26 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
   /// 当前展开的栏目（同一时间只展开一个），null 表示全部收起。
   String? _expanded;
 
+  /// 展开后的选项列表滚动控制器。任一时刻只有一个栏目展开，故共用一个即可。
+  final ScrollController _optionsScrollController = ScrollController();
+
   String get itemId => widget.itemId;
   PlaybackInfo get info => widget.info;
 
   void _toggle(String key) {
-    setState(() => _expanded = _expanded == key ? null : key);
+    setState(() {
+      _expanded = _expanded == key ? null : key;
+      // 切换展开栏目时回到顶部，避免沿用上一个栏目的滚动位置。
+      if (_optionsScrollController.hasClients) {
+        _optionsScrollController.jumpTo(0);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _optionsScrollController.dispose();
+    super.dispose();
   }
 
   MediaSource? _resolveMediaSource(
@@ -388,7 +403,21 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const Divider(height: 1),
-                      ...options(),
+                      // 选项较多（如十几个版本）时不再撑长整页，限定高度内部滚动，
+                      // 项目少时按内容自适应、不会出现多余空白或滚动条。
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 320),
+                        child: Scrollbar(
+                          controller: _optionsScrollController,
+                          child: SingleChildScrollView(
+                            controller: _optionsScrollController,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: options(),
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   )
                 : const SizedBox(width: double.infinity),

@@ -9,6 +9,7 @@ import 'core/providers/app_providers.dart';
 import 'core/providers/proxy_providers.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/cache_service.dart';
+import 'core/services/crash_diagnostics.dart';
 import 'core/services/font_service.dart';
 import 'core/theme/app_motion.dart';
 import 'core/utils/platform_utils.dart';
@@ -34,6 +35,9 @@ Future<void> main() async {
   }
 
   await initializeAppPreferences();
+
+  // 启动后台上报上次的原生崩溃回溯（Android），写入可导出的 App 日志便于定位。
+  unawaited(CrashDiagnostics.reportRecentExits());
 
   // 自定义字体：按持久化路径重新加载（FontLoader 不跨进程，需每次启动重做），
   // 必须在构建 UI 前完成，确保首帧即用上用户字体。

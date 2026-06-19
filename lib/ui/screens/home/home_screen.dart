@@ -1334,8 +1334,13 @@ class _LibraryCard extends ConsumerWidget {
           Container(
             width: 168,
             height: 124,
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               borderRadius: borderRadius,
+              // 封面按比例 contain 显示（不裁剪/不放大），留白处用淡背景衬托。
+              color: Theme.of(context)
+                  .colorScheme
+                  .surfaceContainerHighest
+                  .withValues(alpha: 0.4),
             ),
             clipBehavior: Clip.antiAlias,
             child: imageUrls.isNotEmpty
@@ -1345,7 +1350,7 @@ class _LibraryCard extends ConsumerWidget {
                         imageUrls.length > 1 ? imageUrls.sublist(1) : null,
                     width: 168,
                     height: 124,
-                    fit: BoxFit.cover,
+                    fit: BoxFit.contain,
                     borderRadius: borderRadius,
                   )
                 : Container(
