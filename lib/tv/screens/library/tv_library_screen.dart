@@ -12,9 +12,12 @@ import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_focusable.dart';
 
-/// TV 媒体库页 —— 顶部选库 + 排序，下方 2:3 海报网格（真实数据）。
+/// TV 媒体库页 —— 顶部排序，下方 2:3 海报网格（真实数据）。
 class TvLibraryScreen extends ConsumerStatefulWidget {
-  const TvLibraryScreen({super.key});
+  /// 由首页/查看全部传入的目标媒体库；为空时取第一个媒体库。
+  final String? initialLibraryId;
+
+  const TvLibraryScreen({super.key, this.initialLibraryId});
 
   @override
   ConsumerState<TvLibraryScreen> createState() => _TvLibraryScreenState();
@@ -26,7 +29,14 @@ class _TvLibraryScreenState extends ConsumerState<TvLibraryScreen> {
   static const List<double> _densityFactors = [0.85, 1.0, 1.3];
   int _densityIndex = 1;
   String? _libraryId;
-  String _sortBy = 'SortName'; // SortName | DateCreated
+  // 排序字段：名称 / 最近添加 / 评分 / 首播日期
+  String _sortBy = 'SortName';
+
+  @override
+  void initState() {
+    super.initState();
+    _libraryId = widget.initialLibraryId;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,9 +56,7 @@ class _TvLibraryScreenState extends ConsumerState<TvLibraryScreen> {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(m),
-                SizedBox(height: m.spacingMd),
-                _buildLibraryPicker(m, libs, libId),
+                _buildHeader(m, libs, libId),
                 SizedBox(height: m.spacingMd),
                 _buildSortRow(m),
                 SizedBox(height: m.spacingLg),
@@ -64,12 +72,16 @@ class _TvLibraryScreenState extends ConsumerState<TvLibraryScreen> {
     );
   }
 
-  Widget _buildHeader(TvMetrics m) {
+  Widget _buildHeader(TvMetrics m, List<Library> libs, String selectedId) {
     final dense = _densityIndex == 0;
+    final lib = libs.firstWhere(
+      (l) => l.id == selectedId,
+      orElse: () => libs.first,
+    );
     return Row(
       children: [
         Text(
-          '媒体库',
+          lib.name,
           style: TextStyle(
             fontSize: m.fontSizeXxl,
             color: TvDesignTokens.textPrimary,
@@ -94,46 +106,34 @@ class _TvLibraryScreenState extends ConsumerState<TvLibraryScreen> {
     );
   }
 
-  Widget _buildLibraryPicker(TvMetrics m, List<Library> libs, String selectedId) {
-    return SizedBox(
-      height: m.s(52),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: libs.length,
-        separatorBuilder: (_, __) => SizedBox(width: m.spacingSm),
-        itemBuilder: (context, index) {
-          final lib = libs[index];
-          final selected = lib.id == selectedId;
-          return TvFocusable(
-            onSelect: () => setState(() => _libraryId = lib.id),
-            child: _chip(m, label: lib.name, selected: selected),
-          );
-        },
-      ),
-    );
-  }
+  /// 排序选项：名称 / 最近添加 / 评分 / 首播日期。
+  static const List<({String label, String value})> _sortOptions = [
+    (label: '名称', value: 'SortName'),
+    (label: '最近添加', value: 'DateCreated'),
+    (label: '评分', value: 'CommunityRating'),
+    (label: '首播日期', value: 'PremiereDate'),
+  ];
 
   Widget _buildSortRow(TvMetrics m) {
-    return Row(
+    return Wrap(
+      spacing: m.spacingSm,
+      runSpacing: m.spacingSm,
       children: [
-        TvFocusable(
-          onSelect: () => setState(() => _sortBy = 'SortName'),
-          child: _chip(m, label: '名称', selected: _sortBy == 'SortName'),
-        ),
-        SizedBox(width: m.spacingSm),
-        TvFocusable(
-          onSelect: () => setState(() => _sortBy = 'DateCreated'),
-          child: _chip(m, label: '最近添加', selected: _sortBy == 'DateCreated'),
-        ),
+        for (final opt in _sortOptions)
+          TvFocusable(
+            onSelect: () => setState(() => _sortBy = opt.value),
+            child: _chip(m, label: opt.label, selected: _sortBy == opt.value),
+          ),
       ],
     );
   }
 
   Widget _buildGrid(TvMetrics m, String libraryId) {
+    // 名称按升序（A→Z），其余（最近添加/评分/首播日期）按降序（新→旧 / 高→低）。
     final itemsAsync = ref.watch(libraryItemsProvider((
       libraryId: libraryId,
       sortBy: _sortBy,
-      sortOrder: _sortBy == 'DateCreated' ? 'Descending' : 'Ascending',
+      sortOrder: _sortBy == 'SortName' ? 'Ascending' : 'Descending',
     )));
     final api = ref.read(apiClientProvider);
 

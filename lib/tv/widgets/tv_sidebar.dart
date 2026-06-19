@@ -39,86 +39,63 @@ class _TvSidebarState extends State<TvSidebar> {
     return Container(
       width: width,
       color: TvDesignTokens.surface,
-      child: Column(
-        children: [
-          // Logo 区域
-          Padding(
-            padding: EdgeInsets.all(m.spacingLg),
-            child: widget.collapsed
-                ? Icon(
-                    Icons.play_circle_filled,
-                    color: TvDesignTokens.brand,
-                    size: m.s(40),
-                  )
-                : Row(
-                    children: [
-                      Icon(
-                        Icons.play_circle_filled,
-                        color: TvDesignTokens.brand,
-                        size: m.s(40),
-                      ),
-                      SizedBox(width: m.spacingSm),
+      // 导航项整体垂直居中；每项内容（图标 + 文字）水平居中，
+      // 更贴合 Pad 触控与 TV 对称布局，不再堆在左上角。
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(_items.length, (index) {
+            final item = _items[index];
+            final isSelected = widget.selectedIndex == index;
+
+            return TvFocusable(
+              autofocus: index == 0,
+              onSelect: () => widget.onItemSelected(index),
+              padding: EdgeInsets.symmetric(
+                horizontal: m.spacingMd,
+                vertical: m.spacingSm,
+              ),
+              child: Container(
+                height: m.sidebarItemHeight,
+                alignment: Alignment.center,
+                padding: EdgeInsets.symmetric(horizontal: m.spacingMd),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? TvDesignTokens.brand.withOpacity(0.15)
+                      : null,
+                  borderRadius: BorderRadius.circular(m.posterRadius),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      item.icon,
+                      color: isSelected
+                          ? TvDesignTokens.brand
+                          : TvDesignTokens.textSecondary,
+                      size: m.sidebarIconSize,
+                    ),
+                    if (!widget.collapsed) ...[
+                      SizedBox(width: m.spacingMd),
                       Text(
-                        'LinPlayer',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: TvDesignTokens.brand,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        item.label,
+                        style: TextStyle(
+                          fontSize: m.sidebarTextSize,
+                          color: isSelected
+                              ? TvDesignTokens.brand
+                              : TvDesignTokens.textSecondary,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
                       ),
                     ],
-                  ),
-          ),
-          const Divider(color: TvDesignTokens.divider),
-          // 导航项
-          Expanded(
-            child: ListView.builder(
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                final item = _items[index];
-                final isSelected = widget.selectedIndex == index;
-
-                return TvFocusable(
-                  autofocus: index == 0,
-                  onSelect: () => widget.onItemSelected(index),
-                  padding: EdgeInsets.symmetric(
-                    horizontal: m.spacingMd,
-                    vertical: m.spacingSm,
-                  ),
-                  child: Container(
-                    height: m.sidebarItemHeight,
-                    decoration: BoxDecoration(
-                      color: isSelected ? TvDesignTokens.brand.withOpacity(0.15) : null,
-                      borderRadius: BorderRadius.circular(m.posterRadius),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: widget.collapsed
-                          ? MainAxisAlignment.center
-                          : MainAxisAlignment.start,
-                      children: [
-                        Icon(
-                          item.icon,
-                          color: isSelected ? TvDesignTokens.brand : TvDesignTokens.textSecondary,
-                          size: m.sidebarIconSize,
-                        ),
-                        if (!widget.collapsed) ...[
-                          SizedBox(width: m.spacingMd),
-                          Text(
-                            item.label,
-                            style: TextStyle(
-                              fontSize: m.sidebarTextSize,
-                              color: isSelected ? TvDesignTokens.brand : TvDesignTokens.textSecondary,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+                  ],
+                ),
+              ),
+            );
+          }),
+        ),
       ),
     );
   }

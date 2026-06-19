@@ -107,6 +107,8 @@ class TvServerScreen extends ConsumerWidget {
       child: TvFocusable(
         padding: EdgeInsets.all(m.s(6)),
         onSelect: () => _selectServer(context, ref, server),
+        // 长按（Pad）/ 遥控器菜单键 → 进入编辑模式。
+        onLongPress: () => context.push('/tv/edit-server/${server.id}'),
         child: Container(
           padding: EdgeInsets.all(m.spacingLg),
           decoration: BoxDecoration(
@@ -205,6 +207,13 @@ class TvServerScreen extends ConsumerWidget {
                   ],
                 ),
               ),
+              TvFocusable(
+                padding: EdgeInsets.all(m.spacingXs),
+                onSelect: () => context.push('/tv/edit-server/${server.id}'),
+                child: Icon(Icons.edit_outlined,
+                    color: TvDesignTokens.textSecondary, size: m.s(28)),
+              ),
+              SizedBox(width: m.spacingXs),
               TvFocusable(
                 padding: EdgeInsets.all(m.spacingXs),
                 onSelect: () => _confirmDelete(context, ref, server),

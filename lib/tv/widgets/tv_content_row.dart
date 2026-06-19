@@ -74,9 +74,11 @@ class TvContentRow extends StatelessWidget {
             ],
           ),
         ),
-        // 横向滚动列表
+        // 横向滚动列表：行高随卡片高度自适应（支持 16:9 与 2:3 海报混用）
         SizedBox(
-          height: m.posterHeight16_9 + m.s(60), // 海报 + 文字区域
+          height: ((items.isNotEmpty ? items.first.height : null) ??
+                  m.posterHeight16_9) +
+              m.s(60), // 海报 + 文字区域
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: EdgeInsets.symmetric(

@@ -14,11 +14,16 @@ class TvHeroBanner extends StatefulWidget {
   final VoidCallback? onAutoPlayStarted;
   final VoidCallback? onAutoPlayStopped;
 
+  /// 可选高度覆盖；传 null 时按响应式 [TvMetrics.heroHeight]。
+  /// 首页传入视口比例高度，让 Hero 至少占首屏一半。
+  final double? height;
+
   const TvHeroBanner({
     super.key,
     required this.items,
     this.onAutoPlayStarted,
     this.onAutoPlayStopped,
+    this.height,
   });
 
   @override
@@ -105,7 +110,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
         return KeyEventResult.ignored;
       },
       child: SizedBox(
-        height: m.heroHeight,
+        height: widget.height ?? m.heroHeight,
         child: Stack(
           children: [
             // PageView 轮播

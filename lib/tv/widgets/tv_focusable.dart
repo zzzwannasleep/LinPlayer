@@ -10,6 +10,9 @@ import '../theme/tv_metrics.dart';
 class TvFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onSelect;
+  /// 次级动作：平板/Pad 长按触发；TV 遥控器按「菜单键」(contextMenu) 触发。
+  /// 用于「长按进入编辑模式」等场景。
+  final VoidCallback? onLongPress;
   final VoidCallback? onFocus;
   final VoidCallback? onBlur;
   final bool autofocus;
@@ -23,6 +26,7 @@ class TvFocusable extends StatefulWidget {
     super.key,
     required this.child,
     this.onSelect,
+    this.onLongPress,
     this.onFocus,
     this.onBlur,
     this.autofocus = false,
@@ -62,6 +66,13 @@ class _TvFocusableState extends State<TvFocusable> {
             widget.onSelect?.call();
             return KeyEventResult.handled;
           }
+          // 遥控器「菜单键」= 次级动作（进入编辑等）。
+          if (widget.onLongPress != null &&
+              (event.logicalKey == LogicalKeyboardKey.contextMenu ||
+                  event.logicalKey == LogicalKeyboardKey.gameButtonY)) {
+            widget.onLongPress!.call();
+            return KeyEventResult.handled;
+          }
         }
         return KeyEventResult.ignored;
       },
@@ -80,6 +91,12 @@ class _TvFocusableState extends State<TvFocusable> {
             Focus.of(context).requestFocus();
             widget.onSelect?.call();
           },
+          onLongPress: widget.onLongPress == null
+              ? null
+              : () {
+                  Focus.of(context).requestFocus();
+                  widget.onLongPress!.call();
+                },
           child: RepaintBoundary(
         child: Padding(
           padding: padding,

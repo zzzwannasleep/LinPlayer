@@ -42,6 +42,8 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final m = context.tv;
+    // Hero 至少占首屏一半：以视口高度的 56% 作为目标高度。
+    final double heroHeight = MediaQuery.sizeOf(context).height * 0.56;
     final servers = ref.watch(serverListProvider);
     if (servers.isEmpty) {
       return _buildEmptyServers(m);
@@ -61,18 +63,20 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Hero Banner（每日推荐）
+              // Hero Banner（每日推荐）—— 放大至首屏一半以上
               recommendationsAsync.when(
                 data: (items) {
                   final heroItems = _heroItems(api, items);
-                  if (heroItems.isEmpty) return _heroPlaceholder(m);
+                  if (heroItems.isEmpty) {
+                    return _heroPlaceholder(m, heroHeight);
+                  }
                   return Focus(
                     onFocusChange: (f) => setState(() => _heroFocused = f),
-                    child: TvHeroBanner(items: heroItems),
+                    child: TvHeroBanner(items: heroItems, height: heroHeight),
                   );
                 },
-                loading: () => _heroPlaceholder(m),
-                error: (_, __) => _heroPlaceholder(m),
+                loading: () => _heroPlaceholder(m, heroHeight),
+                error: (_, __) => _heroPlaceholder(m, heroHeight),
               ),
               SizedBox(height: m.spacingLg),
               // 继续观看
@@ -92,7 +96,7 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
                 error: (_, __) => const SizedBox.shrink(),
               ),
               SizedBox(height: m.spacingLg),
-              // 媒体库
+              // 媒体库快捷入口
               librariesAsync.when(
                 data: (libs) {
                   if (libs.isEmpty) return const SizedBox.shrink();
@@ -103,6 +107,22 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
                   );
                 },
                 loading: () => _rowPlaceholder('媒体库', m),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+              SizedBox(height: m.spacingLg),
+              // 各媒体库最新内容（对齐 PC 端首页布局）
+              librariesAsync.when(
+                data: (libs) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (final lib in libs)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: m.spacingMd),
+                        child: _TvLibraryLatestRow(library: lib),
+                      ),
+                  ],
+                ),
+                loading: () => const SizedBox.shrink(),
                 error: (_, __) => const SizedBox.shrink(),
               ),
               SizedBox(height: m.spacingXxl),
@@ -147,12 +167,18 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
       ApiClientFactory api, List<MediaItem> items) {
     return items.map((it) {
       final urls = resolveMediaItemLandscapeImageUrls(api, it, maxWidth: 720);
+      // 点击继续观看 → 进入详情页（剧集回到所属剧的详情，便于挑集/查看信息）。
+      final detailId =
+          (it.type == 'Episode' && (it.seriesId?.isNotEmpty ?? false))
+              ? it.seriesId!
+              : it.id;
       return TvPosterCardData(
         imageUrl: urls.isNotEmpty ? urls.first : null,
         title: _continueTitle(it),
         subtitle: _continueSubtitle(it),
+        nextEpisodeLabel: _continueBadge(it),
         progress: it.progress,
-        onTap: () => context.push('/tv/player?mediaId=${it.id}'),
+        onTap: () => context.push('/tv/detail/$detailId'),
       );
     }).toList(growable: false);
   }
@@ -163,7 +189,7 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
       return TvPosterCardData(
         imageUrl: urls.isNotEmpty ? urls.first : null,
         title: lib.name,
-        onTap: () => context.go('/tv/library'),
+        onTap: () => context.go('/tv/library?libraryId=${lib.id}'),
       );
     }).toList(growable: false);
   }
@@ -194,11 +220,23 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
+  /// 继续观看卡片右上角的「SxEx」角标，保证季/集信息醒目可见。
+  String? _continueBadge(MediaItem it) {
+    if (it.type != 'Episode') return null;
+    final s = it.parentIndexNumber;
+    final e = it.indexNumber;
+    if (s == null && e == null) return null;
+    final sb = StringBuffer();
+    if (s != null) sb.write('S$s');
+    if (e != null) sb.write('E$e');
+    return sb.toString();
+  }
+
   // ============ 占位 / 空态 ============
 
-  Widget _heroPlaceholder(TvMetrics m) {
+  Widget _heroPlaceholder(TvMetrics m, double height) {
     return Container(
-      height: m.heroHeight,
+      height: height,
       color: TvDesignTokens.surface,
       alignment: Alignment.center,
       child: Icon(
@@ -299,6 +337,44 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
               curve: Curves.easeOut,
             ),
       ),
+    );
+  }
+}
+
+/// 单个媒体库的「最新内容」横向行（对齐 PC 端首页：每个媒体库一行最新条目）。
+class _TvLibraryLatestRow extends ConsumerWidget {
+  final Library library;
+
+  const _TvLibraryLatestRow({required this.library});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final m = context.tv;
+    final api = ref.read(apiClientProvider);
+    final latestAsync = ref.watch(latestItemsProvider(library.id));
+
+    return latestAsync.when(
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        final cards = items.map((it) {
+          final urls = resolveMediaItemImageUrls(api, it, maxWidth: 360);
+          return TvPosterCardData(
+            imageUrl: urls.isNotEmpty ? urls.first : null,
+            title: it.name,
+            subtitle: it.productionYear != null ? '${it.productionYear}' : null,
+            width: m.posterWidth2_3,
+            height: m.posterHeight2_3,
+            onTap: () => context.push('/tv/detail/${it.id}'),
+          );
+        }).toList(growable: false);
+        return TvContentRow(
+          title: library.name,
+          items: cards,
+          onSeeAll: () => context.go('/tv/library?libraryId=${library.id}'),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 }

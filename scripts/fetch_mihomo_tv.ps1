@@ -63,8 +63,10 @@ Expand-Archive -Path $zashZip -DestinationPath $assetsDir -Force
 
 # dist.zip 可能解出一层 dist/ 目录，拍平到 assets/zashboard 根。
 $inner = Join-Path $assetsDir "dist"
-if (Test-Path $inner) {
-    Get-ChildItem -Path $inner -Force | Move-Item -Destination $assetsDir -Force
+if ($inner -and (Test-Path $inner)) {
+    Get-ChildItem -Path $inner -Force | ForEach-Object {
+        Move-Item -LiteralPath $_.FullName -Destination $assetsDir -Force
+    }
     Remove-Item -Recurse -Force $inner
 }
 

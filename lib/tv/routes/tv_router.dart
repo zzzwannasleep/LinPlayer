@@ -4,6 +4,7 @@ import '../screens/search/tv_search_screen.dart';
 import '../screens/library/tv_library_screen.dart';
 import '../screens/server/tv_server_screen.dart';
 import '../screens/server/tv_add_server_screen.dart';
+import '../screens/server/tv_edit_server_screen.dart';
 import '../screens/settings/tv_settings_screen.dart';
 import '../screens/detail/tv_detail_screen.dart';
 import '../screens/player/tv_player_screen.dart';
@@ -36,6 +37,13 @@ final tvRouter = GoRouter(
     GoRoute(
       path: '/tv/add-server',
       builder: (context, state) => const TvAddServerScreen(),
+    ),
+    // 编辑服务器（名称/信息/图标/线路，独立页面）
+    GoRoute(
+      path: '/tv/edit-server/:serverId',
+      builder: (context, state) => TvEditServerScreen(
+        serverId: state.pathParameters['serverId'],
+      ),
     ),
     // 详情页（独立页面，无导航栏）
     GoRoute(
@@ -73,7 +81,9 @@ final tvRouter = GoRouter(
         ),
         GoRoute(
           path: '/tv/library',
-          builder: (context, state) => const TvLibraryScreen(),
+          builder: (context, state) => TvLibraryScreen(
+            initialLibraryId: state.uri.queryParameters['libraryId'],
+          ),
         ),
         GoRoute(
           path: '/tv/server',
