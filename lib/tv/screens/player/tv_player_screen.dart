@@ -6,9 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/api/api_interfaces.dart';
+import '../../../core/api/danmaku/danmaku_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/providers/sync_providers.dart';
+import '../../../core/utils/danmaku_filter.dart';
+import '../../../core/utils/danmaku_matcher.dart';
+import '../../../ui/widgets/common/danmaku_overlay.dart';
 import '../../../core/services/player_subtitle_loader.dart';
 import '../../../core/services/translation/streaming_subtitle_translator.dart';
 import '../../../core/services/intro_skip_controller.dart';
@@ -43,6 +47,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   MediaSource? _mediaSource;
   StreamingSubtitleTranslator? _streamTranslator;
   late final IntroSkipController _introSkip;
+  List<DanmakuMatchCandidate> _danmakuCandidates = [];
+  String? _danmakuLoadedEpisodeId;
 
   String get _itemId => widget.episodeId ?? widget.mediaId ?? '';
 
@@ -137,6 +143,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
       return;
     }
     try {
+      // 清掉上一集残留弹幕，避免新页面起播瞬间闪现旧弹幕。
+      ref.read(loadedDanmakuProvider.notifier).state = const [];
       final api = ref.read(apiClientProvider);
       final item = await api.media.getItemDetails(_itemId);
       final playbackInfo = await api.playback.getPlaybackInfo(_itemId);
@@ -224,6 +232,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
       _item = item;
       _mediaSource = selection.mediaSource;
       ref.read(currentPlayingItemProvider.notifier).state = item;
+      // 弹幕：起播自动并行匹配，命中最佳候选即加载（TV 输入不便，默认自动）。
+      unawaited(_autoLoadDanmaku(item));
       // 自动跳过片头/片尾：联网识别本集片段（仅剧集，受设置开关控制）。
       unawaited(_introSkip.loadForItem(
         item,
@@ -263,6 +273,111 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
           .read(syncControllerProvider.notifier)
           .scrobbleWatched(item, seriesProviderIds: seriesProviderIds);
     } catch (_) {}
+  }
+
+  // ============ 弹幕 ============
+
+  Future<void> _autoLoadDanmaku(MediaItem item) async {
+    try {
+      final service = ref.read(danmakuServiceProvider);
+      final candidates = await DanmakuMatcher.matchAll(service, item);
+      if (!mounted) return;
+      setState(() => _danmakuCandidates = candidates);
+      if (candidates.isNotEmpty && ref.read(danmakuEnabledProvider)) {
+        final best = candidates.first;
+        await _loadDanmakuFrom(best);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadDanmakuFrom(DanmakuMatchCandidate c) async {
+    try {
+      final service = ref.read(danmakuServiceProvider);
+      var items = await service.getComments(c.episodeId, sourceId: c.sourceId);
+      final blockwords = ref.read(danmakuBlockwordsProvider);
+      if (blockwords.isNotEmpty) {
+        final filter = DanmakuFilter()..importBlockwords(blockwords);
+        items = items
+            .where((it) => !filter.shouldFilter(it.text, userId: it.userId))
+            .toList();
+      }
+      if (!mounted) return;
+      ref.read(loadedDanmakuProvider.notifier).state = items;
+      _danmakuLoadedEpisodeId = c.episodeId;
+      if (items.isNotEmpty) {
+        _toast('已加载 ${items.length} 条弹幕 · ${c.sourceName}');
+      } else {
+        _toast('该集没有弹幕');
+      }
+    } catch (_) {
+      _toast('加载弹幕失败');
+    }
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Widget _buildDanmakuOverlay() {
+    final enabled = ref.watch(danmakuEnabledProvider);
+    final items = ref.watch(loadedDanmakuProvider);
+    if (!enabled || items.isEmpty) return const SizedBox.shrink();
+    final delay = ref.watch(danmakuDelayProvider);
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: DanmakuOverlay(
+          items: items,
+          position: _service.position -
+              Duration(milliseconds: (delay * 1000).round()),
+          isPlaying: _service.isPlaying,
+          opacity: ref.watch(danmakuOpacityProvider),
+          fontSizeFactor: ref.watch(danmakuFontSizeProvider),
+          speedFactor: ref.watch(danmakuSpeedProvider),
+          densityFactor: ref.watch(danmakuDensityProvider),
+          displayArea: ref.watch(danmakuDisplayAreaProvider),
+          stroke: ref.watch(danmakuStrokeProvider),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDanmakuPanel() async {
+    _revealControls();
+    final enabled = ref.read(danmakuEnabledProvider);
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      barrierColor: Colors.transparent,
+      builder: (ctx) => TvPanel(
+        title: '弹幕',
+        onClose: () => Navigator.pop(ctx),
+        children: [
+          TvPanelOption(
+            title: enabled ? '隐藏弹幕' : '显示弹幕',
+            isSelected: enabled,
+            onTap: () {
+              ref.read(danmakuEnabledProvider.notifier).state = !enabled;
+              Navigator.pop(ctx);
+            },
+          ),
+          if (_danmakuCandidates.isEmpty)
+            const TvPanelOption(title: '未匹配到弹幕', subtitle: '可在手机/桌面端搜索')
+          else
+            for (final c in _danmakuCandidates.take(12))
+              TvPanelOption(
+                title: '${c.animeTitle} · ${c.episodeTitle}',
+                subtitle: c.sourceName,
+                isSelected: _danmakuLoadedEpisodeId == c.episodeId,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  unawaited(_loadDanmakuFrom(c));
+                },
+              ),
+        ],
+      ),
+    );
   }
 
   // ============ 字幕 / 音轨 ============
@@ -651,6 +766,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
               const Center(
                 child: CircularProgressIndicator(color: TvDesignTokens.brand),
               ),
+            // 弹幕层（视频之上、触控/控制条之下；鼠标/遥控穿透）。
+            if (_ready) _buildDanmakuOverlay(),
             // 触控层（位于视频之上、控制条之下）：控制条隐藏时点击画面唤出，
             // 显示时点击空白处隐藏；控制条上的按钮在更上层会优先捕获各自的点击。
             if (_ready)
@@ -748,6 +865,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
                     },
                     onSubtitle: _showSubtitlePanel,
                     onAudioTrack: _showAudioPanel,
+                    onMore: _showDanmakuPanel,
                     onClose: () => context.pop(),
                   ),
                 ),

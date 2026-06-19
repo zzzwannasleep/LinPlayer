@@ -2713,6 +2713,173 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     }
   }
 
+  /// 弹幕叠加层（鼠标穿透）。开关/无弹幕时返回空。
+  Widget _buildDanmakuOverlay() {
+    final enabled = ref.watch(danmakuEnabledProvider);
+    final items = ref.watch(loadedDanmakuProvider);
+    if (!enabled || items.isEmpty) return const SizedBox.shrink();
+    final delay = ref.watch(danmakuDelayProvider);
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: DanmakuOverlay(
+          items: items,
+          position: _playerService.position -
+              Duration(milliseconds: (delay * 1000).round()),
+          isPlaying: _playerService.isPlaying,
+          opacity: ref.watch(danmakuOpacityProvider),
+          fontSizeFactor: ref.watch(danmakuFontSizeProvider),
+          speedFactor: ref.watch(danmakuSpeedProvider),
+          densityFactor: ref.watch(danmakuDensityProvider),
+          displayArea: ref.watch(danmakuDisplayAreaProvider),
+          stroke: ref.watch(danmakuStrokeProvider),
+        ),
+      ),
+    );
+  }
+
+  /// 打开「搜索弹幕」弹层（复用移动端的分源搜索面板）。
+  void _openDanmakuSearch() {
+    final item = ref.read(currentPlayingItemProvider);
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 80, vertical: 40),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 8, 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.subtitles_outlined,
+                        color: Colors.white70, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('搜索弹幕',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: DanmakuSearchContent(item: item),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 弹幕快捷设置弹层（开关 + 透明度/显示区域/描边）。
+  void _openDanmakuSettings() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Consumer(
+        builder: (ctx, r, _) {
+          return Dialog(
+            backgroundColor: const Color(0xFF1C1C1E),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('显示弹幕',
+                          style: TextStyle(color: Colors.white)),
+                      value: r.watch(danmakuEnabledProvider),
+                      onChanged: (v) =>
+                          r.read(danmakuEnabledProvider.notifier).state = v,
+                    ),
+                    _slider(r, '透明度', danmakuOpacityProvider),
+                    _slider(r, '字号', danmakuFontSizeProvider),
+                    _slider(r, '速度', danmakuSpeedProvider),
+                    _slider(r, '密度', danmakuDensityProvider),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('显示区域',
+                          style: TextStyle(color: Colors.white)),
+                      trailing: DropdownButton<double>(
+                        dropdownColor: const Color(0xFF2C2C2E),
+                        value: r.watch(danmakuDisplayAreaProvider),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 0.25,
+                              child: Text('顶部 1/4',
+                                  style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(
+                              value: 0.5,
+                              child: Text('半屏',
+                                  style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(
+                              value: 1.0,
+                              child: Text('全屏',
+                                  style: TextStyle(color: Colors.white))),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            r.read(danmakuDisplayAreaProvider.notifier).state =
+                                v;
+                          }
+                        },
+                      ),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('描边文字',
+                          style: TextStyle(color: Colors.white)),
+                      value: r.watch(danmakuStrokeProvider),
+                      onChanged: (v) =>
+                          r.read(danmakuStrokeProvider.notifier).state = v,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _slider(
+      WidgetRef r,
+      String label,
+      StateNotifierProvider<PreferenceNotifier<double>, double> p) {
+    final value = r.watch(p);
+    return Row(
+      children: [
+        SizedBox(
+            width: 48,
+            child: Text(label,
+                style: const TextStyle(color: Colors.white70, fontSize: 13))),
+        Expanded(
+          child: Slider(
+            value: value.clamp(0.0, 1.0),
+            onChanged: (v) => r.read(p.notifier).state = v,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = ref.watch(currentPlayingItemProvider);
@@ -2740,6 +2907,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
               children: [
                 // 视频区域
                 _playerService.buildVideo(),
+
+                // 弹幕层（鼠标穿透，不挡控制栏）。
+                _buildDanmakuOverlay(),
 
                 // 流式翻译译文叠加层（中文显示在 mpv 原文字幕上方，构成双语）。
                 if (_streamTranslator != null)
@@ -3365,9 +3535,63 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   }
 
   Widget _buildFunctionControls(MediaItem? item) {
+    final danmakuOn = ref.watch(danmakuEnabledProvider);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        Tooltip(
+          message: '弹幕',
+          child: PopupMenuButton<String>(
+            tooltip: '',
+            color: const Color(0xFF2C2C2E),
+            icon: Icon(
+              danmakuOn ? Icons.comment : Icons.comments_disabled_outlined,
+              color: danmakuOn ? Colors.white : Colors.white60,
+              size: 22,
+            ),
+            onSelected: (v) {
+              switch (v) {
+                case 'toggle':
+                  ref.read(danmakuEnabledProvider.notifier).state = !danmakuOn;
+                  break;
+                case 'search':
+                  _openDanmakuSearch();
+                  break;
+                case 'settings':
+                  _openDanmakuSettings();
+                  break;
+              }
+            },
+            itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: 'toggle',
+                child: Row(children: [
+                  Icon(danmakuOn ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  Text(danmakuOn ? '隐藏弹幕' : '显示弹幕',
+                      style: const TextStyle(color: Colors.white)),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: 'search',
+                child: Row(children: [
+                  Icon(Icons.search, color: Colors.white70, size: 18),
+                  SizedBox(width: 10),
+                  Text('搜索弹幕', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: 'settings',
+                child: Row(children: [
+                  Icon(Icons.tune, color: Colors.white70, size: 18),
+                  SizedBox(width: 10),
+                  Text('弹幕设置', style: TextStyle(color: Colors.white)),
+                ]),
+              ),
+            ],
+          ),
+        ),
         _buildIconButton(
           icon: Icons.subtitles,
           tooltip: '字幕',

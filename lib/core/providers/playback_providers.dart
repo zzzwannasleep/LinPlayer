@@ -195,6 +195,30 @@ final danmakuDensityProvider =
   );
 });
 
+/// 弹幕显示区域（占视频高度比例）：0.25=顶部 1/4，0.5=半屏，1.0=全屏。
+final danmakuDisplayAreaProvider =
+    StateNotifierProvider<PreferenceNotifier<double>, double>((ref) {
+  return PreferenceNotifier<double>(
+    defaultValue: 1.0,
+    readValue: (prefs) => prefs.getDouble('linplayer_danmaku_display_area'),
+    writeValue: (prefs, value) async {
+      await prefs.setDouble('linplayer_danmaku_display_area', value);
+    },
+  );
+});
+
+/// 弹幕描边（黑边白/彩字），关闭则用半透明底框（旧观感）。
+final danmakuStrokeProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_danmaku_stroke'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_danmaku_stroke', value);
+    },
+  );
+});
+
 final danmakuDelayProvider = StateProvider<double>((ref) => 0.0);
 final danmakuDedupProvider = StateProvider<bool>((ref) => false);
 final danmakuDedupWindowProvider = StateProvider<double>((ref) => 10.0);

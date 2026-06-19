@@ -30,6 +30,8 @@ import '../../../core/services/video_player_service.dart';
 import '../../../core/services/watch_history/watch_history_models.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../../core/widgets/player_settings_panel.dart';
+import '../../../ui/widgets/common/danmaku_overlay.dart';
+import '../../../ui/widgets/common/danmaku_search_widget.dart';
 import '../../shell/desktop_nav_model.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 

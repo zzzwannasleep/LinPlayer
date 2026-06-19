@@ -132,8 +132,8 @@ jobs:
         run: |
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>/dev/null || true
 
-          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
-          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r' | paste -sd ',' -)
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r' | paste -sd ',' -)
           VERSION="${{ needs.prepare.outputs.version }}"
 
           flutter build apk --release --split-per-abi \
@@ -254,8 +254,8 @@ jobs:
         run: |
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-36" 2>/dev/null || true
 
-          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
-          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r' | paste -sd ',' -)
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r' | paste -sd ',' -)
           VERSION="${{ needs.prepare.outputs.version }}"
 
           # Android TV release only needs the 32-bit build.
@@ -338,8 +338,8 @@ jobs:
           DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
           DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
         run: |
-          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
-          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r' | paste -sd ',' -)
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r' | paste -sd ',' -)
 
           flutter build ios --release --no-codesign \
             --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \
@@ -507,8 +507,8 @@ jobs:
           LINPLAYER_SKIP_LIBMPV_UPGRADE: 1
         shell: pwsh
         run: |
-          $cleanId = "$env:DANDANPLAY_APP_ID" -replace "[`r`n]", ""
-          $cleanSecret = "$env:DANDANPLAY_APP_SECRET" -replace "[`r`n]", ""
+          $cleanId = (("$env:DANDANPLAY_APP_ID" -split "[`r`n]+") | Where-Object { $_.Trim() -ne "" } | ForEach-Object { $_.Trim() }) -join ","
+          $cleanSecret = (("$env:DANDANPLAY_APP_SECRET" -split "[`r`n]+") | Where-Object { $_.Trim() -ne "" } | ForEach-Object { $_.Trim() }) -join ","
 
           flutter build windows --release `
             --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" `
@@ -621,8 +621,8 @@ jobs:
           DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
           DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
         run: |
-          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
-          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r' | paste -sd ',' -)
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r' | paste -sd ',' -)
 
           flutter build linux --release \
             --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \
@@ -688,8 +688,8 @@ jobs:
           DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
           DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
         run: |
-          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r\n')
-          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r\n')
+          CLEAN_ID=$(printf '%s' "$DANDANPLAY_APP_ID" | tr -d '\r' | paste -sd ',' -)
+          CLEAN_SECRET=$(printf '%s' "$DANDANPLAY_APP_SECRET" | tr -d '\r' | paste -sd ',' -)
 
           flutter build macos --release \
             --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \

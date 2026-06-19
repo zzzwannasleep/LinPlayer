@@ -826,6 +826,28 @@ class DanmakuItem {
     this.userId,
     this.count = 1,
   });
+
+  Map<String, dynamic> toJson() => {
+        't': time,
+        'm': text,
+        'y': type,
+        'c': color,
+        's': size,
+        if (source != null) 'src': source,
+        if (cid != null) 'id': cid,
+        if (userId != null) 'u': userId,
+      };
+
+  factory DanmakuItem.fromJson(Map<String, dynamic> j) => DanmakuItem(
+        time: (j['t'] as num?)?.toDouble() ?? 0,
+        text: j['m'] as String? ?? '',
+        type: (j['y'] as num?)?.toInt() ?? 1,
+        color: (j['c'] as num?)?.toInt() ?? 16777215,
+        size: (j['s'] as num?)?.toDouble() ?? 25,
+        source: j['src'] as String?,
+        cid: j['id'] as String?,
+        userId: j['u'] as String?,
+      );
 }
 
 class DanmakuAnime {
@@ -841,6 +863,9 @@ class DanmakuAnime {
   /// 弹弹play 作品详情里的「Bangumi.tv 页面地址」，形如 https://bgm.tv/subject/123。
   /// 用于反查 bgm.tv subject id（作品详情接口才会返回）。
   final String? bangumiUrl;
+  /// 该结果来自哪个弹幕源（并行分源展示时用户挑选后，回此源取评论）。
+  final String? sourceId;
+  final String? sourceName;
 
   DanmakuAnime({
     required this.animeId,
@@ -853,19 +878,56 @@ class DanmakuAnime {
     this.episodeCount,
     this.episodes,
     this.bangumiUrl,
+    this.sourceId,
+    this.sourceName,
   });
+
+  DanmakuAnime copyWith({
+    String? sourceId,
+    String? sourceName,
+    List<DanmakuEpisode>? episodes,
+  }) {
+    return DanmakuAnime(
+      animeId: animeId,
+      animeTitle: animeTitle,
+      bangumiId: bangumiId,
+      type: type,
+      typeDescription: typeDescription,
+      imageUrl: imageUrl,
+      year: year,
+      episodeCount: episodeCount,
+      episodes: episodes ?? this.episodes,
+      bangumiUrl: bangumiUrl,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+    );
+  }
 }
 
 class DanmakuEpisode {
   final String episodeId;
   final String episodeTitle;
   final String? episodeNumber;
+  final String? sourceId;
+  final String? sourceName;
 
   DanmakuEpisode({
     required this.episodeId,
     required this.episodeTitle,
     this.episodeNumber,
+    this.sourceId,
+    this.sourceName,
   });
+
+  DanmakuEpisode copyWith({String? sourceId, String? sourceName}) {
+    return DanmakuEpisode(
+      episodeId: episodeId,
+      episodeTitle: episodeTitle,
+      episodeNumber: episodeNumber,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+    );
+  }
 }
 
 class DanmakuMatchResult {
@@ -886,6 +948,8 @@ class DanmakuMatchItem {
   final String? type;
   final String? typeDescription;
   final int? shift;
+  final String? sourceId;
+  final String? sourceName;
 
   DanmakuMatchItem({
     required this.episodeId,
@@ -895,7 +959,23 @@ class DanmakuMatchItem {
     this.type,
     this.typeDescription,
     this.shift,
+    this.sourceId,
+    this.sourceName,
   });
+
+  DanmakuMatchItem copyWith({String? sourceId, String? sourceName}) {
+    return DanmakuMatchItem(
+      episodeId: episodeId,
+      animeId: animeId,
+      animeTitle: animeTitle,
+      episodeTitle: episodeTitle,
+      type: type,
+      typeDescription: typeDescription,
+      shift: shift,
+      sourceId: sourceId ?? this.sourceId,
+      sourceName: sourceName ?? this.sourceName,
+    );
+  }
 }
 
 class DanmakuSearchResult {

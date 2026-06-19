@@ -1429,6 +1429,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final danmakuSpeed = ref.watch(danmakuSpeedProvider);
     final danmakuDensity = ref.watch(danmakuDensityProvider);
     final danmakuDelay = ref.watch(danmakuDelayProvider);
+    final danmakuDisplayArea = ref.watch(danmakuDisplayAreaProvider);
+    final danmakuStroke = ref.watch(danmakuStrokeProvider);
 
     if (_playerService.coreType != PlayerCoreType.exoPlayer) {
       final overlays = <Widget>[];
@@ -1445,6 +1447,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               fontSizeFactor: danmakuFontSize,
               speedFactor: danmakuSpeed,
               densityFactor: danmakuDensity,
+              displayArea: danmakuDisplayArea,
+              stroke: danmakuStroke,
             ),
           ),
         );
@@ -1484,6 +1488,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   fontSizeFactor: danmakuFontSize,
                   speedFactor: danmakuSpeed,
                   densityFactor: danmakuDensity,
+                  displayArea: danmakuDisplayArea,
+                  stroke: danmakuStroke,
                 ),
               ),
             if (contentRect == Rect.zero)

@@ -10,6 +10,8 @@ class DanmakuSettingsScreen extends ConsumerWidget {
     final fontSize = ref.watch(danmakuFontSizeProvider);
     final speed = ref.watch(danmakuSpeedProvider);
     final density = ref.watch(danmakuDensityProvider);
+    final displayArea = ref.watch(danmakuDisplayAreaProvider);
+    final stroke = ref.watch(danmakuStrokeProvider);
     final blockwords = ref.watch(danmakuBlockwordsProvider);
 
     return Scaffold(
@@ -54,6 +56,30 @@ class DanmakuSettingsScreen extends ConsumerWidget {
               onChanged: (value) =>
                   ref.read(danmakuDensityProvider.notifier).state = value,
             ),
+          ),
+          ListTile(
+            title: const Text('显示区域'),
+            subtitle: const Text('弹幕占用的画面高度范围'),
+            trailing: DropdownButton<double>(
+              value: displayArea,
+              items: const [
+                DropdownMenuItem(value: 0.25, child: Text('顶部 1/4')),
+                DropdownMenuItem(value: 0.5, child: Text('半屏')),
+                DropdownMenuItem(value: 1.0, child: Text('全屏')),
+              ],
+              onChanged: (v) {
+                if (v != null) {
+                  ref.read(danmakuDisplayAreaProvider.notifier).state = v;
+                }
+              },
+            ),
+          ),
+          SwitchListTile(
+            title: const Text('描边文字'),
+            subtitle: const Text('黑边彩字，关闭则用半透明底框'),
+            value: stroke,
+            onChanged: (v) =>
+                ref.read(danmakuStrokeProvider.notifier).state = v,
           ),
           ListTile(
             title: const Text('弹幕延迟'),
@@ -364,14 +390,29 @@ class _CustomSourceManagerSheetState
     extends ConsumerState<_CustomSourceManagerSheet> {
   final _nameController = TextEditingController();
   final _urlController = TextEditingController();
+  final _tokenController = TextEditingController();
+  DanmakuAuthType _authType = DanmakuAuthType.pathToken;
   bool _isAdding = false;
 
   @override
   void dispose() {
     _nameController.dispose();
     _urlController.dispose();
+    _tokenController.dispose();
     super.dispose();
   }
+
+  static const _authLabels = {
+    DanmakuAuthType.none: '无鉴权',
+    DanmakuAuthType.pathToken: 'huangxd 路径 Token',
+    DanmakuAuthType.headerToken: 'misaka Token（请求头）',
+    DanmakuAuthType.queryToken: 'Token（Query 参数）',
+  };
+
+  bool get _needsToken =>
+      _authType == DanmakuAuthType.pathToken ||
+      _authType == DanmakuAuthType.headerToken ||
+      _authType == DanmakuAuthType.queryToken;
 
   @override
   Widget build(BuildContext context) {
@@ -403,12 +444,23 @@ class _CustomSourceManagerSheetState
                 ),
                 const SizedBox(height: 8),
                 if (service.dandanplay != null)
-                  const Card(
+                  Card(
                     child: ListTile(
-                      leading: Icon(Icons.cloud, color: Colors.blue),
-                      title: Text('弹弹Play'),
-                      subtitle: Text('默认源，无需配置'),
-                      trailing: Icon(Icons.check_circle, color: Colors.green),
+                      leading: const Icon(Icons.cloud, color: Colors.blue),
+                      title: const Text('弹弹Play（官方）'),
+                      subtitle: Text(
+                        service.dandanplay!.hasCredentials
+                            ? '默认源，内置签名凭据，无需配置'
+                            : '默认源（当前构建未内置官方凭据）',
+                      ),
+                      trailing: Icon(
+                        service.dandanplay!.hasCredentials
+                            ? Icons.check_circle
+                            : Icons.cloud_off,
+                        color: service.dandanplay!.hasCredentials
+                            ? Colors.green
+                            : Colors.grey,
+                      ),
                     ),
                   ),
                 Expanded(
@@ -434,17 +486,10 @@ class _CustomSourceManagerSheetState
                               Switch(
                                 value: source.config.enabled,
                                 onChanged: (val) {
-                                  final newCfg = DanmakuSourceConfig(
-                                    id: source.config.id,
-                                    type: source.config.type,
-                                    name: source.config.name,
-                                    apiUrl: source.config.apiUrl,
-                                    priority: source.config.priority,
-                                    enabled: val,
-                                  );
                                   ref
                                       .read(danmakuServiceProvider.notifier)
-                                      .addCustomSource(newCfg);
+                                      .addCustomSource(
+                                          source.config.copyWith(enabled: val));
                                 },
                               ),
                               IconButton(
@@ -478,11 +523,39 @@ class _CustomSourceManagerSheetState
                     controller: _urlController,
                     decoration: const InputDecoration(
                       labelText: 'API地址',
-                      hintText: '如: http://192.168.1.7:9321/87654321',
+                      hintText: '如: http://192.168.1.7:9321',
                       border: OutlineInputBorder(),
                     ),
                     keyboardType: TextInputType.url,
                   ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<DanmakuAuthType>(
+                    initialValue: _authType,
+                    decoration: const InputDecoration(
+                      labelText: '鉴权方式',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _authLabels.entries
+                        .map((e) => DropdownMenuItem(
+                              value: e.key,
+                              child: Text(e.value),
+                            ))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) setState(() => _authType = v);
+                    },
+                  ),
+                  if (_needsToken) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _tokenController,
+                      decoration: const InputDecoration(
+                        labelText: 'Token',
+                        hintText: '按各项目文档填入访问 token',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.end,
@@ -515,9 +588,16 @@ class _CustomSourceManagerSheetState
   void _addSource() {
     final name = _nameController.text.trim();
     final url = _urlController.text.trim();
+    final token = _tokenController.text.trim();
     if (name.isEmpty || url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('请填写名称和API地址')),
+      );
+      return;
+    }
+    if (_needsToken && token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前鉴权方式需要填入 Token')),
       );
       return;
     }
@@ -527,10 +607,13 @@ class _CustomSourceManagerSheetState
       name: name,
       apiUrl: url,
       priority: ref.read(danmakuServiceProvider).sources.length,
+      authType: _authType,
+      token: _needsToken ? token : null,
     );
     ref.read(danmakuServiceProvider.notifier).addCustomSource(cfg);
     _nameController.clear();
     _urlController.clear();
+    _tokenController.clear();
     setState(() => _isAdding = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('已添加 $name')),
