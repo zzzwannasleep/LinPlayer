@@ -396,7 +396,14 @@ class MpvPlayerPlugin(
             try { MPVLib.destroy() } catch (_: Throwable) {}
             try { surfaceTextureEntry?.release() } catch (_: Throwable) {}
             try { players.clear() } catch (_: Throwable) {}
-            result.error("CREATE_ERROR", "${e.javaClass.simpleName}: ${e.message}", null)
+            // 带上原生库加载失败详情（若有），让 Dart 日志直接看到"哪个 .so、为何加载失败"，
+            // 而不是只看到下游的 "MPVLib.create 无实现"。
+            val libInfo = MPVLib.loadErrors.let { if (it.isEmpty()) "" else " nativeLibLoad=[$it]" }
+            result.error(
+                "CREATE_ERROR",
+                "${e.javaClass.simpleName}: ${e.message}$libInfo",
+                null
+            )
         }
     }
 

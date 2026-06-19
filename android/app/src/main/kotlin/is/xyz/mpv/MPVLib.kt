@@ -13,25 +13,45 @@ import android.view.Surface
  */
 @Suppress("unused")
 object MPVLib {
+    /** 记录各 .so 的加载失败原因，供上层把"为何不能播放"写进可导出的 App 日志。 */
+    @JvmField
+    var loadErrors: String = ""
+
     init {
-        // Load order matters:
-        // 1. mpv_init_jni — JNI_OnLoad registers JavaVM with ffmpeg
-        // 2. libavcodec.so is loaded as a dependency of libmpv.so
-        // 3. libmpv.so — the core mpv library
-        // 4. libplayer.so — JNI bridge (depends on libmpv)
-        try { System.loadLibrary("mpv_init_jni") } catch (e: Throwable) {
-            android.util.Log.w("MPVLib", "mpv_init_jni not found: ${e.message}")
-        }
-        // 不让 loadLibrary 失败把 object 的静态初始化变成 ExceptionInInitializerError
-        // （Error，会绕过上层 catch(Exception) 崩溃 App）。失败时记录；随后 create() 等
-        // external 调用会抛可被上层 catch(Throwable) 捕获的 UnsatisfiedLinkError，优雅降级。
-        val libs = arrayOf("mpv", "player")
-        for (lib in libs) {
+        val errors = StringBuilder()
+
+        // 统一的安全加载：失败只记录不抛，避免 object 静态初始化变成
+        // ExceptionInInitializerError（Error 会绕过上层 catch(Exception) 崩溃 App）。
+        fun tryLoad(name: String) {
             try {
-                System.loadLibrary(lib)
+                System.loadLibrary(name)
             } catch (e: Throwable) {
-                android.util.Log.e("MPVLib", "loadLibrary($lib) failed: ${e.message}")
+                val msg = "loadLibrary($name): ${e.message}"
+                android.util.Log.e("MPVLib", msg)
+                errors.append(msg).append(" || ")
             }
+        }
+
+        // JavaVM 注册桥：JNI_OnLoad 缓存 JavaVM（mediacodec 硬解需要）。缺失只降级软解。
+        tryLoad("mpv_init_jni")
+
+        // 显式按依赖顺序预加载 ffmpeg 动态库 + libmpv，再加载 libplayer。
+        // 关键修复:libplayer.so 的 DT_NEEDED 含 libavcodec/libswscale/libmpv,若仅靠
+        // System.loadLibrary("player") 让链接器自行解析传递依赖,在依赖版本/打包顺序不一致时
+        // 会"找不到库/找不到符号"而整体加载失败（表现为 MPVLib.create 无实现、无法播放）。
+        // 这里把依赖逐个显式载入,既保证解析,也让失败精确落点到具体某个 .so。
+        for (dep in arrayOf(
+            "avutil", "swresample", "swscale",
+            "avcodec", "avformat", "avfilter"
+        )) {
+            tryLoad(dep)
+        }
+        tryLoad("mpv")
+        tryLoad("player")
+
+        loadErrors = errors.toString()
+        if (loadErrors.isNotEmpty()) {
+            android.util.Log.e("MPVLib", "native lib load errors: $loadErrors")
         }
     }
 

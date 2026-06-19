@@ -149,7 +149,63 @@ jobs:
             }
           done
         timeout-minutes: 120
-      
+
+      # ========================================================================
+      # 关键修复：构建与本次 libmpv 匹配的 libplayer.so（is.xyz.mpv.MPVLib 的 JNI 桥）。
+      # media-kit/libmpv-android-video-build 只产出 libmpv + ffmpeg，**不产出 libplayer.so**，
+      # 因此过去每次"单独重编 libmpv"都把旧的 libplayer.so 留下→与新 libmpv ABI 不匹配→
+      # 运行时 libplayer.so 加载失败（MPVLib.create 无实现）→原生 mpv 完全不能播放。
+      # 这里直接从 mpv-android 的 JNI 源码、针对**刚构建出来的 libmpv** 现编 libplayer.so，
+      # 保证二者来自同一 libmpv、ABI 必然匹配。构建失败则整个 job 失败、不会提交（安全）。
+      # ========================================================================
+      - name: Build matching libplayer.so (mpv-android JNI bridge)
+        working-directory: /tmp/libmpv-build/buildscripts
+        run: |
+          set -e
+          . ./include/depinfo.sh
+
+          # mpv-android 的 app JNI 源码（实现 Java_is_xyz_mpv_MPVLib_*）。
+          # 该套源码与本仓库 is/xyz/mpv/MPVLib.kt 的 external 方法集一一对应。
+          git clone --depth 1 https://github.com/mpv-android/mpv-android.git /tmp/mpv-android
+          JNI=/tmp/mpv-android/app/src/main/jni
+          echo "=== JNI sources ==="; ls -la "$JNI"
+
+          NDKBIN="./sdk/android-sdk-linux/ndk/$v_ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          API=24  # 与 app build.gradle.kts 的 minSdk 一致
+
+          declare -A TRIPLE=(
+            [arm64-v8a]=aarch64-linux-android
+            [armeabi-v7a]=armv7a-linux-androideabi
+            [x86]=i686-linux-android
+            [x86_64]=x86_64-linux-android
+          )
+
+          for arch in arm64-v8a armeabi-v7a x86 x86_64; do
+            PREFIX="prefix/$arch"
+            if [ ! -f "$PREFIX/lib/libmpv.so" ]; then
+              echo "⚠️ $arch: libmpv.so 缺失，跳过 libplayer 构建"
+              continue
+            fi
+            CXX="$NDKBIN/${TRIPLE[$arch]}$API-clang++"
+            echo "=== building libplayer.so for $arch ($CXX) ==="
+            # 直接用 NDK clang 把 JNI .cpp 编成 libplayer.so，链接刚构建的 libmpv 与系统库。
+            "$CXX" -shared -fPIC -std=c++17 -O2 \
+              -o "$PREFIX/lib/libplayer.so" \
+              "$JNI"/*.cpp \
+              -I"$PREFIX/include" \
+              -L"$PREFIX/lib" -lmpv \
+              -landroid -lEGL -lGLESv3 -llog
+            "$NDKBIN/llvm-strip" --strip-all "$PREFIX/lib/libplayer.so" || true
+            echo "✅ $arch: libplayer.so 构建完成"
+            # 校验导出了 MPVLib.create（最关键的符号）。
+            if "$NDKBIN/llvm-nm" -D "$PREFIX/lib/libplayer.so" 2>/dev/null | grep -q "Java_is_xyz_mpv_MPVLib_create"; then
+              echo "✅ $arch: 导出 Java_is_xyz_mpv_MPVLib_create"
+            else
+              echo "❌ $arch: 未导出 MPVLib_create —— 源码方法集可能与本仓库 MPVLib.kt 不一致"
+              exit 1
+            fi
+          done
+
       - name: Verify PGS support in built libraries
         run: |
           echo "=== Verifying PGS support ==="
@@ -215,7 +271,13 @@ jobs:
                 cp "$SOURCE_DIR/libmpv.so" "$DEST_DIR/"
                 $STRIP --strip-all "$DEST_DIR/libmpv.so" 2>/dev/null || true
               fi
-              
+
+              # 复制本次现编、与 libmpv 匹配的 libplayer.so（JNI 桥，避免 ABI 不匹配）。
+              if [ -f "$SOURCE_DIR/libplayer.so" ]; then
+                cp "$SOURCE_DIR/libplayer.so" "$DEST_DIR/"
+                $STRIP --strip-all "$DEST_DIR/libplayer.so" 2>/dev/null || true
+              fi
+
               echo "✅ Copied libraries for $arch"
               ls -lh "$DEST_DIR/"
             fi
@@ -230,7 +292,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: rebuild libmpv with PGS support (pgssub decoder enabled)"
+            git commit -m "chore: rebuild libmpv (PGS) + matching libplayer.so JNI bridge"
             git push
             echo "✅ Libraries committed"
           fi
