@@ -93,7 +93,7 @@ dark_mode:
 
 # ?v= 版本号用于打破浏览器 / CDN 缓存，改样式后把数字 +1 即可强制刷新
 custom_css:
-  - /css/pixel-dream.css?v=8
+  - /css/pixel-dream.css?v=9
 
 custom_js:
   - /js/pixel-dream.js?v=8
