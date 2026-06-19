@@ -634,6 +634,11 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
   void _onEvent(dynamic event) {
     if (event is! Map) return;
     final type = event['type'] as String?;
+    // mpv 原生日志单独处理：不打 "Event: log" 噪声，直接按级别落 App 日志。
+    if (type == 'log') {
+      _logMpvMessage(event['value']);
+      return;
+    }
     _logger.d('NativeMpv', 'Event: $type');
     switch (type) {
       case 'playing':
@@ -694,6 +699,25 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
           _logger.d('NativeMpv', '轨道变更: ${_tracks.length} 条轨道');
         }
         break;
+    }
+  }
+
+  /// 把原生 mpv 转发上来的 warn/error/fatal 日志写入 App 日志文件，
+  /// 以便原生崩溃后用户导出的日志里能看到 mpv 的「最后遗言」。
+  /// mpv 级别：FATAL=10 ERROR=20 WARN=30（数字越小越严重）。
+  void _logMpvMessage(dynamic value) {
+    if (value is! Map) return;
+    final level = (value['level'] as num?)?.toInt() ?? 40;
+    final prefix = value['prefix']?.toString() ?? 'mpv';
+    final text = value['text']?.toString() ?? '';
+    if (text.isEmpty) return;
+    final message = 'mpv/$prefix: $text';
+    if (level <= 20) {
+      _logger.e('NativeMpv', message);
+    } else if (level <= 30) {
+      _logger.w('NativeMpv', message);
+    } else {
+      _logger.i('NativeMpv', message);
     }
   }
 

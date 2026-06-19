@@ -332,8 +332,9 @@ class MpvPlayerPlugin(
                 mainHandler = mainHandler
             )
 
-            // Register observer
+            // Register observer（含日志订阅：把 mpv 原生 warn/error/fatal 落到 App 日志）
             MPVLib.addObserver(instance)
+            MPVLib.addLogObserver(instance)
 
             // Observe key properties
             MPVLib.observeProperty("time-pos", MPVLib.MpvFormat.DOUBLE)
@@ -556,7 +557,7 @@ class MpvPlayerPlugin(
         private val mpvTexture: MpvTexture?,  // Nullable when using SurfaceView
         private val eventChannel: EventChannel,
         private val mainHandler: Handler
-    ) : MPVLib.EventObserver {
+    ) : MPVLib.EventObserver, MPVLib.LogObserver {
 
         private var eventSink: EventChannel.EventSink? = null
         private var currentTracks: List<Map<String, Any>> = emptyList()
@@ -678,6 +679,7 @@ class MpvPlayerPlugin(
 
         fun release() {
             MPVLib.removeObserver(this)
+            MPVLib.removeLogObserver(this)
 
             // Detach surface from mpv (stops video rendering)
             try {
@@ -755,6 +757,22 @@ class MpvPlayerPlugin(
                 "speed" -> emitEvent("speed", value)
                 "volume" -> emitEvent("volume", value / 100.0) // normalize to 0-1
             }
+        }
+
+        // ---- LogObserver implementation ----
+
+        // mpv 自身的日志（来自 libmpv，经 libplayer.so 回调）。原本无人订阅，导致
+        // 原生崩溃前的「最后遗言」全部丢失、用户导出的日志里什么都没有。这里订阅并把
+        // 警告/错误/致命级别转发到 Flutter 侧 AppLogger 落盘，便于崩溃后取证。
+        // mpv 级别：FATAL=10 ERROR=20 WARN=30 INFO=40 V=50 DEBUG=60 TRACE=70，数字越小越严重。
+        override fun logMessage(prefix: String, level: Int, text: String) {
+            if (level > MPVLib.MpvLogLevel.WARN) return // 仅转发 warn/error/fatal，避免刷屏
+            val trimmed = text.trimEnd()
+            if (trimmed.isEmpty()) return
+            emitEvent(
+                "log",
+                mapOf("level" to level, "prefix" to prefix, "text" to trimmed)
+            )
         }
 
         override fun event(eventId: Int) {

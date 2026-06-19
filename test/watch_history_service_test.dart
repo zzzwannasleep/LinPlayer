@@ -152,6 +152,117 @@ void main() {
 
       expect(resolved, isNull);
     });
+
+    test('resumes from another server record when crossServer enabled',
+        () async {
+      final tempDir = await Directory.systemTemp.createTemp('watch-history-');
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+
+      final store = WatchHistoryStore(
+        directoryResolver: () async => tempDir,
+      );
+      final service = WatchHistoryService(store: store);
+      // 同一部影片，在服务器 B 上打开（item.id 与记录所属服务器 A 不同）。
+      final item = MediaItem(
+        id: 'server-b-movie',
+        name: 'Spirited Away',
+        type: 'Movie',
+        providerIds: const {'Tmdb': '129'},
+        runTimeTicks: 75000000000,
+      );
+
+      // 进度记录来自另一台服务器（scopeKey = serverA:user）。
+      await store.saveRecord(
+        WatchHistoryRecord(
+          recordId: 'serverA:user:movie:movie:tmdb:129',
+          scopeKey: 'serverA:user',
+          mediaKind: WatchHistoryMediaKind.movie,
+          canonicalKey: 'movie:tmdb:129',
+          tmdbId: '129',
+          title: item.name,
+          lastPositionTicks: 33000000000,
+          runTimeTicks: item.runTimeTicks,
+          played: false,
+          playCount: 1,
+          lastPlayedAt: DateTime.utc(2026, 6, 14, 9),
+          lastWriteSource: WatchHistoryWriteSource.internalPlayer,
+          lastEmbyItemId: 'server-a-movie',
+        ),
+      );
+
+      // 关闭跨服务器：本服无记录，回退到远端进度。
+      final withoutCross = await service.resolveResumePositionTicks(
+        scopeKey: 'serverB:user',
+        api: _FakeApiClientFactory(),
+        item: item,
+        remotePositionTicks: 5000000000,
+      );
+      expect(withoutCross, 5000000000);
+
+      // 开启跨服务器：续播到服务器 A 的更新进度。
+      final withCross = await service.resolveResumePositionTicks(
+        scopeKey: 'serverB:user',
+        api: _FakeApiClientFactory(),
+        item: item,
+        remotePositionTicks: 5000000000,
+        crossServer: true,
+      );
+      expect(withCross, 33000000000);
+    });
+
+    test('crossServer does not resume a record finished on another server',
+        () async {
+      final tempDir = await Directory.systemTemp.createTemp('watch-history-');
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+
+      final store = WatchHistoryStore(
+        directoryResolver: () async => tempDir,
+      );
+      final service = WatchHistoryService(store: store);
+      final item = MediaItem(
+        id: 'server-b-movie',
+        name: 'Princess Mononoke',
+        type: 'Movie',
+        providerIds: const {'Tmdb': '128'},
+        runTimeTicks: 80000000000,
+      );
+
+      await store.saveRecord(
+        WatchHistoryRecord(
+          recordId: 'serverA:user:movie:movie:tmdb:128',
+          scopeKey: 'serverA:user',
+          mediaKind: WatchHistoryMediaKind.movie,
+          canonicalKey: 'movie:tmdb:128',
+          tmdbId: '128',
+          title: item.name,
+          lastPositionTicks: 79000000000,
+          runTimeTicks: item.runTimeTicks,
+          played: true,
+          playCount: 1,
+          lastPlayedAt: DateTime.utc(2026, 6, 14, 9),
+          lastWriteSource: WatchHistoryWriteSource.internalPlayer,
+          lastEmbyItemId: 'server-a-movie',
+        ),
+      );
+
+      final resolved = await service.resolveResumePositionTicks(
+        scopeKey: 'serverB:user',
+        api: _FakeApiClientFactory(),
+        item: item,
+        remotePositionTicks: 0,
+        crossServer: true,
+      );
+      // 在另一服已看完不应强行续播（回退到本服远端进度 0 → null）。
+      expect(resolved, isNull);
+    });
   });
 }
 

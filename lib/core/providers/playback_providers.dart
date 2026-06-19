@@ -120,6 +120,19 @@ final autoSkipSegmentsProvider =
   );
 });
 
+/// 跨服务器续播：在一个服务器看过的进度，换到另一个服务器打开同一部影片 / 同一集时，
+/// 自动续播到所有服务器中记录的最新进度（基于本地观看记录跨服匹配）。默认开启。
+final crossServerResumeProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_cross_server_resume'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_cross_server_resume', value);
+    },
+  );
+});
+
 final watchedThresholdProvider =
     StateNotifierProvider<PreferenceNotifier<int>, int>((ref) {
   int normalize(int? value) {

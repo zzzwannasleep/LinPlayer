@@ -81,6 +81,22 @@ class AppLogger {
 
   String? get logFilePath => _logFile?.path;
 
+  /// 解析日志根目录。Android 优先用应用专属外部目录（使 Android/data/<包名>
+  /// 文件夹出现且日志可被用户取到），失败再退回临时目录；其它平台用临时目录。
+  Future<Directory> _resolveLogBaseDir() async {
+    if (Platform.isAndroid) {
+      try {
+        final external = await getExternalStorageDirectory();
+        if (external != null) {
+          return external;
+        }
+      } catch (_) {
+        // 外部目录不可用时退回临时目录。
+      }
+    }
+    return getTemporaryDirectory();
+  }
+
   /// 获取今天的日志文件名：linplayer-YYYY-MM-DD.log
   String _getTodayFileName() {
     final now = DateTime.now();
@@ -130,8 +146,13 @@ class AppLogger {
     if (_fileReady || _initStarted) return;
     _initStarted = true;
     try {
-      // 滚动日志放系统 temp 下（不进 AppData/Roaming），属临时产物、随清理可弃。
-      final base = await getTemporaryDirectory();
+      // 日志目录：
+      // - Android 用「应用专属外部目录」(Android/data/<包名>/files/linplayer_logs)。
+      //   这样 a) 安装后该包文件夹会真正出现在 Android/data 下；b) 用户能用文件
+      //   管理器/数据线直接取到日志（内部 cacheDir 在文件管理器里看不见）。
+      //   该目录免权限（getExternalFilesDir，自 KitKat 起无需任何存储权限）。
+      // - 桌面/其它平台仍放系统 temp 下（不进 AppData/Roaming），属临时产物可弃。
+      final base = await _resolveLogBaseDir();
       final dir = Directory('${base.path}/linplayer_logs');
       if (!dir.existsSync()) dir.createSync(recursive: true);
 
@@ -302,7 +323,9 @@ class AppLogger {
         .replaceAll('.', '-');
     final fileName = 'linplayer_log_$timestamp.txt';
 
-    // Android：写到 Download 方便取出。
+    // Android：优先写到公共 Download 方便取出；Android 11+ 作用域存储下直接写
+    // /storage/emulated/0/Download 会被拒，则退回应用专属外部目录（用户可在
+    // Android/data/<包名>/files 下取到，免权限）。
     if (Platform.isAndroid) {
       try {
         final downloads = Directory('/storage/emulated/0/Download');
@@ -313,11 +336,22 @@ class AppLogger {
           return exportFile.path;
         }
       } catch (e) {
-        w('AppLogger', '导出到 Download 失败，回退应用目录: $e');
+        w('AppLogger', '导出到 Download 失败（作用域存储），回退应用外部目录: $e');
+      }
+      try {
+        final external = await getExternalStorageDirectory();
+        if (external != null) {
+          final exportFile = File('${external.path}/$fileName');
+          await exportFile.writeAsString(content);
+          i('AppLogger', '日志已导出: ${exportFile.path}');
+          return exportFile.path;
+        }
+      } catch (e) {
+        w('AppLogger', '导出到应用外部目录失败，回退应用文档目录: $e');
       }
     }
 
-    // 其他平台：写到应用文档目录
+    // 其他平台 / 兜底：写到应用文档目录
     final dir = await getApplicationDocumentsDirectory();
     final exportFile = File('${dir.path}/$fileName');
     await exportFile.writeAsString(content);

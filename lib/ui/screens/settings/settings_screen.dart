@@ -29,6 +29,7 @@ import '../../../core/providers/proxy_providers.dart';
 import '../../../core/network/proxy_settings.dart';
 import '../../../core/network/proxy_http_client.dart';
 import '../../../core/services/update/app_update_service.dart';
+import '../../../core/services/watch_history/watch_history_writeback_service.dart';
 import '../../widgets/common/app_update_gate.dart';
 import '../../../plugins/ui/plugin_management_screen.dart';
 
@@ -38,6 +39,7 @@ part 'settings_general.dart';
 part 'settings_home.dart';
 part 'settings_network.dart';
 part 'settings_player.dart';
+part 'settings_resume_sync.dart';
 part 'settings_sync.dart';
 part 'settings_translation.dart';
 

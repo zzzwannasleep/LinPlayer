@@ -277,6 +277,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     } catch (_) {
       startPosition = null;
     }
+    final startPositionTicks = (startPosition?.inMilliseconds ?? 0) * 10000;
 
     ref.read(currentPlayingItemProvider.notifier).state = item;
     ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
@@ -343,16 +344,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         try {
           await api.playback.reportPlaybackStart(info);
         } catch (_) {}
+        await _writeWatchHistoryForItem(
+          item: item,
+          positionTicks: startPositionTicks,
+          incrementPlayCount: true,
+          force: true,
+        );
       },
       onProgress: (info) async {
         try {
           await api.playback.reportPlaybackProgress(info);
         } catch (_) {}
+        await _writeWatchHistoryForItem(
+          item: item,
+          positionTicks: info.positionTicks,
+        );
       },
       onStop: (info) async {
         try {
           await api.playback.reportPlaybackStopped(info);
         } catch (_) {}
+        await _writeWatchHistoryForItem(
+          item: item,
+          positionTicks: info.positionTicks,
+          force: true,
+        );
         await _maybeScrobbleWatched(
             info, item, api, watchedThreshold, syncController);
       },
@@ -424,6 +440,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               item: item,
               remotePositionTicks: remotePositionTicks,
               remotePlayed: remotePlayed,
+              crossServer: ref.read(crossServerResumeProvider),
             );
     if (resolvedTicks == null || resolvedTicks <= 0) {
       return null;
@@ -2026,6 +2043,66 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
     return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  /// 写本地观看记录（续播 / 跨服务器续播的数据来源），并在看完/停止时回传到其它服务器。
+  Future<void> _writeWatchHistoryForItem({
+    required MediaItem item,
+    required int positionTicks,
+    bool incrementPlayCount = false,
+    bool force = false,
+  }) async {
+    // 播放器进度/停止回调可能在播放页销毁后仍触发，此时严禁再用 ref。
+    if (!mounted) return;
+    final scopeKey = buildWatchHistoryScopeKey(ref.read(currentServerProvider));
+    if (scopeKey == null) {
+      return;
+    }
+    try {
+      final record = await ref.read(watchHistoryProvider).capturePlayback(
+            scopeKey: scopeKey,
+            api: ref.read(apiClientProvider),
+            item: item,
+            positionTicks: positionTicks,
+            source: WatchHistoryWriteSource.internalPlayer,
+            watchedThresholdPercent: ref.read(watchedThresholdProvider),
+            incrementPlayCount: incrementPlayCount,
+            force: force,
+          );
+      _maybeWriteBackCrossServer(
+        scopeKey: scopeKey,
+        item: item,
+        record: record,
+        force: force,
+      );
+    } catch (_) {
+      // 本地观看记录失败不应中断播放。
+    }
+  }
+
+  /// 看完 / 停止时，把进度与「已看完」回传到其它服务器（受设置开关控制）。
+  void _maybeWriteBackCrossServer({
+    required String scopeKey,
+    required MediaItem item,
+    required WatchHistoryRecord? record,
+    required bool force,
+  }) {
+    if (record == null || !mounted) return;
+    if (!ref.read(crossServerWritebackEnabledProvider)) return;
+    // 仅在「看完」或显式停止时回传，避免每个进度回调都打其它服务器。
+    if (!record.played && !force) return;
+    unawaited(
+      ref.read(watchHistoryWritebackServiceProvider).propagate(
+            currentScopeKey: scopeKey,
+            currentApi: ref.read(apiClientProvider),
+            item: item,
+            positionTicks: record.lastPositionTicks,
+            played: record.played,
+            servers: ref.read(serverListProvider),
+            range: ref.read(crossServerWritebackRangeProvider),
+            includeProgress: ref.read(crossServerWritebackProgressProvider),
+          ),
+    );
   }
 
   /// 播放停止时判断是否「看完」（进度达到设置里的统一观看阈值），是则上报到

@@ -4,6 +4,8 @@ import '../services/watch_history/watch_history_models.dart';
 import '../services/watch_history/watch_history_restore_service.dart';
 import '../services/watch_history/watch_history_service.dart';
 import '../services/watch_history/watch_history_store.dart';
+import '../services/watch_history/watch_history_writeback_service.dart';
+import 'app_preferences.dart';
 import 'media_providers.dart';
 import 'server_providers.dart';
 
@@ -22,6 +24,54 @@ final watchHistoryRestoreServiceProvider =
   return WatchHistoryRestoreService(
     store: ref.watch(watchHistoryStoreProvider),
     historyService: ref.watch(watchHistoryProvider),
+  );
+});
+
+final watchHistoryWritebackServiceProvider =
+    Provider<WatchHistoryWritebackService>((ref) {
+  return WatchHistoryWritebackService(
+    store: ref.watch(watchHistoryStoreProvider),
+    historyService: ref.watch(watchHistoryProvider),
+  );
+});
+
+/// 看完 / 进度回传到其它服务器的主开关。默认关闭（会写入其它服务器，需用户主动开启）。
+final crossServerWritebackEnabledProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_cross_server_writeback'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_cross_server_writeback', value);
+    },
+  );
+});
+
+/// 回传目标范围：所有看过的服 / 仅初次看过的服 / 仅最近看过的服。默认所有。
+final crossServerWritebackRangeProvider = StateNotifierProvider<
+    PreferenceNotifier<CrossServerWritebackRange>,
+    CrossServerWritebackRange>((ref) {
+  return PreferenceNotifier<CrossServerWritebackRange>(
+    defaultValue: CrossServerWritebackRange.all,
+    readValue: (prefs) => crossServerWritebackRangeFromWire(
+        prefs.getString('linplayer_cross_server_writeback_range')),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_cross_server_writeback_range',
+          crossServerWritebackRangeToWire(value));
+    },
+  );
+});
+
+/// 回传时是否同时同步播放进度（而不仅是「已看完」标记）。默认开启。
+final crossServerWritebackProgressProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) =>
+        prefs.getBool('linplayer_cross_server_writeback_progress'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_cross_server_writeback_progress', value);
+    },
   );
 });
 

@@ -51,6 +51,12 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => _showNetworkSettings(context),
           ),
           _SettingsCard(
+            icon: Icons.sync_alt,
+            title: '同步记录',
+            subtitle: '跨服务器续播，联动本地观看记录',
+            onTap: () => _showResumeSync(context),
+          ),
+          _SettingsCard(
             icon: Icons.sync,
             title: '同步服务',
             subtitle: 'Trakt、Bangumi 观看记录同步',
@@ -117,6 +123,13 @@ class SettingsScreen extends ConsumerWidget {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const NetworkSettingsScreen()),
+    );
+  }
+
+  void _showResumeSync(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const ResumeSyncScreen()),
     );
   }
 

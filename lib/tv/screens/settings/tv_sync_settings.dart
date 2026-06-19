@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/playback_providers.dart';
 import '../../../core/providers/sync_providers.dart';
+import '../../../core/providers/watch_history_providers.dart';
 import '../../../core/services/sync/sync_models.dart';
+import '../../../core/services/watch_history/watch_history_writeback_service.dart';
 import '../../../core/services/sync/trakt_sync_service.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
@@ -20,9 +23,62 @@ class TvSyncSettings extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final m = context.tv;
     final state = ref.watch(syncControllerProvider);
+    final crossServerResume = ref.watch(crossServerResumeProvider);
+    final writebackEnabled = ref.watch(crossServerWritebackEnabledProvider);
+    final writebackRange = ref.watch(crossServerWritebackRangeProvider);
+    final writebackProgress = ref.watch(crossServerWritebackProgressProvider);
     return ListView(
       padding: EdgeInsets.all(m.spacingXl),
       children: [
+        Text(
+          '同步记录',
+          style: TextStyle(
+            fontSize: m.fontSizeXxl,
+            color: TvDesignTokens.textPrimary,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        SizedBox(height: m.spacingLg),
+        _toggle(
+          context,
+          m,
+          title: '跨服务器续播',
+          subtitle: '换服务器观看同一内容时自动续播到最新进度',
+          value: crossServerResume,
+          onToggle: () => ref
+              .read(crossServerResumeProvider.notifier)
+              .state = !crossServerResume,
+        ),
+        _toggle(
+          context,
+          m,
+          title: '看完后回传到其它服务器',
+          subtitle: '把已看完 / 进度同步到其它服务器(会写入其它服)',
+          value: writebackEnabled,
+          onToggle: () => ref
+              .read(crossServerWritebackEnabledProvider.notifier)
+              .state = !writebackEnabled,
+        ),
+        if (writebackEnabled) ...[
+          _action(
+            context,
+            m,
+            title: '回传目标',
+            value: crossServerWritebackRangeLabel(writebackRange),
+            onSelect: () => _pickWritebackRange(context, ref),
+          ),
+          _toggle(
+            context,
+            m,
+            title: '同步播放进度',
+            subtitle: '不仅回传「已看完」,也回传当前播放进度',
+            value: writebackProgress,
+            onToggle: () => ref
+                .read(crossServerWritebackProgressProvider.notifier)
+                .state = !writebackProgress,
+          ),
+        ],
+        SizedBox(height: m.spacingXl),
         Text(
           '同步服务',
           style: TextStyle(
@@ -111,6 +167,123 @@ class TvSyncSettings extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _toggle(
+    BuildContext context,
+    TvMetrics m, {
+    required String title,
+    required String subtitle,
+    required bool value,
+    required VoidCallback onToggle,
+  }) {
+    return TvFocusable(
+      onSelect: onToggle,
+      child: Container(
+        padding: EdgeInsets.all(m.spacingLg),
+        margin: EdgeInsets.only(bottom: m.spacingMd),
+        decoration: BoxDecoration(
+          color: TvDesignTokens.surface,
+          borderRadius: BorderRadius.circular(m.posterRadius),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: m.fontSizeMd,
+                      color: TvDesignTokens.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: m.fontSizeSm,
+                      color: TvDesignTokens.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              value ? '开' : '关',
+              style: TextStyle(
+                fontSize: m.fontSizeMd,
+                color: value
+                    ? TvDesignTokens.brand
+                    : TvDesignTokens.textSecondary,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _action(
+    BuildContext context,
+    TvMetrics m, {
+    required String title,
+    required String value,
+    required VoidCallback onSelect,
+  }) {
+    return TvFocusable(
+      onSelect: onSelect,
+      child: Container(
+        padding: EdgeInsets.all(m.spacingLg),
+        margin: EdgeInsets.only(bottom: m.spacingMd),
+        decoration: BoxDecoration(
+          color: TvDesignTokens.surface,
+          borderRadius: BorderRadius.circular(m.posterRadius),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: m.fontSizeMd,
+                  color: TvDesignTokens.textPrimary,
+                ),
+              ),
+            ),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: m.fontSizeMd,
+                color: TvDesignTokens.brand,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _pickWritebackRange(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (ctx) => TvPanel(
+        title: '回传目标',
+        onClose: () => Navigator.pop(ctx),
+        children: [
+          for (final range in CrossServerWritebackRange.values)
+            TvPanelOption(
+              title: crossServerWritebackRangeLabel(range),
+              onTap: () {
+                ref.read(crossServerWritebackRangeProvider.notifier).state =
+                    range;
+                Navigator.pop(ctx);
+              },
+            ),
+        ],
       ),
     );
   }

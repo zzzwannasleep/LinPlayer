@@ -131,6 +131,7 @@ class WatchHistoryRecord {
     required this.playCount,
     required this.lastPlayedAt,
     required this.lastWriteSource,
+    this.firstPlayedAt,
     this.tmdbId,
     this.seriesTmdbId,
     this.seriesTitle,
@@ -163,12 +164,18 @@ class WatchHistoryRecord {
   final bool played;
   final int playCount;
   final DateTime lastPlayedAt;
+  /// 该 scope（服务器）首次记录此内容的时间。旧记录可能为 null，
+  /// 此时回退到 [lastPlayedAt]（见 [effectiveFirstPlayedAt]）。
+  final DateTime? firstPlayedAt;
   final String? lastEmbyItemId;
   final WatchHistoryMatchConfidence matchConfidence;
   final DateTime? restoredAt;
   final WatchHistoryWriteSource lastWriteSource;
   final String? presentationUniqueKey;
   final String? mediaPath;
+
+  /// 首次观看时间，旧记录缺失时回退到 [lastPlayedAt]。
+  DateTime get effectiveFirstPlayedAt => firstPlayedAt ?? lastPlayedAt;
 
   Map<String, dynamic> toJson() {
     return {
@@ -188,6 +195,7 @@ class WatchHistoryRecord {
       'played': played,
       'playCount': playCount,
       'lastPlayedAt': lastPlayedAt.toUtc().toIso8601String(),
+      'firstPlayedAt': firstPlayedAt?.toUtc().toIso8601String(),
       'lastEmbyItemId': lastEmbyItemId,
       'matchConfidence': matchConfidence.wireValue,
       'restoredAt': restoredAt?.toUtc().toIso8601String(),
@@ -217,6 +225,7 @@ class WatchHistoryRecord {
       playCount: _readNullableInt(json['playCount']) ?? 0,
       lastPlayedAt: DateTime.tryParse(json['lastPlayedAt']?.toString() ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      firstPlayedAt: DateTime.tryParse(json['firstPlayedAt']?.toString() ?? ''),
       lastEmbyItemId: _readNullableString(json['lastEmbyItemId']),
       matchConfidence:
           WatchHistoryMatchConfidenceWire.fromWire(json['matchConfidence']),
@@ -245,6 +254,7 @@ class WatchHistoryRecord {
     bool? played,
     int? playCount,
     DateTime? lastPlayedAt,
+    Object? firstPlayedAt = _sentinel,
     Object? lastEmbyItemId = _sentinel,
     WatchHistoryMatchConfidence? matchConfidence,
     Object? restoredAt = _sentinel,
@@ -279,6 +289,9 @@ class WatchHistoryRecord {
       played: played ?? this.played,
       playCount: playCount ?? this.playCount,
       lastPlayedAt: lastPlayedAt ?? this.lastPlayedAt,
+      firstPlayedAt: identical(firstPlayedAt, _sentinel)
+          ? this.firstPlayedAt
+          : firstPlayedAt as DateTime?,
       lastEmbyItemId: identical(lastEmbyItemId, _sentinel)
           ? this.lastEmbyItemId
           : lastEmbyItemId as String?,

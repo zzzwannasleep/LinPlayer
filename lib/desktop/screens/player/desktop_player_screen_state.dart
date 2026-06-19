@@ -433,6 +433,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
               item: item,
               remotePositionTicks: remotePositionTicks,
               remotePlayed: remotePlayed,
+              crossServer: ref.read(crossServerResumeProvider),
             );
     if (resolvedTicks == null || resolvedTicks <= 0) {
       return null;
@@ -2688,7 +2689,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       return;
     }
     try {
-      await ref.read(watchHistoryProvider).capturePlayback(
+      final record = await ref.read(watchHistoryProvider).capturePlayback(
             scopeKey: scopeKey,
             api: ref.read(apiClientProvider),
             item: item,
@@ -2698,9 +2699,40 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
             incrementPlayCount: incrementPlayCount,
             force: force,
           );
+      _maybeWriteBackCrossServer(
+        scopeKey: scopeKey,
+        item: item,
+        record: record,
+        force: force,
+      );
     } catch (_) {
       // Ignore local watch history failures to avoid interrupting playback.
     }
+  }
+
+  /// 看完 / 停止时，把进度与「已看完」回传到其它服务器（受设置开关控制）。
+  void _maybeWriteBackCrossServer({
+    required String scopeKey,
+    required MediaItem item,
+    required WatchHistoryRecord? record,
+    required bool force,
+  }) {
+    if (record == null || !mounted) return;
+    if (!ref.read(crossServerWritebackEnabledProvider)) return;
+    // 仅在「看完」或显式停止时回传，避免每个进度回调都打其它服务器。
+    if (!record.played && !force) return;
+    unawaited(
+      ref.read(watchHistoryWritebackServiceProvider).propagate(
+            currentScopeKey: scopeKey,
+            currentApi: ref.read(apiClientProvider),
+            item: item,
+            positionTicks: record.lastPositionTicks,
+            played: record.played,
+            servers: ref.read(serverListProvider),
+            range: ref.read(crossServerWritebackRangeProvider),
+            includeProgress: ref.read(crossServerWritebackProgressProvider),
+          ),
+    );
   }
 
   Future<void> _persistCurrentWatchHistory({bool force = false}) async {

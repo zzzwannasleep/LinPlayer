@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
+import '../../../core/services/watch_history/watch_history_models.dart';
 import '../../../core/providers/sync_providers.dart';
 import '../../../core/providers/download_providers.dart';
 import '../../../core/services/download/download_helper.dart';

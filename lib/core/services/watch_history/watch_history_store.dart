@@ -48,6 +48,29 @@ class WatchHistoryStore {
     return records;
   }
 
+  /// 加载全部观看记录（跨服务器，不按 scopeKey 过滤）。
+  /// 用于跨服务器续播匹配与设置页统计/清理。
+  Future<List<WatchHistoryRecord>> loadAll() async {
+    final document = await loadDocument();
+    final records = document.records.toList();
+    records
+        .sort((left, right) => right.lastPlayedAt.compareTo(left.lastPlayedAt));
+    return records;
+  }
+
+  /// 清空全部本地观看记录。
+  Future<void> clearAll() {
+    return _enqueueWrite(() async {
+      await _writeDocument(
+        WatchHistoryDocument(
+          schemaVersion: 1,
+          updatedAt: DateTime.now().toUtc(),
+          records: const [],
+        ),
+      );
+    });
+  }
+
   Future<void> saveRecord(
     WatchHistoryRecord record, {
     Iterable<String> replaceRecordIds = const [],
