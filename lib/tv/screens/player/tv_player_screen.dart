@@ -22,6 +22,7 @@ import '../../../core/services/video_player_service.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
+import '../../services/lan_remote.dart';
 import '../../widgets/tv_control_overlay.dart';
 import '../../widgets/tv_panel.dart';
 
@@ -50,6 +51,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   late final IntroSkipController _introSkip;
   List<DanmakuMatchCandidate> _danmakuCandidates = [];
   String? _danmakuLoadedEpisodeId;
+  StreamSubscription<LanRemoteCommand>? _remoteSub;
 
   String get _itemId => widget.episodeId ?? widget.mediaId ?? '';
 
@@ -58,6 +60,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     super.initState();
     _introSkip = IntroSkipController(service: ref.read(introSkipServiceProvider));
     _service.addListener(_onTick);
+    // 局域网扫码遥控：订阅命令总线，执行远程播放控制。
+    _remoteSub = ref.read(lanRemoteBusProvider).stream.listen(_handleRemote);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     WidgetsBinding.instance.addPostFrameCallback((_) => _init());
   }
@@ -65,6 +69,9 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _remoteSub?.cancel();
+    // 清空遥控状态，Web 端显示「未在播放」。
+    ref.read(lanRemoteStateProvider.notifier).state = null;
     _streamTranslator?.stop();
     _introSkip.dispose();
     _service.removeListener(_onTick);
@@ -80,7 +87,104 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
       _onPlaybackComplete();
     }
     _introSkip.onPosition(_service.position);
+    _publishRemoteState();
     setState(() {});
+  }
+
+  /// 向 [lanRemoteStateProvider] 写入当前播放快照，供扫码遥控页读取。
+  void _publishRemoteState() {
+    final item = _item;
+    final tracks = _service.tracksInfo;
+    List<Map<String, dynamic>> mapTracks(Set<String> types, String? selId) =>
+        tracks
+            .where((t) => types.contains(t['type']?.toString()))
+            .map((t) {
+          final id = t['id']?.toString();
+          return {'id': id, 'label': _trackLabel(t), 'selected': id == selId};
+        }).toList();
+    ref.read(lanRemoteStateProvider.notifier).state = LanRemoteState(
+      hasItem: _ready && item != null,
+      playing: _service.isPlaying,
+      positionMs: _service.position.inMilliseconds,
+      durationMs: _service.duration.inMilliseconds,
+      title: item?.name ?? '',
+      type: item?.type ?? '',
+      seriesId: item?.seriesId,
+      seasonId: item?.seasonId,
+      audioTracks: mapTracks({'audio'}, _service.selectedAudioTrackId),
+      subtitleTracks:
+          mapTracks({'text', 'bitmap'}, _service.selectedSubtitleTrackId),
+    );
+  }
+
+  /// 处理来自扫码遥控页的远程命令。
+  void _handleRemote(LanRemoteCommand c) {
+    if (!mounted) return;
+    switch (c.action) {
+      case 'toggle':
+        _togglePlay();
+        break;
+      case 'play':
+        _service.play();
+        _revealControls();
+        break;
+      case 'pause':
+        _service.pause();
+        break;
+      case 'seekRel':
+        final s = (c.value is num)
+            ? (c.value as num).toInt()
+            : int.tryParse('${c.value}') ?? 0;
+        _seek(s);
+        break;
+      case 'seekTo':
+        final ms = (c.value is num) ? (c.value as num).toInt() : 0;
+        _service.seekTo(Duration(milliseconds: ms));
+        _revealControls();
+        break;
+      case 'next':
+        unawaited(_goToAdjacentEpisode(1));
+        break;
+      case 'prev':
+        unawaited(_goToAdjacentEpisode(-1));
+        break;
+      case 'playEpisode':
+        final id = c.value?.toString();
+        if (id != null && id.isNotEmpty) {
+          context.replace('/tv/player?mediaId=$id');
+        }
+        break;
+      case 'audio':
+        final id = c.value?.toString();
+        if (id != null) _service.selectAudioTrack(id);
+        break;
+      case 'subtitle':
+        final id = c.value?.toString();
+        if (id == null || id == 'off') {
+          _service.deselectSubtitleTrack();
+          ref.read(subtitleTrackProvider.notifier).state = null;
+        } else {
+          _service.selectSubtitleTrack(id);
+        }
+        break;
+    }
+    _publishRemoteState();
+  }
+
+  Future<void> _goToAdjacentEpisode(int delta) async {
+    final item = _item;
+    if (item == null || item.seriesId == null) return;
+    try {
+      final episodes = await ref.read(apiClientProvider).media.getEpisodes(
+            item.seriesId!,
+            seasonId: item.seasonId,
+          );
+      final idx = episodes.indexWhere((e) => e.id == item.id);
+      final n = idx + delta;
+      if (idx >= 0 && n >= 0 && n < episodes.length && mounted) {
+        context.replace('/tv/player?mediaId=${episodes[n].id}');
+      }
+    } catch (_) {}
   }
 
   /// 点按「跳过片头/片尾」：片尾且开启自动连播则切下一集（无下一集回退 seek），

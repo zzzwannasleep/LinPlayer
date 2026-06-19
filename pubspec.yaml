@@ -51,6 +51,9 @@ dependencies:
   # UI增强
   cupertino_icons: ^1.0.6
 
+  # 局域网扫码遥控：生成二维码（内置 HTTP 服务用 dart:io，无需额外依赖）
+  qr_flutter: ^4.1.0
+
   # 动效（统一三端动画：入场/错峰/shimmer/淡入缩放）
   flutter_animate: ^4.5.0
   

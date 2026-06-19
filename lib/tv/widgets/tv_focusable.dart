@@ -119,6 +119,7 @@ class _TvFocusableState extends State<TvFocusable> {
                     duration: TvDesignTokens.focusAnimationDuration,
                     curve: TvDesignTokens.focusAnimationCurve,
                   ),
+              // 聚焦指示：仅一层淡淡的品牌蓝覆盖（无白色描边、无大光晕）。
               Positioned.fill(
                 child: IgnorePointer(
                   child: AnimatedOpacity(
@@ -127,20 +128,8 @@ class _TvFocusableState extends State<TvFocusable> {
                     opacity: _isFocused ? 1.0 : 0.0,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        border: Border.all(
-                          color: TvDesignTokens.focusBorder,
-                          width: TvDesignTokens.focusBorderWidth,
-                        ),
+                        color: TvDesignTokens.focusOverlay,
                         borderRadius: BorderRadius.circular(m.posterRadius),
-                        boxShadow: widget.enableGlow
-                            ? const [
-                                BoxShadow(
-                                  color: TvDesignTokens.focusGlow,
-                                  blurRadius: TvDesignTokens.focusGlowBlur,
-                                  spreadRadius: 4,
-                                ),
-                              ]
-                            : null,
                       ),
                     ),
                   ),
@@ -203,29 +192,29 @@ class TvFocusableStatic extends StatelessWidget {
               focusNode.requestFocus();
               onSelect?.call();
             },
-            child: Container(
+            child: Padding(
             padding: padding,
-            decoration: focused
-                ? BoxDecoration(
-                    border: Border.all(
-                      color: TvDesignTokens.focusBorder,
-                      width: TvDesignTokens.focusBorderWidth,
-                    ),
-                    borderRadius: BorderRadius.circular(m.posterRadius),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: TvDesignTokens.focusGlow,
-                        blurRadius: TvDesignTokens.focusGlowBlur,
-                        spreadRadius: 4,
-                      ),
-                    ],
-                  )
-                : null,
             child: Transform.scale(
               scale: focused ? TvDesignTokens.focusScale : 1.0,
               child: Opacity(
                 opacity: focused ? 1.0 : TvDesignTokens.nonFocusOpacity,
-                child: child,
+                child: Stack(
+                  children: [
+                    child,
+                    if (focused)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: TvDesignTokens.focusOverlay,
+                              borderRadius:
+                                  BorderRadius.circular(m.posterRadius),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             ),

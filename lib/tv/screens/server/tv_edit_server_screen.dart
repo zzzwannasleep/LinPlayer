@@ -8,6 +8,7 @@ import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
 import '../../widgets/tv_toast.dart';
+import 'tv_icon_picker.dart';
 
 /// TV / Pad 服务器编辑页
 ///
@@ -193,6 +194,7 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
                 Row(
                   children: [
                     TvFocusable(
+                      autofocus: true,
                       padding: EdgeInsets.all(m.spacingXs),
                       onSelect: () => context.pop(),
                       child: Icon(Icons.arrow_back,
@@ -275,8 +277,84 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
           child: _field(m, '图标地址 (URL)', _iconCtrl,
               onChanged: (_) => setState(() {})),
         ),
+        SizedBox(width: m.spacingMd),
+        TvFocusable(
+          padding: EdgeInsets.all(m.spacingXs),
+          onSelect: _pickIcon,
+          child: Container(
+            padding: EdgeInsets.symmetric(
+                horizontal: m.spacingMd, vertical: m.spacingSm),
+            decoration: BoxDecoration(
+              color: TvDesignTokens.surface,
+              borderRadius: BorderRadius.circular(m.posterRadius),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.image_search,
+                    color: TvDesignTokens.brand, size: m.s(24)),
+                SizedBox(width: m.spacingXs),
+                Text('选择图标',
+                    style: TextStyle(
+                        fontSize: m.fontSizeSm,
+                        color: TvDesignTokens.brand)),
+              ],
+            ),
+          ),
+        ),
       ],
     );
+  }
+
+  Future<void> _pickIcon() async {
+    final url = await showTvIconPicker(context);
+    if (url != null && url.isNotEmpty && mounted) {
+      setState(() => _iconCtrl.text = url);
+    }
+  }
+
+  Future<void> _syncLines() async {
+    final server = _findServer();
+    if (server == null) return;
+    final token = server.authToken;
+    if (token == null || token.isEmpty) {
+      TvToast.show(context, '服务器未登录，无法同步线路');
+      return;
+    }
+    if (_lines.isEmpty) {
+      TvToast.show(context, '请先新增一条线路作为同步源');
+      return;
+    }
+    TvToast.show(context, '正在同步线路…');
+    final service = ref.read(extDomainServiceProvider);
+    final merged = <ServerLine>[..._lines];
+    final existingUrls = merged.map((l) => l.url).toSet();
+    var added = 0;
+    for (final src in List<ServerLine>.from(_lines)) {
+      try {
+        final extLines = await service.fetchExtDomains(
+          extDomainUrl: src.url,
+          embyServerUrl: server.baseUrl,
+          embyToken: token,
+        );
+        for (final ext in extLines) {
+          if (existingUrls.add(ext.url)) {
+            merged.add(ServerLine(
+              id: _newLineId(),
+              name: ext.name.isEmpty ? '线路 ${merged.length + 1}' : ext.name,
+              url: ext.url,
+              remark: ext.remark,
+            ));
+            added++;
+          }
+        }
+      } catch (_) {
+        // 单条同步失败不阻断其余。
+      }
+    }
+    if (!mounted) return;
+    setState(() => _lines = merged);
+    TvToast.show(context, added > 0 ? '已同步 $added 条线路' : '未发现新线路');
   }
 
   Widget _buildLinesSection(TvMetrics m) {
@@ -287,6 +365,23 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
           children: [
             _sectionTitle('线路管理', m),
             const Spacer(),
+            TvFocusable(
+              padding: EdgeInsets.all(m.spacingXs),
+              onSelect: _syncLines,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.sync,
+                      color: TvDesignTokens.brand, size: m.s(24)),
+                  SizedBox(width: m.spacingXs),
+                  Text('同步线路',
+                      style: TextStyle(
+                          fontSize: m.fontSizeSm,
+                          color: TvDesignTokens.brand)),
+                ],
+              ),
+            ),
+            SizedBox(width: m.spacingMd),
             TvFocusable(
               padding: EdgeInsets.all(m.spacingXs),
               onSelect: () => _editLine(),

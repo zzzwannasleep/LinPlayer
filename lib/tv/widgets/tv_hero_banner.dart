@@ -121,22 +121,28 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
               itemBuilder: (context, index) =>
                   _buildHeroItem(widget.items[index], m),
             ),
-            // 底部渐变遮罩
+            // 底部渐变遮罩：仅用于让下方内容平滑融入背景。
+            // 必须 IgnorePointer，否则会盖住播放/详情按钮导致点击失效。
+            // 多停靠点平滑过渡，避免中间出现明显黑线。
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
-              height: m.heroOverlayHeight,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      TvDesignTokens.background.withOpacity(0.7),
-                      TvDesignTokens.background,
-                    ],
+              height: (widget.height ?? m.heroHeight) * 0.5,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        TvDesignTokens.background.withOpacity(0.0),
+                        TvDesignTokens.background.withOpacity(0.35),
+                        TvDesignTokens.background.withOpacity(0.85),
+                        TvDesignTokens.background,
+                      ],
+                      stops: const [0.0, 0.5, 0.85, 1.0],
+                    ),
                   ),
                 ),
               ),
@@ -184,16 +190,17 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                 fit: BoxFit.cover,
               )
             : _buildPlaceholder(m),
-        // 渐变遮罩
+        // 左侧轻渐变：仅为左下角文字/按钮提供可读性，不压暗整张封面。
         Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                TvDesignTokens.background.withOpacity(0.8),
+                TvDesignTokens.background.withOpacity(0.55),
                 Colors.transparent,
               ],
+              stops: const [0.0, 0.55],
             ),
           ),
         ),

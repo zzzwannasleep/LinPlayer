@@ -6,6 +6,7 @@ import '../screens/server/tv_server_screen.dart';
 import '../screens/server/tv_add_server_screen.dart';
 import '../screens/server/tv_edit_server_screen.dart';
 import '../screens/settings/tv_settings_screen.dart';
+import '../screens/settings/tv_lan_control_screen.dart';
 import '../screens/detail/tv_detail_screen.dart';
 import '../screens/player/tv_player_screen.dart';
 import '../screens/onboarding/tv_onboarding_screen.dart';
@@ -44,6 +45,11 @@ final tvRouter = GoRouter(
       builder: (context, state) => TvEditServerScreen(
         serverId: state.pathParameters['serverId'],
       ),
+    ),
+    // 手机扫码遥控（局域网）
+    GoRoute(
+      path: '/tv/lan-control',
+      builder: (context, state) => const TvLanControlScreen(),
     ),
     // 详情页（独立页面，无导航栏）
     GoRoute(

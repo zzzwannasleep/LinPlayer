@@ -74,20 +74,25 @@ class _TvToastWidgetState extends State<_TvToastWidget>
       child: FadeTransition(
         opacity: _animation,
         child: Center(
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              vertical: m.toastPaddingVertical,
-              horizontal: m.toastPaddingHorizontal,
-            ),
-            decoration: BoxDecoration(
-              color: TvDesignTokens.surfaceElevated,
-              borderRadius: BorderRadius.circular(m.toastBorderRadius),
-            ),
-            child: Text(
-              widget.message,
-              style: TextStyle(
-                fontSize: m.toastFontSize,
-                color: TvDesignTokens.textPrimary,
+          // Material 祖先：OverlayEntry 中的 Text 缺少 Material 会出现
+          // 调试期黄色双下划线（且发布包默认样式异常）。包一层即可修复。
+          child: Material(
+            type: MaterialType.transparency,
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                vertical: m.toastPaddingVertical,
+                horizontal: m.toastPaddingHorizontal,
+              ),
+              decoration: BoxDecoration(
+                color: TvDesignTokens.surfaceElevated,
+                borderRadius: BorderRadius.circular(m.toastBorderRadius),
+              ),
+              child: Text(
+                widget.message,
+                style: TextStyle(
+                  fontSize: m.toastFontSize,
+                  color: TvDesignTokens.textPrimary,
+                ),
               ),
             ),
           ),

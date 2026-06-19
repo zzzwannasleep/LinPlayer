@@ -316,49 +316,18 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
             ),
             SizedBox(height: m.spacingSm),
             SizedBox(
-              height: m.s(56),
-              child: ListView.builder(
+              height: m.s(150) * 1.5 + m.s(48),
+              child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: seasons.length,
+                separatorBuilder: (_, __) => SizedBox(width: m.spacingMd),
                 itemBuilder: (context, index) {
                   final season = seasons[index];
                   final selected = season.id == seasonId;
-                  return Padding(
-                    padding: EdgeInsets.only(right: m.spacingSm),
-                    child: TvFocusable(
-                      onSelect: () =>
-                          setState(() => _selectedSeasonId = season.id),
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: m.spacingMd,
-                          vertical: m.spacingXs,
-                        ),
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? TvDesignTokens.brand.withValues(alpha: 0.18)
-                              : TvDesignTokens.surface,
-                          borderRadius: BorderRadius.circular(m.posterRadius),
-                          border: selected
-                              ? Border.all(
-                                  color: TvDesignTokens.brand, width: m.s(2))
-                              : null,
-                        ),
-                        child: Center(
-                          child: Text(
-                            season.name,
-                            style: TextStyle(
-                              fontSize: m.fontSizeSm,
-                              color: selected
-                                  ? TvDesignTokens.brand
-                                  : TvDesignTokens.textPrimary,
-                              fontWeight: selected
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                  return TvFocusable(
+                    onSelect: () =>
+                        setState(() => _selectedSeasonId = season.id),
+                    child: _buildSeasonCard(api, season, selected, m),
                   );
                 },
               ),
@@ -373,6 +342,55 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
         child: const CircularProgressIndicator(color: TvDesignTokens.brand),
       ),
       error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  /// 季封面卡片（竖向 2:3 海报 + 季名「第N季」）。
+  Widget _buildSeasonCard(
+      ApiClientFactory api, Season season, bool selected, TvMetrics m) {
+    final double w = m.s(150);
+    final double h = w * 1.5;
+    final poster = _seasonImageUrl(api, season);
+    return SizedBox(
+      width: w,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: w,
+            height: h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(m.posterRadius),
+              border: selected
+                  ? Border.all(color: TvDesignTokens.brand, width: m.s(3))
+                  : null,
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: poster != null
+                ? MediaImage(
+                    imageUrl: poster, width: w, height: h, fit: BoxFit.cover)
+                : const ColoredBox(
+                    color: TvDesignTokens.surfaceElevated,
+                    child: Icon(Icons.video_library_outlined,
+                        color: TvDesignTokens.textDisabled),
+                  ),
+          ),
+          SizedBox(height: m.spacingXs),
+          Text(
+            season.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: m.fontSizeSm,
+              color:
+                  selected ? TvDesignTokens.brand : TvDesignTokens.textPrimary,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -394,15 +412,23 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            SizedBox(height: m.spacingSm),
-            ...episodes.asMap().entries.map((entry) {
-              final index = entry.key;
-              final ep = entry.value;
-              return _buildEpisodeRow(api, ep, m).animate().fadeIn(
-                    delay: Duration(milliseconds: 30 * index),
-                    duration: TvDesignTokens.contentFadeDuration,
-                  );
-            }),
+            SizedBox(height: m.spacingMd),
+            // 竖向剧集卡片网格（封面 + 第N集 + 集名），便于遥控器上下左右选集。
+            Wrap(
+              spacing: m.spacingMd,
+              runSpacing: m.spacingLg,
+              children: [
+                for (final entry in episodes.asMap().entries)
+                  TvFocusable(
+                    onSelect: () =>
+                        context.push('/tv/player?mediaId=${entry.value.id}'),
+                    child: _buildEpisodeCard(api, entry.value, m),
+                  ).animate().fadeIn(
+                        delay: Duration(milliseconds: 20 * (entry.key % 12)),
+                        duration: TvDesignTokens.contentFadeDuration,
+                      ),
+              ],
+            ),
           ],
         );
       },
@@ -414,102 +440,122 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     );
   }
 
-  Widget _buildEpisodeRow(ApiClientFactory api, Episode ep, TvMetrics m) {
+  /// 竖向剧集卡片：16:9 封面（集数角标 + 已看标记 + 进度）+ 第N集 + 集名。
+  Widget _buildEpisodeCard(ApiClientFactory api, Episode ep, TvMetrics m) {
+    final double w = m.s(260);
+    final double coverH = w * 9 / 16;
     final thumbUrl = _episodeImageUrl(api, ep);
     final watched = ep.userData?.played ?? false;
-    return Padding(
-      padding: EdgeInsets.only(bottom: m.spacingSm),
-      child: TvFocusable(
-        padding: EdgeInsets.all(m.spacingXs),
-        onSelect: () => context.push('/tv/player?mediaId=${ep.id}'),
-        child: Container(
-          padding: EdgeInsets.all(m.spacingMd),
-          decoration: BoxDecoration(
-            color: TvDesignTokens.surface,
+    final progress = _episodeProgress(ep);
+    return SizedBox(
+      width: w,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
             borderRadius: BorderRadius.circular(m.posterRadius),
-          ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(m.posterRadius),
-                child: SizedBox(
-                  width: m.s(132),
-                  height: m.s(74),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      thumbUrl != null
-                          ? MediaImage(
-                              imageUrl: thumbUrl,
-                              width: m.s(132),
-                              height: m.s(74),
-                              fit: BoxFit.cover,
-                            )
-                          : const ColoredBox(
-                              color: TvDesignTokens.surfaceElevated,
-                              child: Icon(Icons.movie_outlined,
-                                  color: TvDesignTokens.textDisabled),
-                            ),
-                      if (_episodeProgress(ep) > 0)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          child: LinearProgressIndicator(
-                            value: _episodeProgress(ep),
-                            minHeight: m.s(4),
-                            backgroundColor: Colors.black54,
-                            valueColor: const AlwaysStoppedAnimation(
-                                TvDesignTokens.brand),
+            child: SizedBox(
+              width: w,
+              height: coverH,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  thumbUrl != null
+                      ? MediaImage(
+                          imageUrl: thumbUrl,
+                          width: w,
+                          height: coverH,
+                          fit: BoxFit.cover,
+                        )
+                      : const ColoredBox(
+                          color: TvDesignTokens.surfaceElevated,
+                          child: Icon(Icons.movie_outlined,
+                              color: TvDesignTokens.textDisabled),
+                        ),
+                  // 集数角标
+                  if (ep.indexNumber != null)
+                    Positioned(
+                      top: m.spacingXs,
+                      left: m.spacingXs,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                            horizontal: m.s(8), vertical: m.s(2)),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.6),
+                          borderRadius: BorderRadius.circular(m.s(4)),
+                        ),
+                        child: Text(
+                          'E${ep.indexNumber}',
+                          style: TextStyle(
+                            fontSize: m.fs(12),
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(width: m.spacingMd),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${ep.indexNumber != null ? '${ep.indexNumber}. ' : ''}${ep.name}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: m.fontSizeMd,
-                        color: TvDesignTokens.textPrimary,
                       ),
                     ),
-                    if (ep.overview != null && ep.overview!.isNotEmpty) ...[
-                      SizedBox(height: m.spacingXs),
-                      Text(
-                        ep.overview!,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: m.fontSizeXs,
-                          color: TvDesignTokens.textSecondary,
-                          height: TvDesignTokens.lineHeightNormal,
-                        ),
+                  if (watched)
+                    Positioned(
+                      top: m.spacingXs,
+                      right: m.spacingXs,
+                      child: Icon(Icons.check_circle,
+                          color: TvDesignTokens.success, size: m.s(22)),
+                    ),
+                  if (progress > 0)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: m.s(4),
+                        backgroundColor: Colors.black54,
+                        valueColor: const AlwaysStoppedAnimation(
+                            TvDesignTokens.brand),
                       ),
-                    ],
-                  ],
-                ),
+                    ),
+                ],
               ),
-              SizedBox(width: m.spacingMd),
-              Icon(
-                watched ? Icons.check_circle : Icons.play_circle_outline,
-                color: watched
-                    ? TvDesignTokens.success
-                    : TvDesignTokens.brand,
-                size: m.s(32),
-              ),
-            ],
+            ),
           ),
-        ),
+          SizedBox(height: m.spacingXs),
+          Text(
+            '第 ${ep.indexNumber ?? '?'} 集',
+            style: TextStyle(
+              fontSize: m.fontSizeXs,
+              color: TvDesignTokens.textSecondary,
+            ),
+          ),
+          Text(
+            ep.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: m.fontSizeSm,
+              color: TvDesignTokens.textPrimary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  String? _seasonImageUrl(ApiClientFactory api, Season s) {
+    if (s.primaryImageTag != null) {
+      return api.image
+          .getPrimaryImageUrl(s.id, tag: s.primaryImageTag, maxWidth: 400);
+    }
+    if (s.thumbImageTag != null) {
+      return api.image
+          .getThumbImageUrl(s.id, tag: s.thumbImageTag, maxWidth: 400);
+    }
+    if (s.seriesId.isNotEmpty && s.seriesPrimaryImageTag != null) {
+      return api.image.getPrimaryImageUrl(s.seriesId,
+          tag: s.seriesPrimaryImageTag, maxWidth: 400);
+    }
+    return null;
   }
 
   double _episodeProgress(Episode ep) {

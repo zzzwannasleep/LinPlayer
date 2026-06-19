@@ -240,6 +240,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         onToggle: () =>
             ref.read(backgroundPlaybackProvider.notifier).state = !bgPlay,
       ),
+      _rowCard(
+        m,
+        title: '手机扫码遥控',
+        subtitle: '生成局域网二维码，用手机编辑设置/服务器并遥控播放',
+        trailing: Icon(Icons.qr_code_2,
+            color: TvDesignTokens.brand, size: m.s(28)),
+        onSelect: () => context.push('/tv/lan-control'),
+      ),
     ]);
   }
 
