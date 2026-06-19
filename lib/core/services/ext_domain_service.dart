@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import '../app_identity.dart';
+
 /// 扩展线路同步服务
 /// 
 /// 对接 emby_ext_domains 项目，通过 Emby Token 验证获取服务器线路列表
@@ -33,7 +35,7 @@ class ExtDomainService {
         },
         options: Options(
           headers: {
-            'User-Agent': 'Linplayer/1.0.0',
+            'User-Agent': kAppUserAgent,
             'Accept': 'application/json',
           },
         ),

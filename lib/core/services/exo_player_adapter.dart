@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'player_adapter.dart';
 import 'app_logger.dart';
+import '../app_identity.dart';
 
 class ExoPlayerAdapter implements PlayerAdapter {
   static const _channel = MethodChannel('com.linplayer/exoplayer');
@@ -129,6 +130,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
         'preferredSubtitleLanguage': preferredSubtitleLanguage,
         'enableAssSupport': useLibass,
         'hardwareDecoding': hardwareDecoding,
+        // 统一 UA：部分 CDN 拒绝默认 UA 导致取流失败。
+        'userAgent': kAppUserAgent,
       });
 
       if (result == null) {

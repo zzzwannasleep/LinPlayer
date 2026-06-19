@@ -213,6 +213,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             itemId: widget.itemId,
             preferredMediaSourceId:
                 widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
+            versionRegex: ref.read(preferredVersionRegexProvider),
             playSessionId:
                 '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
           )
@@ -374,7 +375,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final audioStreams =
         mediaSource?.mediaStreams.where((stream) => stream.isAudio).toList() ??
             const <MediaStream>[];
-    final selectedAudioIndex = ref.read(audioTrackProvider);
+    var selectedAudioIndex = ref.read(audioTrackProvider);
+    // 「音频选择」正则：用户未手动选轨时，按正则自动挑选匹配的音频轨。
+    if (selectedAudioIndex == null && audioStreams.isNotEmpty) {
+      final audioMatch =
+          matchPreferredStream(audioStreams, ref.read(preferredAudioRegexProvider));
+      if (audioMatch != null) {
+        selectedAudioIndex = audioMatch.index;
+        ref.read(audioTrackProvider.notifier).state = audioMatch.index;
+      }
+    }
     if (selectedAudioIndex != null) {
       await _applyInitialAudioTrack(audioStreams, selectedAudioIndex);
     }
@@ -461,12 +471,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     final preferredLang = ref.read(preferredSubtitleLanguageProvider);
-    logger.i('Player', '首选字幕语言: $preferredLang');
+    // 「字幕选择」正则优先：命中则用正则结果，否则回退到首选字幕语言。
+    final subtitleRegex = ref.read(preferredSubtitleRegexProvider);
+    final regexMatched = matchPreferredStream(subtitleStreams, subtitleRegex);
+    logger.i('Player',
+        '首选字幕语言: $preferredLang, 字幕正则: "$subtitleRegex", 正则命中: ${regexMatched?.index}');
 
-    final target = subtitleStreams.firstWhere(
-      (s) => s.language == preferredLang,
-      orElse: () => subtitleStreams.first,
-    );
+    final target = regexMatched ??
+        subtitleStreams.firstWhere(
+          (s) => s.language == preferredLang,
+          orElse: () => subtitleStreams.first,
+        );
 
     final codec = target.codec?.toLowerCase() ?? 'ass';
     final isExternal = target.isExternal ?? false;
@@ -1455,6 +1470,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final danmakuDelay = ref.watch(danmakuDelayProvider);
     final danmakuDisplayArea = ref.watch(danmakuDisplayAreaProvider);
     final danmakuStroke = ref.watch(danmakuStrokeProvider);
+    final danmakuFontFamily = ref.watch(customDanmakuFontPathProvider).isEmpty
+        ? null
+        : FontService.danmakuFontFamily;
 
     if (_playerService.coreType != PlayerCoreType.exoPlayer) {
       final overlays = <Widget>[];
@@ -1473,6 +1491,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               densityFactor: danmakuDensity,
               displayArea: danmakuDisplayArea,
               stroke: danmakuStroke,
+              fontFamily: danmakuFontFamily,
             ),
           ),
         );
@@ -1514,6 +1533,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   densityFactor: danmakuDensity,
                   displayArea: danmakuDisplayArea,
                   stroke: danmakuStroke,
+                  fontFamily: danmakuFontFamily,
                 ),
               ),
             if (contentRect == Rect.zero)

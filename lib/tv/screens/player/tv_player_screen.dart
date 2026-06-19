@@ -19,9 +19,11 @@ import '../../../core/services/intro_skip_controller.dart';
 import '../../../core/services/translation/translation_actions.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/app_logger.dart';
+import '../../../core/services/font_service.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/utils/playback_error_text.dart';
 import '../../../core/utils/playback_url_resolver.dart';
+import '../../../core/utils/track_preference.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
 import '../../services/lan_remote.dart';
@@ -259,6 +261,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         playbackInfo: playbackInfo,
         itemId: _itemId,
         preferredMediaSourceId: ref.read(selectedMediaSourceProvider),
+        versionRegex: ref.read(preferredVersionRegexProvider),
         playSessionId: '$_itemId-${DateTime.now().microsecondsSinceEpoch}',
       );
       final req = selection.primaryRequest;
@@ -353,6 +356,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         _scheduleHide();
       }
       await _loadSubtitles(preferredSubtitleLanguage, useLibass);
+      await _applyPreferredAudio();
     } catch (e, st) {
       // 原始错误（可能含播放地址/api_key）只写日志供导出反馈，界面只显示安全文案。
       AppLogger().eWithStack('TvPlayer', '播放失败', e, st);
@@ -447,6 +451,9 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
           densityFactor: ref.watch(danmakuDensityProvider),
           displayArea: ref.watch(danmakuDisplayAreaProvider),
           stroke: ref.watch(danmakuStrokeProvider),
+          fontFamily: ref.watch(customDanmakuFontPathProvider).isEmpty
+              ? null
+              : FontService.danmakuFontFamily,
         ),
       ),
     );
@@ -522,11 +529,32 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         preferredLanguage: preferredLang,
         exoLibassEnabled: exoLibass,
         authToken: ref.read(currentServerProvider)?.authToken,
+        preferredRegex: ref.read(preferredSubtitleRegexProvider),
       );
       if (index != null && mounted) {
         ref.read(subtitleTrackProvider.notifier).state = index;
       }
     } catch (_) {}
+  }
+
+  /// 「音频选择」正则：用户未手动选轨时，按正则在播放器音频轨里自动挑选匹配项。
+  /// TV 直接匹配播放器轨道的「标题/语言/编码」文本，避免 Emby 流序映射。
+  Future<void> _applyPreferredAudio() async {
+    if (ref.read(audioTrackProvider) != null) return; // 尊重已有选择
+    final re = compilePreferenceRegex(ref.read(preferredAudioRegexProvider));
+    if (re == null) return;
+    final audios = await _tracksOfType({'audio'});
+    if (audios.isEmpty || !mounted) return;
+    for (final t in audios) {
+      final text = [t['title'], t['language'], t['codec']]
+          .where((e) => e != null && e.toString().isNotEmpty)
+          .join(' ');
+      if (re.hasMatch(text)) {
+        final id = t['id']?.toString();
+        if (id != null) await _service.selectAudioTrack(id);
+        return;
+      }
+    }
   }
 
   String _trackLabel(Map<String, dynamic> t) {

@@ -225,6 +225,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
               itemId: widget.itemId,
               preferredMediaSourceId:
                   widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
+              versionRegex: ref.read(preferredVersionRegexProvider),
               playSessionId:
                   '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
             )
@@ -641,11 +642,14 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     }
     final preferredLanguage =
         ref.read(preferredSubtitleLanguageProvider).trim().toLowerCase();
-    final preferredTrack = subtitleStreams.firstWhere(
-      (stream) =>
-          (stream.language ?? '').trim().toLowerCase() == preferredLanguage,
-      orElse: () => subtitleStreams.first,
-    );
+    // 「字幕选择」正则优先：命中则用正则结果，否则回退到首选字幕语言。
+    final preferredTrack = matchPreferredStream(
+            subtitleStreams, ref.read(preferredSubtitleRegexProvider)) ??
+        subtitleStreams.firstWhere(
+          (stream) =>
+              (stream.language ?? '').trim().toLowerCase() == preferredLanguage,
+          orElse: () => subtitleStreams.first,
+        );
     await _runWithSuppressedTrackSelectionListeners(() async {
       ref.read(subtitleTrackProvider.notifier).state = preferredTrack.index;
       await _onSubtitleSelectionChanged(null, preferredTrack.index);
@@ -669,6 +673,12 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   int? _resolveInitialAudioIndex(List<MediaStream> audioStreams) {
     if (audioStreams.isEmpty) {
       return null;
+    }
+    // 「音频选择」正则优先：命中则用正则结果，否则回退到服务端默认轨。
+    final regexMatch =
+        matchPreferredStream(audioStreams, ref.read(preferredAudioRegexProvider));
+    if (regexMatch != null) {
+      return regexMatch.index;
     }
     final selected = audioStreams.firstWhere(
       (stream) => stream.isDefault == true,
@@ -2757,6 +2767,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           densityFactor: ref.watch(danmakuDensityProvider),
           displayArea: ref.watch(danmakuDisplayAreaProvider),
           stroke: ref.watch(danmakuStrokeProvider),
+          fontFamily: ref.watch(customDanmakuFontPathProvider).isEmpty
+              ? null
+              : FontService.danmakuFontFamily,
         ),
       ),
     );

@@ -1,8 +1,10 @@
 import 'dart:convert';
 
+import '../../app_identity.dart';
+
 /// 追番/观看记录同步服务的统一 User-Agent。
-/// 与 App 其它出口保持一致（见 emby_api.dart）。
-const String kSyncUserAgent = 'Linplayer/1.0.0';
+/// 与 App 其它出口保持一致（见 [kAppUserAgent]）。
+const String kSyncUserAgent = kAppUserAgent;
 
 /// 支持的同步服务类型。
 enum SyncService {

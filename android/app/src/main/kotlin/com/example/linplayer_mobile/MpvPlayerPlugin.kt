@@ -51,11 +51,13 @@ class MpvPlayerPlugin(
                 val useGpuNext = call.argument<Boolean>("useGpuNext") ?: false
                 // 用户自定义代理（仅 HTTP 代理可被 mpv 消费；为空则直连）
                 val httpProxy = call.argument<String>("httpProxy")
+                // 统一 UA：部分 CDN 拒绝 mpv 默认 UA 导致取流失败。
+                val userAgent = call.argument<String>("userAgent")
                 // 网络播放磁盘缓存（按用户 300MB–8GB 设置；本地文件为空/0 表示不启用）
                 val videoCacheDir = call.argument<String>("videoCacheDir")
                 val diskCacheForwardBytes = call.argument<Number>("diskCacheForwardBytes")?.toLong() ?: 0L
                 val diskCacheBackBytes = call.argument<Number>("diskCacheBackBytes")?.toLong() ?: 0L
-                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result)
+                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, userAgent, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result)
             }
             "play" -> {
                 val playerId = call.argument<String>("playerId") ?: ""
@@ -242,13 +244,14 @@ class MpvPlayerPlugin(
         surfaceViewId: Int?,
         useGpuNext: Boolean,
         httpProxy: String?,
+        userAgent: String?,
         videoCacheDir: String?,
         diskCacheForwardBytes: Long,
         diskCacheBackBytes: Long,
         result: MethodChannel.Result
     ) {
         // Always use SurfaceTexture (no SurfaceView polling needed)
-        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result) }
+        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, userAgent, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result) }
     }
 
     private fun createPlayerOnMainThread(
@@ -257,6 +260,7 @@ class MpvPlayerPlugin(
         hardwareDecoding: Boolean,
         useGpuNext: Boolean,
         httpProxy: String?,
+        userAgent: String?,
         videoCacheDir: String?,
         diskCacheForwardBytes: Long,
         diskCacheBackBytes: Long,
@@ -296,6 +300,7 @@ class MpvPlayerPlugin(
             // Set mpv options (must be before init)
             android.util.Log.i(TAG, "Setting mpv options: hardwareDecoding=$hardwareDecoding, useGpuNext=$useGpuNext")
             setMpvOptions(hardwareDecoding, useGpuNext = useGpuNext, httpProxy = httpProxy,
+                userAgent = userAgent,
                 videoCacheDir = videoCacheDir,
                 diskCacheForwardBytes = diskCacheForwardBytes,
                 diskCacheBackBytes = diskCacheBackBytes)
@@ -401,6 +406,7 @@ class MpvPlayerPlugin(
         hardwareDecoding: Boolean,
         useGpuNext: Boolean = false,
         httpProxy: String? = null,
+        userAgent: String? = null,
         videoCacheDir: String? = null,
         diskCacheForwardBytes: Long = 0L,
         diskCacheBackBytes: Long = 0L,
@@ -409,6 +415,12 @@ class MpvPlayerPlugin(
         if (!httpProxy.isNullOrEmpty()) {
             MPVLib.setOptionString("http-proxy", httpProxy)
             android.util.Log.i(TAG, "mpv http-proxy enabled")
+        }
+
+        // 统一 UA：部分 CDN 拒绝 mpv/libavformat 默认 UA 导致取流失败（403/空响应）。
+        if (!userAgent.isNullOrEmpty()) {
+            MPVLib.setOptionString("user-agent", userAgent)
+            android.util.Log.i(TAG, "mpv user-agent set: $userAgent")
         }
 
         // Video output - try gpu-next for better HDR/DV support, fallback to gpu if unavailable

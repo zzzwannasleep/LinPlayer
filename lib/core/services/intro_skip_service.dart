@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 
+import '../app_identity.dart';
 import '../network/proxy_http_client.dart';
 import 'app_logger.dart';
 
@@ -87,7 +88,10 @@ class IntroSkipService {
       baseUrl: baseUrl,
       connectTimeout: const Duration(seconds: 8),
       receiveTimeout: const Duration(seconds: 8),
-      headers: const {'Accept': 'application/json'},
+      headers: const {
+        'Accept': 'application/json',
+        'User-Agent': kAppUserAgent,
+      },
     ));
     applyProxyToDio(dio);
     return dio;

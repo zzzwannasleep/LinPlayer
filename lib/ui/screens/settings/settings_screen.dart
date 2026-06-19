@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/services/font_service.dart';
 import '../../../core/providers/sync_providers.dart';
 import '../../../core/services/sync/sync_models.dart';
 import '../../../core/services/sync/trakt_sync_service.dart';
@@ -38,6 +40,42 @@ part 'settings_network.dart';
 part 'settings_player.dart';
 part 'settings_sync.dart';
 part 'settings_translation.dart';
+
+/// 导入自定义字体（ttf/otf/ttc）。[isApp] 区分 App 全局字体 / 弹幕字体。
+/// 加载成功后写入对应路径 Provider（持久化 + 触发主题/弹幕重建）。
+Future<void> _importCustomFont(
+  BuildContext context,
+  WidgetRef ref, {
+  required bool isApp,
+}) async {
+  final result = await FilePicker.platform.pickFiles(
+    dialogTitle: isApp ? '选择 App 字体文件' : '选择弹幕字体文件',
+    allowMultiple: false,
+    type: FileType.custom,
+    allowedExtensions: const ['ttf', 'otf', 'ttc'],
+  );
+  final path = result?.files.single.path;
+  if (path == null || path.isEmpty) return;
+
+  final ok = isApp
+      ? await FontService.setAppFont(path)
+      : await FontService.setDanmakuFont(path);
+  if (!context.mounted) return;
+  if (ok) {
+    if (isApp) {
+      ref.read(customAppFontPathProvider.notifier).state = path;
+    } else {
+      ref.read(customDanmakuFontPathProvider.notifier).state = path;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('字体已应用：${p.basename(path)}')),
+    );
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('字体加载失败，请确认文件为有效的 ttf/otf 字体')),
+    );
+  }
+}
 
 Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
   return {
@@ -74,6 +112,8 @@ Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
       'subtitleBackground': ref.read(subtitleBackgroundProvider),
       'hideDailyRecommendations': ref.read(hideDailyRecommendationsProvider),
       'useVideoBackground': ref.read(useVideoBackgroundProvider),
+      'customAppFontPath': ref.read(customAppFontPathProvider),
+      'customDanmakuFontPath': ref.read(customDanmakuFontPathProvider),
     },
   };
 }
@@ -208,5 +248,14 @@ Future<void> _restoreBackupPayload(
   if (settings['useVideoBackground'] is bool) {
     ref.read(useVideoBackgroundProvider.notifier).state =
         settings['useVideoBackground'] as bool;
+  }
+  // 字体路径：还原后下次启动由 FontService 按路径加载。
+  if (settings['customAppFontPath'] is String) {
+    ref.read(customAppFontPathProvider.notifier).state =
+        settings['customAppFontPath'] as String;
+  }
+  if (settings['customDanmakuFontPath'] is String) {
+    ref.read(customDanmakuFontPathProvider.notifier).state =
+        settings['customDanmakuFontPath'] as String;
   }
 }

@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 import 'package:socks5_proxy/socks_client.dart';
 
+import '../app_identity.dart';
 import 'proxy_settings.dart';
 
 /// 把用户代理配置应用到 Dart 的 `HttpClient` / Dio。
@@ -93,7 +94,10 @@ void _applyProxy(
 HttpClient createProxiedHttpClient() {
   final client = HttpClient()
     ..badCertificateCallback =
-        ((X509Certificate cert, String host, int port) => true);
+        ((X509Certificate cert, String host, int port) => true)
+    // 统一默认 UA：部分 CDN（含 Emby 图片）会拒绝空/Dart 默认 UA 导致封面空白。
+    // Dio 请求自带显式 User-Agent 头，会覆盖此默认值，互不冲突。
+    ..userAgent = kAppUserAgent;
   _applyProxy(client, ProxyRuntime.instance.current, _socksResolution);
   return client;
 }

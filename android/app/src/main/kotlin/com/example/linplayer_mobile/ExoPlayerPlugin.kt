@@ -104,12 +104,15 @@ class ExoPlayerPlugin(
                 val dolbyVisionFix = call.argument<Boolean>("dolbyVisionFix") ?: false
                 val preferredSubtitleLanguage = call.argument<String>("preferredSubtitleLanguage")
                 val enableAssSupport = call.argument<Boolean>("enableAssSupport") ?: false
+                // 统一 UA：部分 CDN 拒绝默认 UA 导致取流失败。
+                val userAgent = call.argument<String>("userAgent")
                 createPlayer(
                     videoUrl,
                     startPositionMs,
                     dolbyVisionFix,
                     preferredSubtitleLanguage,
                     enableAssSupport,
+                    userAgent,
                     result
                 )
             }
@@ -240,6 +243,7 @@ class ExoPlayerPlugin(
         dolbyVisionFix: Boolean,
         preferredSubtitleLanguage: String?,
         enableAssSupport: Boolean,
+        userAgent: String?,
         result: MethodChannel.Result
     ) {
         mainHandler.post {
@@ -267,8 +271,22 @@ class ExoPlayerPlugin(
 
                 android.util.Log.i("ExoPlayerPlugin", "Creating ExoPlayer with Media3 extension renderers")
 
+                // 统一 UA：用自定义 HTTP DataSource 工厂覆盖 ExoPlayer 默认 UA，
+                // 部分 CDN 拒绝默认 UA 导致取流失败（403/空响应）。
                 val playerBuilder = ExoPlayer.Builder(context)
                     .setTrackSelector(trackSelector)
+
+                if (!userAgent.isNullOrEmpty()) {
+                    val httpDataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                        .setUserAgent(userAgent)
+                        .setAllowCrossProtocolRedirects(true)
+                    val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(
+                        context, httpDataSourceFactory
+                    )
+                    playerBuilder.setMediaSourceFactory(
+                        androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                    )
+                }
 
                 val exoPlayer = if (enableAssSupport) {
                     android.util.Log.i("ExoPlayerPlugin", "Creating ExoPlayer with ass-media subtitle pipeline")

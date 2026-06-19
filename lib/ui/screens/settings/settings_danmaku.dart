@@ -81,6 +81,30 @@ class DanmakuSettingsScreen extends ConsumerWidget {
             onChanged: (v) =>
                 ref.read(danmakuStrokeProvider.notifier).state = v,
           ),
+          Builder(builder: (context) {
+            final fontPath = ref.watch(customDanmakuFontPathProvider);
+            return ListTile(
+              title: const Text('弹幕字体'),
+              subtitle: Text(
+                fontPath.isEmpty ? '默认字体 · 点击导入字体文件 (ttf/otf)' : p.basename(fontPath),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: fontPath.isEmpty
+                  ? const Icon(Icons.chevron_right)
+                  : IconButton(
+                      tooltip: '恢复默认',
+                      icon: const Icon(Icons.clear),
+                      onPressed: () async {
+                        await FontService.clearDanmakuFont();
+                        ref
+                            .read(customDanmakuFontPathProvider.notifier)
+                            .state = '';
+                      },
+                    ),
+              onTap: () => _importCustomFont(context, ref, isApp: false),
+            );
+          }),
           ListTile(
             title: const Text('弹幕延迟'),
             subtitle: Builder(builder: (context) {

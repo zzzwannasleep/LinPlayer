@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import '../app_identity.dart';
 import '../network/proxy_http_client.dart';
 import '../network/proxy_settings.dart';
 import 'api_interfaces.dart';
@@ -29,13 +30,13 @@ class EmbyApiClient implements ApiClientFactory {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'User-Agent': 'Linplayer/1.0.0',
+        'User-Agent': kAppUserAgent,
         'X-Emby-Authorization':
-            'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+            'MediaBrowser Client="LinPlayer", Device="Mobile", DeviceId="linplayer-mobile", Version="$kAppVersion"',
         'X-Emby-Device-Name': 'Mobile',
         'X-Emby-Device-Id': 'linplayer-mobile',
-        'X-Emby-Client': 'Linplayer',
-        'X-Emby-Client-Version': '1.0.0',
+        'X-Emby-Client': 'LinPlayer',
+        'X-Emby-Client-Version': kAppVersion,
         if (authToken != null) 'X-Emby-Token': authToken,
       },
     ));
@@ -290,13 +291,13 @@ class EmbyServerApi implements ServerApi {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'User-Agent': 'Linplayer/1.0.0',
+        'User-Agent': kAppUserAgent,
         'X-Emby-Authorization':
-            'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+            'MediaBrowser Client="LinPlayer", Device="Mobile", DeviceId="linplayer-mobile", Version="$kAppVersion"',
         'X-Emby-Device-Name': 'Mobile',
         'X-Emby-Device-Id': 'linplayer-mobile',
-        'X-Emby-Client': 'Linplayer',
-        'X-Emby-Client-Version': '1.0.0',
+        'X-Emby-Client': 'LinPlayer',
+        'X-Emby-Client-Version': kAppVersion,
       },
     ));
 
@@ -334,13 +335,13 @@ class EmbyServerApi implements ServerApi {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'User-Agent': 'Linplayer/1.0.0',
+          'User-Agent': kAppUserAgent,
           'X-Emby-Authorization':
-              'MediaBrowser Client="Linplayer", Device="Mobile", DeviceId="linplayer-mobile", Version="1.0.0"',
+              'MediaBrowser Client="LinPlayer", Device="Mobile", DeviceId="linplayer-mobile", Version="$kAppVersion"',
           'X-Emby-Device-Name': 'Mobile',
           'X-Emby-Device-Id': 'linplayer-mobile',
-          'X-Emby-Client': 'Linplayer',
-          'X-Emby-Client-Version': '1.0.0',
+          'X-Emby-Client': 'LinPlayer',
+          'X-Emby-Client-Version': kAppVersion,
         },
       ));
       applyProxyToDio(dio);

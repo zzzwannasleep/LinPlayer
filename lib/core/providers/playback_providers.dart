@@ -295,6 +295,62 @@ final preferredVersionProvider =
   );
 });
 
+/// 版本选择正则偏好：进入多版本片源时，优先选中匹配该正则的媒体源
+/// （反查 名称/容器/分辨率/编码）。为空则不启用正则、保持默认（首个/详情页选择）。
+final preferredVersionRegexProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '',
+    readValue: (prefs) => prefs.getString('linplayer_preferred_version_regex'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_preferred_version_regex', value);
+    },
+  );
+});
+
+/// 字幕选择正则偏好：自动选轨时优先选中匹配该正则的字幕轨
+/// （匹配 显示名/标题/语言/编码，如 `中文|简|繁|chi|zh`）。为空则回退到首选字幕语言。
+final preferredSubtitleRegexProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '',
+    readValue: (prefs) => prefs.getString('linplayer_preferred_subtitle_regex'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_preferred_subtitle_regex', value);
+    },
+  );
+});
+
+/// 音频选择正则偏好：自动选轨时优先选中匹配该正则的音频轨
+/// （匹配 显示名/标题/语言/编码/声道，如 `jpn|日|flac|7.1`）。为空则回退到首选音频语言。
+final preferredAudioRegexProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '',
+    readValue: (prefs) => prefs.getString('linplayer_preferred_audio_regex'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_preferred_audio_regex', value);
+    },
+  );
+});
+
+/// 弹幕自定义字体文件路径（空 = 用系统默认字体）。
+/// 实际字体由 FontService 在启动时按此路径加载，key 与 FontService.danmakuFontPathKey 一致。
+final customDanmakuFontPathProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '',
+    readValue: (prefs) => prefs.getString('linplayer_custom_danmaku_font_path'),
+    writeValue: (prefs, value) async {
+      if (value.isEmpty) {
+        await prefs.remove('linplayer_custom_danmaku_font_path');
+      } else {
+        await prefs.setString('linplayer_custom_danmaku_font_path', value);
+      }
+    },
+  );
+});
+
 final rememberBrightnessProvider =
     StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
   return PreferenceNotifier<bool>(

@@ -18,6 +18,9 @@ class PlayerSettingsScreen extends ConsumerWidget {
         ref.watch(preferredSubtitleLanguageProvider);
     final preferredAudioLanguage = ref.watch(preferredAudioLanguageProvider);
     final preferredVersion = ref.watch(preferredVersionProvider);
+    final versionRegex = ref.watch(preferredVersionRegexProvider);
+    final subtitleRegex = ref.watch(preferredSubtitleRegexProvider);
+    final audioRegex = ref.watch(preferredAudioRegexProvider);
     final rememberBrightness = ref.watch(rememberBrightnessProvider);
     final subtitleFont = ref.watch(subtitleFontProvider);
     final subtitleBackground = ref.watch(subtitleBackgroundProvider);
@@ -140,6 +143,78 @@ class PlayerSettingsScreen extends ConsumerWidget {
             title: const Text('首选版本'),
             subtitle: Text(preferredVersion),
             onTap: () => _showVersionSelector(context, ref),
+          ),
+          ListTile(
+            title: const Text('版本筛选（正则）'),
+            subtitle: Text(
+              versionRegex.isEmpty ? '未设置 · 多版本时优先选中匹配的片源' : versionRegex,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: versionRegex.isEmpty
+                ? const Icon(Icons.chevron_right)
+                : IconButton(
+                    tooltip: '清除',
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => ref
+                        .read(preferredVersionRegexProvider.notifier)
+                        .state = '',
+                  ),
+            onTap: () => _showRegexEditor(
+              context,
+              ref,
+              title: '版本筛选（正则）',
+              hint: r'例：4K|2160 匹配 4K 片源；HEVC|265 匹配 HEVC 编码',
+              provider: preferredVersionRegexProvider,
+            ),
+          ),
+          ListTile(
+            title: const Text('字幕筛选（正则）'),
+            subtitle: Text(
+              subtitleRegex.isEmpty ? '未设置 · 自动选轨时优先选中匹配字幕' : subtitleRegex,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: subtitleRegex.isEmpty
+                ? const Icon(Icons.chevron_right)
+                : IconButton(
+                    tooltip: '清除',
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => ref
+                        .read(preferredSubtitleRegexProvider.notifier)
+                        .state = '',
+                  ),
+            onTap: () => _showRegexEditor(
+              context,
+              ref,
+              title: '字幕筛选（正则）',
+              hint: r'例：中文|简|繁|chi|zh 匹配各种中文字幕（不分简繁）',
+              provider: preferredSubtitleRegexProvider,
+            ),
+          ),
+          ListTile(
+            title: const Text('音频筛选（正则）'),
+            subtitle: Text(
+              audioRegex.isEmpty ? '未设置 · 自动选轨时优先选中匹配音轨' : audioRegex,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: audioRegex.isEmpty
+                ? const Icon(Icons.chevron_right)
+                : IconButton(
+                    tooltip: '清除',
+                    icon: const Icon(Icons.clear),
+                    onPressed: () => ref
+                        .read(preferredAudioRegexProvider.notifier)
+                        .state = '',
+                  ),
+            onTap: () => _showRegexEditor(
+              context,
+              ref,
+              title: '音频筛选（正则）',
+              hint: r'例：jpn|日|flac 匹配日语/FLAC 音轨；7\.1|truehd 匹配高规格',
+              provider: preferredAudioRegexProvider,
+            ),
           ),
           ListTile(
             title: const Text('字幕字体'),
@@ -586,6 +661,72 @@ class PlayerSettingsScreen extends ConsumerWidget {
                     ))
                 .toList(),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 通用正则编辑器：编辑「版本/字幕/音频」筛选正则，保存前校验合法性。
+  void _showRegexEditor(
+    BuildContext context,
+    WidgetRef ref, {
+    required String title,
+    required String hint,
+    required StateNotifierProvider<PreferenceNotifier<String>, String> provider,
+  }) {
+    final controller = TextEditingController(text: ref.read(provider));
+    String? errorText;
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLines: null,
+                decoration: InputDecoration(
+                  hintText: '输入正则表达式（留空表示不启用）',
+                  errorText: errorText,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (_) {
+                  if (errorText != null) setState(() => errorText = null);
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$hint\n大小写不敏感，留空清除该筛选。',
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isNotEmpty) {
+                  try {
+                    RegExp(value);
+                  } catch (_) {
+                    setState(() => errorText = '正则表达式格式不正确');
+                    return;
+                  }
+                }
+                ref.read(provider.notifier).state = value;
+                Navigator.pop(context);
+              },
+              child: const Text('保存'),
+            ),
+          ],
         ),
       ),
     );

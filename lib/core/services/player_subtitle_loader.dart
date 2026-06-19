@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../api/api_interfaces.dart';
+import '../utils/track_preference.dart';
 import 'app_logger.dart';
 import 'subtitle_processor.dart';
 import 'video_player_service.dart';
@@ -25,15 +26,18 @@ class PlayerSubtitleLoader {
     required String? preferredLanguage,
     required bool exoLibassEnabled,
     String? authToken,
+    String? preferredRegex,
   }) async {
     final subtitleStreams =
         mediaSource.mediaStreams.where((s) => s.isSubtitle).toList();
     if (subtitleStreams.isEmpty) return null;
 
-    final target = subtitleStreams.firstWhere(
-      (s) => preferredLanguage != null && s.language == preferredLanguage,
-      orElse: () => subtitleStreams.first,
-    );
+    // 「字幕选择」正则优先：命中则用正则结果，否则回退到首选字幕语言。
+    final target = matchPreferredStream(subtitleStreams, preferredRegex) ??
+        subtitleStreams.firstWhere(
+          (s) => preferredLanguage != null && s.language == preferredLanguage,
+          orElse: () => subtitleStreams.first,
+        );
     final codec = target.codec?.toLowerCase() ?? 'ass';
     final isExternal = target.isExternal ?? false;
     final core = service.coreType;

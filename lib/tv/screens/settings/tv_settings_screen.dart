@@ -1,12 +1,16 @@
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path/path.dart' as p;
 
+import '../../../core/app_identity.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/services/app_logger.dart';
+import '../../../core/services/font_service.dart';
 import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/translation/subtitle_document.dart';
 import '../../../core/providers/proxy_providers.dart';
@@ -127,6 +131,9 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     final autoSkipSegments = ref.watch(autoSkipSegmentsProvider);
     final exoLibass = ref.watch(exoLibassProvider);
     final gpuNext = ref.watch(gpuNextEnabledProvider);
+    final versionRegex = ref.watch(preferredVersionRegexProvider);
+    final subtitleRegex = ref.watch(preferredSubtitleRegexProvider);
+    final audioRegex = ref.watch(preferredAudioRegexProvider);
 
     return _settingsList(m, '播放设置', [
       _choiceItem<String>(
@@ -218,7 +225,41 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         onToggle: () =>
             ref.read(gpuNextEnabledProvider.notifier).state = !gpuNext,
       ),
+      _textItem(
+        m,
+        title: '版本筛选（正则）',
+        value: versionRegex,
+        onSubmit: (v) => _saveRegexPref(preferredVersionRegexProvider, v),
+      ),
+      _textItem(
+        m,
+        title: '字幕筛选（正则，如 中文|简|繁|chi）',
+        value: subtitleRegex,
+        onSubmit: (v) => _saveRegexPref(preferredSubtitleRegexProvider, v),
+      ),
+      _textItem(
+        m,
+        title: '音频筛选（正则，如 jpn|日|flac）',
+        value: audioRegex,
+        onSubmit: (v) => _saveRegexPref(preferredAudioRegexProvider, v),
+      ),
     ]);
+  }
+
+  /// 保存正则筛选偏好：校验合法性，非法则提示且不保存。
+  void _saveRegexPref(
+      StateNotifierProvider<PreferenceNotifier<String>, String> provider,
+      String raw) {
+    final value = raw.trim();
+    if (value.isNotEmpty) {
+      try {
+        RegExp(value);
+      } catch (_) {
+        if (mounted) TvToast.show(context, '正则表达式格式不正确，未保存');
+        return;
+      }
+    }
+    ref.read(provider.notifier).state = value;
   }
 
   Widget _buildGeneralSettings(TvMetrics m) {
@@ -247,6 +288,20 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         trailing: Icon(Icons.qr_code_2,
             color: TvDesignTokens.brand, size: m.s(28)),
         onSelect: () => context.push('/tv/lan-control'),
+      ),
+      _fontItem(
+        m,
+        title: '应用字体',
+        path: ref.watch(customAppFontPathProvider),
+        defaultHint: '默认字体 · 选择字体文件 (ttf/otf)，切换后重启生效',
+        isApp: true,
+      ),
+      _fontItem(
+        m,
+        title: '弹幕字体',
+        path: ref.watch(customDanmakuFontPathProvider),
+        defaultHint: '默认字体 · 选择字体文件 (ttf/otf)',
+        isApp: false,
       ),
     ]);
   }
@@ -652,7 +707,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
   Widget _buildAboutSettings(TvMetrics m) {
     return _settingsList(m, '关于', [
       _staticItem(m, title: '应用', subtitle: 'LinPlayer for TV'),
-      _staticItem(m, title: '版本', subtitle: '1.0.0'),
+      _staticItem(m, title: '版本', subtitle: kAppVersion),
       _actionItem(
         m,
         title: '导出日志',
@@ -841,6 +896,68 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
       onSelect: () {},
       trailing: const SizedBox.shrink(),
     );
+  }
+
+  /// 字体导入行：显示当前字体名 + 点击选择字体文件；已设置时长按清除恢复默认。
+  Widget _fontItem(
+    TvMetrics m, {
+    required String title,
+    required String path,
+    required String defaultHint,
+    required bool isApp,
+  }) {
+    final isSet = path.isNotEmpty;
+    return _rowCard(
+      m,
+      title: title,
+      subtitle: isSet ? p.basename(path) : defaultHint,
+      trailing: Icon(isSet ? Icons.clear : Icons.folder_open,
+          color: TvDesignTokens.textSecondary, size: m.s(28)),
+      onSelect: () {
+        if (isSet) {
+          _clearFont(isApp: isApp);
+        } else {
+          _importFont(isApp: isApp);
+        }
+      },
+    );
+  }
+
+  Future<void> _importFont({required bool isApp}) async {
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: isApp ? '选择 App 字体文件' : '选择弹幕字体文件',
+      allowMultiple: false,
+      type: FileType.custom,
+      allowedExtensions: const ['ttf', 'otf', 'ttc'],
+    );
+    final path = result?.files.single.path;
+    if (path == null || path.isEmpty) return;
+    final ok = isApp
+        ? await FontService.setAppFont(path)
+        : await FontService.setDanmakuFont(path);
+    if (!mounted) return;
+    if (ok) {
+      ref
+          .read((isApp
+                  ? customAppFontPathProvider
+                  : customDanmakuFontPathProvider)
+              .notifier)
+          .state = path;
+      TvToast.show(context, '字体已应用：${p.basename(path)}');
+    } else {
+      TvToast.show(context, '字体加载失败，请确认为有效的 ttf/otf 字体');
+    }
+  }
+
+  Future<void> _clearFont({required bool isApp}) async {
+    if (isApp) {
+      await FontService.clearAppFont();
+      ref.read(customAppFontPathProvider.notifier).state = '';
+    } else {
+      await FontService.clearDanmakuFont();
+      ref.read(customDanmakuFontPathProvider.notifier).state = '';
+    }
+    if (mounted) TvToast.show(context, '已恢复默认字体');
   }
 
   Widget _actionItem(

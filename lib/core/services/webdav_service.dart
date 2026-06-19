@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 
+import '../app_identity.dart';
 import '../network/proxy_http_client.dart';
 
 /// WebDAV 客户端服务
@@ -32,7 +33,7 @@ class WebDAVService {
         'Authorization': 'Basic ${base64Encode(utf8.encode('$username:$password'))}',
         'Content-Type': 'application/xml',
         'Accept': '*/*',
-        'User-Agent': 'LinPlayer/1.0.0',
+        'User-Agent': kAppUserAgent,
       },
     ));
     applyProxyToDio(_dio);

@@ -18,6 +18,9 @@ class DanmakuOverlay extends StatefulWidget {
   /// 描边文字（黑边）。关闭则用半透明底框。
   final bool stroke;
 
+  /// 自定义弹幕字体家族名（已通过 FontService 加载）；null 用系统默认。
+  final String? fontFamily;
+
   const DanmakuOverlay({
     super.key,
     required this.items,
@@ -29,6 +32,7 @@ class DanmakuOverlay extends StatefulWidget {
     this.densityFactor = 0.5,
     this.displayArea = 1.0,
     this.stroke = true,
+    this.fontFamily,
   });
 
   @override
@@ -96,6 +100,7 @@ class _DanmakuOverlayState extends State<DanmakuOverlay>
           densityFactor: widget.densityFactor,
           displayArea: widget.displayArea,
           stroke: widget.stroke,
+          fontFamily: widget.fontFamily,
           cache: _cache,
         ),
         size: Size.infinite,
@@ -115,18 +120,22 @@ class DanmakuLayoutCache {
   List<ui.Paragraph?> _strokeParas = const [];
   List<double> _widths = const [];
 
+  String? _fontFamily;
+
   void ensure(List<DanmakuItem> items, double fontSize, double width,
-      bool stroke) {
+      bool stroke, String? fontFamily) {
     if (identical(_items, items) &&
         _fontSize == fontSize &&
         _width == width &&
-        _stroke == stroke) {
+        _stroke == stroke &&
+        _fontFamily == fontFamily) {
       return;
     }
     _items = items;
     _fontSize = fontSize;
     _width = width;
     _stroke = stroke;
+    _fontFamily = fontFamily;
     _fill = List<ui.Paragraph?>.filled(items.length, null);
     _strokeParas = List<ui.Paragraph?>.filled(items.length, null);
     _widths = List<double>.filled(items.length, 0);
@@ -176,6 +185,7 @@ class DanmakuPainter extends CustomPainter {
   final double densityFactor;
   final double displayArea;
   final bool stroke;
+  final String? fontFamily;
   final DanmakuLayoutCache cache;
 
   static const double _maxFontSize = 36.0;
@@ -195,6 +205,7 @@ class DanmakuPainter extends CustomPainter {
     required this.displayArea,
     required this.stroke,
     required this.cache,
+    this.fontFamily,
   });
 
   double get _fontSize =>
@@ -230,6 +241,7 @@ class DanmakuPainter extends CustomPainter {
     final displayText =
         item.count > 1 ? '${item.text} ×${item.count}' : item.text;
 
+    final fam = fontFamily;
     final ui.TextStyle style;
     if (!stroke) {
       // 旧观感：半透明底框 + 实色字。
@@ -237,9 +249,10 @@ class DanmakuPainter extends CustomPainter {
         color: color,
         background: ui.Paint()..color = const Color(0x60000000),
         fontSize: fs,
+        fontFamily: fam,
       );
     } else if (fillMode) {
-      style = ui.TextStyle(color: color, fontSize: fs);
+      style = ui.TextStyle(color: color, fontSize: fs, fontFamily: fam);
     } else {
       // 描边层：黑色 stroke。
       final strokeWidth = (fs / 14).clamp(1.2, 2.6);
@@ -250,6 +263,7 @@ class DanmakuPainter extends CustomPainter {
           ..strokeJoin = ui.StrokeJoin.round
           ..color = const Color(0xCC000000),
         fontSize: fs,
+        fontFamily: fam,
       );
     }
 
@@ -257,6 +271,7 @@ class DanmakuPainter extends CustomPainter {
       fontSize: fs,
       maxLines: 1,
       ellipsis: '',
+      fontFamily: fam,
     ))
       ..pushStyle(style)
       ..addText(displayText);
@@ -273,7 +288,7 @@ class DanmakuPainter extends CustomPainter {
     final trackCount = (usableHeight / _trackHeight).floor();
     if (trackCount <= 0) return;
 
-    cache.ensure(items, _fontSize, size.width, stroke);
+    cache.ensure(items, _fontSize, size.width, stroke, fontFamily);
 
     final visibleItems = <_DanmakuTrackItem>[];
     var added = 0;
@@ -377,6 +392,7 @@ class DanmakuPainter extends CustomPainter {
         oldDelegate.speedFactor != speedFactor ||
         oldDelegate.densityFactor != densityFactor ||
         oldDelegate.displayArea != displayArea ||
-        oldDelegate.stroke != stroke;
+        oldDelegate.stroke != stroke ||
+        oldDelegate.fontFamily != fontFamily;
   }
 }

@@ -62,6 +62,30 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                 startupPageLabel(startupPage, displayLocale: displayLocale)),
             onTap: () => _showStartupPageSelector(context),
           ),
+          Builder(builder: (context) {
+            final fontPath = ref.watch(customAppFontPathProvider);
+            return ListTile(
+              title: const Text('应用字体'),
+              subtitle: Text(
+                fontPath.isEmpty
+                    ? '默认字体 · 点击导入字体文件 (ttf/otf)'
+                    : '${p.basename(fontPath)} · 切换字体后重启生效',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: fontPath.isEmpty
+                  ? const Icon(Icons.chevron_right)
+                  : IconButton(
+                      tooltip: '恢复默认',
+                      icon: const Icon(Icons.clear),
+                      onPressed: () async {
+                        await FontService.clearAppFont();
+                        ref.read(customAppFontPathProvider.notifier).state = '';
+                      },
+                    ),
+              onTap: () => _importCustomFont(context, ref, isApp: true),
+            );
+          }),
           SwitchListTile(
             title: const Text('隐藏每日推荐'),
             subtitle: const Text('开启后只隐藏每日推荐，继续观看仍会保留'),

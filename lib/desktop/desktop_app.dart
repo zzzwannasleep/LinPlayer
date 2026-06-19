@@ -4,6 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:macos_ui/macos_ui.dart' as macos;
 import '../core/providers/app_providers.dart';
+import '../core/services/font_service.dart';
 import '../core/theme/app_theme.dart';
 import 'platform/desktop_ui_style.dart';
 import 'routes/desktop_router.dart';
@@ -69,10 +70,11 @@ Widget _wrapContent({
   required Brightness brightness,
   required Widget child,
   bool addTitleBar = true,
+  String? customFontFamily,
 }) {
   final materialTheme = brightness == Brightness.dark
-      ? _desktopTheme(AppTheme.darkTheme)
-      : _desktopTheme(AppTheme.lightTheme);
+      ? _desktopTheme(AppTheme.darkTheme, customFontFamily)
+      : _desktopTheme(AppTheme.lightTheme, customFontFamily);
 
   Widget content = child;
   if (addTitleBar) {
@@ -121,6 +123,9 @@ class _FluentDesktopApp extends ConsumerWidget {
     final router = ref.watch(desktopRouterProvider);
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
+    final fontFamily = ref.watch(customAppFontPathProvider).isEmpty
+        ? null
+        : FontService.appFontFamily;
 
     return fluent.FluentApp.router(
       title: 'Linplayer',
@@ -139,6 +144,7 @@ class _FluentDesktopApp extends ConsumerWidget {
         final brightness = fluent.FluentTheme.of(context).brightness;
         return _wrapContent(
           brightness: brightness,
+          customFontFamily: fontFamily,
           child: child ?? const SizedBox.shrink(),
         );
       },
@@ -157,6 +163,9 @@ class _MacosDesktopApp extends ConsumerWidget {
     final router = ref.watch(desktopRouterProvider);
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
+    final fontFamily = ref.watch(customAppFontPathProvider).isEmpty
+        ? null
+        : FontService.appFontFamily;
 
     return macos.MacosApp.router(
       title: 'Linplayer',
@@ -172,6 +181,7 @@ class _MacosDesktopApp extends ConsumerWidget {
         final brightness = macos.MacosTheme.of(context).brightness;
         return _wrapContent(
           brightness: brightness,
+          customFontFamily: fontFamily,
           child: child ?? const SizedBox.shrink(),
         );
       },
@@ -190,12 +200,15 @@ class _MaterialDesktopApp extends ConsumerWidget {
     final router = ref.watch(desktopRouterProvider);
     final themeMode = ref.watch(themeModeProvider);
     final locale = ref.watch(localeProvider);
+    final fontFamily = ref.watch(customAppFontPathProvider).isEmpty
+        ? null
+        : FontService.appFontFamily;
 
     return MaterialApp.router(
       title: 'Linplayer',
       debugShowCheckedModeBanner: false,
-      theme: _desktopTheme(AppTheme.lightTheme),
-      darkTheme: _desktopTheme(AppTheme.darkTheme),
+      theme: _desktopTheme(AppTheme.lightTheme, fontFamily),
+      darkTheme: _desktopTheme(AppTheme.darkTheme, fontFamily),
       locale: locale,
       localizationsDelegates: _localizationsDelegates,
       supportedLocales: _supportedLocales,
@@ -276,75 +289,87 @@ class _SidebarToggleButtonState extends ConsumerState<_SidebarToggleButton> {
   }
 }
 
-ThemeData _desktopTheme(ThemeData base) {
+ThemeData _desktopTheme(ThemeData base, [String? customFamily]) {
+  TextStyle? s(TextStyle? style,
+          {double? fontSize,
+          double? height,
+          FontWeight? fontWeight,
+          double? letterSpacing}) =>
+      _desktopTextStyle(style,
+          fontSize: fontSize,
+          height: height,
+          fontWeight: fontWeight,
+          letterSpacing: letterSpacing,
+          customFamily: customFamily);
+
   final textTheme = base.textTheme.copyWith(
-    displayLarge: _desktopTextStyle(base.textTheme.displayLarge),
-    displayMedium: _desktopTextStyle(base.textTheme.displayMedium),
-    displaySmall: _desktopTextStyle(
+    displayLarge: s(base.textTheme.displayLarge),
+    displayMedium: s(base.textTheme.displayMedium),
+    displaySmall: s(
       base.textTheme.displaySmall,
       fontSize: 30,
       height: 1.08,
       fontWeight: FontWeight.w700,
       letterSpacing: -0.4,
     ),
-    headlineLarge: _desktopTextStyle(base.textTheme.headlineLarge),
-    headlineMedium: _desktopTextStyle(base.textTheme.headlineMedium),
-    headlineSmall: _desktopTextStyle(
+    headlineLarge: s(base.textTheme.headlineLarge),
+    headlineMedium: s(base.textTheme.headlineMedium),
+    headlineSmall: s(
       base.textTheme.headlineSmall,
       fontSize: 20,
       height: 1.15,
       fontWeight: FontWeight.w700,
       letterSpacing: -0.2,
     ),
-    titleLarge: _desktopTextStyle(
+    titleLarge: s(
       base.textTheme.titleLarge,
       fontSize: 18,
       height: 1.18,
       fontWeight: FontWeight.w700,
     ),
-    titleMedium: _desktopTextStyle(
+    titleMedium: s(
       base.textTheme.titleMedium,
       fontSize: 16,
       height: 1.22,
       fontWeight: FontWeight.w700,
     ),
-    titleSmall: _desktopTextStyle(
+    titleSmall: s(
       base.textTheme.titleSmall,
       fontSize: 14,
       height: 1.3,
       fontWeight: FontWeight.w600,
     ),
-    bodyLarge: _desktopTextStyle(
+    bodyLarge: s(
       base.textTheme.bodyLarge,
       fontSize: 16,
       height: 1.45,
       fontWeight: FontWeight.w600,
     ),
-    bodyMedium: _desktopTextStyle(
+    bodyMedium: s(
       base.textTheme.bodyMedium,
       fontSize: 14,
       height: 1.42,
       fontWeight: FontWeight.w600,
     ),
-    bodySmall: _desktopTextStyle(
+    bodySmall: s(
       base.textTheme.bodySmall,
       fontSize: 12,
       height: 1.36,
       fontWeight: FontWeight.w500,
     ),
-    labelLarge: _desktopTextStyle(
+    labelLarge: s(
       base.textTheme.labelLarge,
       fontSize: 14,
       height: 1.2,
       fontWeight: FontWeight.w700,
     ),
-    labelMedium: _desktopTextStyle(
+    labelMedium: s(
       base.textTheme.labelMedium,
       fontSize: 12,
       height: 1.2,
       fontWeight: FontWeight.w600,
     ),
-    labelSmall: _desktopTextStyle(
+    labelSmall: s(
       base.textTheme.labelSmall,
       fontSize: 11,
       height: 1.18,
@@ -368,10 +393,14 @@ TextStyle? _desktopTextStyle(
   double? height,
   FontWeight? fontWeight,
   double? letterSpacing,
+  String? customFamily,
 }) {
   return style?.copyWith(
-    fontFamily: _desktopFontFamily,
-    fontFamilyFallback: _desktopFontFallback,
+    // 用户自定义字体优先；桌面默认字体退为 fallback 之首，保证中文/缺字回退。
+    fontFamily: customFamily ?? _desktopFontFamily,
+    fontFamilyFallback: customFamily != null
+        ? const [_desktopFontFamily, ..._desktopFontFallback]
+        : _desktopFontFallback,
     fontSize: fontSize,
     height: height,
     fontWeight: fontWeight,

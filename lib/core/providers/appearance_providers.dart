@@ -148,6 +148,23 @@ final themeModeProvider =
   );
 });
 
+/// App 全局自定义字体文件路径（空 = 用系统默认字体）。
+/// 实际字体由 FontService 在启动时按此路径加载，key 与 FontService.appFontPathKey 一致。
+final customAppFontPathProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '',
+    readValue: (prefs) => prefs.getString('linplayer_custom_app_font_path'),
+    writeValue: (prefs, value) async {
+      if (value.isEmpty) {
+        await prefs.remove('linplayer_custom_app_font_path');
+      } else {
+        await prefs.setString('linplayer_custom_app_font_path', value);
+      }
+    },
+  );
+});
+
 final localeProvider = StateNotifierProvider<PreferenceNotifier<Locale?>, Locale?>((ref) {
   return PreferenceNotifier<Locale?>(
     defaultValue: null,

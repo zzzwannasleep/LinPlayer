@@ -1,10 +1,10 @@
 import 'package:dio/dio.dart';
 
+import '../../app_identity.dart';
 import '../app_logger.dart';
 
-/// 应用当前版本：CI 构建时通过 --dart-define=APP_VERSION 注入；本地默认取 pubspec。
-const String kCurrentAppVersion =
-    String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');
+/// 应用当前版本：统一取自 [kAppVersion]（CI 构建时通过 --dart-define=APP_VERSION 注入）。
+const String kCurrentAppVersion = kAppVersion;
 
 /// 发布仓库（GitHub）。如迁移仓库改这里即可。
 const String kUpdateRepoOwner = 'zzzwannasleep';
@@ -55,7 +55,10 @@ class AppUpdateService {
             Dio(BaseOptions(
               connectTimeout: const Duration(seconds: 12),
               receiveTimeout: const Duration(seconds: 20),
-              headers: {'Accept': 'application/vnd.github+json'},
+              headers: {
+                'Accept': 'application/vnd.github+json',
+                'User-Agent': kAppUserAgent,
+              },
             )),
         _logger = logger ?? AppLogger();
 

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../app_identity.dart';
 import 'player_adapter.dart';
 import 'app_logger.dart';
 import 'cache_service.dart';
@@ -180,6 +181,12 @@ class MpvPlayerAdapter implements PlayerAdapter {
         await np.setProperty('http-proxy', proxyValue);
       } catch (_) {
         // 代理属性设置失败不应阻断播放。
+      }
+      // 统一 UA：部分 CDN 会拒绝 mpv/libavformat 默认 UA 导致取流失败（403/空响应）。
+      try {
+        await np.setProperty('user-agent', kAppUserAgent);
+      } catch (_) {
+        // UA 设置失败不应阻断播放。
       }
     }
 

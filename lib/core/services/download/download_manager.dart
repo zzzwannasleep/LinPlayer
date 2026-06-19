@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../app_identity.dart';
 import '../../network/proxy_http_client.dart';
 import 'download_models.dart';
 
@@ -53,7 +54,7 @@ class DownloadManager extends ChangeNotifier {
       connectTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(minutes: 30),
       headers: const {
-        'User-Agent': 'Linplayer/1.0.0',
+        'User-Agent': kAppUserAgent,
       },
     ));
     // 复用全局代理 + 自签名证书放行。

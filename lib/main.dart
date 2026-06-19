@@ -9,6 +9,7 @@ import 'core/providers/app_providers.dart';
 import 'core/providers/proxy_providers.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/cache_service.dart';
+import 'core/services/font_service.dart';
 import 'core/theme/app_motion.dart';
 import 'core/utils/platform_utils.dart';
 import 'desktop/desktop_app.dart';
@@ -33,6 +34,10 @@ Future<void> main() async {
   }
 
   await initializeAppPreferences();
+
+  // 自定义字体：按持久化路径重新加载（FontLoader 不跨进程，需每次启动重做），
+  // 必须在构建 UI 前完成，确保首帧即用上用户字体。
+  await FontService.initialize();
 
   // 代理：把持久化的自定义代理配置注入全局运行时（含 SOCKS 主机名预解析），
   // 必须在任何网络请求/客户端构建之前完成，确保首个请求即走代理。

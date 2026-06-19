@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'player_adapter.dart';
 import 'app_logger.dart';
 import 'cache_service.dart';
+import '../app_identity.dart';
 import '../network/proxy_settings.dart';
 
 /// Native mpv player adapter for Android.
@@ -167,6 +168,8 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
         'preferredSubtitleLanguage': preferredSubtitleLanguage,
         'useGpuNext': useGpuNext,
         'httpProxy': httpProxy,
+        // 统一 UA：部分 CDN 拒绝 mpv 默认 UA 导致取流失败。
+        'userAgent': kAppUserAgent,
         // 为 0 / null 时 Kotlin 侧按"不启用磁盘缓存"处理（本地文件）。
         'videoCacheDir': videoCacheDir,
         'diskCacheForwardBytes': diskCacheForwardBytes,

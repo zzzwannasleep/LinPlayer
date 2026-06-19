@@ -137,7 +137,7 @@ class SettingsScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Linplayer v1.0.0'),
+            Text('LinPlayer v$kCurrentAppVersion'),
             SizedBox(height: 8),
             Text('GitHub: https://github.com/your-repo'),
             SizedBox(height: 8),

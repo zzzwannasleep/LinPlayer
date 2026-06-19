@@ -1,4 +1,5 @@
 import '../api/api_interfaces.dart';
+import 'track_preference.dart';
 
 class PlaybackUrlRequest {
   final String itemId;
@@ -77,29 +78,37 @@ class PlaybackSelection {
 MediaSource? resolvePreferredMediaSource(
   PlaybackInfo playbackInfo, {
   String? preferredMediaSourceId,
+  String? versionRegex,
 }) {
   final mediaSources = playbackInfo.mediaSources;
   if (mediaSources.isEmpty) {
     return null;
   }
-  if (preferredMediaSourceId == null || preferredMediaSourceId.isEmpty) {
-    return mediaSources.firstOrNull;
+  // 1) 用户在详情页 / 导航参数中显式选择的版本优先。
+  if (preferredMediaSourceId != null && preferredMediaSourceId.isNotEmpty) {
+    final byId = mediaSources
+        .where((source) => source.id == preferredMediaSourceId)
+        .firstOrNull;
+    if (byId != null) return byId;
   }
-  return mediaSources
-          .where((source) => source.id == preferredMediaSourceId)
-          .firstOrNull ??
-      mediaSources.firstOrNull;
+  // 2) 其次按用户「版本选择」正则偏好反查媒体源。
+  final byRegex = matchPreferredMediaSource(mediaSources, versionRegex);
+  if (byRegex != null) return byRegex;
+  // 3) 兜底取首个。
+  return mediaSources.firstOrNull;
 }
 
 PlaybackSelection buildPlaybackSelection({
   required PlaybackInfo playbackInfo,
   required String itemId,
   String? preferredMediaSourceId,
+  String? versionRegex,
   String? playSessionId,
 }) {
   final mediaSource = resolvePreferredMediaSource(
     playbackInfo,
     preferredMediaSourceId: preferredMediaSourceId,
+    versionRegex: versionRegex,
   );
   final normalizedContainer = _preferredContainer(mediaSource);
   final primaryRequest = PlaybackUrlRequest(

@@ -140,6 +140,16 @@ class AppTheme {
     ),
   );
 
+  /// 把自定义字体家族名套用到一份 [ThemeData] 的全部文本主题上。
+  /// [family] 为空时原样返回（用系统默认字体）。供三端在构建 MaterialApp 时调用。
+  static ThemeData withFontFamily(ThemeData base, String? family) {
+    if (family == null || family.isEmpty) return base;
+    return base.copyWith(
+      textTheme: base.textTheme.apply(fontFamily: family),
+      primaryTextTheme: base.primaryTextTheme.apply(fontFamily: family),
+    );
+  }
+
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
