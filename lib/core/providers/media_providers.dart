@@ -69,12 +69,18 @@ final nextUpProvider = FutureProvider<List<MediaItem>>((ref) async {
   return await api.home.getNextUp();
 });
 
+/// 媒体库列表（全部，未过滤屏蔽）——供媒体库管理页常驻屏蔽/解除屏蔽用。
+final allLibrariesProvider = FutureProvider<List<Library>>((ref) async {
+  ref.keepAlive();
+  final api = ref.watch(apiClientProvider);
+  return await api.home.getLibraries();
+});
+
 /// 媒体库列表（已过滤被屏蔽的）
 final librariesProvider = FutureProvider<List<Library>>((ref) async {
   ref.keepAlive();
-  final api = ref.watch(apiClientProvider);
   final hiddenLibraries = ref.watch(hiddenLibrariesProvider);
-  final allLibraries = await api.home.getLibraries();
+  final allLibraries = await ref.watch(allLibrariesProvider.future);
   return allLibraries.where((lib) => !hiddenLibraries.contains(lib.id)).toList();
 });
 
@@ -249,22 +255,44 @@ final searchHistoryProvider = StateNotifierProvider<SearchHistoryNotifier, List<
 });
 
 class SearchHistoryNotifier extends StateNotifier<List<String>> {
-  SearchHistoryNotifier() : super([]);
-  
-  void addQuery(String query) {
-    if (query.isEmpty) return;
-    state = [
-      query,
-      ...state.where((q) => q != query),
-    ].take(20).toList();
+  SearchHistoryNotifier() : super(_load());
+
+  static const _prefKey = 'linplayer_search_history';
+
+  static List<String> _load() {
+    try {
+      return AppPreferencesStore.instance.getStringList(_prefKey) ?? <String>[];
+    } catch (_) {
+      return <String>[];
+    }
   }
-  
+
+  void _persist() {
+    try {
+      AppPreferencesStore.instance.setStringList(_prefKey, state);
+    } catch (_) {
+      // 持久化失败不影响内存中的历史。
+    }
+  }
+
+  void addQuery(String query) {
+    final q = query.trim();
+    if (q.isEmpty) return;
+    state = [
+      q,
+      ...state.where((e) => e != q),
+    ].take(20).toList();
+    _persist();
+  }
+
   void removeQuery(String query) {
     state = state.where((q) => q != query).toList();
+    _persist();
   }
-  
+
   void clear() {
     state = [];
+    _persist();
   }
 }
 

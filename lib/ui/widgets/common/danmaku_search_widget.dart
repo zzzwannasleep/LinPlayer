@@ -296,12 +296,14 @@ class _DanmakuSearchContentState extends ConsumerState<DanmakuSearchContent> {
     return ListTile(
       dense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      isThreeLine: true,
       leading: _sourceChip(c.sourceName),
       title: Text(c.animeTitle,
           style: const TextStyle(color: Colors.white, fontSize: 14),
-          maxLines: 1,
+          maxLines: 2,
           overflow: TextOverflow.ellipsis),
-      subtitle: Text(c.episodeTitle, style: _white54),
+      subtitle: Text(c.episodeTitle,
+          style: _white54, maxLines: 2, overflow: TextOverflow.ellipsis),
       trailing: loading
           ? const SizedBox(
               width: 18,
@@ -415,11 +417,15 @@ class _DanmakuSearchContentState extends ConsumerState<DanmakuSearchContent> {
         widgets.add(ListTile(
           dense: true,
           title: Text(anime.animeTitle,
-              style: const TextStyle(color: Colors.white, fontSize: 14)),
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
           subtitle: Text(
             '${anime.typeDescription ?? ''} ${anime.year?.toString() ?? ''}'
                 .trim(),
             style: _white54,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
           trailing: Icon(
             selected ? Icons.expand_less : Icons.chevron_right,
@@ -459,7 +465,9 @@ class _DanmakuSearchContentState extends ConsumerState<DanmakuSearchContent> {
           return ListTile(
             dense: true,
             title: Text(ep.episodeTitle,
-                style: const TextStyle(color: Colors.white, fontSize: 14)),
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
             trailing: loading
                 ? const SizedBox(
                     width: 18,

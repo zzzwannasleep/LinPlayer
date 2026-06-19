@@ -201,10 +201,13 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   Color _dominantColor = Colors.black;
   Color _backgroundColor = const Color(0xFF121212);
   bool _isDownloadingSeries = false;
+  bool _isFavorite = false;
+  bool _favoriteBusy = false;
 
   @override
   void initState() {
     super.initState();
+    _isFavorite = widget.item.userData?.isFavorite ?? false;
     _extractColor();
   }
 
@@ -212,7 +215,37 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   void didUpdateWidget(covariant _DetailHeader oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.item.id != widget.item.id) {
+      _isFavorite = widget.item.userData?.isFavorite ?? false;
       _extractColor();
+    }
+  }
+
+  /// 收藏 / 取消收藏当前条目。
+  Future<void> _toggleFavorite() async {
+    if (_favoriteBusy) return;
+    final api = ref.read(apiClientProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    final next = !_isFavorite;
+    setState(() => _favoriteBusy = true);
+    try {
+      if (next) {
+        await api.favorite.addFavorite(widget.item.id);
+      } else {
+        await api.favorite.removeFavorite(widget.item.id);
+      }
+      if (mounted) setState(() => _isFavorite = next);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(next ? '已加入收藏' : '已取消收藏'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('操作失败，请稍后重试')),
+      );
+    } finally {
+      if (mounted) setState(() => _favoriteBusy = false);
     }
   }
 
@@ -364,32 +397,61 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
           ),
         ),
 
-        // 整剧下载按钮（右上角，仅剧集）
-        if (widget.item.type == 'Series')
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: CircleAvatar(
-                  backgroundColor: Colors.black.withValues(alpha: 0.4),
-                  child: IconButton(
-                    tooltip: '下载整部剧',
-                    icon: _isDownloadingSeries
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.download, color: Colors.white),
-                    onPressed:
-                        _isDownloadingSeries ? null : _downloadWholeSeries,
+        // 右上角操作：收藏（通用）+ 下载整部剧（仅剧集）
+        SafeArea(
+          child: Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: Colors.black.withValues(alpha: 0.4),
+                    child: IconButton(
+                      tooltip: _isFavorite ? '取消收藏' : '添加收藏',
+                      icon: _favoriteBusy
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : Icon(
+                              _isFavorite
+                                  ? Icons.favorite
+                                  : Icons.favorite_border,
+                              color: _isFavorite
+                                  ? const Color(0xFFFF6B6B)
+                                  : Colors.white,
+                            ),
+                      onPressed: _favoriteBusy ? null : _toggleFavorite,
+                    ),
                   ),
-                ),
+                  if (widget.item.type == 'Series') ...[
+                    const SizedBox(width: 8),
+                    CircleAvatar(
+                      backgroundColor: Colors.black.withValues(alpha: 0.4),
+                      child: IconButton(
+                        tooltip: '下载整部剧',
+                        icon: _isDownloadingSeries
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.download, color: Colors.white),
+                        onPressed:
+                            _isDownloadingSeries ? null : _downloadWholeSeries,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
+        ),
 
         // 标题信息
         Positioned(
@@ -833,8 +895,9 @@ class _MoviePlaybackSection extends ConsumerWidget {
             itemId: itemId,
             info: info,
           ),
+          _WatchedProgressLabel(itemId: itemId),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             child: _MoviePlayButtons(itemId: itemId),
           ),
           _VersionInfoSection(itemId: itemId),
@@ -845,6 +908,37 @@ class _MoviePlaybackSection extends ConsumerWidget {
         child: AppLoadingIndicator(),
       ),
       error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// 播放键上方的「已观看 XX:XX」进度提示（无进度时不显示）。
+class _WatchedProgressLabel extends ConsumerWidget {
+  final String itemId;
+
+  const _WatchedProgressLabel({required this.itemId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final label = ref.watch(mediaItemProvider(itemId)).maybeWhen(
+          data: (item) =>
+              formatWatchedProgressLabel(item.userData?.playbackPositionTicks),
+          orElse: () => null,
+        );
+    if (label == null) return const SizedBox.shrink();
+    final color = Theme.of(context).textTheme.bodySmall?.color;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Row(
+        children: [
+          Icon(Icons.history, size: 15, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12.5, color: color),
+          ),
+        ],
+      ),
     );
   }
 }

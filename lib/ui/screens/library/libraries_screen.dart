@@ -10,7 +10,7 @@ import '../../widgets/common/media_widgets.dart';
 
 enum LibraryViewMode { grid, list }
 
-/// 媒体库列表页面
+/// 媒体库列表页面（含常驻的屏蔽/解除屏蔽）
 class LibrariesScreen extends ConsumerStatefulWidget {
   const LibrariesScreen({super.key});
 
@@ -20,37 +20,22 @@ class LibrariesScreen extends ConsumerStatefulWidget {
 
 class _LibrariesScreenState extends ConsumerState<LibrariesScreen> {
   LibraryViewMode _viewMode = LibraryViewMode.grid;
-  final Set<String> _selectedLibraryIds = {};
-  bool _isSelecting = false;
 
-  void _toggleSelection(String libraryId) {
-    setState(() {
-      if (_selectedLibraryIds.contains(libraryId)) {
-        _selectedLibraryIds.remove(libraryId);
-      } else {
-        _selectedLibraryIds.add(libraryId);
-      }
-    });
-  }
-
-  void _applyBlock() {
-    if (_selectedLibraryIds.isEmpty) return;
-    final notifier = ref.read(hiddenLibrariesProvider.notifier);
-    for (final id in _selectedLibraryIds) {
-      notifier.toggle(id);
-    }
-    setState(() {
-      _isSelecting = false;
-      _selectedLibraryIds.clear();
-    });
+  void _toggleBlock(String libraryId, bool nowBlocked) {
+    ref.read(hiddenLibrariesProvider.notifier).toggle(libraryId);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已屏蔽选中的媒体库')),
+      SnackBar(
+        content: Text(nowBlocked ? '已解除屏蔽' : '已屏蔽，将不在首页等处显示'),
+        duration: const Duration(seconds: 1),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final librariesAsync = ref.watch(librariesProvider);
+    // 管理页显示全部媒体库（含被屏蔽的），这样屏蔽后仍可在此解除屏蔽。
+    final librariesAsync = ref.watch(allLibrariesProvider);
+    final hidden = ref.watch(hiddenLibrariesProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -60,64 +45,21 @@ class _LibrariesScreenState extends ConsumerState<LibrariesScreen> {
         ),
         title: const Text('媒体库'),
         actions: [
-          // 屏蔽按钮
-          if (_isSelecting) ...[
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  _isSelecting = false;
-                  _selectedLibraryIds.clear();
-                });
-              },
-              child: const Text('取消'),
+          IconButton(
+            tooltip: _viewMode == LibraryViewMode.grid ? '列表视图' : '网格视图',
+            icon: Icon(
+              _viewMode == LibraryViewMode.grid
+                  ? Icons.view_list
+                  : Icons.grid_view,
             ),
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilledButton(
-                onPressed: _selectedLibraryIds.isNotEmpty ? _applyBlock : null,
-                style: FilledButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text('屏蔽'),
-              ),
-            ),
-          ] else ...[
-            // 切换显示模式
-            IconButton(
-              icon: Icon(
-                _viewMode == LibraryViewMode.grid
-                    ? Icons.view_list
-                    : Icons.grid_view,
-              ),
-              onPressed: () {
-                setState(() {
-                  _viewMode = _viewMode == LibraryViewMode.grid
-                      ? LibraryViewMode.list
-                      : LibraryViewMode.grid;
-                });
-              },
-            ),
-            // 屏蔽选择按钮
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: FilledButton.tonal(
-                onPressed: () {
-                  setState(() {
-                    _isSelecting = true;
-                  });
-                },
-                style: FilledButton.styleFrom(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                ),
-                child: const Text('屏蔽'),
-              ),
-            ),
-          ],
+            onPressed: () {
+              setState(() {
+                _viewMode = _viewMode == LibraryViewMode.grid
+                    ? LibraryViewMode.list
+                    : LibraryViewMode.grid;
+              });
+            },
+          ),
         ],
       ),
       body: librariesAsync.when(
@@ -125,36 +67,20 @@ class _LibrariesScreenState extends ConsumerState<LibrariesScreen> {
           if (libraries.isEmpty) {
             return const Center(child: Text('暂无媒体库'));
           }
-
           if (_viewMode == LibraryViewMode.grid) {
             return _GridView(
               libraries: libraries,
-              isSelecting: _isSelecting,
-              selectedIds: _selectedLibraryIds,
-              onToggleSelection: _toggleSelection,
-              onTap: (library) {
-                if (_isSelecting) {
-                  _toggleSelection(library.id);
-                } else {
-                  context.push('/library/${library.id}');
-                }
-              },
-            );
-          } else {
-            return _ListView(
-              libraries: libraries,
-              isSelecting: _isSelecting,
-              selectedIds: _selectedLibraryIds,
-              onToggleSelection: _toggleSelection,
-              onTap: (library) {
-                if (_isSelecting) {
-                  _toggleSelection(library.id);
-                } else {
-                  context.push('/library/${library.id}');
-                }
-              },
+              hiddenIds: hidden,
+              onToggleBlock: _toggleBlock,
+              onTap: (library) => context.push('/library/${library.id}'),
             );
           }
+          return _ListView(
+            libraries: libraries,
+            hiddenIds: hidden,
+            onToggleBlock: _toggleBlock,
+            onTap: (library) => context.push('/library/${library.id}'),
+          );
         },
         loading: () => const AppLoadingIndicator(),
         error: (error, _) => Center(child: Text('加载失败: $error')),
@@ -163,18 +89,44 @@ class _LibrariesScreenState extends ConsumerState<LibrariesScreen> {
   }
 }
 
+/// 常驻屏蔽/解除屏蔽小圆钮。
+class _BlockToggleButton extends StatelessWidget {
+  final bool blocked;
+  final VoidCallback onTap;
+
+  const _BlockToggleButton({required this.blocked, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(
+            blocked ? Icons.visibility_off : Icons.block,
+            size: 18,
+            color: blocked ? const Color(0xFFFF6B6B) : Colors.white,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _GridView extends ConsumerWidget {
   final List<Library> libraries;
-  final bool isSelecting;
-  final Set<String> selectedIds;
-  final Function(String) onToggleSelection;
-  final Function(Library) onTap;
+  final Set<String> hiddenIds;
+  final void Function(String id, bool nowBlocked) onToggleBlock;
+  final void Function(Library) onTap;
 
   const _GridView({
     required this.libraries,
-    required this.isSelecting,
-    required this.selectedIds,
-    required this.onToggleSelection,
+    required this.hiddenIds,
+    required this.onToggleBlock,
     required this.onTap,
   });
 
@@ -193,7 +145,7 @@ class _GridView extends ConsumerWidget {
       itemCount: libraries.length,
       itemBuilder: (context, index) {
         final library = libraries[index];
-        final isSelected = selectedIds.contains(library.id);
+        final blocked = hiddenIds.contains(library.id);
         final imageUrl = library.primaryImageTag != null
             ? api.image.getPrimaryImageUrl(library.id,
                 tag: library.primaryImageTag, maxWidth: 400)
@@ -207,55 +159,67 @@ class _GridView extends ConsumerWidget {
               Expanded(
                 child: Stack(
                   children: [
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius: borderRadius,
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: imageUrl != null
-                          ? ColoredBox(
-                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                              child: SizedBox.expand(
-                                child: Transform.scale(
-                                  scale: 1.04,
-                                  child: MediaImage(
-                                    imageUrl: imageUrl,
-                                    width: double.infinity,
-                                    height: double.infinity,
-                                    fit: BoxFit.contain,
+                    Opacity(
+                      opacity: blocked ? 0.4 : 1.0,
+                      child: Container(
+                        decoration: BoxDecoration(borderRadius: borderRadius),
+                        clipBehavior: Clip.antiAlias,
+                        width: double.infinity,
+                        height: double.infinity,
+                        child: imageUrl != null
+                            ? ColoredBox(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerHighest,
+                                child: SizedBox.expand(
+                                  child: Transform.scale(
+                                    scale: 1.04,
+                                    child: MediaImage(
+                                      imageUrl: imageUrl,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      fit: BoxFit.contain,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            )
-                          : Container(
-                              color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.folder,
-                                  size: 48,
-                                  color: Color(0xFF5B8DEF),
+                              )
+                            : Container(
+                                color:
+                                    const Color(0xFF5B8DEF).withValues(alpha: 0.1),
+                                child: const Center(
+                                  child: Icon(Icons.folder,
+                                      size: 48, color: Color(0xFF5B8DEF)),
                                 ),
                               ),
-                            ),
+                      ),
                     ),
-                    if (isSelecting)
+                    if (blocked)
                       Positioned(
-                        top: 8,
-                        right: 8,
+                        left: 8,
+                        bottom: 8,
                         child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(0xFF5B8DEF)
-                                : Colors.white.withValues(alpha: 0.8),
-                            shape: BoxShape.circle,
+                            color: Colors.black.withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(6),
                           ),
-                          child: Icon(
-                            isSelected ? Icons.check : null,
-                            size: 20,
-                            color: Colors.white,
+                          child: const Text(
+                            '已屏蔽',
+                            style: TextStyle(
+                                fontSize: 11, color: Color(0xFFFF6B6B)),
                           ),
                         ),
                       ),
+                    // 常驻屏蔽/解除按钮
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: _BlockToggleButton(
+                        blocked: blocked,
+                        onTap: () => onToggleBlock(library.id, blocked),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -280,16 +244,14 @@ class _GridView extends ConsumerWidget {
 
 class _ListView extends StatelessWidget {
   final List<Library> libraries;
-  final bool isSelecting;
-  final Set<String> selectedIds;
-  final Function(String) onToggleSelection;
-  final Function(Library) onTap;
+  final Set<String> hiddenIds;
+  final void Function(String id, bool nowBlocked) onToggleBlock;
+  final void Function(Library) onTap;
 
   const _ListView({
     required this.libraries,
-    required this.isSelecting,
-    required this.selectedIds,
-    required this.onToggleSelection,
+    required this.hiddenIds,
+    required this.onToggleBlock,
     required this.onTap,
   });
 
@@ -300,20 +262,33 @@ class _ListView extends StatelessWidget {
       itemCount: libraries.length,
       itemBuilder: (context, index) {
         final library = libraries[index];
-        final isSelected = selectedIds.contains(library.id);
+        final blocked = hiddenIds.contains(library.id);
 
         return ListTile(
           leading: Icon(
             library.collectionType == 'movies' ? Icons.movie : Icons.tv,
-            color: const Color(0xFF5B8DEF),
+            color: blocked
+                ? Theme.of(context).disabledColor
+                : const Color(0xFF5B8DEF),
           ),
-          title: Text(library.name),
-          trailing: isSelecting
-              ? Checkbox(
-                  value: isSelected,
-                  onChanged: (_) => onToggleSelection(library.id),
-                )
-              : const Icon(Icons.chevron_right),
+          title: Text(
+            library.name,
+            style: blocked
+                ? TextStyle(color: Theme.of(context).disabledColor)
+                : null,
+          ),
+          subtitle: blocked
+              ? const Text('已屏蔽',
+                  style: TextStyle(fontSize: 12, color: Color(0xFFFF6B6B)))
+              : null,
+          trailing: IconButton(
+            tooltip: blocked ? '解除屏蔽' : '屏蔽',
+            icon: Icon(
+              blocked ? Icons.visibility_off : Icons.block,
+              color: blocked ? const Color(0xFFFF6B6B) : null,
+            ),
+            onPressed: () => onToggleBlock(library.id, blocked),
+          ),
           onTap: () => onTap(library),
         );
       },

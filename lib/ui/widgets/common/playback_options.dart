@@ -95,6 +95,24 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
           ref.read(selectedMediaSourceProvider.notifier).state = mediaSource.id;
         }
       });
+    } else if (selectedSourceId == null && info.mediaSources.length > 1) {
+      // 未显式选择时，按该剧记忆的画质档位自动选回同档媒体源。
+      final seriesId =
+          ref.read(mediaItemProvider(itemId)).valueOrNull?.seriesId;
+      final remembered =
+          ref.read(seriesQualityMemoryProvider.notifier).recall(seriesId);
+      if (remembered != null) {
+        final match = info.mediaSources
+            .where((s) => _sourceQualityLabel(s) == remembered)
+            .firstOrNull;
+        if (match != null && match.id != mediaSource.id) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (ref.read(selectedMediaSourceProvider) == null) {
+              ref.read(selectedMediaSourceProvider.notifier).state = match.id;
+            }
+          });
+        }
+      }
     }
 
     final audioStreams =
@@ -236,6 +254,15 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
         selected: source.id == selectedSourceId,
         onTap: () {
           ref.read(selectedMediaSourceProvider.notifier).state = source.id;
+          // 记忆该剧画质：按视频分辨率档位记住，进入同剧其它分集自动选回。
+          final seriesId =
+              ref.read(mediaItemProvider(itemId)).valueOrNull?.seriesId;
+          final label = _sourceQualityLabel(source);
+          if (seriesId != null && label.isNotEmpty) {
+            ref
+                .read(seriesQualityMemoryProvider.notifier)
+                .remember(seriesId, label);
+          }
           ref.read(audioTrackProvider.notifier).state = null;
           ref.read(subtitleTrackProvider.notifier).state = null;
           ref.read(secondarySubtitleTrackProvider.notifier).state = null;
@@ -243,6 +270,12 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
         },
       );
     }).toList();
+  }
+
+  /// 媒体源的画质档位标签（取视频流分辨率，如 "1080p"/"4K"）。
+  static String _sourceQualityLabel(MediaSource source) {
+    final v = source.mediaStreams.where((s) => s.isVideo).firstOrNull;
+    return v?.resolution ?? '';
   }
 
   List<Widget> _buildAudioOptions(List<MediaStream> streams) {
@@ -343,39 +376,39 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
   }) {
     final expanded = _expanded == sectionKey;
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 6),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: () => _toggle(sectionKey),
-            borderRadius: BorderRadius.circular(12),
             child: Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
               child: Row(
                 children: [
-                  Icon(icon, size: 24),
-                  const SizedBox(width: 16),
+                  Icon(icon, size: 19),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // 第一行：选项名称（放大字体）
+                        // 第一行：选项名称
                         Text(
                           title,
                           style: const TextStyle(
-                            fontSize: 15,
+                            fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 1),
                         // 第二行：当前选中内容（缩小字体）
                         Text(
                           value,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 11.5,
                             color:
                                 Theme.of(context).textTheme.bodySmall?.color,
                           ),
@@ -388,7 +421,7 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
                   AnimatedRotation(
                     turns: expanded ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.arrow_drop_down, size: 24),
+                    child: const Icon(Icons.expand_more, size: 20),
                   ),
                 ],
               ),
@@ -406,7 +439,7 @@ class _PlaybackOptionsState extends ConsumerState<PlaybackOptions> {
                       // 选项较多（如十几个版本）时不再撑长整页，限定高度内部滚动，
                       // 项目少时按内容自适应、不会出现多余空白或滚动条。
                       ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 320),
+                        constraints: const BoxConstraints(maxHeight: 260),
                         child: Scrollbar(
                           controller: _optionsScrollController,
                           child: SingleChildScrollView(
@@ -546,7 +579,7 @@ class _OptionRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         child: Row(
           children: [
             Expanded(
@@ -554,22 +587,22 @@ class _OptionRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // 第一行：文件名（无后缀）/ 轨道名，加粗稍大
+                  // 第一行：文件名（无后缀）/ 轨道名
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
                       color: selected ? _accent : null,
                     ),
                   ),
                   if (subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     // 第二行：清晰度 / 码率 / 大小 / 容器，正常稍小
                     Text(
                       subtitle,
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 11.5,
                         color: Theme.of(context).textTheme.bodySmall?.color,
                       ),
                     ),
@@ -578,8 +611,8 @@ class _OptionRow extends StatelessWidget {
               ),
             ),
             if (selected) ...[
-              const SizedBox(width: 12),
-              const Icon(Icons.check, color: _accent, size: 20),
+              const SizedBox(width: 10),
+              const Icon(Icons.check, color: _accent, size: 17),
             ],
           ],
         ),

@@ -999,9 +999,15 @@ class ContinueWatchingCard extends ConsumerWidget {
     );
 
     final isEpisode = item.type == 'Episode';
+    // 第一行显示剧名称，第二行显示具体季/集；非剧集回退为条目名。
+    final titleText = isEpisode
+        ? (item.seriesName?.trim().isNotEmpty == true
+            ? item.seriesName!
+            : item.name)
+        : item.name;
     final seasonEpisodeText =
         isEpisode && item.parentIndexNumber != null && item.indexNumber != null
-            ? 'S${item.parentIndexNumber}E${item.indexNumber}'
+            ? 'S${item.parentIndexNumber} · E${item.indexNumber}'
             : null;
 
     return GestureDetector(
@@ -1075,9 +1081,9 @@ class ContinueWatchingCard extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 6),
-            // 标题
+            // 第一行：剧名称
             Text(
-              item.name,
+              titleText,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -1085,7 +1091,7 @@ class ContinueWatchingCard extends ConsumerWidget {
                 fontWeight: FontWeight.w500,
               ),
             ),
-            // 季集信息
+            // 第二行：季/集信息
             if (seasonEpisodeText != null)
               Text(
                 seasonEpisodeText,

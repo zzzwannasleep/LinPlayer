@@ -2,8 +2,11 @@ package com.example.linplayer_mobile
 
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
+import android.content.ContentValues
 import android.content.Context
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -15,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private var libassChannel: MethodChannel? = null
     private var proxyChannel: MethodChannel? = null
     private var diagnosticsChannel: MethodChannel? = null
+    private var mediaChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -75,6 +79,71 @@ class MainActivity : FlutterActivity() {
                 "getRecentExitReasons" -> result.success(getRecentExitReasons())
                 else -> result.notImplemented()
             }
+        }
+
+        // 媒体：把播放器截图字节写入系统相册（之前 Dart 侧只拿到字节、从未落盘）。
+        mediaChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.linplayer/media"
+        )
+        mediaChannel!!.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "saveImageToGallery" -> {
+                    val bytes = call.argument<ByteArray>("bytes")
+                    val name = call.argument<String>("name")
+                        ?: "LinPlayer_${System.currentTimeMillis()}"
+                    if (bytes == null) {
+                        result.success(false)
+                    } else {
+                        result.success(saveImageToGallery(bytes, name))
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /**
+     * 把图片字节保存到系统相册的 Pictures/LinPlayer 目录。
+     * Android 10+（Q）走 MediaStore 作用域存储，**无需任何存储权限**；
+     * Android 9 及以下写入公共 Pictures（需 WRITE_EXTERNAL_STORAGE，清单已声明 maxSdk28）。
+     */
+    private fun saveImageToGallery(bytes: ByteArray, displayName: String): Boolean {
+        val fileName = if (displayName.endsWith(".jpg", true)) displayName else "$displayName.jpg"
+        return try {
+            val resolver = contentResolver
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    put(
+                        MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/LinPlayer"
+                    )
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+                ) ?: return false
+                resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return false
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                true
+            } else {
+                @Suppress("DEPRECATION")
+                val picDir =
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val dir = java.io.File(picDir, "LinPlayer").apply { mkdirs() }
+                val file = java.io.File(dir, fileName)
+                file.outputStream().use { it.write(bytes) }
+                @Suppress("DEPRECATION")
+                MediaStore.Images.Media.insertImage(resolver, file.absolutePath, fileName, null)
+                true
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MediaSave", "saveImageToGallery failed: ${e.message}")
+            false
         }
     }
 

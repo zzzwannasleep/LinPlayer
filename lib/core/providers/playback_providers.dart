@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_interfaces.dart';
@@ -321,6 +323,57 @@ final preferredVersionRegexProvider =
   );
 });
 
+/// 记忆每部剧选过的画质（seriesId → 分辨率档位标签，如 "1080p"/"4K"/"720p"）。
+/// 用户在某剧任一分集选了某档画质后，再进入该剧其它分集会自动选回同档画质，
+/// 不必每集重选。按分辨率档位匹配（而非具体 mediaSource.id），以跨分集复用。
+final seriesQualityMemoryProvider =
+    StateNotifierProvider<SeriesQualityMemoryNotifier, Map<String, String>>(
+        (ref) {
+  return SeriesQualityMemoryNotifier();
+});
+
+class SeriesQualityMemoryNotifier extends StateNotifier<Map<String, String>> {
+  SeriesQualityMemoryNotifier() : super(_load());
+
+  static const _prefKey = 'linplayer_series_quality_memory';
+
+  static Map<String, String> _load() {
+    try {
+      final raw = AppPreferencesStore.instance.getString(_prefKey);
+      if (raw == null || raw.isEmpty) return {};
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return decoded
+            .map((k, v) => MapEntry(k.toString(), v.toString()));
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  /// 取出该剧记忆的画质档位；无记忆返回 null。
+  String? recall(String? seriesId) {
+    if (seriesId == null || seriesId.isEmpty) return null;
+    final v = state[seriesId];
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  /// 记住该剧选用的画质档位。
+  void remember(String? seriesId, String label) {
+    if (seriesId == null || seriesId.isEmpty || label.isEmpty) return;
+    if (state[seriesId] == label) return;
+    state = {...state, seriesId: label};
+    _persist();
+  }
+
+  void _persist() {
+    try {
+      AppPreferencesStore.instance.setString(_prefKey, jsonEncode(state));
+    } catch (_) {
+      // 持久化失败不影响内存记忆。
+    }
+  }
+}
+
 /// 字幕选择正则偏好：自动选轨时优先选中匹配该正则的字幕轨
 /// （匹配 显示名/标题/语言/编码，如 `中文|简|繁|chi|zh`）。为空则回退到首选字幕语言。
 final preferredSubtitleRegexProvider =
@@ -432,7 +485,7 @@ final exoLibassProvider =
   );
 });
 
-final aspectRatioProvider = StateProvider<String>((ref) => '自动');
+final aspectRatioProvider = StateProvider<String>((ref) => '自适应');
 final skipOpeningStartProvider = StateProvider<int>((ref) => 0);
 final skipOpeningEndProvider = StateProvider<int>((ref) => 0);
 final skipEndingStartProvider = StateProvider<int>((ref) => 0);

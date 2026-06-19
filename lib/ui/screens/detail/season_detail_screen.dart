@@ -268,6 +268,29 @@ class _EpisodeDetailScreenState extends ConsumerState<EpisodeDetailScreen> {
               ),
             ),
 
+            // 已观看进度（播放按钮上方）
+            SliverToBoxAdapter(
+              child: Builder(
+                builder: (context) {
+                  final label = formatWatchedProgressLabel(
+                      item.userData?.playbackPositionTicks);
+                  if (label == null) return const SizedBox.shrink();
+                  final color = Theme.of(context).textTheme.bodySmall?.color;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Row(
+                      children: [
+                        Icon(Icons.history, size: 15, color: color),
+                        const SizedBox(width: 6),
+                        Text(label,
+                            style: TextStyle(fontSize: 12.5, color: color)),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+
             // 播放按钮
             SliverToBoxAdapter(
               child: Padding(

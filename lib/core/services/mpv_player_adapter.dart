@@ -1811,7 +1811,9 @@ class MpvPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setAspectRatio(String ratio) async {
     _aspectRatio = ratio;
-    String value;
+    String value = '-1';
+    bool keepAspect = true;
+    double panscan = 0.0;
     switch (ratio) {
       case '16:9':
         value = '16/9';
@@ -1819,15 +1821,21 @@ class MpvPlayerAdapter implements PlayerAdapter {
         value = '4/3';
       case '21:9':
         value = '21/9';
-      case '全屏':
-        value = '-1';
       case '原始':
         value = '0';
-      default:
+      case '拉伸': // 变形铺满
+        value = '-1';
+        keepAspect = false;
+      case '铺满': // 裁切铺满
+        value = '-1';
+        panscan = 1.0;
+      default: // 自适应 / 自动 / 全屏
         value = '-1';
     }
     final np = _nativePlayer;
     if (np != null) {
+      await np.setProperty('keepaspect', keepAspect ? 'yes' : 'no');
+      await np.setProperty('panscan', panscan.toString());
       await np.setProperty('video-aspect-override', value);
     }
     await _configManager.updateConfigValue('video-aspect-override', value);

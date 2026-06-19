@@ -83,9 +83,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
+  // 双指缩放画面：在比例模式之上，用户可双指对画面做缩放裁切（1.0–4.0）。
+  double _videoZoom = 1.0;
+  double _zoomStartScale = 1.0;
+  bool _gestureIsZoom = false;
+
   Rect _computeContentRect(Size containerSize) {
     if (containerSize.width <= 0 || containerSize.height <= 0) {
       return Rect.zero;
+    }
+    final mode = ref.read(aspectRatioProvider);
+    // 拉伸：铺满整个容器、不保持比例（变形填满）。
+    if (mode == '拉伸' || mode == '全屏') {
+      return Offset.zero & containerSize;
     }
     final ratio = _resolveDisplayAspectRatio();
     if (ratio == null || ratio <= 0) {
@@ -93,12 +103,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     final containerRatio = containerSize.width / containerSize.height;
+    // 铺满：保持比例放大到铺满容器、裁掉溢出（Stack 默认裁剪）。
+    if (mode == '铺满') {
+      if (containerRatio > ratio) {
+        final contentHeight = containerSize.width / ratio;
+        final top = (containerSize.height - contentHeight) / 2;
+        return Rect.fromLTWH(0, top, containerSize.width, contentHeight);
+      }
+      final contentWidth = containerSize.height * ratio;
+      final left = (containerSize.width - contentWidth) / 2;
+      return Rect.fromLTWH(left, 0, contentWidth, containerSize.height);
+    }
+    // 自适应 / 原始 / 16:9 / 4:3：保持比例放进容器（letterbox）。
     if (containerRatio > ratio) {
       final contentWidth = containerSize.height * ratio;
       final left = (containerSize.width - contentWidth) / 2;
       return Rect.fromLTWH(left, 0, contentWidth, containerSize.height);
     }
-
     final contentHeight = containerSize.width / ratio;
     final top = (containerSize.height - contentHeight) / 2;
     return Rect.fromLTWH(0, top, containerSize.width, contentHeight);
@@ -106,8 +127,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   double? _resolveDisplayAspectRatio() {
     final aspectMode = ref.read(aspectRatioProvider);
-    if (aspectMode == '全屏') return null;
-
     switch (aspectMode) {
       case '16:9':
         return 16 / 9;
@@ -116,7 +135,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       case '21:9':
         return 21 / 9;
       case '原始':
+      case '自适应':
       case '自动':
+      case '铺满':
       default:
         break;
     }
@@ -1326,20 +1347,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 onDoubleTapDown: _onDoubleTapDown,
                 onLongPressStart: (_) => _onLongPressStart(),
                 onLongPressEnd: (_) => _onLongPressEnd(),
-                onHorizontalDragStart: (details) =>
-                    _playerService.onDragStart(details, constraints),
-                onHorizontalDragUpdate: (details) =>
-                    _playerService.onDragUpdate(details, constraints),
-                onHorizontalDragEnd: _playerService.onDragEnd,
-                onVerticalDragStart: (details) =>
-                    _playerService.onDragStart(details, constraints),
-                onVerticalDragUpdate: (details) =>
-                    _playerService.onDragUpdate(details, constraints),
-                onVerticalDragEnd: _playerService.onDragEnd,
+                // 用 Scale 手势统一处理：单指→沿用亮度/音量/进度拖动；双指→缩放画面。
+                // GestureDetector 不允许同时挂 pan(drag) 与 scale，故由 scale 分流。
+                onScaleStart: (details) => _onScaleStart(details, constraints),
+                onScaleUpdate: (details) => _onScaleUpdate(details, constraints),
+                onScaleEnd: _onScaleEnd,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    _buildVideoArea(),
+                    ClipRect(
+                      child: Transform.scale(
+                        scale: _videoZoom,
+                        child: _buildVideoArea(),
+                      ),
+                    ),
                     // 流式翻译叠加层（按双语排版显示原文/译文，位于控制条之下）。
                     if (_streamTranslator != null)
                       Positioned(
@@ -1565,6 +1586,44 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
   }
 
+  void _onScaleStart(ScaleStartDetails details, BoxConstraints constraints) {
+    if (_playerService.isLocked) return;
+    _gestureIsZoom = details.pointerCount >= 2;
+    if (_gestureIsZoom) {
+      _zoomStartScale = _videoZoom;
+    } else {
+      _playerService.onDragStart(
+        DragStartDetails(globalPosition: details.focalPoint),
+        constraints,
+      );
+    }
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details, BoxConstraints constraints) {
+    if (_playerService.isLocked) return;
+    if (_gestureIsZoom) {
+      setState(() {
+        _videoZoom = (_zoomStartScale * details.scale).clamp(1.0, 4.0);
+      });
+    } else if (details.pointerCount < 2) {
+      // 单指拖动：复用既有亮度/音量/进度逻辑（合成 Drag 详情传给 service）。
+      _playerService.onDragUpdate(
+        DragUpdateDetails(
+          globalPosition: details.focalPoint,
+          delta: details.focalPointDelta,
+        ),
+        constraints,
+      );
+    }
+  }
+
+  void _onScaleEnd(ScaleEndDetails details) {
+    if (!_gestureIsZoom) {
+      _playerService.onDragEnd(DragEndDetails());
+    }
+    _gestureIsZoom = false;
+  }
+
   void _onDoubleTapDown(TapDownDetails details) {
     if (_playerService.isLocked) return;
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1726,6 +1785,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   onTap: () => _onIntroSkipPressed(prompt),
                 );
               },
+            ),
+          ),
+        ),
+        // 截图按钮：常驻左侧中部，方便单手点按（随控制栏显隐）。
+        Positioned(
+          left: 8,
+          top: 0,
+          bottom: 0,
+          child: SafeArea(
+            child: Center(
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.35),
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: IconButton(
+                  icon: const Icon(Icons.camera_alt_outlined,
+                      color: Colors.white),
+                  iconSize: 22,
+                  tooltip: '截图',
+                  onPressed: _takeScreenshot,
+                ),
+              ),
             ),
           ),
         ),
@@ -2246,12 +2327,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             selected: false,
             onTap: () => go(_applySuperResolution),
           ),
-        PanelOptionTile(
-          label: '截图',
-          leading: const Icon(Icons.camera_alt_outlined),
-          selected: false,
-          onTap: () => go(_takeScreenshot),
-        ),
         const PanelSectionTitle('弹幕 / 其它'),
         PanelOptionTile(
           label: '搜索弹幕',
@@ -2329,18 +2404,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     try {
       final data = await _playerService.screenshot();
       if (!mounted) return;
-      if (data != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('截图已保存')),
-        );
-      } else {
+      if (data == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('截图功能暂不支持当前播放器内核')),
         );
+        return;
       }
-    } catch (e) {
+      // 之前只拿到字节、从未落盘，"截图已保存"是假提示。这里真正写入系统相册。
+      // Android 10+ 走 MediaStore（免存储权限）；<10 走 Pictures 目录（清单已声明 maxSdk28）。
+      bool saved = false;
+      try {
+        saved = await const MethodChannel('com.linplayer/media')
+                .invokeMethod<bool>('saveImageToGallery', {
+              'bytes': data,
+              'name': 'LinPlayer_${DateTime.now().millisecondsSinceEpoch}',
+            }) ??
+            false;
+      } catch (_) {
+        saved = false;
+      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('截图失败: $e')),
+        SnackBar(content: Text(saved ? '截图已保存到相册' : '截图保存失败，请重试')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('截图失败，请重试')),
       );
     }
   }
@@ -2610,7 +2700,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _showAspectRatioDialog() {
-    final ratios = ['自动', '16:9', '4:3', '21:9', '全屏', '原始'];
+    final ratios = ['自适应', '原始', '16:9', '4:3', '拉伸', '铺满'];
     _showRightPanel(
       title: '画面比例',
       children: ratios

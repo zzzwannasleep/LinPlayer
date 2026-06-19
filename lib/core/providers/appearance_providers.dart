@@ -218,7 +218,26 @@ final hiddenLibrariesProvider =
 });
 
 class HiddenLibrariesNotifier extends StateNotifier<Set<String>> {
-  HiddenLibrariesNotifier() : super({});
+  HiddenLibrariesNotifier() : super(_load());
+
+  static const _prefKey = 'linplayer_hidden_libraries';
+
+  static Set<String> _load() {
+    try {
+      return AppPreferencesStore.instance.getStringList(_prefKey)?.toSet() ??
+          <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  void _persist() {
+    try {
+      AppPreferencesStore.instance.setStringList(_prefKey, state.toList());
+    } catch (_) {
+      // 持久化失败不影响内存中的屏蔽状态。
+    }
+  }
 
   void toggle(String libraryId) {
     if (state.contains(libraryId)) {
@@ -226,9 +245,11 @@ class HiddenLibrariesNotifier extends StateNotifier<Set<String>> {
     } else {
       state = Set.from(state)..add(libraryId);
     }
+    _persist();
   }
 
   void clear() {
     state = {};
+    _persist();
   }
 }

@@ -469,7 +469,13 @@ class MpvPlayerPlugin(
 
         // Hardware decoding
         if (hardwareDecoding) {
-            MPVLib.setOptionString("hwdec", "mediacodec,mediacodec-copy")
+            // 盲修闪退：只用 mediacodec-copy（拷贝模式），不再优先 direct mediacodec。
+            // direct mediacodec 把解码帧直接交给 Android Surface，需要 vo 与解码器共享
+            // surface 并走 AImageReader 句柄，在部分机型/编码上首帧握手失败会原生 SIGSEGV，
+            // 是"每次播放必闪退"的常见根源。copy 模式把帧拷回 CPU 再走 GL 上传，自包含、
+            // 不依赖 surface 句柄交接，稳定得多；性能损失对流式直连可忽略。解码失败时 mpv
+            // 仍会自动回退软解。
+            MPVLib.setOptionString("hwdec", "mediacodec-copy")
             MPVLib.setOptionString("hwdec-codecs",
                 "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
         } else {
@@ -672,12 +678,31 @@ class MpvPlayerPlugin(
         // ---- Aspect ratio ----
 
         fun setAspectRatio(ratio: String) {
+            // 原生 mpv 在屏幕大小的 surface 里自行做缩放/letterbox，故比例由 mpv 属性控制：
+            // video-aspect-override 改显示宽高比；keepaspect=no 变形拉伸铺满；panscan=1 保持
+            // 比例放大裁切铺满。每个模式都把另外两项复位，避免上次模式残留。
             when (ratio) {
-                "16:9" -> MPVLib.setPropertyString("video-aspect-override", "16:9")
-                "4:3" -> MPVLib.setPropertyString("video-aspect-override", "4:3")
-                "21:9" -> MPVLib.setPropertyString("video-aspect-override", "21:9")
-                "自动" -> MPVLib.setPropertyString("video-aspect-override", "-1")
-                else -> MPVLib.setPropertyString("video-aspect-override", ratio)
+                "16:9" -> applyAspect(override = "16:9")
+                "4:3" -> applyAspect(override = "4:3")
+                "21:9" -> applyAspect(override = "21:9")
+                "原始" -> applyAspect(override = "0") // 用片源原始比例
+                "拉伸" -> applyAspect(override = "-1", keepAspect = false) // 变形铺满
+                "铺满" -> applyAspect(override = "-1", panscan = 1.0) // 裁切铺满
+                else -> applyAspect(override = "-1") // 自适应 / 自动
+            }
+        }
+
+        private fun applyAspect(
+            override: String,
+            keepAspect: Boolean = true,
+            panscan: Double = 0.0,
+        ) {
+            try {
+                MPVLib.setPropertyBoolean("keepaspect", keepAspect)
+                MPVLib.setPropertyDouble("panscan", panscan)
+                MPVLib.setPropertyString("video-aspect-override", override)
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "applyAspect failed: ${e.message}")
             }
         }
 
@@ -734,16 +759,10 @@ class MpvPlayerPlugin(
             when (property) {
                 "pause" -> emitEvent("playing", !value)
                 "paused-for-cache" -> emitEvent("buffering", value)
-                "eof-reached" -> {
-                    if (value) emitEvent("completed", true)
-                }
-                "idle-active" -> {
-                    // When idle and eof-reached, emit completed
-                    if (value) {
-                        val eof = MPVLib.getPropertyBoolean("eof-reached") ?: false
-                        if (eof) emitEvent("completed", true)
-                    }
-                }
+                // 不再用 eof-reached / idle-active 属性推断"播放完成"。
+                // seek（尤其向前 seek）或缓冲枯竭时 mpv 会把 eof-reached 瞬时置 true，
+                // 用它发 completed 会被上层当成"播放结束"→停止播放、画面消失、进度条停在
+                // seek 点，正是"重新 seek 续播后没画面"的根因。真正的结束只认 END_FILE 事件。
             }
         }
 

@@ -17,6 +17,20 @@ Color readableTextColorForBackground(Color background) {
   return background.computeLuminance() < 0.32 ? Colors.white : Colors.black87;
 }
 
+/// 已观看进度文案：返回如「已观看 12:34」/「已观看 1:02:03」；无有效进度返回 null。
+/// [positionTicks] 为 Emby 的 100ns 单位（10,000,000 ticks = 1 秒）。
+String? formatWatchedProgressLabel(num? positionTicks) {
+  if (positionTicks == null || positionTicks <= 0) return null;
+  final totalSeconds = positionTicks ~/ 10000000;
+  if (totalSeconds <= 0) return null;
+  final h = totalSeconds ~/ 3600;
+  final m = (totalSeconds % 3600) ~/ 60;
+  final s = totalSeconds % 60;
+  String two(int v) => v.toString().padLeft(2, '0');
+  final time = h > 0 ? '$h:${two(m)}:${two(s)}' : '$m:${two(s)}';
+  return '已观看 $time';
+}
+
 Color readableSecondaryTextColorForBackground(Color background) {
   return background.computeLuminance() < 0.32 ? Colors.white70 : Colors.black54;
 }
