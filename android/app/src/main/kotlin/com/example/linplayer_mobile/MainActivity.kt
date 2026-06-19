@@ -23,6 +23,12 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // 全覆盖崩溃取证：JVM 未捕获异常（任何线程，含 mpv 原生事件线程回调）在被系统
+        // 记录为 CRASH(JVM) 时，ApplicationExitInfo 往往拿不到回溯文本（实测为 null）。
+        // 这里装一个默认未捕获异常处理器，把完整 Java 堆栈直接追加进可导出的 App 日志，
+        // 再链回原处理器（不改变崩溃行为，只补取证）。
+        installCrashLogger()
+
         // 注册 MpvSurfaceView 平台视图工厂（用于 gpu-next 渲染）
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "com.linplayer/mpv_surface",
@@ -144,6 +150,38 @@ class MainActivity : FlutterActivity() {
         } catch (e: Exception) {
             android.util.Log.e("MediaSave", "saveImageToGallery failed: ${e.message}")
             false
+        }
+    }
+
+    /** 装默认未捕获异常处理器：把堆栈写入 App 日志后链回原处理器。 */
+    private fun installCrashLogger() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val sw = java.io.StringWriter()
+                throwable.printStackTrace(java.io.PrintWriter(sw))
+                val text = "线程 ${thread.name} 未捕获异常:\n$sw"
+                android.util.Log.e("UncaughtCrash", text)
+                appendCrashToLog(text)
+            } catch (_: Throwable) {
+                // 取证失败绝不影响崩溃链路本身。
+            }
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
+    /** 把崩溃文本追加进 AppLogger 同名日志文件（…/files/linplayer_logs/linplayer-<date>.log）。 */
+    private fun appendCrashToLog(text: String) {
+        try {
+            val dir = java.io.File(getExternalFilesDir(null), "linplayer_logs")
+            if (!dir.exists()) dir.mkdirs()
+            val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                .format(java.util.Date())
+            val ts = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", java.util.Locale.US)
+                .format(java.util.Date())
+            java.io.File(dir, "linplayer-$date.log")
+                .appendText("\n$ts  FATAL [UncaughtCrash] $text\n")
+        } catch (_: Throwable) {
         }
     }
 

@@ -19,12 +19,19 @@ object MPVLib {
         // 2. libavcodec.so is loaded as a dependency of libmpv.so
         // 3. libmpv.so — the core mpv library
         // 4. libplayer.so — JNI bridge (depends on libmpv)
-        try { System.loadLibrary("mpv_init_jni") } catch (e: UnsatisfiedLinkError) {
+        try { System.loadLibrary("mpv_init_jni") } catch (e: Throwable) {
             android.util.Log.w("MPVLib", "mpv_init_jni not found: ${e.message}")
         }
+        // 不让 loadLibrary 失败把 object 的静态初始化变成 ExceptionInInitializerError
+        // （Error，会绕过上层 catch(Exception) 崩溃 App）。失败时记录；随后 create() 等
+        // external 调用会抛可被上层 catch(Throwable) 捕获的 UnsatisfiedLinkError，优雅降级。
         val libs = arrayOf("mpv", "player")
         for (lib in libs) {
-            System.loadLibrary(lib)
+            try {
+                System.loadLibrary(lib)
+            } catch (e: Throwable) {
+                android.util.Log.e("MPVLib", "loadLibrary($lib) failed: ${e.message}")
+            }
         }
     }
 

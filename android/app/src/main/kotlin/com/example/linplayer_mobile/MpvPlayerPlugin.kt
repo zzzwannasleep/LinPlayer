@@ -266,16 +266,16 @@ class MpvPlayerPlugin(
         diskCacheBackBytes: Long,
         result: MethodChannel.Result
     ) {
-        // MPVLib is a singleton — only one mpv context can exist at a time.
-        // Dispose any existing player first.
-        if (players.isNotEmpty()) {
-            android.util.Log.w(TAG, "createPlayer: disposing existing player(s)")
-            players.values.forEach { it.release() }
-            players.clear()
-        }
-
         var surfaceTextureEntry: TextureRegistry.SurfaceTextureEntry? = null
         try {
+            // MPVLib is a singleton — only one mpv context can exist at a time.
+            // Dispose any existing player first.（放进 try：release 内部异常也不外泄）
+            if (players.isNotEmpty()) {
+                android.util.Log.w(TAG, "createPlayer: disposing existing player(s)")
+                players.values.forEach { it.release() }
+                players.clear()
+            }
+
             val playerId = UUID.randomUUID().toString()
 
             // Always use SurfaceTexture for both gpu and gpu-next modes
@@ -384,11 +384,19 @@ class MpvPlayerPlugin(
             )
             android.util.Log.i(TAG, "Created player with SurfaceTexture (textureId=${surfaceTextureEntry.id()})")
             result.success(resultMap)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // 关键：必须捕获 Throwable 而非 Exception。
+            // MPVLib / MpvInitBridge 首次访问会触发 object 的 init{} 静态初始化里的
+            // System.loadLibrary()，.so 缺失/加载失败抛的是 UnsatisfiedLinkError /
+            // ExceptionInInitializerError —— 它们继承 Error 而非 Exception，会绕过
+            // catch(Exception) 直接在主线程未捕获 → 整个 App 崩溃(日志表现为 CRASH(JVM)、
+            // 既无"初始化完成"也无"初始化失败")。捕获 Throwable 后降级为可恢复的错误，
+            // 播放页按统一文案提示，并把真实原因抛回 Dart 落入日志。
             android.util.Log.e(TAG, "createPlayer failed", e)
-            try { MPVLib.destroy() } catch (_: Exception) {}
-            surfaceTextureEntry?.release()
-            result.error("CREATE_ERROR", e.message, null)
+            try { MPVLib.destroy() } catch (_: Throwable) {}
+            try { surfaceTextureEntry?.release() } catch (_: Throwable) {}
+            try { players.clear() } catch (_: Throwable) {}
+            result.error("CREATE_ERROR", "${e.javaClass.simpleName}: ${e.message}", null)
         }
     }
 
