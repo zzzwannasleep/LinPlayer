@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 
 /// TV 右侧滑入面板
@@ -12,14 +13,15 @@ class TvPanel extends StatefulWidget {
   final String title;
   final List<Widget> children;
   final VoidCallback? onClose;
-  final double width;
+  /// 面板内容宽度，传 null 时按当前屏幕响应式取 [TvMetrics.panelWidth]。
+  final double? width;
 
   const TvPanel({
     super.key,
     required this.title,
     required this.children,
     this.onClose,
-    this.width = TvDesignTokens.panelWidth,
+    this.width,
   });
 
   @override
@@ -67,11 +69,13 @@ class _TvPanelState extends State<TvPanel>
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     // 宽度由内容决定，但绝不超过屏幕的 1/3。
     final double maxWidth = MediaQuery.of(context).size.width / 3;
-    final double panelWidth = math.min(widget.width, maxWidth);
-    const borderRadius =
-        BorderRadius.horizontal(left: Radius.circular(20));
+    final double panelWidth =
+        math.min(widget.width ?? m.panelWidth, maxWidth);
+    final borderRadius =
+        BorderRadius.horizontal(left: Radius.circular(m.s(20)));
 
     return Stack(
       children: [
@@ -118,8 +122,8 @@ class _TvPanelState extends State<TvPanel>
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.3),
-                            blurRadius: 28,
-                            offset: const Offset(-8, 0),
+                            blurRadius: m.s(28),
+                            offset: Offset(m.s(-8), 0),
                           ),
                         ],
                       ),
@@ -128,8 +132,7 @@ class _TvPanelState extends State<TvPanel>
                         children: [
                           // 标题栏
                           Padding(
-                            padding:
-                                const EdgeInsets.all(TvDesignTokens.spacingLg),
+                            padding: EdgeInsets.all(m.spacingLg),
                             child: Row(
                               children: [
                                 Expanded(
@@ -137,20 +140,20 @@ class _TvPanelState extends State<TvPanel>
                                     widget.title,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: TvDesignTokens.fontSizeXl,
+                                    style: TextStyle(
+                                      fontSize: m.fontSizeXl,
                                       color: TvDesignTokens.textPrimary,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: TvDesignTokens.spacingSm),
+                                SizedBox(width: m.spacingSm),
                                 TvFocusable(
                                   onSelect: _close,
-                                  child: const Icon(
+                                  child: Icon(
                                     Icons.close,
                                     color: TvDesignTokens.textSecondary,
-                                    size: 32,
+                                    size: m.s(32),
                                   ),
                                 ),
                               ],
@@ -160,8 +163,7 @@ class _TvPanelState extends State<TvPanel>
                           // 内容
                           Expanded(
                             child: ListView(
-                              padding: const EdgeInsets.all(
-                                  TvDesignTokens.spacingLg),
+                              padding: EdgeInsets.all(m.spacingLg),
                               children: widget.children,
                             ),
                           ),
@@ -200,20 +202,21 @@ class TvPanelOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return TvFocusable(
       onSelect: onTap,
       child: Container(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+        padding: EdgeInsets.all(m.spacingMd),
         decoration: BoxDecoration(
           color:
               isSelected ? TvDesignTokens.brand.withValues(alpha: 0.15) : null,
-          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+          borderRadius: BorderRadius.circular(m.posterRadius),
         ),
         child: Row(
           children: [
             if (leading != null) ...[
               leading!,
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
             ],
             Expanded(
               child: Column(
@@ -222,7 +225,7 @@ class TvPanelOption extends StatelessWidget {
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeMd,
+                      fontSize: m.fontSizeMd,
                       color: isSelected ? TvDesignTokens.brand : TvDesignTokens.textPrimary,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                     ),
@@ -230,8 +233,8 @@ class TvPanelOption extends StatelessWidget {
                   if (subtitle != null)
                     Text(
                       subtitle!,
-                      style: const TextStyle(
-                        fontSize: TvDesignTokens.fontSizeSm,
+                      style: TextStyle(
+                        fontSize: m.fontSizeSm,
                         color: TvDesignTokens.textSecondary,
                       ),
                     ),
@@ -240,10 +243,10 @@ class TvPanelOption extends StatelessWidget {
             ),
             if (trailing != null) trailing!,
             if (isSelected)
-              const Icon(
+              Icon(
                 Icons.check,
                 color: TvDesignTokens.brand,
-                size: 24,
+                size: m.s(24),
               ),
           ],
         ),
@@ -260,15 +263,16 @@ class TvPanelSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Padding(
-      padding: const EdgeInsets.only(
-        top: TvDesignTokens.spacingLg,
-        bottom: TvDesignTokens.spacingSm,
+      padding: EdgeInsets.only(
+        top: m.spacingLg,
+        bottom: m.spacingSm,
       ),
       child: Text(
         title,
-        style: const TextStyle(
-          fontSize: TvDesignTokens.fontSizeSm,
+        style: TextStyle(
+          fontSize: m.fontSizeSm,
           color: TvDesignTokens.textSecondary,
           fontWeight: FontWeight.bold,
         ),

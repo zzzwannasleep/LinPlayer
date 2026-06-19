@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_toast.dart';
 
@@ -57,6 +58,7 @@ class _TvOnboardingScreenState extends State<TvOnboardingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Focus(
@@ -88,27 +90,27 @@ class _TvOnboardingScreenState extends State<TvOnboardingScreen> {
               controller: _pageController,
               itemCount: _totalPages,
               onPageChanged: (index) => setState(() => _currentPage = index),
-              itemBuilder: (context, index) => _buildPage(index),
+              itemBuilder: (context, index) => _buildPage(index, m),
             ),
             // 跳过按钮
             Positioned(
-              top: TvDesignTokens.spacingLg,
-              right: TvDesignTokens.spacingLg,
+              top: m.spacingLg,
+              right: m.spacingLg,
               child: TvFocusable(
                 onSelect: _skipOnboarding,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingMd,
-                    vertical: TvDesignTokens.spacingXs,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: m.spacingMd,
+                    vertical: m.spacingXs,
                   ),
                   decoration: BoxDecoration(
                     color: TvDesignTokens.surface,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                    borderRadius: BorderRadius.circular(m.posterRadius),
                   ),
-                  child: const Text(
+                  child: Text(
                     '跳过',
                     style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
+                      fontSize: m.fontSizeSm,
                       color: TvDesignTokens.textSecondary,
                     ),
                   ),
@@ -117,7 +119,7 @@ class _TvOnboardingScreenState extends State<TvOnboardingScreen> {
             ),
             // 底部指示器和导航
             Positioned(
-              bottom: TvDesignTokens.spacingXxl,
+              bottom: m.spacingXxl,
               left: 0,
               right: 0,
               child: Column(
@@ -128,36 +130,36 @@ class _TvOnboardingScreenState extends State<TvOnboardingScreen> {
                     children: List.generate(_totalPages, (index) {
                       return AnimatedContainer(
                         duration: TvDesignTokens.focusAnimationDuration,
-                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                        width: _currentPage == index ? 24 : 8,
-                        height: 8,
+                        margin: EdgeInsets.symmetric(horizontal: m.s(4)),
+                        width: _currentPage == index ? m.s(24) : m.s(8),
+                        height: m.s(8),
                         decoration: BoxDecoration(
                           color: _currentPage == index
                               ? TvDesignTokens.brand
                               : const Color(0x40FFFFFF),
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(m.s(4)),
                         ),
                       );
                     }),
                   ),
-                  const SizedBox(height: TvDesignTokens.spacingLg),
+                  SizedBox(height: m.spacingLg),
                   // 完成按钮（最后一页）
                   if (_currentPage == _totalPages - 1)
                     TvFocusable(
                       onSelect: _finishOnboarding,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: TvDesignTokens.spacingLg,
-                          vertical: TvDesignTokens.spacingSm,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: m.spacingLg,
+                          vertical: m.spacingSm,
                         ),
                         decoration: BoxDecoration(
                           color: TvDesignTokens.brand,
-                          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                          borderRadius: BorderRadius.circular(m.posterRadius),
                         ),
-                        child: const Text(
+                        child: Text(
                           '开始使用',
                           style: TextStyle(
-                            fontSize: TvDesignTokens.fontSizeMd,
+                            fontSize: m.fontSizeMd,
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                           ),
@@ -173,7 +175,7 @@ class _TvOnboardingScreenState extends State<TvOnboardingScreen> {
     );
   }
 
-  Widget _buildPage(int index) {
+  Widget _buildPage(int index, TvMetrics m) {
     final pages = [
       _OnboardingPageData(
         icon: Icons.gamepad,
@@ -200,37 +202,37 @@ class _TvOnboardingScreenState extends State<TvOnboardingScreen> {
         children: [
           // 图标
           Container(
-            width: 80,
-            height: 80,
+            width: m.s(80),
+            height: m.s(80),
             decoration: BoxDecoration(
               color: TvDesignTokens.brand.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(40),
+              borderRadius: BorderRadius.circular(m.s(40)),
             ),
             child: Icon(
               page.icon,
               color: TvDesignTokens.brand,
-              size: 40,
+              size: m.s(40),
             ),
           ),
-          const SizedBox(height: TvDesignTokens.spacingLg),
+          SizedBox(height: m.spacingLg),
           // 标题
           Text(
             page.title,
-            style: const TextStyle(
-              fontSize: TvDesignTokens.fontSizeXl,
+            style: TextStyle(
+              fontSize: m.fontSizeXl,
               color: TvDesignTokens.textPrimary,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: TvDesignTokens.spacingMd),
+          SizedBox(height: m.spacingMd),
           // 说明
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: TvDesignTokens.spacingXxl),
+            padding: EdgeInsets.symmetric(horizontal: m.spacingXxl),
             child: Text(
               page.description,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeMd,
+              style: TextStyle(
+                fontSize: m.fontSizeMd,
                 color: TvDesignTokens.textSecondary,
                 height: TvDesignTokens.lineHeightRelaxed,
               ),

@@ -9,6 +9,7 @@ import '../../../core/providers/media_providers.dart';
 import '../../../ui/utils/media_helpers.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_button.dart';
 import '../../widgets/tv_focusable.dart';
 
@@ -53,6 +54,7 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Row(
@@ -60,22 +62,22 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
           Expanded(
             flex: 2,
             child: Padding(
-              padding: const EdgeInsets.all(TvDesignTokens.spacingXl),
+              padding: EdgeInsets.all(m.spacingXl),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     '搜索',
                     style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeXxl,
+                      fontSize: m.fontSizeXxl,
                       color: TvDesignTokens.textPrimary,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: TvDesignTokens.spacingLg),
-                  _buildInputBox(),
-                  const SizedBox(height: TvDesignTokens.spacingLg),
-                  Expanded(child: _buildVirtualKeyboard()),
+                  SizedBox(height: m.spacingLg),
+                  _buildInputBox(m),
+                  SizedBox(height: m.spacingLg),
+                  Expanded(child: _buildVirtualKeyboard(m)),
                 ],
               ),
             ),
@@ -85,8 +87,8 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
             child: Container(
               color: TvDesignTokens.surface,
               child: _hasSearched
-                  ? _buildSearchResults()
-                  : _buildSearchHistory(),
+                  ? _buildSearchResults(m)
+                  : _buildSearchHistory(m),
             ),
           ),
         ],
@@ -94,26 +96,26 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
     );
   }
 
-  Widget _buildInputBox() {
+  Widget _buildInputBox(TvMetrics m) {
     final hasText = _searchController.text.isNotEmpty;
     return Container(
-      padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+      padding: EdgeInsets.all(m.spacingMd),
       decoration: BoxDecoration(
         color: TvDesignTokens.surface,
-        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+        borderRadius: BorderRadius.circular(m.posterRadius),
       ),
       child: Row(
         children: [
-          const Icon(Icons.search,
-              color: TvDesignTokens.textSecondary, size: 32),
-          const SizedBox(width: TvDesignTokens.spacingMd),
+          Icon(Icons.search,
+              color: TvDesignTokens.textSecondary, size: m.s(32)),
+          SizedBox(width: m.spacingMd),
           Expanded(
             child: Text(
               hasText ? _searchController.text : '输入搜索内容...',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeMd,
+                fontSize: m.fontSizeMd,
                 color: hasText
                     ? TvDesignTokens.textPrimary
                     : TvDesignTokens.textDisabled,
@@ -125,7 +127,7 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
     );
   }
 
-  Widget _buildVirtualKeyboard() {
+  Widget _buildVirtualKeyboard(TvMetrics m) {
     const rows = [
       ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
       ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
@@ -136,32 +138,30 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
       children: [
         for (final row in rows)
           Padding(
-            padding: const EdgeInsets.only(
-                bottom: TvDesignTokens.keyboardKeySpacing),
+            padding: EdgeInsets.only(bottom: m.keyboardKeySpacing),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 for (final key in row)
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: TvDesignTokens.keyboardKeySpacing),
+                    padding: EdgeInsets.symmetric(
+                        horizontal: m.keyboardKeySpacing),
                     child: TvFocusable(
                       autofocus: row == rows.first && key == 'q',
                       padding: const EdgeInsets.all(4),
                       onSelect: () => _onKeyPress(key),
                       child: Container(
-                        width: TvDesignTokens.keyboardKeyWidth,
-                        height: TvDesignTokens.keyboardKeyHeight,
+                        width: m.keyboardKeyWidth,
+                        height: m.keyboardKeyHeight,
                         decoration: BoxDecoration(
                           color: TvDesignTokens.surfaceElevated,
-                          borderRadius: BorderRadius.circular(
-                              TvDesignTokens.posterRadius),
+                          borderRadius: BorderRadius.circular(m.posterRadius),
                         ),
                         child: Center(
                           child: Text(
                             key.toUpperCase(),
-                            style: const TextStyle(
-                              fontSize: TvDesignTokens.keyboardFontSize,
+                            style: TextStyle(
+                              fontSize: m.keyboardFontSize,
                               color: TvDesignTokens.textPrimary,
                             ),
                           ),
@@ -173,27 +173,27 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
             ),
           ),
         Padding(
-          padding: const EdgeInsets.only(top: TvDesignTokens.spacingMd),
+          padding: EdgeInsets.only(top: m.spacingMd),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TvFocusable(
                 padding: const EdgeInsets.all(4),
                 onSelect: () => _onKeyPress(' '),
-                child: _keyCap(width: 160, child: const Text('空格',
+                child: _keyCap(m, width: m.s(160), child: Text('空格',
                     style: TextStyle(
-                        fontSize: TvDesignTokens.fontSizeSm,
+                        fontSize: m.fontSizeSm,
                         color: TvDesignTokens.textPrimary))),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               TvFocusable(
                 padding: const EdgeInsets.all(4),
                 onSelect: _onBackspace,
-                child: _keyCap(
-                    child: const Icon(Icons.backspace,
-                        color: TvDesignTokens.textPrimary, size: 28)),
+                child: _keyCap(m,
+                    child: Icon(Icons.backspace,
+                        color: TvDesignTokens.textPrimary, size: m.s(28))),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               TvButton(
                 text: '搜索',
                 icon: Icons.search,
@@ -206,37 +206,37 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
     );
   }
 
-  Widget _keyCap({double? width, required Widget child}) {
+  Widget _keyCap(TvMetrics m, {double? width, required Widget child}) {
     return Container(
       width: width,
-      height: TvDesignTokens.keyboardKeyHeight,
-      padding: const EdgeInsets.symmetric(horizontal: TvDesignTokens.spacingMd),
+      height: m.keyboardKeyHeight,
+      padding: EdgeInsets.symmetric(horizontal: m.spacingMd),
       decoration: BoxDecoration(
         color: TvDesignTokens.surfaceElevated,
-        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+        borderRadius: BorderRadius.circular(m.posterRadius),
       ),
       child: Center(child: child),
     );
   }
 
-  Widget _buildSearchHistory() {
+  Widget _buildSearchHistory(TvMetrics m) {
     final history = ref.watch(searchHistoryProvider);
     if (history.isEmpty) {
-      return const Center(
+      return Center(
         child: Text('暂无搜索历史',
             style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeMd,
+                fontSize: m.fontSizeMd,
                 color: TvDesignTokens.textDisabled)),
       );
     }
     return ListView(
-      padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+      padding: EdgeInsets.all(m.spacingLg),
       children: [
         Row(
           children: [
-            const Text('搜索历史',
+            Text('搜索历史',
                 style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeLg,
+                    fontSize: m.fontSizeLg,
                     color: TvDesignTokens.textPrimary,
                     fontWeight: FontWeight.bold)),
             const Spacer(),
@@ -244,14 +244,14 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
               padding: const EdgeInsets.all(6),
               onSelect: () =>
                   ref.read(searchHistoryProvider.notifier).clear(),
-              child: const Text('清除全部',
+              child: Text('清除全部',
                   style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
+                      fontSize: m.fontSizeSm,
                       color: TvDesignTokens.brand)),
             ),
           ],
         ),
-        const SizedBox(height: TvDesignTokens.spacingLg),
+        SizedBox(height: m.spacingLg),
         for (final query in history)
           TvFocusable(
             padding: const EdgeInsets.all(4),
@@ -260,23 +260,23 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
               _submit(query);
             },
             child: Container(
-              padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-              margin: const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
+              padding: EdgeInsets.all(m.spacingMd),
+              margin: EdgeInsets.only(bottom: m.spacingSm),
               decoration: BoxDecoration(
                 color: TvDesignTokens.background,
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                borderRadius: BorderRadius.circular(m.posterRadius),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.history,
-                      color: TvDesignTokens.textSecondary, size: 24),
-                  const SizedBox(width: TvDesignTokens.spacingMd),
+                  Icon(Icons.history,
+                      color: TvDesignTokens.textSecondary, size: m.s(24)),
+                  SizedBox(width: m.spacingMd),
                   Expanded(
                     child: Text(query,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeMd,
+                        style: TextStyle(
+                            fontSize: m.fontSizeMd,
                             color: TvDesignTokens.textPrimary)),
                   ),
                 ],
@@ -287,7 +287,7 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
     );
   }
 
-  Widget _buildSearchResults() {
+  Widget _buildSearchResults(TvMetrics m) {
     final resultsAsync = ref.watch(searchResultsProvider);
     final query = ref.watch(searchQueryProvider);
     final api = ref.read(apiClientProvider);
@@ -297,22 +297,22 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
         if (items.isEmpty) {
           return Center(
             child: Text('未找到“$query”的结果',
-                style: const TextStyle(
-                    fontSize: TvDesignTokens.fontSizeMd,
+                style: TextStyle(
+                    fontSize: m.fontSizeMd,
                     color: TvDesignTokens.textDisabled)),
           );
         }
         return ListView(
-          padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+          padding: EdgeInsets.all(m.spacingLg),
           children: [
             Text('“$query” 的搜索结果（${items.length}）',
-                style: const TextStyle(
-                    fontSize: TvDesignTokens.fontSizeLg,
+                style: TextStyle(
+                    fontSize: m.fontSizeLg,
                     color: TvDesignTokens.textPrimary,
                     fontWeight: FontWeight.bold)),
-            const SizedBox(height: TvDesignTokens.spacingLg),
+            SizedBox(height: m.spacingLg),
             for (final entry in items.asMap().entries)
-              _buildResultRow(api, entry.value).animate().fadeIn(
+              _buildResultRow(m, api, entry.value).animate().fadeIn(
                     delay: Duration(milliseconds: 30 * entry.key),
                     duration: TvDesignTokens.contentFadeDuration,
                   ),
@@ -323,38 +323,38 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
           const Center(child: CircularProgressIndicator(color: TvDesignTokens.brand)),
       error: (e, _) => Center(
         child: Text('搜索失败：$e',
-            style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeSm,
+            style: TextStyle(
+                fontSize: m.fontSizeSm,
                 color: TvDesignTokens.textSecondary)),
       ),
     );
   }
 
-  Widget _buildResultRow(ApiClientFactory api, MediaItem item) {
+  Widget _buildResultRow(TvMetrics m, ApiClientFactory api, MediaItem item) {
     final urls = resolveMediaItemLandscapeImageUrls(api, item, maxWidth: 360);
     return Padding(
-      padding: const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
+      padding: EdgeInsets.only(bottom: m.spacingSm),
       child: TvFocusable(
         padding: const EdgeInsets.all(4),
         onSelect: () => context.push('/tv/detail/${item.id}'),
         child: Container(
-          padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+          padding: EdgeInsets.all(m.spacingMd),
           decoration: BoxDecoration(
             color: TvDesignTokens.background,
-            borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+            borderRadius: BorderRadius.circular(m.posterRadius),
           ),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                borderRadius: BorderRadius.circular(m.posterRadius),
                 child: SizedBox(
-                  width: 124,
-                  height: 70,
+                  width: m.s(124),
+                  height: m.s(70),
                   child: urls.isNotEmpty
                       ? MediaImage(
                           imageUrl: urls.first,
-                          width: 124,
-                          height: 70,
+                          width: m.s(124),
+                          height: m.s(70),
                           fit: BoxFit.cover,
                         )
                       : const ColoredBox(
@@ -363,7 +363,7 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
                               color: TvDesignTokens.textDisabled)),
                 ),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -371,13 +371,13 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
                     Text(item.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeMd,
+                        style: TextStyle(
+                            fontSize: m.fontSizeMd,
                             color: TvDesignTokens.textPrimary)),
-                    const SizedBox(height: TvDesignTokens.spacingXs),
+                    SizedBox(height: m.spacingXs),
                     Text(_resultSubtitle(item),
-                        style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeSm,
+                        style: TextStyle(
+                            fontSize: m.fontSizeSm,
                             color: TvDesignTokens.textSecondary)),
                   ],
                 ),

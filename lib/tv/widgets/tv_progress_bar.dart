@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 
 /// TV 进度条
@@ -44,6 +45,7 @@ class _TvProgressBarState extends State<TvProgressBar> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final displayProgress = _isDragging ? _dragProgress : widget.progress;
     final currentTime = Duration(
       milliseconds: (displayProgress * widget.totalTime.inMilliseconds).toInt(),
@@ -54,21 +56,21 @@ class _TvProgressBarState extends State<TvProgressBar> {
       children: [
         if (widget.showTime)
           Padding(
-            padding: const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
+            padding: EdgeInsets.only(bottom: m.spacingSm),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   _formatDuration(currentTime),
-                  style: const TextStyle(
-                    fontSize: TvDesignTokens.fontSizeSm,
+                  style: TextStyle(
+                    fontSize: m.fontSizeSm,
                     color: TvDesignTokens.textSecondary,
                   ),
                 ),
                 Text(
                   '-${_formatDuration(remainingTime)}',
-                  style: const TextStyle(
-                    fontSize: TvDesignTokens.fontSizeSm,
+                  style: TextStyle(
+                    fontSize: m.fontSizeSm,
                     color: TvDesignTokens.textSecondary,
                   ),
                 ),
@@ -80,11 +82,11 @@ class _TvProgressBarState extends State<TvProgressBar> {
           onSelect: () {},
           child: Container(
             height: widget.isFocused
-                ? TvDesignTokens.playerProgressBarFocusedHeight
-                : TvDesignTokens.playerProgressBarHeight,
+                ? m.playerProgressBarFocusedHeight
+                : m.playerProgressBarHeight,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(
-                widget.isFocused ? 4 : 2,
+                widget.isFocused ? m.s(4) : m.s(2),
               ),
               color: TvDesignTokens.divider,
             ),
@@ -94,7 +96,7 @@ class _TvProgressBarState extends State<TvProgressBar> {
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(
-                    widget.isFocused ? 4 : 2,
+                    widget.isFocused ? m.s(4) : m.s(2),
                   ),
                   color: TvDesignTokens.brand,
                 ),

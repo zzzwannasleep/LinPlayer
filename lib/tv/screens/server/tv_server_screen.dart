@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_button.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
@@ -17,28 +18,29 @@ class TvServerScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final m = context.tv;
     final servers = ref.watch(serverListProvider);
     final current = ref.watch(currentServerProvider);
 
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Padding(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingXl),
+        padding: EdgeInsets.all(m.spacingXl),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               '服务器',
               style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeXxl,
+                fontSize: m.fontSizeXxl,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: TvDesignTokens.spacingLg),
+            SizedBox(height: m.spacingLg),
             Expanded(
               child: servers.isEmpty
-                  ? _buildEmpty(context)
+                  ? _buildEmpty(context, m)
                   : ListView(
                       children: [
                         for (final entry in servers.asMap().entries)
@@ -46,12 +48,13 @@ class TvServerScreen extends ConsumerWidget {
                             context,
                             ref,
                             entry.value,
+                            m,
                             isCurrent: entry.value.id == current?.id,
                           ).animate().fadeIn(
                                 delay: Duration(milliseconds: 40 * entry.key),
                                 duration: TvDesignTokens.contentFadeDuration,
                               ),
-                        const SizedBox(height: TvDesignTokens.spacingMd),
+                        SizedBox(height: m.spacingMd),
                         TvButton(
                           text: '添加服务器',
                           icon: Icons.add,
@@ -66,20 +69,20 @@ class TvServerScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildEmpty(BuildContext context) {
+  Widget _buildEmpty(BuildContext context, TvMetrics m) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.dns_outlined,
-              color: TvDesignTokens.textSecondary, size: 80),
-          const SizedBox(height: TvDesignTokens.spacingLg),
-          const Text('还没有服务器',
+          Icon(Icons.dns_outlined,
+              color: TvDesignTokens.textSecondary, size: m.s(80)),
+          SizedBox(height: m.spacingLg),
+          Text('还没有服务器',
               style: TextStyle(
-                  fontSize: TvDesignTokens.fontSizeXl,
+                  fontSize: m.fontSizeXl,
                   color: TvDesignTokens.textPrimary,
                   fontWeight: FontWeight.bold)),
-          const SizedBox(height: TvDesignTokens.spacingXl),
+          SizedBox(height: m.spacingXl),
           TvButton(
             text: '添加服务器',
             icon: Icons.add,
@@ -94,22 +97,23 @@ class TvServerScreen extends ConsumerWidget {
   Widget _buildServerCard(
     BuildContext context,
     WidgetRef ref,
-    ServerConfig server, {
+    ServerConfig server,
+    TvMetrics m, {
     required bool isCurrent,
   }) {
     final online = serverHasUsableAuth(server);
     return Padding(
-      padding: const EdgeInsets.only(bottom: TvDesignTokens.spacingMd),
+      padding: EdgeInsets.only(bottom: m.spacingMd),
       child: TvFocusable(
-        padding: const EdgeInsets.all(6),
+        padding: EdgeInsets.all(m.s(6)),
         onSelect: () => _selectServer(context, ref, server),
         child: Container(
-          padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+          padding: EdgeInsets.all(m.spacingLg),
           decoration: BoxDecoration(
             color: isCurrent
                 ? TvDesignTokens.brand.withValues(alpha: 0.15)
                 : TvDesignTokens.surface,
-            borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+            borderRadius: BorderRadius.circular(m.posterRadius),
             border: isCurrent
                 ? Border.all(color: TvDesignTokens.brand, width: 2)
                 : null,
@@ -117,20 +121,20 @@ class TvServerScreen extends ConsumerWidget {
           child: Row(
             children: [
               Container(
-                width: 64,
-                height: 64,
+                width: m.s(64),
+                height: m.s(64),
                 decoration: BoxDecoration(
                   color: (online ? TvDesignTokens.success : TvDesignTokens.error)
                       .withValues(alpha: 0.2),
                   borderRadius:
-                      BorderRadius.circular(TvDesignTokens.posterRadius),
+                      BorderRadius.circular(m.posterRadius),
                 ),
                 child: Icon(Icons.storage,
                     color:
                         online ? TvDesignTokens.success : TvDesignTokens.error,
-                    size: 32),
+                    size: m.s(32)),
               ),
-              const SizedBox(width: TvDesignTokens.spacingLg),
+              SizedBox(width: m.spacingLg),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +147,7 @@ class TvServerScreen extends ConsumerWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: TvDesignTokens.fontSizeLg,
+                              fontSize: m.fontSizeLg,
                               color: isCurrent
                                   ? TvDesignTokens.brand
                                   : TvDesignTokens.textPrimary,
@@ -152,36 +156,36 @@ class TvServerScreen extends ConsumerWidget {
                           ),
                         ),
                         if (isCurrent) ...[
-                          const SizedBox(width: TvDesignTokens.spacingSm),
+                          SizedBox(width: m.spacingSm),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: m.s(8), vertical: m.s(2)),
                             decoration: BoxDecoration(
                               color: TvDesignTokens.brand,
-                              borderRadius: BorderRadius.circular(4),
+                              borderRadius: BorderRadius.circular(m.s(4)),
                             ),
-                            child: const Text('当前',
+                            child: Text('当前',
                                 style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: m.fs(12),
                                     color: Colors.white,
                                     fontWeight: FontWeight.bold)),
                           ),
                         ],
                       ],
                     ),
-                    const SizedBox(height: TvDesignTokens.spacingXs),
+                    SizedBox(height: m.spacingXs),
                     Text(server.baseUrl,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeSm,
+                        style: TextStyle(
+                            fontSize: m.fontSizeSm,
                             color: TvDesignTokens.textSecondary)),
-                    const SizedBox(height: TvDesignTokens.spacingXs),
+                    SizedBox(height: m.spacingXs),
                     Row(
                       children: [
                         Container(
-                          width: 8,
-                          height: 8,
+                          width: m.s(8),
+                          height: m.s(8),
                           decoration: BoxDecoration(
                             color: online
                                 ? TvDesignTokens.success
@@ -189,10 +193,10 @@ class TvServerScreen extends ConsumerWidget {
                             shape: BoxShape.circle,
                           ),
                         ),
-                        const SizedBox(width: TvDesignTokens.spacingXs),
+                        SizedBox(width: m.spacingXs),
                         Text(online ? '已登录' : '未登录',
                             style: TextStyle(
-                                fontSize: TvDesignTokens.fontSizeXs,
+                                fontSize: m.fontSizeXs,
                                 color: online
                                     ? TvDesignTokens.success
                                     : TvDesignTokens.error)),
@@ -202,10 +206,10 @@ class TvServerScreen extends ConsumerWidget {
                 ),
               ),
               TvFocusable(
-                padding: const EdgeInsets.all(TvDesignTokens.spacingXs),
+                padding: EdgeInsets.all(m.spacingXs),
                 onSelect: () => _confirmDelete(context, ref, server),
-                child: const Icon(Icons.delete_outline,
-                    color: TvDesignTokens.error, size: 28),
+                child: Icon(Icons.delete_outline,
+                    color: TvDesignTokens.error, size: m.s(28)),
               ),
             ],
           ),
@@ -228,58 +232,63 @@ class TvServerScreen extends ConsumerWidget {
   void _confirmDelete(BuildContext context, WidgetRef ref, ServerConfig server) {
     showDialog(
       context: context,
-      builder: (dialogContext) => TvPanel(
-        title: '删除服务器',
-        onClose: () => Navigator.pop(dialogContext),
-        children: [
-          Text('确定要删除 “${server.name}” 吗？',
-              style: const TextStyle(
-                  fontSize: TvDesignTokens.fontSizeMd,
-                  color: TvDesignTokens.textPrimary)),
-          const SizedBox(height: TvDesignTokens.spacingLg),
-          Row(
-            children: [
-              Expanded(
-                child: TvFocusable(
-                  autofocus: true,
-                  onSelect: () => Navigator.pop(dialogContext),
-                  child: _dialogButton('取消', TvDesignTokens.surface,
-                      TvDesignTokens.textPrimary),
+      builder: (dialogContext) {
+        final m = dialogContext.tv;
+        return TvPanel(
+          title: '删除服务器',
+          onClose: () => Navigator.pop(dialogContext),
+          children: [
+            Text('确定要删除 “${server.name}” 吗？',
+                style: TextStyle(
+                    fontSize: m.fontSizeMd,
+                    color: TvDesignTokens.textPrimary)),
+            SizedBox(height: m.spacingLg),
+            Row(
+              children: [
+                Expanded(
+                  child: TvFocusable(
+                    autofocus: true,
+                    onSelect: () => Navigator.pop(dialogContext),
+                    child: _dialogButton('取消', TvDesignTokens.surface,
+                        TvDesignTokens.textPrimary, m),
+                  ),
                 ),
-              ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
-              Expanded(
-                child: TvFocusable(
-                  onSelect: () {
-                    ref.read(serverListProvider.notifier).removeServer(server.id);
-                    if (ref.read(currentServerProvider)?.id == server.id) {
-                      ref.read(currentServerProvider.notifier).clear();
-                    }
-                    Navigator.pop(dialogContext);
-                    TvToast.show(context, '服务器已删除');
-                  },
-                  child:
-                      _dialogButton('删除', TvDesignTokens.error, Colors.white),
+                SizedBox(width: m.spacingMd),
+                Expanded(
+                  child: TvFocusable(
+                    onSelect: () {
+                      ref
+                          .read(serverListProvider.notifier)
+                          .removeServer(server.id);
+                      if (ref.read(currentServerProvider)?.id == server.id) {
+                        ref.read(currentServerProvider.notifier).clear();
+                      }
+                      Navigator.pop(dialogContext);
+                      TvToast.show(context, '服务器已删除');
+                    },
+                    child: _dialogButton(
+                        '删除', TvDesignTokens.error, Colors.white, m),
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _dialogButton(String text, Color bg, Color fg) {
+  Widget _dialogButton(String text, Color bg, Color fg, TvMetrics m) {
     return Container(
-      padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+      padding: EdgeInsets.all(m.spacingMd),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+        borderRadius: BorderRadius.circular(m.posterRadius),
       ),
       child: Center(
         child: Text(text,
             style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeMd,
+                fontSize: m.fontSizeMd,
                 color: fg,
                 fontWeight: FontWeight.bold)),
       ),

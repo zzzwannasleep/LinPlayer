@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 import 'tv_progress_bar.dart';
 
@@ -61,6 +62,7 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Stack(
       children: [
         // 背景渐变（暗化）
@@ -91,12 +93,12 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
             child: Column(
               children: [
                 // 顶部栏
-                _buildTopBar(),
+                _buildTopBar(m),
                 const Spacer(),
                 // 进度条区域
-                _buildProgressSection(),
+                _buildProgressSection(m),
                 // 底部控制栏
-                _buildBottomBar(),
+                _buildBottomBar(m),
               ],
             ),
           ),
@@ -105,32 +107,32 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
     );
   }
 
-  Widget _buildTopBar() {
+  Widget _buildTopBar(TvMetrics m) {
     return Container(
-      height: TvDesignTokens.playerTopBarHeight,
-      padding: const EdgeInsets.symmetric(
-        horizontal: TvDesignTokens.spacingXl,
+      height: m.playerTopBarHeight,
+      padding: EdgeInsets.symmetric(
+        horizontal: m.spacingXl,
       ),
       child: Row(
         children: [
           // 返回按钮
           TvFocusable(
             onSelect: widget.onClose,
-            child: const Icon(
+            child: Icon(
               Icons.arrow_back,
               color: TvDesignTokens.textPrimary,
-              size: 32,
+              size: m.s(32),
             ),
           ),
-          const SizedBox(width: TvDesignTokens.spacingLg),
+          SizedBox(width: m.spacingLg),
           // 标题
           Expanded(
             child: Text(
               widget.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeLg,
+              style: TextStyle(
+                fontSize: m.fontSizeLg,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold,
               ),
@@ -141,32 +143,32 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
             TvFocusable(
               onSelect: widget.onSkip,
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: TvDesignTokens.spacingMd,
-                  vertical: TvDesignTokens.spacingXs,
+                padding: EdgeInsets.symmetric(
+                  horizontal: m.spacingMd,
+                  vertical: m.spacingXs,
                 ),
                 decoration: BoxDecoration(
                   color: TvDesignTokens.brand,
-                  borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                  borderRadius: BorderRadius.circular(m.posterRadius),
                 ),
-                child: const Text(
+                child: Text(
                   '跳过',
                   style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeSm,
+                    fontSize: m.fontSizeSm,
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ),
-          const SizedBox(width: TvDesignTokens.spacingMd),
+          SizedBox(width: m.spacingMd),
           // 更多按钮
           TvFocusable(
             onSelect: widget.onMore,
-            child: const Icon(
+            child: Icon(
               Icons.more_vert,
               color: TvDesignTokens.textPrimary,
-              size: 32,
+              size: m.s(32),
             ),
           ),
         ],
@@ -174,10 +176,10 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
     );
   }
 
-  Widget _buildProgressSection() {
+  Widget _buildProgressSection(TvMetrics m) {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: TvDesignTokens.spacingXl,
+      padding: EdgeInsets.symmetric(
+        horizontal: m.spacingXl,
       ),
       child: TvFocusable(
         onSelect: () {},
@@ -192,11 +194,11 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
     );
   }
 
-  Widget _buildBottomBar() {
+  Widget _buildBottomBar(TvMetrics m) {
     return Container(
-      height: TvDesignTokens.playerControlBarHeight,
-      padding: const EdgeInsets.symmetric(
-        horizontal: TvDesignTokens.spacingXl,
+      height: m.playerControlBarHeight,
+      padding: EdgeInsets.symmetric(
+        horizontal: m.spacingXl,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -205,114 +207,114 @@ class _TvControlOverlayState extends State<TvControlOverlay> {
           if (widget.hasPreviousEpisode)
             TvFocusable(
               onSelect: widget.onPreviousEpisode,
-              child: const Icon(
+              child: Icon(
                 Icons.skip_previous,
                 color: TvDesignTokens.textPrimary,
-                size: 40,
+                size: m.s(40),
               ),
             ),
-          const SizedBox(width: TvDesignTokens.spacingLg),
+          SizedBox(width: m.spacingLg),
           // 快退
           TvFocusable(
             onSelect: widget.onSeekBackward,
-            child: const Column(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   Icons.replay_10,
                   color: TvDesignTokens.textPrimary,
-                  size: 40,
+                  size: m.s(40),
                 ),
                 Text(
                   '10s',
                   style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeXs,
+                    fontSize: m.fontSizeXs,
                     color: TvDesignTokens.textSecondary,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: TvDesignTokens.spacingLg),
+          SizedBox(width: m.spacingLg),
           // 播放/暂停
           TvFocusable(
             autofocus: true,
             onSelect: widget.onPlayPause,
             child: Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
+              width: m.s(72),
+              height: m.s(72),
+              decoration: const BoxDecoration(
                 color: TvDesignTokens.brand,
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 widget.isPlaying ? Icons.pause : Icons.play_arrow,
                 color: Colors.white,
-                size: 40,
+                size: m.s(40),
               ),
             ),
           ),
-          const SizedBox(width: TvDesignTokens.spacingLg),
+          SizedBox(width: m.spacingLg),
           // 快进
           TvFocusable(
             onSelect: widget.onSeekForward,
-            child: const Column(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   Icons.forward_10,
                   color: TvDesignTokens.textPrimary,
-                  size: 40,
+                  size: m.s(40),
                 ),
                 Text(
                   '10s',
                   style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeXs,
+                    fontSize: m.fontSizeXs,
                     color: TvDesignTokens.textSecondary,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: TvDesignTokens.spacingLg),
+          SizedBox(width: m.spacingLg),
           // 下一集
           if (widget.hasNextEpisode)
             TvFocusable(
               onSelect: widget.onNextEpisode,
-              child: const Icon(
+              child: Icon(
                 Icons.skip_next,
                 color: TvDesignTokens.textPrimary,
-                size: 40,
+                size: m.s(40),
               ),
             ),
           const Spacer(),
           // 字幕
           TvFocusable(
             onSelect: widget.onSubtitle,
-            child: const Icon(
+            child: Icon(
               Icons.subtitles_outlined,
               color: TvDesignTokens.textPrimary,
-              size: 32,
+              size: m.s(32),
             ),
           ),
-          const SizedBox(width: TvDesignTokens.spacingMd),
+          SizedBox(width: m.spacingMd),
           // 音轨
           TvFocusable(
             onSelect: widget.onAudioTrack,
-            child: const Icon(
+            child: Icon(
               Icons.audiotrack_outlined,
               color: TvDesignTokens.textPrimary,
-              size: 32,
+              size: m.s(32),
             ),
           ),
-          const SizedBox(width: TvDesignTokens.spacingMd),
+          SizedBox(width: m.spacingMd),
           // 更多
           TvFocusable(
             onSelect: widget.onMore,
-            child: const Icon(
+            child: Icon(
               Icons.more_vert,
               color: TvDesignTokens.textPrimary,
-              size: 32,
+              size: m.s(32),
             ),
           ),
         ],

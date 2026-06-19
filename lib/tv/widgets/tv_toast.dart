@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 
 /// TV Toast 提示
 /// 中央偏下，3 秒停留，支持动画淡入淡出
@@ -65,6 +66,7 @@ class _TvToastWidgetState extends State<_TvToastWidget>
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Positioned(
       bottom: MediaQuery.of(context).size.height * 0.25,
       left: 0,
@@ -73,18 +75,18 @@ class _TvToastWidgetState extends State<_TvToastWidget>
         opacity: _animation,
         child: Center(
           child: Container(
-            padding: const EdgeInsets.symmetric(
-              vertical: TvDesignTokens.toastPaddingVertical,
-              horizontal: TvDesignTokens.toastPaddingHorizontal,
+            padding: EdgeInsets.symmetric(
+              vertical: m.toastPaddingVertical,
+              horizontal: m.toastPaddingHorizontal,
             ),
             decoration: BoxDecoration(
               color: TvDesignTokens.surfaceElevated,
-              borderRadius: BorderRadius.circular(TvDesignTokens.toastBorderRadius),
+              borderRadius: BorderRadius.circular(m.toastBorderRadius),
             ),
             child: Text(
               widget.message,
-              style: const TextStyle(
-                fontSize: TvDesignTokens.toastFontSize,
+              style: TextStyle(
+                fontSize: m.toastFontSize,
                 color: TvDesignTokens.textPrimary,
               ),
             ),

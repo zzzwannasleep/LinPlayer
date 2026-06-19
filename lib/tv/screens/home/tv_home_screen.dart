@@ -8,6 +8,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../ui/utils/media_helpers.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_button.dart';
 import '../../widgets/tv_content_row.dart';
 import '../../widgets/tv_hero_banner.dart';
@@ -40,9 +41,10 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final servers = ref.watch(serverListProvider);
     if (servers.isEmpty) {
-      return _buildEmptyServers();
+      return _buildEmptyServers(m);
     }
 
     final api = ref.read(apiClientProvider);
@@ -63,16 +65,16 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
               recommendationsAsync.when(
                 data: (items) {
                   final heroItems = _heroItems(api, items);
-                  if (heroItems.isEmpty) return _heroPlaceholder();
+                  if (heroItems.isEmpty) return _heroPlaceholder(m);
                   return Focus(
                     onFocusChange: (f) => setState(() => _heroFocused = f),
                     child: TvHeroBanner(items: heroItems),
                   );
                 },
-                loading: () => _heroPlaceholder(),
-                error: (_, __) => _heroPlaceholder(),
+                loading: () => _heroPlaceholder(m),
+                error: (_, __) => _heroPlaceholder(m),
               ),
-              const SizedBox(height: TvDesignTokens.spacingLg),
+              SizedBox(height: m.spacingLg),
               // 继续观看
               resumeAsync.when(
                 data: (items) {
@@ -86,10 +88,10 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
                     autofocusFirstItem: !_heroFocused,
                   );
                 },
-                loading: () => _rowPlaceholder('继续观看'),
+                loading: () => _rowPlaceholder('继续观看', m),
                 error: (_, __) => const SizedBox.shrink(),
               ),
-              const SizedBox(height: TvDesignTokens.spacingLg),
+              SizedBox(height: m.spacingLg),
               // 媒体库
               librariesAsync.when(
                 data: (libs) {
@@ -100,10 +102,10 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
                     onSeeAll: () => context.go('/tv/library'),
                   );
                 },
-                loading: () => _rowPlaceholder('媒体库'),
+                loading: () => _rowPlaceholder('媒体库', m),
                 error: (_, __) => const SizedBox.shrink(),
               ),
-              const SizedBox(height: TvDesignTokens.spacingXxl),
+              SizedBox(height: m.spacingXxl),
             ],
           ),
         ),
@@ -194,15 +196,15 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
 
   // ============ 占位 / 空态 ============
 
-  Widget _heroPlaceholder() {
+  Widget _heroPlaceholder(TvMetrics m) {
     return Container(
-      height: TvDesignTokens.heroHeight,
+      height: m.heroHeight,
       color: TvDesignTokens.surface,
       alignment: Alignment.center,
-      child: const Icon(
+      child: Icon(
         Icons.movie_outlined,
         color: TvDesignTokens.textDisabled,
-        size: 64,
+        size: m.s(64),
       ),
     ).animate(onPlay: (c) => c.repeat()).shimmer(
           duration: TvDesignTokens.shimmerDuration,
@@ -210,38 +212,36 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
         );
   }
 
-  Widget _rowPlaceholder(String title) {
+  Widget _rowPlaceholder(String title, TvMetrics m) {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: TvDesignTokens.spacingXl,
-        vertical: TvDesignTokens.spacingMd,
+      padding: EdgeInsets.symmetric(
+        horizontal: m.spacingXl,
+        vertical: m.spacingMd,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(
-              fontSize: TvDesignTokens.fontSizeLg,
+            style: TextStyle(
+              fontSize: m.fontSizeLg,
               color: TvDesignTokens.textPrimary,
               fontWeight: FontWeight.bold,
             ),
           ),
-          const SizedBox(height: TvDesignTokens.spacingMd),
+          SizedBox(height: m.spacingMd),
           SizedBox(
-            height: TvDesignTokens.posterHeight16_9,
+            height: m.posterHeight16_9,
             child: Row(
               children: List.generate(
                 4,
                 (i) => Container(
-                  width: TvDesignTokens.posterWidth16_9,
-                  height: TvDesignTokens.posterHeight16_9,
-                  margin:
-                      const EdgeInsets.only(right: TvDesignTokens.posterSpacing),
+                  width: m.posterWidth16_9,
+                  height: m.posterHeight16_9,
+                  margin: EdgeInsets.only(right: m.posterSpacing),
                   decoration: BoxDecoration(
                     color: TvDesignTokens.surfaceElevated,
-                    borderRadius:
-                        BorderRadius.circular(TvDesignTokens.posterRadius),
+                    borderRadius: BorderRadius.circular(m.posterRadius),
                   ),
                 ),
               ),
@@ -255,36 +255,36 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
     );
   }
 
-  Widget _buildEmptyServers() {
+  Widget _buildEmptyServers(TvMetrics m) {
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
+            Icon(
               Icons.dns_outlined,
               color: TvDesignTokens.textSecondary,
-              size: 96,
+              size: m.s(96),
             ),
-            const SizedBox(height: TvDesignTokens.spacingLg),
-            const Text(
+            SizedBox(height: m.spacingLg),
+            Text(
               '还没有连接服务器',
               style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeXl,
+                fontSize: m.fontSizeXl,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: TvDesignTokens.spacingSm),
-            const Text(
+            SizedBox(height: m.spacingSm),
+            Text(
               '连接 Emby 服务器后即可浏览媒体库',
               style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeSm,
+                fontSize: m.fontSizeSm,
                 color: TvDesignTokens.textSecondary,
               ),
             ),
-            const SizedBox(height: TvDesignTokens.spacingXl),
+            SizedBox(height: m.spacingXl),
             TvButton(
               text: '添加服务器',
               icon: Icons.add,

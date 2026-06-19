@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_motion.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 import 'tv_poster_card.dart';
 
@@ -22,21 +23,22 @@ class TvContentRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // 行标题
         Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: TvDesignTokens.spacingXl,
-            vertical: TvDesignTokens.spacingMd,
+          padding: EdgeInsets.symmetric(
+            horizontal: m.spacingXl,
+            vertical: m.spacingMd,
           ),
           child: Row(
             children: [
               Text(
                 title,
-                style: const TextStyle(
-                  fontSize: TvDesignTokens.fontSizeLg,
+                style: TextStyle(
+                  fontSize: m.fontSizeLg,
                   color: TvDesignTokens.textPrimary,
                   fontWeight: FontWeight.bold,
                 ),
@@ -46,23 +48,23 @@ class TvContentRow extends StatelessWidget {
                 TvFocusable(
                   onSelect: onSeeAll,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: TvDesignTokens.spacingMd,
-                      vertical: TvDesignTokens.spacingXs,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: m.spacingMd,
+                      vertical: m.spacingXs,
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
                         Text(
                           '查看全部',
                           style: TextStyle(
-                            fontSize: TvDesignTokens.fontSizeSm,
+                            fontSize: m.fontSizeSm,
                             color: TvDesignTokens.brand,
                           ),
                         ),
                         Icon(
                           Icons.chevron_right,
                           color: TvDesignTokens.brand,
-                          size: 24,
+                          size: m.s(24),
                         ),
                       ],
                     ),
@@ -74,18 +76,18 @@ class TvContentRow extends StatelessWidget {
         ),
         // 横向滚动列表
         SizedBox(
-          height: TvDesignTokens.posterHeight16_9 + 60, // 海报 + 文字区域
+          height: m.posterHeight16_9 + m.s(60), // 海报 + 文字区域
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-              horizontal: TvDesignTokens.spacingXl,
+            padding: EdgeInsets.symmetric(
+              horizontal: m.spacingXl,
             ),
             itemCount: items.length,
             itemBuilder: (context, index) {
               final item = items[index];
               return Padding(
-                padding: const EdgeInsets.only(
-                  right: TvDesignTokens.posterSpacing,
+                padding: EdgeInsets.only(
+                  right: m.posterSpacing,
                 ),
                 child: TvFocusable(
                   autofocus: autofocusFirstItem && index == 0,
@@ -97,8 +99,8 @@ class TvContentRow extends StatelessWidget {
                     progress: item.progress,
                     isNew: item.isNew,
                     nextEpisodeLabel: item.nextEpisodeLabel,
-                    width: item.width ?? TvDesignTokens.posterWidth16_9,
-                    height: item.height ?? TvDesignTokens.posterHeight16_9,
+                    width: item.width ?? m.posterWidth16_9,
+                    height: item.height ?? m.posterHeight16_9,
                   ),
                 ),
               ).appEntrance(index: index);

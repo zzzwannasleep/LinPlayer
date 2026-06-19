@@ -7,6 +7,7 @@ import '../../../core/providers/sync_providers.dart';
 import '../../../core/services/sync/sync_models.dart';
 import '../../../core/services/sync/trakt_sync_service.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
 import '../../widgets/tv_toast.dart';
@@ -17,22 +18,24 @@ class TvSyncSettings extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final m = context.tv;
     final state = ref.watch(syncControllerProvider);
     return ListView(
-      padding: const EdgeInsets.all(TvDesignTokens.spacingXl),
+      padding: EdgeInsets.all(m.spacingXl),
       children: [
-        const Text(
+        Text(
           '同步服务',
           style: TextStyle(
-            fontSize: TvDesignTokens.fontSizeXxl,
+            fontSize: m.fontSizeXxl,
             color: TvDesignTokens.textPrimary,
             fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: TvDesignTokens.spacingLg),
+        SizedBox(height: m.spacingLg),
         _item(
           context,
           ref,
+          m,
           service: SyncService.trakt,
           account: state.trakt,
           hint: '电影与剧集追踪（trakt.tv）',
@@ -40,6 +43,7 @@ class TvSyncSettings extends ConsumerWidget {
         _item(
           context,
           ref,
+          m,
           service: SyncService.bangumi,
           account: state.bangumi,
           hint: '动画/番剧追踪（bgm.tv）',
@@ -50,7 +54,8 @@ class TvSyncSettings extends ConsumerWidget {
 
   Widget _item(
     BuildContext context,
-    WidgetRef ref, {
+    WidgetRef ref,
+    TvMetrics m, {
     required SyncService service,
     required SyncAccount? account,
     required String hint,
@@ -68,11 +73,11 @@ class TvSyncSettings extends ConsumerWidget {
         }
       },
       child: Container(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-        margin: const EdgeInsets.only(bottom: TvDesignTokens.spacingMd),
+        padding: EdgeInsets.all(m.spacingLg),
+        margin: EdgeInsets.only(bottom: m.spacingMd),
         decoration: BoxDecoration(
           color: TvDesignTokens.surface,
-          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+          borderRadius: BorderRadius.circular(m.posterRadius),
         ),
         child: Row(
           children: [
@@ -82,15 +87,15 @@ class TvSyncSettings extends ConsumerWidget {
                 children: [
                   Text(
                     service.displayName,
-                    style: const TextStyle(
-                      fontSize: TvDesignTokens.fontSizeMd,
+                    style: TextStyle(
+                      fontSize: m.fontSizeMd,
                       color: TvDesignTokens.textPrimary,
                     ),
                   ),
                   Text(
                     subtitle,
-                    style: const TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
+                    style: TextStyle(
+                      fontSize: m.fontSizeSm,
                       color: TvDesignTokens.textSecondary,
                     ),
                   ),
@@ -99,8 +104,8 @@ class TvSyncSettings extends ConsumerWidget {
             ),
             Text(
               connected ? '断开' : '连接',
-              style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeMd,
+              style: TextStyle(
+                fontSize: m.fontSizeMd,
                 color: TvDesignTokens.brand,
               ),
             ),
@@ -118,9 +123,9 @@ class TvSyncSettings extends ConsumerWidget {
         title: '断开 ${service.displayName}',
         onClose: () => Navigator.pop(ctx),
         children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: TvDesignTokens.spacingMd),
-            child: Text('确定要断开连接吗？已保存的登录令牌会被清除。',
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: ctx.tv.spacingMd),
+            child: const Text('确定要断开连接吗？已保存的登录令牌会被清除。',
                 style: TextStyle(color: TvDesignTokens.textSecondary)),
           ),
           TvPanelOption(
@@ -219,6 +224,7 @@ class _TvTraktDialogState extends ConsumerState<_TvTraktDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final code = _code;
     return TvPanel(
       title: '连接 Trakt',
@@ -232,11 +238,11 @@ class _TvTraktDialogState extends ConsumerState<_TvTraktDialog> {
         else ...[
           const Text('在手机或电脑浏览器打开下面网址，输入验证码完成授权：',
               style: TextStyle(color: TvDesignTokens.textSecondary)),
-          const SizedBox(height: TvDesignTokens.spacingLg),
+          SizedBox(height: m.spacingLg),
           _TvInfoBox(label: '网址', value: code.verificationUrl),
-          const SizedBox(height: TvDesignTokens.spacingMd),
+          SizedBox(height: m.spacingMd),
           _TvInfoBox(label: '验证码', value: code.userCode, big: true),
-          const SizedBox(height: TvDesignTokens.spacingLg),
+          SizedBox(height: m.spacingLg),
           Text('等待授权…（${_remaining}s）',
               style: const TextStyle(color: TvDesignTokens.textSecondary)),
         ],
@@ -292,6 +298,7 @@ class _TvBangumiDialogState extends ConsumerState<_TvBangumiDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final url = ref.read(syncControllerProvider.notifier).buildBangumiAuthorizeUrl();
     return TvPanel(
       title: '连接 Bangumi',
@@ -299,12 +306,12 @@ class _TvBangumiDialogState extends ConsumerState<_TvBangumiDialog> {
       children: [
         const Text('在手机或电脑浏览器打开下面网址授权，授权后页面会显示授权码：',
             style: TextStyle(color: TvDesignTokens.textSecondary)),
-        const SizedBox(height: TvDesignTokens.spacingMd),
+        SizedBox(height: m.spacingMd),
         _TvInfoBox(label: '授权网址', value: url),
-        const SizedBox(height: TvDesignTokens.spacingLg),
+        SizedBox(height: m.spacingLg),
         const Text('输入授权码：',
             style: TextStyle(color: TvDesignTokens.textSecondary)),
-        const SizedBox(height: TvDesignTokens.spacingSm),
+        SizedBox(height: m.spacingSm),
         TextField(
           controller: _controller,
           style: const TextStyle(color: TvDesignTokens.textPrimary),
@@ -315,10 +322,10 @@ class _TvBangumiDialogState extends ConsumerState<_TvBangumiDialog> {
             border: OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: TvDesignTokens.spacingLg),
+        SizedBox(height: m.spacingLg),
         if (_error != null) ...[
           Text(_error!, style: const TextStyle(color: Colors.redAccent)),
-          const SizedBox(height: TvDesignTokens.spacingMd),
+          SizedBox(height: m.spacingMd),
         ],
         TvPanelOption(
           title: _submitting ? '连接中…' : '完成连接',
@@ -339,31 +346,30 @@ class _TvInfoBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return TvFocusable(
       onSelect: () {
         Clipboard.setData(ClipboardData(text: value));
         TvToast.show(context, '已复制$label');
       },
       child: Container(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+        padding: EdgeInsets.all(m.spacingMd),
         decoration: BoxDecoration(
           color: TvDesignTokens.background,
-          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+          borderRadius: BorderRadius.circular(m.posterRadius),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label,
-                style: const TextStyle(
-                    fontSize: TvDesignTokens.fontSizeSm,
+                style: TextStyle(
+                    fontSize: m.fontSizeSm,
                     color: TvDesignTokens.textSecondary)),
-            const SizedBox(height: 4),
+            SizedBox(height: m.s(4)),
             Text(
               value,
               style: TextStyle(
-                fontSize: big
-                    ? TvDesignTokens.fontSizeXxl
-                    : TvDesignTokens.fontSizeMd,
+                fontSize: big ? m.fontSizeXxl : m.fontSizeMd,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: big ? FontWeight.bold : FontWeight.normal,
                 letterSpacing: big ? 3 : 0,

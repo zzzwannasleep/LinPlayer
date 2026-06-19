@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 
 /// TV 左侧导航栏
@@ -30,9 +31,10 @@ class _TvSidebarState extends State<TvSidebar> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final width = widget.collapsed
-        ? TvDesignTokens.sidebarCollapsedWidth
-        : TvDesignTokens.sidebarWidth;
+        ? m.sidebarCollapsedWidth
+        : m.sidebarWidth;
 
     return Container(
       width: width,
@@ -41,21 +43,21 @@ class _TvSidebarState extends State<TvSidebar> {
         children: [
           // Logo 区域
           Padding(
-            padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+            padding: EdgeInsets.all(m.spacingLg),
             child: widget.collapsed
-                ? const Icon(
+                ? Icon(
                     Icons.play_circle_filled,
                     color: TvDesignTokens.brand,
-                    size: 40,
+                    size: m.s(40),
                   )
                 : Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.play_circle_filled,
                         color: TvDesignTokens.brand,
-                        size: 40,
+                        size: m.s(40),
                       ),
-                      const SizedBox(width: TvDesignTokens.spacingSm),
+                      SizedBox(width: m.spacingSm),
                       Text(
                         'LinPlayer',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
@@ -78,15 +80,15 @@ class _TvSidebarState extends State<TvSidebar> {
                 return TvFocusable(
                   autofocus: index == 0,
                   onSelect: () => widget.onItemSelected(index),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingMd,
-                    vertical: TvDesignTokens.spacingSm,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: m.spacingMd,
+                    vertical: m.spacingSm,
                   ),
                   child: Container(
-                    height: TvDesignTokens.sidebarItemHeight,
+                    height: m.sidebarItemHeight,
                     decoration: BoxDecoration(
                       color: isSelected ? TvDesignTokens.brand.withOpacity(0.15) : null,
-                      borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                      borderRadius: BorderRadius.circular(m.posterRadius),
                     ),
                     child: Row(
                       mainAxisAlignment: widget.collapsed
@@ -96,14 +98,14 @@ class _TvSidebarState extends State<TvSidebar> {
                         Icon(
                           item.icon,
                           color: isSelected ? TvDesignTokens.brand : TvDesignTokens.textSecondary,
-                          size: TvDesignTokens.sidebarIconSize,
+                          size: m.sidebarIconSize,
                         ),
                         if (!widget.collapsed) ...[
-                          const SizedBox(width: TvDesignTokens.spacingMd),
+                          SizedBox(width: m.spacingMd),
                           Text(
                             item.label,
                             style: TextStyle(
-                              fontSize: TvDesignTokens.sidebarTextSize,
+                              fontSize: m.sidebarTextSize,
                               color: isSelected ? TvDesignTokens.brand : TvDesignTokens.textSecondary,
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                             ),

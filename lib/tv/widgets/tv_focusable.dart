@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 
 /// TV 焦点包装器
 /// 为任何子组件添加 TV 焦点效果（放大、边框、光晕）
@@ -13,7 +14,8 @@ class TvFocusable extends StatefulWidget {
   final VoidCallback? onBlur;
   final bool autofocus;
   final FocusNode? focusNode;
-  final EdgeInsets padding;
+  /// 内边距，传 null 时按当前屏幕响应式取 spacingSm。
+  final EdgeInsets? padding;
   final double scale;
   final bool enableGlow;
 
@@ -25,7 +27,7 @@ class TvFocusable extends StatefulWidget {
     this.onBlur,
     this.autofocus = false,
     this.focusNode,
-    this.padding = const EdgeInsets.all(TvDesignTokens.spacingSm),
+    this.padding,
     this.scale = TvDesignTokens.focusScale,
     this.enableGlow = true,
   });
@@ -39,6 +41,8 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
+    final padding = widget.padding ?? EdgeInsets.all(m.spacingSm);
     return Focus(
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
@@ -78,7 +82,7 @@ class _TvFocusableState extends State<TvFocusable> {
           },
           child: RepaintBoundary(
         child: Padding(
-          padding: widget.padding,
+          padding: padding,
           child: Stack(
             clipBehavior: Clip.none,
             alignment: Alignment.center,
@@ -110,8 +114,7 @@ class _TvFocusableState extends State<TvFocusable> {
                           color: TvDesignTokens.focusBorder,
                           width: TvDesignTokens.focusBorderWidth,
                         ),
-                        borderRadius:
-                            BorderRadius.circular(TvDesignTokens.posterRadius),
+                        borderRadius: BorderRadius.circular(m.posterRadius),
                         boxShadow: widget.enableGlow
                             ? const [
                                 BoxShadow(
@@ -142,7 +145,8 @@ class TvFocusableStatic extends StatelessWidget {
   final VoidCallback? onSelect;
   final bool autofocus;
   final FocusNode? focusNode;
-  final EdgeInsets padding;
+  /// 内边距，传 null 时按当前屏幕响应式取 spacingSm。
+  final EdgeInsets? padding;
 
   const TvFocusableStatic({
     super.key,
@@ -150,11 +154,13 @@ class TvFocusableStatic extends StatelessWidget {
     this.onSelect,
     this.autofocus = false,
     this.focusNode,
-    this.padding = const EdgeInsets.all(TvDesignTokens.spacingSm),
+    this.padding,
   });
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
+    final padding = this.padding ?? EdgeInsets.all(m.spacingSm);
     return Focus(
       focusNode: focusNode,
       autofocus: autofocus,
@@ -188,9 +194,8 @@ class TvFocusableStatic extends StatelessWidget {
                       color: TvDesignTokens.focusBorder,
                       width: TvDesignTokens.focusBorderWidth,
                     ),
-                    borderRadius:
-                        BorderRadius.circular(TvDesignTokens.posterRadius),
-                    boxShadow: [
+                    borderRadius: BorderRadius.circular(m.posterRadius),
+                    boxShadow: const [
                       BoxShadow(
                         color: TvDesignTokens.focusGlow,
                         blurRadius: TvDesignTokens.focusGlowBlur,

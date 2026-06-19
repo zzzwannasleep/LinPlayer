@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 
 /// TV 虚拟键盘（26键 QWERTY 布局）
@@ -64,6 +65,7 @@ class _TvVirtualKeyboardState extends State<TvVirtualKeyboard> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final rows = [
       ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
       ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
@@ -74,10 +76,10 @@ class _TvVirtualKeyboardState extends State<TvVirtualKeyboard> {
       children: [
         // 显示当前输入
         Container(
-          padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+          padding: EdgeInsets.all(m.spacingMd),
           decoration: BoxDecoration(
             color: TvDesignTokens.surface,
-            borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+            borderRadius: BorderRadius.circular(m.posterRadius),
           ),
           child: Row(
             children: [
@@ -85,7 +87,7 @@ class _TvVirtualKeyboardState extends State<TvVirtualKeyboard> {
                 child: Text(
                   _text.isEmpty ? '输入搜索内容...' : _text,
                   style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeMd,
+                    fontSize: m.fontSizeMd,
                     color: _text.isEmpty ? TvDesignTokens.textDisabled : TvDesignTokens.textPrimary,
                   ),
                 ),
@@ -93,41 +95,41 @@ class _TvVirtualKeyboardState extends State<TvVirtualKeyboard> {
               if (_text.isNotEmpty)
                 TvFocusable(
                   onSelect: _onBackspace,
-                  child: const Icon(
+                  child: Icon(
                     Icons.backspace,
                     color: TvDesignTokens.textSecondary,
-                    size: 28,
+                    size: m.s(28),
                   ),
                 ),
             ],
           ),
         ),
-        const SizedBox(height: TvDesignTokens.spacingMd),
+        SizedBox(height: m.spacingMd),
         // 键盘行
         ...rows.map((row) {
           return Padding(
-            padding: const EdgeInsets.only(bottom: TvDesignTokens.keyboardKeySpacing),
+            padding: EdgeInsets.only(bottom: m.keyboardKeySpacing),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: row.map((key) {
                 return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.keyboardKeySpacing,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: m.keyboardKeySpacing,
                   ),
                   child: TvFocusable(
                     onSelect: () => _onKeyPress(key),
                     child: Container(
-                      width: TvDesignTokens.keyboardKeyWidth,
-                      height: TvDesignTokens.keyboardKeyHeight,
+                      width: m.keyboardKeyWidth,
+                      height: m.keyboardKeyHeight,
                       decoration: BoxDecoration(
                         color: TvDesignTokens.surface,
-                        borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                        borderRadius: BorderRadius.circular(m.posterRadius),
                       ),
                       child: Center(
                         child: Text(
                           _isUpperCase ? key.toUpperCase() : key,
-                          style: const TextStyle(
-                            fontSize: TvDesignTokens.keyboardFontSize,
+                          style: TextStyle(
+                            fontSize: m.keyboardFontSize,
                             color: TvDesignTokens.textPrimary,
                           ),
                         ),
@@ -141,65 +143,65 @@ class _TvVirtualKeyboardState extends State<TvVirtualKeyboard> {
         }),
         // 功能行
         Padding(
-          padding: const EdgeInsets.only(top: TvDesignTokens.spacingMd),
+          padding: EdgeInsets.only(top: m.spacingMd),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               TvFocusable(
                 onSelect: _toggleCase,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingMd,
-                    vertical: TvDesignTokens.spacingSm,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: m.spacingMd,
+                    vertical: m.spacingSm,
                   ),
                   decoration: BoxDecoration(
                     color: TvDesignTokens.surface,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                    borderRadius: BorderRadius.circular(m.posterRadius),
                   ),
                   child: Icon(
                     _isUpperCase ? Icons.arrow_upward : Icons.arrow_upward_outlined,
                     color: TvDesignTokens.textPrimary,
-                    size: 28,
+                    size: m.s(28),
                   ),
                 ),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               TvFocusable(
                 onSelect: _onClear,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingMd,
-                    vertical: TvDesignTokens.spacingSm,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: m.spacingMd,
+                    vertical: m.spacingSm,
                   ),
                   decoration: BoxDecoration(
                     color: TvDesignTokens.surface,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                    borderRadius: BorderRadius.circular(m.posterRadius),
                   ),
-                  child: const Text(
+                  child: Text(
                     '清除',
                     style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
+                      fontSize: m.fontSizeSm,
                       color: TvDesignTokens.textPrimary,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               TvFocusable(
                 onSelect: _onSubmit,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: TvDesignTokens.spacingLg,
-                    vertical: TvDesignTokens.spacingSm,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: m.spacingLg,
+                    vertical: m.spacingSm,
                   ),
                   decoration: BoxDecoration(
                     color: TvDesignTokens.brand,
-                    borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                    borderRadius: BorderRadius.circular(m.posterRadius),
                   ),
-                  child: const Text(
+                  child: Text(
                     '搜索',
                     style: TextStyle(
-                      fontSize: TvDesignTokens.fontSizeMd,
+                      fontSize: m.fontSizeMd,
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                     ),

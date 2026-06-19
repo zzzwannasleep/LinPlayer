@@ -13,6 +13,7 @@ import '../../../core/providers/proxy_providers.dart';
 import '../../../core/network/proxy_settings.dart';
 import '../../services/mihomo_service.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_panel.dart';
 import '../../widgets/tv_toast.dart';
@@ -41,15 +42,16 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Row(
         children: [
           Container(
-            width: 240,
+            width: m.sidebarWidth,
             color: TvDesignTokens.surface,
             child: ListView.builder(
-              padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
+              padding: EdgeInsets.all(m.spacingLg),
               itemCount: _categories.length,
               itemBuilder: (context, index) {
                 final category = _categories[index];
@@ -59,15 +61,13 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
                   padding: const EdgeInsets.all(4),
                   onSelect: () => setState(() => _selectedCategory = index),
                   child: Container(
-                    padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
-                    margin:
-                        const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
+                    padding: EdgeInsets.all(m.spacingMd),
+                    margin: EdgeInsets.only(bottom: m.spacingSm),
                     decoration: BoxDecoration(
                       color: selected
                           ? TvDesignTokens.brand.withValues(alpha: 0.15)
                           : null,
-                      borderRadius:
-                          BorderRadius.circular(TvDesignTokens.posterRadius),
+                      borderRadius: BorderRadius.circular(m.posterRadius),
                     ),
                     child: Row(
                       children: [
@@ -75,11 +75,11 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
                             color: selected
                                 ? TvDesignTokens.brand
                                 : TvDesignTokens.textSecondary,
-                            size: 28),
-                        const SizedBox(width: TvDesignTokens.spacingMd),
+                            size: m.s(28)),
+                        SizedBox(width: m.spacingMd),
                         Text(category.name,
                             style: TextStyle(
-                                fontSize: TvDesignTokens.fontSizeMd,
+                                fontSize: m.fontSizeMd,
                                 color: selected
                                     ? TvDesignTokens.brand
                                     : TvDesignTokens.textPrimary,
@@ -93,32 +93,32 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
               },
             ),
           ),
-          Expanded(child: _buildContent()),
+          Expanded(child: _buildContent(m)),
         ],
       ),
     );
   }
 
-  Widget _buildContent() {
+  Widget _buildContent(TvMetrics m) {
     switch (_selectedCategory) {
       case 0:
-        return _buildPlaybackSettings();
+        return _buildPlaybackSettings(m);
       case 1:
-        return _buildGeneralSettings();
+        return _buildGeneralSettings(m);
       case 2:
-        return _buildNetworkSettings();
+        return _buildNetworkSettings(m);
       case 3:
-        return _buildTranslationSettings();
+        return _buildTranslationSettings(m);
       case 4:
         return const TvSyncSettings();
       case 5:
-        return _buildAboutSettings();
+        return _buildAboutSettings(m);
       default:
         return const SizedBox.shrink();
     }
   }
 
-  Widget _buildPlaybackSettings() {
+  Widget _buildPlaybackSettings(TvMetrics m) {
     final core = ref.watch(playerCoreProvider);
     final speed = ref.watch(defaultPlaybackSpeedProvider);
     final threshold = ref.watch(watchedThresholdProvider);
@@ -128,8 +128,9 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     final exoLibass = ref.watch(exoLibassProvider);
     final gpuNext = ref.watch(gpuNextEnabledProvider);
 
-    return _settingsList('播放设置', [
+    return _settingsList(m, '播放设置', [
       _choiceItem<String>(
+        m,
         title: '播放器内核',
         current: core,
         options: const [
@@ -141,6 +142,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(playerCoreProvider.notifier).state = v,
       ),
       _choiceItem<double>(
+        m,
         title: '默认倍速',
         current: speed,
         labelOf: (v) => '${v}x',
@@ -156,6 +158,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(defaultPlaybackSpeedProvider.notifier).state = v,
       ),
       _choiceItem<int>(
+        m,
         title: '观看阈值',
         subtitle: '播放进度达到该比例即标记“已看”，并触发同步上报',
         current: threshold,
@@ -171,6 +174,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(watchedThresholdProvider.notifier).state = v,
       ),
       _choiceItem<int>(
+        m,
         title: '快进/快退步进',
         current: skip,
         labelOf: (v) => '$v 秒',
@@ -184,12 +188,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(skipForwardStepProvider.notifier).state = v,
       ),
       _toggleItem(
+        m,
         title: '自动播放下一集',
         value: autoNext,
         onToggle: () =>
             ref.read(autoPlayNextProvider.notifier).state = !autoNext,
       ),
       _toggleItem(
+        m,
         title: '自动跳过片头/片尾',
         subtitle: '联网识别剧集片头片尾，进入时显示跳过按钮',
         value: autoSkipSegments,
@@ -197,6 +203,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             !autoSkipSegments,
       ),
       _toggleItem(
+        m,
         title: 'ExoPlayer ASS 字幕（libass）',
         subtitle: '开启后 ExoPlayer 内核可渲染内封特效 ASS 字幕（经 libass 转位图叠加）',
         value: exoLibass,
@@ -204,6 +211,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(exoLibassProvider.notifier).state = !exoLibass,
       ),
       _toggleItem(
+        m,
         title: 'MPV gpu-next 渲染',
         subtitle: '原生 MPV 使用 SurfaceView + gpu-next（HDR/着色器更佳，部分设备需关闭）',
         value: gpuNext,
@@ -213,11 +221,12 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     ]);
   }
 
-  Widget _buildGeneralSettings() {
+  Widget _buildGeneralSettings(TvMetrics m) {
     final hwDecode = ref.watch(hardwareDecodingProvider);
     final bgPlay = ref.watch(backgroundPlaybackProvider);
-    return _settingsList('通用设置', [
+    return _settingsList(m, '通用设置', [
       _toggleItem(
+        m,
         title: '硬件解码',
         subtitle: '关闭后使用软件解码（更耗电、更兼容）',
         value: hwDecode,
@@ -225,6 +234,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(hardwareDecodingProvider.notifier).state = !hwDecode,
       ),
       _toggleItem(
+        m,
         title: '后台播放',
         value: bgPlay,
         onToggle: () =>
@@ -233,12 +243,13 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     ]);
   }
 
-  Widget _buildNetworkSettings() {
+  Widget _buildNetworkSettings(TvMetrics m) {
     final cfg = ref.watch(proxyConfigProvider);
     final notifier = ref.read(proxyConfigProvider.notifier);
 
     final items = <Widget>[
       _choiceItem<ProxyType>(
+        m,
         title: '代理协议',
         current: cfg.type,
         labelOf: (v) => v.label,
@@ -250,28 +261,33 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     if (cfg.type != ProxyType.none) {
       items.addAll([
         _textItem(
+          m,
           title: '主机 (Host)',
           value: cfg.host,
           onSubmit: (v) => notifier.save(cfg.copyWith(host: v.trim())),
         ),
         _textItem(
+          m,
           title: '端口 (Port)',
           value: cfg.port > 0 ? '${cfg.port}' : '',
           onSubmit: (v) =>
               notifier.save(cfg.copyWith(port: int.tryParse(v.trim()) ?? 0)),
         ),
         _textItem(
+          m,
           title: '用户名（可选）',
           value: cfg.username,
           onSubmit: (v) => notifier.save(cfg.copyWith(username: v)),
         ),
         _textItem(
+          m,
           title: '密码（可选）',
           value: cfg.password,
           obscure: true,
           onSubmit: (v) => notifier.save(cfg.copyWith(password: v)),
         ),
         _toggleItem(
+          m,
           title: '代理媒体流播放',
           subtitle: cfg.type.isSocks
               ? 'libmpv 不支持 SOCKS，此项仅对 HTTP 代理生效'
@@ -285,31 +301,32 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     // 订阅代理(mihomo) —— 仅 Android TV 内置内核。
     if (Platform.isAndroid) {
       items
-        ..add(const SizedBox(height: TvDesignTokens.spacingLg))
-        ..addAll(_mihomoItems());
+        ..add(SizedBox(height: m.spacingLg))
+        ..addAll(_mihomoItems(m));
     }
 
-    return _settingsList('代理设置', items);
+    return _settingsList(m, '代理设置', items);
   }
 
-  List<Widget> _mihomoItems() {
-    final m = ref.watch(mihomoControllerProvider);
+  List<Widget> _mihomoItems(TvMetrics m) {
+    final mihomo = ref.watch(mihomoControllerProvider);
     final ctrl = ref.read(mihomoControllerProvider.notifier);
 
     final items = <Widget>[
-      const Padding(
+      Padding(
         padding: EdgeInsets.only(
-            left: 4, bottom: TvDesignTokens.spacingMd, top: TvDesignTokens.spacingMd),
+            left: 4, bottom: m.spacingMd, top: m.spacingMd),
         child: Text('订阅代理 (mihomo)',
             style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeLg,
+                fontSize: m.fontSizeLg,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold)),
       ),
     ];
 
-    if (!m.coreAvailable) {
+    if (!mihomo.coreAvailable) {
       items.add(_staticItem(
+        m,
         title: '内核未内置',
         subtitle: '仅 Android TV 构建包含 mihomo 内核（libmihomo.so）。'
             '运行 scripts/fetch_mihomo_tv.ps1 拉取后重新构建 tv flavor。',
@@ -318,31 +335,35 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     }
 
     items.add(_toggleItem(
+      m,
       title: '启用订阅代理',
-      subtitle: m.running
+      subtitle: mihomo.running
           ? '运行中 · 全局走 mihomo（含播放流），启用后会覆盖上方手动代理'
           : '启动 mihomo 并把全局代理指向本地端口 ${MihomoPorts.mixedPort}',
-      value: m.enabled,
-      onToggle: () => m.enabled ? ctrl.disable() : ctrl.enable(),
+      value: mihomo.enabled,
+      onToggle: () => mihomo.enabled ? ctrl.disable() : ctrl.enable(),
     ));
 
-    for (final s in m.subscriptions) {
+    for (final s in mihomo.subscriptions) {
       items.add(_rowCard(
+        m,
         title: s.name,
         subtitle: s.url,
-        trailing: const Icon(Icons.delete_outline,
-            color: TvDesignTokens.textSecondary, size: 24),
+        trailing: Icon(Icons.delete_outline,
+            color: TvDesignTokens.textSecondary, size: m.s(24)),
         onSelect: () => ctrl.removeSubscription(s.id),
       ));
     }
 
     items.add(_actionItem(
+      m,
       title: '添加订阅',
       subtitle: '输入机场订阅链接',
       onTap: _showAddSubscription,
     ));
-    if (m.subscriptions.isNotEmpty) {
+    if (mihomo.subscriptions.isNotEmpty) {
       items.add(_actionItem(
+        m,
         title: '更新订阅',
         subtitle: '重新拉取并重载配置',
         onTap: () {
@@ -351,8 +372,9 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         },
       ));
     }
-    if (m.running) {
+    if (mihomo.running) {
       items.add(_actionItem(
+        m,
         title: '打开 zashboard 面板',
         subtitle: '选择节点 / 查看连接 / 测速',
         onTap: () => Navigator.of(context).push(
@@ -419,13 +441,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
   }
 
-  Widget _buildTranslationSettings() {
+  Widget _buildTranslationSettings(TvMetrics m) {
     final kind = ref.watch(translationEngineKindProvider);
     final target = ref.watch(translationTargetLangProvider);
     final layout = ref.watch(bilingualLayoutProvider);
 
     final items = <Widget>[
       _choiceItem<TranslationEngineKind>(
+        m,
         title: '翻译引擎',
         current: kind,
         labelOf: (v) => v.label,
@@ -436,6 +459,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(translationEngineKindProvider.notifier).state = v,
       ),
       _choiceItem<String>(
+        m,
         title: '目标语言',
         current: target == 'cht' ? 'cht' : 'zh',
         options: const [
@@ -446,6 +470,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
             ref.read(translationTargetLangProvider.notifier).state = v,
       ),
       _choiceItem<BilingualLayout>(
+        m,
         title: '双语排版',
         current: layout,
         labelOf: (v) => switch (v) {
@@ -460,12 +485,12 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         ],
         onPick: (v) => ref.read(bilingualLayoutProvider.notifier).state = v,
       ),
-      ..._engineConfigItems(kind),
+      ..._engineConfigItems(m, kind),
     ];
-    return _settingsList('字幕翻译', items);
+    return _settingsList(m, '字幕翻译', items);
   }
 
-  List<Widget> _engineConfigItems(TranslationEngineKind kind) {
+  List<Widget> _engineConfigItems(TvMetrics m, TranslationEngineKind kind) {
     switch (kind) {
       case TranslationEngineKind.openai:
       case TranslationEngineKind.anthropic:
@@ -475,12 +500,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         final cfg = ref.watch(provider);
         return [
           _textItem(
+            m,
             title: 'API 地址',
             value: cfg.baseUrl,
             onSubmit: (v) => ref.read(provider.notifier).state =
                 cfg.copyWith(baseUrl: v.trim()),
           ),
           _textItem(
+            m,
             title: 'API Key',
             value: cfg.apiKey,
             obscure: true,
@@ -488,6 +515,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
                 cfg.copyWith(apiKey: v.trim()),
           ),
           _textItem(
+            m,
             title: '模型',
             value: cfg.model,
             onSubmit: (v) => ref.read(provider.notifier).state =
@@ -498,12 +526,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         final cfg = ref.watch(baiduGeneralConfigProvider);
         return [
           _textItem(
+            m,
             title: 'APP ID',
             value: cfg.appId,
             onSubmit: (v) => ref.read(baiduGeneralConfigProvider.notifier).state =
                 cfg.copyWith(appId: v.trim()),
           ),
           _textItem(
+            m,
             title: '密钥',
             value: cfg.secretKey,
             obscure: true,
@@ -515,12 +545,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         final cfg = ref.watch(baiduLlmConfigProvider);
         return [
           _textItem(
+            m,
             title: 'APP ID',
             value: cfg.appId,
             onSubmit: (v) => ref.read(baiduLlmConfigProvider.notifier).state =
                 cfg.copyWith(appId: v.trim()),
           ),
           _textItem(
+            m,
             title: 'API Key',
             value: cfg.apiKey,
             obscure: true,
@@ -532,12 +564,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         final cfg = ref.watch(tencentConfigProvider);
         return [
           _textItem(
+            m,
             title: 'SecretId',
             value: cfg.secretId,
             onSubmit: (v) => ref.read(tencentConfigProvider.notifier).state =
                 cfg.copyWith(secretId: v.trim()),
           ),
           _textItem(
+            m,
             title: 'SecretKey',
             value: cfg.secretKey,
             obscure: true,
@@ -545,6 +579,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
                 cfg.copyWith(secretKey: v.trim()),
           ),
           _textItem(
+            m,
             title: '地域 Region',
             value: cfg.region,
             onSubmit: (v) => ref.read(tencentConfigProvider.notifier).state =
@@ -554,7 +589,8 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     }
   }
 
-  Widget _textItem({
+  Widget _textItem(
+    TvMetrics m, {
     required String title,
     required String value,
     required ValueChanged<String> onSubmit,
@@ -564,10 +600,11 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         ? '未设置'
         : (obscure ? '••••••${value.length > 4 ? value.substring(value.length - 4) : ''}' : value);
     return _rowCard(
+      m,
       title: title,
       subtitle: display,
-      trailing: const Icon(Icons.edit,
-          color: TvDesignTokens.textSecondary, size: 24),
+      trailing: Icon(Icons.edit,
+          color: TvDesignTokens.textSecondary, size: m.s(24)),
       onSelect: () => _showTextInput(title, value, obscure, onSubmit),
     );
   }
@@ -604,16 +641,18 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
   }
 
-  Widget _buildAboutSettings() {
-    return _settingsList('关于', [
-      _staticItem(title: '应用', subtitle: 'LinPlayer for TV'),
-      _staticItem(title: '版本', subtitle: '1.0.0'),
+  Widget _buildAboutSettings(TvMetrics m) {
+    return _settingsList(m, '关于', [
+      _staticItem(m, title: '应用', subtitle: 'LinPlayer for TV'),
+      _staticItem(m, title: '版本', subtitle: '1.0.0'),
       _actionItem(
+        m,
         title: '导出日志',
         subtitle: '导出到文件并复制路径（排查问题用）',
         onTap: _exportLogs,
       ),
       _actionItem(
+        m,
         title: '重新查看引导',
         subtitle: '打开 TV 引导页',
         onTap: () => context.go('/tv/onboarding'),
@@ -633,22 +672,23 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
 
   // ============ 复用控件 ============
 
-  Widget _settingsList(String title, List<Widget> items) {
+  Widget _settingsList(TvMetrics m, String title, List<Widget> items) {
     return ListView(
-      padding: const EdgeInsets.all(TvDesignTokens.spacingXl),
+      padding: EdgeInsets.all(m.spacingXl),
       children: [
         Text(title,
-            style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeXxl,
+            style: TextStyle(
+                fontSize: m.fontSizeXxl,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold)),
-        const SizedBox(height: TvDesignTokens.spacingLg),
+        SizedBox(height: m.spacingLg),
         ...items,
       ],
     );
   }
 
-  Widget _rowCard({
+  Widget _rowCard(
+    TvMetrics m, {
     required String title,
     String? subtitle,
     required Widget trailing,
@@ -658,11 +698,11 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
       padding: const EdgeInsets.all(4),
       onSelect: onSelect,
       child: Container(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingLg),
-        margin: const EdgeInsets.only(bottom: TvDesignTokens.spacingMd),
+        padding: EdgeInsets.all(m.spacingLg),
+        margin: EdgeInsets.only(bottom: m.spacingMd),
         decoration: BoxDecoration(
           color: TvDesignTokens.surface,
-          borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+          borderRadius: BorderRadius.circular(m.posterRadius),
         ),
         child: Row(
           children: [
@@ -671,20 +711,20 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
-                      style: const TextStyle(
-                          fontSize: TvDesignTokens.fontSizeMd,
+                      style: TextStyle(
+                          fontSize: m.fontSizeMd,
                           color: TvDesignTokens.textPrimary)),
                   if (subtitle != null) ...[
-                    const SizedBox(height: 2),
+                    SizedBox(height: m.s(2)),
                     Text(subtitle,
-                        style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeXs,
+                        style: TextStyle(
+                            fontSize: m.fontSizeXs,
                             color: TvDesignTokens.textSecondary)),
                   ],
                 ],
               ),
             ),
-            const SizedBox(width: TvDesignTokens.spacingMd),
+            SizedBox(width: m.spacingMd),
             trailing,
           ],
         ),
@@ -692,7 +732,8 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
   }
 
-  Widget _choiceItem<T>({
+  Widget _choiceItem<T>(
+    TvMetrics m, {
     required String title,
     String? subtitle,
     required T current,
@@ -706,18 +747,19 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
                     labelOf?.call(current) ?? '$current', current))
             .key;
     return _rowCard(
+      m,
       title: title,
       subtitle: subtitle ?? currentLabel,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(currentLabel,
-              style: const TextStyle(
-                  fontSize: TvDesignTokens.fontSizeSm,
+              style: TextStyle(
+                  fontSize: m.fontSizeSm,
                   color: TvDesignTokens.brand)),
-          const SizedBox(width: TvDesignTokens.spacingXs),
-          const Icon(Icons.chevron_right,
-              color: TvDesignTokens.textSecondary, size: 28),
+          SizedBox(width: m.spacingXs),
+          Icon(Icons.chevron_right,
+              color: TvDesignTokens.textSecondary, size: m.s(28)),
         ],
       ),
       onSelect: () => _showChoice<T>(title, current, options, onPick),
@@ -746,20 +788,22 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
   }
 
-  Widget _toggleItem({
+  Widget _toggleItem(
+    TvMetrics m, {
     required String title,
     String? subtitle,
     required bool value,
     required VoidCallback onToggle,
   }) {
     return _rowCard(
+      m,
       title: title,
       subtitle: subtitle,
       onSelect: onToggle,
       trailing: AnimatedContainer(
         duration: TvDesignTokens.focusAnimationDuration,
-        width: 56,
-        height: 30,
+        width: m.s(56),
+        height: m.s(30),
         decoration: BoxDecoration(
           color: value
               ? TvDesignTokens.brand
@@ -767,10 +811,10 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
           borderRadius: BorderRadius.circular(999),
         ),
         alignment: value ? Alignment.centerRight : Alignment.centerLeft,
-        padding: const EdgeInsets.all(3),
+        padding: EdgeInsets.all(m.s(3)),
         child: Container(
-          width: 24,
-          height: 24,
+          width: m.s(24),
+          height: m.s(24),
           decoration: const BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
@@ -780,8 +824,10 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
   }
 
-  Widget _staticItem({required String title, required String subtitle}) {
+  Widget _staticItem(TvMetrics m,
+      {required String title, required String subtitle}) {
     return _rowCard(
+      m,
       title: title,
       subtitle: subtitle,
       onSelect: () {},
@@ -789,17 +835,19 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
   }
 
-  Widget _actionItem({
+  Widget _actionItem(
+    TvMetrics m, {
     required String title,
     String? subtitle,
     required VoidCallback onTap,
   }) {
     return _rowCard(
+      m,
       title: title,
       subtitle: subtitle,
       onSelect: onTap,
-      trailing: const Icon(Icons.chevron_right,
-          color: TvDesignTokens.textSecondary, size: 28),
+      trailing: Icon(Icons.chevron_right,
+          color: TvDesignTokens.textSecondary, size: m.s(28)),
     );
   }
 }

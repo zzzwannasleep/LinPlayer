@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/theme/app_motion.dart';
 import '../../ui/widgets/common/media_widgets.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_button.dart';
 
 /// TV Hero Banner
@@ -81,6 +82,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
   Widget build(BuildContext context) {
     if (widget.items.isEmpty) return const SizedBox.shrink();
 
+    final m = context.tv;
     return Focus(
       onFocusChange: (focused) {
         setState(() => _isPaused = !focused);
@@ -103,7 +105,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
         return KeyEventResult.ignored;
       },
       child: SizedBox(
-        height: TvDesignTokens.heroHeight,
+        height: m.heroHeight,
         child: Stack(
           children: [
             // PageView 轮播
@@ -111,14 +113,15 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
               controller: _pageController,
               itemCount: widget.items.length,
               onPageChanged: (index) => setState(() => _currentIndex = index),
-              itemBuilder: (context, index) => _buildHeroItem(widget.items[index]),
+              itemBuilder: (context, index) =>
+                  _buildHeroItem(widget.items[index], m),
             ),
             // 底部渐变遮罩
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
-              height: TvDesignTokens.heroOverlayHeight,
+              height: m.heroOverlayHeight,
               child: Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -135,7 +138,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
             ),
             // 指示器
             Positioned(
-              bottom: TvDesignTokens.spacingLg,
+              bottom: m.spacingLg,
               left: 0,
               right: 0,
               child: Row(
@@ -144,14 +147,14 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                   widget.items.length,
                   (index) => AnimatedContainer(
                     duration: TvDesignTokens.focusAnimationDuration,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: _currentIndex == index ? 24 : 8,
-                    height: 8,
+                    margin: EdgeInsets.symmetric(horizontal: m.s(4)),
+                    width: _currentIndex == index ? m.s(24) : m.s(8),
+                    height: m.s(8),
                     decoration: BoxDecoration(
                       color: _currentIndex == index
                           ? TvDesignTokens.brand
                           : const Color(0x40FFFFFF),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(m.s(4)),
                     ),
                   ),
                 ),
@@ -163,7 +166,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
     );
   }
 
-  Widget _buildHeroItem(TvHeroItem item) {
+  Widget _buildHeroItem(TvHeroItem item, TvMetrics m) {
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -175,7 +178,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                 height: double.infinity,
                 fit: BoxFit.cover,
               )
-            : _buildPlaceholder(),
+            : _buildPlaceholder(m),
         // 渐变遮罩
         Container(
           decoration: BoxDecoration(
@@ -191,40 +194,40 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
         ),
         // 内容信息（随每张轮播淡入上滑）
         Positioned(
-          left: TvDesignTokens.spacingXxl,
-          bottom: TvDesignTokens.spacingXxl,
+          left: m.spacingXxl,
+          bottom: m.spacingXxl,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildLogoOrTitle(item),
+              _buildLogoOrTitle(item, m),
               if (item.subtitle != null) ...[
-                const SizedBox(height: TvDesignTokens.spacingSm),
+                SizedBox(height: m.spacingSm),
                 Text(
                   item.subtitle!,
-                  style: const TextStyle(
-                    fontSize: TvDesignTokens.heroSubtitleSize,
+                  style: TextStyle(
+                    fontSize: m.heroSubtitleSize,
                     color: TvDesignTokens.textSecondary,
                   ),
                 ),
               ],
               if (item.tags != null && item.tags!.isNotEmpty) ...[
-                const SizedBox(height: TvDesignTokens.spacingSm),
+                SizedBox(height: m.spacingSm),
                 Row(
                   children: item.tags!.map((tag) {
                     return Container(
-                      margin: const EdgeInsets.only(right: TvDesignTokens.spacingSm),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: TvDesignTokens.spacingSm,
-                        vertical: 4,
+                      margin: EdgeInsets.only(right: m.spacingSm),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: m.spacingSm,
+                        vertical: m.s(4),
                       ),
                       decoration: BoxDecoration(
                         color: TvDesignTokens.surface,
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(m.s(4)),
                       ),
                       child: Text(
                         tag,
-                        style: const TextStyle(
-                          fontSize: TvDesignTokens.fontSizeXs,
+                        style: TextStyle(
+                          fontSize: m.fontSizeXs,
                           color: TvDesignTokens.textSecondary,
                         ),
                       ),
@@ -232,7 +235,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                   }).toList(),
                 ),
               ],
-              const SizedBox(height: TvDesignTokens.spacingLg),
+              SizedBox(height: m.spacingLg),
               // 操作按钮（TDesign 按钮 + TV 焦点）
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -244,7 +247,7 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
                       onPressed: item.onPlay,
                     ),
                   if (item.onDetail != null) ...[
-                    const SizedBox(width: TvDesignTokens.spacingSm),
+                    SizedBox(width: m.spacingSm),
                     TvButton(
                       text: '详情',
                       icon: Icons.info_outline,
@@ -262,42 +265,42 @@ class _TvHeroBannerState extends State<TvHeroBanner> {
   }
 
   /// 优先使用 Logo 艺术字图片，无 Logo 时回退到文字标题
-  Widget _buildLogoOrTitle(TvHeroItem item) {
+  Widget _buildLogoOrTitle(TvHeroItem item, TvMetrics m) {
     if (item.logoUrl != null && item.logoUrl!.isNotEmpty) {
       return Image.network(
         item.logoUrl!,
-        height: 48,
+        height: m.s(48),
         fit: BoxFit.contain,
         alignment: Alignment.centerLeft,
-        errorBuilder: (_, __, ___) => _buildTitleText(item.title),
+        errorBuilder: (_, __, ___) => _buildTitleText(item.title, m),
         frameBuilder: (_, child, frame, wasSynchronouslyLoaded) {
           if (wasSynchronouslyLoaded || frame != null) return child;
-          return _buildTitleText(item.title);
+          return _buildTitleText(item.title, m);
         },
       );
     }
-    return _buildTitleText(item.title);
+    return _buildTitleText(item.title, m);
   }
 
-  Widget _buildTitleText(String title) {
+  Widget _buildTitleText(String title, TvMetrics m) {
     return Text(
       title,
-      style: const TextStyle(
-        fontSize: TvDesignTokens.heroTitleSize,
+      style: TextStyle(
+        fontSize: m.heroTitleSize,
         color: TvDesignTokens.textPrimary,
         fontWeight: FontWeight.bold,
       ),
     );
   }
 
-  Widget _buildPlaceholder() {
+  Widget _buildPlaceholder(TvMetrics m) {
     return Container(
       color: TvDesignTokens.surfaceElevated,
-      child: const Center(
+      child: Center(
         child: Icon(
           Icons.image_not_supported_outlined,
           color: TvDesignTokens.textDisabled,
-          size: 64,
+          size: m.s(64),
         ),
       ),
     );

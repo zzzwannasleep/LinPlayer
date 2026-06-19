@@ -21,6 +21,7 @@ import '../../../core/services/translation/translation_engine.dart';
 import '../../../core/services/video_player_service.dart';
 import '../../../core/utils/playback_url_resolver.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_control_overlay.dart';
 import '../../widgets/tv_panel.dart';
 
@@ -503,6 +504,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
       progress.dispose();
       return;
     }
+    final m = context.tv;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -510,11 +512,11 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         backgroundColor: TvDesignTokens.surface,
         content: Row(
           children: [
-            const SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2)),
-            const SizedBox(width: 16),
+            SizedBox(
+                width: m.s(22),
+                height: m.s(22),
+                child: const CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: m.s(16)),
             Expanded(
               child: ValueListenableBuilder<String>(
                 valueListenable: progress,
@@ -745,6 +747,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final dur = _service.duration;
     final pos = _service.position;
     final progress =
@@ -761,7 +764,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
             if (_ready)
               Center(child: _service.buildVideo())
             else if (_error != null)
-              _buildError()
+              _buildError(m)
             else
               const Center(
                 child: CircularProgressIndicator(color: TvDesignTokens.brand),
@@ -782,7 +785,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: 96,
+                bottom: m.s(96),
                 child: IgnorePointer(
                   child: ValueListenableBuilder<String>(
                     valueListenable: _streamTranslator!.displayText,
@@ -790,21 +793,21 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
                       if (text.isEmpty) return const SizedBox.shrink();
                       return Center(
                         child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 48),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 6),
+                          margin: EdgeInsets.symmetric(horizontal: m.s(48)),
+                          padding: EdgeInsets.symmetric(
+                              horizontal: m.s(16), vertical: m.s(6)),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(m.s(8)),
                           ),
                           child: Text(
                             text,
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
-                              fontSize: 28,
+                              fontSize: m.fs(28),
                               fontWeight: FontWeight.w600,
-                              shadows: [
+                              shadows: const [
                                 Shadow(blurRadius: 4, color: Colors.black),
                               ],
                             ),
@@ -819,8 +822,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
             // 遥控器按确认即跳。
             if (_ready && _showControls)
               Positioned(
-                left: 48,
-                bottom: 120,
+                left: m.s(48),
+                bottom: m.s(120),
                 child: ValueListenableBuilder<SkipPrompt?>(
                   valueListenable: _introSkip.prompt,
                   builder: (context, prompt, _) {
@@ -828,14 +831,14 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
                     return ElevatedButton.icon(
                       autofocus: true,
                       onPressed: () => _onIntroSkipPressed(prompt),
-                      icon: const Icon(Icons.skip_next, size: 24),
+                      icon: Icon(Icons.skip_next, size: m.s(24)),
                       label: Text(prompt.label,
-                          style: const TextStyle(fontSize: 20)),
+                          style: TextStyle(fontSize: m.fs(20))),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.black.withValues(alpha: 0.7),
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 14),
+                        padding: EdgeInsets.symmetric(
+                            horizontal: m.s(24), vertical: m.s(14)),
                       ),
                     );
                   },
@@ -876,19 +879,19 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     );
   }
 
-  Widget _buildError() {
+  Widget _buildError(TvMetrics m) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.error_outline,
-              color: TvDesignTokens.error, size: 64),
-          const SizedBox(height: TvDesignTokens.spacingLg),
+          Icon(Icons.error_outline,
+              color: TvDesignTokens.error, size: m.s(64)),
+          SizedBox(height: m.spacingLg),
           Text(
             _error ?? '播放失败',
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: TvDesignTokens.fontSizeMd,
+            style: TextStyle(
+              fontSize: m.fontSizeMd,
               color: TvDesignTokens.textPrimary,
             ),
           ),

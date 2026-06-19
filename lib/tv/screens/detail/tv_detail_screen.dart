@@ -9,6 +9,7 @@ import '../../../core/providers/media_providers.dart';
 import '../../../ui/utils/media_helpers.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_button.dart';
 import '../../widgets/tv_focusable.dart';
 import '../../widgets/tv_toast.dart';
@@ -30,25 +31,26 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final id = widget.mediaId;
     if (id == null || id.isEmpty) {
-      return _errorScaffold('无效的媒体 ID');
+      return _errorScaffold('无效的媒体 ID', m);
     }
     final itemAsync = ref.watch(mediaItemProvider(id));
 
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: itemAsync.when(
-        data: (item) => _buildContent(item),
+        data: (item) => _buildContent(item, m),
         loading: () => const Center(
           child: CircularProgressIndicator(color: TvDesignTokens.brand),
         ),
-        error: (e, _) => _errorBody('加载详情失败：$e'),
+        error: (e, _) => _errorBody('加载详情失败：$e', m),
       ),
     );
   }
 
-  Widget _buildContent(MediaItem item) {
+  Widget _buildContent(MediaItem item, TvMetrics m) {
     final api = ref.read(apiClientProvider);
     final isSeries = item.type == 'Series';
 
@@ -56,22 +58,22 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeroArea(api, item),
+          _buildHeroArea(api, item, m),
           Padding(
-            padding: const EdgeInsets.all(TvDesignTokens.spacingXl),
+            padding: EdgeInsets.all(m.spacingXl),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildActionButtons(item),
+                _buildActionButtons(item, m),
                 if (item.overview != null && item.overview!.isNotEmpty) ...[
-                  const SizedBox(height: TvDesignTokens.spacingLg),
-                  _buildSynopsis(item.overview!),
+                  SizedBox(height: m.spacingLg),
+                  _buildSynopsis(item.overview!, m),
                 ],
                 if (isSeries) ...[
-                  const SizedBox(height: TvDesignTokens.spacingLg),
-                  _buildSeasonsAndEpisodes(api, item),
+                  SizedBox(height: m.spacingLg),
+                  _buildSeasonsAndEpisodes(api, item, m),
                 ],
-                const SizedBox(height: TvDesignTokens.spacingXxl),
+                SizedBox(height: m.spacingXxl),
               ],
             ),
           ),
@@ -80,7 +82,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     );
   }
 
-  Widget _buildHeroArea(ApiClientFactory api, MediaItem item) {
+  Widget _buildHeroArea(ApiClientFactory api, MediaItem item, TvMetrics m) {
     final banner = resolveMediaItemBannerImageUrls(api, item,
         maxWidth: 1600, allowPosterFallback: true);
     final logo = (item.logoItemId != null && item.logoImageTag != null)
@@ -89,7 +91,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
         : null;
 
     return SizedBox(
-      height: 420,
+      height: m.s(420),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -118,50 +120,50 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
             ),
           ),
           Positioned(
-            left: TvDesignTokens.spacingXl,
-            right: TvDesignTokens.spacingXl,
-            bottom: TvDesignTokens.spacingLg,
+            left: m.spacingXl,
+            right: m.spacingXl,
+            bottom: m.spacingLg,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (logo != null && logo.isNotEmpty)
                   Image.network(logo,
-                      height: 64,
+                      height: m.s(64),
                       fit: BoxFit.contain,
                       alignment: Alignment.centerLeft,
-                      errorBuilder: (_, __, ___) => _titleText(item.name))
+                      errorBuilder: (_, __, ___) => _titleText(item.name, m))
                 else
-                  _titleText(item.name),
-                const SizedBox(height: TvDesignTokens.spacingSm),
+                  _titleText(item.name, m),
+                SizedBox(height: m.spacingSm),
                 Row(
                   children: [
                     if (item.communityRating != null) ...[
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: TvDesignTokens.spacingSm, vertical: 4),
+                        padding: EdgeInsets.symmetric(
+                            horizontal: m.spacingSm, vertical: m.s(4)),
                         decoration: BoxDecoration(
                           color: TvDesignTokens.brand,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(m.s(4)),
                         ),
                         child: Text(
                           '★ ${item.communityRating!.toStringAsFixed(1)}',
-                          style: const TextStyle(
-                            fontSize: TvDesignTokens.fontSizeSm,
+                          style: TextStyle(
+                            fontSize: m.fontSizeSm,
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                      const SizedBox(width: TvDesignTokens.spacingMd),
+                      SizedBox(width: m.spacingMd),
                     ],
                     Expanded(
                       child: Text(
                         _metaLine(item),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: TvDesignTokens.fontSizeSm,
+                        style: TextStyle(
+                          fontSize: m.fontSizeSm,
                           color: TvDesignTokens.textSecondary,
                         ),
                       ),
@@ -176,12 +178,12 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     );
   }
 
-  Widget _titleText(String name) => Text(
+  Widget _titleText(String name, TvMetrics m) => Text(
         name,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          fontSize: TvDesignTokens.fontSizeXxl,
+        style: TextStyle(
+          fontSize: m.fontSizeXxl,
           color: TvDesignTokens.textPrimary,
           fontWeight: FontWeight.bold,
         ),
@@ -197,7 +199,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     return parts.join(' · ');
   }
 
-  Widget _buildActionButtons(MediaItem item) {
+  Widget _buildActionButtons(MediaItem item, TvMetrics m) {
     final favorited = _favoriteOverride ?? (item.userData?.isFavorite ?? false);
     final resumeTicks = item.userData?.playbackPositionTicks ?? 0;
     final hasResume =
@@ -210,7 +212,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
           autofocus: true,
           onPressed: () => _onPlayMain(item),
         ),
-        const SizedBox(width: TvDesignTokens.spacingMd),
+        SizedBox(width: m.spacingMd),
         TvButton(
           text: favorited ? '已收藏' : '收藏',
           icon: favorited ? Icons.favorite : Icons.favorite_border,
@@ -269,23 +271,23 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     }
   }
 
-  Widget _buildSynopsis(String overview) {
+  Widget _buildSynopsis(String overview, TvMetrics m) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           '简介',
           style: TextStyle(
-            fontSize: TvDesignTokens.fontSizeLg,
+            fontSize: m.fontSizeLg,
             color: TvDesignTokens.textPrimary,
             fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: TvDesignTokens.spacingSm),
+        SizedBox(height: m.spacingSm),
         Text(
           overview,
-          style: const TextStyle(
-            fontSize: TvDesignTokens.fontSizeSm,
+          style: TextStyle(
+            fontSize: m.fontSizeSm,
             color: TvDesignTokens.textSecondary,
             height: TvDesignTokens.lineHeightRelaxed,
           ),
@@ -294,7 +296,8 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     );
   }
 
-  Widget _buildSeasonsAndEpisodes(ApiClientFactory api, MediaItem series) {
+  Widget _buildSeasonsAndEpisodes(
+      ApiClientFactory api, MediaItem series, TvMetrics m) {
     final seasonsAsync = ref.watch(seasonsProvider(series.id));
     return seasonsAsync.when(
       data: (seasons) {
@@ -303,17 +306,17 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               '选择季',
               style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeLg,
+                fontSize: m.fontSizeLg,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: TvDesignTokens.spacingSm),
+            SizedBox(height: m.spacingSm),
             SizedBox(
-              height: 56,
+              height: m.s(56),
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 itemCount: seasons.length,
@@ -321,32 +324,30 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                   final season = seasons[index];
                   final selected = season.id == seasonId;
                   return Padding(
-                    padding:
-                        const EdgeInsets.only(right: TvDesignTokens.spacingSm),
+                    padding: EdgeInsets.only(right: m.spacingSm),
                     child: TvFocusable(
                       onSelect: () =>
                           setState(() => _selectedSeasonId = season.id),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: TvDesignTokens.spacingMd,
-                          vertical: TvDesignTokens.spacingXs,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: m.spacingMd,
+                          vertical: m.spacingXs,
                         ),
                         decoration: BoxDecoration(
                           color: selected
                               ? TvDesignTokens.brand.withValues(alpha: 0.18)
                               : TvDesignTokens.surface,
-                          borderRadius: BorderRadius.circular(
-                              TvDesignTokens.posterRadius),
+                          borderRadius: BorderRadius.circular(m.posterRadius),
                           border: selected
                               ? Border.all(
-                                  color: TvDesignTokens.brand, width: 2)
+                                  color: TvDesignTokens.brand, width: m.s(2))
                               : null,
                         ),
                         child: Center(
                           child: Text(
                             season.name,
                             style: TextStyle(
-                              fontSize: TvDesignTokens.fontSizeSm,
+                              fontSize: m.fontSizeSm,
                               color: selected
                                   ? TvDesignTokens.brand
                                   : TvDesignTokens.textPrimary,
@@ -362,21 +363,21 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                 },
               ),
             ),
-            const SizedBox(height: TvDesignTokens.spacingLg),
-            _buildEpisodeList(api, series.id, seasonId),
+            SizedBox(height: m.spacingLg),
+            _buildEpisodeList(api, series.id, seasonId, m),
           ],
         );
       },
-      loading: () => const Padding(
-        padding: EdgeInsets.all(TvDesignTokens.spacingLg),
-        child: CircularProgressIndicator(color: TvDesignTokens.brand),
+      loading: () => Padding(
+        padding: EdgeInsets.all(m.spacingLg),
+        child: const CircularProgressIndicator(color: TvDesignTokens.brand),
       ),
       error: (_, __) => const SizedBox.shrink(),
     );
   }
 
   Widget _buildEpisodeList(
-      ApiClientFactory api, String seriesId, String seasonId) {
+      ApiClientFactory api, String seriesId, String seasonId, TvMetrics m) {
     final episodesAsync =
         ref.watch(episodesProvider((seriesId: seriesId, seasonId: seasonId)));
     return episodesAsync.when(
@@ -387,17 +388,17 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
           children: [
             Text(
               '共 ${episodes.length} 集',
-              style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeLg,
+              style: TextStyle(
+                fontSize: m.fontSizeLg,
                 color: TvDesignTokens.textPrimary,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: TvDesignTokens.spacingSm),
+            SizedBox(height: m.spacingSm),
             ...episodes.asMap().entries.map((entry) {
               final index = entry.key;
               final ep = entry.value;
-              return _buildEpisodeRow(api, ep).animate().fadeIn(
+              return _buildEpisodeRow(api, ep, m).animate().fadeIn(
                     delay: Duration(milliseconds: 30 * index),
                     duration: TvDesignTokens.contentFadeDuration,
                   );
@@ -405,43 +406,43 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
           ],
         );
       },
-      loading: () => const Padding(
-        padding: EdgeInsets.all(TvDesignTokens.spacingLg),
-        child: CircularProgressIndicator(color: TvDesignTokens.brand),
+      loading: () => Padding(
+        padding: EdgeInsets.all(m.spacingLg),
+        child: const CircularProgressIndicator(color: TvDesignTokens.brand),
       ),
       error: (_, __) => const SizedBox.shrink(),
     );
   }
 
-  Widget _buildEpisodeRow(ApiClientFactory api, Episode ep) {
+  Widget _buildEpisodeRow(ApiClientFactory api, Episode ep, TvMetrics m) {
     final thumbUrl = _episodeImageUrl(api, ep);
     final watched = ep.userData?.played ?? false;
     return Padding(
-      padding: const EdgeInsets.only(bottom: TvDesignTokens.spacingSm),
+      padding: EdgeInsets.only(bottom: m.spacingSm),
       child: TvFocusable(
-        padding: const EdgeInsets.all(TvDesignTokens.spacingXs),
+        padding: EdgeInsets.all(m.spacingXs),
         onSelect: () => context.push('/tv/player?mediaId=${ep.id}'),
         child: Container(
-          padding: const EdgeInsets.all(TvDesignTokens.spacingMd),
+          padding: EdgeInsets.all(m.spacingMd),
           decoration: BoxDecoration(
             color: TvDesignTokens.surface,
-            borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+            borderRadius: BorderRadius.circular(m.posterRadius),
           ),
           child: Row(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                borderRadius: BorderRadius.circular(m.posterRadius),
                 child: SizedBox(
-                  width: 132,
-                  height: 74,
+                  width: m.s(132),
+                  height: m.s(74),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
                       thumbUrl != null
                           ? MediaImage(
                               imageUrl: thumbUrl,
-                              width: 132,
-                              height: 74,
+                              width: m.s(132),
+                              height: m.s(74),
                               fit: BoxFit.cover,
                             )
                           : const ColoredBox(
@@ -456,7 +457,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                           bottom: 0,
                           child: LinearProgressIndicator(
                             value: _episodeProgress(ep),
-                            minHeight: 4,
+                            minHeight: m.s(4),
                             backgroundColor: Colors.black54,
                             valueColor: const AlwaysStoppedAnimation(
                                 TvDesignTokens.brand),
@@ -466,7 +467,7 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -475,19 +476,19 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                       '${ep.indexNumber != null ? '${ep.indexNumber}. ' : ''}${ep.name}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: TvDesignTokens.fontSizeMd,
+                      style: TextStyle(
+                        fontSize: m.fontSizeMd,
                         color: TvDesignTokens.textPrimary,
                       ),
                     ),
                     if (ep.overview != null && ep.overview!.isNotEmpty) ...[
-                      const SizedBox(height: TvDesignTokens.spacingXs),
+                      SizedBox(height: m.spacingXs),
                       Text(
                         ep.overview!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: TvDesignTokens.fontSizeXs,
+                        style: TextStyle(
+                          fontSize: m.fontSizeXs,
                           color: TvDesignTokens.textSecondary,
                           height: TvDesignTokens.lineHeightNormal,
                         ),
@@ -496,13 +497,13 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
                   ],
                 ),
               ),
-              const SizedBox(width: TvDesignTokens.spacingMd),
+              SizedBox(width: m.spacingMd),
               Icon(
                 watched ? Icons.check_circle : Icons.play_circle_outline,
                 color: watched
                     ? TvDesignTokens.success
                     : TvDesignTokens.brand,
-                size: 32,
+                size: m.s(32),
               ),
             ],
           ),
@@ -532,17 +533,17 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     return null;
   }
 
-  Widget _errorScaffold(String msg) => Scaffold(
+  Widget _errorScaffold(String msg, TvMetrics m) => Scaffold(
         backgroundColor: TvDesignTokens.background,
-        body: _errorBody(msg),
+        body: _errorBody(msg, m),
       );
 
-  Widget _errorBody(String msg) => Center(
+  Widget _errorBody(String msg, TvMetrics m) => Center(
         child: Text(
           msg,
-          style: const TextStyle(
+          style: TextStyle(
             color: TvDesignTokens.textSecondary,
-            fontSize: TvDesignTokens.fontSizeMd,
+            fontSize: m.fontSizeMd,
           ),
         ),
       );

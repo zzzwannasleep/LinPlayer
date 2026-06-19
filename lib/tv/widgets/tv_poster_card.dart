@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../ui/widgets/common/media_widgets.dart';
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 
 /// TV 海报卡片
 /// 16:9 或 2:3 比例，支持焦点效果
@@ -11,8 +12,10 @@ class TvPosterCard extends StatelessWidget {
   final double? progress; // 0.0 - 1.0，null 表示不显示进度条
   final bool isNew;
   final String? nextEpisodeLabel;
-  final double width;
-  final double height;
+  /// 卡片宽度，传 null 时按当前屏幕响应式取 16:9 海报宽度。
+  final double? width;
+  /// 卡片高度，传 null 时按当前屏幕响应式取 16:9 海报高度。
+  final double? height;
   final VoidCallback? onTap;
 
   const TvPosterCard({
@@ -23,13 +26,16 @@ class TvPosterCard extends StatelessWidget {
     this.progress,
     this.isNew = false,
     this.nextEpisodeLabel,
-    this.width = TvDesignTokens.posterWidth16_9,
-    this.height = TvDesignTokens.posterHeight16_9,
+    this.width,
+    this.height,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
+    final double width = this.width ?? m.posterWidth16_9;
+    final double height = this.height ?? m.posterHeight16_9;
     return SizedBox(
       width: width,
       child: Column(
@@ -39,7 +45,7 @@ class TvPosterCard extends StatelessWidget {
           Stack(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(TvDesignTokens.posterRadius),
+                borderRadius: BorderRadius.circular(m.posterRadius),
                 child: SizedBox(
                   width: width,
                   height: height,
@@ -60,11 +66,11 @@ class TvPosterCard extends StatelessWidget {
                   left: 0,
                   right: 0,
                   child: Container(
-                    height: 4,
+                    height: m.s(4),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.only(
-                        bottomLeft: Radius.circular(TvDesignTokens.posterRadius),
-                        bottomRight: Radius.circular(TvDesignTokens.posterRadius),
+                        bottomLeft: Radius.circular(m.posterRadius),
+                        bottomRight: Radius.circular(m.posterRadius),
                       ),
                       color: Colors.black.withOpacity(0.3),
                     ),
@@ -74,9 +80,9 @@ class TvPosterCard extends StatelessWidget {
                       child: Container(
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.only(
-                            bottomLeft: Radius.circular(TvDesignTokens.posterRadius),
+                            bottomLeft: Radius.circular(m.posterRadius),
                             bottomRight: progress! >= 1.0
-                                ? Radius.circular(TvDesignTokens.posterRadius)
+                                ? Radius.circular(m.posterRadius)
                                 : Radius.zero,
                           ),
                           color: TvDesignTokens.brand,
@@ -88,21 +94,21 @@ class TvPosterCard extends StatelessWidget {
               // "新" 标签
               if (isNew)
                 Positioned(
-                  top: TvDesignTokens.spacingXs,
-                  right: TvDesignTokens.spacingXs,
+                  top: m.spacingXs,
+                  right: m.spacingXs,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: TvDesignTokens.spacingXs,
-                      vertical: 4,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: m.spacingXs,
+                      vertical: m.s(4),
                     ),
                     decoration: BoxDecoration(
                       color: TvDesignTokens.brand,
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(m.s(4)),
                     ),
-                    child: const Text(
+                    child: Text(
                       '新',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: m.fs(12),
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
@@ -112,21 +118,21 @@ class TvPosterCard extends StatelessWidget {
               // 下一集标签
               if (nextEpisodeLabel != null)
                 Positioned(
-                  top: TvDesignTokens.spacingXs,
-                  right: TvDesignTokens.spacingXs,
+                  top: m.spacingXs,
+                  right: m.spacingXs,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: TvDesignTokens.spacingXs,
-                      vertical: 4,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: m.spacingXs,
+                      vertical: m.s(4),
                     ),
                     decoration: BoxDecoration(
                       color: TvDesignTokens.brand.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(m.s(4)),
                     ),
                     child: Text(
                       nextEpisodeLabel!,
-                      style: const TextStyle(
-                        fontSize: 12,
+                      style: TextStyle(
+                        fontSize: m.fs(12),
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
                       ),
@@ -135,14 +141,14 @@ class TvPosterCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: TvDesignTokens.spacingXs),
+          SizedBox(height: m.spacingXs),
           // 标题
           Text(
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: TvDesignTokens.fontSizeSm,
+            style: TextStyle(
+              fontSize: m.fontSizeSm,
               color: TvDesignTokens.textPrimary,
               fontWeight: FontWeight.w500,
             ),
@@ -153,8 +159,8 @@ class TvPosterCard extends StatelessWidget {
               subtitle!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: TvDesignTokens.fontSizeXs,
+              style: TextStyle(
+                fontSize: m.fontSizeXs,
                 color: TvDesignTokens.textSecondary,
               ),
             ),
@@ -164,9 +170,9 @@ class TvPosterCard extends StatelessWidget {
   }
 
   Widget _buildPlaceholder() {
-    return Container(
+    return const ColoredBox(
       color: TvDesignTokens.surfaceElevated,
-      child: const Center(
+      child: Center(
         child: Icon(
           Icons.image_not_supported_outlined,
           color: TvDesignTokens.textDisabled,

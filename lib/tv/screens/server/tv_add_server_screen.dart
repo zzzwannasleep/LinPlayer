@@ -7,6 +7,7 @@ import '../../../core/api/emby_api.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../theme/tv_design_tokens.dart';
+import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_button.dart';
 import '../../widgets/tv_focusable.dart';
 
@@ -89,75 +90,79 @@ class _TvAddServerScreenState extends ConsumerState<TvAddServerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     return Scaffold(
       backgroundColor: TvDesignTokens.background,
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 720),
+          constraints: BoxConstraints(maxWidth: m.s(720)),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(TvDesignTokens.spacingXxl),
+            padding: EdgeInsets.all(m.spacingXxl),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   '添加服务器',
                   style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeXxl,
+                    fontSize: m.fontSizeXxl,
                     color: TvDesignTokens.textPrimary,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(height: TvDesignTokens.spacingSm),
-                const Text(
+                SizedBox(height: m.spacingSm),
+                Text(
                   '连接你的 Emby 服务器',
                   style: TextStyle(
-                    fontSize: TvDesignTokens.fontSizeSm,
+                    fontSize: m.fontSizeSm,
                     color: TvDesignTokens.textSecondary,
                   ),
                 ),
-                const SizedBox(height: TvDesignTokens.spacingXl),
+                SizedBox(height: m.spacingXl),
                 _field(
+                  m: m,
                   label: '服务器地址',
                   controller: _urlController,
                   hint: 'http://192.168.1.100:8096',
                   autofocus: true,
                   keyboardType: TextInputType.url,
                 ),
-                const SizedBox(height: TvDesignTokens.spacingLg),
+                SizedBox(height: m.spacingLg),
                 _field(
+                  m: m,
                   label: '用户名',
                   controller: _userController,
                   hint: '账号（留空可匿名登录）',
                 ),
-                const SizedBox(height: TvDesignTokens.spacingLg),
+                SizedBox(height: m.spacingLg),
                 _field(
+                  m: m,
                   label: '密码',
                   controller: _passController,
                   hint: '密码（可留空）',
                   obscure: true,
                 ),
                 if (_error != null) ...[
-                  const SizedBox(height: TvDesignTokens.spacingLg),
+                  SizedBox(height: m.spacingLg),
                   Text(
                     _error!,
-                    style: const TextStyle(
-                      fontSize: TvDesignTokens.fontSizeSm,
+                    style: TextStyle(
+                      fontSize: m.fontSizeSm,
                       color: TvDesignTokens.error,
                     ),
                   ).animate().shake(duration: 400.ms),
                 ],
-                const SizedBox(height: TvDesignTokens.spacingXl),
+                SizedBox(height: m.spacingXl),
                 Row(
                   children: [
                     if (_loading)
-                      const Padding(
+                      Padding(
                         padding:
-                            EdgeInsets.only(right: TvDesignTokens.spacingLg),
+                            EdgeInsets.only(right: m.spacingLg),
                         child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(
+                          width: m.s(28),
+                          height: m.s(28),
+                          child: const CircularProgressIndicator(
                             color: TvDesignTokens.brand,
                             strokeWidth: 3,
                           ),
@@ -168,24 +173,24 @@ class _TvAddServerScreenState extends ConsumerState<TvAddServerScreen> {
                       icon: Icons.link,
                       onPressed: _loading ? null : _connect,
                     ),
-                    const SizedBox(width: TvDesignTokens.spacingMd),
+                    SizedBox(width: m.spacingMd),
                     TvFocusable(
-                      padding: const EdgeInsets.all(4),
+                      padding: EdgeInsets.all(m.s(4)),
                       onSelect: () => context.go('/tv/home'),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: TvDesignTokens.spacingLg,
-                          vertical: TvDesignTokens.spacingMd,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: m.spacingLg,
+                          vertical: m.spacingMd,
                         ),
                         decoration: BoxDecoration(
                           color: TvDesignTokens.surface,
                           borderRadius: BorderRadius.circular(
-                              TvDesignTokens.posterRadius),
+                              m.posterRadius),
                         ),
-                        child: const Text(
+                        child: Text(
                           '取消',
                           style: TextStyle(
-                            fontSize: TvDesignTokens.fontSizeMd,
+                            fontSize: m.fontSizeMd,
                             color: TvDesignTokens.textPrimary,
                           ),
                         ),
@@ -202,6 +207,7 @@ class _TvAddServerScreenState extends ConsumerState<TvAddServerScreen> {
   }
 
   Widget _field({
+    required TvMetrics m,
     required String label,
     required TextEditingController controller,
     String? hint,
@@ -214,12 +220,12 @@ class _TvAddServerScreenState extends ConsumerState<TvAddServerScreen> {
       children: [
         Text(
           label,
-          style: const TextStyle(
-            fontSize: TvDesignTokens.fontSizeSm,
+          style: TextStyle(
+            fontSize: m.fontSizeSm,
             color: TvDesignTokens.textSecondary,
           ),
         ),
-        const SizedBox(height: TvDesignTokens.spacingXs),
+        SizedBox(height: m.spacingXs),
         Focus(
           child: Builder(
             builder: (context) {
@@ -228,7 +234,7 @@ class _TvAddServerScreenState extends ConsumerState<TvAddServerScreen> {
                 decoration: BoxDecoration(
                   color: TvDesignTokens.surface,
                   borderRadius:
-                      BorderRadius.circular(TvDesignTokens.posterRadius),
+                      BorderRadius.circular(m.posterRadius),
                   border: Border.all(
                     color: focused
                         ? TvDesignTokens.brand
@@ -236,28 +242,28 @@ class _TvAddServerScreenState extends ConsumerState<TvAddServerScreen> {
                     width: focused ? 3 : 1.5,
                   ),
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: TvDesignTokens.spacingMd,
+                padding: EdgeInsets.symmetric(
+                  horizontal: m.spacingMd,
                 ),
                 child: TextField(
                   controller: controller,
                   autofocus: autofocus,
                   obscureText: obscure,
                   keyboardType: keyboardType,
-                  style: const TextStyle(
-                    fontSize: TvDesignTokens.fontSizeMd,
+                  style: TextStyle(
+                    fontSize: m.fontSizeMd,
                     color: TvDesignTokens.textPrimary,
                   ),
                   cursorColor: TvDesignTokens.brand,
                   decoration: InputDecoration(
                     border: InputBorder.none,
                     hintText: hint,
-                    hintStyle: const TextStyle(
+                    hintStyle: TextStyle(
                       color: TvDesignTokens.textDisabled,
-                      fontSize: TvDesignTokens.fontSizeSm,
+                      fontSize: m.fontSizeSm,
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      vertical: TvDesignTokens.spacingMd,
+                    contentPadding: EdgeInsets.symmetric(
+                      vertical: m.spacingMd,
                     ),
                   ),
                 ),

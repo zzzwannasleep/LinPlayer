@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/tv_design_tokens.dart';
+import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 
 /// TV 主操作按钮 —— 原生实现 + TV 焦点（放大 / 描边 / 品牌色光晕，flutter_animate 驱动）
@@ -30,17 +31,18 @@ class TvButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final m = context.tv;
     final fg = outlined ? TvDesignTokens.textPrimary : Colors.white;
     return TvFocusable(
       autofocus: autofocus,
       focusNode: focusNode,
       onSelect: onPressed,
       scale: 1.08,
-      padding: const EdgeInsets.all(TvDesignTokens.spacingXs),
+      padding: EdgeInsets.all(m.spacingXs),
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: TvDesignTokens.spacingLg,
-          vertical: TvDesignTokens.spacingSm,
+        padding: EdgeInsets.symmetric(
+          horizontal: m.spacingLg,
+          vertical: m.spacingSm,
         ),
         decoration: BoxDecoration(
           color: outlined ? Colors.transparent : TvDesignTokens.brand,
@@ -53,13 +55,13 @@ class TvButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon, color: fg, size: 28),
-              const SizedBox(width: TvDesignTokens.spacingXs),
+              Icon(icon, color: fg, size: m.s(28)),
+              SizedBox(width: m.spacingXs),
             ],
             Text(
               text,
               style: TextStyle(
-                fontSize: TvDesignTokens.fontSizeMd,
+                fontSize: m.fontSizeMd,
                 color: fg,
                 fontWeight: FontWeight.bold,
               ),

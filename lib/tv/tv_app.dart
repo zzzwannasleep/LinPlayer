@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/app_providers.dart';
+import 'theme/tv_metrics.dart';
 import 'theme/tv_theme.dart';
 import 'routes/tv_router.dart';
 
@@ -30,6 +31,14 @@ class LinPlayerTvApp extends ConsumerWidget {
         Locale('zh', 'CN'),
         Locale('en'),
       ],
+      // 在 MaterialApp 内部（MediaQuery 可用）按屏幕尺寸应用响应式主题，
+      // 使对话框/输入框/默认文本等主题默认值也随 Pad 屏幕等比缩放。
+      builder: (context, child) {
+        return Theme(
+          data: TvTheme.themeFor(context.tv),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       routerConfig: tvRouter,
     );
   }
