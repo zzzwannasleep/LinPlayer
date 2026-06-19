@@ -123,6 +123,10 @@ class IntroSkipService {
     final merged = (intro == null && outro == null)
         ? null
         : IntroSkipSegments(intro: intro, outro: outro);
+    // 单例长驻服务，缓存随观看集数无界增长——保留最近 300 条，超出按插入序淘汰最旧。
+    if (_cache.length >= 300) {
+      _cache.remove(_cache.keys.first);
+    }
     _cache[key] = merged;
     if (merged != null) {
       _logger.i(

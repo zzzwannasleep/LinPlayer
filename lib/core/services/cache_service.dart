@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/painting.dart';
 import 'package:path/path.dart' as path;
+import '../utils/platform_utils.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class CacheService {
   static const _imageCacheExpiryDaysKey = 'linplayer_image_cache_expiry_days';
   static const _videoCacheMaxSizeMBKey = 'linplayer_video_cache_max_size_mb';
+  static const _pgsBlendModeKey = 'linplayer_pgs_blend_mode';
 
   /// 图片磁盘缓存硬上限：6GB。
   static const int imageCacheMaxBytes = 6 * 1024 * 1024 * 1024;
@@ -104,6 +106,36 @@ class CacheService {
     await prefs.setInt(
       _videoCacheMaxSizeMBKey,
       mb.clamp(videoCacheMinMB, videoCacheMaxMB),
+    );
+  }
+
+  /// PGS/SUP 图形字幕的混合渲染模式（mpv `blend-subtitles`）：
+  /// 'no'（OSD 覆盖层，默认）/ 'video'（混合到视频分辨率）/ 'yes'（混合到输出帧）。
+  /// 实验性开关——用于排查图形字幕在 UI 重绘（开面板/滑动）时的画面闪现。
+  static Future<String> getPgsBlendMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_pgsBlendModeKey);
+    return (v == 'yes' || v == 'video') ? v! : 'no';
+  }
+
+  /// mpv 解复用缓冲（前向/后向）的 RAM 安全预算，单位字节。
+  ///
+  /// 关键修复：`demuxer-max-bytes` 控制的是**常驻内存**的解复用包队列。即便开启
+  /// `cache-on-disk`，其索引/工作集仍在 RAM，且部分 libmpv 构建未必真把负载落盘
+  /// （曾观测播放时 RAM 飙到 2GB+、"没落盘"）。因此把它与用户的磁盘缓存档位
+  /// （300MB–8GB）**解耦**，按平台硬限上限——桌面 384/128MiB，移动/TV 192/64MiB，
+  /// 杜绝 GB 级 RAM 占用导致的卡顿/OOM。磁盘缓存仍由 cache-on-disk 在此预算内承接。
+  static Future<({int forward, int back})> getDemuxerRamBudgetBytes() async {
+    final mb = await getVideoCacheMaxSizeMB();
+    final total = mb * 1024 * 1024;
+    final forwardCeil =
+        (isDesktopPlatform ? 384 : 192) * 1024 * 1024;
+    final backCeil = (isDesktopPlatform ? 128 : 64) * 1024 * 1024;
+    final forward = (total * 3) ~/ 4;
+    final back = total ~/ 4;
+    return (
+      forward: forward > forwardCeil ? forwardCeil : forward,
+      back: back > backCeil ? backCeil : back,
     );
   }
 
@@ -244,11 +276,21 @@ class CacheService {
     }
   }
 
-  /// 配置内存图片缓存上限（对低内存机器友好）。
+  /// 配置内存图片缓存上限（按平台分级，对低内存机器友好）。
   /// 解码位图只在内存保留少量，磁盘持久化由 PersistentNetworkImageProvider 负责。
+  ///
+  /// 桌面内存充足，给较大的解码缓存换取滚动流畅；移动/TV 内存吃紧（TV 盒子
+  /// 常见仅 1–2GB），收紧到 ~48MB / 240 张，避免解码位图堆积触发 OOM 闪退。
+  /// 单张解码已被 MediaImage 钳制在 1280 长边（≈3.7MB），按张数与字节双限。
   static void configureMemoryCache() {
-    PaintingBinding.instance.imageCache.maximumSize = 1000;
-    PaintingBinding.instance.imageCache.maximumSizeBytes = 100 * 1024 * 1024;
+    final cache = PaintingBinding.instance.imageCache;
+    if (isDesktopPlatform) {
+      cache.maximumSize = 600;
+      cache.maximumSizeBytes = 96 * 1024 * 1024;
+    } else {
+      cache.maximumSize = 240;
+      cache.maximumSizeBytes = 48 * 1024 * 1024;
+    }
   }
 
   static String formatBytes(int bytes) {

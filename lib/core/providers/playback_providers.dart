@@ -352,17 +352,6 @@ final gpuNextEnabledProvider =
   );
 });
 
-final impellerEnabledProvider =
-    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
-  return PreferenceNotifier<bool>(
-    defaultValue: false,
-    readValue: (prefs) => prefs.getBool('linplayer_impeller_enabled'),
-    writeValue: (prefs, value) async {
-      await prefs.setBool('linplayer_impeller_enabled', value);
-    },
-  );
-});
-
 final exoLibassProvider =
     StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
   return PreferenceNotifier<bool>(
@@ -398,3 +387,20 @@ final subtitleBackgroundProvider =
 });
 
 final anime4KLevelProvider = StateProvider<String>((ref) => 'off');
+
+/// PGS/SUP 图形字幕混合渲染模式（mpv blend-subtitles）：'no'/'video'/'yes'。
+/// 实验项，用于排查图形字幕在 UI 重绘时的闪现，默认 'no'（OSD 覆盖层=原行为）。
+/// 键名与 [CacheService.getPgsBlendMode] 一致，桌面 libmpv 初始化时也会读取。
+final pgsBlendModeProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: 'no',
+    readValue: (prefs) {
+      final v = prefs.getString('linplayer_pgs_blend_mode');
+      return (v == 'yes' || v == 'video') ? v : 'no';
+    },
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_pgs_blend_mode', value);
+    },
+  );
+});

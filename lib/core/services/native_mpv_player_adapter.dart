@@ -152,10 +152,11 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
       int diskCacheForwardBytes = 0;
       int diskCacheBackBytes = 0;
       if (_isHttpUrl(videoUrl)) {
-        final cacheMaxMB = await CacheService.getVideoCacheMaxSizeMB();
-        final totalBytes = cacheMaxMB * 1024 * 1024;
-        diskCacheForwardBytes = (totalBytes * 3) ~/ 4; // 前向:后向 = 3:1
-        diskCacheBackBytes = totalBytes ~/ 4;
+        // demuxer-max-bytes 常驻 RAM，与磁盘缓存档位解耦、按平台硬限，
+        // 避免大档位把内存吃到 GB 级（移动/TV OOM）。见 getDemuxerRamBudgetBytes。
+        final ramBudget = await CacheService.getDemuxerRamBudgetBytes();
+        diskCacheForwardBytes = ramBudget.forward;
+        diskCacheBackBytes = ramBudget.back;
         videoCacheDir = await CacheService.videoStreamCacheDirPath;
       }
 
@@ -439,6 +440,11 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
       'playerId': _playerId,
       'enabled': enabled,
     });
+  }
+
+  @override
+  Future<void> setSubtitleBlendMode(String mode) async {
+    // 安卓原生 mpv 暂未透传该实验项（PGS 闪现排查目前针对桌面）；空操作。
   }
 
   // ---- Aspect ratio ----

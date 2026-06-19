@@ -200,6 +200,8 @@ class StreamingSubtitleTranslator {
     _hidOriginal = false;
     _service = null;
     displayText.value = '';
+    // 释放本集累积的翻译缓存——否则每播一集都往同一个 Map 堆字符串，长会话内存只增不减。
+    _cache.clear();
     _logger.i(_tag, '流式字幕翻译已停止');
   }
 

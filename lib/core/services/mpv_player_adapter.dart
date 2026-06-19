@@ -53,6 +53,8 @@ class MpvPlayerAdapter implements PlayerAdapter {
   bool _subtitleBackground = false;
   String? _secondarySid;
   bool _hasBitmapSubtitle = false;
+  // PGS/SUP 图形字幕的 mpv blend-subtitles 模式（'no'/'video'/'yes'），默认覆盖层。
+  String _subtitleBlendMode = 'no';
   bool _currentSubIsAss = false;
   bool _usingExternalSubtitle = false;
   bool _pgsDecoderAvailable = true;
@@ -524,20 +526,21 @@ class MpvPlayerAdapter implements PlayerAdapter {
           // 默认关闭次字幕可见性，只有用户明确选择次字幕时才开启
           // 避免同时显示两个字幕（主字幕+次字幕）
           await np.setProperty('secondary-sub-visibility', 'no');
-          // 字幕走 OSD 覆盖层渲染（不混入视频帧）。
-          // blend-subtitles=video 会让位图字幕(PGS/SUP)每次刷新都重绘整帧，
-          // 导致视频画面闪现；覆盖层渲染同样能稳定显示 PGS/SUP。
-          await np.setProperty('blend-subtitles', 'no');
+          // 图形字幕(PGS/SUP)混合模式由用户实验开关控制（默认 'no'=OSD 覆盖层）。
+          // 'no' 覆盖层渲染不混入视频帧；'video'/'yes' 把字幕混合进帧——不同显卡/
+          // libmpv 构建下闪现表现不同，故做成可切换项让用户挑不闪的那个。
+          _subtitleBlendMode = await CacheService.getPgsBlendMode();
+          await np.setProperty('blend-subtitles', _subtitleBlendMode);
           await np.setProperty('sub-visibility', 'yes');
           await np.setProperty('hwdec', hardwareDecoding ? 'auto-safe' : 'no');
           await _applyShaderList(_glslShaders);
           if (_isHttpUrl(videoUrl)) {
             // 视频播放缓存：写到磁盘而非内存，避免大缓冲吃满 RAM 导致卡顿/OOM。
-            // 缓冲总量由用户设置（300MB–8GB）控制，按 3:1 分给前向/回退。
-            final cacheMaxMB = await CacheService.getVideoCacheMaxSizeMB();
-            final totalBytes = cacheMaxMB * 1024 * 1024;
-            final forwardBytes = (totalBytes * 3) ~/ 4;
-            final backBytes = totalBytes ~/ 4;
+            // demuxer-max-bytes 是常驻 RAM 的解复用队列上限，已与磁盘缓存档位解耦、
+            // 按平台硬限（见 getDemuxerRamBudgetBytes），杜绝曾经的 2GB+ RAM 占用。
+            final ramBudget = await CacheService.getDemuxerRamBudgetBytes();
+            final forwardBytes = ramBudget.forward;
+            final backBytes = ramBudget.back;
             final cacheDir = await CacheService.videoStreamCacheDirPath;
 
             await np.setProperty('cache', 'yes');
@@ -1786,6 +1789,16 @@ class MpvPlayerAdapter implements PlayerAdapter {
       'sub-back-color',
       enabled ? '#000000C0' : '#00000000',
     );
+  }
+
+  @override
+  Future<void> setSubtitleBlendMode(String mode) async {
+    final m = (mode == 'yes' || mode == 'video') ? mode : 'no';
+    _subtitleBlendMode = m;
+    final np = _nativePlayer;
+    if (np == null) return;
+    // 实时切换，便于现场 A/B 排查 PGS/SUP 闪现，无需重开视频。
+    await np.setProperty('blend-subtitles', m);
   }
 
   @override

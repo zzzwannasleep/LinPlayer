@@ -24,8 +24,8 @@ class PlayerSettingsScreen extends ConsumerWidget {
     final mpvDolbyVisionFix = ref.watch(mpvDolbyVisionFixProvider);
     final externalMpvPath = ref.watch(externalMpvPathProvider);
     final gpuNextEnabled = ref.watch(gpuNextEnabledProvider);
-    final impellerEnabled = ref.watch(impellerEnabledProvider);
     final exoLibass = ref.watch(exoLibassProvider);
+    final pgsBlendMode = ref.watch(pgsBlendModeProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('播放器设置')),
@@ -153,6 +153,24 @@ class PlayerSettingsScreen extends ConsumerWidget {
             onChanged: (value) =>
                 ref.read(subtitleBackgroundProvider.notifier).state = value,
           ),
+          if (isDesktopPlatform)
+            ListTile(
+              title: const Text('图形字幕渲染模式 (PGS/SUP)'),
+              subtitle: Text(_pgsBlendLabel(pgsBlendMode)),
+              trailing: DropdownButton<String>(
+                value: pgsBlendMode,
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(pgsBlendModeProvider.notifier).state = v;
+                  }
+                },
+                items: const [
+                  DropdownMenuItem(value: 'no', child: Text('覆盖层（默认）')),
+                  DropdownMenuItem(value: 'video', child: Text('混合到视频')),
+                  DropdownMenuItem(value: 'yes', child: Text('混合到输出帧')),
+                ],
+              ),
+            ),
 
           const Divider(),
           const Padding(
@@ -238,13 +256,6 @@ class PlayerSettingsScreen extends ConsumerWidget {
                 color: Colors.grey,
               ),
             ),
-          ),
-          SwitchListTile(
-            title: const Text('启用 Impeller 渲染引擎'),
-            subtitle: const Text('Flutter 新一代渲染引擎（需要重启应用）'),
-            value: impellerEnabled,
-            onChanged: (value) =>
-                ref.read(impellerEnabledProvider.notifier).state = value,
           ),
           if (isDesktopPlatform) ...[
             const Divider(),
@@ -578,6 +589,17 @@ class PlayerSettingsScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  String _pgsBlendLabel(String mode) {
+    switch (mode) {
+      case 'video':
+        return '混合到视频分辨率 · 覆盖层闪现时可试此项';
+      case 'yes':
+        return '混合到输出帧 · 最不易闪但可能略糊';
+      default:
+        return '覆盖层渲染（默认）· 性能最好，部分显卡滑动时会闪';
+    }
   }
 
   void _showSubtitleFontSelector(BuildContext context, WidgetRef ref) {

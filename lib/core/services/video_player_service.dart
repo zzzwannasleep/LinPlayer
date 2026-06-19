@@ -817,6 +817,12 @@ class VideoPlayerService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 设置图形字幕(PGS/SUP)混合渲染模式（'no'/'video'/'yes'）。实验项，桌面 libmpv 生效。
+  Future<void> setSubtitleBlendMode(String mode) async {
+    await _adapter?.setSubtitleBlendMode(mode);
+    notifyListeners();
+  }
+
   /// 设置画面比例
   Future<void> setAspectRatio(String ratio) async {
     await _adapter?.setAspectRatio(ratio);

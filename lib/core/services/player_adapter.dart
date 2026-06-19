@@ -133,6 +133,10 @@ abstract class PlayerAdapter {
   /// 设置字幕黑色背景
   Future<void> setSubtitleBackground(bool enabled) async {}
 
+  /// 设置图形字幕(PGS/SUP)混合渲染模式：'no'/'video'/'yes'。
+  /// 仅桌面 libmpv 实现，其余适配器空操作。用于排查图形字幕闪现。
+  Future<void> setSubtitleBlendMode(String mode) async {}
+
   /// 设置画面比例
   Future<void> setAspectRatio(String ratio) async {}
 

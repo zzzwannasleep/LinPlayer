@@ -86,14 +86,15 @@ class _DetailContentState extends State<_DetailContent> {
               ),
             ),
 
-          // 剧集相关区块
+          // 剧集相关区块（季 + 集；集数走懒加载 Sliver，几百集也只构建可视项）
           if (widget.item.type == 'Series') ...[
-            SliverToBoxAdapter(
-              child: _SeasonsAndEpisodesSection(
-                itemId: widget.itemId,
-                onEpisodeTap: (episode) => context.push('/episode/${episode.id}'),
-                onSeasonTap: (season) => context.push('/season/${season.id}', extra: _backgroundColor),
-              ),
+            _SeasonsSliver(
+              itemId: widget.itemId,
+              onSeasonTap: (season) => context.push('/season/${season.id}', extra: _backgroundColor),
+            ),
+            _EpisodesSliver(
+              itemId: widget.itemId,
+              onEpisodeTap: (episode) => context.push('/episode/${episode.id}'),
             ),
           ],
 
@@ -112,35 +113,25 @@ class _DetailContentState extends State<_DetailContent> {
   }
 }
 
-class _SeasonsAndEpisodesSection extends ConsumerWidget {
+/// 季列表 Sliver（横向卡片，数量少，整体一个 box adapter）。
+class _SeasonsSliver extends ConsumerWidget {
   final String itemId;
-  final Function(Episode) onEpisodeTap;
   final Function(Season) onSeasonTap;
 
-  const _SeasonsAndEpisodesSection({
+  const _SeasonsSliver({
     required this.itemId,
-    required this.onEpisodeTap,
     required this.onSeasonTap,
   });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final seasonsAsync = ref.watch(seasonsProvider(itemId));
-    final episodesAsync = ref.watch(episodesProvider((seriesId: itemId, seasonId: null)));
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SeasonsSection(
-          seasonsAsync: seasonsAsync,
-          onSeasonTap: onSeasonTap,
-        ),
-        _EpisodesSection(
-          title: '集数选择',
-          episodesAsync: episodesAsync,
-          onEpisodeTap: onEpisodeTap,
-        ),
-      ],
+    // 季横向列表项不多，整体放进一个 box adapter 即可。
+    return SliverToBoxAdapter(
+      child: _SeasonsSection(
+        seasonsAsync: seasonsAsync,
+        onSeasonTap: onSeasonTap,
+      ),
     );
   }
 }
@@ -656,92 +647,109 @@ class _SeasonCard extends ConsumerWidget {
   }
 }
 
-/// 集数选择区块
-class _EpisodesSection extends StatefulWidget {
-  final String title;
-  final AsyncValue<List<Episode>> episodesAsync;
+/// 集数选择区块（懒加载 Sliver）。
+///
+/// 之前用 Wrap / `...episodes.map()` 一次性把整季所有集都构建进内存，几百集的番剧
+/// 会瞬间堆出几百个 widget + 缩略图。改为 SliverList/SliverGrid.builder，只构建
+/// 视口内可见的集，离屏自动回收——内存与集数解耦。
+class _EpisodesSliver extends ConsumerStatefulWidget {
+  final String itemId;
   final Function(Episode) onEpisodeTap;
-  
-  const _EpisodesSection({
-    required this.title,
-    required this.episodesAsync,
+
+  const _EpisodesSliver({
+    required this.itemId,
     required this.onEpisodeTap,
   });
-  
+
   @override
-  State<_EpisodesSection> createState() => _EpisodesSectionState();
+  ConsumerState<_EpisodesSliver> createState() => _EpisodesSliverState();
 }
 
-class _EpisodesSectionState extends State<_EpisodesSection> {
+class _EpisodesSliverState extends ConsumerState<_EpisodesSliver> {
   bool _isGridView = false;
-  
+
   @override
   Widget build(BuildContext context) {
-    return widget.episodesAsync.when(
+    final episodesAsync =
+        ref.watch(episodesProvider((seriesId: widget.itemId, seasonId: null)));
+    return episodesAsync.when(
       data: (episodes) {
-        if (episodes.isEmpty) return const SizedBox.shrink();
-        
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    widget.title,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                  IconButton(
-                    icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
-                    onPressed: () => setState(() => _isGridView = !_isGridView),
-                  ),
-                ],
-              ),
-            ),
+        if (episodes.isEmpty) {
+          return const SliverToBoxAdapter(child: SizedBox.shrink());
+        }
+        return SliverMainAxisGroup(
+          slivers: [
+            SliverToBoxAdapter(child: _header()),
             if (_isGridView)
-              Padding(
+              SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: episodes.map((episode) {
-                    final isWatched = episode.userData?.played ?? false;
-                    return GestureDetector(
-                      onTap: () => widget.onEpisodeTap(episode),
-                      child: Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: isWatched
-                              ? const Color(0xFF5B8DEF).withValues(alpha: 0.1)
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: isWatched
-                              ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
-                              : Text(
-                                  'E${episode.indexNumber}',
-                                  style: const TextStyle(fontWeight: FontWeight.w600),
-                                ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                sliver: SliverGrid.builder(
+                  gridDelegate:
+                      const SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: 68,
+                    mainAxisExtent: 60,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                  ),
+                  itemCount: episodes.length,
+                  itemBuilder: (_, i) => _gridCell(episodes[i]),
                 ),
               )
             else
-              ...episodes.map((episode) => _EpisodeListTile(
-                episode: episode,
-                onTap: () => widget.onEpisodeTap(episode),
-              )),
+              SliverList.builder(
+                itemCount: episodes.length,
+                itemBuilder: (_, i) => _EpisodeListTile(
+                  episode: episodes[i],
+                  onTap: () => widget.onEpisodeTap(episodes[i]),
+                ),
+              ),
           ],
         );
       },
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      loading: () => const SliverToBoxAdapter(child: SizedBox.shrink()),
+      error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+    );
+  }
+
+  Widget _header() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            '集数选择',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          IconButton(
+            icon: Icon(_isGridView ? Icons.view_list : Icons.grid_view),
+            onPressed: () => setState(() => _isGridView = !_isGridView),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _gridCell(Episode episode) {
+    final isWatched = episode.userData?.played ?? false;
+    return GestureDetector(
+      onTap: () => widget.onEpisodeTap(episode),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isWatched
+              ? const Color(0xFF5B8DEF).withValues(alpha: 0.1)
+              : Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: isWatched
+              ? const Icon(Icons.check, color: Color(0xFF5B8DEF))
+              : Text(
+                  'E${episode.indexNumber}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+        ),
+      ),
     );
   }
 }

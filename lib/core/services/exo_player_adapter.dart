@@ -568,6 +568,11 @@ class ExoPlayerAdapter implements PlayerAdapter {
   }
 
   @override
+  Future<void> setSubtitleBlendMode(String mode) async {
+    // ExoPlayer 无 mpv blend-subtitles 概念，空操作。
+  }
+
+  @override
   Future<void> setSubtitleBackground(bool enabled) async {
     _subtitleBackground = enabled;
     _subtitleSettingsVersion.value++;

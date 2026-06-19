@@ -128,6 +128,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           unawaited(_playerService.setSubtitleBackground(next));
         }
       });
+      ref.listenManual(pgsBlendModeProvider, (prev, next) {
+        if (prev != next) {
+          unawaited(_playerService.setSubtitleBlendMode(next));
+        }
+      });
     });
   }
 

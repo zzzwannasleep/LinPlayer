@@ -3,6 +3,41 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_interfaces.dart';
 import '../providers/app_providers.dart';
 
+/// 有界 LRU 保活：让导航级 provider 的结果在内存里保留「最近若干份」。
+///
+/// 取舍：纯 autoDispose 离开页面即释放（省内存）但返回会重新联网（网络慢则卡）；
+/// 纯 keepAlive 返回秒开但浏览越多驻留越多（移动/TV OOM）。这里折中——
+/// 每份结果持有一个 KeepAliveLink 钉在内存，超过 [maxEntries] 就放开最旧的那份，
+/// 使其在无人 watch 时被 autoDispose 回收。于是：
+/// - 返回最近看过的剧/集 → provider 仍在内存，秒开、**不重新联网**；
+/// - 内存恒定有界（元数据每份仅几 KB，60 份 ≈ 1-2MB），不再随浏览无限增长；
+/// - 标记已看/收藏后用 ref.invalidate 触发重建 → 重新拉取，**不会显示过期状态**
+///   （磁盘缓存做不到这点，故元数据不落盘只做有界内存保活）。
+class _BoundedKeepAlive {
+  _BoundedKeepAlive({required this.maxEntries});
+
+  final int maxEntries;
+  // LinkedHashMap 语义：保持插入顺序，最旧的在 keys.first。
+  final Map<String, KeepAliveLink> _links = <String, KeepAliveLink>{};
+
+  /// 在 autoDispose provider 体内调用：保活当前结果并登记到 LRU。
+  void retain(String key, Ref ref) {
+    final link = ref.keepAlive();
+    _links.remove(key)?.close(); // 同 key 旧链接先放开（如 invalidate 重建）
+    _links[key] = link;
+    ref.onDispose(() {
+      if (identical(_links[key], link)) _links.remove(key);
+    });
+    while (_links.length > maxEntries) {
+      final oldestKey = _links.keys.first;
+      _links.remove(oldestKey)?.close();
+    }
+  }
+}
+
+/// 详情/集/季/演员/相似/播放信息共用一个 LRU（约 12 部剧的往返足够秒开）。
+final _metadataKeepAlive = _BoundedKeepAlive(maxEntries: 60);
+
 class EmbyMediaCounts {
   final int movieCount;
   final int episodeCount;
@@ -83,38 +118,43 @@ final embyMediaCountsProvider = FutureProvider<EmbyMediaCounts>((ref) async {
 /// ==========================================
 
 /// 媒体项详情
-final mediaItemProvider = FutureProvider.family<MediaItem, String>((ref, itemId) async {
-  ref.keepAlive();
+///
+/// 内存优化：autoDispose + 有界 LRU 保活（见 [_metadataKeepAlive]）。离开页面后
+/// 仍保留最近若干份在内存——返回秒开、不重新联网；超出上限的最旧项被回收，
+/// 内存恒定有界。之前全量 keepAlive，浏览每部剧都把详情/季/集/演员/相似永久钉死，
+/// 重度浏览必然 OOM（移动/TV 尤甚）。
+final mediaItemProvider = FutureProvider.autoDispose.family<MediaItem, String>((ref, itemId) async {
+  _metadataKeepAlive.retain('item:$itemId', ref);
   final api = ref.watch(apiClientProvider);
   return await api.media.getItemDetails(itemId);
 });
 
 /// 相似推荐
-final similarItemsProvider = FutureProvider.family<List<MediaItem>, String>((ref, itemId) async {
-  ref.keepAlive();
+final similarItemsProvider = FutureProvider.autoDispose.family<List<MediaItem>, String>((ref, itemId) async {
+  _metadataKeepAlive.retain('similar:$itemId', ref);
   final api = ref.watch(apiClientProvider);
   return await api.media.getSimilarItems(itemId);
 });
 
 /// 季列表
-final seasonsProvider = FutureProvider.family<List<Season>, String>((ref, seriesId) async {
-  ref.keepAlive();
+final seasonsProvider = FutureProvider.autoDispose.family<List<Season>, String>((ref, seriesId) async {
+  _metadataKeepAlive.retain('seasons:$seriesId', ref);
   final api = ref.watch(apiClientProvider);
   return await api.media.getSeasons(seriesId);
 });
 
 /// 集列表
-final episodesProvider = FutureProvider.family<List<Episode>, ({String seriesId, String? seasonId})>(
+final episodesProvider = FutureProvider.autoDispose.family<List<Episode>, ({String seriesId, String? seasonId})>(
   (ref, params) async {
-    ref.keepAlive();
+    _metadataKeepAlive.retain('episodes:${params.seriesId}:${params.seasonId}', ref);
     final api = ref.watch(apiClientProvider);
     return await api.media.getEpisodes(params.seriesId, seasonId: params.seasonId);
   },
 );
 
 /// 演职人员
-final personsProvider = FutureProvider.family<List<Person>, String>((ref, itemId) async {
-  ref.keepAlive();
+final personsProvider = FutureProvider.autoDispose.family<List<Person>, String>((ref, itemId) async {
+  _metadataKeepAlive.retain('persons:$itemId', ref);
   final api = ref.watch(apiClientProvider);
   final item = await api.media.getItemDetails(itemId);
   return item.people ?? const <Person>[];
@@ -125,9 +165,8 @@ final personsProvider = FutureProvider.family<List<Person>, String>((ref, itemId
 /// ==========================================
 
 /// 媒体库内容
-final libraryItemsProvider = FutureProvider.family<List<MediaItem>, ({String libraryId, String? sortBy, String? sortOrder})>(
+final libraryItemsProvider = FutureProvider.autoDispose.family<List<MediaItem>, ({String libraryId, String? sortBy, String? sortOrder})>(
   (ref, params) async {
-    ref.keepAlive();
     final api = ref.watch(apiClientProvider);
     return await api.library.getLibraryItems(
       libraryId: params.libraryId,
@@ -138,8 +177,7 @@ final libraryItemsProvider = FutureProvider.family<List<MediaItem>, ({String lib
 );
 
 /// 筛选条件
-final filtersProvider = FutureProvider.family<Filters, String>((ref, libraryId) async {
-  ref.keepAlive();
+final filtersProvider = FutureProvider.autoDispose.family<Filters, String>((ref, libraryId) async {
   final api = ref.watch(apiClientProvider);
   return await api.library.getFilters(libraryId);
 });
@@ -181,8 +219,7 @@ final searchQueryProvider = StateProvider<String>((ref) => '');
 final aggregateSearchProvider = StateProvider<bool>((ref) => false);
 
 /// 搜索结果
-final searchResultsProvider = FutureProvider<List<MediaItem>>((ref) async {
-  ref.keepAlive();
+final searchResultsProvider = FutureProvider.autoDispose<List<MediaItem>>((ref) async {
   final query = ref.watch(searchQueryProvider);
   final isAggregate = ref.watch(aggregateSearchProvider);
   final hiddenLibraries = ref.watch(hiddenLibrariesProvider);
@@ -236,8 +273,8 @@ class SearchHistoryNotifier extends StateNotifier<List<String>> {
 /// ==========================================
 
 /// 播放信息
-final playbackInfoProvider = FutureProvider.family<PlaybackInfo, String>((ref, itemId) async {
-  ref.keepAlive();
+final playbackInfoProvider = FutureProvider.autoDispose.family<PlaybackInfo, String>((ref, itemId) async {
+  _metadataKeepAlive.retain('playback:$itemId', ref);
   final api = ref.watch(apiClientProvider);
   return await api.playback.getPlaybackInfo(itemId);
 });

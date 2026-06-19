@@ -69,8 +69,8 @@ Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
       'subtitleFont': ref.read(subtitleFontProvider),
       'mpvDolbyVisionFix': ref.read(mpvDolbyVisionFixProvider),
       'externalMpvPath': ref.read(externalMpvPathProvider),
-      'impellerEnabled': ref.read(impellerEnabledProvider),
       'exoLibass': ref.read(exoLibassProvider),
+      'pgsBlendMode': ref.read(pgsBlendModeProvider),
       'subtitleBackground': ref.read(subtitleBackgroundProvider),
       'hideDailyRecommendations': ref.read(hideDailyRecommendationsProvider),
       'useVideoBackground': ref.read(useVideoBackgroundProvider),
@@ -190,12 +190,12 @@ Future<void> _restoreBackupPayload(
     ref.read(externalMpvPathProvider.notifier).state =
         settings['externalMpvPath'] as String;
   }
-  if (settings['impellerEnabled'] is bool) {
-    ref.read(impellerEnabledProvider.notifier).state =
-        settings['impellerEnabled'] as bool;
-  }
   if (settings['exoLibass'] is bool) {
     ref.read(exoLibassProvider.notifier).state = settings['exoLibass'] as bool;
+  }
+  if (settings['pgsBlendMode'] is String) {
+    ref.read(pgsBlendModeProvider.notifier).state =
+        settings['pgsBlendMode'] as String;
   }
   if (settings['subtitleBackground'] is bool) {
     ref.read(subtitleBackgroundProvider.notifier).state =
