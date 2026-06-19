@@ -8,7 +8,8 @@ import '../../../core/services/cast_service.dart';
 import '../../../core/utils/color_extractor.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../core/widgets/app_shimmer.dart';
-import '../../screens/download/download_screen.dart';
+import '../../../core/providers/download_providers.dart';
+import '../../../core/services/download/download_helper.dart';
 import '../../utils/media_helpers.dart';
 import '../../widgets/common/dynamic_background.dart';
 import '../../widgets/common/media_widgets.dart';
@@ -208,6 +209,7 @@ class _DetailHeader extends ConsumerStatefulWidget {
 class _DetailHeaderState extends ConsumerState<_DetailHeader> {
   Color _dominantColor = Colors.black;
   Color _backgroundColor = const Color(0xFF121212);
+  bool _isDownloadingSeries = false;
 
   @override
   void initState() {
@@ -241,6 +243,46 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
         _backgroundColor = colors.background;
       });
       widget.onColorChanged?.call(colors.background);
+    }
+  }
+
+  /// 整剧下载：一键把全剧所有分集加入下载队列。
+  Future<void> _downloadWholeSeries() async {
+    final api = ref.read(apiClientProvider);
+    final messenger = ScaffoldMessenger.of(context);
+
+    final allowedByPolicy = await ref.read(downloadPermissionProvider.future);
+    if (!allowedByPolicy) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('当前服务器未开放下载权限')),
+      );
+      return;
+    }
+
+    setState(() => _isDownloadingSeries = true);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('正在解析剧集，准备下载…')),
+    );
+    try {
+      final result = await startSeriesDownload(
+        api: api,
+        manager: ref.read(downloadManagerProvider),
+        series: widget.item,
+      );
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(result.queued > 0
+              ? '已加入下载 ${result.queued} 集'
+                  '${result.skipped > 0 ? '（${result.skipped} 集已存在）' : ''}'
+              : '全部 ${result.total} 集已在下载列表'),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('整剧下载失败，请稍后重试')),
+      );
+    } finally {
+      if (mounted) setState(() => _isDownloadingSeries = false);
     }
   }
 
@@ -330,6 +372,33 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
             ),
           ),
         ),
+
+        // 整剧下载按钮（右上角，仅剧集）
+        if (widget.item.type == 'Series')
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: CircleAvatar(
+                  backgroundColor: Colors.black.withValues(alpha: 0.4),
+                  child: IconButton(
+                    tooltip: '下载整部剧',
+                    icon: _isDownloadingSeries
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.download, color: Colors.white),
+                    onPressed:
+                        _isDownloadingSeries ? null : _downloadWholeSeries,
+                  ),
+                ),
+              ),
+            ),
+          ),
 
         // 标题信息
         Positioned(
@@ -909,7 +978,12 @@ class _MoviePlayButtons extends ConsumerWidget {
   void _addToDownload(BuildContext context, WidgetRef ref) async {
     final api = ref.read(apiClientProvider);
     final item = await api.media.getItemDetails(itemId);
-    if (!(item.canDownload ?? false)) {
+
+    // 服务端下载许可：先看用户策略，再看条目级 CanDownload。
+    final allowedByPolicy =
+        await ref.read(downloadPermissionProvider.future);
+    final allowedByItem = item.canDownload ?? true;
+    if (!allowedByPolicy || !allowedByItem) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('当前服务器未开放下载权限')),
@@ -917,24 +991,18 @@ class _MoviePlayButtons extends ConsumerWidget {
       }
       return;
     }
-    final videoUrl = api.playback.getVideoStreamUrl(itemId);
-    
-    final taskId = await ref.read(downloadServiceProvider).addDownload(
-      itemId: itemId,
-      title: item.name,
-      url: videoUrl,
+
+    final manager = ref.read(downloadManagerProvider);
+    final task = await startMediaDownload(
+      api: api,
+      manager: manager,
+      item: item,
     );
 
     if (context.mounted) {
-      if (taskId != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已添加到下载队列')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('添加下载失败')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(task != null ? '已添加到下载队列' : '添加下载失败')),
+      );
     }
   }
 

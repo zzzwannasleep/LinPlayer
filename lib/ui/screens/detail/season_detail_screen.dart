@@ -9,7 +9,8 @@ import '../../../core/theme/app_motion.dart';
 import '../../../core/utils/color_extractor.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../core/widgets/app_shimmer.dart';
-import '../../screens/download/download_screen.dart';
+import '../../../core/providers/download_providers.dart';
+import '../../../core/services/download/download_helper.dart';
 import '../../utils/media_helpers.dart';
 import '../../widgets/common/dynamic_background.dart';
 import '../../widgets/common/media_widgets.dart';
@@ -680,7 +681,10 @@ class _PlayButtons extends ConsumerWidget {
               onTap: () async {
                 Navigator.pop(ctx);
                 final item = await api.media.getItemDetails(itemId);
-                if (!(item.canDownload ?? false)) {
+                final allowedByPolicy =
+                    await ref.read(downloadPermissionProvider.future);
+                final allowedByItem = item.canDownload ?? true;
+                if (!allowedByPolicy || !allowedByItem) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('当前服务器未开放下载权限')),
@@ -688,18 +692,15 @@ class _PlayButtons extends ConsumerWidget {
                   }
                   return;
                 }
-                final videoUrl = api.playback.getVideoStreamUrl(
-                  itemId,
-                  mediaSourceId: mediaSourceId,
-                );
-                final taskId = await ref.read(downloadServiceProvider).addDownload(
-                  itemId: itemId,
-                  title: item.name,
-                  url: videoUrl,
+                final task = await startMediaDownload(
+                  api: api,
+                  manager: ref.read(downloadManagerProvider),
+                  item: item,
+                  mediaSourceIdOverride: mediaSourceId,
                 );
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(taskId != null ? '已添加到下载队列' : '添加下载失败')),
+                    SnackBar(content: Text(task != null ? '已添加到下载队列' : '添加下载失败')),
                   );
                 }
               },

@@ -58,10 +58,9 @@ dependencies:
   palette_generator: ^0.3.3+7
 
   # 投屏使用纯HTTP扫描（无需原生插件）
-  
-  # 后台下载
-  flutter_downloader: ^1.11.8
-  
+
+  # 下载：自建多线程(Range 分段)下载引擎，见 lib/core/services/download/
+
   # 图片/文件选择
   image_picker: ^1.1.2
   file_picker: ^8.1.7

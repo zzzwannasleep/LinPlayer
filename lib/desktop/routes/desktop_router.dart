@@ -12,6 +12,7 @@ import '../../ui/screens/server/edit_server_screen.dart';
 import '../../ui/screens/server/icon_select_screen.dart';
 import '../../ui/screens/server/server_lines_screen.dart';
 import '../screens/favorites/desktop_favorites_screen.dart';
+import '../screens/download/desktop_download_screen.dart';
 import '../screens/home/desktop_home_screen.dart';
 import '../screens/library/desktop_library_screen.dart';
 import '../screens/library/desktop_library_detail_screen.dart';
@@ -98,7 +99,19 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
-          // 分支 3：服务器
+          // 分支 3：下载
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: '/downloads',
+                pageBuilder: (context, state) => _buildFadePage(
+                  child: const DesktopDownloadScreen(),
+                  state: state,
+                ),
+              ),
+            ],
+          ),
+          // 分支 4：服务器
           StatefulShellBranch(
             routes: [
               GoRoute(
@@ -110,7 +123,7 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
-          // 分支 4：设置
+          // 分支 5：设置
           StatefulShellBranch(
             routes: [
               GoRoute(

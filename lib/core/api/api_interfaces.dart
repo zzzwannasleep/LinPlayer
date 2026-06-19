@@ -61,13 +61,38 @@ class User {
   final bool? hasPassword;
   final List<String>? configuration;
 
+  /// 服务端为该用户配置的权限策略（含是否允许下载）。
+  final UserPolicy? policy;
+
   User({
     required this.id,
     required this.name,
     this.primaryImageTag,
     this.hasPassword,
     this.configuration,
+    this.policy,
   });
+}
+
+/// 用户权限策略（取自 Emby/Jellyfin 用户对象的 `Policy` 字段）。
+class UserPolicy {
+  final bool isAdministrator;
+
+  /// 是否允许下载内容（Emby/Jellyfin：`EnableContentDownloading`）。
+  final bool enableContentDownloading;
+
+  /// 是否允许同步/离线（部分服务端用 `EnableContentDownloading` 之外的 `EnableSyncTranscoding`/`EnableDownloading`）。
+  final bool enableDownloading;
+
+  const UserPolicy({
+    this.isAdministrator = false,
+    this.enableContentDownloading = false,
+    this.enableDownloading = false,
+  });
+
+  /// 综合判断该用户是否被服务端许可下载。
+  bool get canDownload =>
+      isAdministrator || enableContentDownloading || enableDownloading;
 }
 
 // ==================== 服务器相关 ====================
@@ -480,6 +505,10 @@ abstract class PlaybackApi {
   /// GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/Stream.{codec}
   String getSubtitleStreamUrl(
       String itemId, String mediaSourceId, int index, String codec);
+
+  /// 获取离线下载地址（原始文件，服务端按下载权限放行）。
+  /// GET /Items/{Id}/Download
+  String getDownloadUrl(String itemId, {String? mediaSourceId});
 
   /// 播放开始上报
   /// POST /Sessions/Playing

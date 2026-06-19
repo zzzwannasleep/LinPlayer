@@ -132,6 +132,16 @@ PlaybackSelection buildPlaybackSelection({
   );
 }
 
+/// 离线播放用的最简选择：无媒体源、无回退，仅承载 itemId。
+/// 实际播放地址由调用方用本地文件覆盖。
+PlaybackSelection buildOfflinePlaybackSelection({required String itemId}) {
+  return PlaybackSelection(
+    mediaSource: null,
+    primaryRequest: PlaybackUrlRequest(itemId: itemId),
+    fallbackRequest: null,
+  );
+}
+
 String _preferredContainer(MediaSource? mediaSource) {
   final container = mediaSource?.container?.trim().toLowerCase();
   if (container != null && container.isNotEmpty) {

@@ -314,6 +314,15 @@ class _HeroSection extends ConsumerWidget {
                   scaleFactor: scaleFactor,
                 ),
                 const Spacer(),
+                // 整剧下载（仅剧集/季）
+                if (item.type == 'Series' || item.type == 'Season') ...[
+                  _GlassButton(
+                    icon: Icons.download,
+                    onPressed: () => _downloadEntireSeries(context, ref, item),
+                    scaleFactor: scaleFactor,
+                  ),
+                  SizedBox(width: 8 * scaleFactor),
+                ],
                 // 窗口控制按钮占位（右侧系统按钮区域）
                 SizedBox(width: 120 * scaleFactor),
               ],
@@ -322,6 +331,42 @@ class _HeroSection extends ConsumerWidget {
         ),
       ],
     );
+  }
+}
+
+/// 整剧下载：把全剧所有分集加入下载队列（桌面端顶部右上角入口）。
+Future<void> _downloadEntireSeries(
+    BuildContext context, WidgetRef ref, MediaItem series) async {
+  final api = ref.read(apiClientProvider);
+
+  final allowedByPolicy = await ref.read(downloadPermissionProvider.future);
+  if (!allowedByPolicy) {
+    if (context.mounted) {
+      showDesktopMessage(context, '当前服务器未开放下载权限', isError: true);
+    }
+    return;
+  }
+
+  if (context.mounted) {
+    showDesktopMessage(context, '正在解析剧集，准备下载…');
+  }
+  try {
+    final result = await startSeriesDownload(
+      api: api,
+      manager: ref.read(downloadManagerProvider),
+      series: series,
+    );
+    if (!context.mounted) return;
+    showDesktopMessage(
+      context,
+      result.queued > 0
+          ? '已加入下载 ${result.queued} 集'
+              '${result.skipped > 0 ? '（${result.skipped} 集已存在）' : ''}'
+          : '全部 ${result.total} 集已在下载列表',
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    showDesktopMessage(context, '整剧下载失败，请稍后重试', isError: true);
   }
 }
 
@@ -553,9 +598,33 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
     }
   }
 
-  void _handleDownload() {
-    // TODO: 实现下载逻辑
-    showDesktopMessage(context, '已添加到下载队列');
+  Future<void> _handleDownload() async {
+    final api = ref.read(apiClientProvider);
+    MediaItem detail = widget.item;
+    try {
+      detail = await api.media.getItemDetails(widget.itemId);
+    } catch (_) {}
+
+    final allowedByPolicy =
+        await ref.read(downloadPermissionProvider.future);
+    final allowedByItem = detail.canDownload ?? true;
+    if (!allowedByPolicy || !allowedByItem) {
+      if (!mounted) return;
+      showDesktopMessage(context, '当前服务器未开放下载权限', isError: true);
+      return;
+    }
+
+    final task = await startMediaDownload(
+      api: api,
+      manager: ref.read(downloadManagerProvider),
+      item: detail,
+      mediaSourceIdOverride: ref.read(selectedMediaSourceProvider),
+    );
+
+    if (!mounted) return;
+    showDesktopMessage(
+        context, task != null ? '已添加到下载队列' : '添加下载失败',
+        isError: task == null);
   }
 
   OverlayEntry _createMenuOverlay({

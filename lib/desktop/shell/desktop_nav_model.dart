@@ -48,6 +48,12 @@ const desktopNavItems = <DesktopNavItem>[
     label: '收藏',
   ),
   DesktopNavItem(
+    path: '/downloads',
+    icon: Icons.download_outlined,
+    selectedIcon: Icons.download_rounded,
+    label: '下载',
+  ),
+  DesktopNavItem(
     path: '/servers',
     icon: Icons.dns_outlined,
     selectedIcon: Icons.dns_rounded,

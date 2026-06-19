@@ -188,17 +188,35 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<void> _initializePlayer() async {
     final api = ref.read(apiClientProvider);
-    final item = await api.media.getItemDetails(widget.itemId);
 
-    final playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
-    final selection = buildPlaybackSelection(
-      playbackInfo: playbackInfo,
-      itemId: widget.itemId,
-      preferredMediaSourceId:
-          widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
-      playSessionId:
-          '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
-    );
+    // 离线优先：本集已下载完成则用本地文件，且拉取元数据失败时兜底离线播放。
+    final downloadManager = ref.read(downloadManagerProvider);
+    final localPath = downloadManager.completedFilePath(widget.itemId);
+    final hasLocal = localPath != null && await File(localPath).exists();
+
+    MediaItem item;
+    PlaybackInfo? playbackInfo;
+    try {
+      item = await api.media.getItemDetails(widget.itemId);
+      playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
+    } catch (e) {
+      final record = downloadManager.byItemId(widget.itemId);
+      if (!hasLocal || record == null) rethrow;
+      // 完全离线：用下载记录还原最简元数据继续播放。
+      item = mediaItemFromDownload(record);
+      playbackInfo = null;
+    }
+
+    final selection = playbackInfo != null
+        ? buildPlaybackSelection(
+            playbackInfo: playbackInfo,
+            itemId: widget.itemId,
+            preferredMediaSourceId:
+                widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
+            playSessionId:
+                '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
+          )
+        : buildOfflinePlaybackSelection(itemId: widget.itemId);
     final mediaSource = selection.mediaSource;
     _sanitizeSelectionState(mediaSource);
     final videoStream =
@@ -244,7 +262,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 selection.fallbackRequest!.enableAutoStreamCopyVideo,
           );
 
-    final startPosition = await _resolveResumeStartPosition(api, item);
+    // 本地文件覆盖播放源：用 file:// 形式喂给内核；在线地址作为本地失效时的回退。
+    final localFileSource =
+        hasLocal ? Uri.file(localPath).toString() : null;
+    final effectiveVideoUrl = localFileSource ?? videoUrl;
+    final effectiveFallbackUrl = localFileSource != null
+        ? (playbackInfo != null ? videoUrl : null)
+        : fallbackVideoUrl;
+
+    Duration? startPosition;
+    try {
+      startPosition = await _resolveResumeStartPosition(api, item);
+    } catch (_) {
+      startPosition = null;
+    }
 
     ref.read(currentPlayingItemProvider.notifier).state = item;
     ref.read(selectedMediaSourceProvider.notifier).state = mediaSource?.id;
@@ -292,10 +323,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final syncController = ref.read(syncControllerProvider.notifier);
     _didScrobble = false;
     await _playerService.initialize(
-      videoUrl: videoUrl,
+      videoUrl: effectiveVideoUrl,
       itemId: widget.itemId,
       mediaSourceId: mediaSource?.id,
-      fallbackVideoUrl: fallbackVideoUrl,
+      fallbackVideoUrl: effectiveFallbackUrl,
       startPosition: startPosition,
       coreType: coreType,
       dolbyVisionFix: dolbyVisionFix,

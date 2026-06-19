@@ -739,6 +739,21 @@ class EmbyPlaybackApi implements PlaybackApi {
   }
 
   @override
+  String getDownloadUrl(String itemId, {String? mediaSourceId}) {
+    final base = _client._currentLine.endsWith('/')
+        ? _client._currentLine.substring(0, _client._currentLine.length - 1)
+        : _client._currentLine;
+    final token = _client._authToken;
+    final params = <String>[
+      if (mediaSourceId != null && mediaSourceId.isNotEmpty)
+        'MediaSourceId=${Uri.encodeQueryComponent(mediaSourceId)}',
+      if (token != null) 'api_key=${Uri.encodeQueryComponent(token)}',
+    ];
+    final query = params.isEmpty ? '' : '?${params.join('&')}';
+    return '$base/Items/$itemId/Download$query';
+  }
+
+  @override
   Future<void> reportPlaybackStart(PlaybackStartInfo info) async {
     await _client.post('/Sessions/Playing', data: {
       'ItemId': info.itemId,
@@ -937,6 +952,20 @@ User _parseUser(Map<String, dynamic> d) {
     primaryImageTag: d['PrimaryImageTag']?.toString(),
     hasPassword: d['HasPassword'] as bool?,
     configuration: (d['Configuration'] as Map<String, dynamic>?)?.keys.toList(),
+    policy: _parseUserPolicy(d['Policy']),
+  );
+}
+
+UserPolicy? _parseUserPolicy(dynamic raw) {
+  if (raw is! Map<String, dynamic>) return null;
+  bool readBool(String key) => raw[key] as bool? ?? false;
+  return UserPolicy(
+    isAdministrator: readBool('IsAdministrator'),
+    enableContentDownloading: readBool('EnableContentDownloading'),
+    // 不同服务端字段差异：Jellyfin 用 EnableContentDownloading，
+    // 部分 Emby 版本另有 EnableDownloading / EnableSync。
+    enableDownloading:
+        readBool('EnableDownloading') || readBool('EnableSync'),
   );
 }
 

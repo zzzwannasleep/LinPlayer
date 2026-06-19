@@ -190,20 +190,36 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     final api = ref.read(apiClientProvider);
     List<MediaStream> deferredSubtitleStreams = const <MediaStream>[];
     try {
-      final cachedItem = ref.read(currentPlayingItemProvider);
-      final item = cachedItem != null && cachedItem.id == widget.itemId
-          ? cachedItem
-          : await api.media.getItemDetails(widget.itemId);
+      // 离线优先：本集已下载完成则用本地文件，拉取元数据失败时兜底离线播放。
+      final downloadManager = ref.read(downloadManagerProvider);
+      final localPath = downloadManager.completedFilePath(widget.itemId);
+      final hasLocal = localPath != null && await File(localPath).exists();
 
-      final playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
-      final selection = buildPlaybackSelection(
-        playbackInfo: playbackInfo,
-        itemId: widget.itemId,
-        preferredMediaSourceId:
-            widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
-        playSessionId:
-            '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
-      );
+      MediaItem item;
+      PlaybackInfo? playbackInfo;
+      try {
+        final cachedItem = ref.read(currentPlayingItemProvider);
+        item = cachedItem != null && cachedItem.id == widget.itemId
+            ? cachedItem
+            : await api.media.getItemDetails(widget.itemId);
+        playbackInfo = await api.playback.getPlaybackInfo(widget.itemId);
+      } catch (e) {
+        final record = downloadManager.byItemId(widget.itemId);
+        if (!hasLocal || record == null) rethrow;
+        item = mediaItemFromDownload(record);
+        playbackInfo = null;
+      }
+
+      final selection = playbackInfo != null
+          ? buildPlaybackSelection(
+              playbackInfo: playbackInfo,
+              itemId: widget.itemId,
+              preferredMediaSourceId:
+                  widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
+              playSessionId:
+                  '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
+            )
+          : buildOfflinePlaybackSelection(itemId: widget.itemId);
       final mediaSource = selection.mediaSource;
 
       final videoUrl = api.playback.getVideoStreamUrl(
@@ -240,7 +256,20 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
                   selection.fallbackRequest!.enableAutoStreamCopyVideo,
             );
 
-      final startPosition = await _resolveResumeStartPosition(api, item);
+      // 本地文件覆盖播放源；在线地址留作本地失效时回退。
+      final localFileSource =
+          hasLocal ? Uri.file(localPath).toString() : null;
+      final effectiveVideoUrl = localFileSource ?? videoUrl;
+      final effectiveFallbackUrl = localFileSource != null
+          ? (playbackInfo != null ? videoUrl : null)
+          : fallbackVideoUrl;
+
+      Duration? startPosition;
+      try {
+        startPosition = await _resolveResumeStartPosition(api, item);
+      } catch (_) {
+        startPosition = null;
+      }
       final startPositionTicks = (startPosition?.inMilliseconds ?? 0) * 10000;
 
       ref.read(currentPlayingItemProvider.notifier).state = item;
@@ -252,7 +281,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
         fetchItem: (id) => api.media.getItemDetails(id),
       ));
       _currentMediaSource = mediaSource;
-      _videoUrl = videoUrl;
+      _videoUrl = effectiveVideoUrl;
       _displayTitle = item.name;
 
       final coreString = normalizePlayerCore(ref.read(playerCoreProvider));
@@ -270,10 +299,10 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           ref.read(preferredSubtitleLanguageProvider);
 
       await _playerService.initialize(
-        videoUrl: videoUrl,
+        videoUrl: effectiveVideoUrl,
         itemId: widget.itemId,
         mediaSourceId: mediaSource?.id,
-        fallbackVideoUrl: fallbackVideoUrl,
+        fallbackVideoUrl: effectiveFallbackUrl,
         startPosition: startPosition,
         coreType: coreType,
         dolbyVisionFix: dolbyVisionFix,
