@@ -32,6 +32,7 @@ import '../../../core/services/update/app_update_service.dart';
 import '../../../core/services/watch_history/watch_history_writeback_service.dart';
 import '../../widgets/common/app_update_gate.dart';
 import '../../../plugins/ui/plugin_management_screen.dart';
+import 'wallpaper_crop_screen.dart';
 
 part 'settings_backup_restore.dart';
 part 'settings_danmaku.dart';

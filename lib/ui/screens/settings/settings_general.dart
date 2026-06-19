@@ -102,6 +102,28 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
                 .read(useVideoBackgroundProvider.notifier)
                 .state = value,
           ),
+          Builder(builder: (context) {
+            final wallpaperPath = ref.watch(customWallpaperPathProvider);
+            final hasWallpaper = wallpaperPath.isNotEmpty;
+            return ListTile(
+              title: const Text('自定义壁纸'),
+              subtitle: Text(
+                hasWallpaper
+                    ? '已设置 · 点击可重新选择并裁剪（仅静态图片）'
+                    : '点击选择图片并裁剪为软件背景（仅静态图片）',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: hasWallpaper
+                  ? IconButton(
+                      tooltip: '移除壁纸',
+                      icon: const Icon(Icons.clear),
+                      onPressed: () => _clearWallpaper(context),
+                    )
+                  : const Icon(Icons.chevron_right),
+              onTap: () => _pickAndCropWallpaper(context),
+            );
+          }),
           const Divider(),
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -453,6 +475,55 @@ class _GeneralSettingsScreenState extends ConsumerState<GeneralSettingsScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// 选择图片 → 进入裁剪页 → 保存为软件背景壁纸。
+  Future<void> _pickAndCropWallpaper(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: '选择壁纸图片',
+      allowMultiple: false,
+      type: FileType.image,
+    );
+    final sourcePath = result?.files.single.path;
+    if (sourcePath == null || sourcePath.isEmpty) return;
+    if (!context.mounted) return;
+
+    final croppedPath = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => WallpaperCropScreen(sourcePath: sourcePath),
+      ),
+    );
+    if (croppedPath == null || croppedPath.isEmpty) return;
+
+    // 删除旧壁纸文件，避免支持目录残留。
+    final oldPath = ref.read(customWallpaperPathProvider);
+    if (oldPath.isNotEmpty && oldPath != croppedPath) {
+      try {
+        final old = File(oldPath);
+        if (await old.exists()) await old.delete();
+      } catch (_) {}
+    }
+    ref.read(customWallpaperPathProvider.notifier).state = croppedPath;
+
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('壁纸已设置')),
+    );
+  }
+
+  Future<void> _clearWallpaper(BuildContext context) async {
+    final oldPath = ref.read(customWallpaperPathProvider);
+    ref.read(customWallpaperPathProvider.notifier).state = '';
+    if (oldPath.isNotEmpty) {
+      try {
+        final old = File(oldPath);
+        if (await old.exists()) await old.delete();
+      } catch (_) {}
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已移除壁纸')),
     );
   }
 

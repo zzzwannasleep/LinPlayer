@@ -212,6 +212,23 @@ final useVideoBackgroundProvider =
   );
 });
 
+/// 自定义壁纸图片路径（空 = 不使用壁纸，走主题背景色）。
+/// 仅支持静态图片；用户裁剪后的图写入 App 支持目录，这里只存路径。
+final customWallpaperPathProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: '',
+    readValue: (prefs) => prefs.getString('linplayer_custom_wallpaper_path'),
+    writeValue: (prefs, value) async {
+      if (value.isEmpty) {
+        await prefs.remove('linplayer_custom_wallpaper_path');
+      } else {
+        await prefs.setString('linplayer_custom_wallpaper_path', value);
+      }
+    },
+  );
+});
+
 final hiddenLibrariesProvider =
     StateNotifierProvider<HiddenLibrariesNotifier, Set<String>>((ref) {
   return HiddenLibrariesNotifier();

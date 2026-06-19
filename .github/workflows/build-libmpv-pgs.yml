@@ -170,6 +170,18 @@ jobs:
           JNI=/tmp/mpv-android/app/src/main/jni
           echo "=== JNI sources ==="; ls -la "$JNI"
 
+          # 兼容性补丁：mpv-android master 的 main.cpp 调用 av_jni_set_android_app_ctx()，
+          # 这是 FFmpeg 7.0+ 才有的 API，而 media-kit 的 libmpv 构建用的是较旧 ffmpeg → 编译报
+          # "use of undeclared identifier 'av_jni_set_android_app_ctx'"。该调用只是把 Android
+          # ApplicationContext 传给 ffmpeg（新设备硬解上下文用，非必需）；真正关键的 JavaVM 注册
+          # 由其上方的 av_jni_set_java_vm() 完成（旧 ffmpeg 也有）。这里把该调用替换为无副作用语句，
+          # 既能编译又不破坏 if 结构/后续 init_methods_cache 的无条件执行。
+          if grep -q 'av_jni_set_android_app_ctx' "$JNI/main.cpp"; then
+            sed -i 's#av_jni_set_android_app_ctx(global_appctx, NULL);#(void)global_appctx; /* FFmpeg7 API absent in this ffmpeg build */#' "$JNI/main.cpp"
+            echo "🔧 patched main.cpp: 去除 FFmpeg7-only 的 av_jni_set_android_app_ctx 调用"
+            grep -n 'global_appctx' "$JNI/main.cpp" || true
+          fi
+
           NDKBIN="./sdk/android-sdk-linux/ndk/$v_ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
           API=24  # 与 app build.gradle.kts 的 minSdk 一致
 

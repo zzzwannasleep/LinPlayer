@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,7 +35,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   final ScrollController _scrollController = ScrollController();
   double _appBarOpacity = 1.0;
   double _lastScrollOffset = 0.0;
-  Color _backgroundColor = const Color(0xFF121212);
+  // 轮播图提取的沉浸色，仅在深色模式下作为整页背景使用。
+  Color _carouselColor = const Color(0xFF121212);
 
   @override
   bool get wantKeepAlive => true;
@@ -70,9 +73,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   void _onBackgroundColorChanged(Color color) {
-    if (_backgroundColor != color) {
+    if (_carouselColor != color) {
       setState(() {
-        _backgroundColor = color;
+        _carouselColor = color;
       });
     }
   }
@@ -84,22 +87,69 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final hideDailyRecommendations =
         ref.watch(hideDailyRecommendationsProvider);
     final recommendationsAsync = ref.watch(randomRecommendationsProvider);
+
+    final brightness = Theme.of(context).brightness;
+    final themeBg = Theme.of(context).scaffoldBackgroundColor;
+    final wallpaperPath = ref.watch(customWallpaperPathProvider);
+    final hasWallpaper = wallpaperPath.isNotEmpty;
+    // 浅色模式：整页用浅色主题背景，不被轮播提取的深色覆盖（否则浅色模式看起来仍是黑的）。
+    // 深色模式：用轮播提取的沉浸色（默认深色）。
+    final pageBg =
+        brightness == Brightness.dark ? _carouselColor : themeBg;
+    // 壁纸场景：scrim 基色决定前景文字明暗（深色模式黑底浅字、浅色模式白底深字）。
+    final scrimBase =
+        brightness == Brightness.dark ? Colors.black : Colors.white;
+    // 轮播底部渐变要淡出到“它下方实际的背景色”，避免出现一条突兀的色带。
+    final carouselFade = hasWallpaper
+        ? scrimBase
+        : (brightness == Brightness.light ? themeBg : null);
+
     return Scaffold(
-      backgroundColor: _backgroundColor,
-      body: DynamicBackground(
-        backgroundColor: _backgroundColor,
-        child: Stack(
-          children: [
-            CustomScrollView(
-              controller: _scrollController,
-              slivers: [
-                // 随机推荐轮播（可被隐藏）- 直接顶到最上方
-                if (!hideDailyRecommendations)
-                  SliverToBoxAdapter(
-                    child: RandomRecommendationCarousel(
-                      onColorChanged: _onBackgroundColorChanged,
+      backgroundColor: hasWallpaper ? scrimBase : pageBg,
+      body: Stack(
+        children: [
+          if (hasWallpaper)
+            Positioned.fill(
+              child: Image.file(
+                File(wallpaperPath),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          if (hasWallpaper)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        scrimBase.withValues(alpha: 0.30),
+                        scrimBase.withValues(alpha: 0.55),
+                      ],
                     ),
                   ),
+                ),
+              ),
+            ),
+          Positioned.fill(
+            child: DynamicBackground(
+            backgroundColor: hasWallpaper ? scrimBase : pageBg,
+            opaque: !hasWallpaper,
+            child: Stack(
+              children: [
+                CustomScrollView(
+                  controller: _scrollController,
+                  slivers: [
+                    // 随机推荐轮播（可被隐藏）- 直接顶到最上方
+                    if (!hideDailyRecommendations)
+                      SliverToBoxAdapter(
+                        child: RandomRecommendationCarousel(
+                          onColorChanged: _onBackgroundColorChanged,
+                          fadeToColor: carouselFade,
+                        ),
+                      ),
 
                 // 继续观看
                 const SliverToBoxAdapter(child: ContinueWatchingSection()),
@@ -133,7 +183,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             ),
           ],
         ),
-      ),
+            ),
+          ),
+          ],
+        ),
     );
   }
 }
@@ -491,7 +544,15 @@ class _HomeAppBarState extends ConsumerState<_HomeAppBar> {
 class RandomRecommendationCarousel extends ConsumerStatefulWidget {
   final ValueChanged<Color>? onColorChanged;
 
-  const RandomRecommendationCarousel({super.key, this.onColorChanged});
+  /// 轮播底部渐变淡出到的颜色（覆盖内部提取色），用于让轮播无缝融入下方页面背景。
+  /// 浅色模式/壁纸场景由首页传入；深色沉浸场景传 null 走提取色。
+  final Color? fadeToColor;
+
+  const RandomRecommendationCarousel({
+    super.key,
+    this.onColorChanged,
+    this.fadeToColor,
+  });
 
   @override
   ConsumerState<RandomRecommendationCarousel> createState() =>
@@ -693,7 +754,7 @@ class _RandomRecommendationCarouselState
                     child: _CarouselItem(
                       item: item,
                       dominantColor: _dominantColor,
-                      backgroundColor: _backgroundColor,
+                      backgroundColor: widget.fadeToColor ?? _backgroundColor,
                       onTap: () => context.push(mediaRouteForItem(item)),
                     ),
                   );
@@ -984,6 +1045,7 @@ class ContinueWatchingCard extends ConsumerWidget {
   final ImageSizePreference sizePreference;
 
   const ContinueWatchingCard({
+    super.key,
     required this.item,
     required this.sizePreference,
   });
@@ -1304,10 +1366,11 @@ class LibrariesSection extends ConsumerWidget {
               ),
             ),
             HorizontalList(
-              height: 178,
+              height: 172,
+              spacing: 10,
               children: libraries.asMap().entries.map((entry) {
                 return SizedBox(
-                  width: 168,
+                  width: 160,
                   child: _LibraryCard(library: entry.value),
                 ).appEntrance(index: entry.key);
               }).toList(),
@@ -1330,49 +1393,44 @@ class _LibraryCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
     final imageUrls = resolveLibraryImageUrls(api, library, maxWidth: 400);
-    const borderRadius = BorderRadius.all(Radius.circular(20));
+    const borderRadius = BorderRadius.all(Radius.circular(16));
 
     return GestureDetector(
       onTap: () => context.push('/library/${library.id}'),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 168,
-            height: 124,
-            decoration: BoxDecoration(
-              borderRadius: borderRadius,
-              // 封面按比例 contain 显示（不裁剪/不放大），留白处用淡背景衬托。
-              color: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest
-                  .withValues(alpha: 0.4),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: imageUrls.isNotEmpty
-                ? MediaImage(
-                    imageUrl: imageUrls.first,
-                    imageUrls:
-                        imageUrls.length > 1 ? imageUrls.sublist(1) : null,
-                    width: 168,
-                    height: 124,
-                    fit: BoxFit.contain,
-                    borderRadius: borderRadius,
-                  )
-                : Container(
-                    color: const Color(0xFF5B8DEF).withValues(alpha: 0.1),
-                    child: const Center(
-                      child: Icon(
-                        Icons.folder,
-                        size: 36,
-                        color: Color(0xFF5B8DEF),
+          ClipRRect(
+            borderRadius: borderRadius,
+            // 封面 cover 填满整张卡片，去掉旧版 contain 留下的彩色底/留白。
+            child: SizedBox(
+              width: 160,
+              height: 118,
+              child: imageUrls.isNotEmpty
+                  ? MediaImage(
+                      imageUrl: imageUrls.first,
+                      imageUrls:
+                          imageUrls.length > 1 ? imageUrls.sublist(1) : null,
+                      width: 160,
+                      height: 118,
+                      fit: BoxFit.cover,
+                      borderRadius: borderRadius,
+                    )
+                  : Container(
+                      color: const Color(0xFF5B8DEF).withValues(alpha: 0.12),
+                      child: const Center(
+                        child: Icon(
+                          Icons.folder,
+                          size: 34,
+                          color: Color(0xFF5B8DEF),
+                        ),
                       ),
                     ),
-                  ),
+            ),
           ),
           const SizedBox(height: 6),
           SizedBox(
-            width: 168,
+            width: 160,
             child: Text(
               library.name,
               maxLines: 1,
