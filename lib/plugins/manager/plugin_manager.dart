@@ -177,7 +177,7 @@ class PluginManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 从 .lpk 文件安装（安装后默认禁用，需用户授权后启用）。
+  /// 从 .ipk 文件安装（安装后默认禁用，需用户授权后启用）。兼容旧 .lpk。
   Future<PluginInfo> install(String lpkPath) async {
     final info = await _installer.installFromLpkFile(lpkPath);
     _plugins[info.id] = info;

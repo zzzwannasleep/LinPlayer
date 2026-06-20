@@ -16,10 +16,10 @@ class PluginInstallError implements Exception {
   String toString() => 'PluginInstallError: $message';
 }
 
-/// 负责 .lpk 包的解压、清单校验与落盘。
+/// 负责 .ipk 包的解压、清单校验与落盘。
 ///
-/// .lpk = 一个 zip，至少包含 manifest.json 与 main.js，可附带 assets。
-/// 允许包内带一层根目录（会自动剥离）。
+/// .ipk = 一个 zip，至少包含 manifest.json 与 main.js，可附带 assets。
+/// 允许包内带一层根目录（会自动剥离）。兼容旧的 .lpk（同为 zip）。
 class PluginInstaller {
   static final AppLogger _log = AppLogger();
 
@@ -28,7 +28,7 @@ class PluginInstaller {
 
   PluginInstaller(this.pluginsRootDir);
 
-  /// 从 .lpk 文件安装，返回安装后的插件信息（默认禁用状态）。
+  /// 从 .ipk 文件安装，返回安装后的插件信息（默认禁用状态）。兼容旧 .lpk。
   Future<PluginInfo> installFromLpkFile(String lpkPath) async {
     final file = File(lpkPath);
     if (!await file.exists()) {
@@ -43,7 +43,7 @@ class PluginInstaller {
     try {
       archive = ZipDecoder().decodeBytes(bytes);
     } catch (e) {
-      throw PluginInstallError('无法解析 .lpk（zip）文件: $e');
+      throw PluginInstallError('无法解析 .ipk（zip）文件: $e');
     }
 
     // 找到 manifest.json，计算需要剥离的根目录前缀。

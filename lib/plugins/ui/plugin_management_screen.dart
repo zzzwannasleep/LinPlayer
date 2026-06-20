@@ -22,7 +22,7 @@ class PluginManagementScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
-            tooltip: '安装 .lpk',
+            tooltip: '安装 .ipk',
             onPressed: () => _install(context, manager),
           ),
         ],
@@ -49,7 +49,7 @@ class PluginManagementScreen extends ConsumerWidget {
   Future<void> _install(BuildContext context, PluginManager manager) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['lpk', 'zip'],
+      allowedExtensions: ['ipk', 'lpk', 'zip'],
     );
     final path = result?.files.single.path;
     if (path == null) return;
@@ -83,7 +83,7 @@ class _EmptyState extends StatelessWidget {
           const Text('还没有安装任何插件'),
           const SizedBox(height: 8),
           Text(
-            '点击右上角 + 安装 .lpk 插件包',
+            '点击右上角 + 安装 .ipk 插件包',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],
