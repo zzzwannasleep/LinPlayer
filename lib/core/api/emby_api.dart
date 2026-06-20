@@ -1287,5 +1287,7 @@ MediaStream _parseMediaStream(Map<String, dynamic> d) {
     height: d['Height'] as int?,
     channels: d['Channels'] as int?,
     bitRate: d['BitRate'] as int?,
+    videoRange: d['VideoRange']?.toString(),
+    videoRangeType: d['VideoRangeType']?.toString(),
   );
 }

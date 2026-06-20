@@ -527,6 +527,22 @@ final gpuNextEnabledProvider =
   );
 });
 
+/// 杜比视界自动切换 gpu-next + 软解。
+///
+/// 检测到当前视频流为杜比视界(Dolby Vision)且使用 mpv 系内核(media_kit / 原生 mpv)时，
+/// 自动启用 gpu-next 渲染 + 软件解码：硬件 mediacodec 解码 DV 会丢失 RPU 元数据导致偏色，
+/// 而 gpu-next(libplacebo) 软解链路能正确映射 DV 的 IPT-PQ 色彩空间。默认开启，可手动关闭。
+final dolbyAutoGpuNextSwProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_dolby_auto_gpu_next_sw'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_dolby_auto_gpu_next_sw', value);
+    },
+  );
+});
+
 final exoLibassProvider =
     StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
   return PreferenceNotifier<bool>(

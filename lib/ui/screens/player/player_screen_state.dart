@@ -317,21 +317,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _ => PlayerCoreType.exoPlayer,
     };
 
+    // 杜比视界自动切换 gpu-next + 软解（默认开，可关）：检测到 DV 视频流且为 mpv 系内核时，
+    // 强制 libplacebo(gpu-next) 渲染 + 软件解码——硬件 mediacodec 解 DV 会偏色，软解 + gpu-next
+    // 才能正确映射 DV RPU。详见 dolbyAutoGpuNextSwProvider。
+    final isMpvFamily = coreType == PlayerCoreType.mpv ||
+        coreType == PlayerCoreType.nativeMpv;
+    final autoDvMode = isMpvFamily &&
+        ref.read(dolbyAutoGpuNextSwProvider) &&
+        (videoStream?.isDolbyVision ?? false);
+
     final dolbyVisionFix = coreType == PlayerCoreType.mpv
-        ? ref.read(mpvDolbyVisionFixProvider)
+        ? (autoDvMode || ref.read(mpvDolbyVisionFixProvider))
         : false;
     // nativeMpv 的 libass 内置在 libmpv.so 中，始终启用，不需要开关
     // exoPlayer 需要通过 exoLibass 设置控制
     final useLibass = coreType == PlayerCoreType.exoPlayer
         ? ref.read(exoLibassProvider)
         : false;
-    final hardwareDecoding = ref.read(hardwareDecodingProvider);
+    final hardwareDecoding =
+        autoDvMode ? false : ref.read(hardwareDecodingProvider);
 
     final preferredSubtitleLanguage =
         ref.read(preferredSubtitleLanguageProvider);
 
-    // Read gpu-next setting for nativeMpv
-    final gpuNextEnabled = ref.read(gpuNextEnabledProvider);
+    // Read gpu-next setting for nativeMpv（DV 自动模式下强制开启）
+    final gpuNextEnabled = autoDvMode || ref.read(gpuNextEnabledProvider);
 
     // Generate a unique surfaceViewId for nativeMpv gpu-next rendering
     // This ID is used to coordinate between Flutter's AndroidView and the native plugin

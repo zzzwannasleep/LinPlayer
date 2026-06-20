@@ -540,6 +540,14 @@ class MpvPlayerAdapter implements PlayerAdapter {
           await np.setProperty('blend-subtitles', _subtitleBlendMode);
           await np.setProperty('sub-visibility', 'yes');
           await np.setProperty('hwdec', hardwareDecoding ? 'auto-safe' : 'no');
+          if (dolbyVisionFix) {
+            // 杜比视界软件修正：media_kit 走 vo=libmpv(gpu 渲染管线)，无独立 gpu-next vo，
+            // 无法对 DV RPU 做 libplacebo 映射；这里以色彩空间提示 + 色调映射尽量还原，
+            // 配合软解(hwdec=no)避免硬解杜比视界整体偏色/发绿。
+            await np.setProperty('target-colorspace-hint', 'yes');
+            await np.setProperty('tone-mapping', 'spline');
+            await np.setProperty('hdr-compute-peak', 'yes');
+          }
           await _applyShaderList(_glslShaders);
           if (_isHttpUrl(videoUrl)) {
             // 视频播放缓存：写到磁盘而非内存，避免大缓冲吃满 RAM 导致卡顿/OOM。

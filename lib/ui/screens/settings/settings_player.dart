@@ -23,6 +23,7 @@ class PlayerSettingsScreen extends ConsumerWidget {
     final subtitleFont = ref.watch(subtitleFontProvider);
     final subtitleBackground = ref.watch(subtitleBackgroundProvider);
     final mpvDolbyVisionFix = ref.watch(mpvDolbyVisionFixProvider);
+    final dolbyAutoGpuNextSw = ref.watch(dolbyAutoGpuNextSwProvider);
     final externalMpvPath = ref.watch(externalMpvPathProvider);
     final gpuNextEnabled = ref.watch(gpuNextEnabledProvider);
     final exoLibass = ref.watch(exoLibassProvider);
@@ -254,6 +255,17 @@ class PlayerSettingsScreen extends ConsumerWidget {
             onChanged: (value) =>
                 ref.read(hardwareDecodingProvider.notifier).state = value,
           ),
+          if (playerCore == 'mpv' || playerCore == 'nativeMpv')
+            SwitchListTile(
+              title: const Text('杜比视界自动切换软解'),
+              subtitle: const Text(
+                  '播放杜比视界时自动启用 gpu-next 渲染 + 软件解码，修正硬解偏色',
+              ),
+              value: dolbyAutoGpuNextSw,
+              onChanged: (value) => ref
+                  .read(dolbyAutoGpuNextSwProvider.notifier)
+                  .state = value,
+            ),
           SwitchListTile(
             title: const Text('记忆亮度'),
             subtitle: const Text('记住上次调整的播放亮度'),

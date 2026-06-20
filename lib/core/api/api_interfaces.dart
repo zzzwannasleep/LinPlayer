@@ -573,6 +573,8 @@ class MediaStream {
   final int? height;
   final int? channels;
   final int? bitRate;
+  final String? videoRange; // 'SDR' / 'HDR'
+  final String? videoRangeType; // 'SDR' / 'HDR10' / 'HLG' / 'DOVI' / 'DOVIWithHDR10' ...
 
   MediaStream({
     required this.index,
@@ -592,11 +594,31 @@ class MediaStream {
     this.height,
     this.channels,
     this.bitRate,
+    this.videoRange,
+    this.videoRangeType,
   });
 
   bool get isVideo => type == 'Video';
   bool get isAudio => type == 'Audio';
   bool get isSubtitle => type == 'Subtitle';
+
+  /// 是否为杜比视界(Dolby Vision)视频流。
+  ///
+  /// 多信号判定：① Emby 的 VideoRangeType 含 DOVI；② 编解码标签为 DV 专属
+  /// (dvhe/dvh1/dav1)；③ 标题/显示名含 "dolby vision"/"dovi"。任一命中即认定。
+  bool get isDolbyVision {
+    final rt = (videoRangeType ?? '').toUpperCase();
+    if (rt.contains('DOVI') || rt.contains('DOLBYVISION')) return true;
+    final tags = '${codec ?? ''} ${videoCodec ?? ''}'.toLowerCase();
+    if (tags.contains('dvhe') ||
+        tags.contains('dvh1') ||
+        tags.contains('dav1')) {
+      return true;
+    }
+    final text = '${displayTitle ?? ''} ${title ?? ''}'.toLowerCase();
+    if (text.contains('dolby vision') || text.contains('dovi')) return true;
+    return false;
+  }
 
   String readableLabel({List<MediaStream>? siblings}) {
     if (displayTitle != null && displayTitle!.isNotEmpty) return displayTitle!;

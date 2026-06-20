@@ -474,8 +474,11 @@ class MpvPlayerPlugin(
             // gpu-next 模式：libplacebo 处理 DV RPU 元数据，正确映射 IPT-PQ 色空间
             MPVLib.setOptionString("dolby-vision-mode", "auto")
             MPVLib.setOptionString("tone-mapping", "spline")
-            MPVLib.setOptionString("hdr-compute-peak", "yes")
-            android.util.Log.i(TAG, "DV: gpu-next mode, libplacebo handles DV RPU")
+            // hdr-compute-peak 是逐帧 GPU 直方图（compute shader），在移动 GPU 上开销很大。
+            // 软解时 CPU 已被解码吃满，再叠加 per-frame 峰值检测会让画面明显卡顿，故软解路径
+            // 关闭、改用静态元数据；硬解有 GPU 余量时保留以求更准的动态色调映射。
+            MPVLib.setOptionString("hdr-compute-peak", if (hardwareDecoding) "yes" else "no")
+            android.util.Log.i(TAG, "DV: gpu-next mode, libplacebo handles DV RPU (compute-peak=$hardwareDecoding)")
         } else {
             // gpu 模式：不处理 DV RPU，用 video filter 去除 DV 标记避免绿屏
             MPVLib.setOptionString("vf", "format:dolbyvision=no")
@@ -495,6 +498,19 @@ class MpvPlayerPlugin(
                 "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
         } else {
             MPVLib.setOptionString("hwdec", "no")
+            // 软解性能优化：4K HEVC/杜比视界纯软解极吃 CPU，默认配置下移动端会严重卡顿。
+            // ① 解码线程铺满 CPU 核心——mpv 的 auto 在部分机型只用了一半核，显式给满。
+            val decodeThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 16)
+            MPVLib.setOptionString("vd-lavc-threads", decodeThreads.toString())
+            // ② 跳过非参考帧的环路去块滤波 + 启用快速(非严格合规)解码路径：省下可观 CPU，
+            //    肉眼几乎无损，是软解能否跑到实时帧率的关键。
+            MPVLib.setOptionString("vd-lavc-skiploopfilter", "nonref")
+            MPVLib.setOptionString("vd-lavc-fast", "yes")
+            // ③ 解码器直接渲染，省一次帧拷贝。
+            MPVLib.setOptionString("vd-lavc-dr", "yes")
+            // ④ 仍跟不上实时时允许在 VO 丢帧追平，避免音画不同步与持续卡顿堆积。
+            MPVLib.setOptionString("framedrop", "vo")
+            android.util.Log.i(TAG, "Software decode tuned: threads=$decodeThreads, skiploopfilter=nonref, fast=yes")
         }
 
         // Audio output - 强制立体声降混，解决 TrueHD 等多声道音频无声问题

@@ -133,6 +133,7 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     final autoSkipSegments = ref.watch(autoSkipSegmentsProvider);
     final exoLibass = ref.watch(exoLibassProvider);
     final gpuNext = ref.watch(gpuNextEnabledProvider);
+    final dolbyAuto = ref.watch(dolbyAutoGpuNextSwProvider);
     final versionRegex = ref.watch(preferredVersionRegexProvider);
     final subtitleRegex = ref.watch(preferredSubtitleRegexProvider);
     final audioRegex = ref.watch(preferredAudioRegexProvider);
@@ -226,6 +227,14 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         value: gpuNext,
         onToggle: () =>
             ref.read(gpuNextEnabledProvider.notifier).state = !gpuNext,
+      ),
+      _toggleItem(
+        m,
+        title: '杜比视界自动切换软解',
+        subtitle: '播放杜比视界时自动启用 gpu-next 渲染 + 软件解码，修正硬解偏色',
+        value: dolbyAuto,
+        onToggle: () =>
+            ref.read(dolbyAutoGpuNextSwProvider.notifier).state = !dolbyAuto,
       ),
       _textItem(
         m,

@@ -298,13 +298,25 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       final coreType =
           coreString == 'mpv' ? PlayerCoreType.mpv : PlayerCoreType.exoPlayer;
 
+      // 杜比视界自动切换（默认开，可关）：DV 流 + media_kit(mpv) 时强制软解 + DV 色彩修正，
+      // 避免硬解杜比视界偏色。桌面 media_kit 走 vo=libmpv，无独立 gpu-next vo，
+      // 故以软解 + dolbyVisionFix 的色调映射作为等效处理。见 dolbyAutoGpuNextSwProvider。
+      final videoStreams = mediaSource?.mediaStreams
+              .where((s) => s.isVideo)
+              .toList() ??
+          const <MediaStream>[];
+      final dvVideoStream = videoStreams.isEmpty ? null : videoStreams.first;
+      final autoDvMode = coreType == PlayerCoreType.mpv &&
+          ref.read(dolbyAutoGpuNextSwProvider) &&
+          (dvVideoStream?.isDolbyVision ?? false);
       final dolbyVisionFix = coreType == PlayerCoreType.mpv
-          ? ref.read(mpvDolbyVisionFixProvider)
+          ? (autoDvMode || ref.read(mpvDolbyVisionFixProvider))
           : false;
       final useLibass = coreType == PlayerCoreType.exoPlayer
           ? ref.read(exoLibassProvider)
           : false;
-      final hardwareDecoding = ref.read(hardwareDecodingProvider);
+      final hardwareDecoding =
+          autoDvMode ? false : ref.read(hardwareDecodingProvider);
       final preferredSubtitleLanguage =
           ref.read(preferredSubtitleLanguageProvider);
 
