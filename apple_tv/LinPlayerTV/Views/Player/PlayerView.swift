@@ -110,15 +110,42 @@ struct NativeKernelHost: View {
 
     @ViewBuilder
     private var content: some View {
+        switch kind {
+        case .mdk: mdkContent
+        case .mpv: mpvContent
+        case .av: placeholder // 不会走到（.av 由 PlayerView 直接处理）
+        }
+    }
+
+    @ViewBuilder
+    private var mdkContent: some View {
         #if canImport(swift_mdk)
-        if kind == .mdk, let url = streamURL {
+        if let url = streamURL {
             MDKKernelView(
                 url: url,
                 startPositionTicks: item.userData?.playbackPositionTicks ?? 0
             )
             .ignoresSafeArea()
         } else {
-            placeholder  // .mpv 仍待接入
+            placeholder
+        }
+        #else
+        placeholder
+        #endif
+    }
+
+    @ViewBuilder
+    private var mpvContent: some View {
+        #if canImport(MPVKit)
+        if let url = streamURL {
+            MPVKernelView(
+                url: url,
+                startPositionTicks: item.userData?.playbackPositionTicks ?? 0,
+                anime4k: UserDefaults.standard.bool(forKey: SettingsKey.anime4kEnabled)
+            )
+            .ignoresSafeArea()
+        } else {
+            placeholder
         }
         #else
         placeholder
@@ -235,6 +262,132 @@ struct MDKKernelView: UIViewRepresentable {
             ra.layer = Unmanaged.passUnretained(layer).toOpaque()
             withUnsafePointer(to: &ra) { player.setRenderAPI($0) }
         }
+    }
+}
+#endif
+
+// MARK: - MPV 内核渲染宿主（MPVKit / libmpv）
+//
+// 仅在 Xcode 中添加 MPVKit(SPM)依赖后参与编译；未加依赖时整段被排除。
+// 采用 libmpv 经典的 OpenGL ES render API 嵌入(GLKViewController)。
+// Anime4K = libmpv 原生 glsl-shaders(MDK 没有，这里才有)。
+//
+// ⚠️ 在 Mac 上需核对：①模块名(若 mpv_* C 符号不可见，追加 `import LibMPV`)；
+// ②mpv_opengl_init_params 字段数(新版 libmpv 为 2 个字段)；
+// ③若 MPVKit 自带 SwiftUI/Metal 播放视图，优先用它替换本实现。
+
+#if canImport(MPVKit)
+import GLKit
+import MPVKit
+
+struct MPVKernelView: UIViewControllerRepresentable {
+    let url: URL
+    let startPositionTicks: Int
+    let anime4k: Bool
+
+    func makeUIViewController(context: Context) -> MPVGLViewController {
+        MPVGLViewController(url: url, startPositionTicks: startPositionTicks, anime4k: anime4k)
+    }
+
+    func updateUIViewController(_ uiViewController: MPVGLViewController, context: Context) {}
+}
+
+final class MPVGLViewController: GLKViewController, GLKViewDelegate {
+    private var mpv: OpaquePointer?
+    private var mpvGL: OpaquePointer?
+    private let url: URL
+    private let startTicks: Int
+    private let anime4k: Bool
+    private var glContext: EAGLContext?
+
+    init(url: URL, startPositionTicks: Int, anime4k: Bool) {
+        self.url = url
+        self.startTicks = startPositionTicks
+        self.anime4k = anime4k
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        guard let ctx = EAGLContext(api: .openGLES3) ?? EAGLContext(api: .openGLES2) else { return }
+        glContext = ctx
+        EAGLContext.setCurrent(ctx)
+
+        let glkView = GLKView(frame: view.bounds, context: ctx)
+        glkView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        glkView.delegate = self
+        self.view = glkView
+        preferredFramesPerSecond = 60
+
+        setupMPV()
+    }
+
+    private func setupMPV() {
+        mpv = mpv_create()
+        guard let mpv else { return }
+        mpv_set_option_string(mpv, "vo", "libmpv")
+        mpv_set_option_string(mpv, "hwdec", "videotoolbox")
+        mpv_set_option_string(mpv, "gpu-api", "opengl")
+        if startTicks > 0 {
+            let seconds = Double(startTicks) / 10_000_000.0
+            mpv_set_option_string(mpv, "start", String(format: "+%.3f", seconds))
+        }
+        mpv_initialize(mpv)
+
+        // Anime4K(仅 mpv 支持)
+        if anime4k, let shader = Bundle.main.path(forResource: "Anime4K_Upscale_CNN_x2_M", ofType: "glsl") {
+            mpv_set_property_string(mpv, "glsl-shaders", shader)
+            mpv_set_property_string(mpv, "scale", "ewa_lanczos")
+        }
+
+        // OpenGL render context
+        let apiType = UnsafeMutableRawPointer(mutating: ("opengl" as NSString).utf8String)
+        var initParams = mpv_opengl_init_params(
+            get_proc_address: { _, name in
+                guard let name else { return nil }
+                return dlsym(UnsafeMutableRawPointer(bitPattern: -2), name) // RTLD_DEFAULT
+            },
+            get_proc_address_ctx: nil
+        )
+        var params = [
+            mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: apiType),
+            mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: &initParams),
+            mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+        ]
+        mpv_render_context_create(&mpvGL, mpv, &params)
+        mpv_render_context_set_update_callback(mpvGL, { ctx in
+            guard let ctx else { return }
+            let vc = Unmanaged<MPVGLViewController>.fromOpaque(ctx).takeUnretainedValue()
+            DispatchQueue.main.async { (vc.view as? GLKView)?.setNeedsDisplay() }
+        }, Unmanaged.passUnretained(self).toOpaque())
+
+        var cmd = [strdup("loadfile"), strdup(url.absoluteString), UnsafeMutablePointer<CChar>(nil)]
+        mpv_command(mpv, &cmd)
+        cmd.forEach { if let p = $0 { free(p) } }
+    }
+
+    func glkView(_ view: GLKView, drawIn rect: CGRect) {
+        guard let mpvGL else { return }
+        var fboInt: GLint = 0
+        glGetIntegerv(GLenum(GL_FRAMEBUFFER_BINDING), &fboInt)
+        var fbo = mpv_opengl_fbo(fbo: Int32(fboInt),
+                                 w: Int32(view.drawableWidth),
+                                 h: Int32(view.drawableHeight),
+                                 internal_format: 0)
+        var flipY: CInt = 1
+        var params = [
+            mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: &fbo),
+            mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: &flipY),
+            mpv_render_param(type: MPV_RENDER_PARAM_INVALID, data: nil),
+        ]
+        mpv_render_context_render(mpvGL, &params)
+    }
+
+    deinit {
+        if let mpvGL { mpv_render_context_free(mpvGL) }
+        if let mpv { mpv_terminate_destroy(mpv) }
     }
 }
 #endif

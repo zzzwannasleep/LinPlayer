@@ -25,10 +25,11 @@ LinPlayer 桌面/移动端用 mpv + 原生 mpv + ExoPlayer 多内核兼顾「广
 | `PlaybackKernel`(`Views/Player/PlayerView.swift`) | 内核枚举 `av`/`mdk`/`mpv` ✅ |
 | `NativeKernelHost`(同文件) | MDK/MPV 宿主;`.mdk` 已接 `MDKKernelView`(canImport 门控) ✅ |
 | `MDKKernelView`(同文件,`#if canImport(swift_mdk)`) | **MDK 渲染宿主已写好**,加依赖即编译 ✅ |
+| `MPVKernelView`(同文件,`#if canImport(MPVKit)`) | **MPV 渲染宿主已写好**(libmpv OpenGL ES + Anime4K),加依赖即编译 ✅ |
 | `SettingsKey.playbackKernel` / `.anime4kEnabled` | 设置页内核选择 + Anime4K 开关(仅 MPV 显示) ✅ |
 
-未加 swift-mdk 依赖时,`MDKKernelView` 被 `canImport` 排除,App 照常编译运行
-(选 MDK/MPV 显示占位 + 一键回退 AVPlayer)。加依赖后 `.mdk` 自动启用。
+未加依赖时,两个 `KernelView` 被 `canImport` 排除,App 照常编译运行
+(选 MDK/MPV 显示占位 + 一键回退 AVPlayer)。加对应依赖后 `.mdk` / `.mpv` 自动启用。
 
 ---
 
@@ -63,23 +64,37 @@ MDK 官方支持 tvOS(xcframework),且有官方 Swift 绑定 `swift-mdk`,走 SPM
 
 ---
 
-## 2. 接入 MPV（libmpv，Anime4K 来源）
+## 2. 接入 MPV（MPVKit，无需自己交叉编译）
 
-libmpv 没有现成 tvOS 包,需自行交叉编译 `mpv + ffmpeg` 为 `appletvos`/`appletvsimulator`
-的 xcframework,再以 SPM `binaryTarget` 或手动 framework 接入。工程量大于 MDK。
+**不用从零编译 libmpv**。Apple 平台有现成的 **MPVKit**——把 mpv + ffmpeg + libplacebo
+打成 tvOS 17+ 的 xcframework,SPM 直接加,等同 tvOS 版「预编译 libmpv」。
+- MPVKit: https://github.com/cxfksword/MPVKit · https://github.com/karelrooted/MPVKit
 
-- 构建:mpv + ffmpeg 的 Apple 交叉编译脚本(社区 `mpv-build` / kodi 风格)。
-- 渲染:libmpv render API,tvOS 用 Metal(`vo=gpu-next`);`hwdec=videotoolbox`。
-- 续播/控制:`mpv_set_property`/`mpv_command`。
-- **Anime4K(关键)**:
-  ```c
-  mpv_set_property_string(mpv, "glsl-shaders", "<Anime4K_Upscale_CNN_x2_M.glsl 路径>");
-  mpv_set_property_string(mpv, "scale", "ewa_lanczos");
-  ```
-  开关对应 `SettingsKey.anime4kEnabled`。
+### 2.1 添加依赖（Mac 的 Xcode 里）
+1. File → Add Package Dependencies… → 填 MPVKit 仓库 URL → 加到 `LinPlayerTV` target。
+2. 勾选 `MPVKit`;若 `mpv_*` C 符号在 Swift 里不可见,再勾 `LibMPV`(libmpv C 绑定)
+   并在 `PlayerView.swift` 的 `#if canImport(MPVKit)` 块里追加 `import LibMPV`。
+3. CI 无需改:`build-tvos` 已含 `xcodebuild -resolvePackageDependencies`,自动拉取。
 
-宿主同样是一个 `MTKView` 的 `UIViewRepresentable`,替换 `NativeKernelHost` 的 `.mpv` 分支
-(可仿照 `MDKKernelView` 的结构,放在 `#if canImport(<你的 mpv 模块名>)` 下)。
+> 想自管/钉版本/定制 ffmpeg(如确保 PGS):MPVKit 仓库有 `make build platform=tvos`
+> 可重编 xcframework,再走自托管。但通常**直接用预编译包即可**,无需动 `build-libmpv-pgs.yml`。
+
+### 2.2 渲染宿主：已在 `PlayerView.swift` 写好
+
+`MPVKernelView`(`#if canImport(MPVKit)`)用 libmpv 经典的 **OpenGL ES render API**
+(`GLKViewController`)嵌入:
+
+- `mpv_create` / `mpv_initialize`;`hwdec=videotoolbox` 硬解
+- `mpv_render_context_create`(`MPV_RENDER_API_TYPE_OPENGL`)+ 更新回调驱动重绘
+- `glkView(_:drawIn:)` 里 `mpv_render_context_render`(绑定当前 FBO)
+- 续播:`start=+秒`;加载:`loadfile`
+- **Anime4K**:`mpv_set_property_string(mpv, "glsl-shaders", <Anime4K .glsl>)`
+  + `scale=ewa_lanczos`,开关读 `SettingsKey.anime4kEnabled`
+
+**Mac 上需核对**:①若 C 符号不可见加 `import LibMPV`;②`mpv_opengl_init_params`
+字段数(新版 libmpv 为 2 个)；③若 MPVKit 自带 SwiftUI/Metal 播放视图,可直接替换本实现。
+
+加完依赖后,选「设置 → 播放 → 播放内核 → MPV」+ 开 Anime4K 即生效。
 
 ---
 
@@ -114,7 +129,7 @@ libmpv 没有现成 tvOS 包,需自行交叉编译 `mpv + ffmpeg` 为 `appletvos
 
 ## 现状
 
-- 内核接缝、设置 UI、AVPlayer 路径、**MDK 渲染宿主(canImport 门控)**、`.ipa` 打包 —— 均已就绪并可编译运行。
-- MDK:Mac 上加 `swift-mdk` 依赖 + 确认一处 `mdkMetalRenderAPI` 字段即可启用。
-- MPV:需自行编译 libmpv for tvOS 并仿照接入(Anime4K 在此)。
-- 本机为 Windows,无法拉取/编译这两个二进制内核,也无法在 Apple TV 上验证超分,故以上需在 Mac+Xcode 完成验证。
+- 内核接缝、设置 UI、AVPlayer 路径、**MDK 与 MPV 两个渲染宿主(canImport 门控)**、`.ipa` 打包 —— 均已就绪并可编译运行。
+- MDK:Mac 上加 `swift-mdk`(SPM)+ 确认一处 `mdkMetalRenderAPI` 字段即可启用。
+- MPV:Mac 上加 `MPVKit`(SPM,**无需自己交叉编译,也无需改 build-libmpv-pgs.yml**)即可启用;Anime4K 在此。
+- 本机为 Windows,无法拉取/编译这两个二进制内核,也无法在 Apple TV 上验证超分,故以上 SPM 接入与渲染细节需在 Mac+Xcode 完成验证。
