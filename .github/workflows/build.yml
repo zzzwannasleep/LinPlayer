@@ -714,8 +714,9 @@ jobs:
       - name: Install Linux desktop dependencies
         run: |
           sudo apt-get update
-          # media_kit_video links libmpv via pkg-config on Linux.
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev libepoxy-dev
+          # media_kit_video links libmpv via pkg-config on Linux；
+          # flutter_secure_storage_linux 需要 libsecret-1 + jsoncpp（H11 凭据加密）。
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libmpv-dev libepoxy-dev libsecret-1-dev libjsoncpp-dev
 
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
