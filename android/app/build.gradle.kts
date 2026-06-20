@@ -145,6 +145,16 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+
+            // Flutter release 默认开启 R8（构建产物已被混淆，字段被改名为 a/b/c/d）。
+            // libplayer.so(mpv-android JNI 桥)在 create() 里通过 GetStaticMethodID 反查
+            // is.xyz.mpv.MPVLib 的 eventProperty/event/logMessage 回调；R8 看不到 JNI 调用方，
+            // 会把这些「无 Java 引用」的方法删掉 → 运行时 NoSuchMethodError → SIGABRT。
+            // 显式接入 keep 规则(proguard-rules.pro)保住 JNI 回调面。
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
