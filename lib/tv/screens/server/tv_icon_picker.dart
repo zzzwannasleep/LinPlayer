@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/app_identity.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
@@ -56,7 +57,10 @@ class _TvIconPickerDialogState extends State<_TvIconPickerDialog> {
     try {
       final resp = await Dio().get(
         _defaultIconLibraryUrl,
-        options: Options(responseType: ResponseType.plain),
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: const {'User-Agent': kDefaultBrowserUserAgent},
+        ),
       );
       final dynamic data = resp.data is String
           ? jsonDecode(resp.data as String)
@@ -211,6 +215,7 @@ class _TvIconPickerDialogState extends State<_TvIconPickerDialog> {
             child: MediaImage(
               imageUrl: it.url,
               fit: BoxFit.contain,
+              useDefaultUserAgent: true,
             ),
           ),
         );

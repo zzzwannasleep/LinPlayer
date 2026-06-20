@@ -61,18 +61,21 @@ Future<void> _importCustomFont(
   final path = result?.files.single.path;
   if (path == null || path.isEmpty) return;
 
-  final ok = isApp
+  // setApp/DanmakuFont 会把字体复制进应用持久目录并返回稳定路径；必须用这个
+  // 返回值更新 Provider，否则会用 FilePicker 的临时缓存路径覆盖已持久化路径，
+  // 重启后文件被清理 → 字体「失效」。
+  final savedPath = isApp
       ? await FontService.setAppFont(path)
       : await FontService.setDanmakuFont(path);
   if (!context.mounted) return;
-  if (ok) {
+  if (savedPath != null) {
     if (isApp) {
-      ref.read(customAppFontPathProvider.notifier).state = path;
+      ref.read(customAppFontPathProvider.notifier).state = savedPath;
     } else {
-      ref.read(customDanmakuFontPathProvider.notifier).state = path;
+      ref.read(customDanmakuFontPathProvider.notifier).state = savedPath;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('字体已应用：${p.basename(path)}')),
+      SnackBar(content: Text('字体已应用：${p.basename(savedPath)}')),
     );
   } else {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -98,6 +101,8 @@ Map<String, dynamic> _buildBackupPayload(WidgetRef ref) {
       'hardwareDecoding': ref.read(hardwareDecodingProvider),
       'backgroundPlayback': ref.read(backgroundPlaybackProvider),
       'autoPlayNext': ref.read(autoPlayNextProvider),
+      'preloadEnabled': ref.read(preloadEnabledProvider),
+      'strmDirectPlay': ref.read(strmDirectPlayProvider),
       'watchedThreshold': ref.read(watchedThresholdProvider),
       'danmakuEnabled': ref.read(danmakuEnabledProvider),
       'danmakuOpacity': ref.read(danmakuOpacityProvider),
@@ -182,6 +187,14 @@ Future<void> _restoreBackupPayload(
   if (settings['autoPlayNext'] is bool) {
     ref.read(autoPlayNextProvider.notifier).state =
         settings['autoPlayNext'] as bool;
+  }
+  if (settings['preloadEnabled'] is bool) {
+    ref.read(preloadEnabledProvider.notifier).state =
+        settings['preloadEnabled'] as bool;
+  }
+  if (settings['strmDirectPlay'] is bool) {
+    ref.read(strmDirectPlayProvider.notifier).state =
+        settings['strmDirectPlay'] as bool;
   }
   if (settings['watchedThreshold'] is num) {
     ref.read(watchedThresholdProvider.notifier).state =

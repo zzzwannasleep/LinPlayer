@@ -544,6 +544,12 @@ class MediaSource {
   final int? runTimeTicks;
   final List<MediaStream> mediaStreams;
 
+  /// 媒体源协议（Emby `Protocol`）：`File` / `Http` 等。STRM 远端源通常为 `Http`。
+  final String? protocol;
+
+  /// 是否为远端源（Emby `IsRemote`）。STRM 指向外链时为 true。
+  final bool? isRemote;
+
   MediaSource({
     required this.id,
     this.name,
@@ -552,6 +558,8 @@ class MediaSource {
     this.size,
     this.runTimeTicks,
     required this.mediaStreams,
+    this.protocol,
+    this.isRemote,
   });
 }
 

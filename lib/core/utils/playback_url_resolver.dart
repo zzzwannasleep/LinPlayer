@@ -66,13 +66,35 @@ class PlaybackSelection {
   final bool startsWithSoftwareDecoding;
   final String? fallbackReason;
 
+  /// STRM 直链地址：当「STRM 直链播放」开启且媒体源可解析出可用外链时非空。
+  /// 调用方应优先用它喂给内核，并把服务端直传流（[primaryRequest] 构建出的 URL）
+  /// 作为回退，以兼容部分不支持直链的服务器。
+  final String? directPlayUrl;
+
   const PlaybackSelection({
     required this.mediaSource,
     required this.primaryRequest,
     this.fallbackRequest,
     this.startsWithSoftwareDecoding = false,
     this.fallbackReason,
+    this.directPlayUrl,
   });
+}
+
+/// 从媒体源解析 STRM 直链地址：仅当其为远端源（`IsRemote` / `Protocol==Http`）且
+/// `Path` 是合法的 http(s) 链接时返回该链接，否则返回 null（交回服务端直传）。
+String? resolveStrmDirectUrl(MediaSource? source) {
+  if (source == null) return null;
+  final path = source.path?.trim();
+  if (path == null || path.isEmpty) return null;
+  final uri = Uri.tryParse(path);
+  final isHttp = uri != null &&
+      (uri.scheme == 'http' || uri.scheme == 'https') &&
+      uri.host.isNotEmpty;
+  if (!isHttp) return null;
+  final protocol = source.protocol?.trim().toLowerCase();
+  final remote = (source.isRemote ?? false) || protocol == 'http';
+  return remote ? path : null;
 }
 
 MediaSource? resolvePreferredMediaSource(
@@ -104,12 +126,15 @@ PlaybackSelection buildPlaybackSelection({
   String? preferredMediaSourceId,
   String? versionRegex,
   String? playSessionId,
+  bool strmDirectPlay = false,
 }) {
   final mediaSource = resolvePreferredMediaSource(
     playbackInfo,
     preferredMediaSourceId: preferredMediaSourceId,
     versionRegex: versionRegex,
   );
+  final directPlayUrl =
+      strmDirectPlay ? resolveStrmDirectUrl(mediaSource) : null;
   final normalizedContainer = _preferredContainer(mediaSource);
   final primaryRequest = PlaybackUrlRequest(
     itemId: itemId,
@@ -138,6 +163,7 @@ PlaybackSelection buildPlaybackSelection({
     primaryRequest: primaryRequest,
     fallbackRequest: fallbackRequest,
     fallbackReason: '直连失败后回退到服务端直传流',
+    directPlayUrl: directPlayUrl,
   );
 }
 

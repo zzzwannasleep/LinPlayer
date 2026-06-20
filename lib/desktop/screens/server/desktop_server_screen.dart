@@ -438,6 +438,7 @@ class _ServerGridCardState extends State<_ServerGridCard>
                               width: 34,
                               height: 34,
                               fit: BoxFit.cover,
+                              useDefaultUserAgent: true,
                             ),
                           )
                         : Icon(
@@ -672,6 +673,7 @@ class _ServerListTileState extends State<_ServerListTile>
                             width: 36,
                             height: 36,
                             fit: BoxFit.cover,
+                            useDefaultUserAgent: true,
                           ),
                         )
                       : Icon(

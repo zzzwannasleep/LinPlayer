@@ -237,6 +237,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             versionRegex: ref.read(preferredVersionRegexProvider),
             playSessionId:
                 '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
+            strmDirectPlay: ref.read(strmDirectPlayProvider),
           )
         : buildOfflinePlaybackSelection(itemId: widget.itemId);
     final mediaSource = selection.mediaSource;
@@ -284,13 +285,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 selection.fallbackRequest!.enableAutoStreamCopyVideo,
           );
 
+    // STRM 直链：开启且解析出可用直链时优先用直链，服务端直传流作为回退（兼容不支持直链的服务器）。
+    final directUrl = selection.directPlayUrl;
+    final hasDirect = directUrl != null && directUrl.isNotEmpty;
+    final onlineUrl = hasDirect ? directUrl : videoUrl;
+
     // 本地文件覆盖播放源：用 file:// 形式喂给内核；在线地址作为本地失效时的回退。
     final localFileSource =
         hasLocal ? Uri.file(localPath).toString() : null;
-    final effectiveVideoUrl = localFileSource ?? videoUrl;
+    final effectiveVideoUrl = localFileSource ?? onlineUrl;
     final effectiveFallbackUrl = localFileSource != null
-        ? (playbackInfo != null ? videoUrl : null)
-        : fallbackVideoUrl;
+        ? (playbackInfo != null ? onlineUrl : null)
+        : (hasDirect ? videoUrl : fallbackVideoUrl);
 
     Duration? startPosition;
     try {
@@ -2439,8 +2445,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         );
         return;
       }
-      // 之前只拿到字节、从未落盘，"截图已保存"是假提示。这里真正写入系统相册。
-      // Android 10+ 走 MediaStore（免存储权限）；<10 走 Pictures 目录（清单已声明 maxSdk28）。
+      // 真正落盘到系统「下载/Linpic」目录（之前只拿到字节、从未落盘）。
+      // Android 10+ 走 MediaStore.Downloads（免存储权限）；<10 写公共 Download/Linpic
+      //（清单已声明 maxSdk28）。
       bool saved = false;
       try {
         saved = await const MethodChannel('com.linplayer/media')
@@ -2454,7 +2461,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(saved ? '截图已保存到相册' : '截图保存失败，请重试')),
+        SnackBar(content: Text(saved ? '截图已保存到 下载/Linpic' : '截图保存失败，请重试')),
       );
     } catch (_) {
       if (!mounted) return;

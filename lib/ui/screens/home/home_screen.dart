@@ -284,11 +284,23 @@ class _ServerSelectorOverlayState extends State<_ServerSelectorOverlay>
                     builder: (context, ref, _) {
                       final currentServerId =
                           ref.watch(currentServerProvider)?.id;
+                      final theme = Theme.of(context);
                       return Container(
                         width: containerWidth,
-                        decoration: const BoxDecoration(
-                          color: Colors.transparent,
+                        decoration: BoxDecoration(
+                          // 用主题表面色，浅/深模式下都与文字对比清晰（原为透明 →
+                          // 写死黑字在深色模式不可见）。
+                          color: theme.colorScheme.surface,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.18),
+                              blurRadius: 16,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
+                        clipBehavior: Clip.antiAlias,
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxHeight: 280),
                           child: ListView.builder(
@@ -343,6 +355,7 @@ class _ServerSelectorOverlayState extends State<_ServerSelectorOverlay>
                                                     width: 32,
                                                     height: 32,
                                                     fit: BoxFit.cover,
+                                                    useDefaultUserAgent: true,
                                                   ),
                                                 )
                                               : const Icon(
@@ -360,7 +373,9 @@ class _ServerSelectorOverlayState extends State<_ServerSelectorOverlay>
                                               fontWeight: FontWeight.w500,
                                               color: isCurrent
                                                   ? const Color(0xFF5B8DEF)
-                                                  : Colors.black,
+                                                  : Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurface,
                                             ),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -498,6 +513,7 @@ class _HomeAppBarState extends ConsumerState<_HomeAppBar> {
                                 width: 32,
                                 height: 32,
                                 fit: BoxFit.cover,
+                                useDefaultUserAgent: true,
                               ),
                             )
                           : const Icon(Icons.dns,
@@ -845,6 +861,12 @@ class _CarouselItem extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final api = ref.read(apiClientProvider);
     final imageUrl = _carouselBackgroundUrl(api, item);
+    // 底部信息落在「渐变→海报主色」上，前景色按主色亮度自适配（深底浅字、
+    // 浅底深字），保证浅色海报下也清晰。
+    final fg = readableTextColorForBackground(backgroundColor);
+    final shadowColor = fg.computeLuminance() > 0.5
+        ? Colors.black.withValues(alpha: 0.5)
+        : Colors.white.withValues(alpha: 0.5);
 
     return GestureDetector(
       onTap: onTap,
@@ -912,7 +934,7 @@ class _CarouselItem extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildLogoOrTitle(item, api),
+                _buildLogoOrTitle(item, api, fg, shadowColor),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -921,12 +943,12 @@ class _CarouselItem extends ConsumerWidget {
                       const SizedBox(width: 4),
                       Text(
                         item.communityRating!.toStringAsFixed(1),
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: Colors.white,
+                          color: fg,
                           shadows: [
-                            Shadow(blurRadius: 4, color: Colors.black54)
+                            Shadow(blurRadius: 4, color: shadowColor)
                           ],
                         ),
                       ),
@@ -938,13 +960,12 @@ class _CarouselItem extends ConsumerWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.2),
+                              color: fg.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               genre,
-                              style: const TextStyle(
-                                  fontSize: 12, color: Colors.white),
+                              style: TextStyle(fontSize: 12, color: fg),
                             ),
                           ),
                         )),
@@ -959,7 +980,8 @@ class _CarouselItem extends ConsumerWidget {
   }
 
   /// 优先使用 Logo 艺术字图片，无 Logo 时回退到文字标题
-  Widget _buildLogoOrTitle(MediaItem item, ApiClientFactory api) {
+  Widget _buildLogoOrTitle(
+      MediaItem item, ApiClientFactory api, Color fg, Color shadowColor) {
     final logoUrl = _carouselLogoUrl(api, item);
 
     if (logoUrl != null && logoUrl.isNotEmpty) {
@@ -968,25 +990,25 @@ class _CarouselItem extends ConsumerWidget {
         height: 48,
         fit: BoxFit.contain,
         alignment: Alignment.centerLeft,
-        errorBuilder: (_, __, ___) => _buildTitleText(item.name),
+        errorBuilder: (_, __, ___) => _buildTitleText(item.name, fg, shadowColor),
         frameBuilder: (_, child, frame, wasSynchronouslyLoaded) {
           if (wasSynchronouslyLoaded || frame != null) return child;
-          return _buildTitleText(item.name);
+          return _buildTitleText(item.name, fg, shadowColor);
         },
       );
     }
-    return _buildTitleText(item.name);
+    return _buildTitleText(item.name, fg, shadowColor);
   }
 
-  Widget _buildTitleText(String title) {
+  Widget _buildTitleText(String title, Color fg, Color shadowColor) {
     return Text(
       title,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 28,
         fontWeight: FontWeight.w800,
-        color: Colors.white,
+        color: fg,
         shadows: [
-          Shadow(blurRadius: 8, color: Colors.black54),
+          Shadow(blurRadius: 8, color: shadowColor),
         ],
       ),
     );

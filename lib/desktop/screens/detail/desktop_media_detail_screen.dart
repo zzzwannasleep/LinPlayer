@@ -13,6 +13,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/download_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/services/download/download_helper.dart';
+import '../../../core/services/preload_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/utils/color_extractor.dart';

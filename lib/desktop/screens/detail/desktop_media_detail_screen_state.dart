@@ -30,6 +30,27 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
     _dominantColor = _defaultSurfaceColor(context);
     _lastBrightness = Theme.of(context).brightness;
     _extractColor();
+    _triggerPreload();
+  }
+
+  /// 进入详情页即按规范流程预热真实播放流（受「预加载」开关控制，fire-and-forget）。
+  /// 非可直接播放条目（如剧集 / 季根）会在服务内部自动 no-op。
+  void _triggerPreload() {
+    if (!ref.read(preloadEnabledProvider)) return;
+    final ApiClientFactory api;
+    try {
+      api = ref.read(apiClientProvider);
+    } catch (_) {
+      return; // 未连接服务器
+    }
+    PreloadService.instance.preloadItem(
+      api: api,
+      itemId: widget.itemId,
+      enabled: true,
+      preferredMediaSourceId: ref.read(selectedMediaSourceProvider),
+      versionRegex: ref.read(preferredVersionRegexProvider),
+      strmDirectPlay: ref.read(strmDirectPlayProvider),
+    );
   }
 
   @override

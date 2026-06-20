@@ -11,6 +11,8 @@ class PlayerSettingsScreen extends ConsumerWidget {
     final backgroundPlayback = ref.watch(backgroundPlaybackProvider);
     final autoPlayNext = ref.watch(autoPlayNextProvider);
     final autoSkipSegments = ref.watch(autoSkipSegmentsProvider);
+    final preloadEnabled = ref.watch(preloadEnabledProvider);
+    final strmDirectPlay = ref.watch(strmDirectPlayProvider);
     final watchedThreshold = ref.watch(watchedThresholdProvider);
     final preferredSubtitleLanguage =
         ref.watch(preferredSubtitleLanguageProvider);
@@ -93,6 +95,20 @@ class PlayerSettingsScreen extends ConsumerWidget {
             value: autoSkipSegments,
             onChanged: (value) =>
                 ref.read(autoSkipSegmentsProvider.notifier).state = value,
+          ),
+          SwitchListTile(
+            title: const Text('预加载'),
+            subtitle: const Text('进入集/电影详情页时提前预热播放流，点播放更接近秒开（会消耗少量流量）'),
+            value: preloadEnabled,
+            onChanged: (value) =>
+                ref.read(preloadEnabledProvider.notifier).state = value,
+          ),
+          SwitchListTile(
+            title: const Text('STRM 直链播放'),
+            subtitle: const Text('STRM 可获取直链时直接直链播放；部分服务器不兼容可能导致无法播放，仅在明确需要时开启'),
+            value: strmDirectPlay,
+            onChanged: (value) =>
+                ref.read(strmDirectPlayProvider.notifier).state = value,
           ),
           /*
           ListTile(

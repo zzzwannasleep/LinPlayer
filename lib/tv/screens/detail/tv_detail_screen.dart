@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
+import '../../../core/services/preload_service.dart';
 import '../../../ui/utils/media_helpers.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import '../../theme/tv_design_tokens.dart';
@@ -28,6 +29,34 @@ class TvDetailScreen extends ConsumerStatefulWidget {
 class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
   String? _selectedSeasonId;
   bool? _favoriteOverride; // 本地乐观状态
+
+  @override
+  void initState() {
+    super.initState();
+    _triggerPreload();
+  }
+
+  /// 进入详情页即按规范流程预热真实播放流（受「预加载」开关控制，fire-and-forget）。
+  /// 剧集根等非可直接播放条目会在服务内部自动 no-op。
+  void _triggerPreload() {
+    final id = widget.mediaId;
+    if (id == null || id.isEmpty) return;
+    if (!ref.read(preloadEnabledProvider)) return;
+    final ApiClientFactory api;
+    try {
+      api = ref.read(apiClientProvider);
+    } catch (_) {
+      return; // 未连接服务器
+    }
+    PreloadService.instance.preloadItem(
+      api: api,
+      itemId: id,
+      enabled: true,
+      preferredMediaSourceId: ref.read(selectedMediaSourceProvider),
+      versionRegex: ref.read(preferredVersionRegexProvider),
+      strmDirectPlay: ref.read(strmDirectPlayProvider),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,6 +1,7 @@
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/app_identity.dart';
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/utils/persistent_image_provider.dart';
@@ -22,6 +23,10 @@ class MediaImage extends StatelessWidget {
   final bool gaplessPlayback;
   final Alignment alignment;
 
+  /// 用中立浏览器 UA 请求（而非 App 的 `LinPlayer/x.x.x`）。
+  /// 服务器图标等第三方 CDN 资源需要，否则可能被拒导致图标损坏。
+  final bool useDefaultUserAgent;
+
   const MediaImage({
     super.key,
     required this.imageUrl,
@@ -37,6 +42,7 @@ class MediaImage extends StatelessWidget {
     this.cacheHeight,
     this.gaplessPlayback = true,
     this.alignment = Alignment.center,
+    this.useDefaultUserAgent = false,
   });
 
   @override
@@ -57,6 +63,7 @@ class MediaImage extends StatelessWidget {
             cacheWidth: cacheWidth,
             cacheHeight: cacheHeight,
             gaplessPlayback: gaplessPlayback,
+            useDefaultUserAgent: useDefaultUserAgent,
             placeholderBuilder: () => placeholder ?? _buildPlaceholder(context),
             errorBuilder: () => errorWidget ?? _buildError(context),
           );
@@ -110,6 +117,7 @@ class _FallbackNetworkImage extends StatefulWidget {
   final int? cacheWidth;
   final int? cacheHeight;
   final bool gaplessPlayback;
+  final bool useDefaultUserAgent;
   final Widget Function() placeholderBuilder;
   final Widget Function() errorBuilder;
 
@@ -122,6 +130,7 @@ class _FallbackNetworkImage extends StatefulWidget {
     required this.cacheWidth,
     required this.cacheHeight,
     required this.gaplessPlayback,
+    required this.useDefaultUserAgent,
     required this.placeholderBuilder,
     required this.errorBuilder,
   });
@@ -196,6 +205,11 @@ class _FallbackNetworkImageState extends State<_FallbackNetworkImage> {
           retries: 5,
           timeRetry: const Duration(milliseconds: 350),
           requestKey: '$_requestEpoch:$_retryRound:$_currentIndex',
+          // 中立资源（服务器图标等）用浏览器 UA，覆盖共享 HttpClient 的 App UA，
+          // 避免被第三方 CDN 拒绝导致图标损坏。
+          headers: widget.useDefaultUserAgent
+              ? const {'User-Agent': kDefaultBrowserUserAgent}
+              : null,
         );
         // 以推导出的小尺寸解码并缓存。maxBytes/compressionRatio 必须显式置 null，
         // 否则 ExtendedResizeImage 默认 maxBytes=50KB 会无视 width/height 把图压成

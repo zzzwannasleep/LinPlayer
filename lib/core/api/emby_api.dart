@@ -1262,6 +1262,8 @@ MediaSource _parseMediaSource(Map<String, dynamic> d) {
     container: d['Container']?.toString(),
     size: d['Size'] as int?,
     runTimeTicks: _parseTicks(d['RunTimeTicks']),
+    protocol: d['Protocol']?.toString(),
+    isRemote: d['IsRemote'] as bool?,
     mediaStreams: streams
         .map((e) => _parseMediaStream(e as Map<String, dynamic>))
         .toList(),

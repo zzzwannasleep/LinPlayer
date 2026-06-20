@@ -261,6 +261,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         playbackInfo: playbackInfo,
         itemId: _itemId,
         preferredMediaSourceId: ref.read(selectedMediaSourceProvider),
+        strmDirectPlay: ref.read(strmDirectPlayProvider),
         versionRegex: ref.read(preferredVersionRegexProvider),
         playSessionId: '$_itemId-${DateTime.now().microsecondsSinceEpoch}',
       );
@@ -278,6 +279,11 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
         enableAutoStreamCopyAudio: req.enableAutoStreamCopyAudio,
         enableAutoStreamCopyVideo: req.enableAutoStreamCopyVideo,
       );
+      // STRM 直链：开启且解析出可用直链时优先用直链喂给内核。
+      final directUrl = selection.directPlayUrl;
+      final effectiveUrl = (directUrl != null && directUrl.isNotEmpty)
+          ? directUrl
+          : videoUrl;
       final coreType =
           switch (normalizePlayerCore(ref.read(playerCoreProvider))) {
         'mpv' => PlayerCoreType.mpv,
@@ -323,7 +329,7 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
           : null;
 
       await _service.initialize(
-        videoUrl: videoUrl,
+        videoUrl: effectiveUrl,
         itemId: _itemId,
         mediaSourceId: selection.mediaSource?.id,
         coreType: coreType,

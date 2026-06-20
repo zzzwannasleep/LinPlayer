@@ -331,6 +331,13 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
         ? widget.item.remoteTrailers!.first
         : null;
 
+    // 标题/元信息坐落在「渐变→海报主色」的底部，前景色按主色亮度自适配：
+    // 深底用浅字、浅底用深字；阴影取反色保证两种模式下都清晰。
+    final fg = readableTextColorForBackground(_backgroundColor);
+    final shadowColor = fg.computeLuminance() > 0.5
+        ? Colors.black.withValues(alpha: 0.5)
+        : Colors.white.withValues(alpha: 0.5);
+
     return Stack(
       children: [
         Container(
@@ -464,12 +471,12 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
             children: [
               Text(
                 widget.item.name,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.w800,
-                  color: Colors.white,
+                  color: fg,
                   shadows: [
-                    Shadow(blurRadius: 8, color: Colors.black54),
+                    Shadow(blurRadius: 8, color: shadowColor),
                   ],
                 ),
               ),
@@ -481,11 +488,11 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                     const SizedBox(width: 4),
                     Text(
                       widget.item.communityRating!.toStringAsFixed(1),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                        color: fg,
+                        shadows: [Shadow(blurRadius: 4, color: shadowColor)],
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -495,12 +502,12 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: fg.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         genre,
-                        style: const TextStyle(fontSize: 11, color: Colors.white),
+                        style: TextStyle(fontSize: 11, color: fg),
                       ),
                     ),
                   )),
@@ -514,19 +521,19 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                   children: [
                     Text(
                       '${widget.item.productionYear}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
-                        color: Colors.white,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                        color: fg,
+                        shadows: [Shadow(blurRadius: 4, color: shadowColor)],
                       ),
                     ),
                     if ((widget.item.formattedRuntime ?? '').isNotEmpty)
                       Text(
                         widget.item.formattedRuntime!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
-                          color: Colors.white,
-                          shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                          color: fg,
+                          shadows: [Shadow(blurRadius: 4, color: shadowColor)],
                         ),
                       ),
                   ],

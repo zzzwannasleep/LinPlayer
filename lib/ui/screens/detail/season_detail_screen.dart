@@ -5,6 +5,7 @@ import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/services/cast_service.dart';
+import '../../../core/services/preload_service.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/utils/color_extractor.dart';
 import '../../../core/utils/platform_utils.dart';
@@ -193,6 +194,7 @@ class _EpisodeDetailScreenState extends ConsumerState<EpisodeDetailScreen> {
   void initState() {
     super.initState();
     _resetPlaybackSelections();
+    _triggerPreload();
   }
 
   @override
@@ -200,7 +202,27 @@ class _EpisodeDetailScreenState extends ConsumerState<EpisodeDetailScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.episodeId != widget.episodeId) {
       _resetPlaybackSelections();
+      _triggerPreload();
     }
+  }
+
+  /// 进入详情页即按规范流程预热真实播放流（受「预加载」开关控制，fire-and-forget）。
+  void _triggerPreload() {
+    if (!ref.read(preloadEnabledProvider)) return;
+    final ApiClientFactory api;
+    try {
+      api = ref.read(apiClientProvider);
+    } catch (_) {
+      return; // 未连接服务器
+    }
+    PreloadService.instance.preloadItem(
+      api: api,
+      itemId: widget.episodeId,
+      enabled: true,
+      preferredMediaSourceId: ref.read(selectedMediaSourceProvider),
+      versionRegex: ref.read(preferredVersionRegexProvider),
+      strmDirectPlay: ref.read(strmDirectPlayProvider),
+    );
   }
 
   void _resetPlaybackSelections() {
@@ -396,6 +418,13 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
         ? widget.item.remoteTrailers!.first
         : null;
 
+    // 标题/元信息在「渐变→海报主色」底部，前景色按主色亮度自适配（深底浅字、
+    // 浅底深字），阴影取反色保证两种模式下都清晰。
+    final fg = readableTextColorForBackground(_backgroundColor);
+    final shadowColor = fg.computeLuminance() > 0.5
+        ? Colors.black.withValues(alpha: 0.5)
+        : Colors.white.withValues(alpha: 0.5);
+
     return Stack(
       children: [
         Container(
@@ -473,12 +502,12 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
             children: [
               Text(
                 widget.item.name,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.w800,
-                  color: Colors.white,
+                  color: fg,
                   shadows: [
-                    Shadow(blurRadius: 8, color: Colors.black54),
+                    Shadow(blurRadius: 8, color: shadowColor),
                   ],
                 ),
               ),
@@ -490,11 +519,11 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                     const SizedBox(width: 4),
                     Text(
                       widget.item.communityRating!.toStringAsFixed(1),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                        color: fg,
+                        shadows: [Shadow(blurRadius: 4, color: shadowColor)],
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -502,10 +531,10 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                   if (widget.item.productionYear != null)
                     Text(
                       '${widget.item.productionYear}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
-                        color: Colors.white,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                        color: fg,
+                        shadows: [Shadow(blurRadius: 4, color: shadowColor)],
                       ),
                     ),
                   if (widget.item.productionYear != null && widget.item.formattedRuntime != null)
@@ -513,10 +542,10 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                   if (widget.item.formattedRuntime != null)
                     Text(
                       widget.item.formattedRuntime!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
-                        color: Colors.white,
-                        shadows: [Shadow(blurRadius: 4, color: Colors.black54)],
+                        color: fg,
+                        shadows: [Shadow(blurRadius: 4, color: shadowColor)],
                       ),
                     ),
                   const SizedBox(width: 12),
@@ -525,12 +554,12 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: fg.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         genre,
-                        style: const TextStyle(fontSize: 11, color: Colors.white),
+                        style: TextStyle(fontSize: 11, color: fg),
                       ),
                     ),
                   )),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/app_identity.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
@@ -268,6 +269,8 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
               : Image.network(
                   url,
                   fit: BoxFit.cover,
+                  // 图标 CDN 多拒绝 App UA，用中立浏览器 UA 请求。
+                  headers: const {'User-Agent': kDefaultBrowserUserAgent},
                   errorBuilder: (_, __, ___) => Icon(Icons.broken_image,
                       color: TvDesignTokens.textDisabled, size: m.s(28)),
                 ),

@@ -131,6 +131,8 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     final skip = ref.watch(skipForwardStepProvider);
     final autoNext = ref.watch(autoPlayNextProvider);
     final autoSkipSegments = ref.watch(autoSkipSegmentsProvider);
+    final preloadEnabled = ref.watch(preloadEnabledProvider);
+    final strmDirectPlay = ref.watch(strmDirectPlayProvider);
     final exoLibass = ref.watch(exoLibassProvider);
     final gpuNext = ref.watch(gpuNextEnabledProvider);
     final dolbyAuto = ref.watch(dolbyAutoGpuNextSwProvider);
@@ -211,6 +213,22 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
         value: autoSkipSegments,
         onToggle: () => ref.read(autoSkipSegmentsProvider.notifier).state =
             !autoSkipSegments,
+      ),
+      _toggleItem(
+        m,
+        title: '预加载',
+        subtitle: '进入集/电影详情页时提前预热播放流，点播放更接近秒开（会消耗少量流量）',
+        value: preloadEnabled,
+        onToggle: () => ref.read(preloadEnabledProvider.notifier).state =
+            !preloadEnabled,
+      ),
+      _toggleItem(
+        m,
+        title: 'STRM 直链播放',
+        subtitle: 'STRM 可获取直链时直接直链播放；部分服务器不兼容可能导致无法播放，仅在明确需要时开启',
+        value: strmDirectPlay,
+        onToggle: () => ref.read(strmDirectPlayProvider.notifier).state =
+            !strmDirectPlay,
       ),
       _toggleItem(
         m,
@@ -975,18 +993,20 @@ class _TvSettingsScreenState extends ConsumerState<TvSettingsScreen> {
     );
     final path = result?.files.single.path;
     if (path == null || path.isEmpty) return;
-    final ok = isApp
+    // 用 setApp/DanmakuFont 返回的持久化路径更新 Provider，避免用 FilePicker
+    // 临时缓存路径覆盖、重启后字体失效。
+    final savedPath = isApp
         ? await FontService.setAppFont(path)
         : await FontService.setDanmakuFont(path);
     if (!mounted) return;
-    if (ok) {
+    if (savedPath != null) {
       ref
           .read((isApp
                   ? customAppFontPathProvider
                   : customDanmakuFontPathProvider)
               .notifier)
-          .state = path;
-      TvToast.show(context, '字体已应用：${p.basename(path)}');
+          .state = savedPath;
+      TvToast.show(context, '字体已应用：${p.basename(savedPath)}');
     } else {
       TvToast.show(context, '字体加载失败，请确认为有效的 ttf/otf 字体');
     }

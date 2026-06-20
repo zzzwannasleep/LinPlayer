@@ -228,6 +228,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
               versionRegex: ref.read(preferredVersionRegexProvider),
               playSessionId:
                   '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
+              strmDirectPlay: ref.read(strmDirectPlayProvider),
             )
           : buildOfflinePlaybackSelection(itemId: widget.itemId);
       final mediaSource = selection.mediaSource;
@@ -266,13 +267,18 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
                   selection.fallbackRequest!.enableAutoStreamCopyVideo,
             );
 
+      // STRM 直链：开启且解析出可用直链时优先用直链，服务端直传流作为回退。
+      final directUrl = selection.directPlayUrl;
+      final hasDirect = directUrl != null && directUrl.isNotEmpty;
+      final onlineUrl = hasDirect ? directUrl : videoUrl;
+
       // 本地文件覆盖播放源；在线地址留作本地失效时回退。
       final localFileSource =
           hasLocal ? Uri.file(localPath).toString() : null;
-      final effectiveVideoUrl = localFileSource ?? videoUrl;
+      final effectiveVideoUrl = localFileSource ?? onlineUrl;
       final effectiveFallbackUrl = localFileSource != null
-          ? (playbackInfo != null ? videoUrl : null)
-          : fallbackVideoUrl;
+          ? (playbackInfo != null ? onlineUrl : null)
+          : (hasDirect ? videoUrl : fallbackVideoUrl);
 
       Duration? startPosition;
       try {
@@ -1680,8 +1686,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       if (data != null && data.isNotEmpty) {
         final baseDirectory = await getDownloadsDirectory() ??
             await getApplicationDocumentsDirectory();
+        // 与移动端统一：截图落到 下载/Linpic。
         final screenshotsDirectory =
-            Directory(p.join(baseDirectory.path, 'LinPlayer', 'Screenshots'));
+            Directory(p.join(baseDirectory.path, 'Linpic'));
         if (!await screenshotsDirectory.exists()) {
           await screenshotsDirectory.create(recursive: true);
         }

@@ -704,6 +704,28 @@ class MpvPlayerPlugin(
         // ---- Screenshot ----
 
         fun screenshot(): ByteArray? {
+            // 优先用 mpv 原生 screenshot-to-file 截「video」帧：按片源原始分辨率输出、
+            // 宽高比正确、完整无裁切。grabThumbnail(1920) 会按固定边长缩放，导致
+            // 截图比例失真 / 截不全（用户反馈的核心问题），仅作兜底。
+            try {
+                val tmp = java.io.File(
+                    context.cacheDir,
+                    "mpv_shot_${System.currentTimeMillis()}.jpg"
+                )
+                // 第三参数 "video"：只截解码后的视频帧（不含 OSD/字幕），原始分辨率。
+                MPVLib.command(arrayOf("screenshot-to-file", tmp.absolutePath, "video"))
+                if (tmp.exists() && tmp.length() > 0L) {
+                    val bytes = tmp.readBytes()
+                    tmp.delete()
+                    return bytes
+                }
+                if (tmp.exists()) tmp.delete()
+            } catch (e: Exception) {
+                android.util.Log.w(
+                    "MpvScreenshot",
+                    "screenshot-to-file 失败，回退 grabThumbnail: ${e.message}"
+                )
+            }
             val bitmap = MPVLib.grabThumbnail(1920) ?: return null
             val stream = java.io.ByteArrayOutputStream()
             bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)

@@ -476,6 +476,7 @@ class _DesktopTopBarState extends ConsumerState<_DesktopTopBar> {
                           width: 28,
                           height: 28,
                           fit: BoxFit.cover,
+                          useDefaultUserAgent: true,
                         ),
                       )
                     : const Icon(Icons.dns, size: 14, color: Color(0xFF5B8DEF)),
@@ -867,6 +868,7 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                                                       width: 32,
                                                       height: 32,
                                                       fit: BoxFit.cover,
+                                                      useDefaultUserAgent: true,
                                                     ),
                                                   )
                                                 : Icon(

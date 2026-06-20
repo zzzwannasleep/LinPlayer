@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/app_identity.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../widgets/common/media_widgets.dart';
 
@@ -315,7 +316,13 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> {
     required String url,
     required String id,
   }) async {
-    final response = await Dio().get(url);
+    // 图标库 CDN 多拒绝 App UA，用中立浏览器 UA 请求 JSON。
+    final response = await Dio().get(
+      url,
+      options: Options(
+        headers: const {'User-Agent': kDefaultBrowserUserAgent},
+      ),
+    );
     final icons = _parseIconJson(jsonEncode(response.data));
 
     return NetworkIconLibrary(
@@ -698,6 +705,7 @@ class _CurrentIconPreview extends StatelessWidget {
           ? MediaImage(
               imageUrl: iconUrl,
               fit: BoxFit.contain,
+              useDefaultUserAgent: true,
             )
           : Icon(
               Icons.image_outlined,
@@ -913,6 +921,7 @@ class _NetworkIconCard extends StatelessWidget {
                   child: MediaImage(
                     imageUrl: icon.url,
                     fit: BoxFit.contain,
+                    useDefaultUserAgent: true,
                     errorWidget: Center(
                       child: Icon(
                         Icons.broken_image_outlined,

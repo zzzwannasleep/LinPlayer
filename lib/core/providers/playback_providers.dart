@@ -188,6 +188,33 @@ final crossServerResumeProvider =
   );
 });
 
+/// 预加载：进入「集/电影」详情页时，用 `LinplayerPreload/<版本>` UA 对真实播放流
+/// 发起规范的 Range 预取请求，提前预热服务端/CDN 缓存，点播放时秒开。默认开启。
+final preloadEnabledProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_preload_enabled'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_preload_enabled', value);
+    },
+  );
+});
+
+/// STRM 直链播放：当 strm 媒体源可解析出可用的直链地址（远端 Http 源）时，
+/// 直接用直链喂给内核播放（绕过服务端转发）。部分服务器不兼容可能导致无法播放，
+/// 失败会自动回退到服务端直传流。默认关闭，仅在明确需要时开启。
+final strmDirectPlayProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: false,
+    readValue: (prefs) => prefs.getBool('linplayer_strm_direct_play'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_strm_direct_play', value);
+    },
+  );
+});
+
 final watchedThresholdProvider =
     StateNotifierProvider<PreferenceNotifier<int>, int>((ref) {
   int normalize(int? value) {

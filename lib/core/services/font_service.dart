@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show FontLoader;
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../providers/app_preferences.dart';
 import 'app_logger.dart';
@@ -68,22 +70,63 @@ class FontService {
     }
   }
 
-  /// 导入并持久化 App 全局字体。成功返回 true。
-  static Future<bool> setAppFont(String path) async {
-    final ok = await _loadFromPath(path, appFontFamily, isApp: true);
-    if (ok) {
-      await AppPreferencesStore.instance.setString(appFontPathKey, path);
+  /// 把用户选择的字体复制进应用持久目录，返回稳定路径。
+  ///
+  /// 关键修复：FilePicker 在移动端返回的是缓存临时路径（…/cache/file_picker/…），
+  /// 系统随时可能清理 → 重启后字体文件不存在 → 字体「失效」。复制到
+  /// appSupport/fonts/ 后路径稳定、跨重启可用。复制失败则回退原路径。
+  static Future<String> _persistFontFile(String srcPath,
+      {required bool isApp}) async {
+    final src = File(srcPath);
+    final dir = await getApplicationSupportDirectory();
+    final fontsDir = Directory(p.join(dir.path, 'fonts'));
+    if (!fontsDir.existsSync()) {
+      fontsDir.createSync(recursive: true);
     }
-    return ok;
+    final ext = p.extension(srcPath).toLowerCase();
+    final destName = '${isApp ? 'app_font' : 'danmaku_font'}'
+        '${ext.isEmpty ? '.ttf' : ext}';
+    final destPath = p.join(fontsDir.path, destName);
+    // 已经是目标文件（用户重选同一持久文件）就不必复制。
+    if (p.equals(src.absolute.path, destPath)) return destPath;
+    final dest = File(destPath);
+    if (dest.existsSync()) dest.deleteSync();
+    await src.copy(destPath);
+    return destPath;
   }
 
-  /// 导入并持久化弹幕字体。成功返回 true。
-  static Future<bool> setDanmakuFont(String path) async {
-    final ok = await _loadFromPath(path, danmakuFontFamily, isApp: false);
+  /// 导入并持久化 App 全局字体。成功返回最终持久化路径，失败返回 null。
+  static Future<String?> setAppFont(String path) async {
+    final effective = await _resolvePersistentPath(path, isApp: true);
+    final ok = await _loadFromPath(effective, appFontFamily, isApp: true);
     if (ok) {
-      await AppPreferencesStore.instance.setString(danmakuFontPathKey, path);
+      await AppPreferencesStore.instance.setString(appFontPathKey, effective);
+      return effective;
     }
-    return ok;
+    return null;
+  }
+
+  /// 导入并持久化弹幕字体。成功返回最终持久化路径，失败返回 null。
+  static Future<String?> setDanmakuFont(String path) async {
+    final effective = await _resolvePersistentPath(path, isApp: false);
+    final ok = await _loadFromPath(effective, danmakuFontFamily, isApp: false);
+    if (ok) {
+      await AppPreferencesStore.instance
+          .setString(danmakuFontPathKey, effective);
+      return effective;
+    }
+    return null;
+  }
+
+  static Future<String> _resolvePersistentPath(String path,
+      {required bool isApp}) async {
+    try {
+      return await _persistFontFile(path, isApp: isApp);
+    } catch (e, st) {
+      AppLogger()
+          .eWithStack('FontService', '字体持久化失败，回退原路径: $path', e, st);
+      return path;
+    }
   }
 
   static Future<void> clearAppFont() async {
