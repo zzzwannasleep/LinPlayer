@@ -32,20 +32,65 @@ class SecureCredentialStore {
   static final AppLogger _log = AppLogger();
 
   static const _securePrefix = 'srv_secret_';
+  static const _kvPrefix = 'kv_secret_';
   static const _serversPrefsKey = 'linplayer_servers';
   static const _fallbackPrefsKey = 'linplayer_server_secrets_fb';
+  static const _kvFallbackPrefsKey = 'linplayer_kv_secrets_fb';
   static const _fbPassphrase = 'LinPlayer::server::cred::fallback::v1';
+
+  /// 启动时把这些旧明文 prefs 字符串键迁移进加密 KV（如翻译引擎 API key，M5）。
+  static const _legacyKvKeys = <String>[
+    'linplayer_trans_openai',
+    'linplayer_trans_anthropic',
+    'linplayer_trans_baidu_general',
+    'linplayer_trans_baidu_llm',
+    'linplayer_trans_tencent',
+  ];
 
   final _storage = const FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
   final Map<String, ServerSecret> _cache = {};
+  final Map<String, String> _kv = {};
   bool _useFallback = false;
   bool _initialized = false;
   List<int>? _fbKeyCache;
 
-  /// 同步读取（启动后缓存已就绪）。
+  /// 同步读取服务器凭据（启动后缓存已就绪）。
   ServerSecret? read(String id) => _cache[id];
+
+  /// 同步读取通用加密 KV（启动后缓存已就绪）。
+  String? readKv(String key) => _kv[key];
+
+  Future<void> writeKv(String key, String? value) async {
+    if (value == null || value.isEmpty) {
+      await removeKv(key);
+      return;
+    }
+    _kv[key] = value;
+    if (_useFallback) {
+      await _persistKvFallback();
+      return;
+    }
+    try {
+      await _storage.write(key: '$_kvPrefix$key', value: value);
+    } catch (e) {
+      _useFallback = true;
+      _log.w('SecureCred', '写安全存储(KV)失败，回退混淆: $e');
+      await _persistKvFallback();
+    }
+  }
+
+  Future<void> removeKv(String key) async {
+    _kv.remove(key);
+    if (_useFallback) {
+      await _persistKvFallback();
+      return;
+    }
+    try {
+      await _storage.delete(key: '$_kvPrefix$key');
+    } catch (_) {}
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -56,15 +101,32 @@ class SecureCredentialStore {
       for (final e in all.entries) {
         if (e.key.startsWith(_securePrefix)) {
           _cache[e.key.substring(_securePrefix.length)] = _decode(e.value);
+        } else if (e.key.startsWith(_kvPrefix)) {
+          _kv[e.key.substring(_kvPrefix.length)] = e.value;
         }
       }
     } catch (e) {
       _useFallback = true;
       _log.w('SecureCred', 'OS 安全存储不可用，回退混淆存储: $e');
       _loadFallbackCache();
+      _loadKvFallbackCache();
     }
-    // 2) 迁移旧版本明文落盘的 password/authToken。
+    // 2) 迁移旧版本明文落盘的 password/authToken 与通用 KV（翻译 API key 等）。
     await _migrateLegacyPlaintext();
+    await _migrateLegacyKv();
+  }
+
+  /// 把旧明文 prefs 字符串键搬进加密 KV，并从 prefs 抹除明文。
+  Future<void> _migrateLegacyKv() async {
+    final prefs = AppPreferencesStore.instance;
+    for (final key in _legacyKvKeys) {
+      final raw = prefs.getString(key);
+      if (raw == null || raw.isEmpty) continue;
+      if (!_kv.containsKey(key)) {
+        await writeKv(key, raw);
+      }
+      await prefs.remove(key);
+    }
   }
 
   Future<void> write(String id,
@@ -195,6 +257,28 @@ class SecureCredentialStore {
           .setString(_fallbackPrefsKey, _xor(jsonEncode(m)));
     } catch (e) {
       _log.w('SecureCred', '回退存储写入失败: $e');
+    }
+  }
+
+  void _loadKvFallbackCache() {
+    try {
+      final raw = AppPreferencesStore.instance.getString(_kvFallbackPrefsKey);
+      if (raw == null || raw.isEmpty) return;
+      final plain = _unxor(raw);
+      if (plain == null) return;
+      final m = jsonDecode(plain) as Map<String, dynamic>;
+      for (final e in m.entries) {
+        _kv[e.key] = '${e.value}';
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistKvFallback() async {
+    try {
+      await AppPreferencesStore.instance
+          .setString(_kvFallbackPrefsKey, _xor(jsonEncode(_kv)));
+    } catch (e) {
+      _log.w('SecureCred', '回退存储(KV)写入失败: $e');
     }
   }
 }

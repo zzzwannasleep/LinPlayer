@@ -9,6 +9,7 @@ import '../services/translation/subtitle_document.dart';
 import '../services/translation/subtitle_translation_service.dart';
 import '../services/translation/translation_engine.dart';
 import '../services/translation/whisper/whisper_model.dart';
+import '../services/secure_credential_store.dart';
 import 'app_preferences.dart';
 
 // ============ 引擎选择与目标语言 ============
@@ -58,11 +59,12 @@ final bilingualLayoutProvider =
 
 // ============ 各引擎配置 ============
 
+// 翻译引擎配置含 apiKey/secretKey，改存 OS 安全加密 KV（M5），不再明文进 prefs。
 PreferenceNotifier<AiEngineConfig> _aiNotifier(String key, AiEngineConfig def) {
   return PreferenceNotifier<AiEngineConfig>(
     defaultValue: def,
-    readValue: (prefs) {
-      final s = prefs.getString(key);
+    readValue: (_) {
+      final s = SecureCredentialStore.instance.readKv(key);
       if (s == null) return null;
       try {
         return AiEngineConfig.fromJson(jsonDecode(s) as Map<String, dynamic>);
@@ -70,8 +72,9 @@ PreferenceNotifier<AiEngineConfig> _aiNotifier(String key, AiEngineConfig def) {
         return null;
       }
     },
-    writeValue: (prefs, value) async {
-      await prefs.setString(key, jsonEncode(value.toJson()));
+    writeValue: (_, value) async {
+      await SecureCredentialStore.instance
+          .writeKv(key, jsonEncode(value.toJson()));
     },
   );
 }
@@ -88,8 +91,8 @@ final anthropicConfigProvider =
 PreferenceNotifier<BaiduEngineConfig> _baiduNotifier(String key) {
   return PreferenceNotifier<BaiduEngineConfig>(
     defaultValue: const BaiduEngineConfig(),
-    readValue: (prefs) {
-      final s = prefs.getString(key);
+    readValue: (_) {
+      final s = SecureCredentialStore.instance.readKv(key);
       if (s == null) return null;
       try {
         return BaiduEngineConfig.fromJson(jsonDecode(s) as Map<String, dynamic>);
@@ -97,8 +100,9 @@ PreferenceNotifier<BaiduEngineConfig> _baiduNotifier(String key) {
         return null;
       }
     },
-    writeValue: (prefs, value) async {
-      await prefs.setString(key, jsonEncode(value.toJson()));
+    writeValue: (_, value) async {
+      await SecureCredentialStore.instance
+          .writeKv(key, jsonEncode(value.toJson()));
     },
   );
 }
@@ -117,8 +121,8 @@ final tencentConfigProvider = StateNotifierProvider<
     PreferenceNotifier<TencentEngineConfig>, TencentEngineConfig>((ref) {
   return PreferenceNotifier<TencentEngineConfig>(
     defaultValue: const TencentEngineConfig(),
-    readValue: (prefs) {
-      final s = prefs.getString('linplayer_trans_tencent');
+    readValue: (_) {
+      final s = SecureCredentialStore.instance.readKv('linplayer_trans_tencent');
       if (s == null) return null;
       try {
         return TencentEngineConfig.fromJson(
@@ -127,8 +131,9 @@ final tencentConfigProvider = StateNotifierProvider<
         return null;
       }
     },
-    writeValue: (prefs, value) async {
-      await prefs.setString('linplayer_trans_tencent', jsonEncode(value.toJson()));
+    writeValue: (_, value) async {
+      await SecureCredentialStore.instance
+          .writeKv('linplayer_trans_tencent', jsonEncode(value.toJson()));
     },
   );
 });
