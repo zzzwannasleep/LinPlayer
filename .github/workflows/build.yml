@@ -501,7 +501,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO
 
-      - name: Package tvOS app bundle
+      - name: Package tvOS IPA (unsigned)
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
           APP_PATH=$(find build/tvos/Build/Products/Release-appletvos -maxdepth 1 -type d -name "*.app" | head -n 1)
@@ -532,17 +532,24 @@ jobs:
           echo "tvOS executable size:"
           ls -lh "$EXECUTABLE_PATH"
 
-          OUTPUT_NAME="LinPlayer-AppleTV-v$VERSION-unsigned-app"
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT_NAME.zip"
+          OUTPUT_NAME="LinPlayer-AppleTV-v$VERSION-unsigned"
+          # tvOS 安装包与 iOS 一致：IPA = 含 Payload/ 的 zip（Payload/xxx.app）。
+          # 未签名，需用证书重签后经 TestFlight / Apple Configurator 安装。
+          rm -rf Payload "$OUTPUT_NAME.ipa"
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+          # -y 保留 .app 内部可能存在的符号链接，确保 bundle 结构完整
+          zip -qry "$OUTPUT_NAME.ipa" Payload
+          rm -rf Payload
 
-          echo "Created: $OUTPUT_NAME.zip"
-          ls -lh "$OUTPUT_NAME.zip"
+          echo "Created: $OUTPUT_NAME.ipa"
+          ls -lh "$OUTPUT_NAME.ipa"
 
       - name: Upload tvOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-apple-tv
-          path: LinPlayer-AppleTV-*.zip
+          path: LinPlayer-AppleTV-*.ipa
           retention-days: 30
 
       - name: Upload build logs

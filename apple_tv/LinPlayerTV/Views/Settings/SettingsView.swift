@@ -7,6 +7,8 @@ enum SettingsKey {
     static let watchedThreshold = "watchedThreshold"
     static let defaultPlaybackSpeed = "defaultPlaybackSpeed"
     static let updateChannel = "updateChannel"
+    static let playbackKernel = "playbackKernel"
+    static let anime4kEnabled = "anime4kEnabled"
 }
 
 struct SettingsView: View {
@@ -19,6 +21,8 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.watchedThreshold) private var watchedThreshold = 0.9
     @AppStorage(SettingsKey.defaultPlaybackSpeed) private var defaultSpeed = 1.0
     @AppStorage(SettingsKey.updateChannel) private var updateChannel = "stable"
+    @AppStorage(SettingsKey.playbackKernel) private var playbackKernel = PlaybackKernel.av.rawValue
+    @AppStorage(SettingsKey.anime4kEnabled) private var anime4kEnabled = false
 
     var body: some View {
         NavigationStack {
@@ -70,6 +74,20 @@ struct SettingsView: View {
 
     private var playbackSection: some View {
         Section("播放") {
+            Picker(selection: $playbackKernel) {
+                ForEach(PlaybackKernel.allCases) { k in
+                    Text(k.title).tag(k.rawValue)
+                }
+            } label: {
+                Label("播放内核", systemImage: "cpu")
+            }
+
+            if playbackKernel == PlaybackKernel.mpv.rawValue {
+                Toggle(isOn: $anime4kEnabled) {
+                    Label("Anime4K 超分（仅 MPV）", systemImage: "wand.and.stars")
+                }
+            }
+
             Toggle(isOn: $resumePlayback) {
                 Label("从上次位置继续", systemImage: "memorychip")
             }
