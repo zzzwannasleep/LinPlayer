@@ -155,6 +155,13 @@ class PluginContextBridge {
       throw Exception('不支持的 http 方法: $method');
     }
 
+    // 防重定向绕白名单（L1）：白名单主机若 302 跳到名单外/内网，最终 URL 的
+    // host 必须仍在白名单，否则拒绝把重定向内容回传给插件。
+    final finalHost = response.realUri.host;
+    if (!httpAllowedHosts.contains(finalHost)) {
+      throw Exception('请求经重定向到了白名单外主机: $finalHost');
+    }
+
     return {
       'status': response.statusCode,
       'headers': response.headers.map,
@@ -307,6 +314,13 @@ class PluginContextBridge {
         _require(PluginPermissions.embyCredentials.id);
         final s = container.read(currentServerProvider);
         if (s == null) return null;
+        // M1：逐次确认 + 明文密码警告，用户拒绝则视为本次未授权。
+        final approved =
+            await PluginUiHost.confirmCredentialAccess(manifest.name);
+        if (!approved) {
+          throw PluginPermissionError(
+              pluginId, PluginPermissions.embyCredentials.id);
+        }
         return {
           'username': s.username,
           'password': s.password,

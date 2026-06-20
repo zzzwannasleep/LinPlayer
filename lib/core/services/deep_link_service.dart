@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:app_links/app_links.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../desktop/routes/desktop_router.dart';
@@ -73,6 +74,19 @@ class DeepLinkService {
       return;
     }
 
+    // H9/M8/M4/L6：外部链接完全不可信，必须经用户显式确认（展示 host/用户名/
+    // 弹幕源数量、明文 HTTP 警告）后，才登录、添加、设为当前并入弹幕源。
+    final confirmed = await _confirmAddServer(
+      name: name,
+      username: user,
+      lineUrls: block.lines.map((l) => l.url).toList(),
+      danmakuCount: block.danmakuLines.length,
+    );
+    if (!confirmed) {
+      _logger.i('DeepLink', '用户取消（或无 UI 上下文）未添加深链服务器');
+      return;
+    }
+
     try {
       final server = await ServerBatchAdder.authenticateBlock(
         block,
@@ -124,6 +138,81 @@ class DeepLinkService {
           if (u.trim().isNotEmpty) ParsedLine('弹幕', u.trim()),
       ],
     );
+  }
+
+  /// 取当前平台路由器的根导航器 context（用于弹确认框）。拿不到返回 null。
+  BuildContext? _navContext() {
+    try {
+      if (isTvPlatform) {
+        return tvRouter.routerDelegate.navigatorKey.currentContext;
+      }
+      if (isDesktopPlatform) {
+        return container
+            .read(desktopRouterProvider)
+            .routerDelegate
+            .navigatorKey
+            .currentContext;
+      }
+      return container
+          .read(appRouterProvider)
+          .routerDelegate
+          .navigatorKey
+          .currentContext;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 弹出确认框：用户同意才返回 true。无 UI 上下文（拿不到导航器）一律返回
+  /// false——安全默认：不确认就不自动添加，杜绝网页/二维码 drive-by。
+  Future<bool> _confirmAddServer({
+    String? name,
+    required String username,
+    required List<String> lineUrls,
+    required int danmakuCount,
+  }) async {
+    final context = _navContext();
+    if (context == null || !context.mounted) {
+      _logger.w('DeepLink', '无可用 UI 上下文，拒绝自动添加服务器');
+      return false;
+    }
+    final hosts = lineUrls.map(_hostOf).toSet().join('、');
+    final hasHttp = lineUrls.any((u) => ServerBatchAdder.normalizeUrl(u)
+        .toLowerCase()
+        .startsWith('http://'));
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('通过链接添加服务器？'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('有外部链接请求添加并登录以下服务器，确认前请核实来源可信：',
+                style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            if (name != null && name.trim().isNotEmpty) Text('名称：$name'),
+            Text('主机：${hosts.isEmpty ? '（未知）' : hosts}'),
+            Text('用户名：$username'),
+            if (danmakuCount > 0) Text('附带弹幕源：$danmakuCount 条'),
+            if (hasHttp) ...[
+              const SizedBox(height: 8),
+              const Text('⚠ 含明文 HTTP 线路，账号密码将以明文传输',
+                  style: TextStyle(color: Colors.orange, fontSize: 12)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('添加并登录')),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   void _goHome() {

@@ -32,6 +32,12 @@ migrate_working_dir/
 .agents/
 skills-lock.json
 
+# Claude Code 本地文件（技能 SKILL.md、本地设置、worktree 等仅本地，不提交）
+.claude/skills/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/plans/
+
 # Zed Editor
 .zed/
 
