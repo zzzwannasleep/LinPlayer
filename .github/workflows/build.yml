@@ -642,6 +642,27 @@ jobs:
           }
           Write-Host "libmpv-2.dll 完整版就绪，大小: $($targetInfo.Length) bytes"
 
+      - name: Bundle ffmpeg (内置，避免运行时无校验下载，M6)
+        shell: pwsh
+        run: |
+          $outputDir = "build/windows/x64/runner/Release"
+          try {
+            $tmp = Join-Path $env:RUNNER_TEMP "ffmpeg-win"
+            New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+            $zip = Join-Path $tmp "ffmpeg.zip"
+            Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath $tmp -Force
+            $exe = Get-ChildItem -Path $tmp -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+            if ($exe) {
+              Copy-Item $exe.FullName (Join-Path $outputDir "ffmpeg.exe") -Force
+              Write-Host "Bundled ffmpeg.exe ($($exe.Length) bytes)"
+            } else {
+              Write-Host "::warning::ffmpeg.exe 未在归档中找到，跳过内置"
+            }
+          } catch {
+            Write-Host "::warning::内置 ffmpeg 失败（不阻断构建）: $_"
+          }
+
       - name: Package Windows Build
         shell: pwsh
         run: |
@@ -715,6 +736,18 @@ jobs:
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
 
+      - name: Bundle ffmpeg (内置，避免运行时无校验下载，M6)
+        run: |
+          OUT="build/linux/x64/release/bundle"
+          set +e
+          curl -fsSL -o /tmp/ffmpeg.tar.xz "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" \
+            && mkdir -p /tmp/ffmpeg && tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg \
+            && FF=$(find /tmp/ffmpeg -type f -name ffmpeg | head -n1) \
+            && cp "$FF" "$OUT/ffmpeg" && chmod +x "$OUT/ffmpeg" \
+            && echo "Bundled ffmpeg: $(ls -la "$OUT/ffmpeg")"
+          if [ ! -f "$OUT/ffmpeg" ]; then echo "::warning::内置 ffmpeg 失败（不阻断构建）"; fi
+          set -e
+
       - name: Package Linux Build
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
@@ -781,6 +814,19 @@ jobs:
             --dart-define=APP_VERSION="${{ needs.prepare.outputs.version }}" \
             --dart-define=DANDANPLAY_APP_ID="$CLEAN_ID" \
             --dart-define=DANDANPLAY_APP_SECRET="$CLEAN_SECRET"
+
+      - name: Bundle ffmpeg (内置，避免运行时无校验下载，M6)
+        run: |
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -type d -name "*.app" | head -n 1)
+          MACOS_DIR="$APP_PATH/Contents/MacOS"
+          set +e
+          curl -fsSL -o /tmp/ffmpeg.zip "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip" \
+            && mkdir -p /tmp/ffmpeg && unzip -o /tmp/ffmpeg.zip -d /tmp/ffmpeg \
+            && FF=$(find /tmp/ffmpeg -type f -name ffmpeg | head -n1) \
+            && cp "$FF" "$MACOS_DIR/ffmpeg" && chmod +x "$MACOS_DIR/ffmpeg" \
+            && echo "Bundled ffmpeg into app bundle: $(ls -la "$MACOS_DIR/ffmpeg")"
+          if [ ! -f "$MACOS_DIR/ffmpeg" ]; then echo "::warning::内置 ffmpeg 失败（不阻断构建）"; fi
+          set -e
 
       - name: Package macOS Build
         run: |
