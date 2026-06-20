@@ -7,8 +7,6 @@ class PlayerSettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final playerCore = normalizePlayerCore(ref.watch(playerCoreProvider));
     final playbackSpeed = ref.watch(defaultPlaybackSpeedProvider);
-    final skipStep = ref.watch(skipForwardStepProvider);
-    final longPressSpeed = ref.watch(longPressSpeedProvider);
     final hardwareDecoding = ref.watch(hardwareDecodingProvider);
     final backgroundPlayback = ref.watch(backgroundPlaybackProvider);
     final autoPlayNext = ref.watch(autoPlayNextProvider);
@@ -46,26 +44,17 @@ class PlayerSettingsScreen extends ConsumerWidget {
           ),
 
           const Divider(),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Text(
-              '交互设置',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey,
+          ListTile(
+            leading: const Icon(Icons.touch_app_outlined),
+            title: const Text('交互设置'),
+            subtitle: const Text('手势交互区、快进步长、双击与长按'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const InteractionSettingsScreen(),
               ),
             ),
-          ),
-          ListTile(
-            title: const Text('快进步长'),
-            subtitle: Text('$skipStep秒'),
-            onTap: () => _showSkipStepSelector(context, ref),
-          ),
-          ListTile(
-            title: const Text('长按快进倍速'),
-            subtitle: Text('${longPressSpeed}x'),
-            onTap: () => _showLongPressSpeedSelector(context, ref),
           ),
 
           const Divider(),
@@ -434,62 +423,6 @@ class PlayerSettingsScreen extends ConsumerWidget {
           onChanged: (value) {
             if (value != null) {
               ref.read(defaultPlaybackSpeedProvider.notifier).state = value;
-            }
-            Navigator.pop(context);
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: speeds
-                .map((speed) => RadioListTile<double>(
-                      title: Text('${speed}x'),
-                      value: speed,
-                    ))
-                .toList(),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showSkipStepSelector(BuildContext context, WidgetRef ref) {
-    final steps = [5, 10, 15, 30, 60];
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('快进步长'),
-        content: RadioGroup<int>(
-          groupValue: ref.read(skipForwardStepProvider),
-          onChanged: (value) {
-            if (value != null) {
-              ref.read(skipForwardStepProvider.notifier).state = value;
-            }
-            Navigator.pop(context);
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: steps
-                .map((step) => RadioListTile<int>(
-                      title: Text('$step秒'),
-                      value: step,
-                    ))
-                .toList(),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showLongPressSpeedSelector(BuildContext context, WidgetRef ref) {
-    final speeds = [1.5, 2.0, 2.5, 3.0];
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('长按快进倍速'),
-        content: RadioGroup<double>(
-          groupValue: ref.read(longPressSpeedProvider),
-          onChanged: (value) {
-            if (value != null) {
-              ref.read(longPressSpeedProvider.notifier).state = value;
             }
             Navigator.pop(context);
           },

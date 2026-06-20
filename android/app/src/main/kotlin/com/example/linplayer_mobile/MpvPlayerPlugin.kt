@@ -523,6 +523,11 @@ class MpvPlayerPlugin(
         MPVLib.setOptionString("sub-auto", "all")
         MPVLib.setOptionString("sub-ass", "yes")
         MPVLib.setOptionString("sub-codepage", "utf-8")
+        // 关键：Android 上 libass 没有 fontconfig，必须显式给字体目录，否则内封/外挂的
+        // 文本字幕(SRT/ASS)因找不到任何字体而整段不渲染——表现为"选了字幕也不显示"。
+        // 指向系统字体目录，libass 可扫描到 NotoSansCJK / DroidSansFallback 等中文字体并
+        // 在请求的字体名缺失时回退到可用字体（位图 PGS/SUP 不依赖字体，本就不受影响）。
+        MPVLib.setOptionString("sub-fonts-dir", "/system/fonts")
 
         // Cache
         // 网络播放：按用户设置（300MB–8GB）把缓冲落到磁盘，避免大缓冲占满内存导致

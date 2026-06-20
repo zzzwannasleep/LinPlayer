@@ -412,6 +412,10 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
   @override
   Future<void> setSubtitleFont(String fontName) async {
     if (_playerId == null) return;
+    // '默认'/空 不是真实字体名，若强行写入 mpv 的 sub-font，libass 找不到该字体，
+    // 在没有有效回退时会导致整段文本字幕不渲染。跳过设置，保留 libass 默认字体
+    // （配合 init 里设置的 sub-fonts-dir=/system/fonts 即可正常显示中文）。
+    if (fontName.isEmpty || fontName == '默认') return;
     await _channel.invokeMethod('setSubtitleFont', {
       'playerId': _playerId,
       'fontName': fontName,

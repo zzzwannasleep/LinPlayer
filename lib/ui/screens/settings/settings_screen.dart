@@ -38,6 +38,7 @@ part 'settings_backup_restore.dart';
 part 'settings_danmaku.dart';
 part 'settings_general.dart';
 part 'settings_home.dart';
+part 'settings_interaction.dart';
 part 'settings_network.dart';
 part 'settings_player.dart';
 part 'settings_resume_sync.dart';

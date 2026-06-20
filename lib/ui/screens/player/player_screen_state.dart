@@ -1361,6 +1361,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         child: _buildVideoArea(),
                       ),
                     ),
+                    // 软件亮度：纯 Flutter 黑色遮罩压暗画面（不改系统亮度、无需额外插件）。
+                    // brightness 1.0 不遮、0.1 最暗。置于画面之上、字幕/控件之下，故仅压暗
+                    // 视频本身，控制栏与流式翻译文字保持清晰可读。
+                    if (_playerService.brightness < 1.0)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(
+                            color: Colors.black.withValues(
+                              alpha: (1.0 - _playerService.brightness)
+                                  .clamp(0.0, 0.9),
+                            ),
+                          ),
+                        ),
+                      ),
                     // 流式翻译叠加层（按双语排版显示原文/译文，位于控制条之下）。
                     if (_streamTranslator != null)
                       Positioned(
@@ -1452,8 +1466,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                           ),
                         ),
                       ),
-                    if (_playerService.isDragging &&
-                        !_playerService.isScrubbingPosition)
+                    if (_playerService.isAdjustingLevel)
                       _buildGestureIndicator(),
                     if (_isLongPressing) _buildLongPressIndicator(),
                     if (_playerService.isDragging &&
@@ -1592,6 +1605,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (_gestureIsZoom) {
       _zoomStartScale = _videoZoom;
     } else {
+      // 用最新的交互区设置驱动本次手势（左右半屏亮度/音量、横向是否调进度）。
+      _playerService.configureGestures(
+        leftVerticalAction: ref.read(leftVerticalGestureProvider),
+        rightVerticalAction: ref.read(rightVerticalGestureProvider),
+        horizontalSeekEnabled: ref.read(horizontalSeekGestureProvider),
+      );
       _playerService.onDragStart(
         DragStartDetails(globalPosition: details.focalPoint),
         constraints,
@@ -1626,6 +1645,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   void _onDoubleTapDown(TapDownDetails details) {
     if (_playerService.isLocked) return;
+    // 双击快进/快退关闭时，双击中部仍可播放/暂停，但两侧不再快进快退。
+    if (!ref.read(doubleTapSeekGestureProvider)) {
+      _playerService.togglePlay();
+      return;
+    }
     final screenWidth = MediaQuery.of(context).size.width;
     final tapX = details.globalPosition.dx;
 
@@ -1657,20 +1681,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   Widget _buildGestureIndicator() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final dragX = _playerService.dragStartX;
-
     String label;
     IconData icon;
     double value;
 
-    if (dragX < screenWidth / 2) {
-      // 左侧：亮度
+    if (_playerService.activeVerticalAction == 'brightness') {
       label = '亮度';
       icon = Icons.brightness_high;
       value = _playerService.brightness;
     } else {
-      // 右侧：音量
       label = '音量';
       icon = Icons.volume_up;
       value = _playerService.volume;

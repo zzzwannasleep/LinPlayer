@@ -66,6 +66,15 @@ class VideoPlayerService extends ChangeNotifier {
   double _currentBrightness = 1.0;
   double _dragStartBrightness = 1.0;
 
+  /// 手势轴锁定：0=未定向, 1=水平(进度), 2=竖向(亮度/音量), -1=已判定但本次手势不响应。
+  /// 一旦定向即锁死整段手势，避免竖向调亮度/音量时手指轻微横移误触发进度跳变。
+  int _gestureAxis = 0;
+
+  /// 交互区配置（由播放页从设置项注入，缺省维持旧行为：左亮度/右音量、横向可调进度）。
+  String _leftVerticalAction = 'brightness';
+  String _rightVerticalAction = 'volume';
+  bool _horizontalSeekEnabled = true;
+
   // 播放上报
   String? _currentItemId;
   String? _mediaSourceId;
@@ -102,6 +111,28 @@ class VideoPlayerService extends ChangeNotifier {
 
   /// 手势起始 X 坐标（用于判断亮度/音量区域）
   double get dragStartX => _dragStartX;
+
+  /// 注入交互区设置（播放页在每次手势开始前调用，保证用最新配置）。
+  void configureGestures({
+    required String leftVerticalAction,
+    required String rightVerticalAction,
+    required bool horizontalSeekEnabled,
+  }) {
+    _leftVerticalAction = leftVerticalAction;
+    _rightVerticalAction = rightVerticalAction;
+    _horizontalSeekEnabled = horizontalSeekEnabled;
+  }
+
+  /// 当前竖向手势是否正在调节亮度/音量（用于决定是否显示亮度/音量指示器）。
+  bool get isAdjustingLevel => _isDragging && _gestureAxis == 2;
+
+  /// 按手势起点所在半屏解析出的竖向动作（'brightness'/'volume'/'none'）。
+  String get activeVerticalAction => _gestureAxisStartedLeft
+      ? _leftVerticalAction
+      : _rightVerticalAction;
+
+  /// 手势起点是否落在左半屏（指示器据此取亮度/音量数值）。
+  bool _gestureAxisStartedLeft = true;
 
   /// 拖动方向：1=向前, -1=向后, 0=无
   int get dragDirection {
@@ -896,8 +927,11 @@ class VideoPlayerService extends ChangeNotifier {
     if (_isLocked || !isInitialized) return;
     _isDragging = true;
     _isScrubbingPosition = false;
+    _gestureAxis = 0;
     _dragStartX = details.globalPosition.dx;
     _dragStartY = details.globalPosition.dy;
+    _gestureAxisStartedLeft =
+        _dragStartX < constraints.maxWidth / 2;
     _dragStartPosition = position;
     _dragPreviewPosition = position;
     _dragStartVolume = volume;
@@ -914,12 +948,28 @@ class VideoPlayerService extends ChangeNotifier {
     final width = constraints.maxWidth;
     final height = constraints.maxHeight;
 
-    // 手势灵敏度阈值：至少移动 10 个逻辑像素才开始响应
-    const threshold = 10.0;
-    if (dx.abs() < threshold && dy.abs() < threshold) return;
+    // 一旦本次手势被判为不响应（轴=-1），直接忽略后续所有更新，避免误触。
+    if (_gestureAxis == -1) return;
 
-    if (dx.abs() > dy.abs() * 1.5) {
-      // 水平滑动（进度调节）：需要水平移动明显大于垂直移动
+    // 方向未锁定：累计位移超过阈值后按主导轴「一次性」锁定，整段手势不再改判。
+    // 这修复了竖向调亮度/音量时手指轻微横移会突然跳到进度条、导致进度错乱的问题。
+    if (_gestureAxis == 0) {
+      const threshold = 12.0;
+      if (dx.abs() < threshold && dy.abs() < threshold) return;
+      if (dx.abs() >= dy.abs()) {
+        // 主导方向为水平 → 进度
+        _gestureAxis = _horizontalSeekEnabled ? 1 : -1;
+      } else {
+        // 主导方向为竖向 → 亮度/音量（按起点半屏的配置；'none' 则不响应）
+        final action = activeVerticalAction;
+        _gestureAxis = (action == 'brightness' || action == 'volume') ? 2 : -1;
+        _isScrubbingPosition = false;
+      }
+      if (_gestureAxis == -1) return;
+    }
+
+    if (_gestureAxis == 1) {
+      // 水平滑动（进度调节）
       _isScrubbingPosition = true;
       final progressDelta =
           dx / width * duration.inMilliseconds * 0.5; // 降低灵敏度系数
@@ -931,32 +981,28 @@ class VideoPlayerService extends ChangeNotifier {
           ));
       _dragPreviewPosition = Duration(milliseconds: newPositionMs);
       notifyListeners();
-    } else if (dy.abs() > dx.abs() * 1.5) {
+    } else if (_gestureAxis == 2) {
+      // 竖向滑动（亮度/音量）：动作由起点半屏的配置决定
       _isScrubbingPosition = false;
-      // 垂直滑动（亮度/音量）：需要垂直移动明显大于水平移动
-      if (_dragStartX < width / 2) {
-        // 左侧：亮度
-        final brightnessDelta = -dy / height * 0.7; // 降低灵敏度系数
-        final newBrightness =
-            (_dragStartBrightness + brightnessDelta).clamp(0.1, 1.0);
-        setBrightness(newBrightness);
+      final delta = -dy / height * 0.7; // 降低灵敏度系数
+      if (activeVerticalAction == 'brightness') {
+        setBrightness((_dragStartBrightness + delta).clamp(0.1, 1.0));
       } else {
-        // 右侧：音量
-        final volumeDelta = -dy / height * 0.7; // 降低灵敏度系数
-        final newVolume = (_dragStartVolume + volumeDelta).clamp(0.0, 1.0);
-        setVolume(newVolume);
+        setVolume((_dragStartVolume + delta).clamp(0.0, 1.0));
       }
     }
-    // 如果移动方向不明确（水平和垂直移动差不多），则不响应，避免误触
   }
 
   void onDragEnd(DragEndDetails details) {
     if (!_isDragging) return;
     _isDragging = false;
+    // 仅在确实处于进度拖动时才 seek；竖向/无效手势保持原位，避免松手误跳。
+    final wasScrubbing = _gestureAxis == 1 && _isScrubbingPosition;
+    _gestureAxis = 0;
     final targetPosition =
-        _isScrubbingPosition ? _dragPreviewPosition : _dragStartPosition;
+        wasScrubbing ? _dragPreviewPosition : _dragStartPosition;
     _isScrubbingPosition = false;
-    seekTo(targetPosition);
+    if (wasScrubbing) seekTo(targetPosition);
     _startHideControlsTimer();
     notifyListeners();
   }

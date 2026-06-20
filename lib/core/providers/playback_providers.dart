@@ -77,6 +77,59 @@ final longPressSpeedProvider =
   );
 });
 
+/// 竖向滑动手势的动作取值：'brightness' 调亮度 / 'volume' 调音量 / 'none' 关闭。
+const kGestureActionBrightness = 'brightness';
+const kGestureActionVolume = 'volume';
+const kGestureActionNone = 'none';
+
+/// 左半屏竖向滑动的动作（默认亮度）。
+final leftVerticalGestureProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: kGestureActionBrightness,
+    readValue: (prefs) => prefs.getString('linplayer_gesture_left_vertical'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_gesture_left_vertical', value);
+    },
+  );
+});
+
+/// 右半屏竖向滑动的动作（默认音量）。
+final rightVerticalGestureProvider =
+    StateNotifierProvider<PreferenceNotifier<String>, String>((ref) {
+  return PreferenceNotifier<String>(
+    defaultValue: kGestureActionVolume,
+    readValue: (prefs) => prefs.getString('linplayer_gesture_right_vertical'),
+    writeValue: (prefs, value) async {
+      await prefs.setString('linplayer_gesture_right_vertical', value);
+    },
+  );
+});
+
+/// 是否启用横向滑动调节进度（默认开）。
+final horizontalSeekGestureProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_gesture_horizontal_seek'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_gesture_horizontal_seek', value);
+    },
+  );
+});
+
+/// 是否启用双击屏幕两侧快进/快退（默认开）。
+final doubleTapSeekGestureProvider =
+    StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
+  return PreferenceNotifier<bool>(
+    defaultValue: true,
+    readValue: (prefs) => prefs.getBool('linplayer_gesture_double_tap_seek'),
+    writeValue: (prefs, value) async {
+      await prefs.setBool('linplayer_gesture_double_tap_seek', value);
+    },
+  );
+});
+
 final hardwareDecodingProvider =
     StateNotifierProvider<PreferenceNotifier<bool>, bool>((ref) {
   return PreferenceNotifier<bool>(
