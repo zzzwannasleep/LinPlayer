@@ -73,6 +73,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true # jniLibs/*/libmpv.so 由 Git LFS 跟踪，必须拉取真实二进制，否则打进 APK 的是 LFS 指针文件（运行时 UnsatisfiedLinkError: bad ELF magic）
+
+      - name: Verify native libs are real ELF (not LFS pointers)
+        run: |
+          # 防御性校验：若 LFS 未拉取，libmpv.so 会是 "version https://git-lfs..." 文本（magic 0x76657273="vers"），
+          # 让构建在此处明确失败，而不是打出运行时崩溃的 APK。
+          fail=0
+          for so in android/app/src/main/jniLibs/*/libmpv.so; do
+            magic=$(head -c 4 "$so" | xxd -p)
+            if [ "$magic" != "7f454c46" ]; then
+              echo "::error::$so 不是 ELF 二进制（magic=$magic），LFS 对象未拉取。检查 actions/checkout 的 lfs: true。"
+              fail=1
+            else
+              echo "OK: $so ($(stat -c %s "$so") bytes, ELF)"
+            fi
+          done
+          [ "$fail" = 0 ]
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -212,6 +230,24 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          lfs: true # jniLibs/*/libmpv.so 由 Git LFS 跟踪，必须拉取真实二进制，否则打进 APK 的是 LFS 指针文件（运行时 UnsatisfiedLinkError: bad ELF magic）
+
+      - name: Verify native libs are real ELF (not LFS pointers)
+        run: |
+          # 防御性校验：若 LFS 未拉取，libmpv.so 会是 "version https://git-lfs..." 文本（magic 0x76657273="vers"），
+          # 让构建在此处明确失败，而不是打出运行时崩溃的 APK。
+          fail=0
+          for so in android/app/src/main/jniLibs/*/libmpv.so; do
+            magic=$(head -c 4 "$so" | xxd -p)
+            if [ "$magic" != "7f454c46" ]; then
+              echo "::error::$so 不是 ELF 二进制（magic=$magic），LFS 对象未拉取。检查 actions/checkout 的 lfs: true。"
+              fail=1
+            else
+              echo "OK: $so ($(stat -c %s "$so") bytes, ELF)"
+            fi
+          done
+          [ "$fail" = 0 ]
 
       - name: Setup Java
         uses: actions/setup-java@v4
