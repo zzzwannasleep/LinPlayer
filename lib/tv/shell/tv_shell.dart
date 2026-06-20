@@ -28,6 +28,7 @@ class _TvShellState extends State<TvShell> {
     '/tv/home',
     '/tv/search',
     '/tv/server',
+    '/tv/scan',
     '/tv/settings',
   ];
 

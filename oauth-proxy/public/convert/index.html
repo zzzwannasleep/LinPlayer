@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LinPlayer · 一键添加服务器</title>
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      margin: 0; min-height: 100vh; display: flex; align-items: flex-start; justify-content: center;
+      background: #0f1115; color: #e8eaed; padding: 24px 12px;
+    }
+    .card {
+      width: min(94vw, 520px); background: #1b1e25; border: 1px solid #2a2e37;
+      border-radius: 16px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    h1 { font-size: 19px; margin: 0 0 4px; }
+    .sub { color: #9aa0aa; font-size: 13px; line-height: 1.6; margin: 6px 0 18px; }
+    label { display:block; font-size: 12px; color:#9aa0aa; margin: 14px 0 6px; }
+    input, textarea {
+      width: 100%; background:#11141a; color:#e8eaed; border:1px solid #2a2e37;
+      border-radius:10px; padding:11px 12px; font-size:14px; font-family: inherit;
+    }
+    textarea { resize: vertical; min-height: 84px; }
+    .hint { color:#6b7280; font-size:11px; margin-top:4px; }
+    .row { display:flex; gap:10px; }
+    .row > div { flex:1; }
+    button {
+      appearance: none; border: 0; border-radius: 10px; padding: 13px 18px; cursor: pointer;
+      font-size: 15px; font-weight: 700; background: #5b8def; color: #fff; width:100%; margin-top:18px;
+    }
+    button.ghost { background:#2a2e37; color:#e8eaed; font-weight:600; }
+    button:active { transform: scale(.99); }
+    a.open {
+      display:block; text-align:center; text-decoration:none; background:#22c55e; color:#fff;
+      border-radius:10px; padding:14px; font-size:16px; font-weight:700; margin-top:14px;
+    }
+    .out { margin-top:14px; display:none; }
+    .link {
+      user-select: all; font-family: ui-monospace, Consolas, monospace; font-size:12px;
+      word-break: break-all; background:#11141a; border:1px solid #2a2e37; border-radius:10px;
+      padding:11px; color:#9aa0aa;
+    }
+    .tabs { display:flex; gap:8px; margin-bottom:8px; }
+    .tabs button { width:auto; margin:0; padding:8px 14px; font-size:13px; background:#2a2e37; }
+    .tabs button.active { background:#5b8def; }
+    .pane { display:none; } .pane.active { display:block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>一键添加到 LinPlayer</h1>
+    <p class="sub">填写服务器线路与账号，生成一键添加链接。点「打开 LinPlayer」即跳转 App 自动登录并添加（含多线路与弹幕线路）。未安装则请先安装 LinPlayer。</p>
+
+    <div class="tabs">
+      <button id="tabForm" class="active" onclick="switchTab('form')">分项填写</button>
+      <button id="tabText" onclick="switchTab('text')">粘贴整段文本</button>
+    </div>
+
+    <div id="paneForm" class="pane active">
+      <label>服务器名称（可选，留空自动取 Emby 名称）</label>
+      <input id="name" placeholder="我的 Emby" />
+      <div class="row">
+        <div>
+          <label>用户名</label>
+          <input id="user" placeholder="用户名" />
+        </div>
+        <div>
+          <label>密码</label>
+          <input id="pwd" type="password" placeholder="密码" />
+        </div>
+      </div>
+      <label>服务器线路（每行一条，可多条）</label>
+      <textarea id="lines" placeholder="https://line1.example.com:443&#10;https://line2.example.com:8443"></textarea>
+      <label>弹幕线路（可选，每行一条）</label>
+      <textarea id="danmaku" placeholder="https://danmu.example.com/api" style="min-height:60px"></textarea>
+    </div>
+
+    <div id="paneText" class="pane">
+      <label>粘贴开通信息 / 分享文本</label>
+      <textarea id="shareText" style="min-height:180px" placeholder="把机场/Emby 发的整段开通信息粘进来，App 会自动识别线路、用户名、密码、弹幕线路"></textarea>
+    </div>
+
+    <button onclick="build()">生成添加链接</button>
+
+    <div class="out" id="out">
+      <a class="open" id="openLink" href="#">打开 LinPlayer 添加</a>
+      <button class="ghost" id="copyBtn" onclick="copyLink()">复制链接</button>
+      <div class="link" id="linkText" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(t) {
+      document.getElementById('tabForm').classList.toggle('active', t === 'form');
+      document.getElementById('tabText').classList.toggle('active', t === 'text');
+      document.getElementById('paneForm').classList.toggle('active', t === 'form');
+      document.getElementById('paneText').classList.toggle('active', t === 'text');
+    }
+    function lines(id) {
+      return document.getElementById(id).value
+        .split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    }
+    function build() {
+      var p = new URLSearchParams();
+      var textMode = document.getElementById('paneText').classList.contains('active');
+      if (textMode) {
+        var txt = document.getElementById('shareText').value.trim();
+        if (!txt) { alert('请粘贴分享文本'); return; }
+        p.set('text', txt);
+      } else {
+        var ls = lines('lines');
+        if (ls.length === 0) { alert('请至少填写一条服务器线路'); return; }
+        var name = document.getElementById('name').value.trim();
+        var user = document.getElementById('user').value.trim();
+        var pwd = document.getElementById('pwd').value;
+        if (name) p.set('name', name);
+        if (user) p.set('user', user);
+        if (pwd) p.set('pwd', pwd);
+        ls.forEach(function (l) { p.append('line', l); });
+        lines('danmaku').forEach(function (d) { p.append('danmaku', d); });
+      }
+      var link = 'linplayer://add-server?' + p.toString();
+      document.getElementById('openLink').href = link;
+      document.getElementById('linkText').textContent = link;
+      document.getElementById('out').style.display = 'block';
+      // 直接尝试唤起。
+      window.location.href = link;
+    }
+    function copyLink() {
+      var t = document.getElementById('linkText').textContent;
+      if (navigator.clipboard) navigator.clipboard.writeText(t);
+      document.getElementById('copyBtn').textContent = '已复制 ✓';
+    }
+    // 支持用查询参数预填：?name=&user=&pwd=&line=&line=&danmaku=&text=
+    (function prefill() {
+      var q = new URLSearchParams(window.location.search);
+      if (q.get('text')) {
+        document.getElementById('shareText').value = q.get('text');
+        switchTab('text');
+      }
+      if (q.get('name')) document.getElementById('name').value = q.get('name');
+      if (q.get('user')) document.getElementById('user').value = q.get('user');
+      if (q.get('pwd')) document.getElementById('pwd').value = q.get('pwd');
+      var ls = q.getAll('line'); if (ls.length) document.getElementById('lines').value = ls.join('\n');
+      var ds = q.getAll('danmaku'); if (ds.length) document.getElementById('danmaku').value = ds.join('\n');
+    })();
+  </script>
+</body>
+</html>

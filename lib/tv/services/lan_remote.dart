@@ -4,7 +4,10 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/danmaku/danmaku_service.dart';
 import '../../core/providers/app_providers.dart';
+import '../../core/utils/server_batch_adder.dart';
+import '../../core/utils/server_batch_parser.dart';
 
 /// ============================================================
 /// 局域网遥控（扫码）后端
@@ -226,6 +229,8 @@ class LanRemoteServer {
         await _handleSetting(req, res);
       } else if (path == '/api/server' && req.method == 'POST') {
         await _handleServer(req, res);
+      } else if (path == '/api/server-add' && req.method == 'POST') {
+        await _handleServerAdd(req, res);
       } else {
         res.statusCode = 404;
         res.write('Not Found');
@@ -387,6 +392,73 @@ class LanRemoteServer {
     _json(res, {'ok': true});
   }
 
+  /// 手机端「批量解析添加服务器」：把粘贴文本解析成多账号块，逐块登录后加入服务器
+  /// 列表，弹幕线路并入全局弹幕源。用户名/密码留空时用解析到的；填了则套用到所有块。
+  Future<void> _handleServerAdd(HttpRequest req, HttpResponse res) async {
+    final body = await _body(req);
+    final text = body['text']?.toString() ?? '';
+    final overrideUser = body['username']?.toString().trim() ?? '';
+    final overridePass = body['password']?.toString() ?? '';
+
+    final blocks = ServerBatchParser.parse(text);
+    if (blocks.isEmpty) {
+      _json(res, {
+        'ok': false,
+        'added': 0,
+        'danmaku': 0,
+        'errors': ['未解析到服务器线路'],
+      });
+      return;
+    }
+
+    final notifier = _ref.read(serverListProvider.notifier);
+    final danmakuNotifier = _ref.read(danmakuServiceProvider.notifier);
+    var added = 0;
+    var danmaku = 0;
+    final errors = <String>[];
+    var first = true;
+
+    for (final block in blocks) {
+      final user = overrideUser.isNotEmpty ? overrideUser : (block.username ?? '');
+      final pass = overridePass.isNotEmpty ? overridePass : (block.password ?? '');
+      if (user.isEmpty) {
+        errors.add('有账号缺少用户名');
+        continue;
+      }
+      try {
+        final server = await ServerBatchAdder.authenticateBlock(
+          block,
+          username: user,
+          password: pass,
+        );
+        notifier.addServer(server);
+        if (first) {
+          _ref.read(currentServerProvider.notifier).state = server;
+          _ref.read(authStateProvider.notifier).state = AuthState.authenticated;
+          first = false;
+        }
+        added++;
+        final sources = ServerBatchAdder.danmakuSourcesOf(
+          block,
+          basePriority: _ref.read(danmakuServiceProvider).sources.length,
+        );
+        for (final cfg in sources) {
+          await danmakuNotifier.addCustomSource(cfg);
+          danmaku++;
+        }
+      } catch (e) {
+        errors.add('$e');
+      }
+    }
+
+    _json(res, {
+      'ok': added > 0,
+      'added': added,
+      'danmaku': danmaku,
+      'errors': errors,
+    });
+  }
+
   // ---------------- 可远程编辑的设置 ----------------
 
   List<_Setting> _settings() => [
@@ -531,7 +603,7 @@ const String _kWebPage = r'''<!DOCTYPE html>
   .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
   .grid.three{grid-template-columns:repeat(3,1fr);}
   .big{font-size:20px;padding:18px;}
-  input,select{background:var(--elev);color:var(--text);border:1px solid #333;border-radius:8px;padding:10px;font-size:14px;width:100%;}
+  input,select,textarea{background:var(--elev);color:var(--text);border:1px solid #333;border-radius:8px;padding:10px;font-size:14px;width:100%;font-family:inherit;}
   .prog{height:6px;background:var(--elev);border-radius:3px;overflow:hidden;margin:8px 0;}
   .prog>div{height:100%;background:var(--brand);width:0;}
   .pill{display:inline-block;background:var(--brand);color:#fff;border-radius:6px;padding:2px 8px;font-size:12px;}
@@ -646,6 +718,27 @@ function renderSettings(){
 }
 function renderServers(){
   if(!STATE)return;const body=document.getElementById('serversBody');body.innerHTML='';
+  // 批量解析添加：粘贴开通信息，自动识别多服务器/多线路/弹幕线路/用户名/密码。
+  const add=document.createElement('div');add.className='card';
+  add.innerHTML='<h3>批量解析添加服务器</h3>'+
+    '<textarea id="addText" rows="6" placeholder="粘贴开通信息 / 分享文本，自动识别线路、用户名、密码、弹幕线路"></textarea>'+
+    '<div style="margin:8px 0"><input id="addUser" placeholder="统一用户名（留空用解析到的）"></div>'+
+    '<div style="margin:8px 0"><input id="addPwd" type="password" placeholder="统一密码（留空用解析到的）"></div>';
+  const addBtn=document.createElement('button');addBtn.className='btn';addBtn.textContent='解析并添加';
+  const addMsg=document.createElement('div');addMsg.className='muted';addMsg.style.marginTop='8px';
+  addBtn.onclick=async()=>{
+    addBtn.textContent='添加中…';addBtn.disabled=true;
+    try{
+      const r=await fetch('/api/server-add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+        text:document.getElementById('addText').value,
+        username:document.getElementById('addUser').value,
+        password:document.getElementById('addPwd').value})});
+      const d=await r.json();
+      addMsg.textContent='已添加 '+(d.added||0)+' 个服务器'+(d.danmaku?('、'+d.danmaku+' 条弹幕线路'):'')+((d.errors&&d.errors.length)?('；'+d.errors.length+' 个失败'):'');
+    }catch(e){addMsg.textContent='添加失败：'+e;}
+    addBtn.textContent='解析并添加';addBtn.disabled=false;setTimeout(refresh,600);
+  };
+  add.appendChild(addBtn);add.appendChild(addMsg);body.appendChild(add);
   (STATE.servers||[]).forEach(sv=>{
     const card=document.createElement('div');card.className='card';
     card.innerHTML='<div class="row"><b>'+(sv.current?'<span class="pill">当前</span> ':'')+'</b></div>';

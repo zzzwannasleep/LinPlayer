@@ -68,8 +68,10 @@ final tvRouter = GoRouter(
           selectedIndex = 1;
         } else if (path.startsWith('/tv/server')) {
           selectedIndex = 2;
-        } else if (path.startsWith('/tv/settings')) {
+        } else if (path.startsWith('/tv/scan')) {
           selectedIndex = 3;
+        } else if (path.startsWith('/tv/settings')) {
+          selectedIndex = 4;
         }
         return TvShell(
           selectedIndex: selectedIndex,
@@ -94,6 +96,11 @@ final tvRouter = GoRouter(
         GoRoute(
           path: '/tv/server',
           builder: (context, state) => const TvServerScreen(),
+        ),
+        // 扫码（局域网遥控 + 手机端添加服务器）：侧边栏直达。
+        GoRoute(
+          path: '/tv/scan',
+          builder: (context, state) => const TvLanControlScreen(),
         ),
         GoRoute(
           path: '/tv/settings',

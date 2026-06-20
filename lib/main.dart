@@ -10,6 +10,7 @@ import 'core/providers/proxy_providers.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/cache_service.dart';
 import 'core/services/crash_diagnostics.dart';
+import 'core/services/deep_link_service.dart';
 import 'core/services/font_service.dart';
 import 'core/theme/app_motion.dart';
 import 'core/utils/platform_utils.dart';
@@ -76,4 +77,8 @@ Future<void> main() async {
       child: appWidget,
     ),
   );
+
+  // 自定义协议深链(linplayer://add-server …)：唤起即自动登录并添加服务器。
+  // 共用同一 container，跨三端生效；放 runApp 之后，确保插件通道已就绪。
+  unawaited(DeepLinkService(container).init());
 }

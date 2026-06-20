@@ -4,7 +4,7 @@ import '../theme/tv_metrics.dart';
 import 'tv_focusable.dart';
 
 /// TV 左侧导航栏
-/// 固定左侧，4 项导航：首页、搜索、服务器、设置
+/// 固定左侧，5 项导航：首页、搜索、服务器、扫码、设置
 class TvSidebar extends StatefulWidget {
   final int selectedIndex;
   final ValueChanged<int> onItemSelected;
@@ -26,6 +26,7 @@ class _TvSidebarState extends State<TvSidebar> {
     _NavItem(Icons.home_rounded, '首页'),
     _NavItem(Icons.search_rounded, '搜索'),
     _NavItem(Icons.storage_rounded, '服务器'),
+    _NavItem(Icons.qr_code_scanner_rounded, '扫码'),
     _NavItem(Icons.settings_rounded, '设置'),
   ];
 

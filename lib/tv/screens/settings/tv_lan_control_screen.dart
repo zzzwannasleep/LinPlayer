@@ -66,7 +66,8 @@ class _TvLanControlScreenState extends ConsumerState<TvLanControlScreen> {
                   TvFocusable(
                     autofocus: true,
                     padding: EdgeInsets.all(m.spacingXs),
-                    onSelect: () => context.pop(),
+                    onSelect: () =>
+                        context.canPop() ? context.pop() : context.go('/tv/home'),
                     child: Icon(Icons.arrow_back,
                         color: TvDesignTokens.textPrimary, size: m.s(32)),
                   ),

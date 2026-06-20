@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/api/emby_api.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../widgets/server/batch_parse_view.dart';
 
 /// 添加服务器页面
 class AddServerScreen extends ConsumerStatefulWidget {
@@ -20,13 +21,11 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   final _pathController = TextEditingController(text: '/emby');
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _batchController = TextEditingController();
   final _importController = TextEditingController();
-  
+
   bool _isLoading = false;
   String? _errorMessage;
-  List<ServerLine> _parsedLines = [];
-  
+
   @override
   void initState() {
     super.initState();
@@ -40,7 +39,6 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
     _pathController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
-    _batchController.dispose();
     _importController.dispose();
     super.dispose();
   }
@@ -149,92 +147,18 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
   }
   
   Widget _buildBatchTab() {
-    // 使用固定的 bottom padding，让 SingleChildScrollView 自动处理键盘
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16).copyWith(
-        bottom: 100,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          TextField(
-            controller: _batchController,
-            decoration: const InputDecoration(
-              labelText: '粘贴分享文本',
-              hintText: 'XXX线路: https://example.com\n端口: XXXXX',
-              border: OutlineInputBorder(),
-            ),
-            maxLines: 8,
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _parseBatchText,
-            child: const Text('解析'),
-          ),
-          if (_parsedLines.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            const Text('解析结果', style: TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            ..._parsedLines.map((line) => Card(
-              child: ListTile(
-                title: Text(line.name),
-                subtitle: Text(line.url),
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete),
-                  onPressed: () {
-                    setState(() {
-                      _parsedLines.removeWhere((l) => l.id == line.id);
-                    });
-                  },
-                ),
-              ),
-            )),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _usernameController,
-              decoration: const InputDecoration(
-                labelText: '用户名',
-                prefixIcon: Icon(Icons.person),
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _passwordController,
-              decoration: const InputDecoration(
-                labelText: '密码',
-                prefixIcon: Icon(Icons.lock),
-                border: OutlineInputBorder(),
-              ),
-              obscureText: true,
-            ),
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _errorMessage!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer),
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _isLoading ? null : _addBatchServers,
-              child: _isLoading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('添加所有线路'),
-            ),
-          ],
-        ],
-      ),
+    return BatchParseView(
+      onAdded: (setCurrent) {
+        if (!mounted) return;
+        if (setCurrent) {
+          context.pushReplacement('/home');
+        } else {
+          context.pop();
+        }
+      },
     );
   }
-  
+
   Widget _buildImportTab() {
     // 使用固定的 bottom padding，让 SingleChildScrollView 自动处理键盘
     return SingleChildScrollView(
@@ -365,87 +289,6 @@ class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTi
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('导入失败: $e')),
       );
-    }
-  }
-  
-  void _parseBatchText() {
-    final text = _batchController.text;
-    if (text.isEmpty) return;
-
-      final lines = <ServerLine>[];
-
-    // 修改正则，支持有或没有协议前缀的URL
-    final lineRegex = RegExp(r'(.+?线路)\s*[:：]\s*(?:https?://)?([^\s]+)', caseSensitive: false);
-
-    // 提取文本中声明的端口号（如"端口: 8443"）
-    final portRegex = RegExp(r'端口\s*[:：]\s*(\d+)');
-    final portMatch = portRegex.firstMatch(text);
-    final customPort = portMatch?.group(1);
-
-    for (final match in lineRegex.allMatches(text)) {
-      final name = match.group(1)?.trim() ?? '线路';
-      var urlPart = match.group(2)?.trim() ?? '';
-
-      // 规范化URL（添加协议和默认端口）
-      var url = _normalizeUrl(urlPart);
-
-      // 如果文本中声明了端口号，且URL中没有显式端口，则替换默认端口
-      if (customPort != null) {
-      final hasExplicitPort = RegExp(r':\d+(?:/|$)').hasMatch(urlPart);
-        if (!hasExplicitPort) {
-          url = url.replaceFirst(
-            url.startsWith('https://') ? ':443' : ':80',
-            ':$customPort',
-          );
-        }
-      }
-
-      lines.add(ServerLine(
-        id: '${DateTime.now().millisecondsSinceEpoch}${lines.length}',
-        name: name,
-        url: url,
-      ));
-    }
-
-    setState(() {
-      _parsedLines = lines;
-    });
-  }
-  
-  Future<void> _addBatchServers() async {
-    if (_parsedLines.isEmpty) return;
-    setState(() { _isLoading = true; _errorMessage = null; });
-    
-    try {
-      final username = _usernameController.text.trim();
-      final password = _passwordController.text;
-      
-      final firstLine = _parsedLines.first;
-      final client = EmbyApiClient(baseUrl: firstLine.url);
-      final authResult = await client.auth.login(username: username, password: password);
-      final serverInfo = await client.server.getSystemInfo();
-      
-      final server = ServerConfig(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: serverInfo.serverName,
-        baseUrl: firstLine.url,
-        lines: _parsedLines,
-        username: username,
-        authToken: authResult.accessToken,
-        userId: authResult.userId,
-        password: password,
-      );
-
-      ref.read(serverListProvider.notifier).addServer(server);
-      ref.read(currentServerProvider.notifier).state = server;
-      ref.read(authStateProvider.notifier).state = AuthState.authenticated;
-
-      if (!mounted) return;
-      context.pushReplacement('/home');
-    } catch (e) {
-      setState(() { _errorMessage = _formatError(e); });
-    } finally {
-      setState(() { _isLoading = false; });
     }
   }
   

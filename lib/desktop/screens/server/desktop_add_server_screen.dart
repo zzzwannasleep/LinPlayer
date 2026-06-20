@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/emby_api.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../ui/widgets/server/batch_parse_view.dart';
 
 /// 桌面端添加服务器页
 class DesktopAddServerScreen extends ConsumerStatefulWidget {
@@ -43,6 +44,14 @@ class _DesktopAddServerScreenState extends ConsumerState<DesktopAddServerScreen>
           icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: _openBatchParse,
+            icon: const Icon(Icons.auto_fix_high),
+            label: const Text('批量解析'),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Center(
         child: ConstrainedBox(
@@ -208,6 +217,29 @@ class _DesktopAddServerScreenState extends ConsumerState<DesktopAddServerScreen>
     );
   }
   
+  void _openBatchParse() {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('批量解析添加')),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: BatchParseView(
+              onAdded: (setCurrent) {
+                if (!mounted) return;
+                if (setCurrent) {
+                  context.go('/');
+                } else {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
+
   Future<void> _connectServer() async {
     if (!_formKey.currentState!.validate()) return;
     
