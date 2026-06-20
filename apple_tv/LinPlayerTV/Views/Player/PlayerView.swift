@@ -299,7 +299,7 @@ struct MPVKernelView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: MPVGLViewController, context: Context) {}
 }
 
-final class MPVGLViewController: GLKViewController, GLKViewDelegate {
+final class MPVGLViewController: GLKViewController {
     private var mpv: OpaquePointer?
     private var mpvGL: OpaquePointer?
     private let url: URL
@@ -370,12 +370,18 @@ final class MPVGLViewController: GLKViewController, GLKViewDelegate {
             DispatchQueue.main.async { (vc.view as? GLKView)?.setNeedsDisplay() }
         }, Unmanaged.passUnretained(self).toOpaque())
 
-        var cmd = [strdup("loadfile"), strdup(url.absoluteString), UnsafeMutablePointer<CChar>(nil)]
+        // mpv_command 形参是 const char**(元素 UnsafePointer<CChar>?)，strdup 返回的是
+        // 可变指针，需显式转成不可变指针；释放时再转回可变指针 free。
+        var cmd: [UnsafePointer<CChar>?] = [
+            UnsafePointer(strdup("loadfile")),
+            UnsafePointer(strdup(url.absoluteString)),
+            nil,
+        ]
         mpv_command(mpv, &cmd)
-        cmd.forEach { if let p = $0 { free(p) } }
+        cmd.forEach { if let p = $0 { free(UnsafeMutablePointer(mutating: p)) } }
     }
 
-    func glkView(_ view: GLKView, drawIn rect: CGRect) {
+    override func glkView(_ view: GLKView, drawIn rect: CGRect) {
         guard let mpvGL else { return }
         var fboInt: GLint = 0
         glGetIntegerv(GLenum(GL_FRAMEBUFFER_BINDING), &fboInt)
