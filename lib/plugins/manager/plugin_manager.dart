@@ -26,6 +26,8 @@ import 'plugin_installer.dart';
 class PluginManager extends ChangeNotifier {
   static final AppLogger _log = AppLogger();
   static const _enabledKey = 'linplayer_enabled_plugins';
+  /// 同时启用插件数的全局上限（每插件独立 isolate ~64MB，限数量即限总内存）。
+  static const int maxEnabledPlugins = 16;
   // 每个插件“用户已同意的权限集”，用于检测更新提权（新清单申请了未同意的权限）。
   static const _approvedPermsKey = 'linplayer_plugin_approved_perms';
 
@@ -218,10 +220,18 @@ class PluginManager extends ChangeNotifier {
 
     // 激活已启用的插件；若清单权限超出已同意范围（疑似更新提权），强制禁用待重新授权。
     var forcedDisable = false;
+    var activated = 0;
     for (final info in _plugins.values) {
       if (!_enabledIds.contains(info.id)) continue;
       if (_permissionsApproved(info)) {
+        if (activated >= maxEnabledPlugins) {
+          info.status = PluginStatus.disabled;
+          info.error = '超出同时启用插件数上限（$maxEnabledPlugins），未激活';
+          _log.w('PluginManager', '插件 ${info.id} 超出并发上限，跳过激活');
+          continue;
+        }
         await _activate(info);
+        activated++;
       } else {
         _enabledIds.remove(info.id);
         forcedDisable = true;
@@ -256,6 +266,9 @@ class PluginManager extends ChangeNotifier {
   Future<void> enable(String id) async {
     final info = _plugins[id];
     if (info == null) throw StateError('插件不存在: $id');
+    if (!_enabledIds.contains(id) && _enabledIds.length >= maxEnabledPlugins) {
+      throw StateError('已达到同时启用插件数上限（$maxEnabledPlugins 个），请先禁用其它插件');
+    }
     _enabledIds.add(id);
     _approvedPerms[id] = info.manifest.permissions.toSet();
     await _persistEnabledIds();

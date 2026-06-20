@@ -13,9 +13,11 @@ import 'plugin_player_bridge.dart';
 /// 单个插件的运行时：持有独立的 JS 引擎 + ctx 桥，负责加载、事件转发、回调触发。
 ///
 /// 安全约束：
-///  - 每次进入 JS 的调用都有 [callTimeout]（默认 1s）超时；
+///  - 每次进入 JS 的调用都有 [callTimeout]（30s 墙钟）超时；
 ///  - 超时被视为插件失控 —— 销毁引擎并回调 [onFault] 让管理器禁用插件；
-///  - 任何 JS 异常都被捕获，不会冒泡到主程序。
+///  - 任何 JS 异常都被捕获，不会冒泡到主程序；
+///  - 同时启用的插件数由 `PluginManager.maxEnabledPlugins` 全局封顶，间接约束
+///    总内存（每插件独立 isolate，堆上限约 64MB）。
 class PluginRuntime {
   static final AppLogger _log = AppLogger();
 

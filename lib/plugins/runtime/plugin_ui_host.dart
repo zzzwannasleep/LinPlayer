@@ -36,6 +36,36 @@ class PluginUiHost {
     ));
   }
 
+  /// 凭据访问逐次确认（M1）：插件每次调用 getCredentials 都弹此框，明确警告
+  /// 密码将明文交给插件。用户点「允许本次」才返回 true；无 UI 上下文一律拒绝。
+  static Future<bool> confirmCredentialAccess(String pluginName) async {
+    final ctx = _context;
+    if (ctx == null) {
+      _log.w('PluginUI', '无UI上下文，拒绝插件读取凭据');
+      return false;
+    }
+    final result = await showDialogGeneric<bool>(
+      ctx,
+      (context) => AlertDialog(
+        title: const Text('允许插件读取账号密码？'),
+        content: Text(
+          '插件「$pluginName」请求读取你当前服务器的用户名与密码。\n\n'
+          '⚠ 密码将以明文交给该插件，可能被用于登录其它网站或外发到网络。'
+          '仅在你完全信任该插件时允许。',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('拒绝')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('允许本次')),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   /// 弹出对话框，返回被点击按钮的 id（或 null）。
   static Future<String?> showAlert(Map options) async {
     final ctx = _context;
