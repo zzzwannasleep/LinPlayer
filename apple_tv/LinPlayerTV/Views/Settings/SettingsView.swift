@@ -82,9 +82,9 @@ struct SettingsView: View {
                 Label("播放内核", systemImage: "cpu")
             }
 
-            if playbackKernel != PlaybackKernel.av.rawValue {
+            if playbackKernel == PlaybackKernel.mpv.rawValue {
                 Toggle(isOn: $anime4kEnabled) {
-                    Label("Anime4K 超分（MDK/MPV）", systemImage: "wand.and.stars")
+                    Label("Anime4K 超分（仅 MPV）", systemImage: "wand.and.stars")
                 }
             }
 

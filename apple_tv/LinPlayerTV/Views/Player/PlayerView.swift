@@ -3,8 +3,8 @@ import AVKit
 
 /// 播放内核（对齐桌面/移动端的多内核思路）
 /// - av:  系统 AVPlayer（零依赖、包体小；仅支持 mp4/mov/m4v/HLS，放不了 mkv）
-/// - mdk: MDK 内核（广格式 + 硬解 + 支持 mpv 风格用户着色器，含 Anime4K）
-/// - mpv: libmpv 内核（全格式 + Anime4K 超分）
+/// - mdk: MDK 内核（广格式 + VideoToolbox 硬解；不支持 Anime4K）
+/// - mpv: libmpv 内核（全格式 + Anime4K 超分，唯一能跑 Anime4K 的内核）
 /// MDK/MPV 接入步骤见 apple_tv/PLAYER_KERNELS.md
 enum PlaybackKernel: String, CaseIterable, Identifiable {
     case av, mdk, mpv
@@ -105,6 +105,32 @@ struct NativeKernelHost: View {
     var onClose: () -> Void
 
     var body: some View {
+        content
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        #if canImport(swift_mdk)
+        if kind == .mdk, let url = streamURL {
+            MDKKernelView(
+                url: url,
+                startPositionTicks: item.userData?.playbackPositionTicks ?? 0
+            )
+            .ignoresSafeArea()
+        } else {
+            placeholder  // .mpv 仍待接入
+        }
+        #else
+        placeholder
+        #endif
+    }
+
+    /// 直连流（MDK/MPV 可直接解码 mkv，无需服务端转码）
+    private var streamURL: URL? {
+        apiClient.getVideoStreamURL(itemId: item.id)
+    }
+
+    private var placeholder: some View {
         VStack(spacing: AppTheme.Spacing.lg) {
             Image(systemName: "cpu")
                 .font(.system(size: 72))
@@ -136,6 +162,82 @@ struct NativeKernelHost: View {
         .padding(AppTheme.Spacing.xxl)
     }
 }
+
+// MARK: - MDK 内核渲染宿主
+//
+// 仅在 Xcode 中添加 swift-mdk(SPM)依赖后参与编译；未添加时整段被 canImport 排除，
+// App 仍可正常编译运行(走占位 + AVPlayer 回退)。
+// 基于 swift-mdk 真实 API：media / videoDecoders / prepare(from:) / state /
+// setRenderAPI / setVideoSurfaceSize / renderVideo。MDK 负责广兼容 + 硬解，
+// 不支持 Anime4K(Anime4K 见 MPV 内核)。
+
+#if canImport(swift_mdk)
+import MetalKit
+import swift_mdk
+
+struct MDKKernelView: UIViewRepresentable {
+    let url: URL
+    let startPositionTicks: Int
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(url: url, startPositionTicks: startPositionTicks)
+    }
+
+    func makeUIView(context: Context) -> MTKView {
+        let view = MTKView()
+        view.device = MTLCreateSystemDefaultDevice()
+        view.framebufferOnly = false
+        view.preferredFramesPerSecond = 60
+        view.delegate = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ uiView: MTKView, context: Context) {}
+
+    static func dismantleUIView(_ uiView: MTKView, coordinator: Coordinator) {
+        coordinator.stop()
+    }
+
+    final class Coordinator: NSObject, MTKViewDelegate {
+        private let player = Player()
+        private var renderBound = false
+
+        init(url: URL, startPositionTicks: Int) {
+            super.init()
+            player.videoDecoders = ["VT", "FFmpeg"]                 // VideoToolbox 硬解，失败回退软解
+            player.media = url.absoluteString
+            player.prepare(from: Int64(Double(startPositionTicks) / 10_000.0), complete: nil) // ticks(100ns)->ms
+            player.state = .Playing
+        }
+
+        func stop() { player.state = .Stopped }
+
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            bindRenderAPIIfNeeded(view)
+            player.setVideoSurfaceSize(size.width, size.height)
+        }
+
+        func draw(in view: MTKView) {
+            bindRenderAPIIfNeeded(view)
+            _ = player.renderVideo()
+        }
+
+        /// 把 MTKView 的 CAMetalLayer 绑定为 MDK 的 Metal 渲染目标。
+        /// ⚠️ mdkMetalRenderAPI 的字段名以 mdk/c/RenderAPI.h 为准，若编译报错按头文件微调。
+        private func bindRenderAPIIfNeeded(_ view: MTKView) {
+            guard !renderBound,
+                  let device = view.device,
+                  let layer = view.layer as? CAMetalLayer else { return }
+            renderBound = true
+            var ra = mdkMetalRenderAPI()
+            ra.type = MDK_RenderAPI_Metal
+            ra.device = Unmanaged.passUnretained(device).toOpaque()
+            ra.layer = Unmanaged.passUnretained(layer).toOpaque()
+            withUnsafePointer(to: &ra) { player.setRenderAPI($0) }
+        }
+    }
+}
+#endif
 
 @MainActor
 final class PlayerViewModel: ObservableObject {
