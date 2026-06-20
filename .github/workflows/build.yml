@@ -833,6 +833,14 @@ jobs:
       - name: List release artifacts
         run: ls -lah ./artifacts/
 
+      - name: Generate SHA256 checksums
+        run: |
+          # 为所有产物生成汇总校验文件，随发布上传，供 App 端校验安装包完整性。
+          cd ./artifacts
+          rm -f SHA256SUMS
+          for f in *; do [ -f "$f" ] && sha256sum "$f"; done > SHA256SUMS
+          echo "Generated SHA256SUMS:"; cat SHA256SUMS
+
       - name: Create Pre-release
         uses: softprops/action-gh-release@v2
         with:

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -25,6 +26,8 @@ import 'plugin_installer.dart';
 class PluginManager extends ChangeNotifier {
   static final AppLogger _log = AppLogger();
   static const _enabledKey = 'linplayer_enabled_plugins';
+  // 每个插件“用户已同意的权限集”，用于检测更新提权（新清单申请了未同意的权限）。
+  static const _approvedPermsKey = 'linplayer_plugin_approved_perms';
 
   /// 全局单例（UI 深处/JS 回调链路使用）。
   static PluginManager? _instance;
@@ -45,6 +48,8 @@ class PluginManager extends ChangeNotifier {
   final Map<String, PluginInfo> _plugins = {};
   final Map<String, PluginRuntime> _runtimes = {};
   Set<String> _enabledIds = {};
+  // pluginId -> 用户启用时同意的权限 id 集合。
+  Map<String, Set<String>> _approvedPerms = {};
   bool _initialized = false;
 
   PluginManager({PluginExtensionRegistry? registry})
@@ -77,6 +82,7 @@ class PluginManager extends ChangeNotifier {
     _log.i('PluginManager', '插件目录: $_pluginsRootDir');
 
     _enabledIds = _readEnabledIds();
+    _approvedPerms = _readApprovedPerms();
     _initialized = true;
     await scan();
   }
@@ -152,6 +158,36 @@ class PluginManager extends ChangeNotifier {
     }
   }
 
+  Map<String, Set<String>> _readApprovedPerms() {
+    try {
+      final raw = AppPreferencesStore.instance.getString(_approvedPermsKey);
+      if (raw == null || raw.isEmpty) return {};
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      return decoded.map(
+        (k, v) => MapEntry(k, (v as List).map((e) => '$e').toSet()),
+      );
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _persistApprovedPerms() async {
+    try {
+      final json = _approvedPerms.map((k, v) => MapEntry(k, v.toList()));
+      await AppPreferencesStore.instance
+          .setString(_approvedPermsKey, jsonEncode(json));
+    } catch (e) {
+      _log.w('PluginManager', '持久化已同意权限失败: $e');
+    }
+  }
+
+  /// 清单申请的权限是否都在用户已同意范围内（无新增 = 通过）。
+  bool _permissionsApproved(PluginInfo info) {
+    final approved = _approvedPerms[info.id];
+    if (approved == null) return false; // 从未同意过
+    return info.manifest.permissions.toSet().difference(approved).isEmpty;
+  }
+
   /// 扫描插件目录，加载清单，并激活所有已启用插件。
   Future<void> scan() async {
     final root = Directory(_pluginsRootDir);
@@ -168,29 +204,62 @@ class PluginManager extends ChangeNotifier {
       }
     }
 
-    // 激活已启用的插件。
+    // 迁移：本功能上线前已启用、但无“已同意权限”记录的插件，把当前清单权限
+    // 视为既往同意（既往不咎），避免升级后被误判提权而全部禁用。
+    var migrated = false;
     for (final info in _plugins.values) {
-      if (_enabledIds.contains(info.id)) {
-        await _activate(info);
+      if (_enabledIds.contains(info.id) &&
+          !_approvedPerms.containsKey(info.id)) {
+        _approvedPerms[info.id] = info.manifest.permissions.toSet();
+        migrated = true;
       }
     }
+    if (migrated) await _persistApprovedPerms();
+
+    // 激活已启用的插件；若清单权限超出已同意范围（疑似更新提权），强制禁用待重新授权。
+    var forcedDisable = false;
+    for (final info in _plugins.values) {
+      if (!_enabledIds.contains(info.id)) continue;
+      if (_permissionsApproved(info)) {
+        await _activate(info);
+      } else {
+        _enabledIds.remove(info.id);
+        forcedDisable = true;
+        info.status = PluginStatus.disabled;
+        info.error = '插件权限已变更，需要重新授权后再启用';
+        _log.w('PluginManager',
+            '插件 ${info.id} 申请了未同意的权限，已强制禁用待重新授权');
+      }
+    }
+    if (forcedDisable) await _persistEnabledIds();
     notifyListeners();
   }
 
   /// 从 .ipk 文件安装（安装后默认禁用，需用户授权后启用）。兼容旧 .lpk。
   Future<PluginInfo> install(String lpkPath) async {
     final info = await _installer.installFromLpkFile(lpkPath);
+    // 覆盖安装（同 id 升级/重装）：清除旧的启用态、运行时与已同意权限，强制
+    // 重新走授权弹窗，防止新清单悄悄提权后随下次扫描自动获得新权限。
+    final wasEnabled = _enabledIds.remove(info.id);
+    await _deactivate(info.id);
+    if (_approvedPerms.remove(info.id) != null) {
+      await _persistApprovedPerms();
+    }
+    if (wasEnabled) await _persistEnabledIds();
+    info.status = PluginStatus.disabled;
     _plugins[info.id] = info;
     notifyListeners();
     return info;
   }
 
-  /// 启用插件（假定用户已同意其权限）。
+  /// 启用插件（调用方须已通过同意弹窗）。启用即记录用户同意的权限集。
   Future<void> enable(String id) async {
     final info = _plugins[id];
     if (info == null) throw StateError('插件不存在: $id');
     _enabledIds.add(id);
+    _approvedPerms[id] = info.manifest.permissions.toSet();
     await _persistEnabledIds();
+    await _persistApprovedPerms();
     await _activate(info);
     notifyListeners();
   }
@@ -213,6 +282,9 @@ class PluginManager extends ChangeNotifier {
     await _deactivate(id);
     _enabledIds.remove(id);
     await _persistEnabledIds();
+    if (_approvedPerms.remove(id) != null) {
+      await _persistApprovedPerms();
+    }
     final info = _plugins.remove(id);
     if (info != null) {
       try {

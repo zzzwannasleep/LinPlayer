@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_interfaces.dart';
 import '../api/emby_api.dart';
+import '../network/proxy_http_client.dart';
+import '../services/secure_credential_store.dart';
 import 'app_preferences.dart';
 
 enum AuthState { unauthenticated, authenticating, authenticated, error }
@@ -28,6 +30,10 @@ class ServerConfig {
   // 登录密码（可选）。用于需要凭据重新登录的场景（如插件登录配套网站）。
   // 仅在用户添加服务器时填写后保存；通过权限 emby.credentials 暴露给插件。
   final String? password;
+  // 是否信任该服务器的自签名/无效 TLS 证书（不安全）。默认 false=严格校验。
+  // 仅当用户在编辑服务器页显式开启时，才把本服务器的主机加入放行白名单；
+  // 不影响更新下载、WebDAV、其它主机的 TLS 校验。
+  final bool allowInsecureTls;
 
   ServerConfig({
     required this.id,
@@ -41,6 +47,7 @@ class ServerConfig {
     this.authToken,
     this.userId,
     this.password,
+    this.allowInsecureTls = false,
   });
 
   String get activeLineUrl {
@@ -61,6 +68,7 @@ class ServerConfig {
     String? authToken,
     String? userId,
     String? password,
+    bool? allowInsecureTls,
   }) {
     return ServerConfig(
       id: id ?? this.id,
@@ -74,6 +82,7 @@ class ServerConfig {
       authToken: authToken ?? this.authToken,
       userId: userId ?? this.userId,
       password: password ?? this.password,
+      allowInsecureTls: allowInsecureTls ?? this.allowInsecureTls,
     );
   }
 }
@@ -203,9 +212,31 @@ class CurrentServerNotifier extends StateNotifier<ServerConfig?> {
 }
 
 class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
-  ServerListNotifier() : super(_loadServersSync());
+  ServerListNotifier() : super(_loadServersSync()) {
+    // 初始加载不经过 set state 覆写，这里补一次白名单同步。
+    _syncInsecureTlsHosts();
+  }
 
   static const _serversKey = 'linplayer_servers';
+
+  // 任何服务器列表变更都重建“放行不安全 TLS”的主机白名单。
+  @override
+  set state(List<ServerConfig> value) {
+    super.state = value;
+    _syncInsecureTlsHosts();
+  }
+
+  void _syncInsecureTlsHosts() {
+    final hosts = <String>{};
+    for (final server in state) {
+      if (!server.allowInsecureTls) continue;
+      for (final url in [server.baseUrl, ...server.lines.map((l) => l.url)]) {
+        final host = Uri.tryParse(url.trim())?.host;
+        if (host != null && host.isNotEmpty) hosts.add(host);
+      }
+    }
+    setInsecureTlsHosts(hosts);
+  }
 
   static List<ServerConfig> _loadServersSync() {
     try {
@@ -231,15 +262,18 @@ class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
 
   Future<void> _saveServers() async {
     try {
-      final jsonList = state.map(_serverConfigToJson).toList();
-      debugPrint('[ServerList] Saving ${state.length} servers');
+      // 持久化到 SharedPreferences 时**剥离**密码/Token（含密的明文不落 prefs）。
+      final jsonList =
+          state.map((s) => _serverConfigToJson(s, includeSecrets: false)).toList();
+      await AppPreferencesStore.instance.setString(_serversKey, jsonEncode(jsonList));
+      // 密码/Token 写入 OS 安全存储。
       for (final server in state) {
-        debugPrint(
-          '[ServerList] Server ${server.name}: authToken=${server.authToken != null ? 'present' : 'null'}, userId=${server.userId}',
+        await SecureCredentialStore.instance.write(
+          server.id,
+          password: server.password,
+          authToken: server.authToken,
         );
       }
-      await AppPreferencesStore.instance.setString(_serversKey, jsonEncode(jsonList));
-      debugPrint('[ServerList] Save completed');
     } catch (e) {
       debugPrint('[ServerList] Save failed: $e');
     }
@@ -252,6 +286,7 @@ class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
 
   void removeServer(String id) {
     state = state.where((server) => server.id != id).toList();
+    SecureCredentialStore.instance.remove(id);
     _saveServers();
   }
 
@@ -290,7 +325,11 @@ class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
   }
 }
 
-Map<String, dynamic> _serverConfigToJson(ServerConfig server) {
+/// 序列化服务器配置。[includeSecrets] 为 false 时**不写入**密码/Token
+/// （用于 SharedPreferences 持久化，密文改存 OS 安全存储）；备份导出需带凭据
+/// 时传 true（备份会另行用口令加密整包，见 H12）。
+Map<String, dynamic> _serverConfigToJson(ServerConfig server,
+    {bool includeSecrets = true}) {
   return {
     'id': server.id,
     'name': server.name,
@@ -307,9 +346,10 @@ Map<String, dynamic> _serverConfigToJson(ServerConfig server) {
         .toList(),
     'activeLineIndex': server.activeLineIndex,
     'username': server.username,
-    'authToken': server.authToken,
+    if (includeSecrets) 'authToken': server.authToken,
     'userId': server.userId,
-    'password': server.password,
+    if (includeSecrets) 'password': server.password,
+    'allowInsecureTls': server.allowInsecureTls,
   };
 }
 
@@ -326,9 +366,13 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
           .toList() ??
       const <ServerLine>[];
   final activeLineIndex = json['activeLineIndex'] as int? ?? 0;
+  final id = json['id'] as String;
+  // 优先用 JSON 内的明文（备份恢复路径已解密带上），否则从 OS 安全存储取
+  // （SharedPreferences 持久化路径已剥离密码/Token）。
+  final secret = SecureCredentialStore.instance.read(id);
 
   return ServerConfig(
-    id: json['id'] as String,
+    id: id,
     name: json['name'] as String,
     baseUrl: json['baseUrl'] as String,
     iconUrl: json['iconUrl'] as String?,
@@ -338,9 +382,13 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
         ? 0
         : activeLineIndex.clamp(0, lines.length - 1),
     username: _emptyToNull(json['username'] as String?),
-    authToken: _emptyToNull(json['authToken'] as String?),
+    authToken: _emptyToNull(json['authToken'] as String?) ?? secret?.authToken,
     userId: _emptyToNull(json['userId'] as String?),
-    password: _emptyToNull(json['password'] as String?),
+    password: _emptyToNull(json['password'] as String?) ?? secret?.password,
+    // 迁移：旧版本服务器无此字段，过去对所有主机放行坏证书。为不破坏现有
+    // （含自签名 Emby）用户的连接，缺字段时默认 true 保留原放行行为；放行范围
+    // 已收敛到本服务器自身主机。新加服务器走构造默认 false（严格校验）。
+    allowInsecureTls: json['allowInsecureTls'] as bool? ?? true,
   );
 }
 

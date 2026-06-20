@@ -54,6 +54,12 @@ class WhisperModelManager {
     final target = await modelFile(model);
     final tmp = File('${target.path}.part');
     final url = model.downloadUrl(mirrorBase);
+    // 强制 https：自定义镜像可能填 http://，明文下载会被中间人替换为篡改的
+    // GGML 权重交给原生 whisper 二进制解析（潜在内存破坏）。
+    final parsed = Uri.tryParse(url);
+    if (parsed == null || parsed.scheme.toLowerCase() != 'https') {
+      throw ArgumentError('模型下载地址必须为 https：$url');
+    }
     _cancelToken = CancelToken();
     _logger.i(_tag, '开始下载 ${model.fileName}: $url');
 

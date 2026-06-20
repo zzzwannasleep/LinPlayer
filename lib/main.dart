@@ -10,6 +10,7 @@ import 'core/providers/proxy_providers.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/cache_service.dart';
 import 'core/services/crash_diagnostics.dart';
+import 'core/services/secure_credential_store.dart';
 import 'core/services/deep_link_service.dart';
 import 'core/services/font_service.dart';
 import 'core/theme/app_motion.dart';
@@ -36,6 +37,10 @@ Future<void> main() async {
   }
 
   await initializeAppPreferences();
+
+  // 服务器凭据安全存储：一次性把密码/Token 载入同步缓存并迁移旧明文。
+  // 必须在 ProviderContainer 创建（服务器列表同步加载）之前完成。
+  await SecureCredentialStore.instance.initialize();
 
   // 启动后台上报上次的原生崩溃回溯（Android），写入可导出的 App 日志便于定位。
   unawaited(CrashDiagnostics.reportRecentExits());

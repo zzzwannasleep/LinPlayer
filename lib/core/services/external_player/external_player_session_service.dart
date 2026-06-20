@@ -57,6 +57,9 @@ class ExternalPlayerSessionService {
       '--input-ipc-server=${bridge.endpoint}',
       if (_buildStartArgument(startPositionTicks) case final startArg?)
         '--start=$startArg',
+      // 选项终止符：其后的 videoUrl 一律按位置参数处理，永不被解析为 mpv 选项
+      // （即便 URL 以 - / -- 开头），杜绝选项注入。
+      '--',
       videoUrl,
     ];
 

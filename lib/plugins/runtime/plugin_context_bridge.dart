@@ -27,7 +27,8 @@ class PluginContextBridge {
   final PluginStorage storage;
   final PluginExtensionRegistry registry;
 
-  /// HTTPS 域名白名单（空表示不限制 host，但仍强制 HTTPS）。
+  /// HTTPS 域名白名单（来自 manifest 声明、经用户同意展示）。
+  /// **空 = 拒绝所有出网**，绝不放行任意主机；且始终强制 HTTPS。
   final List<String> httpAllowedHosts;
 
   Dio? _httpDio;
@@ -113,7 +114,9 @@ class PluginContextBridge {
     if (uri.scheme.toLowerCase() != 'https') {
       throw Exception('仅允许 HTTPS 请求: $url');
     }
-    if (httpAllowedHosts.isNotEmpty && !httpAllowedHosts.contains(uri.host)) {
+    // 空白名单 = 拒绝所有（fail-closed）：插件必须在 manifest 声明 httpAllowedHosts
+    // 并经用户同意，缺省/空绝不等于“放行任意主机”。
+    if (!httpAllowedHosts.contains(uri.host)) {
       throw Exception('域名不在白名单内: ${uri.host}');
     }
 
@@ -339,10 +342,19 @@ class PluginContextBridge {
     final query = (opts['query'] is Map)
         ? (opts['query'] as Map).map((k, v) => MapEntry('$k', v))
         : null;
+    final baseUri = Uri.parse(base);
+    final resolved = baseUri.resolve(path);
+    // 防 SSRF：path 形如 `//evil.com/x` 或绝对 URL 会改写主机，但仍会带上
+    // X-Emby-Token。解析后必须仍指向同一服务器，否则拒绝，杜绝 Token 外泄。
+    if (resolved.scheme != baseUri.scheme ||
+        resolved.host != baseUri.host ||
+        resolved.port != baseUri.port) {
+      throw Exception('apiRequest 路径越权指向了其它主机: ${resolved.host}');
+    }
     final response = await dio.requestUri(
-      Uri.parse(base).resolve(path).replace(
-            queryParameters: query?.map((k, v) => MapEntry(k, '$v')),
-          ),
+      resolved.replace(
+        queryParameters: query?.map((k, v) => MapEntry(k, '$v')),
+      ),
       data: opts['body'],
       options: Options(method: httpMethod),
     );

@@ -8,11 +8,11 @@ final class AuthManager: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    func login(serverURL: String, username: String, password: String) async {
+    func login(serverURL: String, username: String, password: String, allowInsecureTLS: Bool = false) async {
         await MainActor.run { isLoading = true; errorMessage = nil }
 
         do {
-            let client = EmbyApiClient(baseURL: serverURL)
+            let client = EmbyApiClient(baseURL: serverURL, allowInsecureTLS: allowInsecureTLS)
             let result = try await client.login(username: username, password: password)
             await MainActor.run {
                 self.apiClient = client
@@ -28,8 +28,8 @@ final class AuthManager: ObservableObject {
         }
     }
 
-    func restoreSession(serverURL: String, token: String, userId: String) {
-        let client = EmbyApiClient(baseURL: serverURL, accessToken: token, userId: userId)
+    func restoreSession(serverURL: String, token: String, userId: String, allowInsecureTLS: Bool = false) {
+        let client = EmbyApiClient(baseURL: serverURL, accessToken: token, userId: userId, allowInsecureTLS: allowInsecureTLS)
         self.apiClient = client
         self.isAuthenticated = true
     }

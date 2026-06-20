@@ -20,7 +20,12 @@ final class EmbyApiClient: ObservableObject {
         "People", "CanDownload", "SupportsSync", "ParentLogoItemId", "ParentLogoImageTag"
     ].joined(separator: ",")
 
-    init(baseURL: String, accessToken: String? = nil, userId: String? = nil) {
+    init(
+        baseURL: String,
+        accessToken: String? = nil,
+        userId: String? = nil,
+        allowInsecureTLS: Bool = false
+    ) {
         self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         self.accessToken = accessToken
         self.userId = userId
@@ -28,8 +33,17 @@ final class EmbyApiClient: ObservableObject {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
-        let delegate = InsecureSessionDelegate()
-        self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+        if allowInsecureTLS {
+            // 仅当用户为该服务器显式信任自签名证书时，才放行坏证书。
+            self.session = URLSession(
+                configuration: config,
+                delegate: InsecureSessionDelegate(),
+                delegateQueue: nil
+            )
+        } else {
+            // 默认走系统标准 TLS 校验，拒绝自签名/无效证书，防止中间人。
+            self.session = URLSession(configuration: config)
+        }
     }
 
     func setAuth(token: String, userId: String) {
@@ -135,8 +149,8 @@ final class EmbyApiClient: ObservableObject {
         return try await perform(request)
     }
 
-    static func testConnection(url: String) async throws -> ServerInfo {
-        let client = EmbyApiClient(baseURL: url)
+    static func testConnection(url: String, allowInsecureTLS: Bool = false) async throws -> ServerInfo {
+        let client = EmbyApiClient(baseURL: url, allowInsecureTLS: allowInsecureTLS)
         return try await client.getPublicInfo()
     }
 

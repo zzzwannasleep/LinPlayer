@@ -69,9 +69,41 @@ struct ServerConfig: Codable, Identifiable {
     var name: String
     var userId: String?
     var accessToken: String?
+    // 是否信任该服务器的自签名/无效 TLS 证书（不安全）。新建默认 false=严格校验。
+    // 仅当用户在添加/编辑服务器时显式开启，才对本服务器放行坏证书。
+    var allowInsecureTLS: Bool = false
 
     var isAuthenticated: Bool {
         accessToken != nil && userId != nil
+    }
+
+    init(
+        url: String,
+        name: String,
+        userId: String? = nil,
+        accessToken: String? = nil,
+        allowInsecureTLS: Bool = false
+    ) {
+        self.url = url
+        self.name = name
+        self.userId = userId
+        self.accessToken = accessToken
+        self.allowInsecureTLS = allowInsecureTLS
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case url, name, userId, accessToken, allowInsecureTLS
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        name = try c.decode(String.self, forKey: .name)
+        userId = try c.decodeIfPresent(String.self, forKey: .userId)
+        accessToken = try c.decodeIfPresent(String.self, forKey: .accessToken)
+        // 迁移：旧配置无此字段，过去全局信任任意证书。为不破坏现有（含自签名）
+        // 服务器的连接，缺字段时默认 true 保留原放行行为；新增服务器走 init 默认 false。
+        allowInsecureTLS = (try? c.decode(Bool.self, forKey: .allowInsecureTLS)) ?? true
     }
 }
 

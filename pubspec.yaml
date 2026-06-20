@@ -21,6 +21,10 @@ dependencies:
   # 网络
   dio: ^5.4.0
   crypto: ^3.0.3
+  # 凭据安全：服务器密码/Token 用 OS 钥匙串加密落盘（H11）
+  flutter_secure_storage: ^9.2.2
+  # 备份口令加密（H12）：PBKDF2 + AES-GCM，纯 Dart 跨平台
+  cryptography: ^2.7.0
   # SOCKS4/5 代理支持（Dart HttpClient 原生只支持 HTTP 代理）
   socks5_proxy: ^1.0.4
   # 内置 zashboard 面板（仅 Android TV 使用，指向本地 mihomo external-ui）

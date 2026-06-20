@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -136,6 +137,15 @@ class LanRemoteServer {
   final Ref _ref;
   HttpServer? _server;
   int _port = 8920;
+  // 每次启动生成的随机会话 token，嵌入二维码 URL 的 fragment 中。
+  // 所有 /api/* 请求必须携带它（header 或 query），否则 401。
+  String? _token;
+
+  // 仅这些动作允许经命令总线下发给播放器（防任意 action 注入）。
+  static const _allowedCmdActions = {
+    'toggle', 'play', 'pause', 'seekRel', 'seekTo',
+    'next', 'prev', 'playEpisode', 'audio', 'subtitle',
+  };
 
   bool get isRunning => _server != null;
   int get port => _port;
@@ -144,6 +154,7 @@ class LanRemoteServer {
   Future<String?> start({int port = 8920}) async {
     if (_server != null) return urlFor(await _lanIp());
     _port = port;
+    _token = _generateToken();
     try {
       _server = await HttpServer.bind(InternetAddress.anyIPv4, _port);
     } on SocketException {
@@ -164,9 +175,19 @@ class LanRemoteServer {
   Future<void> stop() async {
     await _server?.close(force: true);
     _server = null;
+    _token = null;
   }
 
-  String? urlFor(String? ip) => ip == null ? null : 'http://$ip:$_port';
+  // token 放在 fragment（#k=）里：不会随请求发往服务器、不进访问日志/Referer，
+  // 由控制页 JS 读取后用请求头回传。
+  String? urlFor(String? ip) =>
+      ip == null ? null : 'http://$ip:$_port/#k=${_token ?? ''}';
+
+  static String _generateToken() {
+    final r = Random.secure();
+    final bytes = List<int>.generate(18, (_) => r.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
 
   Future<String?> currentUrl() async => urlFor(await _lanIp());
 
@@ -207,11 +228,42 @@ class LanRemoteServer {
 
   // ---------------- 请求处理 ----------------
 
+  /// 仅允许通过 IP 直连访问（拒绝带域名的 Host），挫败 DNS rebinding：
+  /// 恶意网页即便把自己的域名解析到本机 IP，其请求的 Host 仍是域名而非 IP。
+  bool _hostOk(HttpRequest req) {
+    final host = req.headers.host;
+    if (host == null || host.isEmpty) return false;
+    return InternetAddress.tryParse(host) != null;
+  }
+
+  /// 校验 /api/* 请求携带的会话 token（请求头优先，兼容 query 回退）。
+  bool _authed(HttpRequest req) {
+    final t = _token;
+    if (t == null || t.isEmpty) return false;
+    final provided =
+        req.headers.value('x-lp-token') ?? req.uri.queryParameters['k'] ?? '';
+    return _constEq(provided, t);
+  }
+
+  bool _constEq(String a, String b) {
+    if (a.length != b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return diff == 0;
+  }
+
   Future<void> _handle(HttpRequest req) async {
     final res = req.response;
-    res.headers.set('Access-Control-Allow-Origin', '*');
-    res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
-    res.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    // 不再放任意来源跨域读取响应：控制页与后端同源，无需 CORS；去掉通配
+    // Access-Control-Allow-Origin 即可阻断浏览器驱动的跨站调用。
+    // 仅允许 IP 直连，拒绝带域名的 Host（防 DNS rebinding）。
+    if (!_hostOk(req)) {
+      res.statusCode = 403;
+      await res.close();
+      return;
+    }
     try {
       final path = req.uri.path;
       if (req.method == 'OPTIONS') {
@@ -219,18 +271,27 @@ class LanRemoteServer {
       } else if (path == '/' || path == '/index.html') {
         res.headers.contentType = ContentType.html;
         res.write(_webPage);
-      } else if (path == '/api/state') {
-        _json(res, _stateJson());
-      } else if (path == '/api/episodes') {
-        await _handleEpisodes(req, res);
-      } else if (path == '/api/cmd' && req.method == 'POST') {
-        await _handleCmd(req, res);
-      } else if (path == '/api/setting' && req.method == 'POST') {
-        await _handleSetting(req, res);
-      } else if (path == '/api/server' && req.method == 'POST') {
-        await _handleServer(req, res);
-      } else if (path == '/api/server-add' && req.method == 'POST') {
-        await _handleServerAdd(req, res);
+      } else if (path.startsWith('/api/')) {
+        // 所有 /api/* 一律要求会话 token，未授权直接 401。
+        if (!_authed(req)) {
+          res.statusCode = 401;
+          _json(res, {'error': 'unauthorized'});
+        } else if (path == '/api/state') {
+          _json(res, _stateJson());
+        } else if (path == '/api/episodes') {
+          await _handleEpisodes(req, res);
+        } else if (path == '/api/cmd' && req.method == 'POST') {
+          await _handleCmd(req, res);
+        } else if (path == '/api/setting' && req.method == 'POST') {
+          await _handleSetting(req, res);
+        } else if (path == '/api/server' && req.method == 'POST') {
+          await _handleServer(req, res);
+        } else if (path == '/api/server-add' && req.method == 'POST') {
+          await _handleServerAdd(req, res);
+        } else {
+          res.statusCode = 404;
+          res.write('Not Found');
+        }
       } else {
         res.statusCode = 404;
         res.write('Not Found');
@@ -315,7 +376,7 @@ class LanRemoteServer {
   Future<void> _handleCmd(HttpRequest req, HttpResponse res) async {
     final body = await _body(req);
     final action = body['action']?.toString() ?? '';
-    if (action.isEmpty) {
+    if (action.isEmpty || !_allowedCmdActions.contains(action)) {
       res.statusCode = 400;
       return;
     }
@@ -656,10 +717,13 @@ const String _kWebPage = r'''<!DOCTYPE html>
 
 <script>
 let STATE=null, curSeries=null;
+// 会话 token 从 URL fragment(#k=) 读取，每个请求经 X-LP-Token 头回传。
+const TOKEN=new URLSearchParams(location.hash.slice(1)).get('k')||'';
+function api(p,o){o=o||{};o.headers=Object.assign({'X-LP-Token':TOKEN},o.headers||{});return fetch(p,o);}
 function fmt(ms){ms=Math.max(0,ms/1000|0);const m=ms/60|0,s=ms%60;return m+':'+(s<10?'0':'')+s;}
-async function cmd(action,value){await fetch('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,value})});setTimeout(refresh,250);}
-async function setSetting(key,value){await fetch('/api/setting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})});}
-async function refresh(){try{const r=await fetch('/api/state');STATE=await r.json();render();}catch(e){}}
+async function cmd(action,value){await api('/api/cmd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,value})});setTimeout(refresh,250);}
+async function setSetting(key,value){await api('/api/setting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,value})});}
+async function refresh(){try{const r=await api('/api/state');STATE=await r.json();render();}catch(e){}}
 document.querySelectorAll('.tab-btn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tab-btn').forEach(x=>x.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
@@ -686,7 +750,7 @@ function renderTracks(elId,tracks,action){
 }
 async function loadEpisodes(){
   const p=STATE&&STATE.player;if(!p||!p.seriesId){document.getElementById('episodes').innerHTML='<div class="muted">非剧集</div>';return;}
-  const r=await fetch('/api/episodes?seriesId='+encodeURIComponent(p.seriesId)+(p.seasonId?'&seasonId='+encodeURIComponent(p.seasonId):''));
+  const r=await api('/api/episodes?seriesId='+encodeURIComponent(p.seriesId)+(p.seasonId?'&seasonId='+encodeURIComponent(p.seasonId):''));
   const d=await r.json();const el=document.getElementById('episodes');el.innerHTML='';
   (d.episodes||[]).forEach(e=>{const b=document.createElement('button');b.className='btn';
     b.textContent=(e.indexNumber?('第'+e.indexNumber+'集 · '):'')+e.name;b.onclick=()=>cmd('playEpisode',e.id);el.appendChild(b);});
@@ -729,7 +793,7 @@ function renderServers(){
   addBtn.onclick=async()=>{
     addBtn.textContent='添加中…';addBtn.disabled=true;
     try{
-      const r=await fetch('/api/server-add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      const r=await api('/api/server-add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         text:document.getElementById('addText').value,
         username:document.getElementById('addUser').value,
         password:document.getElementById('addPwd').value})});
@@ -753,7 +817,7 @@ function renderServers(){
       act.textContent=(i===sv.activeLineIndex?'● 当前线路':'设为当前线路');act.onclick=()=>{sv.activeLineIndex=i;renderServers();};card.appendChild(act);
     });
     const save=document.createElement('button');save.className='btn';save.textContent='保存';
-    save.onclick=async()=>{await fetch('/api/server',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sv)});save.textContent='已保存 ✓';setTimeout(refresh,400);};
+    save.onclick=async()=>{await api('/api/server',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sv)});save.textContent='已保存 ✓';setTimeout(refresh,400);};
     card.appendChild(save);body.appendChild(card);
   });
 }

@@ -70,7 +70,8 @@ struct LoginView: View {
             await authManager.login(
                 serverURL: server.url,
                 username: username,
-                password: password
+                password: password,
+                allowInsecureTLS: server.allowInsecureTLS
             )
             if authManager.isAuthenticated {
                 serverManager.updateServerAuth(

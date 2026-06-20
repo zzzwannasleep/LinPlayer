@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -89,13 +91,31 @@ class UpdateInstaller {
       }
 
       final dio = Dio(BaseOptions(headers: {'User-Agent': kAppUserAgent}));
-      applyProxyToDio(dio);
+      // 更新下载强制严格 TLS：不复用可能放行自签名证书的客户端，杜绝 MITM 投递。
+      applyStrictProxyToDio(dio);
       await dio.download(
         asset.url,
         savePath,
         onReceiveProgress: onProgress,
         cancelToken: cancelToken,
       );
+
+      // 完整性校验：若发布提供了 SHA256 校验文件，必须匹配才放行；不匹配一律
+      // 删除并失败，防止被篡改/损坏的安装包被交给系统安装器执行。
+      final expected = await _expectedSha256(info, asset, dio);
+      if (expected != null) {
+        final actual = await _sha256OfFile(savePath);
+        if (actual.toLowerCase() != expected.toLowerCase()) {
+          _logger.e(_tag, '安装包 SHA256 校验失败: 期望 $expected 实得 $actual，已删除');
+          try {
+            File(savePath).deleteSync();
+          } catch (_) {}
+          return ApplyResult.failed;
+        }
+        _logger.i(_tag, '安装包 SHA256 校验通过');
+      } else {
+        _logger.w(_tag, '发布未提供 SHA256 校验文件，跳过完整性校验');
+      }
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) return ApplyResult.canceled;
       _logger.eWithStack(_tag, '下载安装包失败', e, e.stackTrace);
@@ -125,6 +145,72 @@ class UpdateInstaller {
     // 桌面：在文件管理器中定位下载好的压缩包，供用户解压覆盖。
     await _revealInFileManager(savePath);
     return ApplyResult.desktopRevealed;
+  }
+
+  /// 从发布资产里找到本安装包的预期 SHA256（十六进制）。
+  ///
+  /// 约定（任一命中即可，均经严格 TLS 从同一发布获取）：
+  /// - 同名 `<asset>.sha256` 资产，内容为 `<hex>` 或 `<hex>  <name>`；
+  /// - 汇总文件 `SHA256SUMS` / `SHA256SUMS.txt` / `checksums.txt`，逐行
+  ///   `<hex>  <name>`，匹配本资产名。
+  ///
+  /// 找不到或获取失败返回 null（记录告警，不阻断更新）；一旦提供则强制校验。
+  static Future<String?> _expectedSha256(
+      UpdateInfo info, UpdateAsset asset, Dio dio) async {
+    final sidecarName = '${asset.name}.sha256'.toLowerCase();
+    const sumsNames = {'sha256sums', 'sha256sums.txt', 'checksums.txt'};
+
+    UpdateAsset? sidecar;
+    UpdateAsset? sums;
+    for (final a in info.assets) {
+      final lower = a.name.toLowerCase();
+      if (lower == sidecarName) sidecar = a;
+      if (sumsNames.contains(lower)) sums = a;
+    }
+
+    try {
+      if (sidecar != null && sidecar.url.isNotEmpty) {
+        final resp = await dio.get<String>(
+          sidecar.url,
+          options: Options(responseType: ResponseType.plain),
+        );
+        return _parseHashFor(resp.data, asset.name, singleLine: true);
+      }
+      if (sums != null && sums.url.isNotEmpty) {
+        final resp = await dio.get<String>(
+          sums.url,
+          options: Options(responseType: ResponseType.plain),
+        );
+        return _parseHashFor(resp.data, asset.name, singleLine: false);
+      }
+    } catch (e) {
+      _logger.w(_tag, '获取校验文件失败，跳过完整性校验: $e');
+    }
+    return null;
+  }
+
+  /// 从校验文件文本解出 64 位十六进制 SHA256。
+  /// [singleLine]=true 按“单文件 .sha256”取首个 hex；否则汇总文件逐行匹配资产名。
+  static String? _parseHashFor(String? text, String assetName,
+      {required bool singleLine}) {
+    if (text == null || text.trim().isEmpty) return null;
+    final hex = RegExp(r'\b[a-fA-F0-9]{64}\b');
+    if (singleLine) {
+      return hex.firstMatch(text)?.group(0);
+    }
+    for (final line in const LineSplitter().convert(text)) {
+      if (line.toLowerCase().contains(assetName.toLowerCase())) {
+        final m = hex.firstMatch(line);
+        if (m != null) return m.group(0);
+      }
+    }
+    return null;
+  }
+
+  /// 流式计算文件 SHA256（十六进制小写）。
+  static Future<String> _sha256OfFile(String path) async {
+    final digest = await sha256.bind(File(path).openRead()).first;
+    return digest.toString();
   }
 
   /// 下载目录：Android 用应用私有缓存（open_filex 经自带 FileProvider 授权安装）；

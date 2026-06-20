@@ -50,8 +50,16 @@ class EmbyApiClient implements ApiClientFactory {
     // 因此这里只补 api_key，并主动剔除 query 中的 X-Emby-Authorization。
     dio.interceptors.add(_EmbyAuthQueryCompatInterceptor());
 
-    dio.interceptors
-        .add(LogInterceptor(requestBody: true, responseBody: false));
+    // 仅 debug 构建记录请求行，且**不**打印请求体/请求头/响应体，避免登录
+    // 密码（Pw）与 X-Emby-Token / api_key 落入日志。release 完全不挂日志拦截器。
+    if (kDebugMode) {
+      dio.interceptors.add(LogInterceptor(
+        request: true,
+        requestBody: false,
+        requestHeader: false,
+        responseBody: false,
+      ));
+    }
     return dio;
   }
 
@@ -185,15 +193,16 @@ class EmbyAuthApi implements AuthApi {
   @override
   Future<AuthResult> login(
       {required String username, required String password}) async {
-    debugPrint(
-        '[EmbyAPI] login: username=$username, baseUrl=${_client.currentLine}');
+    if (kDebugMode) {
+      debugPrint('[EmbyAPI] login: baseUrl=${_client.currentLine}');
+    }
 
     try {
       final resp = await _client.post('/Users/AuthenticateByName', data: {
         'Username': username,
         'Pw': password,
       });
-      debugPrint('[EmbyAPI] login success: ${resp.statusCode}');
+      if (kDebugMode) debugPrint('[EmbyAPI] login success: ${resp.statusCode}');
       final d = resp.data as Map<String, dynamic>;
       final userData = d['User'] as Map<String, dynamic>?;
       if (userData == null) {
@@ -216,12 +225,12 @@ class EmbyAuthApi implements AuthApi {
         user: user,
       );
     } on DioException catch (e) {
-      debugPrint('[EmbyAPI] login failed: ${e.type} | ${e.message}');
-      debugPrint('[EmbyAPI] request URL: ${e.requestOptions.uri}');
-      debugPrint('[EmbyAPI] request headers: ${e.requestOptions.headers}');
-      debugPrint('[EmbyAPI] request data: ${e.requestOptions.data}');
-      debugPrint(
-          '[EmbyAPI] response: ${e.response?.statusCode} | ${e.response?.data}');
+      // 仅打印类型/状态码：绝不记录 request headers（含 X-Emby-Token）与
+      // request data（含明文密码 Pw），即便在 debug 也不打。
+      if (kDebugMode) {
+        debugPrint('[EmbyAPI] login failed: ${e.type} | ${e.message} | '
+            'status=${e.response?.statusCode}');
+      }
       rethrow;
     }
   }

@@ -70,6 +70,31 @@ Future<bool> showPluginPermissionConsent(
                         ],
                       ),
                     )),
+              if (manifest.permissions.contains('http')) ...[
+                const SizedBox(height: 12),
+                Builder(builder: (context) {
+                  final raw = manifest.raw['httpAllowedHosts'];
+                  final hosts = (raw is List)
+                      ? raw
+                          .map((e) => '$e')
+                          .where((e) => e.isNotEmpty)
+                          .toList()
+                      : const <String>[];
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        hosts.isEmpty
+                            ? '可访问的网络域名：无（未声明白名单，将无法联网）'
+                            : '仅可访问以下网络域名：',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      ...hosts.map((h) => Text('· $h',
+                          style: Theme.of(context).textTheme.bodySmall)),
+                    ],
+                  );
+                }),
+              ],
               if (manifest.extensions.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(

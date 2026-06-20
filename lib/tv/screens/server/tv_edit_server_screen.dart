@@ -31,6 +31,7 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
 
   List<ServerLine> _lines = [];
   int _activeLineIndex = 0;
+  bool _allowInsecureTls = false;
   bool _loaded = false;
 
   ServerConfig? _findServer() {
@@ -51,6 +52,7 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
       _iconCtrl.text = server.iconUrl ?? '';
       _lines = List<ServerLine>.from(server.lines);
       _activeLineIndex = server.activeLineIndex;
+      _allowInsecureTls = server.allowInsecureTls;
       _loaded = true;
     }
   }
@@ -75,6 +77,7 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
       activeLineIndex: _lines.isEmpty
           ? 0
           : _activeLineIndex.clamp(0, _lines.length - 1),
+      allowInsecureTls: _allowInsecureTls,
     );
     ref.read(serverListProvider.notifier).updateServer(updated);
     // 若编辑的是当前服务器，同步刷新当前引用，使线路切换立即生效。
@@ -220,6 +223,8 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
                 _field(m, '备注信息', _remarkCtrl),
                 SizedBox(height: m.spacingMd),
                 _buildIconField(m),
+                SizedBox(height: m.spacingMd),
+                _buildInsecureTlsToggle(m),
                 SizedBox(height: m.spacingXl),
                 _buildLinesSection(m),
                 SizedBox(height: m.spacingXl),
@@ -306,6 +311,61 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildInsecureTlsToggle(TvMetrics m) {
+    return TvFocusable(
+      padding: EdgeInsets.all(m.spacingXs),
+      onSelect: () => setState(() => _allowInsecureTls = !_allowInsecureTls),
+      child: Container(
+        padding: EdgeInsets.all(m.spacingMd),
+        decoration: BoxDecoration(
+          color: TvDesignTokens.surface,
+          borderRadius: BorderRadius.circular(m.posterRadius),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              _allowInsecureTls ? Icons.lock_open : Icons.lock_outline,
+              color: _allowInsecureTls
+                  ? TvDesignTokens.error
+                  : TvDesignTokens.textSecondary,
+              size: m.s(28),
+            ),
+            SizedBox(width: m.spacingMd),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('信任自签名证书（不安全）',
+                      style: TextStyle(
+                          fontSize: m.fontSizeMd,
+                          color: TvDesignTokens.textPrimary,
+                          fontWeight: FontWeight.w500)),
+                  SizedBox(height: m.spacingXs),
+                  Text(
+                    _allowInsecureTls
+                        ? '已关闭本服务器的 TLS 校验，连接可能被中间人窃听/篡改'
+                        : '默认严格校验；仅自签名证书无法连接时再开启（只影响本服务器）',
+                    style: TextStyle(
+                        fontSize: m.fontSizeXs,
+                        color: TvDesignTokens.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(width: m.spacingMd),
+            Icon(
+              _allowInsecureTls ? Icons.toggle_on : Icons.toggle_off,
+              color: _allowInsecureTls
+                  ? TvDesignTokens.brand
+                  : TvDesignTokens.textDisabled,
+              size: m.s(40),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

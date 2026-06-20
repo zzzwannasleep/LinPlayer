@@ -72,6 +72,15 @@ jobs:
           done
           echo "缺失 $MISSING 个平台产物（不阻断发布）"
 
+      - name: Generate SHA256 checksums
+        run: |
+          # 重新为最终发布产物生成汇总校验文件（覆盖预发布里旧的同名文件），
+          # 随 files: /tmp/assets/* 一起上传，供 App 端校验安装包完整性。
+          cd /tmp/assets
+          rm -f SHA256SUMS
+          for f in *; do [ -f "$f" ] && sha256sum "$f"; done > SHA256SUMS
+          echo "Generated SHA256SUMS:"; cat SHA256SUMS
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:

@@ -40,7 +40,8 @@ struct ServerListView: View {
                                     authManager.restoreSession(
                                         serverURL: server.url,
                                         token: server.accessToken!,
-                                        userId: server.userId!
+                                        userId: server.userId!,
+                                        allowInsecureTLS: server.allowInsecureTLS
                                     )
                                 }
                             }) {
@@ -107,6 +108,7 @@ struct AddServerView: View {
     @EnvironmentObject var serverManager: ServerManager
     @Environment(\.dismiss) private var dismiss
     @State private var serverURL = ""
+    @State private var allowInsecureTLS = false
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -121,6 +123,11 @@ struct AddServerView: View {
                 .padding(AppTheme.Spacing.lg)
                 .background(AppTheme.surfaceColor)
                 .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius))
+                .frame(maxWidth: 700)
+
+            Toggle("信任自签名证书（不安全）", isOn: $allowInsecureTLS)
+                .font(.system(size: AppTheme.FontSize.caption))
+                .foregroundColor(AppTheme.textSecondary)
                 .frame(maxWidth: 700)
 
             if let error = errorMessage {
@@ -160,8 +167,8 @@ struct AddServerView: View {
 
         Task {
             do {
-                let info = try await EmbyApiClient.testConnection(url: url)
-                let config = ServerConfig(url: url, name: info.serverName)
+                let info = try await EmbyApiClient.testConnection(url: url, allowInsecureTLS: allowInsecureTLS)
+                let config = ServerConfig(url: url, name: info.serverName, allowInsecureTLS: allowInsecureTLS)
                 await MainActor.run {
                     serverManager.addServer(config)
                     serverManager.selectServer(config)
@@ -335,7 +342,7 @@ struct ServerManagerView: View {
         guard serverManager.currentServer?.url != server.url || !authManager.isAuthenticated else { return }
         serverManager.selectServer(server)
         if server.isAuthenticated, let token = server.accessToken, let uid = server.userId {
-            authManager.restoreSession(serverURL: server.url, token: token, userId: uid)
+            authManager.restoreSession(serverURL: server.url, token: token, userId: uid, allowInsecureTLS: server.allowInsecureTLS)
             authManager.currentUser = EmbyUser(id: uid, name: server.name)
         } else {
             Task { await authManager.logout() }
@@ -353,7 +360,7 @@ struct ServerManagerView: View {
     private func probeAll() async {
         for server in serverManager.servers {
             let url = server.url
-            let ok = (try? await EmbyApiClient.testConnection(url: url)) != nil
+            let ok = (try? await EmbyApiClient.testConnection(url: url, allowInsecureTLS: server.allowInsecureTLS)) != nil
             await MainActor.run { reachability[url] = ok }
         }
     }
@@ -368,11 +375,13 @@ struct ServerEditView: View {
 
     @State private var name: String
     @State private var url: String
+    @State private var allowInsecureTLS: Bool
 
     init(server: ServerConfig) {
         self.server = server
         _name = State(initialValue: server.name)
         _url = State(initialValue: server.url)
+        _allowInsecureTLS = State(initialValue: server.allowInsecureTLS)
     }
 
     var body: some View {
@@ -393,6 +402,10 @@ struct ServerEditView: View {
                     .padding(AppTheme.Spacing.lg)
                     .background(AppTheme.surfaceColor)
                     .clipShape(RoundedRectangle(cornerRadius: AppTheme.cornerRadius))
+
+                Toggle("信任自签名证书（不安全）", isOn: $allowInsecureTLS)
+                    .font(.system(size: AppTheme.FontSize.caption))
+                    .foregroundColor(AppTheme.textSecondary)
             }
             .frame(maxWidth: 800)
 
@@ -422,11 +435,14 @@ struct ServerEditView: View {
         if urlChanged {
             // 地址变化视为新服务器身份，需重新登录
             serverManager.removeServer(server)
-            serverManager.addServer(ServerConfig(url: newURL, name: name))
+            serverManager.addServer(ServerConfig(
+                url: newURL, name: name,
+                allowInsecureTLS: allowInsecureTLS))
         } else {
             serverManager.addServer(ServerConfig(
                 url: server.url, name: name,
-                userId: server.userId, accessToken: server.accessToken))
+                userId: server.userId, accessToken: server.accessToken,
+                allowInsecureTLS: allowInsecureTLS))
         }
         dismiss()
     }

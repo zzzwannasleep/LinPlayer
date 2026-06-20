@@ -34,7 +34,7 @@ struct RootView: View {
               server.isAuthenticated,
               let token = server.accessToken,
               let userId = server.userId else { return }
-        authManager.restoreSession(serverURL: server.url, token: token, userId: userId)
+        authManager.restoreSession(serverURL: server.url, token: token, userId: userId, allowInsecureTLS: server.allowInsecureTLS)
         authManager.currentUser = EmbyUser(id: userId, name: server.name)
     }
 }
