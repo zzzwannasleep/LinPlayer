@@ -1,12 +1,31 @@
 import SwiftUI
 import AVKit
 
+/// 播放内核（对齐桌面/移动端的多内核思路）
+/// - av:  系统 AVPlayer（零依赖、包体小；仅支持 mp4/mov/m4v/HLS，放不了 mkv）
+/// - mdk: MDK 内核（广格式 + 硬解 + 支持 mpv 风格用户着色器，含 Anime4K）
+/// - mpv: libmpv 内核（全格式 + Anime4K 超分）
+/// MDK/MPV 接入步骤见 apple_tv/PLAYER_KERNELS.md
+enum PlaybackKernel: String, CaseIterable, Identifiable {
+    case av, mdk, mpv
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .av: return "系统播放器 (AVPlayer)"
+        case .mdk: return "MDK (广兼容/硬解)"
+        case .mpv: return "MPV (Anime4K 超分)"
+        }
+    }
+}
+
 struct PlayerView: View {
     let item: MediaItem
     let apiClient: EmbyApiClient
 
+    @AppStorage(SettingsKey.playbackKernel) private var kernelRaw = PlaybackKernel.av.rawValue
     @Environment(\.dismiss) private var dismiss
     @StateObject private var playerVM: PlayerViewModel
+    @State private var fallbackToAV = false
 
     init(item: MediaItem, apiClient: EmbyApiClient) {
         self.item = item
@@ -14,10 +33,36 @@ struct PlayerView: View {
         _playerVM = StateObject(wrappedValue: PlayerViewModel(item: item, apiClient: apiClient))
     }
 
+    private var kernel: PlaybackKernel {
+        if fallbackToAV { return .av }
+        return PlaybackKernel(rawValue: kernelRaw) ?? .av
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            switch kernel {
+            case .av:
+                avPlayerBody
+            case .mdk, .mpv:
+                NativeKernelHost(
+                    kind: kernel,
+                    item: item,
+                    apiClient: apiClient,
+                    onUseSystemPlayer: { fallbackToAV = true },
+                    onClose: { dismiss() }
+                )
+            }
+        }
+        .onChange(of: playerVM.shouldDismiss) { _, finished in
+            if finished { dismiss() }
+        }
+    }
+
+    @ViewBuilder
+    private var avPlayerBody: some View {
+        Group {
             if let player = playerVM.player {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
@@ -32,6 +77,7 @@ struct PlayerView: View {
                         .foregroundColor(AppTheme.brandColor)
                     Text(error)
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
                     Button("返回") { dismiss() }
                         .brandButton()
                         .buttonStyle(.plain)
@@ -40,9 +86,54 @@ struct PlayerView: View {
         }
         .onAppear { playerVM.setup() }
         .onDisappear { playerVM.cleanup() }
-        .onChange(of: playerVM.shouldDismiss) { _, dismissFlag in
-            if dismissFlag { dismiss() }
+    }
+}
+
+// MARK: - 原生内核宿主（MDK / MPV 接入点）
+//
+// 这里是多内核的「接缝」。在 Xcode 中按 apple_tv/PLAYER_KERNELS.md 添加
+// swift-mdk / libmpv 依赖后，把下面的占位视图替换为各自的 Metal 渲染
+// UIViewRepresentable（MDKKernelView / MPVKernelView）即可。
+// MDK/MPV 都能直接解码 mkv 等容器，因此可继续使用 EmbyApiClient 生成的
+// 直连 stream URL，无需服务端转码。
+
+struct NativeKernelHost: View {
+    let kind: PlaybackKernel
+    let item: MediaItem
+    let apiClient: EmbyApiClient
+    var onUseSystemPlayer: () -> Void
+    var onClose: () -> Void
+
+    var body: some View {
+        VStack(spacing: AppTheme.Spacing.lg) {
+            Image(systemName: "cpu")
+                .font(.system(size: 72))
+                .foregroundColor(AppTheme.brandColor)
+
+            Text("\(kind.title) 内核尚未接入")
+                .font(.system(size: AppTheme.FontSize.title3, weight: .bold))
+                .foregroundColor(.white)
+
+            Text("请在 Xcode 中按 apple_tv/PLAYER_KERNELS.md 添加依赖并接入渲染视图。\n接入后可直接解码 mkv 等格式，无需服务端转码。")
+                .font(.system(size: AppTheme.FontSize.caption))
+                .foregroundColor(AppTheme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 1000)
+
+            HStack(spacing: AppTheme.Spacing.lg) {
+                Button(action: onUseSystemPlayer) {
+                    Text("改用系统播放器播放").brandButton()
+                }
+                .buttonStyle(.plain)
+
+                Button("返回") { onClose() }
+                    .font(.system(size: AppTheme.FontSize.body))
+                    .foregroundColor(AppTheme.textSecondary)
+                    .buttonStyle(.plain)
+            }
+            .padding(.top, AppTheme.Spacing.md)
         }
+        .padding(AppTheme.Spacing.xxl)
     }
 }
 

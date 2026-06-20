@@ -53,7 +53,7 @@ struct OnboardingView: View {
     }
 
     private let pages: [Page] = [
-        Page(icon: "av.remote.fill",
+        Page(icon: "hand.tap.fill",
              title: "使用遥控器导航",
              subtitle: "用方向键移动焦点，确认键选择，菜单键返回"),
         Page(icon: "sidebar.left",
