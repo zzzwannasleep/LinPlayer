@@ -151,24 +151,34 @@ class DeepLinkService {
   }
 
   /// Windows：把 `linplayer://` 协议注册到当前用户(HKCU，免管理员)，指向本 exe，
-  /// 这样浏览器点链接才能唤起本程序。用 `reg add` 实现，零额外依赖。
+  /// 这样浏览器点链接才能唤起本程序。
+  ///
+  /// 用「写 .reg 文件 + reg import」而非 `reg add`：后者对空值(URL Protocol)和带空格
+  /// 路径的引号(如 C:\Program Files\…)处理不可靠，会把命令存成没引号、运行即失败。
+  /// .reg 文件按 UTF-8 无 BOM 写入(File.writeAsString 默认)，reg import 可正确解析。
   Future<void> _registerWindowsScheme() async {
     if (!Platform.isWindows) return;
     try {
       final exe = Platform.resolvedExecutable;
-      const base = r'HKCU\Software\Classes\linplayer';
-      await Process.run(
-          'reg', ['add', base, '/ve', '/d', 'URL:LinPlayer Protocol', '/f']);
-      await Process.run(
-          'reg', ['add', base, '/v', 'URL Protocol', '/d', '', '/f']);
-      await Process.run('reg', [
-        'add',
-        '$base\\shell\\open\\command',
-        '/ve',
-        '/d',
-        '"$exe" "%1"',
-        '/f',
-      ]);
+      // 路径转义到 .reg 语法：反斜杠翻倍、引号转义。
+      final exeEsc = exe.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+      const q = '"';
+      const bsq = r'\"'; // .reg 里表示一个字面引号
+      final command = '@=$q$bsq$exeEsc$bsq $bsq%1$bsq$q';
+      final content = [
+        'Windows Registry Editor Version 5.00',
+        '',
+        r'[HKEY_CURRENT_USER\Software\Classes\linplayer]',
+        '@="URL:LinPlayer Protocol"',
+        '"URL Protocol"=""',
+        '',
+        r'[HKEY_CURRENT_USER\Software\Classes\linplayer\shell\open\command]',
+        command,
+        '',
+      ].join('\r\n');
+      final file = File('${Directory.systemTemp.path}\\linplayer_scheme.reg');
+      await file.writeAsString(content);
+      await Process.run('reg', ['import', file.path]);
     } catch (e) {
       _logger.w('DeepLink', 'Windows 协议注册失败: $e');
     }
