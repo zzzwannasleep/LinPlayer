@@ -34,58 +34,69 @@ struct PlayerView: View {
                         .foregroundColor(.white)
                     Button("返回") { dismiss() }
                         .brandButton()
+                        .buttonStyle(.plain)
                 }
             }
         }
         .onAppear { playerVM.setup() }
         .onDisappear { playerVM.cleanup() }
+        .onChange(of: playerVM.shouldDismiss) { _, dismissFlag in
+            if dismissFlag { dismiss() }
+        }
     }
 }
 
 @MainActor
 final class PlayerViewModel: ObservableObject {
-    let item: MediaItem
-    let apiClient: EmbyApiClient
-
+    @Published var currentItem: MediaItem
     @Published var player: AVPlayer?
     @Published var isLoading = true
     @Published var errorMessage: String?
+    @Published var shouldDismiss = false
+
+    let apiClient: EmbyApiClient
 
     private var progressTimer: Timer?
+    private var endObserver: NSObjectProtocol?
     private var mediaSourceId: String?
 
+    // 播放偏好（与 SettingsView 共享）
+    private var autoPlayNext: Bool {
+        UserDefaults.standard.object(forKey: SettingsKey.autoPlayNext) as? Bool ?? true
+    }
+    private var resumePlayback: Bool {
+        UserDefaults.standard.object(forKey: SettingsKey.resumePlayback) as? Bool ?? true
+    }
+    private var defaultSpeed: Float {
+        let v = UserDefaults.standard.double(forKey: SettingsKey.defaultPlaybackSpeed)
+        return v == 0 ? 1.0 : Float(v)
+    }
+
     init(item: MediaItem, apiClient: EmbyApiClient) {
-        self.item = item
+        self.currentItem = item
         self.apiClient = apiClient
     }
 
     func setup() {
-        Task {
-            await loadPlayback()
-        }
+        Task { await load(item: currentItem, allowResume: true) }
     }
 
     func cleanup() {
-        progressTimer?.invalidate()
-        progressTimer = nil
-
-        if let player = player, let msid = mediaSourceId {
-            let currentTime = player.currentTime()
-            let ticks = Int(CMTimeGetSeconds(currentTime) * 10_000_000)
-            Task {
-                try? await apiClient.reportPlaybackStopped(
-                    itemId: item.id,
-                    mediaSourceId: msid,
-                    positionTicks: ticks
-                )
-            }
-        }
-
+        teardownCurrent(reportStopped: true)
         player?.pause()
         player = nil
     }
 
-    private func loadPlayback() async {
+    // MARK: - Loading
+
+    private func load(item: MediaItem, allowResume: Bool) async {
+        // 切换剧集前清理上一个的观测/上报
+        teardownCurrent(reportStopped: true)
+
+        isLoading = true
+        errorMessage = nil
+        currentItem = item
+
         do {
             let info = try await apiClient.getPlaybackInfo(itemId: item.id)
             guard let source = info.mediaSources.first else {
@@ -105,19 +116,21 @@ final class PlayerViewModel: ObservableObject {
                 return
             }
 
-            let avPlayer = AVPlayer(url: url)
+            let avPlayer = player ?? AVPlayer()
+            avPlayer.replaceCurrentItem(with: AVPlayerItem(url: url))
 
-            if let positionTicks = item.userData?.playbackPositionTicks, positionTicks > 0 {
+            if allowResume, resumePlayback,
+               let positionTicks = item.userData?.playbackPositionTicks, positionTicks > 0 {
                 let seconds = Double(positionTicks) / 10_000_000.0
                 await avPlayer.seek(to: CMTime(seconds: seconds, preferredTimescale: 1))
             }
 
             self.player = avPlayer
             self.isLoading = false
-            avPlayer.play()
+            avPlayer.rate = defaultSpeed
 
+            observeEnd(for: avPlayer)
             try? await apiClient.reportPlaybackStart(itemId: item.id, mediaSourceId: source.id)
-
             startProgressReporting()
         } catch {
             errorMessage = error.localizedDescription
@@ -125,26 +138,81 @@ final class PlayerViewModel: ObservableObject {
         }
     }
 
-    private func startProgressReporting() {
-        progressTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+    private func observeEnd(for avPlayer: AVPlayer) {
+        guard let currentPlayerItem = avPlayer.currentItem else { return }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: currentPlayerItem,
+            queue: .main
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.reportPlaybackProgress()
+                await self?.handlePlaybackEnded()
             }
         }
     }
 
-    private func reportPlaybackProgress() async {
+    private func handlePlaybackEnded() async {
+        if autoPlayNext, currentItem.isEpisode, let next = await fetchNextEpisode() {
+            await load(item: next, allowResume: false)
+        } else {
+            shouldDismiss = true
+        }
+    }
+
+    /// 同一季内查找下一集
+    private func fetchNextEpisode() async -> MediaItem? {
+        guard let seriesId = currentItem.seriesId,
+              let currentIndex = currentItem.indexNumber else { return nil }
+        let seasonId = currentItem.seasonId
+        guard let episodes = try? await apiClient.getEpisodes(seriesId: seriesId, seasonId: seasonId) else {
+            return nil
+        }
+        guard let next = episodes.first(where: { ($0.indexNumber ?? -1) == currentIndex + 1 }) else {
+            return nil
+        }
+        return MediaItem.fromEpisode(next, seriesName: currentItem.seriesName)
+    }
+
+    // MARK: - Progress reporting
+
+    private func startProgressReporting() {
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.reportProgress()
+            }
+        }
+    }
+
+    private func reportProgress() async {
         guard let player, let msid = mediaSourceId else { return }
-
-        let currentTime = player.currentTime()
-        let ticks = Int(CMTimeGetSeconds(currentTime) * 10_000_000)
-        let isPaused = player.rate == 0
-
+        let ticks = Int(CMTimeGetSeconds(player.currentTime()) * 10_000_000)
+        guard ticks > 0 else { return }
         try? await apiClient.reportPlaybackProgress(
-            itemId: item.id,
+            itemId: currentItem.id,
             mediaSourceId: msid,
             positionTicks: ticks,
-            isPaused: isPaused
+            isPaused: player.rate == 0
         )
+    }
+
+    /// 清理当前剧集的计时器/观测，并上报停止位置
+    private func teardownCurrent(reportStopped: Bool) {
+        progressTimer?.invalidate()
+        progressTimer = nil
+
+        if let observer = endObserver {
+            NotificationCenter.default.removeObserver(observer)
+            endObserver = nil
+        }
+
+        if reportStopped, let player, let msid = mediaSourceId {
+            let ticks = Int(CMTimeGetSeconds(player.currentTime()) * 10_000_000)
+            let itemId = currentItem.id
+            Task {
+                try? await apiClient.reportPlaybackStopped(
+                    itemId: itemId, mediaSourceId: msid, positionTicks: ticks)
+            }
+        }
     }
 }

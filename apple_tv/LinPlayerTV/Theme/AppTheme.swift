@@ -18,6 +18,10 @@ enum AppTheme {
     static let cardCornerRadius: CGFloat = 16
     static let posterCornerRadius: CGFloat = 12
 
+    // 侧边栏（对齐安卓 TV 端：内容获焦时折叠为图标，侧栏获焦时展开）
+    static let sidebarWidth: CGFloat = 320
+    static let sidebarCollapsedWidth: CGFloat = 140
+
     static let animationDuration: Double = 0.25
 
     enum Spacing {

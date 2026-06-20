@@ -200,6 +200,28 @@ struct MediaItem: Codable, Identifiable, Hashable {
     }
 }
 
+extension MediaItem {
+    /// 由剧集（Episode）构造一个用于播放/上报的 MediaItem
+    static func fromEpisode(_ episode: Episode, seriesName: String?) -> MediaItem {
+        MediaItem(
+            id: episode.id, name: episode.name, type: "Episode",
+            overview: episode.overview, communityRating: nil, officialRating: nil,
+            premiereDate: nil, runTimeTicks: episode.runTimeTicks,
+            productionYear: nil, genres: nil, seriesName: seriesName,
+            indexNumber: episode.indexNumber, parentIndexNumber: nil,
+            seriesId: episode.seriesId, seasonId: episode.seasonId,
+            mediaType: "Video", childCount: nil, recursiveItemCount: nil,
+            userData: episode.userData, imageTags: episode.imageTags,
+            backdropImageTags: nil, parentThumbItemId: episode.parentThumbItemId,
+            parentThumbImageTag: episode.parentThumbImageTag,
+            parentPrimaryImageItemId: nil, parentPrimaryImageTag: nil,
+            seriesThumbImageTag: nil, seriesPrimaryImageTag: nil,
+            parentLogoItemId: nil, parentLogoImageTag: nil,
+            people: nil
+        )
+    }
+}
+
 struct UserItemData: Codable {
     let playbackPositionTicks: Int?
     let played: Bool?
