@@ -18,7 +18,7 @@ class AddServerScreen extends ConsumerStatefulWidget {
 class _AddServerScreenState extends ConsumerState<AddServerScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _urlController = TextEditingController();
-  final _pathController = TextEditingController(text: '/emby');
+  final _pathController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _importController = TextEditingController();

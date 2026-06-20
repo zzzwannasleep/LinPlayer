@@ -30,11 +30,8 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
     navigatorKey: _rootNavigatorKey,
     initialLocation: desktopStartupLocationFor(startupPage),
     redirect: (context, state) {
-      final servers = ref.read(serverListProvider);
-      final isAuthRoute = state.uri.path == '/servers' || state.uri.path == '/add-server';
-      if (servers.isEmpty && !isAuthRoute) {
-        return '/servers';
-      }
+      // 未添加服务器时不再强制跳到服务器页：允许自由切换页面。内容页(首页/媒体库/
+      // 收藏/下载)由 DesktopContentGate 显示「请先添加服务器」提示；设置页、服务器页正常可用。
       return null;
     },
     routes: [

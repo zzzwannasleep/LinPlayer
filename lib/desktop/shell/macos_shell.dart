@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:macos_ui/macos_ui.dart';
 
 import '../../core/providers/app_providers.dart';
+import 'desktop_content_gate.dart';
 import 'desktop_nav_model.dart';
 
 const double _kSidebarWidth = 220;
@@ -69,7 +70,10 @@ class MacosDesktopShell extends ConsumerWidget {
         Expanded(
           child: Container(
             color: theme.canvasColor,
-            child: navigationShell,
+            child: DesktopContentGate(
+              index: navigationShell.currentIndex,
+              child: navigationShell,
+            ),
           ),
         ),
       ],

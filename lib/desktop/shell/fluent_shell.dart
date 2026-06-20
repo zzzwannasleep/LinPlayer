@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/providers/app_providers.dart';
+import 'desktop_content_gate.dart';
 import 'desktop_nav_model.dart';
 
 /// Windows 外壳：fluent_ui 的 [NavigationView]（仿 WinUI 左侧导航）。
@@ -54,7 +55,10 @@ class FluentDesktopShell extends ConsumerWidget {
           ),
         ],
       ),
-      paneBodyBuilder: (item, child) => navigationShell,
+      paneBodyBuilder: (item, child) => DesktopContentGate(
+        index: navigationShell.currentIndex,
+        child: navigationShell,
+      ),
     );
   }
 }

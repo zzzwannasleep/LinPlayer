@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/providers/app_providers.dart';
 import '../platform/desktop_ui_style.dart';
+import 'desktop_content_gate.dart';
 import 'desktop_nav_model.dart';
 import 'fluent_shell.dart';
 import 'macos_shell.dart';
@@ -107,7 +108,10 @@ class MaterialDesktopShell extends ConsumerWidget {
           Expanded(
             child: Container(
               color: Theme.of(context).scaffoldBackgroundColor,
-              child: navigationShell,
+              child: DesktopContentGate(
+                index: navigationShell.currentIndex,
+                child: navigationShell,
+              ),
             ),
           ),
         ],

@@ -16,7 +16,7 @@ class DesktopAddServerScreen extends ConsumerStatefulWidget {
 class _DesktopAddServerScreenState extends ConsumerState<DesktopAddServerScreen> {
   final _formKey = GlobalKey<FormState>();
   final _urlController = TextEditingController();
-  final _pathController = TextEditingController(text: '/emby');
+  final _pathController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();

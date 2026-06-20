@@ -768,7 +768,8 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
     final maxHeight =
         (widget.screenSize.height - top - screenPadding).clamp(120.0, 360.0);
     final theme = Theme.of(context);
-    const surfaceTint = Colors.transparent;
+    final isDark = theme.brightness == Brightness.dark;
+    final menuBg = isDark ? const Color(0xFF2A2A2A) : Colors.white;
 
     return Material(
       type: MaterialType.transparency,
@@ -777,6 +778,13 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
         onTap: _dismiss,
         child: Stack(
           children: [
+            // 半透明遮罩：压暗背景，让切换菜单和待选服务器看得清。
+            Positioned.fill(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: ColoredBox(color: Colors.black.withValues(alpha: 0.35)),
+              ),
+            ),
             Positioned(
               left: left,
               top: top,
@@ -789,8 +797,20 @@ class _DesktopServerMenuOverlayState extends State<_DesktopServerMenuOverlay>
                     onTap: () {},
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: surfaceTint,
+                        color: menuBg,
                         borderRadius: BorderRadius.circular(18),
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF3A3A3A)
+                              : const Color(0xFFE8EAED),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.28),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
                       ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
