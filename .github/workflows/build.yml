@@ -496,6 +496,7 @@ jobs:
             -sdk appletvos \
             -configuration Release \
             -derivedDataPath ../build/tvos \
+            -clonedSourcePackagesDirPath ../build/tvos-spm \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \

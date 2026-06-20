@@ -136,7 +136,9 @@ struct NativeKernelHost: View {
 
     @ViewBuilder
     private var mpvContent: some View {
-        #if canImport(MPVKit)
+        // MPVKit 的可导入模块是 libmpv 的二进制模块 Libmpv（product MPVKit 指向 C 聚合
+        // 目标 _MPVKit，本身不含 mpv 符号）。两名都门控，谁可用走谁。
+        #if canImport(Libmpv) || canImport(MPVKit)
         if let url = streamURL {
             MPVKernelView(
                 url: url,
@@ -276,9 +278,14 @@ struct MDKKernelView: UIViewRepresentable {
 // ②mpv_opengl_init_params 字段数(新版 libmpv 为 2 个字段)；
 // ③若 MPVKit 自带 SwiftUI/Metal 播放视图，优先用它替换本实现。
 
-#if canImport(MPVKit)
+#if canImport(Libmpv) || canImport(MPVKit)
 import GLKit
+#if canImport(Libmpv)
+import Libmpv   // MPVKit 的 libmpv C 符号(mpv_create / mpv_render_* …)所在模块
+#endif
+#if canImport(MPVKit)
 import MPVKit
+#endif
 
 struct MPVKernelView: UIViewControllerRepresentable {
     let url: URL

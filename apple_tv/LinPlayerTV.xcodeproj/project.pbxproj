@@ -29,6 +29,7 @@
 		B00000000000000000000014 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000014 /* LoginView.swift */; };
 		B00000000000000000000015 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000015 /* SettingsView.swift */; };
 		B00000000000000000000016 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000016 /* Assets.xcassets */; };
+		D00000000000000000000003 /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = D00000000000000000000002 /* MPVKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D00000000000000000000003 /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -235,6 +237,9 @@
 			dependencies = (
 			);
 			name = LinPlayerTV;
+			packageProductDependencies = (
+				D00000000000000000000002 /* MPVKit */,
+			);
 			productName = LinPlayerTV;
 			productReference = C00000000000000000000018 /* LinPlayerTV.app */;
 			productType = "com.apple.product-type.application";
@@ -264,6 +269,9 @@
 				Base,
 			);
 			mainGroup = A00000000000000000000002;
+			packageReferences = (
+				D00000000000000000000001 /* XCRemoteSwiftPackageReference "MPVKit" */,
+			);
 			productRefGroup = A00000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -439,6 +447,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D00000000000000000000001 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.41.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D00000000000000000000002 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D00000000000000000000001 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = A00000000000000000000001 /* Project object */;

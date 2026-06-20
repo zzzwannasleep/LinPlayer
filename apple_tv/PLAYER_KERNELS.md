@@ -68,13 +68,18 @@ MDK 官方支持 tvOS(xcframework),且有官方 Swift 绑定 `swift-mdk`,走 SPM
 
 **不用从零编译 libmpv**。Apple 平台有现成的 **MPVKit**——把 mpv + ffmpeg + libplacebo
 打成 tvOS 17+ 的 xcframework,SPM 直接加,等同 tvOS 版「预编译 libmpv」。
-- MPVKit: https://github.com/cxfksword/MPVKit · https://github.com/karelrooted/MPVKit
+- MPVKit(上游): https://github.com/mpvkit/MPVKit （cxfksword/karelrooted 为旧 fork）
 
-### 2.1 添加依赖（Mac 的 Xcode 里）
-1. File → Add Package Dependencies… → 填 MPVKit 仓库 URL → 加到 `LinPlayerTV` target。
-2. 勾选 `MPVKit`;若 `mpv_*` C 符号在 Swift 里不可见,再勾 `LibMPV`(libmpv C 绑定)
-   并在 `PlayerView.swift` 的 `#if canImport(MPVKit)` 块里追加 `import LibMPV`。
-3. CI 无需改:`build-tvos` 已含 `xcodebuild -resolvePackageDependencies`,自动拉取。
+### 2.1 依赖已写进工程（无需手动加）
+- `project.pbxproj` 里已加 `XCRemoteSwiftPackageReference`:
+  `https://github.com/mpvkit/MPVKit.git`,`exactVersion 0.41.0`,产品 `MPVKit`,
+  并链入 `LinPlayerTV` target。CI 的 `xcodebuild -resolvePackageDependencies`
+  自动拉取并嵌入 xcframework(libmpv + ffmpeg + libass + libplacebo + MoltenVK …),
+  IPA 随之从几百 KB 涨到几十/上百 MB。
+- **模块名实测是 `Libmpv`**:product `MPVKit` 只指向 C 聚合目标 `_MPVKit`(仅 dummy.c,
+  不含 mpv 符号);`mpv_create` 等真正来自二进制目标 `Libmpv`。故 `PlayerView.swift` 门控写成
+  `#if canImport(Libmpv) || canImport(MPVKit)` + `import Libmpv`,两名都覆盖。
+- 换/钉版本:改 pbxproj 里该引用的 `version` 即可。Mac 的 Xcode 打开工程会自动识别此 SPM 依赖。
 
 > 想自管/钉版本/定制 ffmpeg(如确保 PGS):MPVKit 仓库有 `make build platform=tvos`
 > 可重编 xcframework,再走自托管。但通常**直接用预编译包即可**,无需动 `build-libmpv-pgs.yml`。
@@ -130,6 +135,8 @@ MDK 官方支持 tvOS(xcframework),且有官方 Swift 绑定 `swift-mdk`,走 SPM
 ## 现状
 
 - 内核接缝、设置 UI、AVPlayer 路径、**MDK 与 MPV 两个渲染宿主(canImport 门控)**、`.ipa` 打包 —— 均已就绪并可编译运行。
-- MDK:Mac 上加 `swift-mdk`(SPM)+ 确认一处 `mdkMetalRenderAPI` 字段即可启用。
-- MPV:Mac 上加 `MPVKit`(SPM,**无需自己交叉编译,也无需改 build-libmpv-pgs.yml**)即可启用;Anime4K 在此。
+- **MPV:已把 `MPVKit 0.41.0`(SPM)写进 `project.pbxproj` 并链入 target**,CI 自动拉取嵌入
+  → IPA 不再是几百 KB。门控用实测模块名 `Libmpv`。`MPVKernelView` 仍有几处需 Mac 实编核对
+  (`mpv_opengl_init_params` 字段数、`import Libmpv` 是否够),CI 编译失败按日志迭代即可。
+- MDK:仍需 Mac 上加 `swift-mdk`(SPM)+ 确认 `mdkMetalRenderAPI` 字段;尚未写进工程。
 - 本机为 Windows,无法拉取/编译这两个二进制内核,也无法在 Apple TV 上验证超分,故以上 SPM 接入与渲染细节需在 Mac+Xcode 完成验证。
