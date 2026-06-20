@@ -30,22 +30,7 @@ struct DetailView: View {
         .fullScreenCover(isPresented: $showPlayer) {
             if let episode = playEpisode {
                 PlayerView(
-                    item: MediaItem(
-                        id: episode.id, name: episode.name, type: "Episode",
-                        overview: episode.overview, communityRating: nil, officialRating: nil,
-                        premiereDate: nil, runTimeTicks: episode.runTimeTicks,
-                        productionYear: nil, genres: nil, seriesName: item?.name,
-                        indexNumber: episode.indexNumber, parentIndexNumber: nil,
-                        seriesId: episode.seriesId, seasonId: episode.seasonId,
-                        mediaType: "Video", childCount: nil, recursiveItemCount: nil,
-                        userData: episode.userData, imageTags: episode.imageTags,
-                        backdropImageTags: nil, parentThumbItemId: episode.parentThumbItemId,
-                        parentThumbImageTag: episode.parentThumbImageTag,
-                        parentPrimaryImageItemId: nil, parentPrimaryImageTag: nil,
-                        seriesThumbImageTag: nil, seriesPrimaryImageTag: nil,
-                        parentLogoItemId: nil, parentLogoImageTag: nil,
-                        people: nil
-                    ),
+                    item: MediaItem.fromEpisode(episode, seriesName: item?.name),
                     apiClient: apiClient
                 )
             } else if let item = item {
@@ -176,13 +161,10 @@ struct DetailView: View {
                     }
 
                     HStack(spacing: AppTheme.Spacing.md) {
-                        Button(action: {
-                            playEpisode = nil
-                            showPlayer = true
-                        }) {
+                        Button(action: { playPrimary(item) }) {
                             HStack(spacing: 8) {
                                 Image(systemName: "play.fill")
-                                Text(item.isMovie ? "播放" : "播放第一集")
+                                Text(primaryPlayLabel(item))
                             }
                             .brandButton()
                         }
@@ -348,6 +330,31 @@ struct DetailView: View {
             let eps = try await apiClient.getEpisodes(seriesId: seriesId, seasonId: seasonId)
             await MainActor.run { episodes = eps }
         } catch {}
+    }
+
+    /// 主播放按钮文案：剧集显示「播放/继续观看」，电影按进度显示
+    private func primaryPlayLabel(_ item: MediaItem) -> String {
+        if item.isSeries {
+            if let target = firstUnwatchedEpisode(), target.progress ?? 0 > 0 {
+                return "继续观看"
+            }
+            return "播放"
+        }
+        return (item.progress ?? 0) > 0 ? "继续观看" : "播放"
+    }
+
+    /// 剧集首选未看完的一集，否则第一集
+    private func firstUnwatchedEpisode() -> Episode? {
+        episodes.first(where: { !$0.isWatched }) ?? episodes.first
+    }
+
+    private func playPrimary(_ item: MediaItem) {
+        if item.isSeries {
+            playEpisode = firstUnwatchedEpisode()
+        } else {
+            playEpisode = nil
+        }
+        showPlayer = true
     }
 
     private func toggleFavorite() {
