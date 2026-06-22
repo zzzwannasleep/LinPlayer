@@ -136,14 +136,21 @@ class BackupRestoreScreen extends ConsumerWidget {
         title: const Text('选择导出方式'),
         children: [
           ListTile(
+            leading: const Icon(Icons.bolt),
+            title: const Text('免密码 · 跨客户端（推荐）'),
+            subtitle: const Text('无需密码，任何兼容客户端都能导入（混淆级加密）'),
+            onTap: () => Navigator.pop(dialogContext, 'common'),
+          ),
+          const Divider(height: 1),
+          ListTile(
             leading: const Icon(Icons.password),
-            title: const Text('用密码加密'),
+            title: const Text('用密码加密（更安全）'),
             subtitle: const Text('对方导入时需输入同一密码'),
             onTap: () => Navigator.pop(dialogContext, 'password'),
           ),
           ListTile(
             leading: const Icon(Icons.vpn_key),
-            title: const Text('加密给指定设备（公钥）'),
+            title: const Text('加密给指定设备（公钥，更安全）'),
             subtitle: const Text('填入对方公钥，只有对方设备能解开，无需密码'),
             onTap: () => Navigator.pop(dialogContext, 'recipient'),
           ),
@@ -151,10 +158,52 @@ class BackupRestoreScreen extends ConsumerWidget {
       ),
     );
     if (mode == null || !context.mounted) return;
-    if (mode == 'password') {
-      await _exportWithPassword(context, ref);
-    } else {
-      await _exportToRecipient(context, ref);
+    switch (mode) {
+      case 'common':
+        await _exportCommonConfig(context, ref);
+        break;
+      case 'password':
+        await _exportWithPassword(context, ref);
+        break;
+      case 'recipient':
+        await _exportToRecipient(context, ref);
+        break;
+    }
+  }
+
+  /// 免密码 · 跨客户端导出:通用配置(Richasy 兼容)格式,容器内带 `_key`,
+  /// 任何兼容客户端无需密码即可导入。全程无提示。
+  Future<void> _exportCommonConfig(BuildContext context, WidgetRef ref) async {
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: '导出备份（免密码·跨客户端）',
+      fileName: 'linplayer-config.json',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+    );
+    if (path == null) return;
+    try {
+      final payload = _buildBackupPayload(ref);
+      final container = await CommonConfig.build(
+        ref.read(serverListProvider),
+        exportTimeUnix: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        extra: {
+          'linplayer_settings': payload['settings'],
+          if (payload['currentServerId'] != null)
+            'current_server_id': payload['currentServerId'],
+        },
+      );
+      await File(path).writeAsString(jsonEncode(container));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已导出（免密码·跨客户端）: $path')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e')),
+        );
+      }
     }
   }
 
@@ -526,6 +575,25 @@ class BackupRestoreScreen extends ConsumerWidget {
   /// 旧版明文备份直接返回。返回 null = 用户取消输入密码。
   Future<Map<String, dynamic>?> _decodeBackup(
       BuildContext context, Map<String, dynamic> json) async {
+    // 通用配置（Richasy 兼容，免密码·跨客户端）：用 _key/内置密钥解出服务器列表，
+    // 转成统一 payload 交给 _restoreBackupPayload。
+    if (CommonConfig.isCommonConfig(json)) {
+      final servers = await CommonConfig.parse(json);
+      final extra = CommonConfig.additionalData(json);
+      final settings =
+          (extra?['linplayer_settings'] as Map?)?.cast<String, dynamic>();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已识别通用配置（${servers.length} 个服务器）')),
+        );
+      }
+      return {
+        'servers': servers.map(serverConfigToJson).toList(),
+        if (settings != null) 'settings': settings,
+        if (extra?['current_server_id'] != null)
+          'currentServerId': extra!['current_server_id'],
+      };
+    }
     // 加密给本设备的备份（非对称）：用本机私钥解封，无需密码。
     if (BackupCrypto.isSealed(json)) {
       final encKey = await BackupIdentity.instance.encryptionKeyPair();
