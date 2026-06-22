@@ -59,6 +59,8 @@ dependencies:
 
   # 局域网扫码遥控：生成二维码（内置 HTTP 服务用 dart:io，无需额外依赖）
   qr_flutter: ^4.1.0
+  # 备份「加密给设备」：扫对方公钥二维码（仅移动/macOS 用相机，桌面/TV 退化为粘贴）
+  mobile_scanner: ^5.2.3
 
   # 动效（统一三端动画：入场/错峰/shimmer/淡入缩放）
   flutter_animate: ^4.5.0
