@@ -1,7 +1,6 @@
 # LinPlayer 备份文件格式 / 兼容指南
 
 > 本文档面向**想让自己的客户端与 LinPlayer 互相导入/导出服务器配置**的开发者。
-> 照本文实现即可与 LinPlayer 双向互通(也与 Richasy/Rodel 的 `common-config` 同源)。
 
 LinPlayer 备份默认采用**免密码、跨客户端**的「通用配置(common-config)」格式。备份里含
 **服务器地址、账号、密码与访问 Token**;导出时把每条配置加密成乱码,导入端无需密码即可还原。
