@@ -48,6 +48,8 @@ dependencies:
   # 工具
   ffi: ^2.2.0
   path_provider: ^2.1.2
+  # 便携化:直接重定向 PathProviderPlatform.instance(见 core/services/portable_paths.dart)
+  path_provider_platform_interface: ^2.1.0
   path: ^1.9.0
   uuid: ^4.3.3
   win32: ^5.15.0
