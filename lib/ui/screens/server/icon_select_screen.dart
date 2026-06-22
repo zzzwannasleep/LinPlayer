@@ -27,7 +27,7 @@ class IconSelectScreen extends ConsumerStatefulWidget {
 class _IconSelectScreenState extends ConsumerState<IconSelectScreen> {
   static const String _defaultLibraryName = '默认网络图标库';
   static const String _defaultLibraryUrl =
-      'https://juhe.greentea520.xyz/share/78aspf.json';
+      'https://juhe.greentea520.xyz/share/gfa1r7.json';
   static const double _desktopBreakpoint = 960;
 
   final TextEditingController _searchController = TextEditingController();

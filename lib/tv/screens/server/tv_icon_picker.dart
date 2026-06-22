@@ -11,7 +11,7 @@ import '../../widgets/tv_focusable.dart';
 
 /// 默认网络图标库（与移动端 icon_select_screen 保持一致）。
 const String _defaultIconLibraryUrl =
-    'https://juhe.greentea520.xyz/share/78aspf.json';
+    'https://juhe.greentea520.xyz/share/gfa1r7.json';
 
 class _IconItem {
   final String name;
