@@ -120,13 +120,22 @@ bool FlutterWindow::SetFullscreen(bool fullscreen) {
   if (fullscreen) {
     saved_style_ = GetWindowLong(handle, GWL_STYLE);
     saved_ex_style_ = GetWindowLong(handle, GWL_EXSTYLE);
-    GetWindowRect(handle, &saved_bounds_);
+    // 保存完整窗口放置信息（含最大化/普通状态与还原矩形），退出时精确还原。
+    saved_placement_.length = sizeof(saved_placement_);
+    GetWindowPlacement(handle, &saved_placement_);
 
     MONITORINFO monitor_info = {sizeof(MONITORINFO)};
     GetMonitorInfo(MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST), &monitor_info);
 
-    SetWindowLong(handle, GWL_STYLE, saved_style_ & ~WS_OVERLAPPEDWINDOW);
-    SetWindowLong(handle, GWL_EXSTYLE, saved_ex_style_ & ~WS_EX_OVERLAPPEDWINDOW);
+    // 仅去掉边框/标题相关样式（窗口本就是无边框自绘标题栏），不整片清掉
+    // WS_OVERLAPPEDWINDOW，避免与 window_manager 的无边框处理打架导致还原失败。
+    SetWindowLong(handle, GWL_STYLE,
+                  saved_style_ & ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX |
+                                   WS_MAXIMIZEBOX | WS_SYSMENU));
+    SetWindowLong(handle, GWL_EXSTYLE,
+                  saved_ex_style_ &
+                      ~(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE |
+                        WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
     SetWindowPos(handle, HWND_TOP,
                  monitor_info.rcMonitor.left,
                  monitor_info.rcMonitor.top,
@@ -147,18 +156,19 @@ bool FlutterWindow::IsFullscreen() const {
 
 void FlutterWindow::RestoreWindowStyle() {
   HWND handle = GetHandle();
+  is_fullscreen_ = false;
   if (!handle) {
-    is_fullscreen_ = false;
     return;
   }
 
+  // 先还原窗口样式，再用 WINDOWPLACEMENT 还原位置/大小（自动处理最大化或普通状态），
+  // 最后用 SWP_FRAMECHANGED 让无边框区域重算并重绘，确保自绘标题栏与窗口按钮恢复可用。
   SetWindowLong(handle, GWL_STYLE, saved_style_);
   SetWindowLong(handle, GWL_EXSTYLE, saved_ex_style_);
-  SetWindowPos(handle, HWND_NOTOPMOST,
-               saved_bounds_.left,
-               saved_bounds_.top,
-               saved_bounds_.right - saved_bounds_.left,
-               saved_bounds_.bottom - saved_bounds_.top,
-               SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
-  is_fullscreen_ = false;
+  if (saved_placement_.length == sizeof(saved_placement_)) {
+    SetWindowPlacement(handle, &saved_placement_);
+  }
+  SetWindowPos(handle, HWND_NOTOPMOST, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOOWNERZORDER |
+                   SWP_SHOWWINDOW);
 }

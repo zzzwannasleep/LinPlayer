@@ -40,7 +40,9 @@ class FlutterWindow : public Win32Window {
   bool is_fullscreen_ = false;
   DWORD saved_style_ = 0;
   DWORD saved_ex_style_ = 0;
-  RECT saved_bounds_{};
+  // 用 WINDOWPLACEMENT 而非裸 RECT 保存窗口位置：它能正确保留/还原「最大化 vs 普通」
+  // 状态，避免退出全屏后窗口卡在覆盖全屏、标题栏按钮失效的情况。
+  WINDOWPLACEMENT saved_placement_{sizeof(WINDOWPLACEMENT)};
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

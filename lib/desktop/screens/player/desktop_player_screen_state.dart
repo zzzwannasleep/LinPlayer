@@ -10,6 +10,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   final FocusNode _focusNode = FocusNode();
   bool _initializingPlayer = false;
   Timer? _uiRefreshTimer;
+  // 上一次的缓冲态，用于在控制栏隐藏时仍能感知缓冲开始/结束触发一次重建。
+  bool _lastBuffering = false;
 
   // 控制栏显隐状态
   bool _showControls = true;
@@ -27,9 +29,6 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   bool _showSkipButton = false;
   Timer? _skipButtonTimer;
   bool _autoSkipTriggeredForCurrentOpening = false;
-
-  // 鼠标是否在控制栏区域内
-  bool _mouseInControlsArea = false;
 
   // 音量滑块显示
   bool _showVolumeSlider = false;
@@ -68,7 +67,18 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       if (!mounted) return;
       _checkSkipOpening();
       _introSkip.onPosition(_playerService.position);
-      setState(() {});
+      // 仅在「屏幕上有随时间变化的可见元素」时才整树重建：控制栏可见(进度条要走)、
+      // 正在缓冲(转圈)、统计浮层开着，或缓冲态刚发生切换。控制栏隐藏且无这些时跳过重建，
+      // 让隐藏后的播放不再每 200ms 重绘一次，进一步缓解卡顿。
+      final buffering = _playerService.isBuffering;
+      final needsRefresh = _showControls ||
+          buffering ||
+          _showStatsOverlay ||
+          _lastBuffering != buffering;
+      _lastBuffering = buffering;
+      if (needsRefresh) {
+        setState(() {});
+      }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.listenManual(audioTrackProvider, (prev, next) {
@@ -1455,7 +1465,9 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   void _startHideControlsTimer() {
     _cancelHideControlsTimer();
     _hideControlsTimer = Timer(const Duration(seconds: 3), () {
-      if (_playerService.isPlaying && !_mouseInControlsArea && mounted) {
+      // 空闲到点就连同上下栏 + 鼠标光标一起隐藏：哪怕鼠标正停在控制栏上、只要不动
+      // 也照隐（计时器在每次移动时已被 _onMouseMoved 重置）。仅在拖动进度条时不隐。
+      if (_playerService.isPlaying && !_isSeekingWithSlider && mounted) {
         setState(() => _showControls = false);
       }
     });
@@ -2981,6 +2993,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           return KeyEventResult.handled;
         },
         child: MouseRegion(
+          // 控制栏隐藏时一并隐藏鼠标光标；移动鼠标(onHover)会重新显示控制栏与光标。
+          cursor: _showControls ? MouseCursor.defer : SystemMouseCursors.none,
           onHover: (_) => _onMouseMoved(),
           child: Listener(
             onPointerSignal: (event) {
@@ -3191,9 +3205,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
                     ),
                   ),
 
-                // 控制栏覆盖层
+                // 控制栏覆盖层。用 RepaintBoundary 把控制栏自成一层：进度条每 200ms
+                // 刷新时只重绘控制栏这层，不再把渐变叠加层整片重新混合到 4K 视频上，
+                // 显著缓解「上下栏在时更卡」。
                 if (_showControls && !_playerService.isLocked)
-                  _buildControlsOverlay(item, isMpv),
+                  RepaintBoundary(child: _buildControlsOverlay(item, isMpv)),
 
                 // 锁定状态指示
                 if (_playerService.isLocked)
@@ -3226,9 +3242,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           left: 0,
           right: 0,
           child: MouseRegion(
-            onEnter: (_) => setState(() => _mouseInControlsArea = true),
-            onExit: (_) => setState(() => _mouseInControlsArea = false),
-            child: Container(
+            child:Container(
               height: 100,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -3255,9 +3269,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           bottom: 132,
           width: 60,
           child: MouseRegion(
-            onEnter: (_) => setState(() => _mouseInControlsArea = true),
-            onExit: (_) => setState(() => _mouseInControlsArea = false),
-            child: Center(
+            child:Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -3286,9 +3298,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           bottom: 132,
           width: 60,
           child: MouseRegion(
-            onEnter: (_) => setState(() => _mouseInControlsArea = true),
-            onExit: (_) => setState(() => _mouseInControlsArea = false),
-            child: Center(
+            child:Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -3353,9 +3363,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           left: 0,
           right: 0,
           child: MouseRegion(
-            onEnter: (_) => setState(() => _mouseInControlsArea = true),
-            onExit: (_) => setState(() => _mouseInControlsArea = false),
-            child: Container(
+            child:Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
