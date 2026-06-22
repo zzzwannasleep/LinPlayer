@@ -13,6 +13,7 @@ import 'core/services/crash_diagnostics.dart';
 import 'core/services/secure_credential_store.dart';
 import 'core/services/deep_link_service.dart';
 import 'core/services/font_service.dart';
+import 'core/services/portable_paths.dart';
 import 'core/theme/app_motion.dart';
 import 'core/utils/platform_utils.dart';
 import 'desktop/desktop_app.dart';
@@ -22,6 +23,12 @@ import 'tv/tv_app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 便携化:Windows/Linux 压缩包版把所有应用数据(设置/凭据/记录/日志/缓存)
+  // 重定向进「程序目录/userdata」,实现各副本互不影响、覆盖更新不丢配置、不污染
+  // 系统目录。必须在任何 path_provider 调用(下面 AppLogger/SharedPreferences 等)
+  // 之前完成。装到只读位置时自动回退系统目录。
+  await PortablePathProvider.ensureInstalled();
 
   // 日志：尽早初始化文件落盘 + 捕获未处理异常（三端统一、原生输出、可被 AI 读取）。
   await AppLogger().init();
