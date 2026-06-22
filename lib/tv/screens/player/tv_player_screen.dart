@@ -299,11 +299,8 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
           : false;
       // 杜比视界自动切换 gpu-next + 软解（默认开，可关）：DV 流 + mpv 系内核时强制
       // libplacebo 软解链路，避免硬解 mediacodec 丢 RPU 偏色。见 dolbyAutoGpuNextSwProvider。
-      final videoStreams = selection.mediaSource?.mediaStreams
-              .where((s) => s.isVideo)
-              .toList() ??
-          const <MediaStream>[];
-      final videoStream = videoStreams.isEmpty ? null : videoStreams.first;
+      // 取最高分辨率视频流判定 DV，避免被排在前面的低清流误导。
+      final videoStream = selection.mediaSource?.primaryVideoStream;
       final isMpvFamily = coreType == PlayerCoreType.mpv ||
           coreType == PlayerCoreType.nativeMpv;
       final autoDvMode = isMpvFamily &&

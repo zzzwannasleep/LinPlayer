@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -7,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../../../core/app_identity.dart';
 import '../../../core/providers/app_providers.dart';
@@ -496,7 +499,7 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> {
       final picker = ImagePicker();
       final image = await picker.pickImage(source: ImageSource.gallery);
       if (image != null) {
-        _updateServerIcon(image.path);
+        await _applyLocalIcon(image.path);
       }
     } catch (_) {
       if (!mounted) {
@@ -518,7 +521,7 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> {
       if (result != null && result.files.isNotEmpty) {
         final path = result.files.first.path;
         if (path != null && path.isNotEmpty) {
-          _updateServerIcon(path);
+          await _applyLocalIcon(path);
         }
       }
     } catch (_) {
@@ -528,6 +531,50 @@ class _IconSelectScreenState extends ConsumerState<IconSelectScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('选择文件失败')),
       );
+    }
+  }
+
+  /// 选中的本地图片先复制进应用数据目录再落库，避免引用临时/原始路径：
+  /// image_picker 给的是会被清理的缓存路径，file_picker 给的是原文件路径
+  /// （用户移动/删除即损坏）。复制到 `应用支持目录/server_icons/` 才稳定持久。
+  Future<void> _applyLocalIcon(String srcPath) async {
+    final stable = await _persistLocalIcon(srcPath);
+    if (!mounted) {
+      return;
+    }
+    _updateServerIcon(stable ?? srcPath);
+  }
+
+  Future<String?> _persistLocalIcon(String srcPath) async {
+    try {
+      final support = await getApplicationSupportDirectory();
+      final dir = Directory(p.join(support.path, 'server_icons'));
+      if (!dir.existsSync()) {
+        dir.createSync(recursive: true);
+      }
+      final ext = p.extension(srcPath).isNotEmpty
+          ? p.extension(srcPath).toLowerCase()
+          : '.png';
+      // 文件名带时间戳：换图后路径变化，绕开 Image.file 对同路径文件的缓存。
+      final dest = p.join(
+        dir.path,
+        '${widget.serverId}_${DateTime.now().millisecondsSinceEpoch}$ext',
+      );
+      await File(srcPath).copy(dest);
+      // 清掉该服务器的旧图标文件，避免目录里堆积历史图。
+      final prefix = '${widget.serverId}_';
+      for (final entity in dir.listSync()) {
+        if (entity is File &&
+            p.basename(entity.path).startsWith(prefix) &&
+            entity.path != dest) {
+          try {
+            entity.deleteSync();
+          } catch (_) {}
+        }
+      }
+      return dest;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -690,8 +737,7 @@ class _CurrentIconPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isRemote = iconUrl != null &&
-        (iconUrl!.startsWith('http://') || iconUrl!.startsWith('https://'));
+    final hasIcon = iconUrl != null && iconUrl!.isNotEmpty;
 
     return Container(
       width: 112,
@@ -701,7 +747,8 @@ class _CurrentIconPreview extends StatelessWidget {
         color: theme.colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(24),
       ),
-      child: isRemote
+      // MediaImage 现已兼容本地文件与网络地址，本地图标也能正常预览。
+      child: hasIcon
           ? MediaImage(
               imageUrl: iconUrl,
               fit: BoxFit.contain,

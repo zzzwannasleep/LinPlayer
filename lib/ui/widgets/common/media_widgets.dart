@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,26 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/utils/persistent_image_provider.dart';
 import '../../../core/widgets/app_shimmer.dart';
 import '../../utils/media_helpers.dart';
+
+/// 判断一个图片地址是否为本地文件（而非网络 URL）。
+///
+/// 服务器自定义图标允许是本地图片，落盘后以绝对路径 / `file://` 形式存储；
+/// Emby 海报、网络图标库等则是 http(s)。为避免把相对网络地址误判为本地文件，
+/// 只在以下形态才认定为本地：`file://`、Windows 盘符路径(`C:\` / `C:/`)、
+/// 或绝对 Unix 路径(`/...`，即 image_picker/file_picker 返回的绝对路径)。
+bool isLocalImagePath(String url) {
+  final u = url.trim();
+  if (u.isEmpty) return false;
+  final lower = u.toLowerCase();
+  if (lower.startsWith('file://')) return true;
+  // Windows 盘符：C:\... 或 C:/...
+  if (RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(u)) return true;
+  // 绝对 Unix 路径（排除以 // 开头的协议相对网络地址）
+  if (u.startsWith('/') && !u.startsWith('//')) return true;
+  // Windows UNC 路径 \\server\share
+  if (u.startsWith(r'\\')) return true;
+  return false;
+}
 
 class MediaImage extends StatelessWidget {
   final String? imageUrl;
@@ -52,7 +74,14 @@ class MediaImage extends StatelessWidget {
       ...?imageUrls?.where((url) => url.isNotEmpty),
     }.toList();
 
-    Widget image = candidates.isEmpty
+    final primary = candidates.isEmpty ? null : candidates.first;
+
+    Widget image;
+    if (primary != null && isLocalImagePath(primary)) {
+      // 本地图片（服务器自定义图标等）：走 Image.file，网络图片管线不认本地路径。
+      image = _buildLocalImage(context, primary);
+    } else {
+      image = candidates.isEmpty
         ? _buildPlaceholder(context)
         : _FallbackNetworkImage(
             imageUrls: candidates,
@@ -67,6 +96,7 @@ class MediaImage extends StatelessWidget {
             placeholderBuilder: () => placeholder ?? _buildPlaceholder(context),
             errorBuilder: () => errorWidget ?? _buildError(context),
           );
+    }
 
     if (borderRadius != null) {
       image = ClipRRect(
@@ -83,6 +113,23 @@ class MediaImage extends StatelessWidget {
     }
 
     return image;
+  }
+
+  Widget _buildLocalImage(BuildContext context, String pathOrUri) {
+    final path = pathOrUri.startsWith('file://')
+        ? Uri.parse(pathOrUri).toFilePath()
+        : pathOrUri;
+    return Image.file(
+      File(path),
+      width: width,
+      height: height,
+      fit: fit,
+      alignment: alignment,
+      gaplessPlayback: gaplessPlayback,
+      cacheWidth: cacheWidth,
+      cacheHeight: cacheHeight,
+      errorBuilder: (_, __, ___) => errorWidget ?? _buildError(context),
+    );
   }
 
   Widget _buildPlaceholder(BuildContext context) {

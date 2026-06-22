@@ -561,6 +561,28 @@ class MediaSource {
     this.protocol,
     this.isRemote,
   });
+
+  /// 代表该媒体源画质的视频流：取**分辨率最高**的一条，而非第一条。
+  ///
+  /// 关键修复：以前用 `firstOrNull` 取第一条视频流，部分媒体源把低清流排在前面，
+  /// 导致 4K 资源被显示成 1080p。这里按宽/高挑最大的一条，画质标签才准。
+  MediaStream? get primaryVideoStream {
+    MediaStream? best;
+    for (final s in mediaStreams) {
+      if (!s.isVideo) continue;
+      if (best == null) {
+        best = s;
+        continue;
+      }
+      final bestPx = (best.width ?? 0) * (best.height ?? 1);
+      final curPx = (s.width ?? 0) * (s.height ?? 1);
+      if (curPx > bestPx) best = s;
+    }
+    return best;
+  }
+
+  /// 画质档位标签（如 "4K"/"1080p"），取自 [primaryVideoStream]。
+  String get qualityLabel => primaryVideoStream?.resolution ?? '';
 }
 
 class MediaStream {
@@ -676,14 +698,62 @@ class MediaStream {
     return map[code.toLowerCase()] ?? code;
   }
 
+  /// 分辨率档位标签。
+  ///
+  /// 关键修复：以前只看 `height` 分档，2.39:1 的 4K 电影（3840×1608）高度只有
+  /// 1608，会被错判成 "1080p"。改为**以宽度为主**分档（宽度不受裁切比例影响），
+  /// 高度作兜底，4K 宽屏电影才能正确显示为 4K。
   String get resolution {
-    final w = width;
-    final h = height;
-    if (w == null || h == null) return '';
-    if (h >= 2160) return '4K';
-    if (h >= 1080) return '1080p';
-    if (h >= 720) return '720p';
-    return '${h}p';
+    final w = width ?? 0;
+    final h = height ?? 0;
+    if (w <= 0 && h <= 0) return '';
+    if (w >= 7600 || h >= 4300) return '8K';
+    if (w >= 3600 || h >= 2000) return '4K';
+    if (w >= 1800 || h >= 1000) return '1080p';
+    if (w >= 1200 || h >= 700) return '720p';
+    if (w >= 640 || h >= 480) return '480p';
+    if (h > 0) return '${h}p';
+    return '';
+  }
+
+  /// 规范化的视频编码名（HEVC / H.264 / AV1 …）。
+  String get videoCodecLabel {
+    final c = (videoCodec ?? codec ?? '').toLowerCase();
+    if (c.isEmpty) return '';
+    if (c.contains('hevc') || c.contains('h265') || c.contains('h.265')) {
+      return 'HEVC';
+    }
+    if (c.contains('avc') || c.contains('h264') || c.contains('h.264')) {
+      return 'H.264';
+    }
+    if (c.contains('av1')) return 'AV1';
+    if (c.contains('vp9')) return 'VP9';
+    if (c.contains('vp8')) return 'VP8';
+    if (c.contains('mpeg4')) return 'MPEG-4';
+    if (c.contains('mpeg2')) return 'MPEG-2';
+    if (c.contains('vc1') || c.contains('vc-1')) return 'VC-1';
+    return c.toUpperCase();
+  }
+
+  /// HDR/动态范围标签：Dolby Vision / HDR10+ / HDR10 / HLG / HDR / 空(SDR)。
+  String get videoRangeLabel {
+    if (isDolbyVision) return 'Dolby Vision';
+    final rt = '${videoRangeType ?? ''} ${videoRange ?? ''}'.toUpperCase();
+    if (rt.contains('HDR10PLUS') || rt.contains('HDR10+')) return 'HDR10+';
+    if (rt.contains('HDR10')) return 'HDR10';
+    if (rt.contains('HLG')) return 'HLG';
+    if (rt.contains('PQ')) return 'HDR';
+    if (rt.contains('HDR')) return 'HDR';
+    return '';
+  }
+
+  /// 「动态范围 + 编码」组合标签，如 "Dolby Vision HEVC" / "HDR10 HEVC" / "H.264"。
+  String get videoFormatLabel {
+    final range = videoRangeLabel;
+    final codecName = videoCodecLabel;
+    if (range.isNotEmpty && codecName.isNotEmpty) return '$range $codecName';
+    if (range.isNotEmpty) return range;
+    return codecName;
   }
 }
 

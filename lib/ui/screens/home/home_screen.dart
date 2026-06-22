@@ -92,10 +92,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final themeBg = Theme.of(context).scaffoldBackgroundColor;
     final wallpaperPath = ref.watch(customWallpaperPathProvider);
     final hasWallpaper = wallpaperPath.isNotEmpty;
-    // 浅色模式：整页用浅色主题背景，不被轮播提取的深色覆盖（否则浅色模式看起来仍是黑的）。
-    // 深色模式：用轮播提取的沉浸色（默认深色）。
-    final pageBg =
-        brightness == Brightness.dark ? _carouselColor : themeBg;
+    // 跟随取色：深色模式用提取的深色沉浸色；浅色模式用提取的浅色系沉浸色，
+    // 但取色未就绪（仍是深色默认值）时退回浅色主题背景，避免浅色模式闪一下深色。
+    final carouselIsLight = _carouselColor.computeLuminance() >= 0.5;
+    final pageBg = brightness == Brightness.dark
+        ? _carouselColor
+        : (carouselIsLight ? _carouselColor : themeBg);
     // 壁纸场景：scrim 基色决定前景文字明暗（深色模式黑底浅字、浅色模式白底深字）。
     final scrimBase =
         brightness == Brightness.dark ? Colors.black : Colors.white;
@@ -673,7 +675,12 @@ class _RandomRecommendationCarouselState
     int sessionId,
   ) async {
     try {
-      final colors = await ColorExtractor.extractFromUrl(imageUrl);
+      final brightness =
+          mounted ? Theme.of(context).brightness : Brightness.dark;
+      final colors = await ColorExtractor.extractFromUrl(
+        imageUrl,
+        brightness: brightness,
+      );
       if (mounted && sessionId == _colorPrefetchToken) {
         _colorCache[itemId] = colors;
       }

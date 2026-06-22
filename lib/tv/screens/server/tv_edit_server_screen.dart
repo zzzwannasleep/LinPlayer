@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/app_identity.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../ui/widgets/common/media_widgets.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_focusable.dart';
@@ -268,15 +268,15 @@ class _TvEditServerScreenState extends ConsumerState<TvEditServerScreen> {
             borderRadius: BorderRadius.circular(m.posterRadius),
           ),
           clipBehavior: Clip.antiAlias,
+          // MediaImage 兼容本地文件与网络地址（CDN 用中立浏览器 UA），本地图标也能预览。
           child: url.isEmpty
               ? Icon(Icons.storage,
                   color: TvDesignTokens.textSecondary, size: m.s(32))
-              : Image.network(
-                  url,
+              : MediaImage(
+                  imageUrl: url,
                   fit: BoxFit.cover,
-                  // 图标 CDN 多拒绝 App UA，用中立浏览器 UA 请求。
-                  headers: const {'User-Agent': kDefaultBrowserUserAgent},
-                  errorBuilder: (_, __, ___) => Icon(Icons.broken_image,
+                  useDefaultUserAgent: true,
+                  errorWidget: Icon(Icons.broken_image,
                       color: TvDesignTokens.textDisabled, size: m.s(28)),
                 ),
         ),

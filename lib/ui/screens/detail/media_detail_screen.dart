@@ -260,7 +260,10 @@ class _DetailHeaderState extends ConsumerState<_DetailHeader> {
 
     if (imageUrl == null) return;
 
-    final colors = await ColorExtractor.extractFromUrl(imageUrl);
+    // 跟随用户主题明暗取色：浅色模式取浅色系背景，深色模式取深色系。
+    final brightness = Theme.of(context).brightness;
+    final colors =
+        await ColorExtractor.extractFromUrl(imageUrl, brightness: brightness);
     if (mounted) {
       setState(() {
         _dominantColor = colors.gradientStart;
@@ -1293,9 +1296,20 @@ class _VersionInfoSection extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 children: info.mediaSources.map((source) {
-                  final video = source.mediaStreams.where((s) => s.isVideo).firstOrNull;
+                  final video = source.primaryVideoStream;
                   final audio = source.mediaStreams.where((s) => s.isAudio).firstOrNull;
                   final subtitle = source.mediaStreams.where((s) => s.isSubtitle).firstOrNull;
+                  String videoLabel = '';
+                  if (video != null) {
+                    final segs = <String>[
+                      if (video.resolution.isNotEmpty) video.resolution,
+                      if (video.videoFormatLabel.isNotEmpty)
+                        video.videoFormatLabel,
+                    ];
+                    videoLabel = segs.isNotEmpty
+                        ? segs.join(' / ')
+                        : (video.displayTitle ?? video.codec ?? '');
+                  }
                   return Card(
                     child: Padding(
                       padding: const EdgeInsets.all(12),
@@ -1311,7 +1325,7 @@ class _VersionInfoSection extends ConsumerWidget {
                               children: [
                                 Icon(Icons.videocam, size: 16, color: Theme.of(context).colorScheme.primary),
                                 const SizedBox(width: 6),
-                                Text(video.displayTitle ?? '${video.codec ?? ""} ${video.resolution}', style: const TextStyle(fontSize: 13)),
+                                Text(videoLabel, style: const TextStyle(fontSize: 13)),
                               ],
                             ),
                           if (audio != null) ...[

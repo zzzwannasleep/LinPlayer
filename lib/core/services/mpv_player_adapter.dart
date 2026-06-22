@@ -546,7 +546,18 @@ class MpvPlayerAdapter implements PlayerAdapter {
             // 配合软解(hwdec=no)避免硬解杜比视界整体偏色/发绿。
             await np.setProperty('target-colorspace-hint', 'yes');
             await np.setProperty('tone-mapping', 'spline');
-            await np.setProperty('hdr-compute-peak', 'yes');
+            // 关键修复(画面闪)：hdr-compute-peak=yes 会逐帧扫描像素重算 HDR 峰值亮度，
+            // 表现为画面亮度忽明忽暗(就是"闪")，且每帧全画面扫描吃 GPU/CPU 加剧卡顿。
+            // 关掉改用固定峰值，亮度稳定不再闪，负载也降下来。
+            await np.setProperty('hdr-compute-peak', 'no');
+            // 关键修复(软解卡顿)：DV 强制软解，4K 软解吃满 CPU 易掉帧。
+            // 桌面端放开解码线程并降一档环路滤波/允许非严格合规加速，
+            // 画质几乎无损但解码快很多，缓解 4K 杜比视界软解卡顿。
+            if (!hardwareDecoding && _isDesktopPlatform) {
+              await np.setProperty('vd-lavc-threads', '0'); // 0=按 CPU 核数自动
+              await np.setProperty('vd-lavc-fast', 'yes');
+              await np.setProperty('vd-lavc-skiploopfilter', 'nonref');
+            }
           }
           await _applyShaderList(_glslShaders);
           if (_isHttpUrl(videoUrl)) {

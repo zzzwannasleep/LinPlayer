@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
+import '../../../ui/widgets/common/media_widgets.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
 import '../../widgets/tv_button.dart';
@@ -125,16 +126,30 @@ class TvServerScreen extends ConsumerWidget {
               Container(
                 width: m.s(64),
                 height: m.s(64),
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   color: (online ? TvDesignTokens.success : TvDesignTokens.error)
                       .withValues(alpha: 0.2),
                   borderRadius:
                       BorderRadius.circular(m.posterRadius),
                 ),
-                child: Icon(Icons.storage,
-                    color:
-                        online ? TvDesignTokens.success : TvDesignTokens.error,
-                    size: m.s(32)),
+                // 有自定义图标（本地图片/网络图标）就显示图标，否则退回机房图标。
+                child: (server.iconUrl != null && server.iconUrl!.isNotEmpty)
+                    ? MediaImage(
+                        imageUrl: server.iconUrl,
+                        fit: BoxFit.cover,
+                        useDefaultUserAgent: true,
+                        errorWidget: Icon(Icons.storage,
+                            color: online
+                                ? TvDesignTokens.success
+                                : TvDesignTokens.error,
+                            size: m.s(32)),
+                      )
+                    : Icon(Icons.storage,
+                        color: online
+                            ? TvDesignTokens.success
+                            : TvDesignTokens.error,
+                        size: m.s(32)),
               ),
               SizedBox(width: m.spacingLg),
               Expanded(

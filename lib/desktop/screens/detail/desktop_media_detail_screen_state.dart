@@ -109,7 +109,9 @@ class _DetailContentState extends ConsumerState<_DetailContent> {
 
     if (imageUrl == null) return;
 
-    final colors = await ColorExtractor.extractFromUrl(imageUrl);
+    final brightness = Theme.of(context).brightness;
+    final colors =
+        await ColorExtractor.extractFromUrl(imageUrl, brightness: brightness);
     if (mounted) {
       setState(() {
         _dominantColor = colors.gradientStart;

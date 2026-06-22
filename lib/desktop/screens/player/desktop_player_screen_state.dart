@@ -307,11 +307,8 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
       // 杜比视界自动切换（默认开，可关）：DV 流 + media_kit(mpv) 时强制软解 + DV 色彩修正，
       // 避免硬解杜比视界偏色。桌面 media_kit 走 vo=libmpv，无独立 gpu-next vo，
       // 故以软解 + dolbyVisionFix 的色调映射作为等效处理。见 dolbyAutoGpuNextSwProvider。
-      final videoStreams = mediaSource?.mediaStreams
-              .where((s) => s.isVideo)
-              .toList() ??
-          const <MediaStream>[];
-      final dvVideoStream = videoStreams.isEmpty ? null : videoStreams.first;
+      // 取最高分辨率视频流判定 DV，避免被排在前面的低清流误导。
+      final dvVideoStream = mediaSource?.primaryVideoStream;
       final autoDvMode = coreType == PlayerCoreType.mpv &&
           ref.read(dolbyAutoGpuNextSwProvider) &&
           (dvVideoStream?.isDolbyVision ?? false);
