@@ -24,8 +24,15 @@ class BackupRestoreScreen extends ConsumerWidget {
               ),
             ),
           ),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text(
+              '备份含服务器账号密码/Token，导出时会加密成乱码，任何兼容客户端无需密码即可导入。',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ),
           FilledButton.icon(
-            onPressed: () => _showExportDialog(context, ref),
+            onPressed: () => _exportBackup(context, ref),
             icon: const Icon(Icons.backup),
             label: const Text('导出备份'),
           ),
@@ -40,33 +47,6 @@ class BackupRestoreScreen extends ConsumerWidget {
             onPressed: () => _showImportJsonDialog(context),
             icon: const Icon(Icons.file_upload),
             label: const Text('导入服务器配置（JSON）'),
-          ),
-
-          // 设备密钥（非对称加密互传）
-          const Divider(height: 32),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(0, 8, 0, 8),
-            child: Text(
-              '设备密钥（加密互传）',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey,
-              ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Text(
-              '把你的公钥发给对方，对方导出时选「加密给设备」并填入，'
-              '生成的备份只有你这台设备能解开——无需互相约定密码。',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => _showMyDeviceKeyDialog(context),
-            icon: const Icon(Icons.qr_code_2),
-            label: const Text('我的公钥（二维码 / 复制）'),
           ),
 
           // WebDAV配置
@@ -128,74 +108,22 @@ class BackupRestoreScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _showExportDialog(BuildContext context, WidgetRef ref) async {
-    // 备份含服务器账号密码/Token，必须加密。两种方式：口令(H12) 或 加密给设备(H13)。
-    final mode = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => SimpleDialog(
-        title: const Text('选择导出方式'),
-        children: [
-          ListTile(
-            leading: const Icon(Icons.bolt),
-            title: const Text('免密码 · 跨客户端（推荐）'),
-            subtitle: const Text('无需密码，任何兼容客户端都能导入（混淆级加密）'),
-            onTap: () => Navigator.pop(dialogContext, 'common'),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.password),
-            title: const Text('用密码加密（更安全）'),
-            subtitle: const Text('对方导入时需输入同一密码'),
-            onTap: () => Navigator.pop(dialogContext, 'password'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.vpn_key),
-            title: const Text('加密给指定设备（公钥，更安全）'),
-            subtitle: const Text('填入对方公钥，只有对方设备能解开，无需密码'),
-            onTap: () => Navigator.pop(dialogContext, 'recipient'),
-          ),
-        ],
-      ),
-    );
-    if (mode == null || !context.mounted) return;
-    switch (mode) {
-      case 'common':
-        await _exportCommonConfig(context, ref);
-        break;
-      case 'password':
-        await _exportWithPassword(context, ref);
-        break;
-      case 'recipient':
-        await _exportToRecipient(context, ref);
-        break;
-    }
-  }
-
-  /// 免密码 · 跨客户端导出:通用配置(Richasy 兼容)格式,容器内带 `_key`,
-  /// 任何兼容客户端无需密码即可导入。全程无提示。
-  Future<void> _exportCommonConfig(BuildContext context, WidgetRef ref) async {
+  /// 导出备份:通用配置(Richasy 兼容)格式,容器内带 `_key`,把明文密码/Token
+  /// 挡成乱码;免密、任何兼容客户端可直接导入。全程无提示。
+  Future<void> _exportBackup(BuildContext context, WidgetRef ref) async {
     final path = await FilePicker.platform.saveFile(
-      dialogTitle: '导出备份（免密码·跨客户端）',
+      dialogTitle: '导出备份',
       fileName: 'linplayer-config.json',
       type: FileType.custom,
       allowedExtensions: const ['json'],
     );
     if (path == null) return;
     try {
-      final payload = _buildBackupPayload(ref);
-      final container = await CommonConfig.build(
-        ref.read(serverListProvider),
-        exportTimeUnix: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        extra: {
-          'linplayer_settings': payload['settings'],
-          if (payload['currentServerId'] != null)
-            'current_server_id': payload['currentServerId'],
-        },
-      );
+      final container = await _buildCommonConfig(ref);
       await File(path).writeAsString(jsonEncode(container));
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已导出（免密码·跨客户端）: $path')),
+          SnackBar(content: Text('备份已导出: $path')),
         );
       }
     } catch (e) {
@@ -207,321 +135,16 @@ class BackupRestoreScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _exportWithPassword(BuildContext context, WidgetRef ref) async {
-    final pass = await _promptPassphrase(context, forExport: true);
-    if (pass == null || !context.mounted) return;
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: '导出备份',
-      fileName: 'linplayer-backup.json',
-      type: FileType.custom,
-      allowedExtensions: const ['json'],
-    );
-    if (path == null) return;
-    try {
-      final plain = jsonEncode(_buildBackupPayload(ref));
-      final wrapper = await BackupCrypto.encrypt(plain, pass);
-      await File(path).writeAsString(jsonEncode(wrapper));
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('备份已加密导出到: $path')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导出失败: $e')),
-        );
-      }
-    }
-  }
-
-  /// 加密给指定设备：用对方公钥封装 + 本机 Ed25519 私钥签名。
-  Future<void> _exportToRecipient(BuildContext context, WidgetRef ref) async {
-    final recipient = await _promptRecipientKey(context);
-    if (recipient == null || !context.mounted) return;
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: '导出加密备份',
-      fileName: 'linplayer-sealed-backup.json',
-      type: FileType.custom,
-      allowedExtensions: const ['json'],
-    );
-    if (path == null) return;
-    try {
-      final myPub = await BackupIdentity.instance.myPublicKey();
-      final signKey = await BackupIdentity.instance.signingKeyPair();
-      final plain = jsonEncode(_buildBackupPayload(ref));
-      final wrapper = await BackupCrypto.sealTo(
-        plain,
-        recipient: recipient,
-        senderEd25519: signKey,
-        senderPublicKey: myPub,
-        exportTimeUnix: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      );
-      await File(path).writeAsString(jsonEncode(wrapper));
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已加密给设备 ${recipient.fingerprint}：$path')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导出失败: $e')),
-        );
-      }
-    }
-  }
-
-  /// 输入/扫描收件人公钥。返回 null=取消或无效。
-  Future<BackupPublicKey?> _promptRecipientKey(BuildContext context) {
-    final controller = TextEditingController();
-    final canScan =
-        Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
-    return showDialog<BackupPublicKey>(
-      context: context,
-      builder: (dialogContext) {
-        String? error;
-        String? fp;
-        return StatefulBuilder(builder: (dialogContext, setState) {
-          BackupPublicKey? tryParse() {
-            try {
-              return BackupPublicKey.decode(controller.text);
-            } catch (_) {
-              return null;
-            }
-          }
-
-          return AlertDialog(
-            title: const Text('加密给设备'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  '粘贴对方在「我的公钥」里复制的公钥串（LPKEY1:…），'
-                  '或扫描其二维码。',
-                  style: TextStyle(fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  minLines: 2,
-                  maxLines: 3,
-                  decoration: const InputDecoration(
-                      labelText: '对方公钥', border: OutlineInputBorder()),
-                  onChanged: (_) => setState(() {
-                    final pub = tryParse();
-                    fp = pub?.fingerprint;
-                    error = null;
-                  }),
-                ),
-                if (canScan) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () async {
-                        final scanned = await _scanPublicKey(dialogContext);
-                        if (scanned != null) {
-                          controller.text = scanned;
-                          setState(() {
-                            fp = tryParse()?.fingerprint;
-                            error = null;
-                          });
-                        }
-                      },
-                      icon: const Icon(Icons.qr_code_scanner),
-                      label: const Text('扫描二维码'),
-                    ),
-                  ),
-                ],
-                if (fp != null) ...[
-                  const SizedBox(height: 8),
-                  Text('指纹: $fp（请与对方口头核对一致）',
-                      style:
-                          const TextStyle(fontSize: 12, color: Colors.green)),
-                ],
-                if (error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 12)),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('取消')),
-              FilledButton(
-                onPressed: () {
-                  final pub = tryParse();
-                  if (pub == null) {
-                    setState(() => error = '公钥格式无效');
-                    return;
-                  }
-                  Navigator.pop(dialogContext, pub);
-                },
-                child: const Text('加密导出'),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  /// 全屏相机扫描，返回扫到的字符串（仅移动/macOS 调用）。
-  Future<String?> _scanPublicKey(BuildContext context) {
-    return Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (ctx) => Scaffold(
-          appBar: AppBar(title: const Text('扫描对方公钥')),
-          body: MobileScanner(
-            onDetect: (capture) {
-              for (final barcode in capture.barcodes) {
-                final value = barcode.rawValue;
-                if (value != null &&
-                    value.startsWith(BackupIdentity.tokenPrefix)) {
-                  Navigator.of(ctx).pop(value);
-                  return;
-                }
-              }
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 展示本设备公钥：二维码 + 可复制文本 + 指纹。
-  Future<void> _showMyDeviceKeyDialog(BuildContext context) async {
-    BackupPublicKey pub;
-    try {
-      pub = await BackupIdentity.instance.myPublicKey();
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('生成设备密钥失败: $e')),
-        );
-      }
-      return;
-    }
-    if (!context.mounted) return;
-    final token = pub.encode();
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('我的公钥'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.all(8),
-                child: QrImageView(
-                  data: token,
-                  size: 200,
-                  backgroundColor: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 12),
-              SelectableText(
-                token,
-                style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-              ),
-              const SizedBox(height: 8),
-              Text('指纹: ${pub.fingerprint}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: token));
-              if (dialogContext.mounted) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(content: Text('公钥已复制')),
-                );
-              }
-            },
-            child: const Text('复制公钥'),
-          ),
-          FilledButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('关闭')),
-        ],
-      ),
-    );
-  }
-
-  /// 备份口令输入框。导出时需二次确认；导入时仅输入一次。返回 null=取消。
-  Future<String?> _promptPassphrase(BuildContext context,
-      {required bool forExport}) {
-    final controller = TextEditingController();
-    final confirmController = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        String? error;
-        return StatefulBuilder(builder: (dialogContext, setState) {
-          return AlertDialog(
-            title: Text(forExport ? '设置备份密码' : '输入备份密码'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  forExport
-                      ? '备份将用此密码加密（含服务器账号密码/Token）。务必记住——'
-                          '忘记密码将无法恢复，与他人互导时对方也需要此密码。'
-                      : '此备份已加密，请输入导出时设置的密码。',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                      labelText: '密码', border: OutlineInputBorder()),
-                ),
-                if (forExport) ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: confirmController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                        labelText: '确认密码', border: OutlineInputBorder()),
-                  ),
-                ],
-                if (error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(error!,
-                      style: const TextStyle(color: Colors.red, fontSize: 12)),
-                ],
-              ],
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: const Text('取消')),
-              FilledButton(
-                onPressed: () {
-                  final pass = controller.text;
-                  if (pass.isEmpty) {
-                    setState(() => error = '密码不能为空');
-                    return;
-                  }
-                  if (forExport && pass != confirmController.text) {
-                    setState(() => error = '两次输入不一致');
-                    return;
-                  }
-                  Navigator.pop(dialogContext, pass);
-                },
-                child: Text(forExport ? '加密导出' : '解密导入'),
-              ),
-            ],
-          );
-        });
+  /// 把当前服务器 + 设置打包成通用配置容器。
+  Future<Map<String, dynamic>> _buildCommonConfig(WidgetRef ref) async {
+    final payload = _buildBackupPayload(ref);
+    return CommonConfig.build(
+      ref.read(serverListProvider),
+      exportTimeUnix: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      extra: {
+        'linplayer_settings': payload['settings'],
+        if (payload['currentServerId'] != null)
+          'current_server_id': payload['currentServerId'],
       },
     );
   }
@@ -565,18 +188,19 @@ class BackupRestoreScreen extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('导入失败：密码错误或文件已损坏')),
+          const SnackBar(content: Text('导入失败：文件已损坏或格式不支持')),
         );
       }
     }
   }
 
-  /// 把读到的备份 JSON 解为明文 payload：加密备份则提示输入密码解密，
-  /// 旧版明文备份直接返回。返回 null = 用户取消输入密码。
+  /// 把读到的备份 JSON 解为统一 payload。
+  /// - 通用配置(默认导出)：用 _key/内置密钥解出服务器列表。
+  /// - 旧版口令加密备份：提示输入密码解密(向后兼容)。
+  /// - 旧版明文备份：直接返回。
+  /// 返回 null = 用户取消输入密码。
   Future<Map<String, dynamic>?> _decodeBackup(
       BuildContext context, Map<String, dynamic> json) async {
-    // 通用配置（Richasy 兼容，免密码·跨客户端）：用 _key/内置密钥解出服务器列表，
-    // 转成统一 payload 交给 _restoreBackupPayload。
     if (CommonConfig.isCommonConfig(json)) {
       final servers = await CommonConfig.parse(json);
       final extra = CommonConfig.additionalData(json);
@@ -584,7 +208,7 @@ class BackupRestoreScreen extends ConsumerWidget {
           (extra?['linplayer_settings'] as Map?)?.cast<String, dynamic>();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已识别通用配置（${servers.length} 个服务器）')),
+          SnackBar(content: Text('已识别备份（${servers.length} 个服务器）')),
         );
       }
       return {
@@ -594,29 +218,64 @@ class BackupRestoreScreen extends ConsumerWidget {
           'currentServerId': extra!['current_server_id'],
       };
     }
-    // 加密给本设备的备份（非对称）：用本机私钥解封，无需密码。
-    if (BackupCrypto.isSealed(json)) {
-      final encKey = await BackupIdentity.instance.encryptionKeyPair();
-      final myPub = await BackupIdentity.instance.myPublicKey();
-      final result = await BackupCrypto.openSealed(
-        json,
-        recipientX25519: encKey,
-        recipientPublicKey: myPub,
-      );
-      if (context.mounted) {
-        final sender = result.senderPublicKey?.fingerprint ?? '未知';
-        final sig = result.signatureValid ? '签名已验证' : '⚠ 签名未通过';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('来自设备 $sender · $sig')),
-        );
-      }
-      return jsonDecode(result.plaintext) as Map<String, dynamic>;
+    // 向后兼容：旧版口令加密备份。
+    if (BackupCrypto.isEncrypted(json)) {
+      final pass = await _promptImportPassphrase(context);
+      if (pass == null) return null;
+      final plain = await BackupCrypto.decrypt(json, pass);
+      return jsonDecode(plain) as Map<String, dynamic>;
     }
-    if (!BackupCrypto.isEncrypted(json)) return json; // 兼容旧明文备份
-    final pass = await _promptPassphrase(context, forExport: false);
-    if (pass == null) return null;
-    final plain = await BackupCrypto.decrypt(json, pass);
-    return jsonDecode(plain) as Map<String, dynamic>;
+    return json; // 旧版明文备份
+  }
+
+  /// 旧版加密备份的密码输入框(仅导入时用)。返回 null=取消。
+  Future<String?> _promptImportPassphrase(BuildContext context) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        String? error;
+        return StatefulBuilder(builder: (dialogContext, setState) {
+          return AlertDialog(
+            title: const Text('输入备份密码'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('此备份由旧版本加密，请输入当时设置的密码。',
+                    style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                      labelText: '密码', border: OutlineInputBorder()),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(error!,
+                      style: const TextStyle(color: Colors.red, fontSize: 12)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('取消')),
+              FilledButton(
+                onPressed: () {
+                  if (controller.text.isEmpty) {
+                    setState(() => error = '密码不能为空');
+                    return;
+                  }
+                  Navigator.pop(dialogContext, controller.text);
+                },
+                child: const Text('解密导入'),
+              ),
+            ],
+          );
+        });
+      },
+    );
   }
 
   void _showImportJsonDialog(BuildContext context) {
@@ -737,20 +396,17 @@ class BackupRestoreScreen extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
     final config = ref.read(webdavConfigProvider);
     if (config == null) return;
-    final pass = await _promptPassphrase(context, forExport: true);
-    if (pass == null) return;
     try {
       final service = WebDAVService(
         serverUrl: config.serverUrl,
         username: config.username,
         password: config.password,
       );
-      final plain = jsonEncode(_buildBackupPayload(ref));
-      final backupData = jsonEncode(await BackupCrypto.encrypt(plain, pass));
+      final backupData = jsonEncode(await _buildCommonConfig(ref));
       await service.backupApp(backupData);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已成功加密备份到 WebDAV')),
+          const SnackBar(content: Text('已备份到 WebDAV')),
         );
       }
     } catch (e) {
@@ -802,7 +458,7 @@ class BackupRestoreScreen extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('还原失败：密码错误或文件已损坏')),
+          const SnackBar(content: Text('还原失败：文件已损坏或格式不支持')),
         );
       }
     }
