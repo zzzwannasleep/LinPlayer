@@ -7,7 +7,7 @@ import '../../../core/api/emby_api.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import '../../utils/desktop_smooth_scroll.dart';
 
-enum _ServerContextAction { rename, lines, icon, login }
+enum _ServerContextAction { rename, lines, icon, login, delete }
 
 /// 桌面端服务器管理页
 class DesktopServerScreen extends ConsumerStatefulWidget {
@@ -268,6 +268,18 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
             title: Text('重新登录'),
           ),
         ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _ServerContextAction.delete,
+          child: ListTile(
+            dense: true,
+            leading: Icon(Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error),
+            title: Text('删除服务器',
+                style:
+                    TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        ),
       ],
     );
 
@@ -286,6 +298,39 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
       case _ServerContextAction.login:
         _showReauthDialog(server);
         break;
+      case _ServerContextAction.delete:
+        _confirmDelete(server);
+        break;
+    }
+  }
+
+  Future<void> _confirmDelete(ServerConfig server) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除服务器'),
+        content: Text('确定要删除服务器「${server.name}」吗？此操作不可撤销。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    ref.read(serverListProvider.notifier).removeServer(server.id);
+    if (ref.read(currentServerProvider)?.id == server.id) {
+      ref.read(currentServerProvider.notifier).clear();
     }
   }
 }
