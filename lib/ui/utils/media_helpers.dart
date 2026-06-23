@@ -50,15 +50,44 @@ Color readableTextColorForBackground(Color background) {
 /// 已观看进度文案：返回如「已观看 12:34」/「已观看 1:02:03」；无有效进度返回 null。
 /// [positionTicks] 为 Emby 的 100ns 单位（10,000,000 ticks = 1 秒）。
 String? formatWatchedProgressLabel(num? positionTicks) {
-  if (positionTicks == null || positionTicks <= 0) return null;
-  final totalSeconds = positionTicks ~/ 10000000;
+  final time = formatTicksClock(positionTicks);
+  if (time == null) return null;
+  return '已观看 $time';
+}
+
+/// 把 Emby 100ns ticks 格式化为时钟字符串：「12:34」/「1:02:03」；无效返回 null。
+String? formatTicksClock(num? ticks) {
+  if (ticks == null || ticks <= 0) return null;
+  final totalSeconds = ticks ~/ 10000000;
   if (totalSeconds <= 0) return null;
   final h = totalSeconds ~/ 3600;
   final m = (totalSeconds % 3600) ~/ 60;
   final s = totalSeconds % 60;
   String two(int v) => v.toString().padLeft(2, '0');
-  final time = h > 0 ? '$h:${two(m)}:${two(s)}' : '$m:${two(s)}';
-  return '已观看 $time';
+  return h > 0 ? '$h:${two(m)}:${two(s)}' : '$m:${two(s)}';
+}
+
+/// 播放键上的「已观看 / 总时长」文案：如「12:34 / 45:00」。
+/// 无有效进度返回 null（此时按钮显示默认「播放」文案）。
+String? formatWatchedOverTotalLabel(num? positionTicks, num? runTimeTicks) {
+  final watched = formatTicksClock(positionTicks);
+  if (watched == null) return null;
+  final total = formatTicksClock(runTimeTicks);
+  return total == null ? watched : '$watched / $total';
+}
+
+/// 观看进度比例 0.0~1.0；无有效进度返回 null。
+/// 末尾 >98% 视为「即将看完」仍返回真实比例（是否清零由调用方决定）。
+double? watchedFraction(num? positionTicks, num? runTimeTicks) {
+  if (positionTicks == null ||
+      runTimeTicks == null ||
+      positionTicks <= 0 ||
+      runTimeTicks <= 0) {
+    return null;
+  }
+  final f = positionTicks / runTimeTicks;
+  if (f <= 0) return null;
+  return f.clamp(0.0, 1.0).toDouble();
 }
 
 Color readableSecondaryTextColorForBackground(Color background) {

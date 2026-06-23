@@ -2046,9 +2046,39 @@ class MpvPlayerAdapter implements PlayerAdapter {
 
   @override
   Future<Uint8List?> screenshot() async {
-    if (_player == null) return null;
+    final player = _player;
+    if (player == null) return null;
+    // HDR/杜比视界亮度修正：media_kit 的 screenshot() 写死 `screenshot-raw video`，
+    // 截的是解码后的原始帧——不经过 GPU 渲染管线的 tone-mapping/色彩管理，HDR/DV
+    // 片会明显过曝(比屏幕亮)。这里改用 mpv 的 `window` 模式截「渲染后的窗口」(已
+    // tone-map、与屏幕所见一致)，截到临时文件再读回。任一步失败都回退默认实现，
+    // 保证不比原来差。
+    final np = _nativePlayer;
+    if (np != null) {
+      File? shotFile;
+      try {
+        final dir = await getTemporaryDirectory();
+        final path =
+            '${dir.path}${Platform.pathSeparator}linshot_${DateTime.now().microsecondsSinceEpoch}.png';
+        await np.command(['screenshot-to-file', path, 'window']);
+        shotFile = File(path);
+        if (await shotFile.exists()) {
+          final bytes = await shotFile.readAsBytes();
+          if (bytes.isNotEmpty) return bytes;
+        }
+      } catch (e, stackTrace) {
+        _logger.eWithStack(
+            'MpvAdapter', 'window 模式截图失败，回退默认截图', e, stackTrace);
+      } finally {
+        if (shotFile != null) {
+          try {
+            if (await shotFile.exists()) await shotFile.delete();
+          } catch (_) {}
+        }
+      }
+    }
     try {
-      return await _player!.screenshot();
+      return await player.screenshot();
     } catch (e, stackTrace) {
       _logger.eWithStack('MpvAdapter', '截图失败', e, stackTrace);
       return null;

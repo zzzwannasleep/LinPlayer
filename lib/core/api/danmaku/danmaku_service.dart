@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'danmaku_source.dart';
 import 'danmaku_cache.dart';
@@ -89,6 +90,43 @@ class DanmakuService {
       }
     }));
     return results;
+  }
+
+  /// 流式分源搜索：每个源各自查询，**谁先返回谁先发**（按出现速度从前往后）。
+  /// 用于搜索面板边搜边显示，无需等最慢的源。全部完成后关闭流。
+  Stream<DanmakuSourceGroup> searchAllStreamed(String keyword) {
+    final controller = StreamController<DanmakuSourceGroup>();
+    final srcs = allSources;
+    if (srcs.isEmpty) {
+      controller.close();
+      return controller.stream;
+    }
+    var remaining = srcs.length;
+    void done() {
+      remaining--;
+      if (remaining <= 0 && !controller.isClosed) controller.close();
+    }
+
+    for (final source in srcs) {
+      source.searchEpisodes(anime: keyword).then((r) {
+        if (!controller.isClosed) {
+          controller.add(DanmakuSourceGroup(
+            sourceId: source.config.id,
+            sourceName: source.config.name,
+            animes: r.animes,
+          ));
+        }
+      }).catchError((Object e) {
+        if (!controller.isClosed) {
+          controller.add(DanmakuSourceGroup(
+            sourceId: source.config.id,
+            sourceName: source.config.name,
+            error: e,
+          ));
+        }
+      }).whenComplete(done);
+    }
+    return controller.stream;
   }
 
   /// 并行向所有启用源做文件名/哈希匹配，分源返回候选。

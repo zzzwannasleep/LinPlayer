@@ -94,13 +94,14 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildActionButtons(item, m),
-                if (item.overview != null && item.overview!.isNotEmpty) ...[
-                  SizedBox(height: m.spacingLg),
-                  _buildSynopsis(item.overview!, m),
-                ],
+                // 选集列表放在「简介」之上，方便遥控器直接选集切换。
                 if (isSeries) ...[
                   SizedBox(height: m.spacingLg),
                   _buildSeasonsAndEpisodes(api, item, m),
+                ],
+                if (item.overview != null && item.overview!.isNotEmpty) ...[
+                  SizedBox(height: m.spacingLg),
+                  _buildSynopsis(item.overview!, m),
                 ],
                 SizedBox(height: m.spacingXxl),
               ],
@@ -233,13 +234,44 @@ class _TvDetailScreenState extends ConsumerState<TvDetailScreen> {
     final resumeTicks = item.userData?.playbackPositionTicks ?? 0;
     final hasResume =
         item.type != 'Series' && !(item.userData?.played ?? false) && resumeTicks > 0;
+    final progress = watchedFraction(resumeTicks, item.runTimeTicks);
+    final timeText = formatWatchedOverTotalLabel(resumeTicks, item.runTimeTicks);
+    final showProgress = hasResume && progress != null;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TvButton(
-          text: hasResume ? '继续观看' : '播放',
-          icon: Icons.play_arrow,
-          autofocus: true,
-          onPressed: () => _onPlayMain(item),
+        // 播放键：键内显示「继续观看 12:34 / 45:00」，键下贴一条等宽观看进度条
+        IntrinsicWidth(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TvButton(
+                text: hasResume && timeText != null
+                    ? '继续观看  $timeText'
+                    : (hasResume ? '继续观看' : '播放'),
+                icon: Icons.play_arrow,
+                autofocus: true,
+                onPressed: () => _onPlayMain(item),
+              ),
+              if (showProgress) ...[
+                SizedBox(height: m.spacingXs),
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: m.spacingSm),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      minHeight: m.s(4),
+                      backgroundColor: TvDesignTokens.surfaceElevated,
+                      valueColor: const AlwaysStoppedAnimation(
+                          TvDesignTokens.brand),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
         SizedBox(width: m.spacingMd),
         TvButton(
