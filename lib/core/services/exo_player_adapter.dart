@@ -169,6 +169,14 @@ class ExoPlayerAdapter implements PlayerAdapter {
   }
 
   @override
+  Future<void> reload(String url, {Duration? startPosition}) async {
+    // ExoPlayer 暂未实现原生原地重载：抛出由 VideoPlayerService 捕获，
+    // 降级到「整体重建 + 重解析后的新地址」，仍能重签 302、续播到当前位置，
+    // 只是会有一次重建闪屏（ExoPlayer 自身亦有内置 load error 重试兜底）。
+    throw UnsupportedError('ExoPlayer 不支持原地重载，改走整体重建');
+  }
+
+  @override
   Future<void> selectSubtitleTrack(String trackId) async {
     if (_playerId == null || !_isInitialized) return;
     _logger.i('ExoPlayer', '选择字幕轨道: $trackId');

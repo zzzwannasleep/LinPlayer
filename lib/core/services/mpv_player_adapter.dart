@@ -215,6 +215,20 @@ class MpvPlayerAdapter implements PlayerAdapter {
     }
   }
 
+  @override
+  Future<void> reload(String url, {Duration? startPosition}) async {
+    final player = _player;
+    if (player == null) {
+      throw StateError('播放器未就绪，无法重载');
+    }
+    // 网络/缓存/重连等选项已在 initialize 时写入同一 player 实例，重载只需重新 open。
+    // 复用 _openVideoSource：内含代理/UA 重写 + start 定位 + 兜底续播 seek。
+    _errorMessage = null;
+    await _openVideoSource(url, startPosition: startPosition);
+    _isInitialized = true;
+    _callbacks?.onDurationChanged?.call();
+  }
+
   /// 探测当前 libmpv 是否包含 PGS/SUP 解码器。
   ///
   /// media-kit 的 Windows 预编译包为了体积会 `--disable-decoders` 并漏掉
@@ -585,6 +599,13 @@ class MpvPlayerAdapter implements PlayerAdapter {
             await np.setProperty('demuxer-seekable-cache', 'yes');
             await np.setProperty('demuxer-cache-wait', 'no');
             await np.setProperty('network-timeout', '20');
+            // L1 预防层：让 libavformat 在「网络掉线」时透明重连(连当前 URL)，
+            // 跨境硬盘服的瞬断/抖动在缓冲区内消化，不冒错误、不黑屏。
+            // 关键：只开 reconnect_on_network_error，不开 reconnect_on_http_error——
+            // 网盘 302 签名过期返回的 4xx/5xx 必须冒出来交给 L2 重解析重签，
+            // 若让 ffmpeg 死磕过期链，错误永不上抛，L2 反而触发不了。
+            await np.setProperty('stream-lavf-o',
+                'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30');
             await np.setProperty('stream-buffer-size', '33554432');
             await np.setProperty('interpolation', 'no');
             await np.setProperty('prefetch-playlist', 'no');

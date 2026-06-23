@@ -16,6 +16,23 @@ bool serverHasUsableAuth(ServerConfig? server) {
   return token != null && token.isNotEmpty;
 }
 
+/// 服务器取流形态（L0 自调档用，仅影响缓冲/重取流时机，不改控制流）。
+/// - [unknown]：未判定，按通用档位。
+/// - [cloud302]：国内 302 网盘服（签名 CDN 直链短效，暂停/seek 易过期）→ 重取流 TTL 调短。
+/// - [directDisk]：硬盘直传服（长链接稳定，主要风险是跨境抖动）→ 沿用宽松档位。
+enum StreamServerKind { unknown, cloud302, directDisk }
+
+StreamServerKind streamServerKindFromName(String? name) {
+  switch (name) {
+    case 'cloud302':
+      return StreamServerKind.cloud302;
+    case 'directDisk':
+      return StreamServerKind.directDisk;
+    default:
+      return StreamServerKind.unknown;
+  }
+}
+
 class ServerConfig {
   final String id;
   final String name;
@@ -35,6 +52,9 @@ class ServerConfig {
   // 不影响更新下载、WebDAV、其它主机的 TLS 校验。
   final bool allowInsecureTls;
 
+  // L0 取流形态：从播放时的 MediaSource 被动推断（远端/直传），仅用于断流恢复调档。
+  final StreamServerKind streamKind;
+
   ServerConfig({
     required this.id,
     required this.name,
@@ -48,6 +68,7 @@ class ServerConfig {
     this.userId,
     this.password,
     this.allowInsecureTls = false,
+    this.streamKind = StreamServerKind.unknown,
   });
 
   String get activeLineUrl {
@@ -69,6 +90,7 @@ class ServerConfig {
     String? userId,
     String? password,
     bool? allowInsecureTls,
+    StreamServerKind? streamKind,
   }) {
     return ServerConfig(
       id: id ?? this.id,
@@ -83,6 +105,7 @@ class ServerConfig {
       userId: userId ?? this.userId,
       password: password ?? this.password,
       allowInsecureTls: allowInsecureTls ?? this.allowInsecureTls,
+      streamKind: streamKind ?? this.streamKind,
     );
   }
 }
@@ -343,6 +366,21 @@ class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
     }).toList();
     _saveServers();
   }
+
+  /// L0：回填服务器取流形态（首次播放时按 MediaSource 推断）。无变化则跳过，避免无谓持久化。
+  void setStreamKind(String serverId, StreamServerKind kind) {
+    var changed = false;
+    final next = state.map((server) {
+      if (server.id == serverId && server.streamKind != kind) {
+        changed = true;
+        return server.copyWith(streamKind: kind);
+      }
+      return server;
+    }).toList();
+    if (!changed) return;
+    state = next;
+    _saveServers();
+  }
 }
 
 /// 序列化服务器配置。[includeSecrets] 为 false 时**不写入**密码/Token
@@ -370,6 +408,7 @@ Map<String, dynamic> _serverConfigToJson(ServerConfig server,
     'userId': server.userId,
     if (includeSecrets) 'password': server.password,
     'allowInsecureTls': server.allowInsecureTls,
+    'streamKind': server.streamKind.name,
   };
 }
 
@@ -409,6 +448,8 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
     // （含自签名 Emby）用户的连接，缺字段时默认 true 保留原放行行为；放行范围
     // 已收敛到本服务器自身主机。新加服务器走构造默认 false（严格校验）。
     allowInsecureTls: json['allowInsecureTls'] as bool? ?? true,
+    // 迁移：旧数据无此字段 → unknown，首次播放时按 MediaSource 推断回填。
+    streamKind: streamServerKindFromName(json['streamKind'] as String?),
   );
 }
 

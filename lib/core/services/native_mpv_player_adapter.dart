@@ -231,6 +231,23 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
     }
   }
 
+  @override
+  Future<void> reload(String url, {Duration? startPosition}) async {
+    final id = _playerId;
+    if (id == null) {
+      throw StateError('原生 mpv 未就绪，无法重载');
+    }
+    // 复用同一 mpv 上下文/texture，仅 loadfile replace 切到重签后的新地址。
+    _errorMessage = null;
+    _isCompleted = false;
+    await _channel.invokeMethod('reloadPlayer', {
+      'playerId': id,
+      'videoUrl': url,
+      'startPositionMs': startPosition?.inMilliseconds ?? 0,
+    });
+    _callbacks?.onDurationChanged?.call();
+  }
+
   // ---- Playback control ----
 
   @override
