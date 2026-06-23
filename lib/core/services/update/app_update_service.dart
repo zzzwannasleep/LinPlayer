@@ -81,8 +81,10 @@ class AppUpdateService {
       final info = _parseRelease(release);
       if (info == null) return null;
 
-      if (compareVersions(info.version, normalizeVersion(kCurrentAppVersion)) >
-          0) {
+      // 用「原始 tag」对比「当前 APP_VERSION」，二者都保留 -buildN/-pre 信息。
+      // 不能用归一化后的 x.y.z 对比：CI 每个预发布都是 vX.Y.Z-build<run>-pre，
+      // 主版本号不变，归一化后恒等 → 预览版永远检测不到更新（本次修复点）。
+      if (compareVersions(info.tag, kCurrentAppVersion) > 0) {
         _logger.i(_tag,
             '发现新版本: ${info.tag}（当前 $kCurrentAppVersion），pre=${info.isPrerelease}');
         return info;
@@ -146,15 +148,47 @@ class AppUpdateService {
     return '${m.group(1)}.${m.group(2)}.${m.group(3)}';
   }
 
-  /// 语义版本比较：a>b 返回 1，相等 0，a<b 返回 -1。
+  /// 版本比较：a>b 返回 1，相等 0，a<b 返回 -1。
+  ///
+  /// 识别本项目的实际版本形态 `vX.Y.Z[-build<N>][-pre]`（如 `v1.2.0-build88-pre`、
+  /// `1.2.0-build88`、`v1.2.0`），按以下优先级排序，**新者为大**：
+  /// 主版本 > 次版本 > 修订号 > 构建号(build N) > 稳定优于预览(pre)。
+  ///
+  /// 关键：同一 x.y.z 下更高的 `-buildN` 视为更新——这正是修复「预览版同号漏检」
+  /// 的核心（旧实现只比 x.y.z，丢掉了唯一能区分预发布迭代的构建号）。
   static int compareVersions(String a, String b) {
-    final pa = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    final pb = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    for (var i = 0; i < 3; i++) {
-      final x = i < pa.length ? pa[i] : 0;
-      final y = i < pb.length ? pb[i] : 0;
-      if (x != y) return x > y ? 1 : -1;
-    }
+    final pa = _VersionParts.parse(a);
+    final pb = _VersionParts.parse(b);
+    if (pa.major != pb.major) return pa.major > pb.major ? 1 : -1;
+    if (pa.minor != pb.minor) return pa.minor > pb.minor ? 1 : -1;
+    if (pa.patch != pb.patch) return pa.patch > pb.patch ? 1 : -1;
+    if (pa.build != pb.build) return pa.build > pb.build ? 1 : -1;
+    // 同一构建号下，稳定版（非 pre）视为比预览版更新（发布即由 pre 晋升而来）。
+    if (pa.isPre != pb.isPre) return pa.isPre ? -1 : 1;
     return 0;
+  }
+}
+
+/// 解析后的版本组成，供 [AppUpdateService.compareVersions] 排序使用。
+class _VersionParts {
+  const _VersionParts(
+      this.major, this.minor, this.patch, this.build, this.isPre);
+
+  final int major;
+  final int minor;
+  final int patch;
+  final int build; // -build<N>，缺省 0
+  final bool isPre; // 含 -pre 后缀
+
+  static _VersionParts parse(String raw) {
+    final core = RegExp(r'(\d+)\.(\d+)\.(\d+)').firstMatch(raw);
+    final major = core != null ? int.tryParse(core.group(1)!) ?? 0 : 0;
+    final minor = core != null ? int.tryParse(core.group(2)!) ?? 0 : 0;
+    final patch = core != null ? int.tryParse(core.group(3)!) ?? 0 : 0;
+    final b = RegExp(r'-build(\d+)', caseSensitive: false).firstMatch(raw);
+    final build = b != null ? int.tryParse(b.group(1)!) ?? 0 : 0;
+    final isPre = RegExp(r'-pre\b', caseSensitive: false).hasMatch(raw) ||
+        raw.toLowerCase().endsWith('-pre');
+    return _VersionParts(major, minor, patch, build, isPre);
   }
 }

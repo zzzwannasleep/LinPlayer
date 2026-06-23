@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/providers/update_providers.dart';
 import '../../../core/services/update/app_update_service.dart';
 import '../../../core/services/update/update_installer.dart';
+import '../../../core/theme/app_colors.dart';
+import 'app_toast.dart';
 
 /// 挂在根 `MaterialApp.router` 的 builder 下，负责：启动时 + 每 24h 检查更新，
 /// 发现新版本即弹窗。三端共用（桌面/移动/TV 均经此）。
@@ -60,54 +62,99 @@ class _AppUpdateGateState extends ConsumerState<AppUpdateGate> {
 }
 
 /// 弹出更新提示对话框。可被设置页「检查更新」复用。
+///
+/// 两个主选项：[立即更新]（应用内下载 → Windows 原地覆盖并自动重启 / 其他端
+/// 落地安装）/ [暂不更新]；并保留「前往发布页」作为次要入口。更新日志直接展示
+/// GitHub 自动生成的发布说明（含本次提交/PR 列表）。
 Future<void> showUpdateDialog(BuildContext context, UpdateInfo info) async {
-  // 当前平台是否能应用内落地（Android/TV 安装、桌面下载揭示），且有匹配安装包。
+  // 当前平台是否能应用内落地（Android/TV 安装、Windows 原地覆盖、桌面揭示）。
   final canApply =
       UpdateInstaller.isSupported && UpdateInstaller.pickAsset(info) != null;
 
   await showDialog<void>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text('发现新版本 ${info.tag}'
-          '${info.isPrerelease ? '（预览版）' : '（稳定版）'}'),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 360, maxWidth: 480),
-        child: SingleChildScrollView(
+    builder: (ctx) {
+      final theme = Theme.of(ctx);
+      return AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.system_update_rounded,
+                color: AppColors.brand, size: 26),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text('发现新版本 ${info.tag}'
+                  '${info.isPrerelease ? '（预览版）' : '（稳定版）'}'),
+            ),
+          ],
+        ),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 380, maxWidth: 500),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('当前版本：$kCurrentAppVersion',
-                  style: TextStyle(color: Colors.grey, fontSize: 13)),
-              const SizedBox(height: 12),
-              Text(info.notes.isEmpty ? '（无更新说明）' : info.notes,
-                  style: const TextStyle(fontSize: 13)),
+              Text('当前版本：$kCurrentAppVersion',
+                  style: TextStyle(
+                      color: theme.hintColor, fontSize: 13)),
+              const SizedBox(height: 6),
+              Text('更新内容',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Flexible(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest
+                        .withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      info.notes.trim().isEmpty ? '（无更新说明）' : info.notes.trim(),
+                      style: const TextStyle(fontSize: 13, height: 1.45),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('稍后'),
-        ),
-        TextButton(
-          onPressed: () async {
-            Navigator.pop(ctx);
-            await _openDownload(context, info);
-          },
-          child: const Text('前往发布页'),
-        ),
-        if (canApply)
-          FilledButton(
+        actionsPadding:
+            const EdgeInsets.only(left: 12, right: 16, bottom: 12, top: 4),
+        actions: [
+          TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await _startInAppUpdate(context, info);
+              await _openDownload(context, info);
             },
-            child: const Text('下载并更新'),
+            child: const Text('前往发布页'),
           ),
-      ],
-    ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('暂不更新'),
+          ),
+          if (canApply)
+            FilledButton.icon(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await _startInAppUpdate(context, info);
+              },
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text('立即更新'),
+            )
+          else
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await _openDownload(context, info);
+              },
+              child: const Text('立即更新'),
+            ),
+        ],
+      );
+    },
   );
 }
 
@@ -134,6 +181,7 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   final CancelToken _cancel = CancelToken();
   double _progress = 0;
   bool _finished = false;
+  bool _relaunching = false;
   String? _error;
 
   @override
@@ -143,8 +191,6 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   }
 
   Future<void> _run() async {
-    // 在 pop 之前抓住底层页面的 messenger，避免对话框关闭后 context 失效。
-    final messenger = ScaffoldMessenger.maybeOf(context);
     final result = await UpdateInstaller.downloadAndApply(
       info: widget.info,
       cancelToken: _cancel,
@@ -162,10 +208,15 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
         // 系统安装界面已弹出，关闭进度框即可。
         Navigator.of(context).pop();
         break;
+      case ApplyResult.desktopRelaunching:
+        // Windows：覆盖更新脚本已接管，提示后立即退出，让其覆盖并自动重启。
+        setState(() => _relaunching = true);
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        exit(0);
       case ApplyResult.desktopRevealed:
         Navigator.of(context).pop();
-        messenger?.showSnackBar(const SnackBar(
-            content: Text('安装包已下载到「下载」目录并定位，解压后覆盖原文件夹即可完成更新')));
+        AppToast.success(
+            context, '安装包已下载到「下载」目录并定位，解压后覆盖原文件夹即可完成更新');
         break;
       case ApplyResult.canceled:
         Navigator.of(context).pop();
@@ -182,6 +233,21 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   @override
   Widget build(BuildContext context) {
     final percent = (_progress * 100).clamp(0, 100).toStringAsFixed(0);
+    if (_relaunching) {
+      return const AlertDialog(
+        title: Text('更新完成'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('正在覆盖安装并自动重启，请稍候…（不会清除你的设置与数据）',
+                style: TextStyle(fontSize: 13)),
+            SizedBox(height: 14),
+            LinearProgressIndicator(),
+          ],
+        ),
+      );
+    }
     return AlertDialog(
       title: Text(_error != null ? '更新失败' : '正在下载更新'),
       content: Column(
@@ -230,9 +296,7 @@ Future<void> _openDownload(BuildContext context, UpdateInfo info) async {
   if (!opened) {
     await Clipboard.setData(ClipboardData(text: url));
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('下载链接已复制，请在浏览器中打开')),
-      );
+      AppToast.show(context, '下载链接已复制，请在浏览器中打开');
     }
   }
 }

@@ -12,11 +12,16 @@ import '../../network/proxy_http_client.dart';
 import '../../utils/platform_utils.dart';
 import '../app_logger.dart';
 import 'app_update_service.dart';
+import 'windows_self_updater.dart';
 
 /// 应用更新的「下载 + 落地」结果。
 enum ApplyResult {
   /// Android/TV：已下载并调起系统安装器（用户在系统界面确认覆盖安装）。
   androidInstalling,
+
+  /// Windows：已下载校验通过并启动「原地覆盖更新」脚本，调用方应立即退出程序，
+  /// 让脱离进程的脚本接管覆盖并自动重启。
+  desktopRelaunching,
 
   /// 桌面：已下载压缩包并在文件管理器中定位，用户解压覆盖即可。
   desktopRevealed,
@@ -142,7 +147,15 @@ class UpdateInstaller {
       }
     }
 
-    // 桌面：在文件管理器中定位下载好的压缩包，供用户解压覆盖。
+    // Windows：原地覆盖更新——启动脱离进程的脚本，等程序退出后解压覆盖并重启。
+    // 用户数据在 %APPDATA% 等系统目录，不在安装目录内，故覆盖不会清空用户数据。
+    if (Platform.isWindows) {
+      final started = await WindowsSelfUpdater.applyAndRelaunch(savePath);
+      if (started) return ApplyResult.desktopRelaunching;
+      _logger.w(_tag, '原地覆盖更新启动失败，回退到「文件管理器定位」');
+    }
+
+    // macOS / Linux（及 Windows 回退）：在文件管理器中定位压缩包，供用户解压覆盖。
     await _revealInFileManager(savePath);
     return ApplyResult.desktopRevealed;
   }

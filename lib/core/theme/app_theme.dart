@@ -140,6 +140,29 @@ class AppTheme {
     ),
   );
 
+  /// 全局 SnackBar 主题：浮动圆角气泡，取代默认「底部贴边大黑框」。
+  /// 业务侧已逐步迁移到 [AppToast] 顶部气泡；这里作为兜底，让任何残留的
+  /// 原生 SnackBar 也呈现一致的浮动圆角气泡观感。
+  static SnackBarThemeData _snackBarTheme(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
+    return SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      elevation: 6,
+      backgroundColor:
+          dark ? const Color(0xFF2A2A2E) : const Color(0xFF323236),
+      contentTextStyle: const TextStyle(
+        color: Colors.white,
+        fontSize: textSizeSM,
+        fontWeight: FontWeight.w500,
+      ),
+      actionTextColor: AppColors.brandLight,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(borderRadiusXLarge),
+      ),
+    );
+  }
+
   /// 把自定义字体家族名套用到一份 [ThemeData] 的全部文本主题上。
   /// [family] 为空时原样返回（用系统默认字体）。供三端在构建 MaterialApp 时调用。
   static ThemeData withFontFamily(ThemeData base, String? family) {
@@ -195,6 +218,7 @@ class AppTheme {
         thickness: 1,
       ),
       textTheme: _lightTextTheme,
+      snackBarTheme: _snackBarTheme(Brightness.light),
       scrollbarTheme: ScrollbarThemeData(
         thickness: WidgetStateProperty.all(8),
         radius: const Radius.circular(4),
@@ -249,6 +273,7 @@ class AppTheme {
         thickness: 1,
       ),
       textTheme: _darkTextTheme,
+      snackBarTheme: _snackBarTheme(Brightness.dark),
       scrollbarTheme: ScrollbarThemeData(
         thickness: WidgetStateProperty.all(8),
         radius: const Radius.circular(4),

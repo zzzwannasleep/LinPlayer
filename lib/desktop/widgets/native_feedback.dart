@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:macos_ui/macos_ui.dart' as macos;
 
 import '../../core/theme/app_colors.dart';
+import '../../ui/widgets/common/app_toast.dart';
 import '../platform/desktop_ui_style.dart';
 
 /// 跨平台原生确认弹窗。
@@ -98,32 +99,16 @@ Future<bool> showDesktopConfirm(
 
 /// 跨平台轻量提示（成功/普通消息）。
 ///
-/// - Windows -> fluent [fluent.InfoBar] 弹出
-/// - macOS / Linux -> Material SnackBar（在原生根下经兼容层仍可用）
+/// 三端统一走 [AppToast] 顶部圆角气泡，取代以往各平台不一致的 InfoBar / 黑底
+/// SnackBar，视觉统一且更好看。
 void showDesktopMessage(
   BuildContext context,
   String message, {
   bool isError = false,
 }) {
-  if (isFluentStyle) {
-    fluent.displayInfoBar(
-      context,
-      builder: (ctx, close) => fluent.InfoBar(
-        title: Text(message),
-        severity: isError
-            ? fluent.InfoBarSeverity.error
-            : fluent.InfoBarSeverity.info,
-        onClose: close,
-      ),
-    );
-    return;
-  }
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      behavior: SnackBarBehavior.floating,
-      backgroundColor: isError ? AppColors.error : null,
-    ),
+  AppToast.show(
+    context,
+    message,
+    kind: isError ? AppToastKind.error : AppToastKind.info,
   );
 }
