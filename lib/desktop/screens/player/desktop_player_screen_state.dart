@@ -20,6 +20,11 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
   // 全屏状态
   bool _isFullscreen = false;
 
+  // 退出播放页的两段式放行：先在 PopScope 拦截里还原窗口外壳（退全屏+恢复
+  // 标题栏），再放行真正的返回。详见 [_handleExit]。
+  bool _allowExitPop = false;
+  bool _exiting = false;
+
   // 倍速按钮长按状态
   bool _isSpeedLongPressing = false;
   bool _didTriggerSpeedLongPress = false;
@@ -1598,6 +1603,49 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     }
   }
 
+  /// 离开播放页前还原窗口外壳：恢复自绘标题栏并退出 OS 全屏。
+  ///
+  /// 关键：恢复沉浸态（`desktopImmersiveModeProvider=false`）必须在 widget 仍
+  /// mounted、ref 仍有效时执行——若放到 dispose()，ProviderScope 可能已先行
+  /// 销毁导致写入被吞，标题栏（含最小化/关闭按钮）永久隐藏、窗口卡在全屏。
+  Future<void> _restoreWindowChrome() async {
+    // 先恢复标题栏：这步只要 ref 有效就一定成功，是用户能重新操作窗口的关键。
+    try {
+      ref.read(desktopImmersiveModeProvider.notifier).state = false;
+    } catch (_) {}
+    if (!_isFullscreen) return;
+    try {
+      if (Platform.isWindows) {
+        await _windowChannel
+            .invokeMethod<bool>('setFullscreen', {'fullscreen': false});
+      } else {
+        await windowManager.setFullScreen(false);
+      }
+    } on MissingPluginException {
+      // 无桌面窗口集成的平台忽略。
+    } on PlatformException {
+      // 原生侧失败也忽略：标题栏已恢复，用户仍可操作窗口。
+    }
+    if (mounted) setState(() => _isFullscreen = false);
+  }
+
+  /// PopScope 拦截到返回请求后的处理：先还原窗口外壳，再放行真正的 pop。
+  ///
+  /// 两段式（先 `canPop:false` 拦截 → 还原 → 置 [_allowExitPop] → 下一帧再
+  /// pop）是为了避开「canPop=false 时手动 pop 又被自己拦截」的死循环。
+  Future<void> _handleExit() async {
+    if (_exiting) return;
+    _exiting = true;
+    await _restoreWindowChrome();
+    if (!mounted) return;
+    setState(() => _allowExitPop = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && context.mounted && context.canPop()) {
+        context.pop();
+      }
+    });
+  }
+
   void _toggleFullscreen() async {
     final target = !_isFullscreen;
     var fullscreen = target;
@@ -2983,7 +3031,15 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
     final item = ref.watch(currentPlayingItemProvider);
     final isMpv = normalizePlayerCore(ref.read(playerCoreProvider)) == 'mpv';
 
-    return Scaffold(
+    return PopScope(
+      // 拦截所有返回路径（返回按钮 / ESC / 系统返回），先还原窗口外壳再放行，
+      // 确保退出全屏后窗口一定窗口化、自绘标题栏一定恢复，杜绝卡全屏。
+      canPop: _allowExitPop,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleExit();
+      },
+      child: Scaffold(
       backgroundColor: Colors.black,
       body: Focus(
         focusNode: _focusNode,
@@ -3227,7 +3283,7 @@ class _DesktopPlayerScreenState extends ConsumerState<DesktopPlayerScreen>
           ),
         ),
       ),
-    );
+    ));
   }
 
   // ========== 控制栏覆盖层 ==========

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import '../../../core/api/api_interfaces.dart';
-import '../../../core/providers/app_providers.dart';
 import '../../../ui/utils/media_helpers.dart';
 import '../../../ui/widgets/common/media_widgets.dart';
 import 'desktop_cover_radii.dart';
@@ -39,7 +37,8 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
 
   @override
   Widget build(BuildContext context) {
-    final api = ref.read(apiClientProvider);
+    // 聚合搜索的跨服务器结果用其来源服务器解析封面，避免当前服务器鉴权不过空白。
+    final api = apiClientForItem(ref, widget.item);
     final imageUrls =
         resolveMediaItemImageUrls(api, widget.item, maxWidth: 400);
     final theme = Theme.of(context);
@@ -63,8 +62,7 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
         onExit: (_) => setState(() => _isHovered = false),
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
-          onTap: widget.onTap ??
-              () => context.push(mediaRouteForItem(widget.item)),
+          onTap: widget.onTap ?? () => openMediaItem(ref, context, widget.item),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             curve: Curves.fastOutSlowIn,
@@ -178,11 +176,12 @@ class _DesktopMediaCardState extends ConsumerState<DesktopMediaCard> {
                 ),
                 if (widget.showMetadata &&
                     (widget.item.productionYear != null ||
-                        widget.item.genres != null))
+                        (widget.item.genres?.isNotEmpty ?? false)))
                   Text(
                     widget.item.productionYear?.toString() ??
-                        widget.item.genres?.first ??
-                        '',
+                        (widget.item.genres?.isNotEmpty ?? false
+                            ? widget.item.genres!.first
+                            : ''),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: metaStyle,

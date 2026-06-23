@@ -25,10 +25,16 @@ String friendlyPlaybackError(Object? rawError) {
     return '播放遇到问题，无法继续播放。';
   }
 
-  // 网络连接类：超时 / 断网 / DNS / 连接被拒。
+  // 网络连接类：超时 / 断网 / DNS / 连接被拒 / TLS 握手被中断。
+  // 注：`handshake` / `connection terminated` 多见于服务器过载、限流或线路被
+  // 中间网络重置（SNI 阻断），握手阶段即被掐断，换线路或代理往往能绕过。
   if (r.contains('timeout') ||
       r.contains('timed out') ||
       r.contains('socketexception') ||
+      r.contains('handshakeexception') ||
+      r.contains('handshake') ||
+      r.contains('connection terminated') ||
+      r.contains('tlsexception') ||
       r.contains('connection error') ||
       r.contains('connection refused') ||
       r.contains('connection closed') ||
@@ -36,7 +42,7 @@ String friendlyPlaybackError(Object? rawError) {
       r.contains('failed host lookup') ||
       r.contains('network is unreachable') ||
       r.contains('no address associated')) {
-    return '无法连接到服务器，请检查网络连接或服务器状态后重试。';
+    return '无法连接到服务器（连接被中断），请检查网络后重试；若仍不行，请更换线路/播放源或开启代理。';
   }
 
   // 鉴权类：登录过期 / 无权限。

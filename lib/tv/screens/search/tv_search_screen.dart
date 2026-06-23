@@ -72,11 +72,61 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
               ),
               SizedBox(height: m.spacingLg),
               _buildSearchField(m),
+              SizedBox(height: m.spacingMd),
+              _buildAggregateToggle(m),
               SizedBox(height: m.spacingLg),
               Expanded(
                 child: _hasSearched
                     ? _buildSearchResults(m)
                     : _buildSearchHistory(m),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 聚合搜索开关：开启后跨所有已登录服务器并行搜索并合并结果。
+  Widget _buildAggregateToggle(TvMetrics m) {
+    final isAggregate = ref.watch(aggregateSearchProvider);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TvFocusable(
+        padding: const EdgeInsets.all(4),
+        onSelect: () => ref.read(aggregateSearchProvider.notifier).state =
+            !isAggregate,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: m.spacingMd,
+            vertical: m.spacingSm,
+          ),
+          decoration: BoxDecoration(
+            color: TvDesignTokens.surface,
+            borderRadius: BorderRadius.circular(m.posterRadius),
+            border: Border.all(
+              color: isAggregate
+                  ? TvDesignTokens.brand
+                  : TvDesignTokens.textDisabled,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isAggregate ? Icons.check_box : Icons.check_box_outline_blank,
+                color: isAggregate
+                    ? TvDesignTokens.brand
+                    : TvDesignTokens.textSecondary,
+                size: m.s(24),
+              ),
+              SizedBox(width: m.spacingSm),
+              Text(
+                '聚合搜索（所有服务器）',
+                style: TextStyle(
+                  fontSize: m.fontSizeMd,
+                  color: TvDesignTokens.textPrimary,
+                ),
               ),
             ],
           ),
@@ -204,7 +254,6 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
   Widget _buildSearchResults(TvMetrics m) {
     final resultsAsync = ref.watch(searchResultsProvider);
     final query = ref.watch(searchQueryProvider);
-    final api = ref.read(apiClientProvider);
 
     return resultsAsync.when(
       data: (items) {
@@ -231,7 +280,7 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
             ),
             SizedBox(height: m.spacingLg),
             for (final entry in items.asMap().entries)
-              _buildResultRow(m, api, entry.value).animate().fadeIn(
+              _buildResultRow(m, entry.value).animate().fadeIn(
                     delay: Duration(milliseconds: 30 * entry.key),
                     duration: TvDesignTokens.contentFadeDuration,
                   ),
@@ -253,13 +302,15 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
     );
   }
 
-  Widget _buildResultRow(TvMetrics m, ApiClientFactory api, MediaItem item) {
+  Widget _buildResultRow(TvMetrics m, MediaItem item) {
+    // 聚合搜索结果可能来自其它服务器：用来源服务器解析封面、点击时先切服务器。
+    final api = apiClientForItem(ref, item);
     final urls = resolveMediaItemLandscapeImageUrls(api, item, maxWidth: 360);
     return Padding(
       padding: EdgeInsets.only(bottom: m.spacingSm),
       child: TvFocusable(
         padding: const EdgeInsets.all(4),
-        onSelect: () => context.push('/tv/detail/${item.id}'),
+        onSelect: () => _openResult(item),
         child: Container(
           padding: EdgeInsets.all(m.spacingMd),
           decoration: BoxDecoration(
@@ -310,6 +361,19 @@ class _TvSearchScreenState extends ConsumerState<TvSearchScreen> {
         ),
       ),
     );
+  }
+
+  /// 打开一条结果：聚合搜索的跨服务器结果先把当前服务器切到来源服务器，再走
+  /// TV 详情路由，否则详情页用错服务器取 itemId 会失败。
+  void _openResult(MediaItem item) {
+    final origin = item.sourceServerId;
+    if (origin != null && origin != ref.read(currentServerProvider)?.id) {
+      ref.read(currentServerProvider.notifier).syncWithAvailableServers(
+            ref.read(serverListProvider),
+            preferredServerId: origin,
+          );
+    }
+    context.push('/tv/detail/${item.id}');
   }
 
   String _resultSubtitle(MediaItem item) {

@@ -128,6 +128,26 @@ final apiClientProvider = Provider<ApiClientFactory>((ref) {
   );
 });
 
+/// 按服务器 ID 缓存的只读 ApiClient。
+///
+/// 聚合搜索的结果可能来自非当前服务器，解析其封面/海报、跨服务器打开前都需要
+/// 对应服务器的 client。用 family 缓存复用同一实例，避免在卡片 build 路径里反复
+/// `new EmbyApiClient` 泄漏 ProxyRuntime 监听（见 [EmbyApiClient.dispose]）。
+/// 未登录或不存在的服务器返回 null，调用方回退到当前服务器。
+final serverApiClientProvider =
+    Provider.family<ApiClientFactory?, String>((ref, serverId) {
+  final server =
+      ref.watch(serverListProvider).where((s) => s.id == serverId).firstOrNull;
+  if (server == null || (server.authToken ?? '').isEmpty) return null;
+  final client = EmbyApiClient(
+    baseUrl: server.activeLineUrl,
+    authToken: server.authToken,
+    userId: server.userId,
+  );
+  ref.onDispose(client.dispose);
+  return client;
+});
+
 final currentUserProvider = FutureProvider<User?>((ref) async {
   final currentServer = ref.watch(currentServerProvider);
   if (!serverHasUsableAuth(currentServer)) return null;
