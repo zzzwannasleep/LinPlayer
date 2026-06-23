@@ -7,7 +7,11 @@ import '../api/api_interfaces.dart';
 import '../api/emby_api.dart';
 import '../network/proxy_http_client.dart';
 import '../services/secure_credential_store.dart';
+import '../sources/source_credentials.dart';
+import '../sources/source_kind.dart';
 import 'app_preferences.dart';
+
+export '../sources/source_kind.dart' show SourceKind;
 
 enum AuthState { unauthenticated, authenticating, authenticated, error }
 
@@ -55,6 +59,10 @@ class ServerConfig {
   // L0 取流形态：从播放时的 MediaSource 被动推断（远端/直传），仅用于断流恢复调档。
   final StreamServerKind streamKind;
 
+  // 源类型：emby（默认，现有后端）/ openlist / quark / anirss。
+  // 决定选中本服务器后落到原 Emby 首页还是文件浏览页，以及用哪个 MediaSourceBackend。
+  final SourceKind sourceKind;
+
   ServerConfig({
     required this.id,
     required this.name,
@@ -69,7 +77,11 @@ class ServerConfig {
     this.password,
     this.allowInsecureTls = false,
     this.streamKind = StreamServerKind.unknown,
+    this.sourceKind = SourceKind.emby,
   });
+
+  /// 是否文件浏览型源（非 Emby）。
+  bool get isFileBrowse => isFileBrowseSource(sourceKind);
 
   String get activeLineUrl {
     if (lines.isEmpty) return baseUrl;
@@ -91,6 +103,7 @@ class ServerConfig {
     String? password,
     bool? allowInsecureTls,
     StreamServerKind? streamKind,
+    SourceKind? sourceKind,
   }) {
     return ServerConfig(
       id: id ?? this.id,
@@ -106,6 +119,7 @@ class ServerConfig {
       password: password ?? this.password,
       allowInsecureTls: allowInsecureTls ?? this.allowInsecureTls,
       streamKind: streamKind ?? this.streamKind,
+      sourceKind: sourceKind ?? this.sourceKind,
     );
   }
 }
@@ -330,6 +344,7 @@ class ServerListNotifier extends StateNotifier<List<ServerConfig>> {
   void removeServer(String id) {
     state = state.where((server) => server.id != id).toList();
     SecureCredentialStore.instance.remove(id);
+    SourceCredentialStore.instance.remove(id); // 一并清理网盘源的附加凭据
     _saveServers();
   }
 
@@ -409,6 +424,7 @@ Map<String, dynamic> _serverConfigToJson(ServerConfig server,
     if (includeSecrets) 'password': server.password,
     'allowInsecureTls': server.allowInsecureTls,
     'streamKind': server.streamKind.name,
+    'sourceKind': server.sourceKind.name,
   };
 }
 
@@ -450,6 +466,8 @@ ServerConfig _serverConfigFromJson(Map<String, dynamic> json) {
     allowInsecureTls: json['allowInsecureTls'] as bool? ?? true,
     // 迁移：旧数据无此字段 → unknown，首次播放时按 MediaSource 推断回填。
     streamKind: streamServerKindFromName(json['streamKind'] as String?),
+    // 迁移：旧数据无此字段 → emby（保持原 Emby 行为）。
+    sourceKind: sourceKindFromName(json['sourceKind'] as String?),
   );
 }
 

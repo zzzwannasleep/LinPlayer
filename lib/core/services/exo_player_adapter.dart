@@ -13,6 +13,9 @@ class ExoPlayerAdapter implements PlayerAdapter {
 
   String? _playerId;
   int? _textureId;
+  // 逐流取流鉴权（网盘/聚合源直链）：Kotlin 侧设到 ExoPlayer DataSource headers。
+  Map<String, String>? _httpHeaders;
+  String? _userAgentOverride;
   EventChannel? _eventChannel;
   StreamSubscription? _eventSub;
 
@@ -111,6 +114,8 @@ class ExoPlayerAdapter implements PlayerAdapter {
     String? preferredSubtitleLanguage,
     int? surfaceViewId,  // Not used by ExoPlayer, only for native mpv
     bool useGpuNext = false,  // Not used by ExoPlayer, only for native mpv
+    Map<String, String>? httpHeaders,
+    String? userAgentOverride,
   }) async {
     _logger.i('ExoPlayer', '开始初始化 - videoUrl=$videoUrl');
     try {
@@ -122,6 +127,10 @@ class ExoPlayerAdapter implements PlayerAdapter {
       _videoWidth = 0;
       _videoHeight = 0;
       _enableAssSupport = useLibass;
+      _httpHeaders = (httpHeaders != null && httpHeaders.isNotEmpty)
+          ? Map<String, String>.from(httpHeaders)
+          : null;
+      _userAgentOverride = userAgentOverride;
 
       final result = await _channel.invokeMethod<Map<dynamic, dynamic>>('createPlayer', {
         'videoUrl': videoUrl,
@@ -130,8 +139,10 @@ class ExoPlayerAdapter implements PlayerAdapter {
         'preferredSubtitleLanguage': preferredSubtitleLanguage,
         'enableAssSupport': useLibass,
         'hardwareDecoding': hardwareDecoding,
-        // 统一 UA：部分 CDN 拒绝默认 UA 导致取流失败。
-        'userAgent': kAppUserAgent,
+        // 统一 UA：部分 CDN 拒绝默认 UA 导致取流失败。网盘源可覆盖。
+        'userAgent': _userAgentOverride ?? kAppUserAgent,
+        // 逐流 HTTP 头（Cookie/Authorization/Referer）：Kotlin 侧设到 DataSource。
+        'httpHeaders': _httpHeaders,
       });
 
       if (result == null) {

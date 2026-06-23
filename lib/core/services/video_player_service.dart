@@ -47,6 +47,9 @@ class VideoPlayerService extends ChangeNotifier {
   bool _lastStartWithSoftwareDecoding = false;
   String? _primaryVideoUrl;
   String? _fallbackVideoUrl;
+  // 逐流取流鉴权（网盘/聚合源直链）：主/兜底链路与适配器重建都复用同一份。
+  Map<String, String>? _httpHeaders;
+  String? _userAgentOverride;
   bool _fallbackActivated = false;
   bool _autoRetryInFlight = false;
   int _startupRetryCount = 0;
@@ -327,6 +330,8 @@ class VideoPlayerService extends ChangeNotifier {
       preferredSubtitleLanguage: preferredSubtitleLanguage,
       surfaceViewId: _surfaceViewId,  // Pass for gpu-next rendering
       useGpuNext: useGpuNext,
+      httpHeaders: _httpHeaders,
+      userAgentOverride: _userAgentOverride,
     );
     _logger.i('VideoPlayerService', '适配器初始化完成, surfaceViewId=$_surfaceViewId');
     if (!(_adapter?.isInitialized ?? false) || (_adapter?.hasError ?? false)) {
@@ -671,6 +676,8 @@ class VideoPlayerService extends ChangeNotifier {
     bool useGpuNext = false,  // gpu-next rendering mode
     StreamUrlResolver? streamUrlResolver,  // L2 在线断流重解析；离线/本地为 null
     Duration? streamUrlTtl,  // L0 按服务器形态调档的签名链 TTL；null 用默认 5 分钟
+    Map<String, String>? httpHeaders,  // 网盘/聚合源直链逐流 headers；Emby/本地为 null
+    String? userAgentOverride,  // 覆盖默认 UA（夸克等要求特定 UA）
   }) async {
     // 屏幕已销毁：不要再创建/初始化适配器，否则会留下后台空跑的孤儿播放器。
     if (_disposed) return;
@@ -684,6 +691,10 @@ class VideoPlayerService extends ChangeNotifier {
     _lastFallbackReason = fallbackReason;
     _primaryVideoUrl = videoUrl;
     _fallbackVideoUrl = fallbackVideoUrl;
+    _httpHeaders = (httpHeaders != null && httpHeaders.isNotEmpty)
+        ? Map<String, String>.from(httpHeaders)
+        : null;
+    _userAgentOverride = userAgentOverride;
     _streamUrlResolver = streamUrlResolver;
     _streamUrlTtl = streamUrlTtl;
     _pausedAt = null;

@@ -136,7 +136,8 @@ class _ServerListScreenState extends ConsumerState<ServerListScreen> {
             if (server.authToken != null) {
               ref.read(authStateProvider.notifier).state = AuthState.authenticated;
             }
-            context.go('/home');
+            // 网盘/聚合源 → 文件浏览页；Emby → 原首页。
+            context.go(server.isFileBrowse ? '/browse' : '/home');
           },
           onMoreTap: () => _showServerMenu(context, ref, server),
         );

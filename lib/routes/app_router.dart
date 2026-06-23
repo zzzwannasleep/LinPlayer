@@ -21,6 +21,11 @@ import '../ui/screens/server/icon_select_screen.dart';
 import '../ui/screens/server/server_lines_screen.dart';
 import '../ui/screens/server/server_list_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
+import '../ui/screens/source/source_browse_screen.dart';
+import '../ui/screens/source/source_login_screen.dart';
+import '../ui/screens/source/source_picker_screen.dart';
+import '../ui/screens/source/source_player_screen.dart';
+import '../core/sources/source_kind.dart';
 import '../ui/utils/image_size_helper.dart';
 import '../ui/utils/media_helpers.dart';
 import '../ui/widgets/common/media_widgets.dart';
@@ -86,10 +91,33 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   GoRoute(
                     path: 'add',
                     pageBuilder: (context, state) => _buildHorizontalPage(
-                      child: const AddServerScreen(),
+                      child: const SourcePickerScreen(),
                       state: state,
                       direction: _PageTransitionDirection.forward,
                     ),
+                    routes: [
+                      // Emby 分支：复用现有添加流程（手动/批量/导入）。
+                      GoRoute(
+                        path: 'emby',
+                        pageBuilder: (context, state) => _buildHorizontalPage(
+                          child: const AddServerScreen(),
+                          state: state,
+                          direction: _PageTransitionDirection.forward,
+                        ),
+                      ),
+                      // 网盘/聚合源登录页：按 :kind 分发。
+                      GoRoute(
+                        path: 'source/:kind',
+                        pageBuilder: (context, state) => _buildHorizontalPage(
+                          child: SourceLoginScreen(
+                            kind: sourceKindFromName(
+                                state.pathParameters['kind']),
+                          ),
+                          state: state,
+                          direction: _PageTransitionDirection.forward,
+                        ),
+                      ),
+                    ],
                   ),
                   GoRoute(
                     path: 'edit/:serverId',
@@ -202,6 +230,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/downloads',
         builder: (context, state) => const DownloadScreen(),
+      ),
+      // 网盘/聚合源：文件浏览页（按 currentServer）。
+      GoRoute(
+        path: '/browse',
+        builder: (context, state) => const SourceBrowseScreen(),
+      ),
+      // 网盘/聚合源：直链播放页（server+entry 经 extra 传入）。
+      GoRoute(
+        path: '/source-player',
+        builder: (context, state) {
+          final args = state.extra as SourcePlayArgs;
+          return SourcePlayerScreen(server: args.server, entry: args.entry);
+        },
       ),
     ],
   );

@@ -53,6 +53,10 @@ abstract class PlayerAdapter {
   Widget buildVideo();
 
   /// 初始化播放器
+  ///
+  /// [httpHeaders]：逐流 HTTP 请求头（网盘/聚合源直链需 Cookie/Authorization/Referer）。
+  /// 本地文件与 Emby 流为 null。[userAgentOverride]：覆盖默认 UA（夸克等要求特定 UA），
+  /// null 时沿用 [kAppUserAgent]。两者也用于 [reload] 时复用同一鉴权。
   Future<void> initialize({
     required String videoUrl,
     Duration? startPosition,
@@ -62,6 +66,8 @@ abstract class PlayerAdapter {
     String? preferredSubtitleLanguage,
     int? surfaceViewId,  // Optional: for gpu-next rendering on Android
     bool useGpuNext = false,  // Optional: gpu-next rendering mode
+    Map<String, String>? httpHeaders,
+    String? userAgentOverride,
   });
 
   /// 加载外部字幕文件（通过 libass）

@@ -25,6 +25,10 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
 
   String? _playerId;
   int? _textureId;
+  // 逐流取流鉴权（网盘/聚合源直链）：create 与 reload 共用。Kotlin 侧把
+  // httpHeaders 透传给 mpv http-header-fields、userAgent 覆盖默认 UA。
+  Map<String, String>? _httpHeaders;
+  String? _userAgentOverride;
   int? _surfaceViewId;  // For gpu-next rendering via SurfaceView
   bool _useSurfaceView = false;
   EventChannel? _eventChannel;
@@ -129,6 +133,8 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
     String? preferredSubtitleLanguage,
     int? surfaceViewId,  // Optional: for gpu-next rendering
     bool useGpuNext = false,  // Optional: gpu-next rendering mode
+    Map<String, String>? httpHeaders,
+    String? userAgentOverride,
   }) async {
     _logger.i('NativeMpv', '开始初始化 - videoUrl=$videoUrl, surfaceViewId=$surfaceViewId, useGpuNext=$useGpuNext');
     try {
@@ -138,6 +144,10 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
       _tracks = [];
       _videoWidth = 0;
       _videoHeight = 0;
+      _httpHeaders = (httpHeaders != null && httpHeaders.isNotEmpty)
+          ? Map<String, String>.from(httpHeaders)
+          : null;
+      _userAgentOverride = userAgentOverride;
 
       // gpu-next uses SurfaceTexture just like gpu mode.
       // SurfaceView is not used because it creates a separate window layer
@@ -168,8 +178,10 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
         'preferredSubtitleLanguage': preferredSubtitleLanguage,
         'useGpuNext': useGpuNext,
         'httpProxy': httpProxy,
-        // 统一 UA：部分 CDN 拒绝 mpv 默认 UA 导致取流失败。
-        'userAgent': kAppUserAgent,
+        // 统一 UA：部分 CDN 拒绝 mpv 默认 UA 导致取流失败。网盘源可覆盖。
+        'userAgent': _userAgentOverride ?? kAppUserAgent,
+        // 逐流 HTTP 头（Cookie/Authorization/Referer）：Kotlin 侧设 mpv http-header-fields。
+        'httpHeaders': _httpHeaders,
         // 为 0 / null 时 Kotlin 侧按"不启用磁盘缓存"处理（本地文件）。
         'videoCacheDir': videoCacheDir,
         'diskCacheForwardBytes': diskCacheForwardBytes,
@@ -244,6 +256,9 @@ class NativeMpvPlayerAdapter implements PlayerAdapter {
       'playerId': id,
       'videoUrl': url,
       'startPositionMs': startPosition?.inMilliseconds ?? 0,
+      // 重签后复用同一鉴权（夸克 302 过期重解析时 URL 变、Cookie 不变）。
+      'httpHeaders': _httpHeaders,
+      'userAgent': _userAgentOverride ?? kAppUserAgent,
     });
     _callbacks?.onDurationChanged?.call();
   }

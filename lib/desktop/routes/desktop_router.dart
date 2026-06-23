@@ -18,6 +18,10 @@ import '../screens/library/desktop_library_screen.dart';
 import '../screens/library/desktop_library_detail_screen.dart';
 import '../screens/server/desktop_server_screen.dart';
 import '../screens/server/desktop_add_server_screen.dart';
+import '../screens/source/desktop_source_login_screen.dart';
+import '../screens/source/desktop_source_picker_screen.dart';
+import '../../ui/screens/source/source_player_screen.dart';
+import '../../core/sources/source_kind.dart';
 import '../shell/desktop_shell.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -180,13 +184,45 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
           fromRight: true,
         ),
       ),
+      // 添加服务器第一步：源类型选择器（带搜索）。
       GoRoute(
-        path: '/add-server',
+        path: '/add-source-picker',
+        pageBuilder: (context, state) => _buildSlidePage(
+          child: const DesktopSourcePickerScreen(),
+          state: state,
+          fromRight: true,
+        ),
+      ),
+      // Emby 分支：复用现有添加流程。
+      GoRoute(
+        path: '/add-emby',
         pageBuilder: (context, state) => _buildSlidePage(
           child: const DesktopAddServerScreen(),
           state: state,
           fromRight: true,
         ),
+      ),
+      // 网盘/聚合源登录页（按 :kind 分发）。
+      GoRoute(
+        path: '/add-source/:kind',
+        pageBuilder: (context, state) => _buildSlidePage(
+          child: DesktopSourceLoginScreen(
+            kind: sourceKindFromName(state.pathParameters['kind']),
+          ),
+          state: state,
+          fromRight: true,
+        ),
+      ),
+      // 网盘/聚合源：直链播放页（共用移动端实现）。
+      GoRoute(
+        path: '/source-player',
+        pageBuilder: (context, state) {
+          final args = state.extra as SourcePlayArgs;
+          return _buildFadePage(
+            child: SourcePlayerScreen(server: args.server, entry: args.entry),
+            state: state,
+          );
+        },
       ),
       GoRoute(
         path: '/edit-server/:serverId',

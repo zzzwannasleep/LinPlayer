@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
+import '../source/desktop_source_browse_screen.dart';
 import '../../../core/services/watch_history/watch_history_models.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/widgets/app_shimmer.dart';
@@ -69,6 +70,10 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
         ref.watch(hideDailyRecommendationsProvider);
     final servers = ref.watch(serverListProvider);
     final currentServer = ref.watch(currentServerProvider);
+    // 网盘/聚合源：首页内容区改渲染文件浏览视图（保留侧边栏壳）。
+    if (currentServer != null && currentServer.isFileBrowse) {
+      return const DesktopSourceBrowseView();
+    }
     final isUnauthenticated =
         currentServer != null && !serverHasUsableAuth(currentServer);
 

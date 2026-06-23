@@ -49,6 +49,9 @@ class MpvPlayerAdapter implements PlayerAdapter {
   double _subtitleScale = 1.0;
   double _subtitlePosition = 100.0;
   String? _subtitleFont;
+  // 逐流取流鉴权（网盘/聚合源直链）：open 与 reload 共用，保证重签后仍带 Cookie/Token。
+  Map<String, String>? _httpHeaders;
+  String? _userAgentOverride;
   String? _aspectRatio;
   List<String>? _glslShaders;
   bool _subtitleBackground = false;
@@ -183,10 +186,28 @@ class MpvPlayerAdapter implements PlayerAdapter {
         // 代理属性设置失败不应阻断播放。
       }
       // 统一 UA：部分 CDN 会拒绝 mpv/libavformat 默认 UA 导致取流失败（403/空响应）。
+      // 网盘源（夸克等）可要求特定 UA，用 _userAgentOverride 覆盖。
       try {
-        await np.setProperty('user-agent', kAppUserAgent);
+        await np.setProperty('user-agent', _userAgentOverride ?? kAppUserAgent);
       } catch (_) {
         // UA 设置失败不应阻断播放。
+      }
+      // 逐流 HTTP 头（Cookie/Authorization/Referer）：网盘/聚合源直链取流必需。
+      // mpv 用 http-header-fields（逗号分隔的 "Key: Value" 列表，不含 User-Agent，
+      // UA 已单独走 user-agent 属性）。
+      try {
+        final headers = _httpHeaders;
+        if (headers != null && headers.isNotEmpty) {
+          final fields = headers.entries
+              .where((e) => e.key.toLowerCase() != 'user-agent')
+              .map((e) => '${e.key}: ${e.value}')
+              .toList();
+          await np.setProperty('http-header-fields', fields.join(','));
+        } else {
+          await np.setProperty('http-header-fields', '');
+        }
+      } catch (_) {
+        // header 设置失败不应阻断播放。
       }
     }
 
@@ -496,6 +517,8 @@ class MpvPlayerAdapter implements PlayerAdapter {
     String? preferredSubtitleLanguage,
     int? surfaceViewId, // Not used by media_kit, only for native mpv
     bool useGpuNext = false, // Not used by media_kit, only for native mpv
+    Map<String, String>? httpHeaders,
+    String? userAgentOverride,
   }) async {
     _logger.i('MpvAdapter', '开始初始化 media_kit 内核');
     try {
@@ -507,6 +530,10 @@ class MpvPlayerAdapter implements PlayerAdapter {
       _audioTracks = [];
       _secondarySid = null;
       _usingExternalSubtitle = false;
+      _httpHeaders = (httpHeaders != null && httpHeaders.isNotEmpty)
+          ? Map<String, String>.from(httpHeaders)
+          : null;
+      _userAgentOverride = userAgentOverride;
 
       await _configManager.initialize();
       await _configManager.writeConfig(

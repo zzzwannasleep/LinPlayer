@@ -50,7 +50,7 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
                     MouseRegion(
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
-                        onTap: () => context.push('/add-server'),
+                        onTap: () => context.push('/add-source-picker'),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 8),
@@ -109,7 +109,7 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
                       MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: GestureDetector(
-                          onTap: () => context.push('/add-server'),
+                          onTap: () => context.push('/add-source-picker'),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 24, vertical: 12),
@@ -197,6 +197,12 @@ class _DesktopServerScreenState extends ConsumerState<DesktopServerScreen> {
     debugPrint(
         '[SelectServer] Selecting ${server.name}: authToken=${server.authToken != null ? 'present' : 'null'}, userId=${server.userId}');
     ref.read(currentServerProvider.notifier).state = server;
+    // 网盘/聚合源：切到首页分支，由 DesktopHomeScreen 渲染文件浏览视图。
+    if (server.isFileBrowse) {
+      ref.read(authStateProvider.notifier).state = AuthState.authenticated;
+      context.go('/');
+      return;
+    }
     if (serverHasUsableAuth(server)) {
       ref.read(authStateProvider.notifier).state = AuthState.authenticated;
     } else {

@@ -250,6 +250,11 @@ class TvServerScreen extends ConsumerWidget {
     ref.invalidate(librariesProvider);
     ref.invalidate(resumeItemsProvider);
     ref.invalidate(randomRecommendationsProvider);
+    // 网盘/聚合源：进首页（由 TvHomeScreen 渲染文件浏览视图）。
+    if (server.isFileBrowse) {
+      context.go('/tv/home');
+      return;
+    }
     TvToast.show(context, '已切换到 ${server.name}');
   }
 

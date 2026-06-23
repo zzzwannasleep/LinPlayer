@@ -5,6 +5,10 @@ import '../screens/library/tv_library_screen.dart';
 import '../screens/server/tv_server_screen.dart';
 import '../screens/server/tv_add_server_screen.dart';
 import '../screens/server/tv_edit_server_screen.dart';
+import '../screens/source/tv_source_picker_screen.dart';
+import '../screens/source/tv_source_login_screen.dart';
+import '../../ui/screens/source/source_player_screen.dart';
+import '../../core/sources/source_kind.dart';
 import '../screens/settings/tv_settings_screen.dart';
 import '../screens/settings/tv_lan_control_screen.dart';
 import '../screens/detail/tv_detail_screen.dart';
@@ -34,10 +38,30 @@ final tvRouter = GoRouter(
         );
       },
     ),
-    // 添加服务器（独立页面，全屏表单）
+    // 添加服务器第一步：源类型选择器（独立页面）。
     GoRoute(
       path: '/tv/add-server',
+      builder: (context, state) => const TvSourcePickerScreen(),
+    ),
+    // Emby 分支：复用现有添加流程。
+    GoRoute(
+      path: '/tv/add-emby',
       builder: (context, state) => const TvAddServerScreen(),
+    ),
+    // 网盘/聚合源登录页（按 :kind 分发）。
+    GoRoute(
+      path: '/tv/add-source/:kind',
+      builder: (context, state) => TvSourceLoginScreen(
+        kind: sourceKindFromName(state.pathParameters['kind']),
+      ),
+    ),
+    // 网盘/聚合源：直链播放页（共用实现，含 D-pad 遥控）。
+    GoRoute(
+      path: '/tv/source-player',
+      builder: (context, state) {
+        final args = state.extra as SourcePlayArgs;
+        return SourcePlayerScreen(server: args.server, entry: args.entry);
+      },
     ),
     // 编辑服务器（名称/信息/图标/线路，独立页面）
     GoRoute(

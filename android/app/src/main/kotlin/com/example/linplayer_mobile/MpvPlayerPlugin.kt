@@ -53,11 +53,13 @@ class MpvPlayerPlugin(
                 val httpProxy = call.argument<String>("httpProxy")
                 // 统一 UA：部分 CDN 拒绝 mpv 默认 UA 导致取流失败。
                 val userAgent = call.argument<String>("userAgent")
+                // 逐流 HTTP 头（网盘/聚合源直链需 Cookie/Authorization/Referer）。
+                val httpHeaders = call.argument<Map<String, String>>("httpHeaders")
                 // 网络播放磁盘缓存（按用户 300MB–8GB 设置；本地文件为空/0 表示不启用）
                 val videoCacheDir = call.argument<String>("videoCacheDir")
                 val diskCacheForwardBytes = call.argument<Number>("diskCacheForwardBytes")?.toLong() ?: 0L
                 val diskCacheBackBytes = call.argument<Number>("diskCacheBackBytes")?.toLong() ?: 0L
-                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, userAgent, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result)
+                createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, userAgent, httpHeaders, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result)
             }
             "reloadPlayer" -> {
                 // L2 原地重载：外层重解析重签后的新 URL，复用同一 surface/texture，免黑屏。
@@ -253,13 +255,14 @@ class MpvPlayerPlugin(
         useGpuNext: Boolean,
         httpProxy: String?,
         userAgent: String?,
+        httpHeaders: Map<String, String>?,
         videoCacheDir: String?,
         diskCacheForwardBytes: Long,
         diskCacheBackBytes: Long,
         result: MethodChannel.Result
     ) {
         // Always use SurfaceTexture (no SurfaceView polling needed)
-        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, userAgent, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result) }
+        mainHandler.post { createPlayerOnMainThread(videoUrl, startPositionMs, hardwareDecoding, useGpuNext, httpProxy, userAgent, httpHeaders, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result) }
     }
 
     private fun createPlayerOnMainThread(
@@ -269,6 +272,7 @@ class MpvPlayerPlugin(
         useGpuNext: Boolean,
         httpProxy: String?,
         userAgent: String?,
+        httpHeaders: Map<String, String>?,
         videoCacheDir: String?,
         diskCacheForwardBytes: Long,
         diskCacheBackBytes: Long,
@@ -315,6 +319,7 @@ class MpvPlayerPlugin(
             android.util.Log.i(TAG, "Setting mpv options: hardwareDecoding=$hardwareDecoding, useGpuNext=$useGpuNext")
             setMpvOptions(hardwareDecoding, useGpuNext = useGpuNext, httpProxy = httpProxy,
                 userAgent = userAgent,
+                httpHeaders = httpHeaders,
                 videoCacheDir = videoCacheDir,
                 diskCacheForwardBytes = diskCacheForwardBytes,
                 diskCacheBackBytes = diskCacheBackBytes)
@@ -437,6 +442,7 @@ class MpvPlayerPlugin(
         useGpuNext: Boolean = false,
         httpProxy: String? = null,
         userAgent: String? = null,
+        httpHeaders: Map<String, String>? = null,
         videoCacheDir: String? = null,
         diskCacheForwardBytes: Long = 0L,
         diskCacheBackBytes: Long = 0L,
@@ -451,6 +457,18 @@ class MpvPlayerPlugin(
         if (!userAgent.isNullOrEmpty()) {
             MPVLib.setOptionString("user-agent", userAgent)
             android.util.Log.i(TAG, "mpv user-agent set: $userAgent")
+        }
+
+        // 逐流 HTTP 头（网盘/聚合源直链需 Cookie/Authorization/Referer）。
+        // mpv 用 http-header-fields（逗号分隔的 "Key: Value"，不含 User-Agent）。
+        if (!httpHeaders.isNullOrEmpty()) {
+            val fields = httpHeaders.entries
+                .filter { it.key.lowercase() != "user-agent" }
+                .joinToString(",") { "${it.key}: ${it.value}" }
+            if (fields.isNotEmpty()) {
+                MPVLib.setOptionString("http-header-fields", fields)
+                android.util.Log.i(TAG, "mpv http-header-fields set (${httpHeaders.size} headers)")
+            }
         }
 
         // Video output - try gpu-next for better HDR/DV support, fallback to gpu if unavailable
