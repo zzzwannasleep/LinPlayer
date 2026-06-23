@@ -741,8 +741,9 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 简介
-        if (widget.item.overview != null &&
+        // 简介（电影：信息在顶部；剧集：下沉到集/季列表之下，让选集更靠前）
+        if (!isSeries &&
+            widget.item.overview != null &&
             widget.item.overview!.isNotEmpty) ...[
           _OverviewSection(
             overview: widget.item.overview!,
@@ -853,6 +854,21 @@ class _InfoSectionState extends ConsumerState<_InfoSection> {
             onSeasonTap: (season) {
               setState(() => _selectedSeasonId = season.id);
             },
+          ),
+          SizedBox(height: 48 * scale),
+        ],
+
+        // 简介（剧集：下沉到选集之下）
+        if (isSeries &&
+            widget.item.overview != null &&
+            widget.item.overview!.isNotEmpty) ...[
+          _OverviewSection(
+            overview: widget.item.overview!,
+            expanded: _overviewExpanded,
+            scaleFactor: scale,
+            accentColor: widget.primaryColor,
+            onToggle: () =>
+                setState(() => _overviewExpanded = !_overviewExpanded),
           ),
           SizedBox(height: 48 * scale),
         ],
@@ -1608,6 +1624,11 @@ class _PlayButtonState extends State<_PlayButton> {
     final scale = widget.scaleFactor;
     final foregroundColor = readableTextColorForBackground(widget.primaryColor);
     final dividerColor = foregroundColor.withValues(alpha: 0.24);
+    final positionTicks = widget.item.userData?.playbackPositionTicks;
+    final runTimeTicks = widget.item.runTimeTicks;
+    final progress = watchedFraction(positionTicks, runTimeTicks);
+    final timeText = formatWatchedOverTotalLabel(positionTicks, runTimeTicks);
+    final hasProgress = progress != null && progress > 0;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -1622,6 +1643,7 @@ class _PlayButtonState extends State<_PlayButton> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 height: 48 * scale,
+                clipBehavior: Clip.antiAlias,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
@@ -1642,21 +1664,55 @@ class _PlayButtonState extends State<_PlayButton> {
                         ]
                       : null,
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                child: Stack(
                   children: [
-                    Icon(
-                      Icons.play_arrow,
-                      color: foregroundColor,
-                      size: 24 * scale,
-                    ),
-                    SizedBox(width: 8 * scale),
-                    Text(
-                      '开始播放',
-                      style: TextStyle(
-                        fontSize: 16 * scale,
-                        fontWeight: FontWeight.w600,
-                        color: foregroundColor,
+                    // 底部观看进度填充
+                    if (hasProgress)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: FractionallySizedBox(
+                          alignment: Alignment.centerLeft,
+                          widthFactor: progress.clamp(0.0, 1.0),
+                          child: Container(
+                            height: 4 * scale,
+                            color: foregroundColor.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ),
+                    Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.play_arrow,
+                            color: foregroundColor,
+                            size: 24 * scale,
+                          ),
+                          SizedBox(width: 8 * scale),
+                          Text(
+                            hasProgress ? '继续观看' : '开始播放',
+                            style: TextStyle(
+                              fontSize: 16 * scale,
+                              fontWeight: FontWeight.w600,
+                              color: foregroundColor,
+                            ),
+                          ),
+                          if (timeText != null) ...[
+                            SizedBox(width: 10 * scale),
+                            Text(
+                              timeText,
+                              style: TextStyle(
+                                fontSize: 12.5 * scale,
+                                color: foregroundColor.withValues(alpha: 0.85),
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ],

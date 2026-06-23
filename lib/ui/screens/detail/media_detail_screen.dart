@@ -77,16 +77,8 @@ class _DetailContentState extends State<_DetailContent> {
             ),
           ),
 
-          // 简介
-          if (widget.item.overview != null && widget.item.overview!.isNotEmpty)
-            SliverToBoxAdapter(
-              child: _OverviewSection(
-                overview: widget.item.overview!,
-                textColor: foregroundColor,
-              ),
-            ),
-
-          // 剧集相关区块（季 + 集；集数走懒加载 Sliver，几百集也只构建可视项）
+          // 剧集相关区块（季 + 集；集数走懒加载 Sliver，几百集也只构建可视项）。
+          // 放在「简介」之上，方便用户进集详情页就能直接切换集，不用先滑过信息区。
           if (widget.item.type == 'Series') ...[
             _SeasonsSliver(
               itemId: widget.itemId,
@@ -97,6 +89,15 @@ class _DetailContentState extends State<_DetailContent> {
               onEpisodeTap: (episode) => context.push('/episode/${episode.id}'),
             ),
           ],
+
+          // 简介（媒体信息栏）
+          if (widget.item.overview != null && widget.item.overview!.isNotEmpty)
+            SliverToBoxAdapter(
+              child: _OverviewSection(
+                overview: widget.item.overview!,
+                textColor: foregroundColor,
+              ),
+            ),
 
           // 电影播放选项 + 按钮
           if (widget.item.type == 'Movie') ...[
@@ -905,9 +906,8 @@ class _MoviePlaybackSection extends ConsumerWidget {
             itemId: itemId,
             info: info,
           ),
-          _WatchedProgressLabel(itemId: itemId),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: _MoviePlayButtons(itemId: itemId),
           ),
           _VersionInfoSection(itemId: itemId),
@@ -922,32 +922,85 @@ class _MoviePlaybackSection extends ConsumerWidget {
   }
 }
 
-/// 播放键上方的「已观看 XX:XX」进度提示（无进度时不显示）。
-class _WatchedProgressLabel extends ConsumerWidget {
-  final String itemId;
+/// 播放键：底部叠加观看进度条 + 键内显示「已观看 / 总时长」。
+/// 有进度时文案为「继续观看」并显示时间，无进度时为「播放」。
+class _PlayButtonWithProgress extends StatelessWidget {
+  final double? progress; // 0~1，null 表示无进度
+  final String? timeText; // 「12:34 / 45:00」，null 表示不显示
+  final VoidCallback onPressed;
 
-  const _WatchedProgressLabel({required this.itemId});
+  const _PlayButtonWithProgress({
+    required this.progress,
+    required this.timeText,
+    required this.onPressed,
+  });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final label = ref.watch(mediaItemProvider(itemId)).maybeWhen(
-          data: (item) =>
-              formatWatchedProgressLabel(item.userData?.playbackPositionTicks),
-          orElse: () => null,
-        );
-    if (label == null) return const SizedBox.shrink();
-    final color = Theme.of(context).textTheme.bodySmall?.color;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-      child: Row(
-        children: [
-          Icon(Icons.history, size: 15, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(fontSize: 12.5, color: color),
-          ),
-        ],
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final hasProgress = progress != null && progress! > 0;
+    return SizedBox(
+      height: 48,
+      child: Material(
+      color: scheme.primary,
+      borderRadius: BorderRadius.circular(8),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onPressed,
+        child: Stack(
+          children: [
+            // 底部观看进度填充
+            if (hasProgress)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: progress!.clamp(0.0, 1.0),
+                  child: Container(
+                    height: 4,
+                    color: scheme.onPrimary.withValues(alpha: 0.55),
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.play_arrow, color: scheme.onPrimary, size: 20),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      hasProgress ? '继续观看' : '播放',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: scheme.onPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (timeText != null) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      timeText!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: scheme.onPrimary.withValues(alpha: 0.82),
+                        fontSize: 12,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
       ),
     );
   }
@@ -962,33 +1015,39 @@ class _MoviePlayButtons extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mediaSourceId = ref.watch(selectedMediaSourceProvider);
-    final canDownload = ref.watch(mediaItemProvider(itemId)).maybeWhen(
-          data: (item) => item.canDownload ?? false,
-          orElse: () => false,
-        );
+    final item = ref.watch(mediaItemProvider(itemId)).valueOrNull;
+    final canDownload = item?.canDownload ?? false;
+    final progress =
+        watchedFraction(item?.userData?.playbackPositionTicks, item?.runTimeTicks);
+    final timeText = formatWatchedOverTotalLabel(
+        item?.userData?.playbackPositionTicks, item?.runTimeTicks);
     return Row(
       children: [
         Expanded(
           flex: 5,
-          child: FilledButton.icon(
+          child: _PlayButtonWithProgress(
+            progress: progress,
+            timeText: timeText,
             onPressed: () => context.push(
               mediaSourceId != null && mediaSourceId.isNotEmpty
                   ? '/player/$itemId?mediaSourceId=$mediaSourceId'
                   : '/player/$itemId',
-            ),
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('播放'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           flex: 1,
-          child: OutlinedButton(
-            onPressed: () => _showMoreMenu(context, ref, canDownload: canDownload),
-            child: const Icon(Icons.more_vert),
+          child: SizedBox(
+            height: 48,
+            child: OutlinedButton(
+              onPressed: () =>
+                  _showMoreMenu(context, ref, canDownload: canDownload),
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.zero,
+              ),
+              child: const Icon(Icons.more_vert),
+            ),
           ),
         ),
       ],

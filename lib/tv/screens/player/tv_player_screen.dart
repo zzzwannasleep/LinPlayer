@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +14,7 @@ import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/providers/sync_providers.dart';
 import '../../../core/utils/danmaku_filter.dart';
+import '../../../core/utils/danmaku_local_parser.dart';
 import '../../../core/utils/danmaku_matcher.dart';
 import '../../../ui/widgets/common/danmaku_overlay.dart';
 import '../../../core/services/player_subtitle_loader.dart';
@@ -443,6 +447,52 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
     }
   }
 
+  /// 本地导入弹幕文件（.xml/.json/.ass）→ 解析 → 过滤屏蔽词 → 加载。
+  Future<void> _importLocalDanmaku() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: DanmakuLocalParser.supportedExtensions,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final f = result.files.first;
+      String content;
+      if (f.bytes != null) {
+        content = utf8.decode(f.bytes!, allowMalformed: true);
+      } else if (f.path != null) {
+        content = await File(f.path!).readAsString();
+      } else {
+        _toast('无法读取文件内容');
+        return;
+      }
+      var items = DanmakuLocalParser.parse(f.name, content);
+      final blockwords = ref.read(danmakuBlockwordsProvider);
+      if (blockwords.isNotEmpty) {
+        final filter = DanmakuFilter()..importBlockwords(blockwords);
+        items = items
+            .where((it) => !filter.shouldFilter(it.text, userId: it.userId))
+            .toList();
+      }
+      if (!mounted) return;
+      if (items.isEmpty) {
+        _toast('该文件没有可用弹幕');
+        return;
+      }
+      ref.read(loadedDanmakuProvider.notifier).state = items;
+      if (!ref.read(danmakuEnabledProvider)) {
+        ref.read(danmakuEnabledProvider.notifier).state = true;
+      }
+      _danmakuLoadedEpisodeId = null;
+      _toast('已导入 ${items.length} 条本地弹幕 · ${f.name}');
+    } on FormatException catch (e) {
+      _toast('解析失败: ${e.message}');
+    } catch (e) {
+      _toast('导入失败: $e');
+    }
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -492,6 +542,14 @@ class _TvPlayerScreenState extends ConsumerState<TvPlayerScreen> {
             onTap: () {
               ref.read(danmakuEnabledProvider.notifier).state = !enabled;
               Navigator.pop(ctx);
+            },
+          ),
+          TvPanelOption(
+            title: '本地导入弹幕',
+            subtitle: '.xml / .json / .ass 文件',
+            onTap: () {
+              Navigator.pop(ctx);
+              unawaited(_importLocalDanmaku());
             },
           ),
           if (_danmakuCandidates.isEmpty)
