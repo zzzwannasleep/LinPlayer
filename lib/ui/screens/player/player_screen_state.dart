@@ -207,6 +207,60 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     });
   }
 
+  /// L2 在线重解析：重走 PlaybackInfo→重签 302，产出新的主/兜底播放地址。
+  /// 与 [_initializePlayer] 的在线地址构建口径完全一致（含 STRM 直链优先），
+  /// 每次都用全新 PlaySessionId，确保拿到新签发的网盘短效链。仅在线流调用。
+  Future<ResolvedStreamUrls?> _resolveOnlineStreamUrls(
+      ApiClientFactory api) async {
+    final info = await api.playback.getPlaybackInfo(widget.itemId);
+    final sel = buildPlaybackSelection(
+      playbackInfo: info,
+      itemId: widget.itemId,
+      preferredMediaSourceId:
+          widget.mediaSourceId ?? ref.read(selectedMediaSourceProvider),
+      versionRegex: ref.read(preferredVersionRegexProvider),
+      playSessionId:
+          '${widget.itemId}-${DateTime.now().microsecondsSinceEpoch}',
+      strmDirectPlay: ref.read(strmDirectPlayProvider),
+    );
+    final primary = api.playback.getVideoStreamUrl(
+      sel.primaryRequest.itemId,
+      mediaSourceId: sel.primaryRequest.mediaSourceId,
+      container: sel.primaryRequest.container,
+      playSessionId: sel.primaryRequest.playSessionId,
+      staticStream: sel.primaryRequest.staticStream,
+      allowDirectPlay: sel.primaryRequest.allowDirectPlay,
+      allowDirectStream: sel.primaryRequest.allowDirectStream,
+      allowTranscoding: sel.primaryRequest.allowTranscoding,
+      enableAutoStreamCopy: sel.primaryRequest.enableAutoStreamCopy,
+      enableAutoStreamCopyAudio: sel.primaryRequest.enableAutoStreamCopyAudio,
+      enableAutoStreamCopyVideo: sel.primaryRequest.enableAutoStreamCopyVideo,
+    );
+    final fb = sel.fallbackRequest == null
+        ? null
+        : api.playback.getVideoStreamUrl(
+            sel.fallbackRequest!.itemId,
+            mediaSourceId: sel.fallbackRequest!.mediaSourceId,
+            container: sel.fallbackRequest!.container,
+            playSessionId: sel.fallbackRequest!.playSessionId,
+            staticStream: sel.fallbackRequest!.staticStream,
+            allowDirectPlay: sel.fallbackRequest!.allowDirectPlay,
+            allowDirectStream: sel.fallbackRequest!.allowDirectStream,
+            allowTranscoding: sel.fallbackRequest!.allowTranscoding,
+            enableAutoStreamCopy: sel.fallbackRequest!.enableAutoStreamCopy,
+            enableAutoStreamCopyAudio:
+                sel.fallbackRequest!.enableAutoStreamCopyAudio,
+            enableAutoStreamCopyVideo:
+                sel.fallbackRequest!.enableAutoStreamCopyVideo,
+          );
+    final directUrl = sel.directPlayUrl;
+    final hasDirect = directUrl != null && directUrl.isNotEmpty;
+    return (
+      url: hasDirect ? directUrl : primary,
+      fallbackUrl: hasDirect ? primary : fb,
+    );
+  }
+
   Future<void> _initializePlayer() async {
     final api = ref.read(apiClientProvider);
 
@@ -360,6 +414,25 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final watchedThreshold = ref.read(watchedThresholdProvider);
     final syncController = ref.read(syncControllerProvider.notifier);
     _didScrobble = false;
+
+    // L0 取流形态自调档：从 MediaSource 被动推断（远端/Http 直链 → 网盘 302；否则硬盘直传），
+    // 据此调节签名链 TTL——网盘短效(3min)、硬盘长链接放宽(30min，近乎不触发暂停重取)。
+    StreamServerKind? inferredKind;
+    if (playbackInfo != null && mediaSource != null) {
+      final remote = (mediaSource.isRemote ?? false) ||
+          (mediaSource.protocol?.toLowerCase() == 'http');
+      inferredKind =
+          remote ? StreamServerKind.cloud302 : StreamServerKind.directDisk;
+    }
+    final effectiveKind = inferredKind ??
+        (ref.read(currentServerProvider)?.streamKind ??
+            StreamServerKind.unknown);
+    final streamUrlTtl = switch (effectiveKind) {
+      StreamServerKind.cloud302 => const Duration(minutes: 3),
+      StreamServerKind.directDisk => const Duration(minutes: 30),
+      StreamServerKind.unknown => null,
+    };
+
     await _playerService.initialize(
       videoUrl: effectiveVideoUrl,
       itemId: widget.itemId,
@@ -376,6 +449,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       preferredSubtitleLanguage: preferredSubtitleLanguage,
       surfaceViewId: surfaceViewId, // Pass for gpu-next rendering
       useGpuNext: gpuNextEnabled, // Pass gpu-next rendering mode
+      // L2：仅在线流注入重解析回调（本地文件/离线为 null → 退回旧行为）。
+      // 断流时服务层据此重走 PlaybackInfo→重签 302→原地续播。
+      streamUrlResolver: (localFileSource == null && playbackInfo != null)
+          ? () => _resolveOnlineStreamUrls(api)
+          : null,
+      streamUrlTtl: streamUrlTtl,
       onStart: (info) async {
         try {
           await api.playback.reportPlaybackStart(info);
@@ -411,6 +490,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
 
     await _playerService.play();
+
+    // L0：回填推断出的取流形态（下次播放即可据持久化值直接调档）。
+    if (inferredKind != null) {
+      final server = ref.read(currentServerProvider);
+      if (server != null && server.streamKind != inferredKind) {
+        ref.read(serverListProvider.notifier).setStreamKind(
+              server.id,
+              inferredKind,
+            );
+      }
+    }
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     SystemChrome.setPreferredOrientations([
@@ -1477,6 +1567,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                 onPressed: _initializePlayer,
                                 child: const Text('重试'),
                               ),
+                              // L3：断流自动恢复耗尽后，把现成的手动切线入口摆到用户面前。
+                              // 仅多线路服务器显示；不自动切线（由用户决定换哪条）。
+                              if ((ref.watch(currentServerProvider)?.lines.length ??
+                                      0) >
+                                  1) ...[
+                                const SizedBox(height: 8),
+                                TextButton(
+                                  onPressed: _showLineSelector,
+                                  child: const Text(
+                                    '切换线路',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

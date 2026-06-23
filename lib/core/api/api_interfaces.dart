@@ -264,6 +264,13 @@ class MediaItem {
   final String? logoItemId; // 有 Logo 的项目 ID（自身或父级）
   final String? logoImageTag; // Logo 缓存 tag
 
+  /// 聚合搜索专用的客户端侧来源标记：该条结果来自哪台服务器（ServerConfig.id）。
+  ///
+  /// 不参与 JSON 解析、不来自服务端——仅在跨服务器聚合搜索时由本地写入，用于让
+  /// 封面/海报用正确服务器的 base+token 解析、点击时先切到来源服务器再打开。
+  /// 普通（单服务器）场景保持 null，行为与原来完全一致。
+  String? sourceServerId;
+
   MediaItem({
     required this.id,
     required this.name,

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api/api_interfaces.dart';
+import '../../core/providers/app_providers.dart';
 
 String mediaRouteForItem(MediaItem item) {
   switch (item.type) {
@@ -11,6 +14,33 @@ String mediaRouteForItem(MediaItem item) {
     default:
       return '/detail/${item.id}';
   }
+}
+
+/// 为一条媒体结果挑选**正确的** ApiClient。
+///
+/// 聚合搜索的结果可能来自其它服务器（[MediaItem.sourceServerId] 非空）：此时用其
+/// 来源服务器的 base+token 解析封面/海报，否则当前服务器的图片地址鉴权不过导致空白。
+/// 普通场景（sourceServerId 为 null）直接返回当前服务器 client，行为不变。
+ApiClientFactory apiClientForItem(WidgetRef ref, MediaItem item) {
+  final origin = item.sourceServerId;
+  if (origin != null) {
+    final client = ref.read(serverApiClientProvider(origin));
+    if (client != null) return client;
+  }
+  return ref.read(apiClientProvider);
+}
+
+/// 打开一条媒体结果。若来自其它服务器（聚合搜索），先把当前服务器切到来源服务器，
+/// 再导航到详情/分集/季——否则详情页会用当前服务器去取一个不存在的 itemId 而失败。
+void openMediaItem(WidgetRef ref, BuildContext context, MediaItem item) {
+  final origin = item.sourceServerId;
+  if (origin != null && origin != ref.read(currentServerProvider)?.id) {
+    ref
+        .read(currentServerProvider.notifier)
+        .syncWithAvailableServers(ref.read(serverListProvider),
+            preferredServerId: origin);
+  }
+  context.push(mediaRouteForItem(item));
 }
 
 Color readableTextColorForBackground(Color background) {

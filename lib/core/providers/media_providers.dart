@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_interfaces.dart';
 import '../providers/app_providers.dart';
+import '../services/app_logger.dart';
 
 /// 有界 LRU 保活：让导航级 provider 的结果在内存里保留「最近若干份」。
 ///
@@ -224,7 +225,61 @@ final searchQueryProvider = StateProvider<String>((ref) => '');
 /// 聚合搜索开关
 final aggregateSearchProvider = StateProvider<bool>((ref) => false);
 
-/// 搜索结果
+/// 聚合搜索结果（按服务器分组）。
+///
+/// 真正的跨服务器搜索：遍历 [serverListProvider] 里**每一台已登录**服务器，
+/// 各自用缓存的只读 client **并行**查询并合并；任一服务器失败只记日志并
+/// 跳过，不拖垮其余。返回「服务器名 → 命中列表」，供需要分组展示的端使用
+/// （移动端按服务器分组、桌面/TV 可平铺）。
+///
+/// 注：旧实现把聚合委托给 `api.search.searchAggregate()`，但那只查当前 client
+/// 指向的单台服务器（等价于普通搜索），是聚合搜索"看似开了却没效果"的根因。
+final aggregateSearchResultsProvider =
+    FutureProvider.autoDispose<Map<String, List<MediaItem>>>((ref) async {
+  final query = ref.watch(searchQueryProvider).trim();
+  final servers = ref.watch(serverListProvider);
+  final hiddenLibraries = ref.watch(hiddenLibrariesProvider);
+
+  if (query.isEmpty) return <String, List<MediaItem>>{};
+
+  // 仅搜已登录（authToken 非空）的服务器。
+  final targets =
+      servers.where((s) => (s.authToken ?? '').isNotEmpty).toList();
+  if (targets.isEmpty) return <String, List<MediaItem>>{};
+
+  // 并行查询：各服务器用缓存的只读 client（避免泄漏代理监听），互不影响；
+  // 单台异常被隔离为空结果 + 日志。
+  final entries = await Future.wait(targets.map((server) async {
+    final client = ref.read(serverApiClientProvider(server.id));
+    if (client == null) return MapEntry(server.name, const <MediaItem>[]);
+    try {
+      final items = await client.search.search(query);
+      final filtered = items.where((item) {
+        if (item.parentId != null &&
+            hiddenLibraries.contains(item.parentId)) {
+          return false;
+        }
+        return true;
+      }).toList();
+      // 打来源标记：让封面/点击解析到正确的服务器（见 MediaItem.sourceServerId）。
+      for (final item in filtered) {
+        item.sourceServerId = server.id;
+      }
+      return MapEntry(server.name, filtered);
+    } catch (e) {
+      AppLogger().w('AggregateSearch', '服务器「${server.name}」搜索失败: $e');
+      return MapEntry(server.name, const <MediaItem>[]);
+    }
+  }));
+
+  // 丢弃无命中的服务器，保留 serverListProvider 的顺序。
+  return <String, List<MediaItem>>{
+    for (final e in entries)
+      if (e.value.isNotEmpty) e.key: e.value,
+  };
+});
+
+/// 搜索结果（平铺）。聚合开关打开时跨所有服务器搜索并合并，否则只搜当前服务器。
 final searchResultsProvider = FutureProvider.autoDispose<List<MediaItem>>((ref) async {
   final query = ref.watch(searchQueryProvider);
   final isAggregate = ref.watch(aggregateSearchProvider);
@@ -232,15 +287,14 @@ final searchResultsProvider = FutureProvider.autoDispose<List<MediaItem>>((ref) 
 
   if (query.isEmpty) return [];
 
-  final api = ref.watch(apiClientProvider);
-
-  List<MediaItem> results;
   if (isAggregate) {
-    final aggregateResults = await api.search.searchAggregate(query);
-    results = aggregateResults.values.expand((list) => list).toList();
-  } else {
-    results = await api.search.search(query);
+    // 跨服务器聚合后平铺（桌面/TV 用平铺列表展示）。
+    final grouped = await ref.watch(aggregateSearchResultsProvider.future);
+    return grouped.values.expand((list) => list).toList();
   }
+
+  final api = ref.watch(apiClientProvider);
+  final results = await api.search.search(query);
 
   // 排除被屏蔽媒体库的结果（通过parentId匹配）
   return results.where((item) {

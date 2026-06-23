@@ -73,6 +73,15 @@ abstract class PlayerAdapter {
   /// 为下一次字幕选择提供类型/标题提示。
   void setSubtitleSelectionHint(String? codec, {String? title}) {}
 
+  /// 原地重载新 URL 到当前内核（免 dispose 重建、免黑屏）。
+  ///
+  /// 用于 L2「重解析续播」：外层重走 PlaybackInfo 拿到重签后的新 stream URL 后，
+  /// 在不销毁播放器的前提下切到新地址并定位到 [startPosition]，恢复网盘 302 过期、
+  /// 跨境硬断后的播放。未实现的内核抛异常，由 VideoPlayerService 降级到整体重建。
+  Future<void> reload(String url, {Duration? startPosition}) async {
+    throw UnsupportedError('reload not supported by this adapter');
+  }
+
   /// 播放
   Future<void> play();
 

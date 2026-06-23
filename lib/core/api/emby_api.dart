@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../app_identity.dart';
@@ -133,36 +135,84 @@ class EmbyApiClient implements ApiClientFactory {
     _dio.options.headers.remove('X-Emby-Token');
   }
 
+  /// 释放底层 Dio 连接并注销代理监听。
+  ///
+  /// 构造函数会向 [ProxyRuntime] 注册一个监听器；临时创建的 client（如聚合搜索
+  /// 为其它服务器建的只读 client）若不释放，会持续泄漏监听器。长生命周期的主
+  /// client 不必调用。
+  void dispose() {
+    _proxyListenerCancel?.call();
+    _proxyListenerCancel = null;
+    _dio.close(force: true);
+  }
+
+  /// 仅在「请求尚未抵达服务器」的瞬时连接错误上重试：TLS 握手被中断
+  /// （HandshakeException: Connection terminated during handshake）、连接
+  /// 超时、Socket 中断等。此类失败发生在收到任何 HTTP 响应**之前**，服务端
+  /// 未收到请求，因此即便是 POST 重试也不会产生重复副作用。
+  ///
+  /// 反例：一旦收到任意 HTTP 响应（含 4xx/5xx）或进入 receive/send 超时
+  /// （请求可能已抵达服务端），一律不重试，避免重复提交。
+  static const int _kTransientMaxAttempts = 3;
+
+  static bool _isTransientConnError(Object e) {
+    if (e is! DioException) return false;
+    if (e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout) {
+      return true;
+    }
+    // 部分平台握手中断会被 Dio 归类为 unknown，回退到底层异常类型判断。
+    final inner = e.error;
+    return inner is HandshakeException || inner is SocketException;
+  }
+
+  Future<Response<T>> _retryTransient<T>(
+      Future<Response<T>> Function() send) async {
+    var attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        return await send();
+      } catch (e) {
+        if (attempt >= _kTransientMaxAttempts || !_isTransientConnError(e)) {
+          rethrow;
+        }
+        // 线性退避：300ms / 600ms，避开瞬时网络抖动与服务端瞬时拒连。
+        await Future<void>.delayed(Duration(milliseconds: 300 * attempt));
+      }
+    }
+  }
+
   /// 包装 Dio.get，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
   Future<Response<T>> get<T>(String path,
       {Map<String, dynamic>? queryParameters, Options? options}) {
-    return _dio.get<T>(
-      path.startsWith('/') ? path.substring(1) : path,
-      queryParameters: queryParameters,
-      options: options,
-    );
+    return _retryTransient(() => _dio.get<T>(
+          path.startsWith('/') ? path.substring(1) : path,
+          queryParameters: queryParameters,
+          options: options,
+        ));
   }
 
   /// 包装 Dio.post，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
   Future<Response<T>> post<T>(String path,
       {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
-    return _dio.post<T>(
-      path.startsWith('/') ? path.substring(1) : path,
-      data: data,
-      queryParameters: queryParameters,
-      options: options,
-    );
+    return _retryTransient(() => _dio.post<T>(
+          path.startsWith('/') ? path.substring(1) : path,
+          data: data,
+          queryParameters: queryParameters,
+          options: options,
+        ));
   }
 
   /// 包装 Dio.delete，自动去掉路径开头的 /，确保 baseUrl 子路径不被丢弃
   Future<Response<T>> delete<T>(String path,
       {dynamic data, Map<String, dynamic>? queryParameters, Options? options}) {
-    return _dio.delete<T>(
-      path.startsWith('/') ? path.substring(1) : path,
-      data: data,
-      queryParameters: queryParameters,
-      options: options,
-    );
+    return _retryTransient(() => _dio.delete<T>(
+          path.startsWith('/') ? path.substring(1) : path,
+          data: data,
+          queryParameters: queryParameters,
+          options: options,
+        ));
   }
 }
 

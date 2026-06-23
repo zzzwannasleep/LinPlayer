@@ -18,6 +18,13 @@ enum PlayerCoreType {
   nativeMpv,  // MPV 原生 JNI（Android 专用，通过平台通道调用）
 }
 
+/// 重解析得到的播放地址：[url] 为主地址，[fallbackUrl] 为转码兜底地址（可空）。
+typedef ResolvedStreamUrls = ({String url, String? fallbackUrl});
+
+/// 重解析回调：重走 PlaybackInfo→重签 302，产出全新 [ResolvedStreamUrls]。
+/// 用于播放中断流（网盘 302 过期 / 跨境硬断）后在当前线路内重新取流续播。
+typedef StreamUrlResolver = Future<ResolvedStreamUrls?> Function();
+
 /// 视频播放器服务
 ///
 /// 支持动态切换播放器内核：
@@ -43,6 +50,31 @@ class VideoPlayerService extends ChangeNotifier {
   bool _fallbackActivated = false;
   bool _autoRetryInFlight = false;
   int _startupRetryCount = 0;
+
+  /// L2 重解析回调（在线播放时由播放页注入；离线/本地文件为 null → 退回旧行为）。
+  StreamUrlResolver? _streamUrlResolver;
+
+  /// 播放中断流恢复的可重入守卫。
+  bool _recoverInFlight = false;
+
+  /// 防止服务器持续不可用时无限重解析刷接口：滚动窗口内自动恢复失败过多就停手，
+  /// 暴露错误让用户手动重试 / 切换线路（被动失败才计数，用户主动恢复 preemptive 不受限）。
+  static const int _kMaxRecoverFailuresInWindow = 3;
+  static const Duration _kRecoverWindow = Duration(seconds: 90);
+  int _recoverFailureCount = 0;
+  DateTime? _recoverWindowStart;
+
+  /// L2.5 暂停陷阱：记录进入暂停的时刻；恢复时若超过 TTL 先重解析，避免撞死的网盘签名链。
+  DateTime? _pausedAt;
+
+  /// 网盘 302 签名链的保守存活时长（默认值）。暂停超过它再恢复就先重取流。
+  /// 实际生效值由 [initialize] 的 streamUrlTtl 注入（L0 按服务器形态调档：
+  /// 302 网盘调短、硬盘直传可放宽/接近不触发）。
+  static const Duration _kStreamUrlTtl = Duration(minutes: 5);
+
+  /// 当前生效的签名链 TTL（L0 注入；null 时退回 [_kStreamUrlTtl]）。
+  Duration? _streamUrlTtl;
+  Duration get _effectiveStreamUrlTtl => _streamUrlTtl ?? _kStreamUrlTtl;
   String? _selectedSubtitleTrackId;
   String? _selectedAudioTrackId;
   int? _surfaceViewId;  // For gpu-next rendering on Android
@@ -241,7 +273,13 @@ class VideoPlayerService extends ChangeNotifier {
       },
       onError: () {
         _setPendingPlayingState(null, notify: false);
-        unawaited(_attemptStartupRetry());
+        // 已起播后的错误 = 播放中断流(网盘302过期/跨境硬断) → L2 重解析原地续播；
+        // 尚未起播的错误 = 起播失败 → 维持原有 5 次直连重试 + 转码兜底。
+        if (_hasReportedStart) {
+          unawaited(_recoverInPlace());
+        } else {
+          unawaited(_attemptStartupRetry());
+        }
         notifyListeners();
       },
       onSubtitleCue: (text, start, end) =>
@@ -473,6 +511,140 @@ class VideoPlayerService extends ChangeNotifier {
     }
   }
 
+  /// L2 — 播放中断流的「重解析 + 原地续播」。
+  ///
+  /// 与起播重试的区别：①重走 PlaybackInfo 拿重签后的新地址（网盘 302 过期的正解，
+  /// 因为复用旧字符串可能再撞同一条已重定向的死链）；②优先在同一内核 `reload`（免黑屏），
+  /// 仅在内核不支持/重载失败时才整体重建；③用独立的局部重试预算，不受起播 5 次终身计数限制，
+  /// 长片多次过期事件不会被一次性耗尽。
+  ///
+  /// [preemptive] 为 true 时用于 L2.5 暂停陷阱：恢复播放前主动重取流，此时无错误态，
+  /// 跳过 hasError 守卫；重解析失败也不算错误，退回用原地址重载（重开 Emby 端点同样重签 302）。
+  Future<void> _recoverInPlace({bool preemptive = false}) async {
+    if (_disposed || _recoverInFlight || _adapter == null) return;
+    if (!preemptive && !(_adapter?.hasError ?? false)) return;
+
+    // 滚动窗口熔断：被动恢复在短时间内连续失败过多 → 停手，暴露错误（用户重试/切线）。
+    final windowNow = DateTime.now();
+    if (_recoverWindowStart == null ||
+        windowNow.difference(_recoverWindowStart!) > _kRecoverWindow) {
+      _recoverWindowStart = windowNow;
+      _recoverFailureCount = 0;
+    }
+    if (!preemptive && _recoverFailureCount >= _kMaxRecoverFailuresInWindow) {
+      _logger.w(
+        'VideoPlayerService',
+        '短时间内多次断流恢复失败，停止自动恢复，暴露错误供用户重试/切换线路',
+      );
+      return;
+    }
+
+    _recoverInFlight = true;
+    // 复用 _autoRetryInFlight 抑制错误卡片，恢复期间不闪「加载失败」。
+    _autoRetryInFlight = true;
+    notifyListeners();
+    try {
+      final resumePosition = position > Duration.zero
+          ? position
+          : (_initialStartPosition ?? Duration.zero);
+      final hardwareDecoding =
+          _lastStartWithSoftwareDecoding ? false : _lastHardwareDecoding;
+      final audioTrackId = _selectedAudioTrackId;
+      final subtitleTrackId = _selectedSubtitleTrackId;
+
+      // 1) 重解析：重走 PlaybackInfo→重签 302。失败则退回原地址（重开 Emby 端点也会重签）。
+      var targetUrl = _primaryVideoUrl ?? '';
+      final resolver = _streamUrlResolver;
+      if (resolver != null) {
+        try {
+          final resolved = await resolver();
+          if (resolved != null && resolved.url.isNotEmpty) {
+            targetUrl = resolved.url;
+            _primaryVideoUrl = resolved.url;
+            _fallbackVideoUrl = resolved.fallbackUrl;
+            _fallbackActivated = false; // 新链路，允许重新兜底
+          }
+        } catch (error, stackTrace) {
+          _logger.eWithStack(
+            'VideoPlayerService',
+            '播放中重解析地址失败，退回原地址重连',
+            error,
+            stackTrace,
+          );
+        }
+      }
+
+      if (targetUrl.isEmpty) {
+        // 既无法重解析也无原地址：交给起播兜底路径。
+        await _attemptStartupRetry();
+        return;
+      }
+
+      // 2) 原地重载（免黑屏）；3 次局部重试后降级到整体重建。
+      const attempts = 3;
+      Object? lastError;
+      for (var i = 1; i <= attempts; i++) {
+        if (_disposed) return;
+        try {
+          try {
+            await _adapter!.reload(targetUrl, startPosition: resumePosition);
+          } on UnsupportedError {
+            // 内核不支持原地重载（如 ExoPlayer）：整体重建，但用刚重解析的新地址。
+            await _recreateAdapter();
+            await _initializeAdapterForUrl(
+              targetUrl,
+              startPosition: resumePosition,
+              hardwareDecoding: hardwareDecoding,
+              preferredSubtitleLanguage: _lastPreferredSubtitleLanguage,
+              useGpuNext: _useGpuNext,
+            );
+          }
+          await _adapter!.play();
+          await _restoreTrackSelections(
+            audioTrackId: audioTrackId,
+            subtitleTrackId: subtitleTrackId,
+          );
+          _startupRetryCount = 0; // 恢复成功，归零起播预算。
+          _recoverFailureCount = 0; // 恢复成功，清空熔断计数。
+          _logger.i('VideoPlayerService', '播放中断流原地恢复成功: attempt=$i');
+          return;
+        } catch (error, stackTrace) {
+          lastError = error;
+          _logger.eWithStack(
+            'VideoPlayerService',
+            '播放中原地恢复失败: attempt=$i',
+            error,
+            stackTrace,
+          );
+          if (i < attempts) {
+            await Future.delayed(Duration(milliseconds: 350 * i));
+          }
+        }
+      }
+
+      // 3) 原地恢复彻底失败 → 转码兜底；仍失败则让 hasError 自然暴露（用户重试/手动切线）。
+      final fallbackActivated = await _tryActivateFallbackUrl(
+        startPosition: resumePosition,
+        hardwareDecoding: hardwareDecoding,
+        preferredSubtitleLanguage: _lastPreferredSubtitleLanguage,
+        audioTrackId: audioTrackId,
+        subtitleTrackId: subtitleTrackId,
+        autoPlay: true,
+      );
+      if (!fallbackActivated) {
+        _recoverFailureCount++; // 熔断计数：被动恢复彻底失败。
+        _logger.w(
+          'VideoPlayerService',
+          '播放中恢复与转码兜底均失败，暴露错误供用户重试/切换线路: ${lastError ?? ''}',
+        );
+      }
+    } finally {
+      _recoverInFlight = false;
+      _autoRetryInFlight = false;
+      notifyListeners();
+    }
+  }
+
   /// 初始化播放器
   /// 已释放标记。在异步初始化途中用户返回（dispose 先于 initialize 完成）时，
   /// 用它让 initialize/play 直接短路，避免在屏幕已销毁后才创建适配器、
@@ -497,6 +669,8 @@ class VideoPlayerService extends ChangeNotifier {
     String? preferredSubtitleLanguage,
     int? surfaceViewId,  // For gpu-next rendering on Android
     bool useGpuNext = false,  // gpu-next rendering mode
+    StreamUrlResolver? streamUrlResolver,  // L2 在线断流重解析；离线/本地为 null
+    Duration? streamUrlTtl,  // L0 按服务器形态调档的签名链 TTL；null 用默认 5 分钟
   }) async {
     // 屏幕已销毁：不要再创建/初始化适配器，否则会留下后台空跑的孤儿播放器。
     if (_disposed) return;
@@ -510,6 +684,12 @@ class VideoPlayerService extends ChangeNotifier {
     _lastFallbackReason = fallbackReason;
     _primaryVideoUrl = videoUrl;
     _fallbackVideoUrl = fallbackVideoUrl;
+    _streamUrlResolver = streamUrlResolver;
+    _streamUrlTtl = streamUrlTtl;
+    _pausedAt = null;
+    _recoverInFlight = false;
+    _recoverFailureCount = 0;
+    _recoverWindowStart = null;
     _fallbackActivated = false;
     _initialStartPosition = startPosition;
     _lastDolbyVisionFix = dolbyVisionFix ?? false;
@@ -698,6 +878,24 @@ class VideoPlayerService extends ChangeNotifier {
         isPlaybackActionPending) {
       return;
     }
+    // L2.5 暂停陷阱：暂停超过 TTL 再恢复，先重取流（重签 302）再播，
+    // 避免恢复瞬间朝已失效的网盘签名链发 Range 请求导致断流。仅在线流生效。
+    if (_streamUrlResolver != null &&
+        _pausedAt != null &&
+        DateTime.now().difference(_pausedAt!) > _effectiveStreamUrlTtl) {
+      _pausedAt = null;
+      _setPendingPlayingState(true);
+      try {
+        await _recoverInPlace(preemptive: true);
+      } catch (_) {
+        _setPendingPlayingState(null);
+        rethrow;
+      }
+      _startHideControlsTimer();
+      notifyListeners();
+      return;
+    }
+    _pausedAt = null;
     _setPendingPlayingState(true);
     try {
       await _playWithStartupRetries();
@@ -764,6 +962,8 @@ class VideoPlayerService extends ChangeNotifier {
       _setPendingPlayingState(null);
       rethrow;
     }
+    // L2.5：记录进入暂停的时刻，恢复时据此判断网盘签名链是否可能已过期。
+    _pausedAt = DateTime.now();
     _reportProgress();
     _cancelHideControlsTimer();
     notifyListeners();
@@ -1077,6 +1277,11 @@ class VideoPlayerService extends ChangeNotifier {
     _pendingPlaybackTimer = null;
     _primaryVideoUrl = null;
     _fallbackVideoUrl = null;
+    _streamUrlResolver = null;
+    _pausedAt = null;
+    _recoverInFlight = false;
+    _recoverFailureCount = 0;
+    _recoverWindowStart = null;
     _fallbackActivated = false;
     _initialStartPosition = null;
     _lastPreferredSubtitleLanguage = null;

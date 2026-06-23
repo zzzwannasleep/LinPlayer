@@ -59,6 +59,14 @@ class MpvPlayerPlugin(
                 val diskCacheBackBytes = call.argument<Number>("diskCacheBackBytes")?.toLong() ?: 0L
                 createPlayer(videoUrl, startPositionMs, hardwareDecoding, surfaceViewId, useGpuNext, httpProxy, userAgent, videoCacheDir, diskCacheForwardBytes, diskCacheBackBytes, result)
             }
+            "reloadPlayer" -> {
+                // L2 原地重载：外层重解析重签后的新 URL，复用同一 surface/texture，免黑屏。
+                val playerId = call.argument<String>("playerId") ?: ""
+                val videoUrl = call.argument<String>("videoUrl") ?: ""
+                val startPositionMs = call.argument<Number>("startPositionMs")?.toInt() ?: 0
+                getPlayer(playerId)?.reload(videoUrl, startPositionMs)
+                result.success(true)
+            }
             "play" -> {
                 val playerId = call.argument<String>("playerId") ?: ""
                 getPlayer(playerId)?.play()
@@ -556,6 +564,11 @@ class MpvPlayerPlugin(
             MPVLib.setOptionString("demuxer-max-bytes", diskCacheForwardBytes.toString())
             MPVLib.setOptionString("demuxer-max-back-bytes", diskCacheBackBytes.toString())
             MPVLib.setOptionString("demuxer-readahead-secs", "180")
+            // L1 预防层：网络掉线时 libavformat 透明重连(连当前 URL)，瞬断在缓冲区内消化。
+            // 只开 reconnect_on_network_error，不开 http_error——网盘 302 过期的 4xx/5xx 要
+            // 上抛交给 Dart 层 L2 重解析重签，不能让 ffmpeg 死磕过期链把错误吞掉。
+            MPVLib.setOptionString("stream-lavf-o",
+                "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30")
             android.util.Log.i(TAG, "mpv disk cache: dir=$videoCacheDir fwd=$diskCacheForwardBytes back=$diskCacheBackBytes")
         } else {
             // 本地文件：无需大缓冲，沿用小额内存缓冲。
@@ -636,6 +649,19 @@ class MpvPlayerPlugin(
 
         fun seekTo(positionMs: Int) {
             MPVLib.command(arrayOf("seek", "${positionMs / 1000.0}", "absolute"))
+        }
+
+        fun reload(videoUrl: String, startPositionMs: Int) {
+            // L2 原地重载：与 createPlayer 的加载逻辑一致——先用 start 属性定位再 loadfile
+            // replace，避免 loadfile 后立刻 seek 落空的竞态。网络/缓存/重连等 mpv 选项已在
+            // createPlayer 时写入同一 mpv 上下文，重载无需重设，直接复用。
+            if (startPositionMs > 0) {
+                MPVLib.setPropertyString("start", "${startPositionMs / 1000.0}")
+            } else {
+                MPVLib.setPropertyString("start", "none")
+            }
+            MPVLib.command(arrayOf("loadfile", videoUrl, "replace"))
+            android.util.Log.i(TAG, "reload: loadfile replace from ${startPositionMs / 1000.0}s")
         }
 
         fun setSpeed(speed: Double) {

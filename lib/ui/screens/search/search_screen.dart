@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api/api_interfaces.dart';
-import '../../../core/api/emby_api.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../core/theme/app_motion.dart';
@@ -194,35 +193,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
   
   Widget _buildAggregateResults() {
-    final query = ref.watch(searchQueryProvider);
-    final servers = ref.watch(serverListProvider);
-    
-    return FutureBuilder<Map<String, List<MediaItem>>>(
-      future: () async {
-        final results = <String, List<MediaItem>>{};
-        for (final server in servers) {
-          if (server.authToken == null) continue;
-          try {
-            final client = EmbyApiClient(
-              baseUrl: server.activeLineUrl,
-              authToken: server.authToken,
-              userId: server.userId,
-            );
-            final items = await client.search.search(query);
-            if (items.isNotEmpty) results[server.name] = items;
-          } catch (_) {}
-        }
-        return results;
-      }(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const AppLoadingIndicator();
-        }
-        final aggregateData = snapshot.data ?? {};
+    // 复用共享的跨服务器聚合 provider（并行查询 + 失败记日志），不再在 UI 层
+    // 自己串行遍历服务器，三端口径统一。
+    final aggregateAsync = ref.watch(aggregateSearchResultsProvider);
+
+    return aggregateAsync.when(
+      loading: () => const AppLoadingIndicator(),
+      error: (e, _) => Center(child: Text('搜索失败: $e')),
+      data: (aggregateData) {
         if (aggregateData.isEmpty) {
           return const Center(child: Text('没有找到结果'));
         }
-        
+
         return ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: aggregateData.length,
@@ -251,7 +233,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 ...items.map((item) => Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
-                    onTap: () => context.push(mediaRouteForItem(item)),
+                    onTap: () => openMediaItem(ref, context, item),
                     title: Text(item.name),
                     subtitle: Text(item.type == 'Movie' ? '电影' : '剧集'),
                     trailing: item.communityRating != null
