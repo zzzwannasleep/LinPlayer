@@ -20,7 +20,9 @@ import '../screens/server/desktop_server_screen.dart';
 import '../screens/server/desktop_add_server_screen.dart';
 import '../screens/source/desktop_source_login_screen.dart';
 import '../screens/source/desktop_source_picker_screen.dart';
+import '../screens/anirss/desktop_anirss_detail_screen.dart';
 import '../../ui/screens/source/source_player_screen.dart';
+import '../../core/sources/anirss/anirss_nav_args.dart';
 import '../../core/sources/source_kind.dart';
 import '../shell/desktop_shell.dart';
 
@@ -208,6 +210,17 @@ final desktopRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _buildSlidePage(
           child: DesktopSourceLoginScreen(
             kind: sourceKindFromName(state.pathParameters['kind']),
+          ),
+          state: state,
+          fromRight: true,
+        ),
+      ),
+      // 追番源：番剧详情页（全屏覆盖壳，经 context.push 进入）。
+      GoRoute(
+        path: '/anirss-detail',
+        pageBuilder: (context, state) => _buildSlidePage(
+          child: DesktopAniRssDetailScreen(
+            args: state.extra as AniRssDetailArgs,
           ),
           state: state,
           fromRight: true,

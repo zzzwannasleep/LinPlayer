@@ -21,6 +21,9 @@ import '../ui/screens/server/icon_select_screen.dart';
 import '../ui/screens/server/server_lines_screen.dart';
 import '../ui/screens/server/server_list_screen.dart';
 import '../ui/screens/settings/settings_screen.dart';
+import '../core/sources/anirss/anirss_nav_args.dart';
+import '../ui/screens/anirss/anirss_detail_screen.dart';
+import '../ui/screens/anirss/anirss_shell_screen.dart';
 import '../ui/screens/source/source_browse_screen.dart';
 import '../ui/screens/source/source_login_screen.dart';
 import '../ui/screens/source/source_picker_screen.dart';
@@ -231,10 +234,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/downloads',
         builder: (context, state) => const DownloadScreen(),
       ),
-      // 网盘/聚合源：文件浏览页（按 currentServer）。
+      // 网盘/聚合源：文件浏览页（按 currentServer）。Ani-rss 走专属 3-Tab 迷你应用。
       GoRoute(
         path: '/browse',
-        builder: (context, state) => const SourceBrowseScreen(),
+        builder: (context, state) => Consumer(
+          builder: (context, ref, _) {
+            final server = ref.watch(currentServerProvider);
+            if (server?.sourceKind == SourceKind.anirss) {
+              return const AniRssShellScreen();
+            }
+            return const SourceBrowseScreen();
+          },
+        ),
+      ),
+      // Ani-rss 详情页（server+ani 经 extra 传入）。
+      GoRoute(
+        path: '/anirss-detail',
+        builder: (context, state) =>
+            AniRssDetailScreen(args: state.extra as AniRssDetailArgs),
       ),
       // 网盘/聚合源：直链播放页（server+entry 经 extra 传入）。
       GoRoute(

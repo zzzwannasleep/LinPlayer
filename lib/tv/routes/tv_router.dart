@@ -11,6 +11,8 @@ import '../../ui/screens/source/source_player_screen.dart';
 import '../../core/sources/source_kind.dart';
 import '../screens/settings/tv_settings_screen.dart';
 import '../screens/settings/tv_lan_control_screen.dart';
+import '../screens/anirss/tv_anirss_detail_screen.dart';
+import '../../core/sources/anirss/anirss_nav_args.dart';
 import '../screens/detail/tv_detail_screen.dart';
 import '../screens/player/tv_player_screen.dart';
 import '../screens/onboarding/tv_onboarding_screen.dart';
@@ -82,6 +84,12 @@ final tvRouter = GoRouter(
         final mediaId = state.pathParameters['mediaId'];
         return TvDetailScreen(mediaId: mediaId);
       },
+    ),
+    // Ani-rss 详情页（独立页面，无导航栏；Ani 对象经 extra 传）
+    GoRoute(
+      path: '/tv/anirss-detail',
+      builder: (context, state) =>
+          TvAniRssDetailScreen(args: state.extra as AniRssDetailArgs),
     ),
     // 主页面（带导航栏 Shell）
     ShellRoute(

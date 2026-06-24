@@ -7,6 +7,7 @@ import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../../../ui/utils/media_helpers.dart';
+import '../anirss/tv_anirss_view.dart';
 import '../source/tv_source_browse_screen.dart';
 import '../../theme/tv_design_tokens.dart';
 import '../../theme/tv_metrics.dart';
@@ -50,8 +51,11 @@ class _TvHomeScreenState extends ConsumerState<TvHomeScreen> {
       return _buildEmptyServers(m);
     }
 
-    // 网盘/聚合源：首页改渲染文件浏览视图（保留侧边栏）。
+    // 网盘/聚合源：首页改渲染对应视图（保留侧边栏）。
     final currentServer = ref.watch(currentServerProvider);
+    if (currentServer != null && currentServer.sourceKind == SourceKind.anirss) {
+      return TvAniRssView(server: currentServer);
+    }
     if (currentServer != null && currentServer.isFileBrowse) {
       return TvSourceBrowseView(server: currentServer);
     }

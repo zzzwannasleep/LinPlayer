@@ -1,103 +1,40 @@
 import 'dart:convert';
 
-import 'package:dio/dio.dart';
-
+import 'anirss/anirss_token.dart';
 import '../providers/server_providers.dart';
 import 'media_source_backend.dart';
 import 'source_http.dart';
 
-/// Ani-rss 后端（wushuo894/ani-rss）。
+/// Ani-rss 后端（wushuo894/ani-rss），负责**播放路径**（列目录 / 取流 / 字幕）。
+/// 浏览/订阅/设置等深度适配走类型化的 `AniRssApi`，二者共享 [AniRssAuth] 的 token。
 ///
-/// 它是追番下载管理器，但暴露了可播放的文件接口：
-/// - `POST /api/login` {username,password} → `data` 是令牌字符串。
-/// - 鉴权：请求头 `Authorization: <token>` 或查询 `?s=<token>`（源码 auth/fun Header/Form）。
-/// - `POST /api/listAni` → `data.weekList[].items[]` 为番剧列表（当作「文件夹」）。
-/// - `POST /api/playList`（body=Ani）→ `data` 为 `PlayItem[]`（每集文件）。
-/// - `GET /api/file?filename=<base64>` 流式返回视频（服务端 base64 解码 filename）。
+/// 端点/字段以仓库根 `api-docs.json`（OpenAPI v3）为准：
+/// - `POST /api/listAni` → `ResultListAni`，data=`ListAni{weekList:[{items:Ani[]}]}`。
+/// - `POST /api/playList` body=`Ani` → `ResultListPlayItem`，data=`PlayItem[]`。
+///   `PlayItem.filename` 已是「路径+文件名」base64，`subtitles[]` 随列表返回。
+/// - `GET /api/file?filename=<base64>` 流式返回视频（filename 直接用，勿再编码）。
 ///
-/// 浏览映射：根目录列番剧；进入某番剧 → 列该番剧的剧集文件；点文件 → /api/file 取流。
+/// 浏览映射（泛用浏览页用）：根目录列番剧；进入某番剧 → playList 列剧集；点文件 → 取流。
 class AniRssBackend implements MediaSourceBackend {
   @override
   SourceKind get kind => SourceKind.anirss;
 
-  final Map<String, String> _tokenCache = {};
+  AniRssAuth get _auth => AniRssAuth.instance;
 
-  Dio _dio(ServerConfig server) =>
-      buildSourceDio(baseUrl: normalizeBaseUrl(server.activeLineUrl));
-
-  /// 账密登录拿令牌。
+  /// 账密登录拿令牌（登录页复用）。
   static Future<String> login(
     String baseUrl,
     String username,
     String password,
-  ) async {
-    final dio = buildSourceDio(baseUrl: normalizeBaseUrl(baseUrl));
-    final Response resp;
-    try {
-      resp = await dio.post('/api/login', data: {
-        'username': username,
-        'password': password,
-      });
-    } catch (e) {
-      throw SourceException('无法连接服务器: $e', cause: e);
-    }
-    final body = resp.data;
-    if (body is! Map) throw SourceException('登录响应异常');
-    if (body['code'] != 200) {
-      throw SourceException(
-        body['message']?.toString() ?? '登录失败',
-        isAuth: true,
-      );
-    }
-    final token = (body['data'] ?? '').toString();
-    if (token.isEmpty) throw SourceException('登录未返回令牌', isAuth: true);
-    return token;
-  }
-
-  Future<String> _ensureToken(ServerConfig server, {bool force = false}) async {
-    if (!force) {
-      final cached = _tokenCache[server.id] ?? server.authToken;
-      if (cached != null && cached.isNotEmpty) return cached;
-    }
-    final u = server.username ?? '';
-    final p = server.password ?? '';
-    if (u.isEmpty) throw SourceException('登录已过期，请重新登录', isAuth: true);
-    final token = await login(server.activeLineUrl, u, p);
-    _tokenCache[server.id] = token;
-    return token;
-  }
-
-  Future<Response> _authed(
-    ServerConfig server,
-    String path, {
-    Object? data,
-    bool retried = false,
-  }) async {
-    final token = await _ensureToken(server, force: retried);
-    final resp = await _dio(server).post(
-      path,
-      data: data,
-      options: Options(headers: {'Authorization': token}),
-    );
-    final body = resp.data;
-    final code = body is Map ? body['code'] : null;
-    if (code == 403 && !retried) {
-      _tokenCache.remove(server.id);
-      return _authed(server, path, data: data, retried: true);
-    }
-    if (code != 200) {
-      final msg = body is Map ? body['message']?.toString() : null;
-      throw SourceException(msg ?? 'Ani-rss 请求失败（$code）', isAuth: code == 403);
-    }
-    return resp;
-  }
+  ) =>
+      AniRssAuth.login(baseUrl, username, password);
 
   @override
   Future<List<SourceEntry>> listDir(ServerConfig server, {String? dirId}) async {
-    // 根目录：列番剧（当作文件夹）。
+    // 根目录：列番剧（当作文件夹）。data=ListAni{weekList:[{items:Ani[]}]}。
     if (dirId == null || dirId.isEmpty) {
-      final resp = await _authed(server, '/api/listAni');
-      final data = resp.data['data'] as Map?;
+      final resp = await _auth.authed(server, '/api/listAni');
+      final data = _auth.unwrap(resp) as Map?;
       final weekList = (data?['weekList'] as List?) ?? const [];
       final entries = <SourceEntry>[];
       final seen = <String>{};
@@ -111,7 +48,8 @@ class AniRssBackend implements MediaSourceBackend {
             id: 'ani:${jsonEncode(am)}',
             name: am['title']?.toString() ?? '未命名',
             isDir: true,
-            thumbUrl: _httpOrNull(am['cover']?.toString()),
+            // image 是 https:// 封面；cover 是服务端本地路径，不可直接取。
+            thumbUrl: _httpOrNull(am['image']?.toString()),
             raw: {'ani': am},
           ));
         }
@@ -123,21 +61,34 @@ class AniRssBackend implements MediaSourceBackend {
     // 番剧层：用该 Ani 调 playList 列出剧集文件。
     if (dirId.startsWith('ani:')) {
       final aniMap = jsonDecode(dirId.substring(4)) as Map<String, dynamic>;
-      final resp = await _authed(server, '/api/playList', data: aniMap);
-      final list = (resp.data['data'] as List?) ?? const [];
-      return list.map<SourceEntry>((p) {
-        final pm = (p as Map);
-        final filename = pm['filename']?.toString() ?? '';
+      final resp = await _auth.authed(server, '/api/playList', data: aniMap);
+      final list = (_auth.unwrap(resp) as List?) ?? const [];
+      final entries = list.map<SourceEntry>((p) {
+        final pm = (p as Map).cast<String, dynamic>();
+        // filename 已是 base64（路径+文件名），原样保存供取流用。
+        final b64Filename = pm['filename']?.toString() ?? '';
+        final display = pm['title']?.toString() ??
+            pm['name']?.toString() ??
+            _safeDecode(b64Filename);
         return SourceEntry(
-          id: 'file:${base64.encode(utf8.encode(filename))}',
-          name: pm['title']?.toString() ??
-              pm['name']?.toString() ??
-              filename.split('/').last,
+          id: 'file:$b64Filename',
+          name: display,
           isDir: false,
           isVideo: true,
-          raw: {'filename': filename},
+          raw: {
+            'filename': b64Filename,
+            'episode': pm['episode'],
+            'subtitles': pm['subtitles'],
+          },
         );
       }).toList();
+      entries.sort((a, b) {
+        final ea = (a.raw?['episode'] as num?)?.toDouble() ?? double.infinity;
+        final eb = (b.raw?['episode'] as num?)?.toDouble() ?? double.infinity;
+        final c = ea.compareTo(eb);
+        return c != 0 ? c : a.name.compareTo(b.name);
+      });
+      return entries;
     }
 
     return const [];
@@ -145,21 +96,60 @@ class AniRssBackend implements MediaSourceBackend {
 
   @override
   Future<List<SourceEntry>> search(ServerConfig server, String query) =>
-      // 无源端搜索：交给浏览控制器降级为当前目录本地名称过滤。
       throw UnsupportedError('Ani-rss 不支持源端搜索');
 
   @override
   Future<ResolvedPlay> resolvePlay(ServerConfig server, SourceEntry entry) async {
-    final filename = (entry.raw?['filename'] ?? '').toString();
-    if (filename.isEmpty) throw SourceException('缺少文件信息');
-    final token = await _ensureToken(server);
+    final b64Filename = (entry.raw?['filename'] ?? '').toString();
+    if (b64Filename.isEmpty) throw SourceException('缺少文件信息');
+    final token = await _auth.ensureToken(server);
     final base = normalizeBaseUrl(server.activeLineUrl);
-    final b64 = base64.encode(utf8.encode(filename));
-    // 鉴权走查询参数 ?s=<token>，免去逐流 header（服务端 Form 鉴权）。
+    // filename 已是 base64，仅做查询参数转义，不可二次 base64。
     final url = '$base/api/file'
-        '?filename=${Uri.encodeQueryComponent(b64)}'
-        '&s=${Uri.encodeQueryComponent(token)}';
-    return ResolvedPlay(url: url, title: entry.name);
+        '?filename=${Uri.encodeQueryComponent(b64Filename)}'
+        '&${AniRssAuth.header}=${Uri.encodeQueryComponent(token)}';
+    final headers = {AniRssAuth.header: token};
+    return ResolvedPlay(
+      url: url,
+      title: entry.name,
+      httpHeaders: headers,
+      subtitles: _subtitlesOf(entry, base, token, headers),
+    );
+  }
+
+  /// 把 PlayItem.subtitles 映射成外挂字幕轨（仅取可解析的绝对/相对 URL）。
+  List<SourceSubtitle> _subtitlesOf(
+    SourceEntry entry,
+    String base,
+    String token,
+    Map<String, String> headers,
+  ) {
+    final raw = entry.raw?['subtitles'];
+    if (raw is! List) return const [];
+    final subs = <SourceSubtitle>[];
+    for (final s in raw) {
+      if (s is! Map) continue;
+      final u = s['url']?.toString() ?? '';
+      if (u.isEmpty) continue;
+      final full = u.startsWith('http')
+          ? u
+          : '$base${u.startsWith('/') ? '' : '/'}$u';
+      final sep = full.contains('?') ? '&' : '?';
+      subs.add(SourceSubtitle(
+        url: '$full$sep${AniRssAuth.header}=${Uri.encodeQueryComponent(token)}',
+        title: s['name']?.toString(),
+        httpHeaders: headers,
+      ));
+    }
+    return subs;
+  }
+
+  String _safeDecode(String b64) {
+    try {
+      return utf8.decode(base64.decode(b64)).split('/').last;
+    } catch (_) {
+      return b64;
+    }
   }
 
   String? _httpOrNull(String? url) {

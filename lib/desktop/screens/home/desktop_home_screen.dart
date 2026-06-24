@@ -8,6 +8,7 @@ import '../../../core/api/api_interfaces.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/media_providers.dart';
 import '../source/desktop_source_browse_screen.dart';
+import '../anirss/desktop_anirss_view.dart';
 import '../../../core/services/watch_history/watch_history_models.dart';
 import '../../../core/theme/app_motion.dart';
 import '../../../core/widgets/app_shimmer.dart';
@@ -70,6 +71,11 @@ class _DesktopHomeScreenState extends ConsumerState<DesktopHomeScreen>
         ref.watch(hideDailyRecommendationsProvider);
     final servers = ref.watch(serverListProvider);
     final currentServer = ref.watch(currentServerProvider);
+    // 追番源：首页内容区改渲染 Ani-rss 迷你应用（保留侧边栏壳）。
+    if (currentServer != null &&
+        currentServer.sourceKind == SourceKind.anirss) {
+      return const DesktopAniRssView();
+    }
     // 网盘/聚合源：首页内容区改渲染文件浏览视图（保留侧边栏壳）。
     if (currentServer != null && currentServer.isFileBrowse) {
       return const DesktopSourceBrowseView();
