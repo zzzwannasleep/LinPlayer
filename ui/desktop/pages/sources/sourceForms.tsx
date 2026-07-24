@@ -17,6 +17,7 @@ import {
   quarkScanPoll,
   quarkScanStart,
   sourceLogin,
+  sourcePasswordLogin,
   sourceQrPoll,
   sourceQrStart,
   startupDeepLink,
@@ -194,6 +195,10 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
   const [stremio, setStremio] = useState(STREMIO_DEFAULT);
   // 百度双路线:扫码 / Cookie。默认扫码。
   const [baiduWay, setBaiduWay] = useState<"scan" | "cookie">("scan");
+  // 天翼189 两路线:扫码 / 账密(手机号+密码)。默认扫码。
+  const [pan189Way, setPan189Way] = useState<"scan" | "password">("scan");
+  // 移动云139 三路线:扫码 / 手机号密码 / 手动粘 Authorization。默认扫码。
+  const [pan139Way, setPan139Way] = useState<"scan" | "password" | "manual">("scan");
   const [batchText, setBatchText] = useState("");
   const [qrPayload, setQrPayload] = useState("");
   const [exportText, setExportText] = useState("");
@@ -447,13 +452,16 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
   useEffect(() => {
     // 只有扫码型源在扫码分支时才留轮询;切走一律停 + 清码。
     const scanning =
-      sel === "aliyundrive" || sel === "pan189" || (sel === "baidu" && baiduWay === "scan");
+      sel === "aliyundrive" ||
+      (sel === "pan189" && pan189Way === "scan") ||
+      (sel === "pan139" && pan139Way === "scan") ||
+      (sel === "baidu" && baiduWay === "scan");
     if (!scanning) {
       stopQrPoll();
       setQr(null);
       setQrMsg("");
     }
-  }, [sel, baiduWay, stopQrPoll]);
+  }, [sel, baiduWay, pan189Way, pan139Way, stopQrPoll]);
 
   /** 通用扫码:core 出码 → 每 2s 轮询 → confirmed 时把 credentials 塞进 source_login 落库。 */
   const startSourceScan = (kind: string) =>
@@ -490,6 +498,16 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
     run(async () => {
       if (!cookie.trim()) throw new Error("请粘贴凭据");
       await sourceLogin(kind, "", "", "", cookie.trim());
+      await nameActiveSource();
+      onDone("netdisk");
+    });
+
+  /** 账密登录(天翼189):手机号+密码换令牌 → 令牌塞进 source_login 落库。 */
+  const submitPasswordLogin = (kind: string) =>
+    run(async () => {
+      if (!username.trim() || !password) throw new Error("请填写手机号和密码");
+      const creds = await sourcePasswordLogin(kind, username.trim(), password);
+      await sourceLogin(kind, "", "", "", null, creds);
       await nameActiveSource();
       onDone("netdisk");
     });
@@ -630,14 +648,11 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
       ],
       pan189: [
         "天翼云盘",
-        <>用<b>天翼云盘 App</b> 扫码登录，确认后自动完成。</>,
+        <>用<b>天翼云盘 App</b> 扫码登录；也可用<b>手机号 + 密码</b>直接登录。</>,
       ],
       pan139: [
         "移动云盘",
-        <>
-          浏览器登录 <b>yun.139.com</b> 后，从开发者工具 Network 里复制请求头
-          <b> Authorization</b>（Basic 开头那串）粘到下方。移动云无扫码登录接口。
-        </>,
+        <>用<b>移动云盘 App</b> 扫码登录；也可用手机号 + 密码，或手动粘贴 Authorization。</>,
       ],
       stremio: [
         "Stremio",
@@ -714,6 +729,33 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
       </div>
     );
 
+    // 手机号+密码子表单(天翼189 / 移动云139 共用)。
+    const pwdFields = (
+      <>
+        <p className="hint">用网盘账号的手机号和登录密码。若提示需要图形验证码，请改用其它登录方式或稍后再试。</p>
+        <div className="fld">
+          <label>手机号</label>
+          <input
+            className="field"
+            autoComplete="off"
+            placeholder="13800138000"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+        </div>
+        <div className="fld">
+          <label>密码</label>
+          <input
+            className="field"
+            type="password"
+            autoComplete="off"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+      </>
+    );
+
     switch (sel) {
       case "emby":
         return (
@@ -749,7 +791,14 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
         return (
           <>
             {nameField("我的天翼云盘")}
-            {scanBox("pan189", "天翼云盘 App")}
+            <div className="seg" style={{ marginBottom: 14 }}>
+              {(["scan", "password"] as const).map((w) => (
+                <span key={w} className={pan189Way === w ? "on" : ""} onClick={() => setPan189Way(w)}>
+                  {w === "scan" ? "扫码登录" : "手机号密码"}
+                </span>
+              ))}
+            </div>
+            {pan189Way === "scan" ? scanBox("pan189", "天翼云盘 App") : pwdFields}
           </>
         );
 
@@ -757,21 +806,36 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
         return (
           <>
             {nameField("我的移动云盘")}
-            <p className="hint">
-              移动云盘无扫码接口。浏览器登录 yun.139.com 后，从开发者工具 Network
-              里复制任一请求的 <b>Authorization</b> 头（Basic 开头那串）粘到下方。
-            </p>
-            <div className="fld">
-              <label>Authorization</label>
-              <textarea
-                className="field"
-                rows={4}
-                spellCheck={false}
-                placeholder="Basic MTA3MDE6..."
-                value={cookie}
-                onChange={(e) => setCookie(e.target.value)}
-              />
+            <div className="seg" style={{ marginBottom: 14 }}>
+              {(["scan", "password", "manual"] as const).map((w) => (
+                <span key={w} className={pan139Way === w ? "on" : ""} onClick={() => setPan139Way(w)}>
+                  {w === "scan" ? "扫码登录" : w === "password" ? "手机号密码" : "手动粘贴"}
+                </span>
+              ))}
             </div>
+            {pan139Way === "scan" ? (
+              scanBox("pan139", "移动云盘 App")
+            ) : pan139Way === "password" ? (
+              pwdFields
+            ) : (
+              <>
+                <p className="hint">
+                  浏览器登录 yun.139.com 后，从开发者工具 Network 里复制任一请求的
+                  <b> Authorization</b> 头（Basic 开头那串）粘到下方。
+                </p>
+                <div className="fld">
+                  <label>Authorization</label>
+                  <textarea
+                    className="field"
+                    rows={4}
+                    spellCheck={false}
+                    placeholder="Basic MTA3MDE6..."
+                    value={cookie}
+                    onChange={(e) => setCookie(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
           </>
         );
 
@@ -1033,9 +1097,21 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
             {spin(label)}
           </button>
         );
-      // 阿里/天翼189:扫码那一路的按钮长在二维码旁边(见 fields),这里无主按钮。
+      // 阿里:扫码按钮长在二维码旁边(见 fields),这里无主按钮。
       case "aliyundrive":
+        return null;
+      // 天翼189:扫码那一路按钮在二维码旁;账密需要底部主按钮。
       case "pan189":
+        if (pan189Way === "password")
+          return (
+            <button
+              className="btn primary big"
+              disabled={busy || !username.trim() || !password}
+              onClick={() => submitPasswordLogin("pan189")}
+            >
+              {spin(label)}
+            </button>
+          );
         return null;
       case "pan115":
         return (
@@ -1044,6 +1120,17 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
           </button>
         );
       case "pan139":
+        if (pan139Way === "scan") return null; // 扫码按钮在二维码旁
+        if (pan139Way === "password")
+          return (
+            <button
+              className="btn primary big"
+              disabled={busy || !username.trim() || !password}
+              onClick={() => submitPasswordLogin("pan139")}
+            >
+              {spin(label)}
+            </button>
+          );
         return (
           <button className="btn primary big" disabled={busy || !cookie.trim()} onClick={() => submitCookieSource("pan139")}>
             {spin(label)}

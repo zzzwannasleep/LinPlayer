@@ -15,6 +15,7 @@ use super::{
 };
 use aes::cipher::{BlockEncrypt, KeyInit};
 use hmac::{Hmac, Mac};
+use num_bigint::BigUint;
 use rand::RngCore;
 use serde_json::Value;
 use sha1::Sha1;
@@ -502,15 +503,16 @@ pub async fn qr_poll(http: &reqwest::Client, ctx: &str) -> Result<QrPoll, Source
             if redirect.is_empty() {
                 return Err(SourceError::msg("天翼云盘登录成功但未返回跳转地址"));
             }
-            qr_exchange_session(http, redirect).await
+            exchange_session(http, redirect).await
         }
         Some(-11001) => Ok(QrPoll::Expired),
         _ => Ok(QrPoll::Pending), // -106 待扫 / -11002 待确认
     }
 }
 
-/// 成功后用 redirectUrl 换 accessToken/refreshToken(sessionKey/secret 运行时再刷)。
-async fn qr_exchange_session(http: &reqwest::Client, redirect: &str) -> Result<QrPoll, SourceError> {
+/// 成功后用 redirectUrl/toUrl 换 accessToken/refreshToken(sessionKey/secret 运行时再刷)。
+/// 扫码和账密登录共用这最后一步。
+async fn exchange_session(http: &reqwest::Client, redirect: &str) -> Result<QrPoll, SourceError> {
     let mut q: Vec<(&str, String)> = CLIENT_SUFFIX
         .iter()
         .map(|(k, v)| (*k, v.to_string()))
@@ -535,6 +537,252 @@ async fn qr_exchange_session(http: &reqwest::Client, redirect: &str) -> Result<Q
         creds.insert("refresh_token".to_string(), r.to_string());
     }
     Ok(QrPoll::Confirmed { credentials: creds })
+}
+
+// ---------- 账密(手机号+密码)登录 ----------
+//
+// 开源项目(cloudpan189-api / Aruelius/cloud189 / AList 189pc)都实现了账密登录。
+// 这条链逐步照 cloudpan189-api/login.go + AList 189pc/utils.go 落:
+//   unifyLoginForPC 抠 lt/paramId/captchaToken → encryptConf 拿 RSA 公钥 → RSA 加密账号密码
+//   → needcaptcha 判图形码 → loginSubmit 拿 toUrl → getSessionForPC 换令牌(复用 exchange_session)。
+// RSA 是 RSA/ECB/PKCS1,密文取小写 hex 前缀 "{RSA}"(开源的 b64tohex(base64(ct)) 净效果就是 hex(ct))。
+// ponytail:不引 rsa crate —— 只需公钥加密,填充+模幂用已在树里的 num-bigint/rand 手做(与 115 同策)。
+
+/// encryptConf.do 拿不到时的内置 1024 位公钥(SPKI base64,来自 Aruelius/cloud189 硬编码值)。
+const RSA_PUBKEY_FALLBACK: &str = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDY7mpaUysvgQkbp0iIn2ezoUyhi1zPFn0HCXloLFWT7uoNkqtrphpQ/63LEcPz1VYzmDuDIf3iGxQKzeoHTiVMSmW6FlhDeqVOG094hFJvZeK4OzA6HVwzwnEW5vIZ7d+u61RV1bsFxmB68+8JXs3ycGcE4anY+YzZJcyOcEGKVQIDAQAB";
+
+/// 账密登录:手机号(或邮箱)+ 密码。返回待落盘的 access_token/refresh_token,前端拿去 source_login。
+pub async fn password_login(
+    http: &reqwest::Client,
+    username: &str,
+    password: &str,
+) -> Result<HashMap<String, String>, SourceError> {
+    if username.trim().is_empty() || password.is_empty() {
+        return Err(SourceError::auth("请填写天翼云盘账号和密码"));
+    }
+    // 1. 登录页拿 lt/paramId/captchaToken/returnUrl/reqId。
+    let html = http
+        .get(format!("{WEB_URL}/api/portal/unifyLoginForPC.action"))
+        .query(&[
+            ("appId", APP_ID),
+            ("clientType", CLIENT_TYPE),
+            ("returnURL", RETURN_URL),
+            ("timeStamp", &now_ms().to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| SourceError::msg(format!("天翼云盘取登录页失败: {e}")))?
+        .text()
+        .await
+        .map_err(|e| SourceError::msg(format!("天翼云盘登录页读取失败: {e}")))?;
+    let lt = regex_pick(&html, r#"lt\s*=\s*"([^"]+)""#);
+    let param_id = regex_pick(&html, r#"paramId\s*=\s*"([^"]+)""#);
+    let req_id = regex_pick(&html, r#"reqId\s*=\s*"([^"]+)""#);
+    let captcha_token = regex_pick(&html, r#"'captchaToken'\s*value\s*=\s*'([^']*)'"#);
+    let return_url = {
+        let r = regex_pick(&html, r#"returnUrl\s*=\s*'([^']*)'"#);
+        if r.is_empty() { RETURN_URL.to_string() } else { r }
+    };
+    if param_id.is_empty() {
+        return Err(SourceError::msg("天翼云盘登录页解析失败，请重试"));
+    }
+
+    // 2. RSA 公钥(动态,拿不到退回内置)。
+    let (pubkey, pre) = fetch_encrypt_conf(http).await;
+    let enc_user = rsa_encrypt_field(&pubkey, &pre, username)?;
+    let enc_pass = rsa_encrypt_field(&pubkey, &pre, password)?;
+
+    // 3. 图形验证码检查。命中就让用户改走扫码(图形码要 UI 往返,本 MVP 不接)。
+    let need = http
+        .post(format!("{AUTH_URL}/api/logbox/oauth2/needcaptcha.do"))
+        .header("lt", &lt)
+        .header("REQID", &req_id)
+        .form(&[
+            ("appKey", APP_ID),
+            ("accountType", "02"),
+            ("userName", enc_user.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|e| SourceError::msg(format!("天翼云盘验证码检查失败: {e}")))?
+        .text()
+        .await
+        .unwrap_or_default();
+    // ponytail:非 "0" = 需图形验证码;命中改用扫码,真机若高频命中再补 picCaptcha 往返。
+    if !need.trim().is_empty() && need.trim() != "0" {
+        return Err(SourceError::auth("天翼云盘此账号需要图形验证码，请改用扫码登录"));
+    }
+
+    // 4. 提交登录 → toUrl。
+    let v: Value = http
+        .post(format!("{AUTH_URL}/api/logbox/oauth2/loginSubmit.do"))
+        .header("lt", &lt)
+        .header("REQID", &req_id)
+        .header("Referer", AUTH_URL)
+        .form(&[
+            ("appKey", APP_ID),
+            ("accountType", "02"),
+            ("userName", enc_user.as_str()),
+            ("password", enc_pass.as_str()),
+            ("validateCode", ""),
+            ("captchaToken", captcha_token.as_str()),
+            ("returnUrl", return_url.as_str()),
+            ("paramId", param_id.as_str()),
+            ("mailSuffix", "@189.cn"),
+            ("dynamicCheck", "FALSE"),
+            ("clientType", CLIENT_TYPE),
+            ("cb_SaveName", "1"),
+            ("isOauth2", "false"),
+            ("state", ""),
+        ])
+        .send()
+        .await
+        .map_err(|e| SourceError::msg(format!("天翼云盘登录提交失败: {e}")))?
+        .json()
+        .await
+        .map_err(|e| SourceError::msg(format!("天翼云盘登录响应解析失败: {e}")))?;
+    if v["result"].as_i64() != Some(0) {
+        let msg = v["msg"].as_str().unwrap_or("账号或密码错误");
+        return Err(SourceError::auth(format!("天翼云盘登录失败: {msg}")));
+    }
+    let to_url = v["toUrl"].as_str().unwrap_or("");
+    if to_url.is_empty() {
+        return Err(SourceError::msg("天翼云盘登录成功但未返回跳转地址"));
+    }
+
+    // 5. 换会话令牌(与扫码共用)。
+    match exchange_session(http, to_url).await? {
+        QrPoll::Confirmed { credentials } => Ok(credentials),
+        _ => Err(SourceError::msg("天翼云盘换取令牌失败")),
+    }
+}
+
+/// 动态取 RSA 公钥与前缀;任何一步失败都退回内置公钥 + "{RSA}"。
+async fn fetch_encrypt_conf(http: &reqwest::Client) -> (String, String) {
+    let fallback = (RSA_PUBKEY_FALLBACK.to_string(), "{RSA}".to_string());
+    let v: Value = match http
+        .post(format!("{AUTH_URL}/api/logbox/config/encryptConf.do"))
+        .form(&[("appId", APP_ID)])
+        .send()
+        .await
+    {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return fallback,
+        },
+        Err(_) => return fallback,
+    };
+    let pk = v["data"]["pubKey"].as_str().unwrap_or("").to_string();
+    let pre = v["data"]["pre"].as_str().filter(|s| !s.is_empty()).unwrap_or("{RSA}").to_string();
+    if pk.is_empty() {
+        fallback
+    } else {
+        (pk, pre)
+    }
+}
+
+/// 读一个 DER TLV → (tag, 内容, 该 TLV 之后偏移)。只覆盖 SPKI 里出现的短/长度形式。
+fn der_read(data: &[u8], pos: usize) -> Option<(u8, &[u8], usize)> {
+    let tag = *data.get(pos)?;
+    let l0 = *data.get(pos + 1)? as usize;
+    let (len, hdr) = if l0 < 0x80 {
+        (l0, 2)
+    } else {
+        let n = l0 & 0x7f;
+        if n == 0 || n > 4 {
+            return None;
+        }
+        let mut len = 0usize;
+        for i in 0..n {
+            len = (len << 8) | *data.get(pos + 2 + i)? as usize;
+        }
+        (len, 2 + n)
+    };
+    let start = pos + hdr;
+    let end = start.checked_add(len)?;
+    if end > data.len() {
+        return None;
+    }
+    Some((tag, &data[start..end], end))
+}
+
+/// 从 SPKI DER 抠 RSA (n, e):SEQ{ SEQ{OID,NULL}, BITSTRING{ SEQ{INT n, INT e} } }。
+fn parse_spki_rsa(der: &[u8]) -> Option<(BigUint, BigUint)> {
+    let (t, outer, _) = der_read(der, 0)?;
+    if t != 0x30 {
+        return None;
+    }
+    let (_t1, _alg, p1) = der_read(outer, 0)?; // 跳过 AlgorithmIdentifier
+    let (t2, bitstr, _) = der_read(outer, p1)?;
+    if t2 != 0x03 {
+        return None;
+    }
+    let inner = bitstr.get(1..)?; // BIT STRING 首字节是 unused-bits 计数
+    let (t3, rsaseq, _) = der_read(inner, 0)?;
+    if t3 != 0x30 {
+        return None;
+    }
+    let (tn, n_bytes, pe) = der_read(rsaseq, 0)?;
+    let (te, e_bytes, _) = der_read(rsaseq, pe)?;
+    if tn != 0x02 || te != 0x02 {
+        return None;
+    }
+    Some((BigUint::from_bytes_be(n_bytes), BigUint::from_bytes_be(e_bytes)))
+}
+
+/// PKCS#1 v1.5 加密填充:EM = 0x00 || 0x02 || PS(≥8 字节非零随机) || 0x00 || M。
+fn pkcs1v15_pad(msg: &[u8], k: usize) -> Option<Vec<u8>> {
+    if msg.len() + 11 > k {
+        return None;
+    }
+    let ps_len = k - msg.len() - 3;
+    let mut em = Vec::with_capacity(k);
+    em.push(0x00);
+    em.push(0x02);
+    let mut filled = 0;
+    let mut buf = [0u8; 32];
+    while filled < ps_len {
+        rand::rng().fill_bytes(&mut buf);
+        for &b in buf.iter() {
+            if b != 0 {
+                em.push(b);
+                filled += 1;
+                if filled == ps_len {
+                    break;
+                }
+            }
+        }
+    }
+    em.push(0x00);
+    em.extend_from_slice(msg);
+    Some(em)
+}
+
+/// RSA/ECB/PKCS1 加密 → 小写 hex,前缀 pre(通常 "{RSA}")。公钥容忍 PEM 头尾/换行。
+fn rsa_encrypt_field(pubkey_b64: &str, pre: &str, plaintext: &str) -> Result<String, SourceError> {
+    use base64::Engine;
+    let cleaned: String = pubkey_b64
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect::<String>()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(cleaned.as_bytes())
+        .map_err(|_| SourceError::msg("天翼云盘公钥解析失败"))?;
+    let (n, e) = parse_spki_rsa(&der).ok_or_else(|| SourceError::msg("天翼云盘公钥格式异常"))?;
+    let k = ((n.bits() as usize) + 7) / 8;
+    let em = pkcs1v15_pad(plaintext.as_bytes(), k)
+        .ok_or_else(|| SourceError::msg("天翼云盘登录参数过长"))?;
+    let c = BigUint::from_bytes_be(&em).modpow(&e, &n);
+    let mut out = c.to_bytes_be();
+    if out.len() < k {
+        let mut p = vec![0u8; k - out.len()];
+        p.extend_from_slice(&out);
+        out = p;
+    }
+    Ok(format!("{pre}{}", hex::encode(out)))
 }
 
 fn regex_pick(text: &str, pat: &str) -> String {
@@ -618,5 +866,50 @@ mod tests {
         let d = serde_json::json!({"id":"9","name":"影视"});
         let de = folder_entry(&d);
         assert!(de.is_dir && !de.is_video && de.id == "9");
+    }
+
+    /// SPKI DER 解析:内置公钥必须解出 e=65537、模数 128 字节(1024 位)。
+    /// 解错 n/e,后续 RSA 密文服务端一律拒登。
+    #[test]
+    fn spki_parse_extracts_n_and_e() {
+        use base64::Engine;
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(RSA_PUBKEY_FALLBACK)
+            .unwrap();
+        let (n, e) = parse_spki_rsa(&der).expect("内置公钥应能解析");
+        assert_eq!(e, BigUint::from(65537u32), "公钥指数应为 65537");
+        assert_eq!(n.to_bytes_be().len(), 128, "1024 位模数 = 128 字节");
+    }
+
+    /// PKCS#1 v1.5 填充结构:00 02 || 非零PS(≥8) || 00 || M,总长 = k。
+    /// 填充写歪(混进零字节、少了分隔符)服务端解密即失败。
+    #[test]
+    fn pkcs1v15_padding_shape() {
+        let k = 128;
+        let msg = b"hello";
+        let em = pkcs1v15_pad(msg, k).expect("应能填充");
+        assert_eq!(em.len(), k);
+        assert_eq!(&em[0..2], &[0x00, 0x02]);
+        let sep = k - msg.len() - 1; // 分隔符 0x00 的位置
+        assert_eq!(em[sep], 0x00, "M 前必须是单个 0x00 分隔符");
+        assert!(em[2..sep].iter().all(|&b| b != 0), "PS 段不能含零字节");
+        assert!(sep - 2 >= 8, "PS 至少 8 字节");
+        assert_eq!(&em[sep + 1..], msg, "尾部就是明文");
+        // 明文太长(k-10 字节,留不下 8 字节 PS)必须拒绝。
+        assert!(pkcs1v15_pad(&vec![0x41u8; k - 10], k).is_none());
+    }
+
+    /// rsa_encrypt_field 形状:前缀 "{RSA}" + 128 字节密文的小写 hex(256 字符)。
+    /// 容忍带 PEM 头尾/换行的公钥。填充随机 → 两次不同,只验形状。
+    #[test]
+    fn rsa_encrypt_field_shape_and_pem_tolerant() {
+        let out = rsa_encrypt_field(RSA_PUBKEY_FALLBACK, "{RSA}", "13800138000").unwrap();
+        assert!(out.starts_with("{RSA}"));
+        let hexpart = &out["{RSA}".len()..];
+        assert_eq!(hexpart.len(), 256, "1024 位密文 = 128 字节 = 256 hex");
+        assert!(hexpart.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+        // 带 PEM 包装也要能解。
+        let pem = format!("-----BEGIN PUBLIC KEY-----\n{RSA_PUBKEY_FALLBACK}\n-----END PUBLIC KEY-----");
+        assert!(rsa_encrypt_field(&pem, "{RSA}", "x").is_ok());
     }
 }

@@ -30,7 +30,7 @@ use linplayer_core::source::baidu::{self, BaiduBackend};
 use linplayer_core::source::feiniu::FeiniuBackend;
 use linplayer_core::source::openlist::OpenListBackend;
 use linplayer_core::source::pan115::Pan115Backend;
-use linplayer_core::source::pan139::Pan139Backend;
+use linplayer_core::source::pan139::{self, Pan139Backend};
 use linplayer_core::source::pan189::{self, Pan189Backend};
 use linplayer_core::source::quark::QuarkBackend;
 use linplayer_core::source::stremio::StremioBackend;
@@ -1521,6 +1521,7 @@ async fn source_qr_start(state: State<'_, AppState>, kind: SourceKind) -> Result
         SourceKind::BAIDU => baidu::qr_start(http).await,
         SourceKind::ALIYUNDRIVE => aliyundrive::qr_start(http).await,
         SourceKind::PAN189 => pan189::qr_start(http).await,
+        SourceKind::PAN139 => pan139::qr_start(http).await,
         _ => return Err("该源不支持扫码登录".to_string()),
     }
     .map_err(|e| e.message)
@@ -1538,7 +1539,25 @@ async fn source_qr_poll(
         SourceKind::BAIDU => baidu::qr_poll(http, &ctx).await,
         SourceKind::ALIYUNDRIVE => aliyundrive::qr_poll(http, &ctx).await,
         SourceKind::PAN189 => pan189::qr_poll(http, &ctx).await,
+        SourceKind::PAN139 => pan139::qr_poll(http, &ctx).await,
         _ => return Err("该源不支持扫码登录".to_string()),
+    }
+    .map_err(|e| e.message)
+}
+
+/// 账密登录:手机号+密码换令牌。与 `apps/desktop/src/lib.rs::source_password_login` 同构。
+#[tauri::command]
+async fn source_password_login(
+    state: State<'_, AppState>,
+    kind: SourceKind,
+    username: String,
+    password: String,
+) -> Result<HashMap<String, String>, String> {
+    let http = &state.http;
+    match kind.as_str() {
+        SourceKind::PAN189 => pan189::password_login(http, &username, &password).await,
+        SourceKind::PAN139 => pan139::password_login(http, &username, &password).await,
+        _ => return Err("该源不支持账密登录".to_string()),
     }
     .map_err(|e| e.message)
 }
@@ -2151,6 +2170,7 @@ pub fn run() {
             source_login,
             source_qr_start,
             source_qr_poll,
+            source_password_login,
             source_list_dir,
             source_search,
             // --- 设置 / 数据 / 更新 ---

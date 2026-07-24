@@ -1,24 +1,29 @@
 // 移动云盘 / 中国移动云盘(yun.139.com)后端。个人云(hcy 新接口)。
 //
-// 139 全网**没有逆向出的扫码接口**,一律账密登录。OpenList 的做法也是让用户把浏览器里
-// 登录 yun.139.com 后的 Authorization(Basic ...)整段拷出来粘贴,我们照搬:
-//   凭据 = 用户粘贴的 Authorization 头(extra.authorization)。
+// 登录:**手机号+密码 / 扫码**(逆向自官网 yun.139.com 自己的 Vue SPA
+// app.5f980ea6.js,非 10086 统一认证);也保留手动粘贴 Authorization 兜底。
+//   - 登录:POST .../user/thirdlogin(密码 pintype=9),
+//     dycpwd=密码明文,secinfo=SHA1("fetion.com.cn:"+它).大写。
+//   - 关键:Authorization **服务端从不下发现成串**,是客户端自算的:
+//       Authorization = "Basic " + base64("pc:{手机号}:{data.token}")
+//     所以拿到 token 就能离线算出 Authorization,不必再手动抓浏览器(enCodeToken 逆向)。
 //
-// 每个请求都要 **mcloud-sign** 签名(算法逐字节抄自 OpenList drivers/139/util.go 的 calSign):
+// 每个请求(含登录)都要 **mcloud-sign** 签名(cal_sign,与 app.js getNewSign 逐字节一致):
 //   1. body 过 encodeURIComponent(JS 口径,不是通用 urlencode);
 //   2. 拆成字符**排序**再拼回,base64;
 //   3. sign = UPPER( MD5( MD5(base64) + MD5(ts + ":" + randStr) ) );
 //   header:mcloud-sign: {ts},{randStr},{sign}。
 //
-// ponytail:authTokenRefresh.do 走 XML,暂不实现。Authorization 过期就报鉴权失败让用户重贴,
-//   等真机确认刷新链路收益再补(139 是最重且优先级最低的一家)。
+// 扫码登录(thirdlogin type=5,dycpwd=qrcSessionID)见下方 qr_start/qr_poll。
+//   token 过期(有 expireTime)无刷新端点,过期即重新登录。
 use super::{
-    is_video_file_name, sort_entries, MediaSourceBackend, ResolvedPlay, SourceEntry, SourceError,
-    SourceKind, SourceServer,
+    is_video_file_name, sort_entries, MediaSourceBackend, QrPoll, QrStart, ResolvedPlay,
+    SourceEntry, SourceError, SourceKind, SourceServer,
 };
 use md5::{Digest, Md5};
 use rand::RngCore;
 use serde_json::{json, Value};
+use sha1::Sha1;
 use std::collections::HashMap;
 
 const HCY_HOST: &str = "https://personal-kd-njs.yun.139.com";
@@ -202,6 +207,222 @@ impl MediaSourceBackend for Pan139Backend {
     }
 }
 
+// ---------- 手机号登录(密码) ----------
+
+const USER_HOST: &str = "https://user-njs.yun.139.com/user";
+const CLIENT_TYPE_139: i64 = 670;
+const CP_ID: i64 = 292;
+const VERSION_139: &str = "mCloud_4.3.0_536";
+
+/// SHA1(s) 大写 hex。secinfo 用。
+fn sha1_upper(s: &str) -> String {
+    let mut h = Sha1::new();
+    h.update(s.as_bytes());
+    hex::encode(h.finalize()).to_uppercase()
+}
+
+/// Authorization = "Basic " + base64("pc:{手机号}:{token}")。逆向自 app.js enCodeToken。
+fn compute_authorization(phone: &str, token: &str) -> String {
+    use base64::Engine;
+    let raw = format!("pc:{phone}:{token}");
+    format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(raw.as_bytes()))
+}
+
+/// 响应是否成功。139 用 success 布尔或 code(0 / "0" / 六个零 / S000000)表状态。
+fn resp_ok(v: &Value) -> bool {
+    if let Some(b) = v["success"].as_bool() {
+        return b;
+    }
+    match &v["code"] {
+        Value::String(s) => {
+            s == "0" || s == "000000" || s.eq_ignore_ascii_case("s000000")
+        }
+        Value::Number(n) => n.as_i64() == Some(0),
+        Value::Null => true, // 无 code 字段就不当失败(以 data.token 存在为准)
+        _ => true,
+    }
+}
+
+fn resp_msg(v: &Value) -> String {
+    v["message"]
+        .as_str()
+        .or_else(|| v["msg"].as_str())
+        .unwrap_or("请求失败")
+        .to_string()
+}
+
+/// 登录系 POST(user-njs 域,带 mcloud-sign 但**无 Authorization**——登录本身还没凭据)。
+async fn login_post(
+    http: &reqwest::Client,
+    path: &str,
+    body: Value,
+) -> Result<Value, SourceError> {
+    let body_str = serde_json::to_string(&body).unwrap_or_default();
+    let ts = now_ms().to_string();
+    let rand_str = gen_rand_str();
+    let sign = cal_sign(&body_str, &ts, &rand_str);
+    let resp = http
+        .post(format!("{USER_HOST}{path}"))
+        .header("Accept", "application/json, text/plain, */*")
+        .header("Content-Type", "application/json;charset=UTF-8")
+        .header("CMS-DEVICE", "default")
+        .header("mcloud-channel", "1000101")
+        .header("mcloud-client", "10701")
+        .header("mcloud-version", "7.14.0")
+        .header("mcloud-sign", format!("{ts},{rand_str},{sign}"))
+        .header("x-huawei-channelSrc", "10000034")
+        .header("x-NationCode", "+86")
+        .body(body_str)
+        .send()
+        .await
+        .map_err(|e| SourceError::msg(format!("移动云盘请求失败: {e}")))?;
+    let status = resp.status();
+    resp.json()
+        .await
+        .map_err(|e| SourceError::msg(format!("移动云盘响应解析失败({status}): {e}")))
+}
+
+/// 账密登录:手机号+密码。
+pub async fn password_login(
+    http: &reqwest::Client,
+    username: &str,
+    password: &str,
+) -> Result<HashMap<String, String>, SourceError> {
+    let phone = username.trim();
+    if phone.is_empty() || password.is_empty() {
+        return Err(SourceError::auth("请填写手机号和密码"));
+    }
+    third_login(http, phone, password, 9).await
+}
+
+/// thirdlogin:密码(pintype=9)与扫码(pintype=21)同端点,dycpwd 装密码明文或扫码会话 ID。
+/// 成功后拿 data.token 本地算 Authorization,作为凭据返回。
+async fn third_login(
+    http: &reqwest::Client,
+    phone: &str,
+    secret: &str,
+    pintype: i64,
+) -> Result<HashMap<String, String>, SourceError> {
+    let v = login_post(
+        http,
+        "/thirdlogin",
+        json!({
+            "msisdn": phone,
+            "random": "",
+            "dycpwd": secret,
+            "cpid": CP_ID,
+            "clienttype": CLIENT_TYPE_139,
+            "version": VERSION_139,
+            "pintype": pintype,
+            "secinfo": sha1_upper(&format!("fetion.com.cn:{secret}")),
+            "verType": 2,
+            "loginMode": "0",
+            "extInfo": {},
+        }),
+    )
+    .await?;
+    // token 在 body.data.token(响应拦截器已解包一层,已核对 app.js);兜底再看顶层 token。
+    let token = v["data"]["token"]
+        .as_str()
+        .or_else(|| v["token"].as_str())
+        .unwrap_or("");
+    if token.is_empty() {
+        if !resp_ok(&v) {
+            return Err(SourceError::auth(format!("移动云盘登录失败: {}", resp_msg(&v))));
+        }
+        return Err(SourceError::msg("移动云盘登录成功但未返回令牌"));
+    }
+    let auth = compute_authorization(phone, token);
+    Ok(HashMap::from([("authorization".to_string(), auth)]))
+}
+
+// ---------- 扫码登录 ----------
+//
+// 逆向自 chunk-23496a60(登录组件 createLoginQrcode/queryQrcLoginResult):
+//   - sID 是**客户端自生成**的随机串(服务端不下发),二维码内容:
+//       https://yun.139.com/w/#/qrcLogin?sID={sID}&dID={设备id}&cType=9
+//   - 手机 App 扫这个 URL 确认后,PC 端反复 POST /thirdlogin(type=5→pintype=21,dycpwd=sID)拿 token。
+//   - 轮询状态 data.result.resultCode:200059548=已扫待确认(继续)、200059542=已失效、200059549=已取消。
+//   - 扫码登录的手机号从响应 encryptAccount(base64 的真实手机号)解出,再算 Authorization。
+
+const QR_URL_BASE: &str = "https://yun.139.com/w/#/qrcLogin";
+
+/// 出码:sID 客户端自生成,无需请求服务端。ctx 带 sID 回传给 qr_poll。
+pub async fn qr_start(_http: &reqwest::Client) -> Result<QrStart, SourceError> {
+    let sid = gen_rand_str();
+    let did = gen_rand_str();
+    let text = format!("{QR_URL_BASE}?sID={sid}&dID={did}&cType=9");
+    let image = super::qr_svg_data_uri(&text)?;
+    let ctx = json!({ "sID": sid }).to_string();
+    Ok(QrStart { image, ctx })
+}
+
+/// 轮询一次:POST /thirdlogin(type=5)。confirmed 时算出 Authorization 作凭据。
+pub async fn qr_poll(http: &reqwest::Client, ctx: &str) -> Result<QrPoll, SourceError> {
+    let c: Value =
+        serde_json::from_str(ctx).map_err(|_| SourceError::msg("扫码上下文损坏，请重新获取二维码"))?;
+    let sid = c["sID"].as_str().unwrap_or("");
+    if sid.is_empty() {
+        return Err(SourceError::msg("扫码上下文缺少会话 ID"));
+    }
+    let v = login_post(
+        http,
+        "/thirdlogin",
+        json!({
+            "msisdn": "",
+            "random": "",
+            "dycpwd": sid,
+            "cpid": CP_ID,
+            "clienttype": CLIENT_TYPE_139,
+            "version": VERSION_139,
+            "pintype": 21,
+            "secinfo": sha1_upper(&format!("fetion.com.cn:{sid}")),
+            "verType": 2,
+            "loginMode": "0",
+            "extInfo": {},
+        }),
+    )
+    .await?;
+    // 成功:token + encryptAccount(base64 手机号)算 Authorization。
+    let token = v["data"]["token"]
+        .as_str()
+        .or_else(|| v["token"].as_str())
+        .unwrap_or("");
+    if resp_ok(&v) && !token.is_empty() {
+        let phone = decode_encrypt_account(&v);
+        let auth = compute_authorization(&phone, token);
+        return Ok(QrPoll::Confirmed {
+            credentials: HashMap::from([("authorization".to_string(), auth)]),
+        });
+    }
+    // 状态码判定(resultCode 可能是字符串或数字)。
+    let code = match &v["data"]["result"]["resultCode"] {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    match code.as_str() {
+        "200059542" | "200059549" => Ok(QrPoll::Expired),
+        _ => Ok(QrPoll::Pending), // 200059548 已扫待确认 / 待扫 / 其它一律继续等
+    }
+}
+
+/// 从响应 encryptAccount(base64 的真实手机号)解出手机号;失败退回 simplifyAccount(脱敏,不理想但不空)。
+fn decode_encrypt_account(v: &Value) -> String {
+    use base64::Engine;
+    let enc = v["data"]["encryptAccount"].as_str().unwrap_or("");
+    if !enc.is_empty() {
+        if let Ok(b) = base64::engine::general_purpose::STANDARD.decode(enc) {
+            if let Ok(s) = String::from_utf8(b) {
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+        }
+    }
+    v["data"]["simplifyAccount"].as_str().unwrap_or("").to_string()
+}
+
 // ---------- mcloud-sign ----------
 
 fn md5_hex(data: &[u8]) -> String {
@@ -297,5 +518,48 @@ mod tests {
         let f = json!({"type":"file","name":"a.mkv","fileId":"f1","size":9});
         let e = item_to_entry(&f);
         assert!(!e.is_dir && e.is_video && e.id == "f1" && e.size == Some(9));
+    }
+
+    /// SHA1 大写 known-answer:secinfo 算错服务端可能拒登。SHA1("abc") 是标准向量。
+    #[test]
+    fn sha1_upper_known_answer() {
+        assert_eq!(sha1_upper("abc"), "A9993E364706816ABA3E25717850C26C9CD0D89D");
+    }
+
+    /// Authorization 组装 known-answer:base64("pc:1:2")=cGM6MToy。逆向自 enCodeToken,
+    /// 拼错(冒号/前缀/编码)则每个业务请求鉴权全废。
+    #[test]
+    fn authorization_known_answer() {
+        assert_eq!(compute_authorization("1", "2"), "Basic cGM6MToy");
+        // 真实形状:Basic 前缀 + 可解码回 "pc:手机号:token"。
+        use base64::Engine;
+        let a = compute_authorization("13800138000", "TOK123");
+        let b64 = a.strip_prefix("Basic ").unwrap();
+        let raw = base64::engine::general_purpose::STANDARD.decode(b64).unwrap();
+        assert_eq!(String::from_utf8(raw).unwrap(), "pc:13800138000:TOK123");
+    }
+
+    /// 扫码手机号从 encryptAccount(base64 真实手机号)解;缺失退回 simplifyAccount。
+    #[test]
+    fn decode_encrypt_account_from_base64() {
+        use base64::Engine;
+        let enc = base64::engine::general_purpose::STANDARD.encode("13800138000");
+        let v = json!({"data": {"encryptAccount": enc, "simplifyAccount": "138****8000"}});
+        assert_eq!(decode_encrypt_account(&v), "13800138000");
+        // 无 encryptAccount 时退脱敏号(不空即可,总比空手机号强)。
+        let v2 = json!({"data": {"simplifyAccount": "138****8000"}});
+        assert_eq!(decode_encrypt_account(&v2), "138****8000");
+    }
+
+    /// resp_ok:success 布尔优先,其次 code 的多种 0 写法;无 code 不算失败。
+    #[test]
+    fn resp_ok_variants() {
+        assert!(resp_ok(&json!({"success": true})));
+        assert!(!resp_ok(&json!({"success": false})));
+        assert!(resp_ok(&json!({"code": "0"})));
+        assert!(resp_ok(&json!({"code": "S000000"})));
+        assert!(resp_ok(&json!({"code": 0})));
+        assert!(!resp_ok(&json!({"code": "200059554"})));
+        assert!(resp_ok(&json!({"data": {"token": "x"}})));
     }
 }
