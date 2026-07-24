@@ -73,22 +73,26 @@
   </tr>
   <tr>
     <td><img src="docs/images/screenshots/pc-series-detail.png" width="100%" alt="剧集详情"><br><sub><b>剧集详情</b></sub></td>
-    <td><img src="docs/images/screenshots/pc-movie-detail.png" width="100%" alt="电影详情"><br><sub><b>电影详情</b></sub></td>
+    <td><img src="docs/images/screenshots/pc-episode-detail.png" width="100%" alt="集详情"><br><sub><b>集详情</b></sub></td>
   </tr>
   <tr>
     <td><img src="docs/images/screenshots/pc-rankings.png" width="100%" alt="排行榜"><br><sub><b>排行榜</b></sub></td>
-    <td><img src="docs/images/screenshots/pc-search.png" width="100%" alt="搜索"><br><sub><b>搜索</b></sub></td>
+    <td><img src="docs/images/screenshots/pc-favorites.png" width="100%" alt="收藏"><br><sub><b>收藏</b></sub></td>
   </tr>
   <tr>
-    <td><img src="docs/images/screenshots/pc-favorites.png" width="100%" alt="收藏"><br><sub><b>收藏</b></sub></td>
+    <td><img src="docs/images/screenshots/pc-calendar-week.png" width="100%" alt="本周追剧日历"><br><sub><b>追剧日历 · 本周</b></sub></td>
+    <td><img src="docs/images/screenshots/pc-calendar-day.png" width="100%" alt="本日追剧日历"><br><sub><b>追剧日历 · 本日</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/pc-plugins.png" width="100%" alt="插件"><br><sub><b>插件</b></sub></td>
+    <td><img src="docs/images/screenshots/pc-servers.png" width="100%" alt="服务器"><br><sub><b>服务器</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshots/pc-add-server.png" width="100%" alt="添加服务器"><br><sub><b>添加服务器</b></sub></td>
     <td><img src="docs/images/screenshots/pc-settings.png" width="100%" alt="设置"><br><sub><b>设置</b></sub></td>
   </tr>
   <tr>
-    <td><img src="docs/images/screenshots/pc-add-server-1.png" width="100%" alt="添加服务器 1"><br><sub><b>添加服务器 ①</b></sub></td>
-    <td><img src="docs/images/screenshots/pc-add-server-2.png" width="100%" alt="添加服务器 2"><br><sub><b>添加服务器 ②</b></sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" width="50%"><img src="docs/images/screenshots/pc-add-server-3.png" width="100%" alt="添加服务器 3"><br><sub><b>添加服务器 ③</b></sub></td>
+    <td colspan="2" width="50%"><img src="docs/images/screenshots/pc-login.png" width="100%" alt="首次登录"><br><sub><b>首次登录</b></sub></td>
   </tr>
 </table>
 

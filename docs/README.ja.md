@@ -72,22 +72,26 @@
   </tr>
   <tr>
     <td><img src="images/screenshots/pc-series-detail.png" width="100%" alt="シリーズ詳細"><br><sub><b>シリーズ詳細</b></sub></td>
-    <td><img src="images/screenshots/pc-movie-detail.png" width="100%" alt="映画詳細"><br><sub><b>映画詳細</b></sub></td>
+    <td><img src="images/screenshots/pc-episode-detail.png" width="100%" alt="エピソード詳細"><br><sub><b>エピソード詳細</b></sub></td>
   </tr>
   <tr>
     <td><img src="images/screenshots/pc-rankings.png" width="100%" alt="ランキング"><br><sub><b>ランキング</b></sub></td>
-    <td><img src="images/screenshots/pc-search.png" width="100%" alt="検索"><br><sub><b>検索</b></sub></td>
+    <td><img src="images/screenshots/pc-favorites.png" width="100%" alt="お気に入り"><br><sub><b>お気に入り</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/pc-favorites.png" width="100%" alt="お気に入り"><br><sub><b>お気に入り</b></sub></td>
+    <td><img src="images/screenshots/pc-calendar-week.png" width="100%" alt="カレンダー 今週"><br><sub><b>カレンダー · 今週</b></sub></td>
+    <td><img src="images/screenshots/pc-calendar-day.png" width="100%" alt="カレンダー 今日"><br><sub><b>カレンダー · 今日</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/pc-plugins.png" width="100%" alt="プラグイン"><br><sub><b>プラグイン</b></sub></td>
+    <td><img src="images/screenshots/pc-servers.png" width="100%" alt="サーバー"><br><sub><b>サーバー</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/pc-add-server.png" width="100%" alt="サーバー追加"><br><sub><b>サーバー追加</b></sub></td>
     <td><img src="images/screenshots/pc-settings.png" width="100%" alt="設定"><br><sub><b>設定</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/pc-add-server-1.png" width="100%" alt="サーバー追加 1"><br><sub><b>サーバー追加 ①</b></sub></td>
-    <td><img src="images/screenshots/pc-add-server-2.png" width="100%" alt="サーバー追加 2"><br><sub><b>サーバー追加 ②</b></sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" width="50%"><img src="images/screenshots/pc-add-server-3.png" width="100%" alt="サーバー追加 3"><br><sub><b>サーバー追加 ③</b></sub></td>
+    <td colspan="2" width="50%"><img src="images/screenshots/pc-login.png" width="100%" alt="初回ログイン"><br><sub><b>初回ログイン</b></sub></td>
   </tr>
 </table>
 

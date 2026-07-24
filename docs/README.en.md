@@ -72,22 +72,26 @@ Business logic (data sources, networking, playback control, sync, downloads) liv
   </tr>
   <tr>
     <td><img src="images/screenshots/pc-series-detail.png" width="100%" alt="Series detail"><br><sub><b>Series Detail</b></sub></td>
-    <td><img src="images/screenshots/pc-movie-detail.png" width="100%" alt="Movie detail"><br><sub><b>Movie Detail</b></sub></td>
+    <td><img src="images/screenshots/pc-episode-detail.png" width="100%" alt="Episode detail"><br><sub><b>Episode Detail</b></sub></td>
   </tr>
   <tr>
     <td><img src="images/screenshots/pc-rankings.png" width="100%" alt="Rankings"><br><sub><b>Rankings</b></sub></td>
-    <td><img src="images/screenshots/pc-search.png" width="100%" alt="Search"><br><sub><b>Search</b></sub></td>
+    <td><img src="images/screenshots/pc-favorites.png" width="100%" alt="Favorites"><br><sub><b>Favorites</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/pc-favorites.png" width="100%" alt="Favorites"><br><sub><b>Favorites</b></sub></td>
+    <td><img src="images/screenshots/pc-calendar-week.png" width="100%" alt="Calendar week"><br><sub><b>Calendar · Week</b></sub></td>
+    <td><img src="images/screenshots/pc-calendar-day.png" width="100%" alt="Calendar day"><br><sub><b>Calendar · Day</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/pc-plugins.png" width="100%" alt="Plugins"><br><sub><b>Plugins</b></sub></td>
+    <td><img src="images/screenshots/pc-servers.png" width="100%" alt="Servers"><br><sub><b>Servers</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/pc-add-server.png" width="100%" alt="Add server"><br><sub><b>Add Server</b></sub></td>
     <td><img src="images/screenshots/pc-settings.png" width="100%" alt="Settings"><br><sub><b>Settings</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/pc-add-server-1.png" width="100%" alt="Add server 1"><br><sub><b>Add Server ①</b></sub></td>
-    <td><img src="images/screenshots/pc-add-server-2.png" width="100%" alt="Add server 2"><br><sub><b>Add Server ②</b></sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" width="50%"><img src="images/screenshots/pc-add-server-3.png" width="100%" alt="Add server 3"><br><sub><b>Add Server ③</b></sub></td>
+    <td colspan="2" width="50%"><img src="images/screenshots/pc-login.png" width="100%" alt="First-run login"><br><sub><b>First-run Login</b></sub></td>
   </tr>
 </table>
 
