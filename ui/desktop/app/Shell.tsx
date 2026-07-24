@@ -175,11 +175,12 @@ export default function Shell({
             onPickView={setLibTarget}
             onBack={() => setLibTarget(null)}
             onOpenItem={openDetail}
+            onPlay={onPlay}
             onSearch={onSearch}
           />
         );
       case "favorites":
-        return <FavoritesPage session={session} onOpenItem={openDetail} />;
+        return <FavoritesPage session={session} onOpenItem={openDetail} onPlay={onPlay} />;
       case "rankings":
         return <RankingsPage onOpenItem={openFromSearch} />;
       case "downloads":

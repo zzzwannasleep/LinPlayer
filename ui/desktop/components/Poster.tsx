@@ -1,26 +1,35 @@
 import { type MouseEvent, useState } from "react";
 import { type Item, type LoginResult, itemLabel, posterUrl, thumbUrl } from "@shared/api";
-import { IconPlay, IconLibrary } from "../app/icons";
+import { IconPlay, IconLibrary, IconCheck, IconHeart } from "../app/icons";
 
 type Props = {
   item: Item;
   session: LoginResult;
   variant?: "poster" | "thumb";
-  /** 单击就走它 —— 卡片唯一的主操作。 */
+  /** 单击就走它 —— 卡片主操作(进详情)。 */
   onOpen: (it: Item) => void;
   /** 入场动画的阶梯下标(同一行卡片错开一点点淡入)。列表里传 map 的 i 即可,不传按 0。 */
   index?: number;
-  /** 右键菜单。**只有首页传**(标记已/未播放、添加到喜欢);
-      媒体库/收藏/搜索浮层不传 = 没有右键(保留浏览器默认)。 */
+  /** 右键菜单(标记已/未播放、收藏、管理员项)。不传 = 保留浏览器默认右键。 */
   onContextMenu?: (e: MouseEvent, it: Item) => void;
+  /** 悬停中央 ▶ 起播。仅**非文件夹**(电影/单集)渲染 —— 剧集/合集没有单一可播流,
+      悬停就不给假播放钮,点卡片进详情挑集。不传 = 无悬停播放钮。 */
+  onPlay?: (it: Item) => void;
+  /** 该条目当前是否已收藏(右下红心的实心态)。 */
+  favActive?: boolean;
+  /** 右下红心:切换收藏。不传 = 不出红心。 */
+  onToggleFav?: (it: Item) => void;
+  /** 右下 ✓:切换已看/未看(hook 内部按 item.played 决定翻向)。不传 = 不出该钮。 */
+  onToggleWatched?: (it: Item) => void;
 };
 
 /* 海报卡:全端共用(首页轨道 / 媒体库网格 / 收藏网格 / 搜索浮层结果)。
 
-   ★ 交互口径(2026-07-15 用户定,**覆盖草稿标注 7/11/36**):
-     单击 = 进详情页;悬停 = 只浮起,**不出任何按钮**;双击**没有这一说**。
-     播放与收藏一律回到详情页里做 —— 卡片是纯展示 + 一个入口。
-   草稿画的悬停 ▶/♥ 与「双击进详情」已按此作废,别照草稿改回来。 */
+   ★ 交互口径(2026-07-24 用户定,**推翻 2026-07-15「只浮起不出按钮」的旧决策**):
+     单击 = 进详情页;悬停 = 浮起 + 中央 ▶(可播条目)+ 右下快捷键(✓ 标记已看 / ♥ 收藏);
+     双击**没有这一说**。悬停各钮是**可选**的(靠 onPlay/onToggleFav/onToggleWatched 传不传决定),
+     不传就退回纯展示卡 —— 搜索浮层的跨服结果就不传,避免对错服务器写操作。
+   角标:右上角状态(绿勾=看完 / 蓝数字=未看集数),评分挪左上,两不打架。 */
 export default function Poster({
   item,
   session,
@@ -28,6 +37,10 @@ export default function Poster({
   onOpen,
   index = 0,
   onContextMenu,
+  onPlay,
+  favActive,
+  onToggleFav,
+  onToggleWatched,
 }: Props) {
   const thumb = variant === "thumb";
   /* 图片就位前先摆骨架(用户 2026-07-16:「先加载骨架出来,名字这种文字先出来,
@@ -83,18 +96,72 @@ export default function Poster({
             {item.is_folder ? <IconLibrary size={30} /> : <IconPlay size={26} />}
           </div>
         )}
-        {/* 评分角标(草稿标注 11)。核层 Item.rating 一直在传 —— 之前 .badge-tr 这条 CSS
-            零调用方就是因为这里没渲染。
-            「未看角标」需要 UserData.UnplayedItemCount,核层 Item 上没有这个字段 →
-            不编,宁可缺角标也不显假数字。要补先给 Rust 的 emby::Item 加字段。 */}
+        {/* 评分角标(草稿标注 11):挪到**左上角**,把右上角让给状态角标(勾/未看数)。 */}
         {item.rating != null && item.rating > 0 && (
-          <div className="badge-tr" title={`评分 ${item.rating}`}>
+          <div className="badge-tl" title={`评分 ${item.rating}`}>
             {item.rating.toFixed(1)}
           </div>
+        )}
+        {/* 状态角标(右上角,对标 Emby):看完=绿勾;否则剧集/季显未看集数=蓝数字。
+            emby::Item.unplayed_item_count 现已透传;played=true 时它必为 0 → 勾优先、二者不并存。 */}
+        {item.played ? (
+          <div className="played-ind" title="已看完">
+            <IconCheck size={12} />
+          </div>
+        ) : (
+          item.is_folder &&
+          item.unplayed_item_count > 0 && (
+            <div className="count-ind" title={`${item.unplayed_item_count} 集未看`}>
+              {item.unplayed_item_count > 99 ? "99+" : item.unplayed_item_count}
+            </div>
+          )
         )}
         {progress > 0 && (
           <div className="progress">
             <i style={{ width: `${progress}%` }} />
+          </div>
+        )}
+        {/* 悬停操作层(可选):中央 ▶(仅可播条目)+ 右下 ✓/♥。都靠 stopPropagation 免得触发卡片单击。 */}
+        {(onPlay || onToggleWatched || onToggleFav) && (
+          <div className="overlay">
+            {onPlay && !item.is_folder && (
+              <button
+                className="ov-play ov-center"
+                title="播放"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPlay(item);
+                }}
+              >
+                <IconPlay size={18} />
+              </button>
+            )}
+            <div className="ov-actions">
+              {onToggleWatched && (
+                <button
+                  className={`ov-chk${item.played ? " on" : ""}`}
+                  title={item.played ? "标记为未播放" : "标记为已播放"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleWatched(item);
+                  }}
+                >
+                  <IconCheck size={15} />
+                </button>
+              )}
+              {onToggleFav && (
+                <button
+                  className={`ov-fav${favActive ? " on" : ""}`}
+                  title={favActive ? "从喜欢中移除" : "添加到喜欢"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFav(item);
+                  }}
+                >
+                  <IconHeart size={15} />
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

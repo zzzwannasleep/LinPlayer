@@ -10,6 +10,7 @@ import {
   views,
 } from "@shared/api";
 import { AdminMenuItems, useIsAdmin } from "../lib/admin";
+import { useCardActions } from "../lib/cardActions";
 import Poster from "../components/Poster";
 import {
   IconChevronDown,
@@ -27,6 +28,7 @@ type Props = {
   onPickView: (v: Item) => void;
   onBack: () => void;
   onOpenItem: (it: Item) => void;
+  onPlay: (it: Item) => void;
   onSearch: () => void;
 };
 
@@ -72,7 +74,16 @@ export const IconRows = ({ size = 15 }: { size?: number }) => (
 const toggle = <T,>(arr: T[], v: T): T[] =>
   arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v];
 
-export default function LibraryPage({ session, view, onPickView, onBack, onOpenItem, onSearch }: Props) {
+export default function LibraryPage({ session, view, onPickView, onBack, onOpenItem, onPlay, onSearch }: Props) {
+  /* 库内**内容项**(电影/剧集)的卡片动作:收藏/标记已看/右键/悬停播放,走公共 hook。
+     标记已看后就地把该卡 played 翻转 → 绿勾即时反显(本页自持 items 副本,得自己更新)。
+     注意:下面另有一套 admin-only 的 ctx 是给**媒体库根**(电影/电视剧那种文件夹)用的 ——
+     对整个库「标记已看」没意义,所以库列表右键仍只给管理员项,不并进这个 hook。 */
+  const card = useCardActions(session, {
+    onPlay,
+    onChanged: (it, played) =>
+      setItems((cur) => (cur ? cur.map((x) => (x.id === it.id ? { ...x, played } : x)) : cur)),
+  });
   const [libs, setLibs] = useState<Item[] | null>(null);
   const [items, setItems] = useState<Item[] | null>(null);
   /** 库里符合当前筛选的**总数**(不是已加载条数)—— 面包屑那个「· 1,284」要的就是它。 */
@@ -474,10 +485,9 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
           <div className="empty">{nFilters ? "没有符合筛选的内容" : "这个库还没有内容"}</div>
         ) : layout === "grid" ? (
           <div className="dense-grid">
-            {/* 卡片只有一个操作:点 = 进详情。无悬停按钮(用户 2026-07-15 定,覆盖草稿 11)。
-                右键**只对管理员**开:菜单里就那三项管理动作,普通用户右键仍是浏览器默认行为。 */}
+            {/* 卡片:点=进详情;悬停=▶/✓/♥;右键=标记已看/收藏/管理员项(2026-07-24 用户定,四网格统一)。 */}
             {items.map((it) => (
-              <Poster key={it.id} item={it} session={session} onOpen={onOpenItem} onContextMenu={openCtx} />
+              <Poster key={it.id} item={it} session={session} onOpen={onOpenItem} {...card.cardProps(it)} />
             ))}
           </div>
         ) : (
@@ -487,7 +497,7 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
                 className="lib-row enter"
                 key={it.id}
                 onClick={() => onOpenItem(it)}
-                onContextMenu={(e) => openCtx(e, it)}
+                onContextMenu={(e) => card.openCtx(e, it)}
               >
                 <span className="lib-row-thumb">
                   {it.has_primary ? (
@@ -514,7 +524,9 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
         <div style={{ height: 40 }} />
       </div>
 
-      {ctxMenu}
+      {/* 内容项的右键菜单 + 卡片动作 toast 走 hook;下面那条 toast 仍留给「加载更多失败」。 */}
+      {card.menu}
+      {card.toastNode}
       {toast && <div className="toast">{toast}</div>}
     </>
   );

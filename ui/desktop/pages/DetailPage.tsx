@@ -31,6 +31,7 @@ import {
   thumbUrl,
 } from "@shared/api";
 import {
+  IconCheck,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
@@ -77,6 +78,7 @@ function toItem(d: ItemDetail): Item {
     size_bytes: null,
     // ItemDetail 有的照搬,没有的给中性值(这条 Item 只用于起播/收藏,不参与列表排序)。
     played: false,
+    unplayed_item_count: 0,
     genres: d.genres,
     year: d.year,
     rating: d.rating,
@@ -800,6 +802,13 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
                         {prog > 0 && (
                           <div className="progress">
                             <i style={{ width: `${prog}%` }} />
+                          </div>
+                        )}
+                        {/* 看完打勾(绿勾,和海报卡同口径)。markPlayed 后详情重取 → d.children[].played
+                            刷新 → 这里自动反显。 */}
+                        {ep.played && (
+                          <div className="dt-ep-chk" title="已看完">
+                            <IconCheck size={12} />
                           </div>
                         )}
                         {/* 标注 16:悬停显现播放 */}

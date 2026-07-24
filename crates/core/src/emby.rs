@@ -130,6 +130,10 @@ struct UserData {
     /// 已看标记。set_played 改的就是它,列表不返回它前端就没法反显「已看」角标。
     #[serde(rename = "Played")]
     played: Option<bool>,
+    /// 未看子项数(剧集/季才有,电影/单集为 None)。海报右上角「未看集数」角标就靠它。
+    /// Emby 的 UserData 默认就带,不必请求任何 Fields —— 只是我们过去漏了这个字段。
+    #[serde(rename = "UnplayedItemCount")]
+    unplayed_item_count: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -152,6 +156,9 @@ pub struct Item {
     pub size_bytes: Option<i64>,
     /// 已看(UserData.Played)。set_played 的反显靠它。
     pub played: bool,
+    /// 未看子项数(剧集/季)。0 = 全看完 或 非文件夹。海报「未看集数」蓝角标用它,
+    /// played=true 时必为 0(全看完),前端据此:有勾优先、否则显数字。
+    pub unplayed_item_count: i64,
     /// 以下三项要 Fields=Genres,ProductionYear,CommunityRating;媒体库筛选面板要展示也要过滤。
     pub genres: Vec<String>,
     pub year: Option<i64>,
@@ -183,10 +190,14 @@ impl From<RawItem> for Item {
             .and_then(|m| m.media_streams.as_ref())
             .and_then(|ss| ss.iter().find(|s| s.type_.as_deref() == Some("Video")))
             .and_then(|s| s.height);
-        // user_data 要读两个字段(进度 + 已看),先拆出来免得被 move 掉。
-        let (resume_ticks, played) = match r.user_data {
-            Some(u) => (u.position_ticks.unwrap_or(0), u.played.unwrap_or(false)),
-            None => (0, false),
+        // user_data 要读三个字段(进度 + 已看 + 未看数),先拆出来免得被 move 掉。
+        let (resume_ticks, played, unplayed_item_count) = match r.user_data {
+            Some(u) => (
+                u.position_ticks.unwrap_or(0),
+                u.played.unwrap_or(false),
+                u.unplayed_item_count.unwrap_or(0),
+            ),
+            None => (0, false, 0),
         };
         Item {
             id: r.id,
@@ -197,6 +208,7 @@ impl From<RawItem> for Item {
             runtime_secs: r.runtime_ticks.unwrap_or(0) as f64 / 1e7,
             resume_secs: resume_ticks as f64 / 1e7,
             played,
+            unplayed_item_count,
             genres: r.genres.unwrap_or_default(),
             year: r.production_year,
             rating: r.community_rating,
@@ -2150,6 +2162,20 @@ mod tests {
         let it: Item = serde_json::from_str::<RawItem>(raw).unwrap().into();
         assert!(!it.played);
         assert_eq!(it.resume_secs, 0.0);
+        assert_eq!(it.unplayed_item_count, 0); // 无 UserData → 未看数兜底 0
+    }
+
+    /// UnplayedItemCount 要进漏斗:剧集卡「未看集数」蓝角标全靠它。
+    /// Emby 默认就在 UserData 里带,不请求任何 Fields —— 载荷取自实测剧集列表返回。
+    #[test]
+    fn unplayed_count_flows_through_funnel() {
+        let raw = r#"{
+            "Id": "s01", "Name": "怪奇物语", "Type": "Series", "IsFolder": true,
+            "UserData": { "Played": false, "UnplayedItemCount": 3 }
+        }"#;
+        let it: Item = serde_json::from_str::<RawItem>(raw).unwrap().into();
+        assert_eq!(it.unplayed_item_count, 3);
+        assert!(!it.played);
     }
 
     /// 客户端兜底复筛:实测 UHD 服务端忽略 Genres/Years/评分过滤,

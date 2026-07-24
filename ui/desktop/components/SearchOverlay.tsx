@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { type Item, type LoginResult, type ServerGroup, aggregateSearch, search } from "@shared/api";
+import { useCardActions } from "../lib/cardActions";
 import Poster from "./Poster";
 import { IconSearch } from "../app/icons";
 import "./SearchOverlay.css";
@@ -50,6 +51,11 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
   const [err, setErr] = useState("");
   const [hist, setHist] = useState<string[]>(readHist);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  /* 右键菜单(标记已看/收藏)只给**本服**结果 —— 聚合结果属别的服务器,
+     不先切服务器就右键会写到当前服上(错服)。所以聚合分组仍只「点=进详情」,
+     由宿主 openFromSearch 负责先切服再开。悬停播放同理不给(搜索页 2026-07-15 定不起播)。 */
+  const card = useCardActions(session);
 
   /** 拨开关:只改「下一次搜用哪个模式」,**不搜**。当前结果原样留着。 */
   const toggleAggregate = () => {
@@ -200,13 +206,15 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
           {local && local.length > 0 && (
             <div className="dense-grid" style={{ padding: "4px 0 8px" }}>
               {local.map((it) => (
-                <Poster key={it.id} item={it} session={session} onOpen={pick} />
+                <Poster key={it.id} item={it} session={session} onOpen={pick} onContextMenu={card.openCtx} />
               ))}
             </div>
           )}
           {local && local.length === 0 && !err && <div className="empty">没有找到结果</div>}
         </div>
       </div>
+      {card.menu}
+      {card.toastNode}
     </div>
   );
 }

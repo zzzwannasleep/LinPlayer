@@ -81,6 +81,9 @@ export type Item = {
      海报评分角标/已看反显/本地排序就会被误判成「服务端不透传」。别再删。 */
   /** 已看(UserData.Played)。setPlayed 的反显靠它。 */
   played: boolean;
+  /** 未看子项数(剧集/季才 >0,电影/单集恒 0)。海报「未看集数」蓝角标用它;
+   *  played=true 时必为 0 → 前端:有勾优先、否则显数字。核层 emby::Item 已透传。 */
+  unplayed_item_count: number;
   genres: string[];
   year: number | null;
   rating: number | null;

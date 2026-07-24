@@ -1,35 +1,24 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type MouseEvent,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   type Item,
   type LoginResult,
   backdropUrl,
   listCollections,
-  listFavorites,
   listLatest,
+  listNextUp,
   listRandom,
   listResume,
   logoUrl,
   posterUrl,
-  setFavorite,
-  setPlayed,
   thumbUrl,
   views,
 } from "@shared/api";
-import { AdminMenuItems, useIsAdmin } from "../lib/admin";
+import { useCardActions } from "../lib/cardActions";
 import Poster from "../components/Poster";
 import { PluginSlot } from "../components/PluginHost";
 import {
-  IconCheck,
   IconChevronLeft,
   IconChevronRight,
-  IconHeart,
   IconLibrary,
   IconRefresh,
   IconSearch,
@@ -134,6 +123,7 @@ export default function HomePage({
   session,
   onOpenLibrary,
   onOpenItem,
+  onPlay,
   onSearch,
   onRefresh,
   reloadKey,
@@ -141,18 +131,22 @@ export default function HomePage({
   const [libs, setLibs] = useState<Item[]>([]);
   const [byLib, setByLib] = useState<Record<string, Item[]>>({});
   const [resume, setResume] = useState<Item[]>([]);
+  const [nextUp, setNextUp] = useState<Item[]>([]);
   const [collections, setCollections] = useState<Item[]>([]);
   const [featured, setFeatured] = useState<Item[]>([]);
-  const [favIds, setFavIds] = useState<Set<string>>(new Set());
   const [heroIdx, setHeroIdx] = useState(0);
   /** 取 Logo 失败的条目 id。按 id 记而不是一个 bool —— 否则翻到下一张 Hero 还顶着上一张的失败态。 */
   const [logoFail, setLogoFail] = useState<Set<string>>(new Set());
-  const [ctx, setCtx] = useState<{ x: number; y: number; item: Item } | null>(null);
-  const admin = useIsAdmin(session.server);
-  const [toast, setToast] = useState("");
   const [err, setErr] = useState("");
   const hover = useRef(false);
   const cbarRef = useRef<HTMLDivElement>(null);
+
+  /* 卡片动作(收藏/标记已看/右键菜单/悬停播放)全走公共 hook —— 首页/媒体库/收藏/搜索同一套。
+     标记已看后只重拉「继续观看」这条轨道(Emby 里已看即掉出 Resume),不整页刷(会把 Hero 重随机)。 */
+  const { cardProps, menu, toastNode } = useCardActions(session, {
+    onPlay,
+    onChanged: () => void listResume(12).then(setResume).catch(() => {}),
+  });
 
   /** 首屏是否还在等第一批数据 —— 控制骨架。null=加载中,[]/有值=到了。 */
   const [loading, setLoading] = useState(true);
@@ -197,8 +191,8 @@ export default function HomePage({
 
     listRandom(5).then((r) => alive && setFeatured(r)).catch(() => {});
     listResume(12).then((r) => alive && setResume(r)).catch(() => {});
+    listNextUp(20).then((r) => alive && setNextUp(r)).catch(() => {});
     listCollections().then((c) => alive && setCollections(c)).catch(() => {});
-    listFavorites().then((f) => alive && setFavIds(new Set(f.map((x) => x.id)))).catch(() => {});
 
     return () => {
       alive = false;
@@ -213,67 +207,6 @@ export default function HomePage({
     }, 6000);
     return () => window.clearInterval(t);
   }, [featured.length]);
-
-  // 右键菜单:点空白/滚动/Esc 关掉(和 NetdiskPage/ServersPage 一个套路)。
-  useEffect(() => {
-    const close = () => setCtx(null);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setCtx(null);
-    window.addEventListener("click", close);
-    window.addEventListener("scroll", close, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("scroll", close, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = window.setTimeout(() => setToast(""), 2600);
-    return () => window.clearTimeout(t);
-  }, [toast]);
-
-  const toggleFav = useCallback((it: Item) => {
-    setFavIds((s) => {
-      const next = !s.has(it.id);
-      setFavorite(it.id, next).catch((e) => {
-        // 后端没落地就把 UI 状态退回去,不留假的红心。
-        setFavIds((cur) => {
-          const back = new Set(cur);
-          if (next) back.delete(it.id);
-          else back.add(it.id);
-          return back;
-        });
-        setToast(`收藏失败:${e}`);
-      });
-      const n = new Set(s);
-      if (next) n.add(it.id);
-      else n.delete(it.id);
-      return n;
-    });
-  }, []);
-
-  const openCtx = useCallback((e: MouseEvent, it: Item) => {
-    e.preventDefault();
-    setCtx({ x: e.clientX, y: e.clientY, item: it });
-  }, []);
-
-  /** 右键「标记为已/未播放」。
-   * ★ Emby 没有「从继续观看里删掉」这种端点 —— 继续观看就是 Resume 查询的结果,
-   *   标记已播放它自己就掉出去,标记未播放又可能回来。所以标记完只需重拉这条轨道,
-   *   让服务端说了算,不在本地猜。
-   * 只刷继续观看,**不整页 onRefresh()**:整页刷会把 Hero 重新随机掉,
-   *   用户只是右键了一张卡,不该整屏跟着变。 */
-  async function markPlayed(it: Item, played: boolean) {
-    setCtx(null);
-    try {
-      await setPlayed(it.id, played);
-      setResume(await listResume(12));
-    } catch (e) {
-      setToast(`标记失败:${e}`);
-    }
-  }
 
   /** 顶栏随内容滚动淡出(标注 4)。直接写 DOM 上的 CSS 变量,不走 state ——
       滚动每帧 setState 会把整页(含所有海报)重渲一遍。 */
@@ -427,7 +360,30 @@ export default function HomePage({
                       session={session}
                       variant="thumb"
                       onOpen={onOpenItem}
-                      onContextMenu={openCtx}
+                      {...cardProps(it)}
+                    />
+                  </div>
+                ))}
+              </Rail>
+            </section>
+          )}
+
+          {/* 接下来观看(/Shows/NextUp):剧集追更的「下一集」。命令一直在,首页过去没接。
+              竖海报 → 用竖版卡;和继续观看错开(那边是有进度的当前集,这边是没看过的下一集)。 */}
+          {nextUp.length > 0 && (
+            <section>
+              <div className="rowlab">
+                <span className="h">接下来观看</span>
+              </div>
+              <Rail>
+                {nextUp.map((it) => (
+                  <div className="r-wide" key={it.id}>
+                    <Poster
+                      item={it}
+                      session={session}
+                      variant="thumb"
+                      onOpen={onOpenItem}
+                      {...cardProps(it)}
                     />
                   </div>
                 ))}
@@ -449,7 +405,7 @@ export default function HomePage({
                       session={session}
                       variant="thumb"
                       onOpen={onOpenItem}
-                      onContextMenu={openCtx}
+                      {...cardProps(c)}
                     />
                   </div>
                 ))}
@@ -549,7 +505,7 @@ export default function HomePage({
                           item={it}
                           session={session}
                           onOpen={onOpenItem}
-                          onContextMenu={openCtx}
+                          {...cardProps(it)}
                         />
                       </div>
                     ))}
@@ -562,47 +518,10 @@ export default function HomePage({
         </div>
       </div>
 
-      {/* 右键菜单**只有首页有**,且只有这三项(用户 2026-07-15 定,覆盖草稿标注 7)。
-          原来的「播放 / 查看详情 / 移出继续观看」已按此删除:
-          单击本身就是进详情,而「标记为已播放」在 Emby 里就等于把它移出继续观看。
-          标记两项都常驻(不做 toggle):用户点名的就是「标记为未/已播放」两条。 */}
-      {ctx && (
-        <div
-          className="ctxmenu"
-          style={{ left: ctx.x, top: ctx.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* 每项都得自己 setCtx(null):菜单容器 stopPropagation 了,关菜单的 window click 到不了这。 */}
-          <div className="mi" onClick={() => void markPlayed(ctx.item, true)}>
-            <IconCheck size={15} /> 标记为已播放
-          </div>
-          <div className="mi" onClick={() => void markPlayed(ctx.item, false)}>
-            <IconCheck size={15} /> 标记为未播放
-          </div>
-          {/* 已在喜欢里还显示「添加到喜欢」就是骗人 → 标签跟着实际状态走,仍是一项。 */}
-          <div
-            className="mi"
-            onClick={() => {
-              toggleFav(ctx.item);
-              setCtx(null);
-            }}
-          >
-            <IconHeart size={15} /> {favIds.has(ctx.item.id) ? "从喜欢中移除" : "添加到喜欢"}
-          </div>
-          {/* 管理员三项(对标 Emby web)。非管理员**整段不出现** —— 出现了也只会 403。 */}
-          {admin && (
-            <AdminMenuItems
-              itemId={ctx.item.id}
-              onDone={(m) => {
-                setToast(m);
-                setCtx(null);
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      {toast && <div className="toast">{toast}</div>}
+      {/* 右键菜单(标记已/未播放 + 收藏 + 管理员项)与 toast 都由 useCardActions 出 ——
+          现在四处网格(首页/媒体库/收藏/搜索)共用同一套,不再是首页独有。 */}
+      {menu}
+      {toastNode}
     </>
   );
 }

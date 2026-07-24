@@ -402,41 +402,53 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; font-family
 .pcard img.ready { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .pcard img { transition: none; } .pskel { animation: none; } }
 .pcard .fallback { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); }
+/* 悬停操作层:中央 ▶ 绝对居中,右下 ✓/♥ 一排。渐变只压底部让右下按钮看得清。 */
 .pcard .overlay {
   position: absolute; inset: 0;
   background: linear-gradient(0deg, rgba(6, 9, 13, 0.72), transparent 55%);
   opacity: 0;
-  display: flex; align-items: flex-end; justify-content: space-between;
-  padding: 9px;
   transition: opacity var(--dur-fast) var(--ease);
 }
 .pcard:hover .overlay { opacity: 1; }
+.ov-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.ov-actions { position: absolute; right: 8px; bottom: 8px; display: flex; gap: 6px; }
 .ov-play {
-  width: 34px; height: 34px; border-radius: 50%;
+  width: 40px; height: 40px; border-radius: 50%;
   background: var(--accent); color: var(--accent-ink);
   display: grid; place-items: center; border: none; cursor: pointer;
   box-shadow: 0 6px 16px -4px rgba(0, 0, 0, 0.6);
 }
-.ov-fav {
+.ov-chk, .ov-fav {
   width: 30px; height: 30px; border-radius: 50%;
   background: rgba(12, 15, 20, 0.7); color: #fff;
   display: grid; place-items: center; border: 1px solid rgba(255, 255, 255, 0.2); cursor: pointer;
 }
+.ov-chk.on { background: #37b24d; border-color: #37b24d; }
 .ov-fav.on { color: var(--danger); }
 .ov-fav.on svg { fill: var(--danger); }
-.pcard .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, 0.5); }
+.pcard .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, 0.5); z-index: 2; }
 .pcard .progress i { display: block; height: 100%; background: var(--accent); }
-/* 未看角标 / 评分角标 */
-.pcard .badge-tr {
-  position: absolute; top: 6px; right: 6px;
+/* 评分角标:左上角(把右上角让给状态角标)。 */
+.pcard .badge-tl {
+  position: absolute; top: 6px; left: 6px; z-index: 2;
   min-width: 20px; height: 20px; padding: 0 6px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.62); border: 1px solid rgba(255, 255, 255, 0.18);
-  /* 底恒为深色半透明 → 字必须恒亮,不能跟 --ink(浅色主题下 --ink 是深色 = 深底深字,
-     用户 2026-07-16「首页的评分是黑的」)。 */
+  /* 底恒为深色半透明 → 字必须恒亮,不能跟 --ink(浅色主题下 --ink 是深色 = 深底深字)。 */
   color: #f0f3f8; font-family: var(--mono); font-size: 11px; font-weight: 700;
   display: grid; place-items: center;
 }
+/* 状态角标:右上角。绿勾=看完(红绿灯语义,避开官方 Jellyfin 蓝勾配蓝数字之混淆);
+   蓝数字=未看集数。字/图标恒亮,不跟主题色。 */
+.pcard .played-ind, .pcard .count-ind {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  display: grid; place-items: center;
+  color: #fff; font-size: 11px; font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.pcard .played-ind { width: 20px; padding: 0; border-radius: 50%; background: #37b24d; }
+.pcard .count-ind { border-radius: 10px; background: #2f88ff; }
 .pcap { font-size: 12.5px; color: var(--ink); font-weight: 500; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcap .sub { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; }
 

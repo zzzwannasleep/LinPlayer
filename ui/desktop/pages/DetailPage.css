@@ -157,6 +157,12 @@
 .dt-ep .th img { width: 100%; height: 100%; object-fit: cover; }
 .dt-ep .th .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(0, 0, 0, 0.5); z-index: 1; }
 .dt-ep .th .progress i { display: block; height: 100%; background: var(--accent); }
+/* 看完打勾:缩略图右上角绿勾(和海报卡 .played-ind 同色)。 */
+.dt-ep .th .dt-ep-chk {
+  position: absolute; top: 5px; right: 5px; z-index: 1;
+  width: 19px; height: 19px; border-radius: 50%; background: #37b24d; color: #fff;
+  display: grid; place-items: center; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
 /* 标注 16:悬停显现播放 */
 .dt-ep-play {
   position: absolute; inset: 0; margin: auto;

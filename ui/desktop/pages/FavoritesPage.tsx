@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { type Item, type LoginResult, listFavorites, posterUrl } from "@shared/api";
+import { useCardActions } from "../lib/cardActions";
 import Poster from "../components/Poster";
 // 视图切换图标复用媒体库那套(icons.tsx 没有网格/列表图标且不许改,不重画一遍)。
 // 顺带把 LibraryPage.css 显式带进来:收藏页复用 .lib-ddwrap/.lib-dd/.lib-list/.lib-row —— 草稿说收藏页「和媒体库同款」。
@@ -10,6 +11,7 @@ import { IconChevronDown, IconChevronRight, IconPlay } from "../app/icons";
 type Props = {
   session: LoginResult;
   onOpenItem: (it: Item) => void;
+  onPlay: (it: Item) => void;
 };
 
 // 排序逻辑单独放一个模块 —— 纯逻辑,node 可以直跑真模块做自检(见 favorites-sort.test.mjs)。
@@ -32,9 +34,18 @@ function loadView(): View {
 
 /** 收藏页(草稿 PAGE 10):和媒体库同款密集海报网格。
     卡片只有一个操作:单击 = 进详情 —— 用户 2026-07-15 定,覆盖草稿标注 36(悬停 ♥/▶ 和右键菜单都不做),别照草稿"复原"回来。 */
-export default function FavoritesPage({ session, onOpenItem }: Props) {
+export default function FavoritesPage({ session, onOpenItem, onPlay }: Props) {
   const [items, setItems] = useState<Item[] | null>(null);
   const [err, setErr] = useState("");
+
+  /* 卡片动作走公共 hook。这页是收藏列表 → 取消收藏就把卡片移出;标记已看就地翻转 played。 */
+  const card = useCardActions(session, {
+    onPlay,
+    onChanged: (it, played) =>
+      setItems((cur) => (cur ? cur.map((x) => (x.id === it.id ? { ...x, played } : x)) : cur)),
+    onFavChanged: (it, faved) =>
+      !faved && setItems((cur) => (cur ? cur.filter((x) => x.id !== it.id) : cur)),
+  });
   // 初值写成函数,否则每次渲染都读一遍 localStorage。
   const [view, setView] = useState<View>(loadView);
   const { sort, asc, layout } = view;
@@ -129,15 +140,20 @@ export default function FavoritesPage({ session, onOpenItem }: Props) {
           <div className="empty">还没有收藏。在详情页点收藏即可加入。</div>
         ) : layout === "grid" ? (
           <div className="dense-grid">
-            {/* 卡片只有一个操作:点 = 进详情。无悬停按钮、无右键(用户 2026-07-15 定,覆盖草稿 36)。 */}
+            {/* 卡片:点=进详情;悬停=▶/✓/♥;右键=标记已看/收藏(2026-07-24 用户定,四网格统一)。 */}
             {shown.map((it) => (
-              <Poster key={it.id} item={it} session={session} onOpen={onOpenItem} />
+              <Poster key={it.id} item={it} session={session} onOpen={onOpenItem} {...card.cardProps(it)} />
             ))}
           </div>
         ) : (
           <div className="lib-list">
             {shown.map((it) => (
-              <button className="lib-row enter" key={it.id} onClick={() => onOpenItem(it)}>
+              <button
+                className="lib-row enter"
+                key={it.id}
+                onClick={() => onOpenItem(it)}
+                onContextMenu={(e) => card.openCtx(e, it)}
+              >
                 <span className="lib-row-thumb">
                   {it.has_primary ? (
                     <img src={posterUrl(session, it.id, 120)} loading="lazy" />
@@ -153,6 +169,9 @@ export default function FavoritesPage({ session, onOpenItem }: Props) {
         )}
         <div style={{ height: 40 }} />
       </div>
+
+      {card.menu}
+      {card.toastNode}
     </>
   );
 }

@@ -625,7 +625,7 @@ export default function App() {
         id: d.item_id || d.id, name: d.title, type_: "Video", is_folder: false, has_primary: false,
         runtime_secs: 0, resume_secs: resume, series_name: d.series_name, episode_no: d.episode_number,
         season_no: d.season_number, video_height: null, bitrate: null, size_bytes: d.total_bytes, date_updated: null, sort_name: null,
-        played: false, genres: [], year: null, rating: null, provider_ids: {},
+        played: false, unplayed_item_count: 0, genres: [], year: null, rating: null, provider_ids: {},
         presentation_unique_key: null, path: d.file_path, series_id: d.series_id,
       };
       setPlaying(synth);
@@ -641,7 +641,7 @@ export default function App() {
     try {
       const start = await sourcePlay(entry, 0);
       // 网盘文件不是 Emby 条目:剧集号/规格字段一律 null。
-      const synth: Item = { id: entry.id, name: entry.name, type_: "Video", is_folder: false, has_primary: false, runtime_secs: 0, resume_secs: 0, series_name: null, episode_no: null, season_no: null, video_height: null, bitrate: null, size_bytes: null, played: false, genres: [], year: null, rating: null, provider_ids: {}, presentation_unique_key: null, path: null, series_id: null, date_updated: null, sort_name: null };
+      const synth: Item = { id: entry.id, name: entry.name, type_: "Video", is_folder: false, has_primary: false, runtime_secs: 0, resume_secs: 0, series_name: null, episode_no: null, season_no: null, video_height: null, bitrate: null, size_bytes: null, played: false, unplayed_item_count: 0, genres: [], year: null, rating: null, provider_ids: {}, presentation_unique_key: null, path: null, series_id: null, date_updated: null, sort_name: null };
       setPlaying(synth);
       setCurMsId(null);
       setStatus({ time: start, duration: 0, paused: false, buffered: 0, eof: false });
