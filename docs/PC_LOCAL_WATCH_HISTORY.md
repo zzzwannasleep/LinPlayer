@@ -97,31 +97,32 @@
 
 以下现状会直接影响实现方式：
 
-- `lib/desktop/screens/player/desktop_player_screen_state.dart`
-  - 桌面内置播放器已经会根据 `playbackPositionTicks` 做续播。
-  - 也已经通过 `api.playback.reportPlaybackStart / Progress / Stopped` 向 Emby 上报播放状态。
+- `apps/desktop/src/lib.rs` + `ui/desktop/` (Tauri 壳 + React 前端)
+  - 桌面内置播放器已经会根据 `resume_secs` 字段做续播(emby.rs 层回传)。
+  - 也已经通过 `play / reportProgress / reportStopped` 命令向 Emby 上报播放状态(lib.rs 的 #[tauri::command])。
 
-- `lib/core/providers/media_providers.dart`
-  - `resumeItemsProvider` 直接读 Emby 的续播列表。
+- `ui/shared/api.ts`
+  - `listResume()` 直接读 Emby 的续播列表(核层 /Users/{UserId}/Items/Resume)。
 
-- `lib/desktop/screens/home/desktop_home_screen.dart`
-  - 首页在初始化、恢复前台时会刷新 `resumeItemsProvider` 等首页摘要数据。
+- `ui/desktop/pages/HomePage.tsx`
+  - 首页在初始化、恢复前台时会刷新 `listResume()` 等首页摘要数据。
   - 这里很适合作为“恢复扫描”的触发入口。
 
-- `lib/desktop/screens/detail/desktop_media_detail_screen_header.dart`
-  - 外部 MPV 当前仍是 `Process.start(..., detached)`。
-  - 只传入了 `--start` 和播放地址，没有 IPC、没有进度跟踪、没有会话回传。
+- `ui/desktop/pages/DetailPage.tsx` + `apps/desktop/src/lib.rs`
+  - 外部 MPV 当前由前端通过 `play_external()` 命令拉起(Tauri invoke)。
+  - 实现在 `apps/desktop/src/lib.rs` 中,目前只传 `--start` 和播放地址,没有 IPC、没有进度跟踪、没有会话回传。
 
-- `lib/core/api/api_interfaces.dart`
-  - 当前 `MediaItem` 主要承接了标题、年份、剧集号、用户播放进度等字段。
-  - 还没有把跨重扫更关键的字段纳入模型，例如 `ProviderIds`、`PresentationUniqueKey`。
+- `ui/shared/api.ts` (类型 Item)
+  - 当前 `Item` 已承接标题、年份、剧集号、用户播放进度等字段。
+  - 已补进跨重扫关键字段: `provider_ids`、`presentation_unique_key`、`path`、`series_id`。
 
-- `lib/core/api/emby_api.dart`
-  - 已存在 Emby 播放状态上报能力。
-  - 已存在 `markAsPlayed` / `markAsUnplayed` 能力。
+- `crates/core/src/emby.rs`
+  - 已存在 Emby 播放状态上报能力(Sessions/Playing/Progress/Stopped 端点)。
+  - 已存在 `setPlayed()` / 标记已看能力。
 
-- `lib/core/providers/playback_providers.dart`
-  - 已有 `PreferenceNotifier<T>` 体系，适合直接承接“已看阈值”等新增播放偏好。
+- `crates/core/src/config.rs` (Prefs 结构体)
+  - 已有偏好持久化体系(Prefs 字段),适合直接承接”已看阈值”等新增播放偏好。
+  - UI 层通过 `ui/shared/api.ts` 中的 `getPrefs/setPrefs` 命令与核层通信。
 
 ## 五、总体方案
 
@@ -453,44 +454,40 @@
 
 ### 12.1 数据与存储
 
-- `lib/core/services/watch_history/watch_history_models.dart`
-- `lib/core/services/watch_history/watch_history_store.dart`
-- `lib/core/services/watch_history/watch_history_matcher.dart`
-- `lib/core/services/watch_history/watch_history_restore_service.dart`
+- `crates/core/src/watch_history.rs` — 本地观看记录主模块(已落地)
+- `crates/core/src/watch_history_sync.rs` — 跨服续播与恢复匹配(已落地)
+- 相关 Tauri 命令在 `apps/desktop/src/lib.rs`
 
 ### 12.2 外部播放器
 
-- `lib/core/services/external_player/external_player_session_service.dart`
-- `lib/core/services/external_player/mpv_ipc_bridge.dart`
+- `apps/desktop/src/lib.rs` — 外部 MPV 启动与会话管理
+- `crates/mpv/src/lib.rs` — libmpv 原生绑定(含 IPC 接口)
+- IPC 机制:Windows 命名管道、Linux/macOS Unix socket(cross-platform 待补)
 
-### 12.3 Provider
+### 12.3 Provider 与前端状态
 
-- `watchHistoryProvider`
-- `watchHistoryRestoreQueueProvider`
-- `watchedThresholdProvider`
+- `ui/shared/api.ts` 中的命令: `listResume()`, `getWatchHistory()`, `setPlayed()`
+- 前端 React 组件中的局部 useState 副本(无全局 store,参见 [[frontend-state-copies-need-broadcast]])
+- `ui/desktop/pages/HomePage.tsx` 中集成首页恢复扫描与提示队列
 
 ### 12.4 现有文件改动点
 
-- `lib/core/api/api_interfaces.dart`
-  - 扩展 `MediaItem` 标识字段
+- `crates/core/src/emby.rs`
+  - 确保已解析 `ProviderIds`、`PresentationUniqueKey` 等标识字段(已补)
 
-- `lib/core/api/emby_api.dart`
-  - 补齐对应字段解析
-
-- `lib/desktop/screens/player/desktop_player_screen_state.dart`
-  - 接入内置播放器本地写入
-
-- `lib/desktop/screens/detail/desktop_media_detail_screen_header.dart`
+- `apps/desktop/src/lib.rs`
+  - 接入播放器生命周期回调到 `watch_history` 模块
   - 改造外部 MPV 启动参数与会话跟踪
+  - 新增已看阈值偏好相关命令
 
-- `lib/desktop/screens/home/desktop_home_screen.dart`
-  - 接入首页恢复扫描与提示队列
+- `ui/desktop/pages/HomePage.tsx`
+  - 集成首页恢复扫描与提示队列
 
-- `lib/core/providers/playback_providers.dart`
-  - 新增已看阈值偏好
-
-- `lib/ui/screens/settings/settings_player.dart`
+- `ui/desktop/pages/SettingsPage.tsx`
   - 新增已看阈值设置 UI
+
+- `crates/core/src/config.rs` (Prefs)
+  - 新增已看阈值字段
 
 ## 十三、建议实施顺序
 

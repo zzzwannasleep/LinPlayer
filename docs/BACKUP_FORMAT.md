@@ -242,7 +242,8 @@ LinPlayer 还能导入两种旧格式(当前**不再产出**它们):
 
 ## 8. 实现位置
 
-- 默认免密格式:`lib/core/services/common_config.dart`(`CommonConfig.build/parse/isCommonConfig`)。
-- 旧口令格式(仅导入):`lib/core/services/backup_crypto.dart`。
-- 导出/导入 UI:`lib/ui/screens/settings/settings_backup_restore.dart`。
-- 回归测试:`test/common_config_test.dart`。
+- 默认免密格式:`crates/core/src/config.rs`(Account/ServerLine 结构体)+ `crates/core/src/config_transfer.rs`(encode/decode/merge 函数)。
+- AES-256-CBC 加解密:`crates/core/src/config_transfer.rs`(encrypt_config/decrypt_config)。
+- 导出/导入命令:`apps/desktop/src/lib.rs`(config_export_qr/config_import_qr)。
+- 导出/导入 UI:`ui/desktop/pages/SettingsPage.tsx`。
+- Tauri 命令注册:`apps/desktop/src/lib.rs`(生成 generate_handler! 列表)。

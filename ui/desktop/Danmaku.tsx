@@ -1,7 +1,14 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
 
-export type DanmakuComment = { time: number; text: string; mode: number; color: number };
-export type TimeSync = { base: number; stamp: number; paused: boolean };
+/* 弹幕类型只保留**一份**(核层契约那份)。这里原本另写了个四字段的窄版本,
+   于是同名两个类型在 App.tsx 里对不上 —— 把同一份数据既喂给这个组件、又喂给
+   danmaku_attach 时会当场编译错。渲染只用到前四个字段,但类型别再分家。 */
+export type { DanmakuComment } from "@shared/api";
+import type { DanmakuComment } from "@shared/api";
+/** 播放时钟的快照。`speed` **必须有**:两次轮询之间是用墙钟外推的,
+ *  没有倍速这个因子,2x 播放时弹幕按 1x 爬,再每 250ms 被真值一把拽回去 ——
+ *  那就是用户报的「倍速更卡」,和绘制开销毫无关系。 */
+export type TimeSync = { base: number; stamp: number; paused: boolean; speed: number };
 
 type Active = { text: string; color: string; mode: number; born: number; width: number; lane: number; speed: number };
 
@@ -29,11 +36,11 @@ export function DanmakuLayer({
   fontSize?: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const stateRef = useRef({ cursor: 0, active: [] as Active[], lastT: -1 });
+  const stateRef = useRef({ cursor: 0, active: [] as Active[], lastT: -1, laneFree: [] as number[] });
 
   // 换视频/重载弹幕 → 重置游标与在屏弹幕
   useEffect(() => {
-    stateRef.current = { cursor: 0, active: [], lastT: -1 };
+    stateRef.current = { cursor: 0, active: [], lastT: -1, laneFree: [] };
   }, [comments]);
 
   useEffect(() => {
@@ -41,12 +48,21 @@ export function DanmakuLayer({
     const ctx = canvas.getContext("2d")!;
     let raf = 0;
 
+    /* 画布尺寸靠 ResizeObserver 推,不在 rAF 里读 getBoundingClientRect ——
+       后者每帧强制一次同步布局(layout thrash),而尺寸一秒也变不了几次。 */
+    let W = 0, H = 0, dpr = 1;
+    const measure = () => {
+      const r = canvas.getBoundingClientRect();
+      dpr = window.devicePixelRatio || 1;
+      W = Math.round(r.width * dpr);
+      H = Math.round(r.height * dpr);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(canvas);
+
     const frame = () => {
       raf = requestAnimationFrame(frame);
-      const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      const W = Math.round(rect.width * dpr);
-      const H = Math.round(rect.height * dpr);
       if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (!enabled || !comments.length) { stateRef.current.active = []; return; }
@@ -62,7 +78,8 @@ export function DanmakuLayer({
 
       const st = stateRef.current;
       const ts = timeSync.current;
-      const t = ts.paused ? ts.base : ts.base + (performance.now() - ts.stamp) / 1000;
+      // ★ 乘 speed:墙钟外推必须按倍速走,否则每次轮询都要把弹幕硬拽回真实位置。
+      const t = ts.paused ? ts.base : ts.base + ((performance.now() - ts.stamp) / 1000) * (ts.speed || 1);
 
       // seek 检测:大跳则清屏并重定位游标
       if (t < st.lastT - 0.5 || t > st.lastT + 3) {
@@ -85,15 +102,19 @@ export function DanmakuLayer({
           const used = new Set(st.active.filter((a) => a.mode === c.mode).map((a) => a.lane));
           while (used.has(lane) && lane < numLanes - 1) lane++;
         } else {
-          // 滚动:选入口已空出的道,否则选最快空出的
+          /* 滚动:选入口已空出的道,否则选最快空出的。
+             ★ 每条轨的「空出时刻」直接记在 laneFree 里 —— 原来是对**全量在屏弹幕**
+               做 filter+slice(-1),外面还套着轨道数的循环,于是每生成一条弹幕就是
+               O(轨道数 × 在屏条数)。弹幕一密就是这里在掉帧。 */
+          if (st.laneFree.length !== numLanes) st.laneFree = new Array(numLanes).fill(-Infinity);
           let best = 0, bestFree = Infinity;
           for (let l = 0; l < numLanes; l++) {
-            const last = st.active.filter((a) => a.mode !== 4 && a.mode !== 5 && a.lane === l).slice(-1)[0];
-            const freeAt = last ? last.born + (last.width + fs) / last.speed : -1;
-            if (t >= freeAt) { best = l; bestFree = -1; break; }
+            const freeAt = st.laneFree[l];
+            if (t >= freeAt) { best = l; break; }
             if (freeAt < bestFree) { bestFree = freeAt; best = l; }
           }
           lane = best;
+          st.laneFree[lane] = t + (width + fs) / speed;
         }
         st.active.push({ text: c.text, color, mode: c.mode, born: t, width, lane, speed });
       }
@@ -125,7 +146,7 @@ export function DanmakuLayer({
     };
 
     raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
     // duration/fontSize 进依赖:改档位要立刻重建 frame 闭包,否则调了没反应。
   }, [comments, enabled, timeSync, duration, fontSize]);
 

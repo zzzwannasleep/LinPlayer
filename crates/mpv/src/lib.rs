@@ -266,8 +266,11 @@ mod overlay {
     use windows_sys::Win32::Graphics::Gdi::HBRUSH;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, RegisterClassW, SetWindowPos, SWP_NOACTIVATE,
-        SWP_SHOWWINDOW, WNDCLASSW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, GetWindowLongPtrW, IsIconic, IsWindow,
+        IsWindowVisible, RegisterClassW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWLP_WNDPROC,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE,
+        WM_WINDOWPOSCHANGED, WNDCLASSW,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
     };
 
     static REGISTER: Once = Once::new();
@@ -301,11 +304,16 @@ mod overlay {
         ensure_class();
         unsafe {
             let hinst = GetModuleHandleW(std::ptr::null());
+            /* ★ 建出来就**不带 WS_VISIBLE**。老代码是可见的,而 sync() 每次又都带
+               SWP_SHOWWINDOW —— 于是这个黑窗从 App 启动那一刻起就一直挂在桌面上。
+               平时它被主窗盖住看不出来,主窗一最小化就露出来:用户看到的
+               「反复最小化能看到后面层级窗口正在播放」正是这个。
+               显隐现在由 sync() 按主窗状态决定,见下。 */
             let hwnd = CreateWindowExW(
                 WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 CLASS_NAME.as_ptr(),
                 std::ptr::null(),
-                WS_POPUP | WS_VISIBLE,
+                WS_POPUP,
                 100,
                 100,
                 800,
@@ -319,10 +327,121 @@ mod overlay {
         }
     }
 
+    /* 视频窗该不该显示 = **两个条件的与**:
+         1) 正在播片(WANT,由 set_visible 从 play/stop 那边置);
+         2) 主窗自己还在屏幕上(没最小化、没隐藏)。
+       任一不成立就藏。收敛成这一个函数,是因为它有三个调用点(sync / host_proc /
+       set_visible)——散着写的话必然出现「A 把它藏了 B 又把它亮出来」。 */
+    static WANT_VISIBLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    unsafe fn apply_visibility(v: HWND, t: HWND) -> bool {
+        let show = WANT_VISIBLE.load(std::sync::atomic::Ordering::Relaxed)
+            && IsIconic(t) == 0
+            && IsWindowVisible(t) != 0;
+        // 状态已经对就别调 ShowWindow:它会动 z 序,而我们正挂在 z 序变化的回调里。
+        if (IsWindowVisible(v) != 0) != show {
+            ShowWindow(v, if show { SW_SHOWNOACTIVATE } else { SW_HIDE });
+        }
+        show
+    }
+
+    /// 把视频窗压在主窗正下方(hWndInsertAfter = 主窗)。
+    unsafe fn restack(v: HWND, t: HWND) {
+        SetWindowPos(v, t, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+    }
+
     pub fn sync(video: isize, tauri: isize, x: i32, y: i32, w: i32, h: i32) {
         unsafe {
-            // hWndInsertAfter = tauri => video 排在 tauri 之下(紧贴其后)
-            SetWindowPos(video as HWND, tauri as HWND, x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            let (v, t) = (video as HWND, tauri as HWND);
+            // 几何先摆好(不动 z 序),藏着的时候也摆 —— 这样恢复显示时不会闪一下旧位置。
+            SetWindowPos(v, std::ptr::null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
+            if apply_visibility(v, t) {
+                restack(v, t);
+            }
+        }
+    }
+
+    /* ---- 把视频窗**焊死**在主窗背面 ----
+
+       原来只在 Tauri 的 Resized / Moved / Focused(true) 三个事件上重排。
+       可主窗的 z 序还会被别的路径改:Alt-Tab、点任务栏、别的窗口插进来、
+       WebView2 自己动一下 —— 这些都不产生上面那三个事件,于是视频层就"掉"了。
+       用户报的「视频层级掉到应用主界面之下」就是这一类漏网。
+
+       WM_WINDOWPOSCHANGED 是**位置/尺寸/z 序任何一样变了都会发**的那条消息。
+       钉住它,上面整类问题一次消掉,也不用起定时器去轮询。 */
+    static mut PREV_PROC: isize = 0;
+    static mut VIDEO_HWND: isize = 0;
+    static HOOK: Once = Once::new();
+
+    unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+        let prev = PREV_PROC;
+        // 拿不到原 wndproc 就退回默认处理 —— 拿 null 去 CallWindowProcW 是当场崩。
+        let r = if prev == 0 {
+            DefWindowProcW(hwnd, msg, wp, lp)
+        } else {
+            CallWindowProcW(std::mem::transmute(prev), hwnd, msg, wp, lp)
+        };
+        /* ★ 重入闸,少了它就是**当场爆栈**。
+           我们在这条回调里调 SetWindowPos/ShowWindow 去摆视频窗,而那会改变主窗的
+           相对 z 序 —— Windows 于是又给主窗发一条 WM_WINDOWPOSCHANGED,再进这里,
+           再摆一次…… 递归到栈溢出,进程**无声消失**(日志停在最后一行,没有 panic)。
+           实测:装上钩子后,鼠标挪一下窗口 App 就没了。 */
+        if msg == WM_WINDOWPOSCHANGED
+            && VIDEO_HWND != 0
+            && !IN_SYNC.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            /* 只跟 z 序和显隐,不动几何 —— 几何由 apps/desktop 的 sync_video 负责
+               (它才知道客户区在哪;这里拿不到 Tauri 的 inner_position)。 */
+            let (v, t) = (VIDEO_HWND as HWND, hwnd);
+            /* 句柄可能已经失效:Player 存在 Mutex<Option<Player>> 里,替换/销毁时
+               视频窗就没了,而这个 static 还留着旧 HWND。拿失效句柄去 SetWindowPos
+               是典型的「无声死亡」来源,先验一下再用。 */
+            if IsWindow(v) != 0 && apply_visibility(v, t) {
+                restack(v, t);
+            }
+            IN_SYNC.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        r
+    }
+
+    static IN_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    /// 子类化主窗,接管 WM_WINDOWPOSCHANGED。只装一次;窗口活到进程结束,不用卸。
+    pub fn pin_below(video: isize, tauri: isize) {
+        unsafe {
+            VIDEO_HWND = video;
+            HOST_HWND = tauri;
+            HOOK.call_once(|| {
+                let prev = GetWindowLongPtrW(tauri as HWND, GWLP_WNDPROC);
+                /* 拿不到原 wndproc 就**别装**。装了却把消息全喂给 DefWindowProcW,
+                   等于把 Tauri 的窗口过程整个换掉 —— 窗口会彻底不响应。
+                   降级成「只靠 Tauri 事件重排 z 序」(改这版之前的行为)远比这个好。 */
+                if prev == 0 {
+                    crate::poclog("装 WM_WINDOWPOSCHANGED 钩子失败(取不到原 wndproc),z 序退回事件驱动");
+                    return;
+                }
+                PREV_PROC = prev;
+                SetWindowLongPtrW(tauri as HWND, GWLP_WNDPROC, host_proc as *const () as isize);
+            });
+        }
+    }
+
+    static mut HOST_HWND: isize = 0;
+
+    /// 开关「正在播片」。真正显不显示还要看主窗是不是最小化了,见 apply_visibility。
+    pub fn set_visible(video: isize, on: bool) {
+        WANT_VISIBLE.store(on, std::sync::atomic::Ordering::Relaxed);
+        unsafe {
+            let v = video as HWND;
+            if HOST_HWND != 0 {
+                if apply_visibility(v, HOST_HWND as HWND) {
+                    restack(v, HOST_HWND as HWND);
+                }
+            } else {
+                // 还没装钩子(启动早期)。藏总是安全的;显示留给之后的 sync/钩子。
+                ShowWindow(v, SW_HIDE);
+            }
         }
     }
 }
@@ -400,7 +519,9 @@ mod overlay {
             if w == 0 {
                 return 0;
             }
-            (x.lib.XMapWindow)(x.dpy, w);
+            /* ★ 建完**不 map**。原来是建完就 map,于是这个窗从 App 启动起就一直在桌面上,
+               主窗一最小化就露出来 —— 和 Windows 那半 WS_VISIBLE 是同一个 bug。
+               显隐统一交给 set_visible / sync。 */
             (x.lib.XFlush)(x.dpy);
             w as isize
         }
@@ -432,6 +553,42 @@ mod overlay {
         None
     }
 
+    /// 「正在播片」。X11 上没有 IsIconic 那种便宜的查法,而主窗最小化时 Tauri 会
+    /// 发 Resized(0,0)/Moved,sync 那边据此不再 map —— 与 Windows 同一个「与」语义。
+    static WANT_VISIBLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+    fn want() -> bool {
+        WANT_VISIBLE.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// 显隐视频窗。X11 上就是 map / unmap。
+    pub fn set_visible(video: isize, on: bool) {
+        WANT_VISIBLE.store(on, std::sync::atomic::Ordering::Relaxed);
+        let Some(x) = x11() else { return };
+        if video == 0 {
+            return;
+        }
+        unsafe {
+            map(x, video as xlib::Window, on);
+        }
+    }
+
+    unsafe fn map(x: &X, w: xlib::Window, on: bool) {
+        if on {
+            (x.lib.XMapWindow)(x.dpy, w);
+        } else {
+            (x.lib.XUnmapWindow)(x.dpy, w);
+        }
+        (x.lib.XFlush)(x.dpy);
+    }
+
+    /* X11 上**没有** WM_WINDOWPOSCHANGED 那种「主窗几何/层叠一变就通知我」的现成消息:
+       要等价的效果得 XSelectInput(StructureNotify) 主窗的 frame 再自己跑事件循环,
+       而那个 frame 会被 WM 换掉(reparent),得跟着重挂 —— 成本和出错面都不小。
+       所以 Linux 这半仍然只靠 Tauri 事件驱动的 sync(),这是**已知的能力差**,
+       不是忘了写。真在 X11 上遇到层级掉队,再来补事件循环那条路。 */
+    pub fn pin_below(_video: isize, _tauri: isize) {}
+
     pub fn sync(video: isize, tauri: isize, x_: i32, y_: i32, w: i32, h: i32) {
         let Some(x) = x11() else { return };
         if video == 0 {
@@ -439,6 +596,14 @@ mod overlay {
         }
         unsafe {
             let video = video as xlib::Window;
+            /* 主窗最小化时 Tauri 报的尺寸会塌成 0(或极小)。这时不能再 map:
+               视频窗是 override_redirect 的,WM 完全不管它,不主动 unmap 的话
+               就是一块还在放片的画面留在桌面上(Windows 那半的同款症状)。 */
+            let host_ok = w > 1 && h > 1;
+            map(x, video, want() && host_ok);
+            if !host_ok {
+                return;
+            }
             // 宽高为 0 在 X11 上是 BadValue(Win32 只是忽略),这里先夹住。
             (x.lib.XMoveResizeWindow)(x.dpy, video, x_, y_, w.max(1) as c_uint, h.max(1) as c_uint);
             let sibling = toplevel_frame(x, tauri as xlib::Window).unwrap_or(tauri as xlib::Window);
@@ -501,6 +666,9 @@ mod overlay {
 
     /// SurfaceView 铺满 Activity,没有「把视频窗对齐到 UI 窗」这回事。
     pub fn sync(_v: isize, _t: isize, _x: i32, _y: i32, _w: i32, _h: i32) {}
+    // 安卓的渲染面是 SurfaceView,层级归 Android 的 View 树管,不存在这两件事。
+    pub fn set_visible(_v: isize, _on: bool) {}
+    pub fn pin_below(_v: isize, _t: isize) {}
 }
 
 /// 安卓壳把 SurfaceView 的 Surface(**全局引用**)交进来。见 `mod overlay` 的注释。
@@ -591,8 +759,22 @@ fn create_overlay() -> isize {
 }
 
 /// 把视频窗口对齐到 Tauri 窗口客户区(屏幕坐标 x,y,w,h),并置于 Tauri 窗口正下方。
+/// 主窗最小化/隐藏时改为把视频窗藏起来(它是独立顶层窗,系统不会替我们联动)。
 pub fn sync_overlay(video: isize, tauri: isize, x: i32, y: i32, w: i32, h: i32) {
     overlay::sync(video, tauri, x, y, w, h)
+}
+
+/// 把视频窗焊在主窗背面:Windows 上子类化主窗接管 WM_WINDOWPOSCHANGED,
+/// 任何来源的 z 序变化都当场跟回来(Alt-Tab / 点任务栏 / 别的窗口插进来 /
+/// WebView2 自己动)。X11 暂为 no-op,见那边的说明。启动时调一次即可。
+pub fn pin_overlay_below(video: isize, tauri: isize) {
+    overlay::pin_below(video, tauri)
+}
+
+/// 显隐视频窗。**不播放时应当隐藏** —— 否则那是一块黑色垫在 UI 底下,
+/// 主窗一最小化就露在桌面上。
+pub fn set_overlay_visible(video: isize, on: bool) {
+    overlay::set_visible(video, on)
 }
 
 // ---------- 播放器 ----------
@@ -615,6 +797,69 @@ fn cmd_raw(ctx: *mut mpv_handle, args: &[&str]) -> Result<(), String> {
 struct SubState {
     loaded: bool,                   // 当前文件是否已 FILE_LOADED
     pending: Vec<(String, String)>, // (url, title),等 FILE_LOADED 后由事件线程挂
+    /* 弹幕 ASS 的路径。和普通外挂字幕分开排队,因为它还要额外指到 secondary-sid,
+       而且**只保留最后一条** —— 用户连点「字号+」时前面几版都作废,排成队会挂一串。 */
+    pending_danmaku: Option<String>,
+}
+
+/// 挂弹幕 ASS 并指到 secondary-sid。先摘掉上一条(改档位是「重新生成再挂」)。
+///
+/// 走 secondary 而不是主字幕位:主位要留给用户真正的字幕轨,
+/// 否则一开弹幕字幕就没了 —— 那是「修好一个坏掉另一个」。
+fn attach_danmaku_raw(
+    ctx: *mut mpv_handle,
+    path: &str,
+    slot: &std::sync::Mutex<Option<String>>,
+) {
+    if let Some(old) = slot.lock().unwrap().take() {
+        let _ = cmd_raw(ctx, &["sub-remove", &old]);
+    }
+    if let Err(e) = cmd_raw(ctx, &["sub-add", path, "auto", "弹幕"]) {
+        poclog(&format!("弹幕轨挂载失败: {e}"));
+        return;
+    }
+    let Some(id) = last_sub_id_raw(ctx) else {
+        poclog("弹幕轨挂上了但找不到它的 sid —— 不设 secondary-sid,否则会指错轨");
+        return;
+    };
+    set_str_raw(ctx, "secondary-sid", &id);
+    /* mpv 默认 `secondary-sub-ass-override=strip`:把 ASS 标记**剥成纯文本**,
+       于是 \move / \pos / \c 全没了,弹幕会变成一行叠在顶上的白字。
+       必须显式关掉覆写,让 libass 照我们写的样式渲染。 */
+    set_str_raw(ctx, "secondary-sub-ass-override", "no");
+    set_str_raw(ctx, "secondary-sub-visibility", "yes");
+    *slot.lock().unwrap() = Some(id);
+    poclog(&format!("弹幕轨已挂载: {path}"));
+}
+
+fn set_str_raw(ctx: *mut mpv_handle, name: &str, val: &str) {
+    let n = CString::new(name).unwrap();
+    let v = CString::new(val).unwrap();
+    unsafe {
+        mpv_set_property_string(ctx, n.as_ptr(), v.as_ptr());
+    }
+}
+
+fn get_str_raw(ctx: *mut mpv_handle, name: &str) -> Option<String> {
+    let n = CString::new(name).unwrap();
+    unsafe {
+        let p = mpv_get_property_string(ctx, n.as_ptr());
+        if p.is_null() {
+            return None;
+        }
+        let s = CStr::from_ptr(p).to_string_lossy().into_owned();
+        mpv_free(p as *mut c_void);
+        Some(s)
+    }
+}
+
+/// 最后一条字幕轨的 id(sub-add 之后取新挂的那条)。
+fn last_sub_id_raw(ctx: *mut mpv_handle) -> Option<String> {
+    let count: usize = get_str_raw(ctx, "track-list/count")?.parse().ok()?;
+    (0..count)
+        .rev()
+        .find(|i| get_str_raw(ctx, &format!("track-list/{i}/type")).as_deref() == Some("sub"))
+        .and_then(|i| get_str_raw(ctx, &format!("track-list/{i}/id")))
 }
 
 pub struct Player {
@@ -623,6 +868,8 @@ pub struct Player {
     error_eof: Arc<AtomicBool>, // 直链失效标志(END_FILE=error),供 302 重签探测
     eof: Arc<AtomicBool>,       // 正常播完标志(END_FILE=eof),供「看完」同步
     subs: Arc<std::sync::Mutex<SubState>>,
+    /// 弹幕 ASS 轨的 sid。换档位/换片时按它 sub-remove,别误删用户的字幕轨。
+    danmaku_sid: Arc<std::sync::Mutex<Option<String>>>,
     running: Arc<AtomicBool>,
     event_thread: Option<JoinHandle<()>>,
     /* 最后一次**读到过**的播放位置/时长(f64 的位模式)。
@@ -801,9 +1048,11 @@ impl Player {
             let eof = Arc::new(AtomicBool::new(false));
             let running = Arc::new(AtomicBool::new(true));
             let subs: Arc<std::sync::Mutex<SubState>> = Default::default();
+            // 弹幕轨当前的 sid(挂上才有)。事件线程和调用方都要动它,故共享。
+            let danmaku_sid: Arc<std::sync::Mutex<Option<String>>> = Default::default();
             let ctx_addr = ctx as usize;
-            let (e2, r2, eof2, subs2) =
-                (error_eof.clone(), running.clone(), eof.clone(), subs.clone());
+            let (e2, r2, eof2, subs2, dm2) =
+                (error_eof.clone(), running.clone(), eof.clone(), subs.clone(), danmaku_sid.clone());
             let event_thread = std::thread::spawn(move || {
                 let ctx = ctx_addr as *mut mpv_handle;
                 while r2.load(Ordering::Relaxed) {
@@ -815,11 +1064,17 @@ impl Player {
                        挂载放在事件线程里做,而不是让调用方阻塞等:两端的调用点都在
                        播放器锁内,在那儿等 FILE_LOADED 等于拿着锁卡住整个 UI。 */
                     if (*ev).event_id == MPV_EVENT_FILE_LOADED {
-                        let queued = {
+                        let (queued, danmaku) = {
                             let mut st = subs2.lock().unwrap();
                             st.loaded = true;
-                            std::mem::take(&mut st.pending)
+                            (std::mem::take(&mut st.pending), st.pending_danmaku.take())
                         };
+                        /* 换片了:上一条弹幕轨的 sid 随旧文件一起没了,
+                           不清账下次 sub-remove 会打到新文件的某条真字幕上。 */
+                        *dm2.lock().unwrap() = None;
+                        if let Some(path) = danmaku {
+                            attach_danmaku_raw(ctx, &path, &dm2);
+                        }
                         /* 就在事件线程里挂,**不要**另开线程:Drop 的顺序是
                            running=false → join(事件线程) → mpv_terminate_destroy,
                            只有跑在这根线程上才被 join 保护住;另开的线程会绕过它,
@@ -859,6 +1114,7 @@ impl Player {
                 error_eof,
                 eof,
                 subs,
+                danmaku_sid,
                 running,
                 event_thread: Some(event_thread),
                 last_pos: Arc::new(AtomicU64::new(0)),
@@ -985,7 +1241,13 @@ impl Player {
             let mut st = self.subs.lock().unwrap();
             st.loaded = false;
             st.pending.clear();
+            /* 弹幕同理,而且更要命:排队中的那份是**上一集**的弹幕,漏到下一集
+               就是「集数对不上的弹幕」——看起来能用,内容全错。前端拿到新一集的
+               弹幕后会重新 attach,这里清干净就好。 */
+            st.pending_danmaku = None;
         }
+        // 旧弹幕轨的 sid 随旧文件一起作废;不清账,下一次 sub-remove 会打到新文件的某条真字幕上。
+        *self.danmaku_sid.lock().unwrap() = None;
         self.set_str("http-header-fields", header_fields);
         // 源没指定 UA 就用访问 Emby 的那个(用户 2026-07-19 定的 UA 口径)。
         self.set_str(
@@ -1098,6 +1360,12 @@ impl Player {
                 title: self.get_str(&format!("track-list/{i}/title")).unwrap_or_default(),
                 lang: self.get_str(&format!("track-list/{i}/lang")).unwrap_or_default(),
                 selected: self.get_str(&format!("track-list/{i}/selected")).as_deref() == Some("yes"),
+                // 正则筛选要匹配编码和声道(wiki regex-filters 的口径),所以这两个必须取。
+                codec: self.get_str(&format!("track-list/{i}/codec")).unwrap_or_default(),
+                channels: self
+                    .get_str(&format!("track-list/{i}/demux-channel-count"))
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0),
             });
         }
         v
@@ -1255,6 +1523,42 @@ impl Player {
     pub fn set_secondary_sub_position(&self, pos: f64) {
         self.set_str("secondary-sub-pos", &(pos.clamp(0.0, 100.0).round() as i64).to_string());
     }
+    /* ---- 弹幕轨(ASS,交 libass 渲染)----
+
+       前端把弹幕生成成一个 .ass 文件,这里挂给 mpv。之后时间轴/倍速/seek/暂停
+       全归 mpv 自己,前端一帧都不用算 —— 这才是弹幕卡顿的根治(见
+       core 的 danmaku::ass 模块头注释:老 Canvas 版的插值里没有倍速这个变量)。 */
+
+    /// 挂一条弹幕 ASS。文件还没开好就排队,等 FILE_LOADED 由事件线程挂
+    /// (直接挂必得 -12,那是 [[loadfile 异步吞掉 sub-add]] 踩过的坑)。
+    ///
+    /// 重复调用 = 换档位后重新生成:旧的会先被 sub-remove。
+    pub fn set_danmaku_sub(&self, path: &str) {
+        let mut st = self.subs.lock().unwrap();
+        if !st.loaded {
+            // 只留最后一条:连点「字号+」时前面几版都作废。
+            st.pending_danmaku = Some(path.to_string());
+            return;
+        }
+        drop(st);
+        attach_danmaku_raw(self.ctx, path, &self.danmaku_sid);
+    }
+
+    /// 摘掉弹幕轨(关弹幕/换片)。没挂过是 no-op。
+    pub fn clear_danmaku_sub(&self) {
+        self.subs.lock().unwrap().pending_danmaku = None;
+        if let Some(id) = self.danmaku_sid.lock().unwrap().take() {
+            let _ = self.cmd(&["sub-remove", &id]);
+        }
+    }
+
+    /// 弹幕轨可见性。只是开关显示,不卸载 —— 重开不用重新生成整份 ASS。
+    pub fn set_danmaku_visible(&self, on: bool) {
+        if self.danmaku_sid.lock().unwrap().is_some() {
+            self.set_str("secondary-sub-visibility", if on { "yes" } else { "no" });
+        }
+    }
+
     /// 最后一条字幕轨的 id(sub-add 之后取新挂的那条)。
     fn last_sub_id(&self) -> Option<String> {
         self.tracks()
@@ -1452,6 +1756,81 @@ mod tests {
             subs.iter().any(|t| t.title == "外挂测试"),
             "挂上了但标题丢了 —— 字幕列表里会是一条空白项,等于选不了。实到:{:?}",
             subs.iter().map(|t| &t.title).collect::<Vec<_>>()
+        );
+    }
+
+    /* 弹幕 ASS 轨的两条契约,和上面那条外挂字幕测试同一个时序陷阱。
+
+       ① **排队路径**:起播路径是 `load_at` 之后**立刻** attach,那时 loadfile 只是排了个队,
+          直接 sub-add 必得 -12。必须等 FILE_LOADED 由事件线程补挂。
+          反向验证:把 set_danmaku_sub 里的 `if !st.loaded { …排队…; return; }` 删掉,本测试立刻红。
+
+       ② **换片不能漏**:排队中的那份是**上一集**的弹幕。不在 load_inner 里清 pending_danmaku 的话,
+          它会挂到下一集头上 —— 集数对不上的弹幕,看起来能用、内容全错。
+          反向验证:把 load_inner 里的 `st.pending_danmaku = None;` 删掉,第二段断言立刻红。
+          (注意第二段的时序 —— 必须在弹幕**还在队列里**时换片,否则测不出任何东西,见那段注释。)
+
+       另外钉住 **secondary-sid**:弹幕必须走次字幕位,主字幕位要留给用户真正的字幕轨。
+       走错位子的表现是「一开弹幕字幕就没了」。
+
+       要真 libmpv + 桌面会话,所以默认 ignore。
+       跑:cargo test -p linplayer-mpv --lib danmaku_sub -- --ignored --nocapture */
+    #[test]
+    #[ignore]
+    fn danmaku_sub_queues_until_file_loaded_and_never_leaks_across_files() {
+        let ass = std::env::temp_dir().join("lp_danmaku_test.ass");
+        std::fs::write(
+            &ass,
+            "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n\
+             [V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, Alignment, Encoding\n\
+             Style: LP,Arial,48,&H00FFFFFF,7,1\n\n\
+             [Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+             Dialogue: 0,0:00:00.00,0:00:09.00,LP,,0,0,0,,{\\an7\\move(1920,0,-300,0)}DANMAKU-PROBE\n",
+        )
+        .unwrap();
+
+        let p = Player::new().expect("mpv 起不来(需要 libmpv-2.dll 与桌面会话)");
+        p.load_at("av://lavfi:testsrc=size=320x240:duration=30", 0.0).expect("loadfile 失败");
+        // ★ 复刻真实时序:load 之后**立刻**挂,不等 FILE_LOADED。
+        p.set_danmaku_sub(&ass.to_string_lossy());
+
+        let mut sec = String::new();
+        for _ in 0..50 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            sec = p.get_str("secondary-sid").unwrap_or_default();
+            if sec != "no" && !sec.is_empty() {
+                break;
+            }
+        }
+        assert!(
+            sec != "no" && !sec.is_empty(),
+            "弹幕轨没挂上 —— 排队机制失效,起播路径的弹幕会全丢。secondary-sid={sec:?}"
+        );
+        assert_eq!(
+            p.get_str("sid").as_deref(),
+            Some("no"),
+            "弹幕占了**主**字幕位 —— 用户真正的字幕轨会被顶掉(表现:一开弹幕字幕就没了)"
+        );
+        assert_eq!(
+            p.get_str("secondary-sub-ass-override").as_deref(),
+            Some("no"),
+            "没关掉次字幕的 ASS 覆写 —— mpv 默认 strip 会把 \\move/\\pos/\\c 全剥掉,弹幕变成顶上一行白字"
+        );
+
+        /* ② 换片不能漏。
+           ★ 时序必须让弹幕**停在队列里**的时候换片 —— 第一段那次挂载已经成功,队列早空了,
+             在那之后换片根本没有残留可漏(第一版就是这么写的,注入 bug 也照样绿,
+             等于一条测不住任何东西的断言)。所以这里重新排一次:
+             load(B) → attach(进队列) → **不等 FILE_LOADED 立刻** load(C)。
+             没有 load_inner 里那句 pending_danmaku = None 的话,B 的弹幕会挂到 C 头上。 */
+        p.load_at("av://lavfi:testsrc=size=640x480:duration=30", 0.0).expect("第二次 loadfile 失败");
+        p.set_danmaku_sub(&ass.to_string_lossy()); // 进队列(loaded 已被 load_inner 复位成 false)
+        p.load_at("av://lavfi:testsrc=size=800x600:duration=30", 0.0).expect("第三次 loadfile 失败");
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        assert_eq!(
+            p.get_str("secondary-sid").as_deref(),
+            Some("no"),
+            "上一集排队中的弹幕漏到了新文件上 —— 集数对不上的弹幕比没有弹幕更糟"
         );
     }
 

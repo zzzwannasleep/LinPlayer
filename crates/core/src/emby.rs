@@ -1659,11 +1659,47 @@ fn abs_url(s: &Session, path: &str) -> String {
 /// `media_source_id`:选哪个版本(草稿页 03/04 的「版本」选择器)。
 /// None = 服务器返回的第一个。**指定了却找不到就报错,不静默回落第一个** ——
 /// 那会让用户以为在看 4K,实际放的是 1080p,且毫无提示。
+/// 一条媒体源的**可匹配文本**(版本筛选正则打的就是它)。
+///
+/// 口径照 wiki `regex-filters`:名称 + 容器 + 视频分辨率 + 编码 + 显示名。
+/// 分辨率既给 `2160`(原始高)也给 `2160p`/`4K` 别名 —— 用户写 `4K|2160` 是最常见的
+/// 一条,而 Emby 的 DisplayTitle 未必带 "4K" 字样,不补别名等于这条最常用的正则失灵。
+fn source_match_text(m: &RawMediaSource) -> String {
+    let mut parts: Vec<String> = vec![
+        m.name.clone().unwrap_or_default(),
+        m.container.clone().unwrap_or_default(),
+    ];
+    for st in m.media_streams.as_deref().unwrap_or_default() {
+        if st.type_.as_deref() != Some("Video") {
+            continue;
+        }
+        parts.push(st.display_title.clone().unwrap_or_default());
+        parts.push(st.codec.clone().unwrap_or_default());
+        parts.push(st.profile.clone().unwrap_or_default());
+        parts.push(st.video_range.clone().unwrap_or_default());
+        parts.push(st.video_range_type.clone().unwrap_or_default());
+        if let Some(h) = st.height {
+            parts.push(format!("{h} {h}p"));
+            // 常见口语档位。只补「不会误伤」的两档:4K 与 8K。
+            if h >= 4320 {
+                parts.push("8K".into());
+            } else if h >= 2160 {
+                parts.push("4K".into());
+            }
+        }
+    }
+    parts.retain(|p| !p.is_empty());
+    parts.join(" ")
+}
+
 pub async fn resolve_stream(
     http: &reqwest::Client,
     s: &Session,
     item_id: &str,
     media_source_id: Option<&str>,
+    // 版本筛选正则(wiki regex-filters)。仅在 media_source_id 为 None ——
+    // 也就是用户**没有手动指定版本**时才参与,手动选的永远优先。
+    version_regex: &str,
 ) -> Result<PlaybackTarget, String> {
     let url = format!(
         "{}/Items/{}/PlaybackInfo?UserId={}",
@@ -1722,11 +1758,16 @@ pub async fn resolve_stream(
             .into_iter()
             .find(|m| m.id.as_deref() == Some(want))
             .ok_or_else(|| format!("该条目没有版本 {want}(服务器可能已改动媒体源)"))?,
-        None => info
-            .media_sources
-            .into_iter()
-            .next()
-            .ok_or("该条目无可播放源")?,
+        None => {
+            // 版本正则命中哪条就用哪条,没命中/没设 → 第一条(服务器顺序,旧行为)。
+            let texts: Vec<String> =
+                info.media_sources.iter().map(source_match_text).collect();
+            let idx = crate::media::pick_index(&texts, version_regex).unwrap_or(0);
+            info.media_sources
+                .into_iter()
+                .nth(idx)
+                .ok_or("该条目无可播放源")?
+        }
     };
     let media_source_id = ms.id.clone().unwrap_or_default();
     // 取流这一跳顺手把 DV 判了 —— MediaStreams 就在同一份响应里,不用再打一次服务器。
@@ -1963,6 +2004,44 @@ mod tests {
         assert_eq!(streams[0].video_range_type.as_deref(), Some("DOVI"));
         // DirectStreamUrl 也必须还在(合并模型时最容易漏掉的那个字段)
         assert_eq!(ms.direct_stream_url.as_deref(), Some("/videos/1/stream.mkv"));
+    }
+
+    /// 版本筛选正则(wiki regex-filters)打的是 source_match_text 拼出来的那段文本。
+    /// 这条钉住 wiki 承诺的四类写法都能命中,尤其是 `4K` —— Emby 只给 Height=2160,
+    /// 不补 4K 别名的话「优先 4K 片源」这条最常用的正则永远不命中,而且一声不吭。
+    #[test]
+    fn version_regex_matches_wiki_examples() {
+        let raw = r#"{
+            "MediaSources": [
+                { "Id": "a", "Name": "1080p x264", "Container": "mp4",
+                  "MediaStreams": [{ "Type": "Video", "Codec": "h264", "Height": 1080,
+                                     "DisplayTitle": "1080p H264 SDR" }] },
+                { "Id": "b", "Name": "原盘 Remux", "Container": "mkv",
+                  "MediaStreams": [{ "Type": "Video", "Codec": "hevc", "Height": 2160,
+                                     "VideoRangeType": "DOVI", "DisplayTitle": "2160p HEVC" }] }
+            ],
+            "PlaySessionId": "p"
+        }"#;
+        let info: PlaybackInfoResp = serde_json::from_str(raw).unwrap();
+        let texts: Vec<String> = info.media_sources.iter().map(source_match_text).collect();
+        for pat in ["4K|2160", "HEVC|265|x265", "原盘|remux|bluray", "DOVI|杜比视界"] {
+            assert_eq!(
+                crate::media::pick_index(&texts, pat),
+                Some(1),
+                "wiki 示例 `{pat}` 应命中第二条媒体源;实际文本 = {texts:?}"
+            );
+        }
+        assert_eq!(crate::media::pick_index(&texts, "1080"), Some(0));
+        // ★ 单独钉「4K」这个别名:上面那条 `4K|2160` 里 2160 分支自己就能命中,
+        //   删掉别名它照样绿 —— 测不住的断言等于没有。这条只写 4K,别名没了就红。
+        assert_eq!(
+            crate::media::pick_index(&texts, "4K"),
+            Some(1),
+            "Emby 只给 Height=2160,不补 4K 别名的话「优先 4K 片源」永远不命中"
+        );
+        // 没命中 / 没设 → 调用方回落第一条(旧行为不变)
+        assert_eq!(crate::media::pick_index(&texts, "8K"), None);
+        assert_eq!(crate::media::pick_index(&texts, ""), None);
     }
 
     /// 外挂字幕兜底路径必须和 Emby 自己发的 DeliveryUrl 字节一致。

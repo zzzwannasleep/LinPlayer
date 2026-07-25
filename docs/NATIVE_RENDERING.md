@@ -1,156 +1,158 @@
-# 三端原生渲染改造（治「开面板整屏闪」+「ANGLE 逐帧税」）
+# 桌面端视频合成（Windows / Linux）
 
-> 单一事实源。对话被 compact 后，从本文件继续。最后更新：2026-07-14。
+> 单一事实源：PC 端「视频画面和 UI 是怎么叠在一起的」。最后更新：2026-07-26。
+>
+> 2026-07-14 版本的本文写的是 Flutter + media_kit 时代的调研（治「开面板整屏闪」）。
+> 那套栈**已整体删除**，结论收在文末「历史结论」一节——那些坑现在仍然是我们不能走某些路的理由，
+> 所以留着，但它们描述的**不是当前实现**。
 
-## 0. 一句话目标
+## 1. 当前架构：两个顶层窗口
 
-把桌面播放器从 **media_kit（mpv → 离屏纹理 → ANGLE(GLES→D3D11) 合成 → Flutter Texture）**
-改成 **原生渲染（mpv 直接画到自己的原生窗口/表面，Flutter UI 叠加在其上）**，
-消除「任何 UI 在视频上重绘 → 整屏丢一帧黑闪」的根，并去掉逐帧纹理拷贝税。
+```
+   ┌─────────────────────────────────┐
+   │  Tauri 主窗（transparent=true） │  ← WebView2 / WebKitGTK 画 React UI
+   │  decorations=false，自绘标题栏  │     视频区域是**透明像素**
+   └─────────────────────────────────┘
+                  ▲ 逐像素 alpha，由系统合成器（DWM / X11 合成器）叠
+   ┌─────────────────────────────────┐
+   │  视频窗（我们自己 Create 的）   │  ← libmpv 的 `wid` 指向它
+   │  无边框 / 不进任务栏 / 不抢焦点 │     vo=gpu-next，Win 上 gpu-context=d3d11
+   └─────────────────────────────────┘
+```
 
-## 1. 根因（已用 6 次失败 + Hills 逆向双向坐实）
+两个都是**顶层窗口**，视频窗被持续对齐到主窗客户区、并压在主窗正下方。
 
-**症状**：Windows 上打开/滑动/悬停任何设置面板 → 整个画面闪一下（黑帧）。用户机
-`dxva2-egl Failed to create EGL surface`（EGL 损坏）。
+代码位置：
+- `crates/mpv/src/lib.rs` 的 `mod overlay` —— 建窗 / 对齐 / 层叠 / 显隐，Win 与 X11 各一份同构实现。
+- `apps/desktop/src/lib.rs` 的 `sync_video()` / `show_video()` —— 几何来源（主窗客户区）与显隐时机。
 
-**根因**：media_kit 把 mpv 渲染成一张 Flutter Texture，经 **ANGLE** 合成。视频和 UI 在
-**同一个 ANGLE 场景**里。该机 EGL 损坏 → 只要有东西在视频纹理上方重绘/改变图层结构，
-整块外部纹理就 blank 一帧。**与面板是路由/就地、透明/不透明、有无裁剪都无关**（全试过，全闪）。
+### 为什么不能用子窗口
 
-**证伪的假设（本会话踩过的坑，别再走）**：
-- ❌ 路由 vs 就地 Navigator —— 就地 Offstage 一样闪（连悬停都闪）。
-- ❌ 不透明面板挡住 —— 整屏还闪（闪是全屏级，不是面板区域级）。
-- ❌ 去掉 ClipRRect/ListView 裁剪 —— 还闪。
-- ✅ 唯一有效的 Flutter 层手段 = **全屏冻结帧**（截图盖住整个视频）——但会「画面冻结、声音继续」，
-  用户否掉。说明：**只有让实时纹理彻底不出现在 ANGLE 场景里才不闪** → 即原生渲染。
+这是被实测证伪过的，别再试：
 
-## 2. Hills 逆向实据（`Hills_1.7.2.apk.apks`，同为 Flutter+mpv，从不闪）
+- **Windows**：子窗口进不了逐像素透明的分层窗口。WebView2 自己就是主窗的一个子 HWND，
+  把 mpv 也做成兄弟子窗口时，WebView2 的透明像素**不会**透出兄弟窗口——Win32 的子窗口之间不做 alpha 混合。
+- **X11**：合成器只合成**顶层**窗口。兄弟窗口之间同样不做 alpha 混合。
 
-反编译 `classes.dex`：
-- `com.mountains.player.mpv.MPVView` extends **SurfaceView**（`SurfaceHolder`/`surfaceCreated`/`setZOrderMediaOverlay`）。
-- `dev.jdtech.mpv.MPVLib` —— 用 **mpv-android**（libmpv 原生绑定），**不是 media_kit**。
-- 一堆 `io.flutter.plugin.platform.PlatformView*` —— 通过 **Flutter PlatformView** 把原生视频视图嵌进 Flutter。
-- `assets/shaders/Anime4K_*.glsl` —— 超分方案和我们一样。
+所以两边都只剩「顶层垫顶层」这一条路。
 
-**结论**：Hills = mpv 直画原生 Surface + Flutter UI 由系统合成器叠加。UI 重绘碰不到视频 surface → 永不闪，
-且无逐帧拷贝 → 顺。**这就是正解的架构。**
+## 2. 层级维持（2026-07-26 重做）
 
-## 3. 现有代码全景（4 个侦察 agent 实测，file:line 有据）
+### 之前坏在哪
 
-### 适配器接缝
-- `lib/core/services/player_adapter.dart` —— 抽象 `PlayerAdapter`，关键 `Widget buildVideo()`、`int? textureId`、
-  `screenshot()`、`applySuperResolutionLevel()`、`mpvCommand()`。
-- `lib/core/services/video_player_service.dart:266` `_createAdapter()` 按平台+核心选适配器：
-  - mpv + `Platform.isWindows && _windowsNativeRender` → `WindowsNativeMpvAdapter`（原生，现被开关封存）
-  - mpv（默认）→ `MpvPlayerAdapter`（media_kit）
-  - nativeMpv → `NativeMpvPlayerAdapter`（Android libmpv）
-  - exoPlayer（Android 默认）→ `ExoPlayerAdapter`
-- `buildVideo()` 经 `VideoPlayerService.buildVideo()` 暴露给三端播放页。
+对齐/排序只挂在 Tauri 的 `Resized | Moved | Focused(true)` 三个事件上。但主窗的 z 序还会被**别的路径**改：
+Alt-Tab、点任务栏、别的窗口插进来、WebView2 自己动一下——这些**都不产生**那三个事件。
+于是视频层「掉」到 UI 后面去。
 
-### 各平台当前渲染路径
-| 平台 | 默认适配器 | 渲染方式 | 闪? |
-|---|---|---|---|
-| Windows | MpvPlayerAdapter | media_kit Texture（ANGLE） | **是** |
-| Windows(原生开关) | WindowsNativeMpvAdapter | mpv 子 HWND 直连 D3D11，零 ANGLE | 否（但 UI 被盖） |
-| Linux | MpvPlayerAdapter | media_kit Texture（原生 GL） | 未知（无 Linux 反馈） |
-| macOS | MpvPlayerAdapter | media_kit Texture（软件纹理防 GL 泄漏） | 可能 |
-| iOS | MpvPlayerAdapter | media_kit Texture | N/A（触屏无悬停） |
-| Android | ExoPlayerAdapter / NativeMpvPlayerAdapter | Flutter Texture（SurfaceTexture 缓存末帧） | **否** |
+而且视频窗建出来就带 `WS_VISIBLE`（X11 那半是建完就 `XMapWindow`），每次 sync 又都带 `SWP_SHOWWINDOW`——
+它从 App 启动那一刻起就一直在桌面上。平时被主窗盖着看不出来，**主窗一最小化就露出来**，
+表现是「反复最小化能看到后面有个窗口正在播放」。
 
-### 三端播放页叠加结构（都把 buildVideo() 当普通 Stack 子节点，控件叠在同 Stack 顶层）
-- 桌面 `lib/desktop/screens/player/desktop_player_screen_state.dart` build() 顶层 Stack：
-  `buildVideo()`（子 0）→ 弹幕 → 缓冲 → 错误 → 手势 → 统计 → 控制栏 → …
-- 移动 `lib/ui/screens/player/player_screen_state.dart:1563` 外层 Stack + 内层 Stack（video 在内层子 0）。
-- TV `lib/tv/screens/player/tv_player_screen.dart:1058` Stack（`Center(buildVideo())` 子 0 + OSD 叠加）。
-- **含义**：原生化后视频**不再是 Stack 里的 Flutter 组件**，而在 Flutter 层**之下**。三端播放页需把视频占位
-  改成「透明 rect 上报器」（原生窗口跟随该矩形），控件继续在透明 Flutter 层上叠加——**叠加代码基本不动**，
-  只是背后从 Texture 变成透明→透出原生视频。视频状态查询（isBuffering/hasError/position）走 provider，仍有效。
+### 现在怎么做
 
-### Windows M1 现状（`windows/runner/native_mpv_render.{h,cpp}` + adapter）
-- MethodChannel `com.linplayer/native_render`：init/setRect/getProperty/setProperty/command/applyShaders/dispose。
-- C++：`CreateWindowExW(0, "LinPlayerMpvChild", WS_CHILD|WS_VISIBLE|WS_CLIPSIBLINGS, ..., host_window_)`
-  —— host_window_ = Flutter view HWND；mpv `wid`=该子 HWND，`vo=gpu-next`+`gpu-context=d3d11`+`hwdec=d3d11va`。
-- setRect = `MoveWindow`（无 SetWindowPos / 无 z-order / 无 WS_EX_LAYERED）。
-- **M2 缺口**：WS_CHILD 子窗口按 Win32 z-order **天然画在父(Flutter)客户区之上** → 盖住 Flutter 控件。
-  当前零合成基础设施。
+1. **显隐 = 两个条件的与**（`overlay::apply_visibility`）：
+   - `WANT_VISIBLE`：在播片吗（`play` 置真，`stop_playback` 置假）；
+   - 主窗自己还在屏幕上吗（没最小化、没隐藏）。
 
-### Android（关键：本就不闪，且特意没用 SurfaceView）
-- `native_mpv_player_adapter.dart:741` buildVideo() 返回 `Texture(textureId)`。
-- `MpvPlayerPlugin.kt`：`textureRegistry.createSurfaceTexture()` → `Surface` → `MPVLib.attachSurface(surface)`。
-- `MpvSurfaceView.kt`(extends SurfaceView) + factory 已注册但**从不实例化**；注释明说「SurfaceView 会另起窗口层、
-  和 Flutter 叠加控件冲突」→ 故意走 Texture。SurfaceTexture 缓存末帧 → **不闪**。
+   任一不成立就藏。建窗时**不带** `WS_VISIBLE` / 不 map。
 
-## 4. 目标架构（统一接缝，分平台实现）
+2. **Windows：子类化主窗接管 `WM_WINDOWPOSCHANGED`**（`overlay::pin_below`）。
+   这条消息在位置、尺寸、z 序**任何一样变了**时都会发，钉住它，上面整类漏网一次消掉，
+   也不用起定时器轮询。
 
-**统一原则**：新增/复用「原生渲染适配器」，`buildVideo()` 返回一个**透明占位**（上报矩形或走 PlatformView），
-视频由原生渲染，不进 ANGLE 共享纹理；Flutter UI 照旧在透明背景上叠加。
+   ⚠️ **重入闸不能删**。我们在这条回调里调 `SetWindowPos`/`ShowWindow` 摆视频窗，
+   而那会改变主窗的相对 z 序 → Windows 又发一条 `WM_WINDOWPOSCHANGED` → 再进来 →
+   递归到**栈溢出，进程无声消失**（日志停在最后一行，没有 panic，Windows 事件日志里也没有记录）。
+   实测症状：装上钩子后鼠标挪一下窗口 App 就没了。
 
-| 平台 | 方案 | 难度 | 说明 |
-|---|---|---|---|
-| **Windows** | mpv 子窗口 + **透明 Flutter 覆盖**（M2） | 高（硬骨头） | Win 无官方 PlatformView，需 runner 层做窗口层级+透明合成 |
-| **Linux** | 同 Windows 思路（X11/Wayland `--wid` + GTK 透明覆盖） | 高 | 先看 Linux 是否真闪，不闪则延后 |
-| **Android** | **维持现状**（Texture，不闪） | 无 | 别改成 SurfaceView（会弄坏叠加）；已达标 |
-| **macOS** | PlatformView(NSView) + libmpv/MPVKit 渲 CAMetalLayer | 中 | Apple 有 PlatformView，叠加免费；顺带治 GL 泄漏黑屏 |
-| **iOS** | PlatformView(UIView) + libmpv/MPVKit | 中 | 无悬停不闪，但可统一架构+去 ANGLE 税 |
+   同理 `apply_visibility` 里状态已经对就不要调 `ShowWindow`——它同样会动 z 序。
 
-## 5'. Windows M2 已实现方案（2026-07-14，挖洞法，待真机验 ANGLE 穿透）
+3. **取不到原 wndproc 就不装钩子**。装了却把消息全喂给 `DefWindowProcW`
+   等于把 Tauri 的窗口过程整个换掉，窗口会彻底不响应。降级成「只靠 Tauri 事件重排」远比这个好。
 
-**用户拍板**：选「挖洞原生」（AskUserQuestion）——弹幕转 ASS 由 mpv 画，面板/控制栏零改动零闪。
-**M2 蓝图 agent 结论**：Windows 无低成本方案让 Flutter 实时 UI 与独立 mpv D3D11 窗口做每像素 alpha 合成
-（透明窗撞 ANGLE flip-model；DComp 要 fork 引擎）。唯一干净路 = **区域挖洞**（`SetWindowRgn`）。
+4. **Linux/X11 没有等价的钩子**。要同样的效果得 `XSelectInput(StructureNotify)` 主窗的 frame
+   再自己跑事件循环，而那个 frame 会被 WM reparent 掉、得跟着重挂。
+   所以 X11 这半仍然只靠 Tauri 事件驱动的 `sync()`——**这是已知的能力差，不是忘了写**。
 
-**已落实现**（全部 opt-in，`_windowsNativeRender` 开关，默认 media_kit）：
-- `windows/runner/native_mpv_render.cpp`：mpv 改为**顶层窗口的兄弟子窗口**（父=顶层，非 Flutter 视图），
-  `WS_CHILD` 去掉 `WS_CLIPSIBLINGS`，`SetWindowPos(HWND_BOTTOM)` 压最底；`osc=no`（Flutter 控件接管）。
-  新 `SetHole(video, cutouts)`：在 **Flutter 视图窗口**上 `SetWindowRgn` = 整视图 −（视频洞 − cutouts）；
-  `ClearHole()` 离场还原。`setRect` 通道多收 `cutouts:[[l,t,w,h]...]`（物理像素）。
-- `flutter_window.cpp`：`NativeMpvRender::Create(messenger, GetHandle()顶层, view HWND)`。
-- `windows_native_mpv_adapter.dart`：占位组件上报视频物理矩形 + 控制栏上/下条高度（100+safeTop / 140+safeBot）；
-  `setChrome(controls/panelFraction)` + `reportGeometry` → `_pushHole()` 合并算 cutout，payload 变更才打通道。
-- `video_player_service.dart`：`setNativeChrome(controls:)` 透传（仅 WindowsNativeMpvAdapter 生效）。
-- `player_settings_panel.dart`：全局 `nativeRenderPanelFraction` 广播面板占屏宽比例，关闭清 0。
-- `desktop_player_screen_state.dart` build()：每帧 `_playerService.setNativeChrome(controls: _showControls)`。
+### 验收（2026-07-26 在真 exe 上实测）
 
-**唯一未验证的致命假设**：`SetWindowRgn` 挖 Flutter 视图（ANGLE flip-model swapchain 子窗口）的洞，
-能否真的透出其下的 mpv 兄弟窗口。M2a（只挖顶层窗口）实测「没看到洞」→ 证明顶层区域管不到子窗口，
-故改挖 Flutter 视图本身。**待真机验**：开原生 + 播视频 → 洞里出视频=成；界面照旧黑画面无视频=ANGLE 无视区域→转 DComp 备选。
+用 `EnumWindows` 查视频窗（窗口类 `lpvid`）的 `IsWindowVisible`：
 
-**验后待办**（成立后）：弹幕转 ASS 喂 mpv、手势层输入转发、缓冲转圈、字幕/音轨/续播/Emby 上报平价、Linux/mac/iOS。
+| 状态 | 视频窗可见 | z 序 |
+|---|---|---|
+| 未播放 | 否 | — |
+| 播放中 | 是 | 主窗之下 |
+| 主窗最小化 | **否** | — |
+| 恢复 | 是 | 主窗之下 |
 
-## 5. Windows M2 技术方案（原始调研，保留备查）
+压力：最小化/恢复 ×8 + 挪窗 ×8 交替、连续最小化 ×6 不恢复 —— 进程存活，状态每次都对。
 
-**要求**：mpv（自有 D3D11 窗口、零 ANGLE）显示在 Flutter UI **之下**，Flutter 透明处透出视频、不透明处（控件）盖住。
+## 3. 已知限制：录屏只能录到一层
 
-**选定路线：透明 Flutter 覆盖 + 底层 mpv 窗口**（唯一能既绕开 ANGLE 又叠 UI 的路）：
-1. runner 让 **Flutter 视图窗口支持每像素透明**（ANGLE surface 带 alpha + DWM 合成；Flutter Windows 可做透明窗）。
-2. mpv 窗口置于 Flutter 内容**之下**（重排窗口层级：mpv 为底层，Flutter 视图为其上的透明层）。
-3. Flutter Scaffold/播放页背景在视频区**透明**（`Colors.transparent`），控件不透明 → 透出 mpv、盖住控件。
-4. 视频矩形跟随（现有 setRect 机制）；全屏/DPI/resize 同步。
+两个独立顶层窗口，**窗口捕获（OBS「窗口采集」/ WGC / PrintWindow）只能抓到其中一个**：
+抓主窗得到 UI + 一块透明/黑，抓视频窗得到画面但没有 UI。这是窗口捕获的定义决定的，不是 bug。
 
-**待研究确认的技术点**（动手前 dive deep）：
-- Flutter Windows 开启透明窗的确切改法（runner `Win32Window`/`FlutterWindow` + ANGLE EGL_ALPHA_SIZE + DWM）。
-- 窗口层级重排：mpv 作 main window 的 WS_CHILD 且 z-order 在 Flutter view 之下，或 mpv 作 main、Flutter view 作透明子。
-- 参考：其他 Flutter Windows 原生视频叠加实现（fvp / 社区方案）。
+**能用的办法**：
+- 录制请用**显示器采集**（OBS「显示器采集」/ Windows 游戏栏的全屏录制），两层由系统合成器叠好后一起录。
+- 只想录画面不要 UI：抓视频窗即可，而且**弹幕和字幕现在是 mpv 画的**（见下），会一起录进去。
 
-**备选（若透明窗走不通）**：分离顶层 layered overlay 窗口承载 Flutter UI（复杂、输入路由麻烦），最后手段。
+**为什么不做成一个窗口**：真正的单窗口合成要把 WebView2 放进 visual hosting 模式
+（`ICoreWebView2Environment3::CreateCoreWebView2CompositionController`），
+把它的视觉和 mpv 的 D3D11 swapchain 挂进同一棵 DirectComposition 树。
+**Tauri v2 / wry 不暴露 CompositionController**，只支持普通的 windowed hosting ——
+要做就得 fork wry，是几周量级的改动。当前**不做**，需要时单独立项。
 
-## 6. 执行顺序 + 验收（真机只有用户能看画面 → 每步交付必须用户验）
+## 4. 弹幕改由 mpv 渲染（2026-07-26）
 
-1. **Windows M2**（本命）：透明覆盖 → mpv 底层 → 控件叠回 → 输入/全屏/DPI/resize。
-   验收：开面板不闪 + 控件正常 + 播放顺 + 超分照旧。
-2. **Windows M3**：把 WindowsNativeMpvAdapter 的方法补齐到 media_kit 平价（字幕轨/续播/Emby 上报/连播/截图）。
-3. **Linux**：先真机确认是否闪；闪则套 Windows 方案。
-4. **Android**：确认不闪（应免改）；只在发现 Texture 路有额外卡时才评估。
-5. **macOS/iOS**：PlatformView + libmpv 原生视图，去 ANGLE 税、治 macOS GL 黑屏。
-6. 全程：默认关（opt-in 开关）直到某平台 M2 稳，再切默认。media_kit 保留为回退。
+弹幕原来是 React 在**透明主窗**里用 Canvas 每帧画。除了它自身的性能问题
+（见 `crates/core/src/danmaku/ass.rs` 头注释：位置插值里没有倍速），
+它还让透明主窗每帧都要重新合成一次，直接压在这套合成方案上。
 
-## 7. 硬约束/教训（血泪，别重犯）
+现在默认把弹幕生成成 ASS 交 libass 渲染：
+- 生成：`crates/core/src/danmaku/ass.rs`（纯函数 + 单测）
+- 挂载：`Player::set_danmaku_sub()` → `sub-add` 到 **secondary-sid**，
+  并设 `secondary-sub-ass-override=no`（默认是 `strip`，会把 ASS 标记剥成纯文本，
+  于是 `\move` / `\pos` / `\c` 全没了，弹幕变成顶上一行白字）。
+- 主字幕位**空着留给用户真正的字幕轨**。实测 `sid=no` / `secondary-sid=1`，两者不打架。
 
-- media_kit 加 shader 前 `grep -c '//!COMPUTE'` 必须 0（ANGLE 蓝屏）。
-- media_kit 永不 `setSize`（此机 dxva2-egl 坏 → setSize resize 渲染面 → GPU 击穿蓝屏，3/3 铁证）。
-- 超分 = 标准 Anime4K Medium 六档（modeA/B/C + AA/BB/AC），用户已定，别再换 ArtCNN/FSR/CAS。
-- 原生渲染**治得了闪**（视频离开 ANGLE 场景）；**治不了「4K 超分卡」**（那是 shader GPU 算力随输出像素暴涨，
-  物理，换渲染器无用）——别对用户过度承诺「原生就不卡了」。
-- `VideoPlayerService` 非单例（每进播放页 new）→ 跨会话状态走 static+SharedPreferences（`_windowsNativeRender` 已如此）。
-- Windows 原生数字键超分：键盘焦点在 Flutter 顶层，mpv 子窗口 WS_CHILD 不抢焦点 → mpv keybind 是死码，
-  数字键必须在 Flutter `_handleKeyEvent` 处理（M2 后控件叠回则用正常菜单）。
+副作用（正面）：mpv 的截图/录制会带上弹幕；倍速/seek/暂停全归 mpv，前端一帧都不用算。
+
+代价：弹幕占了 mpv 唯一的次字幕位，**和双语字幕抢同一个位子**。
+需要两者同开的用户可以在播放页弹幕面板把「渲染方式」切回「网页层」。
+
+## 5. mpv 初始化参数（桌面）
+
+在 `crates/mpv/src/lib.rs` 的 `Player::new()`：
+
+| 参数 | 值 | 说明 |
+|---|---|---|
+| `wid` | 视频窗 HWND / X11 Window | 渲染面 |
+| `vo` | `gpu-next` | |
+| `gpu-context` | `d3d11`（仅 Win） | |
+| `hwdec` | `auto-safe`（默认档，用户可调） | 双显卡必须钉独显，否则 mpv 会跑核显 |
+| `keep-open` | `yes` | 播完停在最后一帧，**所以 END_FILE 不发**，判播完要读 `eof-reached` |
+| `force-window` | `yes` | |
+| `osc` / `terminal` / `input-default-bindings` / `input-vo-keyboard` | `no` | UI 全归我们 |
+| `gpu-shader-cache` + `gpu-shader-cache-dir` | 开 + 显式目录 | libmpv 不给默认目录，不显式给就不缓存 |
+| `msg-level` / `log-file` | 仅 `LP_MPV_LOG=1` 时开 | 常开会把 mpv+ffmpeg 钉在 debug 级 |
+
+## 6. Wayland
+
+整套方案要求「应用自己摆放顶层窗口」，而 **Wayland 协议上就不允许**。
+`run()` 里强制 `GDK_BACKEND=x11` 走 XWayland。真落到 Wayland 原生会话时如实报错，
+走和「拿不到窗口句柄」一样的降级路径（App 能起，视频层不工作），不假装成功。
+
+## 7. 历史结论（Flutter + media_kit 时代，仅供别再走回头路）
+
+那套栈已删，以下结论仍然有效：
+
+- **症状**：Windows 上打开/滑动/悬停任何面板 → 整屏闪一下黑帧。
+  **根因**：media_kit 把 mpv 渲成 Flutter Texture，经 ANGLE 合成，视频和 UI 在同一个 ANGLE 场景里；
+  该机 EGL 损坏 → 只要有东西在视频纹理上方改变图层结构，整块外部纹理就 blank 一帧。
+- 证伪过的假设：路由 vs 就地 Navigator、不透明面板遮挡、去掉裁剪 —— **全试过，全闪**。
+  唯一有效的 Flutter 层手段是全屏冻结帧，用户否掉。
+- 逆向 Hills（同为 Flutter+mpv 却从不闪）：它用 `SurfaceView` + mpv-android + Flutter PlatformView，
+  即 mpv 直画原生 Surface、由系统合成器叠 UI。**这就是现在这套架构的思路来源。**
+- `SetWindowRgn` 挖洞法（在 Flutter 视图上挖出视频区域）—— 顶层区域管不到子窗口，实测「没看到洞」。**此路不通。**
+- 原生渲染治得了闪，**治不了「4K 超分卡」**：那是 shader 算力随输出像素暴涨，是物理，换渲染器无用。
+  （真凶另有其人：mpv 默认跑核显，独显全程没参与，必须在 exe 里导出 `NvOptimusEnablement` 钉独显。）

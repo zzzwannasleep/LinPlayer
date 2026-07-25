@@ -115,8 +115,11 @@ async fn play(
     media_source_id: Option<String>,
 ) -> Result<f64, String> {
     let s = session_of(&state)?;
+    // 版本筛选正则(wiki regex-filters)与桌面同源,先取出再 await(别跨 await 攥 std Mutex)。
+    let version_regex = state.config.lock().unwrap().prefs.version_regex.clone();
     let target =
-        emby::resolve_stream(&state.http, &s, &item_id, media_source_id.as_deref()).await?;
+        emby::resolve_stream(&state.http, &s, &item_id, media_source_id.as_deref(), &version_regex)
+            .await?;
 
     // 播放器锁必须在后面那些 await 之前放掉:MutexGuard 不是 Send,
     // 跨 await 持有会让整个 command 的 future 不能在线程间移动(编译期直接拒)。

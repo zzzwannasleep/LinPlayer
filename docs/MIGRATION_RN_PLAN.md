@@ -1,5 +1,14 @@
 # LinPlayer → TypeScript + React Native 迁移规划书
 
+> **⚠️ 这份是 2026-07-14 的可行性评估，结论已被推翻（2026-07-26 复核）**
+>
+> - **React Native 方案已否决**，最终选的是 **Rust 核 + React/TS + Tauri**。落地记录见
+>   [RUST_MIGRATION_PLAN.md](RUST_MIGRATION_PLAN.md)，当前架构见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+> - **端范围已收窄**：只做 Android 手机 / Android TV / Windows / Linux。**苹果全线不做**，
+>   下文里的 iOS / macOS / tvOS 一律作废。
+> - **这份文档现在唯一还算数的东西**：第 1~N 节那份**「已实现功能全清单」**——
+>   它是防止重写时漏功能的对照表，仍在用。**技术选型、工作量估算、路线图部分全部作废。**
+>
 > 生成日期：2026-07-14 · 基线：Flutter/Dart 版本(main 分支，355 个 dart 文件 / 约 11.4 万行 / 7 平台)
 > 用途：① **已实现功能全清单**(防止重写遗漏) ② RN/TS 迁移可行性评估 ③ 分阶段路线图 ④ 待拍板决策点
 > 调研方式：8 个子 agent 逐域清点源码 + RN 生态可行性 web 调研，交叉验证。

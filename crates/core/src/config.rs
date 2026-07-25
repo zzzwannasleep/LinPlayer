@@ -158,6 +158,16 @@ pub struct Prefs {
     pub audio_lang: Option<String>,
     pub sub_lang: Option<String>,
     pub sub_enabled: bool,
+    /* 正则优先选择(wiki: /wiki/regex-filters)。空 = 不启用,回退到上面的语言偏好。
+       优先级:手动选过的 ＞ 正则命中 ＞ 语言/服务端默认。
+       校验必须走 media::validate_track_regex(Rust regex crate),**不能**用前端的 JS RegExp:
+       两套语法集不同(Rust 无前后瞻),JS 放行而 Rust 编译不过的表达式会静默失效。 */
+    #[serde(default)]
+    pub version_regex: String,
+    #[serde(default)]
+    pub sub_regex: String,
+    #[serde(default)]
+    pub audio_regex: String,
     /* 这里曾有 `shader_strength: u8`(0~100 的滤镜强度)+ UI 上一个让用户自己拧的 stepper。
        用户 2026-07-15 否掉:「强度不是靠用户调的 是让你设计挡位的……用户又不会调 没用啊」。
        强度现在**烧死在档位里**(src-tauri/src/shaders.rs 的 preset()),梯度由档位名承诺。
@@ -289,6 +299,9 @@ impl Default for Prefs {
             audio_lang: None,
             sub_lang: None,
             sub_enabled: true,
+            version_regex: String::new(),
+            sub_regex: String::new(),
+            audio_regex: String::new(),
             cross_server_resume: false,
             cross_server_writeback: false,
             cross_server_writeback_range: default_writeback_range(),

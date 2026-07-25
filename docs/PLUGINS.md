@@ -1,57 +1,56 @@
 # LinPlayer 插件系统
 
-一个基于 **QuickJS**（`flutter_qjs`）的插件系统：每个插件运行在独立的 JS isolate 中，
-通过受权限控制的 `ctx` API 与主程序交互，并可向预定义的扩展点挂载自定义功能。
+一个基于 **QuickJS**（Rust 绑定 [`rquickjs`](https://github.com/DelSkayn/rquickjs)）的插件系统：
+每个插件跑在自己的专用 worker 线程上，通过受权限控制的 `ctx` API 与宿主交互，
+并可向预定义的扩展点挂载自定义功能。
+
+> 本文讲的是**插件运行时与契约**。市场（安装源/列表页/权限弹窗/声明式 UI 槽位）
+> 的设计与落地进度见 [PLUGINS_V2_PLAN.md](./PLUGINS_V2_PLAN.md)。
+> 目前插件**只在 PC 端可用**。
 
 ## 目录结构
 
+实现全在 `crates/core/src/plugins/`（平台无关，桌面与安卓共用）：
+
 ```
-lib/plugins/
-├── plugin_system.dart            # 对外 barrel + 初始化入口
-├── models/
-│   ├── plugin_manifest.dart      # manifest.json 解析与校验
-│   ├── plugin_permission.dart    # 权限定义 / 授予 / 校验
-│   ├── plugin_extension_point.dart # 扩展点类型 + 平台支持表
-│   └── plugin_info.dart          # 运行时插件状态
-├── engine/
-│   ├── plugin_js_engine.dart     # JS 引擎抽象接口
-│   └── qjs_plugin_engine.dart    # flutter_qjs(IsolateQjs) 实现（唯一依赖三方包处）
-├── runtime/
-│   ├── plugin_bootstrap_js.dart  # 注入到每个插件的 ctx 引导脚本
-│   ├── plugin_context_bridge.dart# 宿主侧 ctx.* 分发器（权限检查）
-│   ├── plugin_runtime.dart       # 单插件运行时（加载/事件/超时）
-│   ├── plugin_storage.dart       # 每插件 5MB 独立存储
-│   ├── plugin_player_bridge.dart # 播放器事件/控制桥
-│   ├── plugin_host_bindings.dart # 与运行中 App 的绑定（容器/导航器）
-│   └── plugin_ui_host.dart       # ctx.ui 落地为 Flutter UI
-├── manager/
-│   ├── plugin_manager.dart       # 扫描/安装/启用/禁用/卸载/触发
-│   ├── plugin_installer.dart     # .lpk 解压与校验
-│   └── plugin_extension_registry.dart # 扩展点收集与渲染桥接
-├── providers/plugin_providers.dart    # Riverpod providers
-└── ui/
-    ├── plugin_management_screen.dart  # 插件管理页（移动端）
-    ├── plugin_permission_dialog.dart  # 权限同意弹窗
-    └── plugin_settings_page_host.dart # 声明式设置页渲染
+crates/core/src/plugins/
+├── mod.rs             # 对外入口
+├── manifest.rs        # manifest.json 解析与校验
+├── permission.rs      # 权限定义 / 授予 / 校验
+├── engine.rs          # rquickjs 引擎
+├── worker.rs          # 每插件一条专用线程(QuickJS runtime 单线程,不跨线程)
+├── ctx.rs             # 宿主侧 ctx.* 分发器(权限检查在这)
+├── host.rs            # PluginHost trait —— 平台能力(UI/播放器/网络)由各壳实现
+├── state.rs           # 运行时状态 + 出网白名单
+├── storage.rs         # 每插件独立存储(有配额)
+├── manager.rs         # 扫描/安装/启用/禁用/卸载/触发
+├── installer.rs       # 插件包解压与校验
+├── contributions.rs   # 扩展点收集
+├── registry_index.rs  # 插件市场索引
+├── convert.rs / assets.rs / hello_it.rs
 ```
 
-插件存储位置（`PluginManager._resolvePluginBaseDir`），目标是「卸载即清理、不残留」：
+宿主侧接线：`apps/desktop/src/lib.rs`（`plugins_host::make_host` + Tauri 命令），
+前端在 `ui/desktop/pages/`。
 
-| 平台 | 基准目录 | 卸载是否自动清理 |
+### 插件放在哪
+
+`PluginManager::new(base_dir, host)` 在 `base_dir` 下建两个目录：
+
+- `plugins/<id>/` —— 安装后的插件文件（重装整体覆盖该子目录）
+- `plugin_data/<id>/` —— 插件存储，**与插件目录分离**，所以升级/重装不丢数据
+- `plugins_state.json` —— 启用状态与已授权限
+
+`base_dir` 由各壳决定，目标都是「卸载即清理、不残留」：
+
+| 平台 | base_dir | 卸载是否自动清理 |
 |------|----------|------------------|
-| Windows / Linux（便携） | **可执行文件所在目录** | 删除应用文件夹即清理 |
-| macOS（便携） | **.app 包同级目录**（移到 `/Applications` 则回退应用支持目录） | 删除解压文件夹即清理 |
-| iOS / Android / tvOS / Android TV | **应用支持目录**（`getApplicationSupportDirectory`，沙盒内） | ✅ 系统卸载时随沙盒一并删除 |
+| Windows / Linux（压缩包分发） | `userdata/data/plugins`，即 **exe 同级的 userdata 里** | 删掉应用文件夹即清理 |
+| Android | 应用私有目录（沙盒内） | ✅ 系统卸载时随沙盒一并删除 |
 
-设计要点：
-- 桌面便携版把插件放在可执行文件/`.app` 同级，使整个解压文件夹**自包含**，
-  删文件夹即清理，不散落到 AppData。
-- 移动端/TV 无法把文件放到二进制旁边，但应用支持目录在**应用私有沙盒**内，
-  **卸载时由系统连同沙盒一起删除**，天然不残留；且不污染用户可见的 Documents。
-- 任何便携路径不可写（如装到只读位置）时，统一回退到应用支持目录。
-
-- `plugins/<id>/`：安装后的插件文件（重装会整体覆盖该子目录）。
-- `plugin_data/<id>/storage.json`：插件存储，**与插件目录分离**，所以升级/重装不丢数据。
+> 桌面端**不要**用 Tauri 的 `app_config_dir()`：那是由 `tauri.conf.json` 的 identifier
+> 推出来的另一个根，会在 `%APPDATA%` 下再开一份，而且改 identifier 就让已装插件静默失联。
+> 所有数据的唯一出口是 `crates/core/src/paths.rs`。
 
 ## manifest.json
 
@@ -93,69 +92,67 @@ lib/plugins/
 
 播放器事件：`onPlay` / `onPause` / `onPlayEnd`（用 `ctx.player.on` 订阅）。
 
-## 扩展点
+## 贡献点（contributions）
 
-`sidebarItems`、`mediaSources`、`actions`、`eventListeners`、`settingsPages`、
-`playerOverlays`、`contextMenus`、`homeStats`。
+插件把能力「挂载」到宿主的预定义位置。**v2 收敛成 4 类 × slot**（抄 VS Code 的 contribution points）：
 
-`homeStats`（首页统计指标）：handler 返回 `{ metrics: [{label, value}, ...] }`，
-宿主渲染在首页媒体计数（电影/剧集/总共）旁边。**桌面端已接入**
-（`desktop_home_screen.dart` 的 `_buildServerStats` + `PluginHomeStatsView`）；
-移动端/TV 端按相同方式读取 `pluginRegistryProvider` 即可接。
-示例见 `plugins_examples/uhdnow_traffic/`（uhdnow 服务器流量统计）。
+| 类型 | 作用 | 需要的权限 |
+|------|------|-----------|
+| `dataSources` | 贡献一个完整数据源（浏览/搜索/播放），接进宿主的 `MediaSourceBackend` | `sources` |
+| `panels` | 贡献一块 UI，挂在 `slot` 指定的位置 | `extensions` |
+| `actions` | 贡献一个操作项，出现在 `context` 指定的上下文 | `extensions` |
+| `sandboxViews` | 贡献一个 iframe 逃生舱视图 | `extensions` |
 
-- 静态：在 manifest 的 `extends` 声明；
-- 动态：运行时 `ctx.extensions.register(type, descriptor)`。
+以后加新位置**只加 slot 常量，不加类型**。
 
-主程序通过 `PluginExtensionRegistry` 收集，UI 监听该注册表渲染。
-**TV 端**不支持 `playerOverlays` / `contextMenus`，加载时自动忽略并记录日志。
+- 静态：在 manifest 的 `contributes` 里声明；
+- 动态：运行时 `ctx.extensions.register(kind, descriptor)`。
 
-> 主程序侧已实现「收集 + 桥接」：移动端设置页内置插件管理与 settingsPages 渲染。
-> 各端把自己的导航器通过 `attachPluginNavigator(key)` 注册后，即可让插件 UI 生效；
-> 侧边栏/播放器覆盖层等扩展的渲染，由各端在读取 `pluginRegistryProvider` 后接入。
+宿主侧由 `ContributionRegistry`（`crates/core/src/plugins/contributions.rs`）收集，前端读它渲染。
+
+> ⚠️ **v1 的 8 个老扩展点名（`sidebarItems` / `mediaSources` / `eventListeners` /
+> `settingsPages` / `homeStats` / `playerOverlays` / `contextMenus` / `actions`平级版）
+> 一律不再识别**，`contributions.rs` 里有条测试专门钉这件事 —— 认了会让 v1 插件
+> 半死不活地跑起来。`eventListeners` 被直接删掉：它本来就该是运行时的
+> `ctx.player.on()`，声明成扩展点是概念错位。
+
+**每类贡献都必须绑一个权限。** 漏绑 = 用户在授权弹窗里看不见、却被挂上了东西。
+注意 `panels`/`actions` 要的是 `extensions` 而**不是** `ui`（后者管的是 `ctx.ui.*` 弹提示/对话框）——
+第一版写成 `ui`，结果是只声明了 `ui` 的插件能过静态校验、运行时注册面板却被拒，
+而那个异常发生在 `onEnable` 里被吞掉，表现为**插件显示已启用、面板永远是空的**。
 
 ## 安全模型
 
-- **权限声明制**：启用前弹窗征得用户同意（`plugin_permission_dialog.dart`）。
-- **隔离**：每个插件一个 QuickJS isolate（`IsolateQjs`），内存上限 64MB；
-  插件 JS 崩溃/死循环只影响自己的 isolate，**主程序始终响应**。
+- **权限声明制**：启用前弹窗征得用户同意，同意结果落 `plugins_state.json`。
+- **隔离**：每个插件一个 QuickJS 引擎（`AsyncRuntime` + `AsyncContext`），钉在自己的 worker 线程上，
+  **内存上限 64MB**；插件 JS 崩溃/栈溢出只毁自己，宿主始终响应。
 - **网络**：仅 HTTPS，且受 `httpAllowedHosts` 白名单约束 —— **fail-closed**：不写 =
   拒绝所有出网（不是放行）。支持 `*.example.com` 子域通配（不覆盖主域本身，裸 `*`
   不算通配）。重定向后的最终 host 也要在白名单内。实现见 `crates/core/src/plugins/state.rs`。
 - **无文件系统**：不暴露 fs / 模块加载（`import` 被拒绝）。
-- **超时**：每次进入 JS 的调用有墙钟超时（默认 8s）作为卡死保护，超时即判定
-  插件失控、自动禁用并停止与之通信。
-  - 注意：严格的「单次同步 CPU 1 秒预算」需要 QuickJS 原生中断；当前
-    `flutter_qjs` 的 `IsolateQjs` 未透传 `timeout`，因此采用「独立 isolate +
-    主线程墙钟超时」方案：失控插件被禁用、主程序不受影响（其代价是失控 isolate
-    线程可能空转直到进程结束）。如需硬 CPU 中断，可改用 in-isolate `FlutterQjs`
-    并设置 `timeout`，但那会在中断前短暂阻塞主 isolate。
+- **空转看门狗**：用 QuickJS 的 **interrupt handler**（真 CPU 中断，不是墙钟兜底）。
+  它**只在 JS 真跑字节码时触发**，等宿主 UI/网络的 `await` 期间不触发 ——
+  所以「弹个表单等用户填」这种交互式流程不会被误杀，而纯 JS 死循环在 30s 无宿主交互后被中断。
 
 ## 打包与安装（.lpk）
 
-`.lpk` = 含 `manifest.json` + `main.js`(+assets) 的 zip。
+插件包 = 含 `manifest.json` + `main.js`(+assets) 的 zip。
 
-```bash
-dart run tools/pack_plugin.dart <插件目录>
-```
+打包脚本在**独立的插件仓库**里（`build.py`），不在本仓库。产物必须可复现
+（无时间戳、强制 LF），registry 索引的键是 snake_case、`author` 是字符串 —— 这是硬契约，
+写错会被静默清空成空列表。
 
-安装：设置 → 插件 → `+` 选择 `.lpk` → 解压到插件目录并校验清单 →
-在列表中开启开关（同意权限后）即启用。启用状态存于 `shared_preferences`。
+安装：设置 → 插件 → 从插件源安装，或选本地包 → 解压到 `plugins/<id>/` 并校验清单 →
+同意权限后启用。启用状态与已授权限存在 `plugins_state.json`。
 
 ## 依赖说明
 
-- **`flutter_qjs`（vendored 于 `third_party/flutter_qjs`）**：QuickJS 绑定。
-  pub 上的 0.3.7 自 2021 起未维护，在 Dart 3.x 下无法编译——`lib/src/ffi.dart`
-  的原生回调 `channelDispacher` 返回可空 `Pointer<JSValue>?`，而 Dart 3 要求
-  `Pointer.fromFunction` 的回调返回**非空** Pointer；其 pubspec 还把 SDK 上界写成
-  `<3.0.0`、ffi 锁 `^1.0.0`。因此把该包**复制进仓库并打补丁**：
-  - `ffi.dart`：`channelDispacher` 改为返回非空 `Pointer<JSValue>`（查不到时
-    `nullptr`），并给 `Pointer.fromFunction<_JSChannelNative>` 显式类型参数；
-  - `pubspec.yaml`：SDK 放宽到 `<4.0.0`，ffi 放宽到 `>=1.0.0 <3.0.0`（与项目
-    `ffi ^2.2.0` 兼容，**无需 dependency_overrides**）。
-  - 主 `pubspec.yaml` 以 `flutter_qjs: { path: third_party/flutter_qjs }` 引用。
-  - 已在 Windows 上 `flutter build windows` 验证：原生 quickjs.c 与 Dart 胶水均编译通过。
-  - 若将来上游发布兼容版本，可换回 hosted 依赖；引擎实现抽象在
-    `engine/plugin_js_engine.dart` 之后，替换 JS 引擎只需改 `qjs_plugin_engine.dart`。
-- `archive ^3.6.1`：.lpk 解压与打包。
-```
+- **`rquickjs`（`crates/core/Cargo.toml`）** —— QuickJS 的纯 Rust 绑定，可交叉编译到安卓。
+  启用 `macro`（`async_with!`）+ `futures`（AsyncRuntime）。
+  **不启 `parallel`**：QuickJS runtime 本就单线程，我们让每个插件钉在自己的 worker 线程上
+  （`worker.rs`），从不跨线程共享 runtime。
+  安卓无预生成的 FFI bindings，构建期用 `bindgen` 现生成（cargo-ndk 会喂 sysroot）；桌面走预生成。
+- **`zip`** —— 插件包解压（只启 `deflate`）。
+
+> 历史：Flutter 时代用的是 vendored `flutter_qjs`（pub 上的 0.3.7 在 Dart 3.x 下编不过，
+> 打了补丁放在 `third_party/`）。那套连同整个 Dart 栈已于 2026-07 删除，这里只留一句免得考古。

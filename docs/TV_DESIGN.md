@@ -1,9 +1,19 @@
 # LinPlayer TV 端设计文档
 
-> 本文档记录 LinPlayer TV 端（Android TV + Apple TV + 平板）的完整设计决策。
+> **⚠️ 读之前先看这段（2026-07-26）**
 >
-> 状态：讨论完成，编码中
-> 关联文档：./DESIGN.md（手机端与桌面端设计）
+> 本文写于 Flutter 时代。TV 端 UI 已于 2026-07 用 **React + TypeScript** 重建（`ui/tv/`，
+> 焦点走 norigin-spatial-navigation），壳是 `apps/android/`（Tauri）。
+>
+> - **仍然算数**：版式、焦点/交互规则、尺寸与动效参数、按键映射、页面结构等**设计决策**。
+> - **已作废**：文中所有 Flutter 实现细节 —— `flutter build`、`StatelessWidget`/`Focus`/
+>   `FocusTraversalPolicy`、Riverpod、GoRouter、media_kit、`lib/**` 路径、`.dart` 文件名。
+>   它们描述的代码**不存在了**，看实现请直接读 `ui/tv/`。
+>
+> 本文档记录 LinPlayer TV 端（Android TV 和 Android 平板）的完整设计决策。
+>
+> 状态：设计定稿；UI 已按本文重建于新栈
+> 关联文档：./DESIGN.md（手机端与桌面端设计）、./NATIVE_RENDERING.md（桌面视频合成）
 
 ---
 
@@ -41,10 +51,8 @@
 
 TV 端是 LinPlayer 的独立平台版本，覆盖：
 - **Android TV**（智能电视、电视盒子、投影仪）
-- **Apple TV**（tvOS）
-- **平板**（Android 平板 / iPad）
+- **Android 平板**（触摸回退操作）
 
-平板使用 TV 端 UI，额外支持触摸回退操作。
 
 ### 1.2 核心原则
 
@@ -55,42 +63,19 @@ TV 端是 LinPlayer 的独立平台版本，覆盖：
 - **无阴影**：所有 UI 元素无阴影，焦点用 outline + 光晕（参考 Apple 无阴影原则）
 - **强制深色**：TV 端始终深色模式，无视系统设置
 
-### 1.3 目录结构
+### 1.3 项目架构
 
-```
-lib/
-├── core/                   # 平台无关（API、服务、共享 Provider）
-│   ├── api/                # Emby API 接口
-│   ├── providers/          # 共享状态（服务器、播放、媒体库）
-│   └── services/           # 播放器服务
-├── ui/                     # 手机端 UI（现有，不改动）
-├── desktop/                # 桌面端 UI（现有，不改动）
-├── tv/                     # TV 端（新增）
-│   ├── providers/          # TV 专用状态（焦点管理、导航状态）
-│   ├── ui/                 # TV 页面
-│   │   ├── home/           # 首页
-│   │   ├── player/         # 播放页
-│   │   ├── detail/         # 详情页
-│   │   ├── library/        # 媒体库
-│   │   ├── search/         # 搜索
-│   │   ├── server/         # 服务器
-│   │   └── settings/       # 设置
-│   ├── widgets/            # TV 通用组件
-│   │   ├── tv_focusable.dart        # 焦点包裹组件
-│   │   ├── tv_focus_row.dart        # 横向焦点行
-│   │   ├── tv_focus_grid.dart       # 焦点网格
-│   │   ├── tv_nav_bar.dart          # 左侧导航栏
-│   │   ├── tv_side_panel.dart       # 右侧滑入面板
-│   │   ├── tv_hero_banner.dart      # Hero Banner
-│   │   ├── tv_poster_card.dart      # 海报卡片
-│   │   ├── tv_keyboard.dart         # 虚拟键盘
-│   │   └── tv_progress_bar.dart     # 进度条（TV 焦点版）
-│   └── tv_app.dart         # TV 端应用入口
-└── routes/
-    ├── mobile_routes.dart   # 手机端路由
-    ├── desktop_routes.dart  # 桌面端路由
-    └── tv_routes.dart       # TV 端路由
-```
+TV 端采用 Rust（后端核心） + React/TypeScript（前端 UI） + Tauri（跨平台壳）的现代栈实现。
+
+- **后端核心**：`crates/` 目录
+  - `crates/core/src/` — API 层、服务、共享逻辑
+  - `crates/mpv/src/` — libmpv 播放器封装
+  
+- **前端 UI**：React/TypeScript 实现 TV 端用户界面
+  - 焦点管理、导航栏、首页、播放页、详情页、媒体库、搜索、服务器、设置等页面
+  
+- **平台壳**：`apps/` 目录
+  - `apps/android/` — Android TV 应用壳
 
 ---
 
@@ -101,7 +86,6 @@ lib/
 | 平台 | 优先级 | 输入方式 | 构建产物 |
 |------|--------|----------|----------|
 | Android TV | P0 | 遥控器 + 平板触摸 | `linplayer-tv.apk` |
-| Apple TV | P1 | 遥控器 | `linplayer-tv.ipa` |
 | Android 平板 | P0 | 触摸回退 | 复用 TV APK |
 
 ### 2.2 代码复用策略
@@ -119,7 +103,7 @@ lib/
 |------|------|
 | Flutter Focus | 焦点导航基础设施 |
 | FocusTraversalPolicy | 自定义方向导航 |
-| media_kit | MPV 播放器（Android TV + Apple TV） |
+| media_kit | MPV 播放器（Android TV） |
 | ExoPlayer | Android TV 备选播放器 |
 | Riverpod | 状态管理（复用） |
 | GoRouter | TV 端路由 |
@@ -133,7 +117,6 @@ lib/
 ```bash
 # TV 构建
 flutter build apk --flavor tv
-flutter build ios --flavor tv
 
 # 手机端构建
 flutter build apk --flavor mobile
@@ -150,7 +133,6 @@ const bool isTV = bool.fromEnvironment('IS_TV_MODE', defaultValue: false);
 | 产物 | 文件名 |
 |------|--------|
 | TV APK | `linplayer-tv.apk` |
-| TV IPA | `linplayer-tv.ipa` |
 | 手机 APK | `linplayer-mobile.apk` |
 | 桌面 ZIP | `linplayer-desktop.zip`（现有） |
 
@@ -750,8 +732,8 @@ class TVFocusGrid extends StatelessWidget {
 
 #### 屏幕旋转（横竖屏）
 
-- TV 端（Android TV / Apple TV）：固定横屏（Landscape），不处理旋转
-- 平板（使用 TV APK）：强制横屏模式，不响应设备旋转
+- Android TV：固定横屏（Landscape），不处理旋转
+- Android 平板（使用 TV APK）：强制横屏模式，不响应设备旋转
 - 播放页：视频按原始比例显示，不支持手动旋转（TV 上不需要）
 
 ---
@@ -970,7 +952,7 @@ class TVFocusGrid extends StatelessWidget {
 
 ## 十七、按键映射
 
-### 17.1 Android TV / Apple TV 遥控器
+### 17.1 Android TV 遥控器
 
 | 按键 | 全局行为 | 播放页（控制层隐藏） | 播放页（控制层显示） | 页面内 |
 |------|---------|---------------------|---------------------|--------|
@@ -1018,13 +1000,7 @@ class TVFocusGrid extends StatelessWidget {
 | MPV | 默认 | 全格式、HDR、Dolby Vision、PGS/SUP 字幕、Anime4K |
 | ExoPlayer | 可选 | 硬件解码优化，设置中切换 |
 
-### 18.2 Apple TV
-
-| 内核 | 默认 | 说明 |
-|------|------|------|
-| MPV | 唯一 | 通过 media_kit iOS 桥接，需验证 tvOS 兼容性 |
-
-### 18.3 设置中内核切换
+### 18.2 设置中内核切换
 
 - 列出当前平台所有可用内核
 - 不可用内核禁用并标注原因
@@ -1201,7 +1177,6 @@ TV 端无法方便查看日志，通过局域网 HTTP 服务器 + 手机扫码�
 | 项 | 优先级 | 说明 |
 |----|--------|------|
 | media_kit Android TV 兼容性 | P0 | 需验证 libmpv 在 Android TV 上的构建和运行 |
-| media_kit Apple TV 兼容性 | P1 | 需验证 tvOS 桥接是否完整 |
 | Flutter Focus 在 TV 上的性能 | P0 | 大量焦点项时的帧率，是否掉帧 |
 | 虚拟键盘输入效率 | P1 | 26 键在 TV 上的实际体验，是否需要 T9 备选 |
 | 焦点导航流畅度 | P0 | 跨行对齐的动画流畅度，是否卡顿 |
@@ -1214,7 +1189,7 @@ TV 端无法方便查看日志，通过局域网 HTTP 服务器 + 手机扫码�
 | 多用户切换 | P3 | TV 端多用户登录（家庭共享） |
 | 家长控制 | P3 | PIN 码、内容分级 |
 | 无障碍支持 | P2 | TalkBack、VoiceOver、高对比度 |
-| 语音搜索 | P2 | Apple TV Siri / Android TV Assistant 集成 |
+| 语音搜索 | P2 | Android TV Assistant 集成 |
 | 手机遥控 | P3 | 手机作为 TV 遥控器（局域网控制） |
 | 局域网自动发现 | P2 | mDNS/SSDP 扫描 Emby 服务器 |
 | 播放队列 UI | P3 | 显式播放队列（当前为隐式） |

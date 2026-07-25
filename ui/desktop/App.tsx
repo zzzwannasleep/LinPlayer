@@ -19,11 +19,14 @@ import {
   applyPrefs,
   currentSession,
   currentSource,
+  danmakuAttach,
   danmakuAutoLoad,
+  danmakuDetach,
   danmakuEpisodes,
   danmakuLoad,
   danmakuMatch,
   danmakuMinAutoScore,
+  danmakuVisible,
   danmakuSearch,
   defaultDanmakuFilter,
   fmtBitrate,
@@ -125,8 +128,16 @@ const DM_AREAS = [25, 50, 75, 100];
    两张表的默认下标(DM_DEFAULT)都对着组件原本写死的常量,不动档位 = 观感与以前一模一样。 */
 /** 滚动弹幕横穿屏幕的秒数(越小越快)。「中」=8s = Danmaku.tsx 的 DURATION。 */
 const DM_SPEEDS: [number, string][] = [[14, "极慢"], [11, "慢"], [8, "中"], [6, "快"], [4.5, "极快"]];
-/** 弹幕字号(CSS px);null =「按画面高自适应」,即组件不传 fontSize 时的原行为。 */
-const DM_SIZES: [number | null, string][] = [[16, "极小"], [20, "小"], [null, "中"], [28, "大"], [34, "极大"]];
+/** 弹幕字号。第一列是网页渲染用的 CSS px(null =「按画面高自适应」= 组件原行为);
+    第三列是 **ASS 字号**,活在固定的 1080 坐标系里,所以换窗口大小观感不变
+    ——「中」= 49 ≈ 老自适应的 canvas.height/22,换渲染引擎不改默认观感。 */
+const DM_SIZES: [number | null, string, number][] = [
+  [16, "极小", 32], [20, "小", 40], [null, "中", 49], [28, "大", 60], [34, "极大", 72],
+];
+/** 弹幕渲染引擎。mpv = 生成 ASS 交 libass(默认);web = 老的网页 Canvas 层。
+    默认走 mpv:网页层每帧自己算位置,而位置插值里没有倍速,倍速下每 250ms 硬跳一次。 */
+const DM_ENGINES: [DmEngine, string][] = [["mpv", "mpv(流畅)"], ["web", "网页层"]];
+type DmEngine = "mpv" | "web";
 const DM_DEFAULT = 2; // 两张表的「中」都在下标 2
 
 /* 弹幕显示设置的持久化(用户 2026-07-16:「在某一集调整了,后续就不用再重新调整」)。
@@ -137,12 +148,12 @@ const DM_DEFAULT = 2; // 两张表的「中」都在下标 2
    为它们往 config.rs 加字段 = 让核层存一份自己永远不读的数据。
    ★ 但「用不到」不等于「可以不存」:换片会重建整个播放器状态,不落盘就每集都要重调。 */
 const DM_KEY = "player:danmaku";
-type DmSettings = { on: boolean; opacity: number; area: number; speed: number; size: number };
+type DmSettings = { on: boolean; opacity: number; area: number; speed: number; size: number; engine: DmEngine };
 /* ★ on 的默认从 false 改成了 true,这是**配套改动**不是口味改动:
    以前靠 autoDanmaku 匹配成功时 setDmOn(true) 把它顶开,所以默认 false 也看得到弹幕;
    现在开关是用户的持久化偏好,自动匹配不能再擅自翻它(翻了就等于「关不掉」),
    于是默认必须自己立起来。没匹配到弹幕时 dmComments 为空,开着也只是一层空画布,观感不变。 */
-const DM_FALLBACK: DmSettings = { on: true, opacity: 80, area: 1, speed: DM_DEFAULT, size: DM_DEFAULT };
+const DM_FALLBACK: DmSettings = { on: true, opacity: 80, area: 1, speed: DM_DEFAULT, size: DM_DEFAULT, engine: "mpv" };
 
 /** 读回存档。★ 必须逐项夹紧:存档是上个版本写的,档位表增删过之后
     旧下标可能越界 → DM_SPEEDS[7] = undefined → 解构 [0] 直接崩在渲染里。 */
@@ -159,6 +170,8 @@ function loadDm(): DmSettings {
       area: idx(p.area, DM_AREAS.length, DM_FALLBACK.area),
       speed: idx(p.speed, DM_SPEEDS.length, DM_FALLBACK.speed),
       size: idx(p.size, DM_SIZES.length, DM_FALLBACK.size),
+      // 存档里没有 engine 的老用户 → 走默认的 mpv(升级即得流畅版,不用自己去翻设置)
+      engine: p.engine === "web" || p.engine === "mpv" ? p.engine : DM_FALLBACK.engine,
     };
   } catch {
     return DM_FALLBACK; // 存档坏了就用默认,不能让它挡住起播
@@ -220,7 +233,12 @@ export default function App() {
   const [playing, setPlaying] = useState<Item | null>(null);
   const [status, setStatus] = useState<Status>({ time: 0, duration: 0, paused: false, buffered: 0, eof: false });
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [prefs, setPrefs2] = useState<Prefs>({ audio_lang: null, sub_lang: null, sub_enabled: true, detail_blur: 40 });
+  /* 只是 getPrefs() 回来之前的占位;正则三项在这儿恒为空 —— 播放页从不改它们
+     (设置页有专用命令 setTrackRegexes),这个副本只负责别把已存的值覆盖掉。 */
+  const [prefs, setPrefs2] = useState<Prefs>({
+    audio_lang: null, sub_lang: null, sub_enabled: true, detail_blur: 40,
+    version_regex: "", sub_regex: "", audio_regex: "",
+  });
   const [seeking, setSeeking] = useState<number | null>(null);
   /* 拖动中的值同时存一份 ref:提交动作挂在 window 上(见下面那个 effect),
      而 window 监听器闭包里读到的 state 是注册那一刻的快照,只有 ref 是最新的。 */
@@ -312,7 +330,7 @@ export default function App() {
   /* 显示设置从存档起步(用户:「某一集调整了,后续不用再重新调整」)。
      useState 的初值写成**函数**:不写函数的话 loadDm() 每次渲染都会跑一遍读 localStorage。 */
   const [dm, setDm] = useState<DmSettings>(loadDm);
-  const { on: dmOn, opacity: dmOpacity, area: dmArea, speed: dmSpeed, size: dmSize } = dm;
+  const { on: dmOn, opacity: dmOpacity, area: dmArea, speed: dmSpeed, size: dmSize, engine: dmEngine } = dm;
   /** 改一项 = 存一次。写在同一个函数里,不靠各调用点自觉 —— 漏一处就是「这项不记」。
    *  ★ 收函数式入参:键盘快捷键的 handler 挂在一个 deps 里**没有 dm** 的 effect 上,
    *    直接读渲染作用域的 dmOn 会读到注册那一刻的旧值(按 D 只切一次就再也切不动)。
@@ -329,7 +347,7 @@ export default function App() {
     { group: DanmakuSourceGroup; anime: DanmakuAnime; episodes: DanmakuEpisode[] | null } | null
   >(null);
   const [dmKw, setDmKw] = useState("");
-  const timeSync = useRef<TimeSync>({ base: 0, stamp: performance.now(), paused: false });
+  const timeSync = useRef<TimeSync>({ base: 0, stamp: performance.now(), paused: false, speed: 1 });
 
   // 进度条悬停时间气泡(草稿 pin 18);x 是条内像素偏移。
   const [hoverT, setHoverT] = useState<{ x: number; t: number } | null>(null);
@@ -444,6 +462,43 @@ export default function App() {
       say(`弹幕自动匹配失败:${e} · 可在弹幕面板手动搜索`);
     }
   }
+
+  /* ---- 弹幕交给 mpv 渲染(engine=mpv,默认)----
+
+     生成 ASS → sub-add 到 mpv 的次字幕位,之后时间轴/倍速/seek/暂停全归 mpv,
+     前端一帧都不用算。根治的是「插值里没有倍速」那个 bug(见 danmaku/ass.rs 头注释)。
+
+     ★ comments 只在**它自己变**的时候才传:改字号/透明度这些档位会重跑本 effect,
+       每次都推几万条过 IPC 的话,连点 stepper 就会一顿一顿的。核层留了上一份。 */
+  const dmSentRef = useRef<DanmakuComment[] | null>(null);
+  useEffect(() => {
+    if (!playing || dmEngine !== "mpv") return;
+    const fresh = dmSentRef.current !== dmComments;
+    dmSentRef.current = dmComments;
+    danmakuAttach(fresh ? dmComments : null, {
+      // libass 在 Windows 上直接读系统字体;Linux 走 fontconfig,雅黑多半不存在,
+      // 给个通用族名让它自己挑,别写死一个不存在的字体名(那会静默回落到看不懂的字形)。
+      font: IS_LINUX ? "Sans" : "Microsoft YaHei",
+      font_size: DM_SIZES[dmSize][2],
+      opacity: dmOpacity,
+      area_percent: DM_AREAS[dmArea],
+      scroll_secs: DM_SPEEDS[dmSpeed][0],
+    }).catch((e) => fail("弹幕渲染", e));
+  }, [playing, dmEngine, dmComments, dmSize, dmOpacity, dmArea, dmSpeed]);
+
+  /* 弹幕开关走 mpv 的次字幕可见性:不卸载,重开不用再生成整份 ASS。 */
+  useEffect(() => {
+    if (!playing || dmEngine !== "mpv") return;
+    danmakuVisible(dmOn).catch(() => {});
+  }, [playing, dmOn, dmEngine]);
+
+  /* 离开播放页 / 切回网页层渲染 → 摘掉弹幕轨。
+     不摘的话次字幕位一直被占着,用户去挂双语字幕会「挂上了但显示的是弹幕」。 */
+  useEffect(() => {
+    if (playing && dmEngine === "mpv") return;
+    dmSentRef.current = null;
+    danmakuDetach().catch(() => {});
+  }, [playing, dmEngine]);
 
   /* 自动跳过片头/片尾。挂在已有的 500ms 状态轮询上,不另开定时器。
      ★ 每片各跳一次(skipped ref):不设这个闸,用户手动倒回去看片头会被立刻再踹走一次,
@@ -819,7 +874,8 @@ export default function App() {
         statusRef.current = st;
         setStatus(st);
         if (st.time > 0) setReady(true); // 时间开始走 = 已出画,撤黑屏
-        timeSync.current = { base: st.time, stamp: performance.now(), paused: st.paused };
+        // speed 必须带上:两次轮询之间靠墙钟外推,不乘倍速就每 250ms 硬跳一次(见 TimeSync)。
+        timeSync.current = { base: st.time, stamp: performance.now(), paused: st.paused, speed: speedRef.current };
         statusFail.current = 0;
         tick.current++;
         // 轮询提到 250ms 后,每 20 拍仍是 5s 上报一次 —— 别跟着轮询一起加倍打服务器。
@@ -1343,8 +1399,10 @@ export default function App() {
         <div className="p-dim" style={{ opacity: ((100 - brightness) / 100) * 0.85 }} />
       )}
 
-      {/* 弹幕层外包一层:不透明度/显示区域纯 CSS 就能真生效(Danmaku.tsx 不动)。 */}
-      {playing && (
+      {/* 弹幕层。engine=mpv 时这一层**整个不存在** —— 弹幕是 mpv 的一条 ASS 字幕轨,
+          不透明度/显示区域都写进 ASS 了,再套一层 CSS 反而会二次衰减。
+          留着网页层是给「要双语字幕 + 弹幕同时开」的人兜底:secondary-sid 只有一个位子。 */}
+      {playing && dmEngine === "web" && (
         <div
           className="p-dmwrap"
           style={{ opacity: dmOpacity / 100, clipPath: `inset(0 0 ${100 - DM_AREAS[dmArea]}% 0)` }}
@@ -1756,6 +1814,11 @@ export default function App() {
                       {stepper("字体大小", DM_SIZES[dmSize][1],
                         () => patchDm({ size: Math.max(0, dmSize - 1) }),
                         () => patchDm({ size: Math.min(DM_SIZES.length - 1, dmSize + 1) }))}
+                      {/* 渲染方式。默认 mpv;只有需要「双语字幕 + 弹幕同开」时才退回网页层
+                          (弹幕占的是 mpv 的次字幕位,和双语字幕抢同一个位子)。 */}
+                      {stepper("渲染方式", DM_ENGINES.find((e) => e[0] === dmEngine)?.[1] ?? dmEngine,
+                        () => patchDm({ engine: dmEngine === "mpv" ? "web" : "mpv" }),
+                        () => patchDm({ engine: dmEngine === "mpv" ? "web" : "mpv" }))}
                     </div>
                   </>
                 )}

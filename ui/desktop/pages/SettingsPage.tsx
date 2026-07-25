@@ -15,6 +15,8 @@ import {
   type WritebackSettings,
   getPrefs,
   setPrefs,
+  setTrackRegexes,
+  validateTrackRegex,
   setDetailBlur,
   getProxy,
   setProxy,
@@ -320,11 +322,66 @@ function AppearancePane({ theme, setTheme }: { theme: Theme; setTheme: (t: Theme
    加新项时:落 Prefs → 在 apply_playback_defaults 里消费 → 才算做完。
    只加字段不加消费点,就是又造一个「存得下、没人读」的假开关。
    ============================================================ */
+/* 一条筛选正则的输入框。校验**必须问 Rust** —— 浏览器 RegExp 认前后瞻,
+   Rust 的 regex crate 不认;拿 JS 校验就会放过一条存得下、却永远不命中的正则,
+   两边都不报错,用户只看到「设了没反应」。所以这里 blur 时先 validate 再 save,
+   非法就红框 + 不落盘(和旧 Dart 版「正则非法不会保存」的承诺一致)。 */
+function RegexField({
+  label,
+  hint,
+  value,
+  onChange,
+  onCommit,
+  disabled,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: () => Promise<void>;
+  disabled?: boolean;
+}) {
+  const [err, setErr] = useState<string | null>(null);
+  async function commit() {
+    try {
+      await validateTrackRegex(value);
+    } catch (e) {
+      setErr(String(e)); // 非法就停在这:不落盘,红框留着让用户看见
+      return;
+    }
+    setErr(null);
+    await onCommit();
+  }
+  return (
+    <div className="fld">
+      <label>{label}</label>
+      <input
+        className="field"
+        style={err ? { borderColor: "var(--danger, #e5484d)" } : undefined}
+        placeholder="留空 = 不启用"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setErr(null);
+        }}
+        onBlur={commit}
+      />
+      <p className="hint" style={{ margin: "4px 0 0" }}>
+        {err ? <span style={{ color: "var(--danger, #e5484d)" }}>正则不合法:{err}</span> : hint}
+      </p>
+    </div>
+  );
+}
+
 function PlaybackPane() {
   const f = useFlash();
   const [audio, setAudio] = useState("");
   const [sub, setSub] = useState("");
   const [subOn, setSubOn] = useState(true);
+  const [reVer, setReVer] = useState("");
+  const [reSub, setReSub] = useState("");
+  const [reAudio, setReAudio] = useState("");
   const [loaded, setLoaded] = useState(false);
   /* null = 还没读回来。核层有自己的默认值,前端别硬编码一份 ——
      两份默认值早晚对不上,用户看到的就是「显示的和实际生效的不是一回事」。 */
@@ -339,6 +396,9 @@ function PlaybackPane() {
         setAudio(p.audio_lang ?? "");
         setSub(p.sub_lang ?? "");
         setSubOn(p.sub_enabled);
+        setReVer(p.version_regex ?? "");
+        setReSub(p.sub_regex ?? "");
+        setReAudio(p.audio_regex ?? "");
         setLoaded(true);
       })
       .catch(f.err);
@@ -388,6 +448,22 @@ function PlaybackPane() {
       f.ok("已保存");
     } catch (e) {
       setLp(prev);
+      f.err(e);
+    }
+  }
+
+  /* 三条正则一起落盘(核层是一条命令,只改这三项不动别的 Prefs)。
+     单条的合法性已由 RegexField 在 blur 时问过 Rust,这里再失败只可能是
+     别的字段还揣着非法值 —— 如实弹出来,别静默。 */
+  async function saveRegexes() {
+    try {
+      await setTrackRegexes({
+        version_regex: reVer.trim(),
+        sub_regex: reSub.trim(),
+        audio_regex: reAudio.trim(),
+      });
+      f.ok("已保存");
+    } catch (e) {
       f.err(e);
     }
   }
@@ -509,6 +585,45 @@ function PlaybackPane() {
           }}
         />
       </Row>
+
+      <h4 style={{ marginTop: 22 }}>正则优先选择</h4>
+      <p className="hint">
+        比上面的语言偏好优先。留空 = 不启用。优先级:手动选过的 ＞ 正则命中 ＞ 语言/服务端默认。{" "}
+        {/* Tauri webview 里 <a target="_blank"> 不会开系统浏览器,必须走 opener 插件。 */}
+        <a
+          href="https://linplayer.902541.xyz/wiki/regex-filters"
+          onClick={(e) => {
+            e.preventDefault();
+            openUrl("https://linplayer.902541.xyz/wiki/regex-filters");
+          }}
+        >
+          写法与示例 →
+        </a>
+      </p>
+      <RegexField
+        label="版本筛选"
+        hint="多版本片源时优先选中匹配的那条。例:4K|2160 · HEVC|265 · 原盘|remux"
+        value={reVer}
+        onChange={setReVer}
+        onCommit={saveRegexes}
+        disabled={!loaded}
+      />
+      <RegexField
+        label="字幕筛选"
+        hint="匹配字幕轨的显示名/标题/语言/编码。例:中文|简|繁|chi|zh"
+        value={reSub}
+        onChange={setReSub}
+        onCommit={saveRegexes}
+        disabled={!loaded}
+      />
+      <RegexField
+        label="音频筛选"
+        hint="匹配音轨的显示名/标题/语言/编码/声道。例:jpn|日 · flac|truehd · 6ch"
+        value={reAudio}
+        onChange={setReAudio}
+        onCommit={saveRegexes}
+        disabled={!loaded}
+      />
       {f.node}
     </div>
   );

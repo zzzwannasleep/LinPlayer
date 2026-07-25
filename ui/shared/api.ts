@@ -222,12 +222,20 @@ export type Track = {
   title: string;
   lang: string;
   selected: boolean;
+  /** 编码(mpv track-list/N/codec)。正则筛选匹配它,见 /wiki/regex-filters。 */
+  codec: string;
+  /** 声道数,0 = 未知/非音轨。正则里写 `6ch` 匹配。 */
+  channels: number;
 };
 
 export type Prefs = {
   audio_lang: string | null;
   sub_lang: string | null;
   sub_enabled: boolean;
+  /* 正则优先选择(/wiki/regex-filters)。空 = 不启用,回退语言偏好。 */
+  version_regex: string;
+  sub_regex: string;
+  audio_regex: string;
   /** 详情页背景图模糊强度 0~100(0=清晰,100=糊成色块)。外观设置里调。 */
   detail_blur: number;
 };
@@ -846,6 +854,19 @@ export const downloadAndApplyUpdate = () => invoke<void>("download_and_apply_upd
  *  以前这里标成 `p: Prefs`,逼调用方拼一个完整 Prefs 再扔掉多余字段:
  *  看着像「整体覆盖」,给人一种「不传的字段会被清掉」的错觉,新增 Prefs 字段时
  *  每个调用点都得跟着改一遍。 */
+/** 三条筛选正则。**校验必须问 Rust**(validateTrackRegex):浏览器的 RegExp 支持前后瞻,
+    Rust 的 regex crate 不支持 —— 拿 JS 校验会放过 Rust 编译不过的写法,
+    结果是「设置存下了却永不命中」,而且两边都不报错。 */
+export type TrackRegexes = Pick<Prefs, "version_regex" | "sub_regex" | "audio_regex">;
+export const validateTrackRegex = (pattern: string) =>
+  invoke<void>("validate_track_regex", { pattern });
+export const setTrackRegexes = (r: TrackRegexes) =>
+  invoke<void>("set_track_regexes", {
+    versionRegex: r.version_regex,
+    subRegex: r.sub_regex,
+    audioRegex: r.audio_regex,
+  });
+
 export type TrackPrefs = Pick<Prefs, "audio_lang" | "sub_lang" | "sub_enabled">;
 export const setPrefs = (p: TrackPrefs) =>
   invoke<void>("set_prefs", {
@@ -853,6 +874,34 @@ export const setPrefs = (p: TrackPrefs) =>
     subLang: p.sub_lang,
     subEnabled: p.sub_enabled,
   });
+
+/* ---------- 弹幕渲染(交给 mpv 的 libass)----------
+
+   老的网页 Canvas 版每帧自己算位置,位置来自 250ms 轮询 + performance.now() 插值,
+   而那段插值**没有把倍速算进去** —— 2x 时弹幕按 1x 爬、每 250ms 被拽回去,
+   就是用户说的「正常速度也卡、倍速更卡」。交给 libass 后时间轴归 mpv,前端零开销。 */
+export type DanmakuAssOptions = {
+  /** 版面分辨率(libass 会等比缩放到实际画面)。省略 = 1920×1080。 */
+  play_res_x?: number;
+  play_res_y?: number;
+  font?: string;
+  /** 字号,单位是 play_res_y 那套坐标(1080 基准),**不是** CSS px。 */
+  font_size?: number;
+  opacity?: number;
+  area_percent?: number;
+  scroll_secs?: number;
+  fixed_secs?: number;
+  outline?: number;
+  bold?: boolean;
+};
+
+/** 生成 ASS 并挂给 mpv。`comments` 传 null = 沿用核层上次那份(只改档位时别再推几万条过 IPC)。 */
+export const danmakuAttach = (
+  comments: DanmakuComment[] | null,
+  options: DanmakuAssOptions,
+) => invoke<void>("danmaku_attach", { comments, options });
+export const danmakuDetach = () => invoke<void>("danmaku_detach");
+export const danmakuVisible = (on: boolean) => invoke<void>("danmaku_visible", { on });
 
 // ---------- 网盘源 ----------
 export const sourceLogin = (

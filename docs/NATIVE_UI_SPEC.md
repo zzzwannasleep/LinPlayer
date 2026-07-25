@@ -1,5 +1,14 @@
 # 桌面播放页 UI 施工清单（用于 mpv Lua 1:1 复刻）
 
+> **⚠️ 这个方案没有采用（2026-07-26 复核）。**
+>
+> 「让 mpv 用 Lua 自绘播放页 UI」是原生渲染改造期间评估过的一条路，**最终没走**。
+> 现在的做法是：mpv 只画视频，UI 全部由**透明 Tauri 窗口里的 React** 承担
+> （见 [NATIVE_RENDERING.md](NATIVE_RENDERING.md)）。文中的 Flutter↔Lua 桥、
+> `user-data/linplayer/*` 约定、`lib/**` 路径**全部不存在**。
+>
+> 留档只为一件事：**它逐条列出了桌面播放页当年有哪些交互**，可当功能对照表用。
+>
 > 原生渲染 v2：mpv 自绘 UI（自研 Lua，非 uosc），复刻现有桌面播放页。
 > Flutter↔Lua 桥：Lua 写 `user-data/linplayer/cmd` → Dart 轮询执行 → 清空；
 > Dart 写 `user-data/linplayer/<key>`(JSON) → Lua observe 读取刷新菜单。

@@ -31,7 +31,7 @@ use linplayer_core::plugins::PluginManager;
 use linplayer_core::danmaku::{self, DanmakuAuthType, DanmakuComment, DanmakuSourceConfig};
 use linplayer_core::emby::{self, Item, LoginResult, PlaybackTarget, Session};
 use linplayer_core::http;
-use linplayer_core::media::{pick_tracks, Track};
+use linplayer_core::media::{pick_tracks, Track, TrackPrefs};
 use linplayer_core::net::cf;
 use linplayer_core::source::aliyundrive::{self, AliyunDriveBackend};
 use linplayer_core::source::anirss::AniRssBackend;
@@ -86,6 +86,11 @@ struct AppState {
     watch_history: linplayer_core::watch_history::WatchHistory,
     // 剧 -> TMDB id 缓存(跨服匹配剧集要它;每部剧只查一次)。对齐 Dart _seriesTmdbCache。
     series_tmdb: Mutex<HashMap<String, Option<String>>>,
+    /* 当前这集的弹幕(已过滤/已合并的最终版)。留一份在核层是为了改样式档位时
+       不必让前端把几万条再过一遍 IPC —— 见 danmaku_attach。 */
+    danmaku_comments: Mutex<Vec<DanmakuComment>>,
+    // 弹幕 ASS 的文件名序号(每次重新生成换个名字,见 danmaku_attach 里的说明)。
+    danmaku_seq: AtomicU32,
     // server_id -> 连通状态三态。probe_accounts 刷新,list_accounts 读;不落盘(重启即重探)。
     account_status: Mutex<HashMap<String, AccountStatus>>,
     // 自动挂弹幕的连号锚点:seriesId|seasonId -> (集号, 弹弹Play episodeId)。
@@ -176,13 +181,24 @@ fn poclog(msg: &str) {
     }
 }
 
-/// 把 mpv 视频窗口对齐到 Tauri 窗口客户区。
+/// 把 mpv 视频窗口对齐到 Tauri 窗口客户区(并压在它正下方)。
+/// 主窗最小化/隐藏时 sync_overlay 会转而把视频窗藏起来。
 fn sync_video(window: &tauri::WebviewWindow, parent: isize, state: &AppState) {
     let video = state.player.lock().unwrap().as_ref().map(|p| p.video_hwnd);
     if let Some(v) = video {
         if let (Ok(pos), Ok(size)) = (window.inner_position(), window.inner_size()) {
             mpv::sync_overlay(v, parent, pos.x, pos.y, size.width as i32, size.height as i32);
         }
+    }
+}
+
+/* 视频窗的显隐。**不在播放时必须藏起来** —— 它是独立顶层窗口,一直可见的话:
+   1) 平时被主窗盖着看不出来,主窗一最小化就是一个黑窗(或还在放的片)留在桌面;
+   2) 主窗透明,视频窗那块黑会把 UI 的半透明效果整个压死。
+   起播时开、停播/退播放页时关。 */
+fn show_video(state: &AppState, on: bool) {
+    if let Some(p) = state.player.lock().unwrap().as_ref() {
+        mpv::set_overlay_visible(p.video_hwnd, on);
     }
 }
 
@@ -1348,9 +1364,18 @@ async fn play(
          往这两条路上加锁时务必重新确认,否则 join! 把两个 future 放同一线程轮询,
          一方持锁 await、另一方去抢同一把锁 = 自我死锁(本项目在 [[prefetch-proxy-deadlock]]
          上栽过同一类跟头:症状是起播直接吊死,不报错)。 */
+    // 版本筛选正则先在 await 之前从 config 取出来 —— 上面那段注释讲的就是这件事:
+    // join! 里两个 future 同线程轮询,谁跨 await 攥着 std Mutex 谁就自己锁死自己。
+    let version_regex = state.config.lock().unwrap().prefs.version_regex.clone();
     let (ctx, target) = tokio::join!(
         build_wh_ctx(&state, &s, &item_id),
-        emby::resolve_stream(&state.http, &s, &item_id, media_source_id.as_deref()),
+        emby::resolve_stream(
+            &state.http,
+            &s,
+            &item_id,
+            media_source_id.as_deref(),
+            &version_regex,
+        ),
     );
     let target = target?;
 
@@ -1407,7 +1432,8 @@ async fn play(
             Arc::new(move || {
                 let (http, sess, iid, msid) = (http.clone(), sess.clone(), iid.clone(), msid.clone());
                 Box::pin(async move {
-                    emby::resolve_stream(&http, &sess, &iid, Some(&msid))
+                    // 已经钉死 media_source_id 了,正则不参与(手动/既定选择永远优先)。
+                    emby::resolve_stream(&http, &sess, &iid, Some(&msid), "")
                         .await
                         .ok()
                         .map(|t| t.url)
@@ -1465,6 +1491,8 @@ async fn play(
         }
         p.set_pause(false);
     }
+    // 起播了才让视频窗露面(平时它藏着,见 show_video)。必须在上面那把播放器锁**之外**。
+    show_video(&state, true);
     *state.source_play_entry.lock().unwrap() = None; // Emby 播放,非源
     // 上报 start(失败不阻断播放)
     if let Err(e) = emby::report_start(&state.http, &s, &target, resume_secs).await {
@@ -1805,8 +1833,12 @@ async fn stop_playback(state: State<'_, AppState>, pos: f64) -> Result<(), Strin
         let guard = state.player.lock().unwrap();
         if let Some(p) = guard.as_ref() {
             p.set_pause(true);
+            // 弹幕轨随播放会话一起收:留着会一直占住次字幕位。
+            p.clear_danmaku_sub();
         }
     }
+    // 退出播放页 → 视频窗藏起来。不藏的话主窗一最小化,桌面上就露出一个黑窗。
+    show_video(&state, false);
     *state.source_play_entry.lock().unwrap() = None; // 退出播放,停止 302 看门狗
     *state.prefetch.lock().unwrap() = None; // 停预取代理(Drop 关服)
 
@@ -2657,12 +2689,42 @@ fn apply_prefs(state: State<'_, AppState>) -> Result<(Option<String>, Option<Str
     let tracks = p.tracks();
     let (aid, sid) = pick_tracks(
         &tracks,
-        prefs.audio_lang.as_deref(),
-        prefs.sub_lang.as_deref(),
-        prefs.sub_enabled,
+        TrackPrefs {
+            audio_lang: prefs.audio_lang.as_deref(),
+            sub_lang: prefs.sub_lang.as_deref(),
+            sub_enabled: prefs.sub_enabled,
+            audio_regex: &prefs.audio_regex,
+            sub_regex: &prefs.sub_regex,
+        },
     );
     p.apply_tracks(aid.clone(), sid.clone());
     Ok((aid, sid))
+}
+
+/// 设置页的正则合法性校验。**必须问 Rust**:前端的 JS RegExp 语法集和 Rust 的
+/// regex crate 不同(Rust 无前后瞻/反向引用),用 JS 校验会放过 Rust 编译不过的写法,
+/// 于是设置存下了却永不命中,还一声不吭。空串合法(= 关闭该项)。
+#[tauri::command]
+fn validate_track_regex(pattern: String) -> Result<(), String> {
+    linplayer_core::media::validate_track_regex(&pattern)
+}
+
+/// 保存三条筛选正则(版本/字幕/音频)。非法直接拒,不落盘。
+#[tauri::command]
+fn set_track_regexes(
+    state: State<'_, AppState>,
+    version_regex: String,
+    sub_regex: String,
+    audio_regex: String,
+) -> Result<(), String> {
+    for p in [&version_regex, &sub_regex, &audio_regex] {
+        linplayer_core::media::validate_track_regex(p)?;
+    }
+    let mut cfg = state.config.lock().unwrap();
+    // 同 set_prefs:只改这三项,别整体覆盖 Prefs。
+    cfg.prefs = Prefs { version_regex, sub_regex, audio_regex, ..cfg.prefs.clone() };
+    cfg.save();
+    Ok(())
 }
 
 #[tauri::command]
@@ -3086,6 +3148,71 @@ fn danmaku_load_local(path: String) -> Result<Vec<DanmakuComment>, String> {
     let text = String::from_utf8_lossy(&content);
     let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
     linplayer_core::danmaku::local::parse(name, &text)
+}
+
+/* ---------- 弹幕渲染:交给 mpv 的 libass ----------
+
+   老实现是前端 Canvas 每帧自己画,位置靠 250ms 轮询 + `performance.now()` 插值 ——
+   **那段插值里没有倍速**,2x 播放时弹幕按 1x 爬再每 250ms 被拽回去,每秒 4 次硬跳。
+   用户报的「正常速度也卡、倍速更卡」是这个,不是绘制开销。
+
+   换成 ASS 之后弹幕就是一条字幕轨:时间轴/倍速/seek/暂停全归 mpv,
+   前端一帧都不用算。副作用是 mpv 的截图/录制会带上弹幕(正好是想要的)。 */
+
+/// 生成弹幕 ASS 并挂给 mpv。
+///
+/// `comments` 传 `None` = 沿用上一次那份 —— 只改字号/透明度/区域/速度档位时
+/// 不必把几万条弹幕再过一遍 IPC(一次几 MB,连点档位会明显发顿)。
+#[tauri::command]
+fn danmaku_attach(
+    state: State<'_, AppState>,
+    comments: Option<Vec<DanmakuComment>>,
+    options: danmaku::ass::AssOptions,
+) -> Result<(), String> {
+    if let Some(c) = comments {
+        *state.danmaku_comments.lock().unwrap() = c;
+    }
+    let list = state.danmaku_comments.lock().unwrap().clone();
+    if list.is_empty() {
+        // 没弹幕就别挂一条空轨:secondary-sid 被占着,用户挂双语字幕会莫名其妙。
+        if let Some(p) = state.player.lock().unwrap().as_ref() {
+            p.clear_danmaku_sub();
+        }
+        return Ok(());
+    }
+    let text = danmaku::ass::to_ass(&list, &options);
+    let dir = linplayer_core::paths::cache_dir("danmaku-ass");
+    /* 每次换个文件名,并把旧的清掉。同名覆盖理论上也行,但 sub-add 同一路径时
+       libass/mpv 是否重读没有书面保证,而这个坑一旦踩中的表现是「档位调了没反应」——
+       和「设置没生效」长得一模一样,极难排查。换名字是一行的代价,买断这个不确定性。 */
+    let seq = state.danmaku_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    let path = dir.join(format!("dm-{seq}.ass"));
+    std::fs::write(&path, text).map_err(|e| format!("弹幕 ASS 写盘失败: {e}"))?;
+    let guard = state.player.lock().unwrap();
+    guard.as_ref().ok_or("播放器未就绪")?.set_danmaku_sub(&path.to_string_lossy());
+    Ok(())
+}
+
+/// 摘掉弹幕轨(关弹幕 / 退出播放页)。
+#[tauri::command]
+fn danmaku_detach(state: State<'_, AppState>) {
+    state.danmaku_comments.lock().unwrap().clear();
+    if let Some(p) = state.player.lock().unwrap().as_ref() {
+        p.clear_danmaku_sub();
+    }
+}
+
+/// 弹幕显隐。只切可见性,不卸载 —— 重新打开不用再生成整份 ASS。
+#[tauri::command]
+fn danmaku_visible(state: State<'_, AppState>, on: bool) {
+    if let Some(p) = state.player.lock().unwrap().as_ref() {
+        p.set_danmaku_visible(on);
+    }
 }
 
 // ---------- 文件浏览型源命令(网盘/追番)----------
@@ -4197,7 +4324,10 @@ async fn play_external(
         return Err(format!("外部播放器不存在: {exe}"));
     }
     let s = session_of(&state)?;
-    let target = emby::resolve_stream(&state.http, &s, &item_id, media_source_id.as_deref()).await?;
+    let version_regex = state.config.lock().unwrap().prefs.version_regex.clone();
+    let target =
+        emby::resolve_stream(&state.http, &s, &item_id, media_source_id.as_deref(), &version_regex)
+            .await?;
     // mpv 系通吃 --start=;不是 mpv 的播放器会忽略未知参数或直接报错,
     // 所以进度参数只在文件名像 mpv 时才给 —— 给错参数导致压根打不开,比不续播糟得多。
     let is_mpv = std::path::Path::new(&exe)
@@ -4241,6 +4371,7 @@ fn play_local(state: State<'_, AppState>, id: String, resume_secs: f64) -> Resul
         p.load_at(&path, resume_secs)?;
         p.set_pause(false);
     }
+    show_video(&state, true);
     *state.playback.lock().unwrap() = None; // 本地文件不走 Emby 上报
     *state.source_play_entry.lock().unwrap() = None; // 非源播放,停 302 看门狗
     *state.scrobble_ctx.lock().unwrap() = None;
@@ -4871,6 +5002,8 @@ pub fn run() {
             source: Mutex::new(source),
             watch_history: linplayer_core::watch_history::WatchHistory::default(),
             series_tmdb: Mutex::new(HashMap::new()),
+            danmaku_comments: Mutex::new(Vec::new()),
+            danmaku_seq: AtomicU32::new(0),
             wh_ctx: Mutex::new(None),
             source_play_entry: Mutex::new(None),
             resign_count: AtomicU32::new(0),
@@ -4930,7 +5063,20 @@ pub fn run() {
                 Err(e) => poclog(&format!("player init ERR: {e}")),
             }
             if let Some(parent) = parent {
-                sync_video(&window, parent, &app.state::<AppState>());
+                let st = app.state::<AppState>();
+                sync_video(&window, parent, &st);
+                /* 视频窗默认藏着 —— 没在播片就不该有一块黑垫在 UI 底下(而且主窗一
+                   最小化它就露在桌面上)。play/stop 负责开关,见 show_video。 */
+                show_video(&st, false);
+                /* ★ 把视频窗焊在主窗背面。原来只靠下面那三个 Tauri 事件重排 z 序,
+                   而 Alt-Tab、点任务栏、别的窗口插进来、WebView2 自己动**都不产生**
+                   那三个事件 —— 视频层于是「掉」到 UI 后面去了(用户 2026-07-26 报的)。
+                   WM_WINDOWPOSCHANGED 是位置/尺寸/z 序任一变化都发的那条,钉住它
+                   整类问题一次消掉,也不用起定时器轮询。 */
+                let video = st.player.lock().unwrap().as_ref().map(|p| p.video_hwnd);
+                if let Some(v) = video {
+                    mpv::pin_overlay_below(v, parent);
+                }
             }
 
             // 窗口移动/缩放/激活 -> 重新对齐视频窗口
@@ -5059,6 +5205,8 @@ pub fn run() {
             mpv_set,
             mpv_command,
             apply_prefs,
+            validate_track_regex,
+            set_track_regexes,
             get_prefs,
             set_prefs,
             get_update_settings,
@@ -5139,6 +5287,9 @@ pub fn run() {
             danmaku_cache_clear,
             danmaku_cache_size,
             danmaku_load_local,
+            danmaku_attach,
+            danmaku_detach,
+            danmaku_visible,
             danmaku_auto_load,
             cf_speed_test,
             cf_proxy_enable,
