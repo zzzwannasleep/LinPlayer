@@ -1,0 +1,1112 @@
+/* ============================================================
+   LinPlayer 手机端全站样式。
+
+   ## 规矩(与 ui/tv 一致)
+   - **页面不新写 CSS 文件**,全站样式都在这里。散着写必然长出两套间距。
+   - **强制深色,不 import @shared/tokens.css**:那份 token 带侧栏宽/标题栏高/
+     正文最大宽度等 PC 专属量,还有一整条浅色分支。手机端一屏全是封面图,
+     浅色主题没有意义,而两套配色要维护两遍。
+   - **只动 transform 和 opacity**。其余属性一律触发重排/重绘,
+     安卓 WebView 比桌面弱得多。
+   - **禁 backdrop-filter**(安卓 WebView 黑块 bug)、禁动画 box-shadow / filter /
+     width / height / top / left。
+   - 触摸目标 ≥48dp,主要操作排在屏幕下 1/3(拇指可达区)。
+   ============================================================ */
+
+:root {
+  /* —— 颜色 —— */
+  --bg: #0b0b0f;
+  --bg-1: #14141b;
+  --bg-2: #1c1c25;
+  --line: #2a2a36;
+  --fg: #f2f2f6;
+  --fg-2: #a8a8b8;
+  --fg-3: #6e6e80;
+  --acc: #5b8cff;
+  --acc-fg: #ffffff;
+  --ok: #37c26a;
+  --bad: #ff5f56;
+
+  /* —— 尺寸 —— */
+  /* 48dp 是 Material / WCAG AA 的触摸目标下限。所有可点元素以它为底。 */
+  --tap: 48px;
+  --topbar-h: 52px;
+  --tabbar-h: 56px;
+  --gap: 12px;
+  --pad: 16px;
+  --r: 10px;
+
+  /* —— 安全区 ——
+     刘海/挖孔/手势导航条。前提是 index-mobile.html 里写了 viewport-fit=cover,
+     没写的话这几个 env() 全部返回 0,而且**不报错** —— 表现是标题被刘海吃掉一半。
+     ★ 安卓 WebView 上 env() 的可靠性需要真机复核(README 已记)。不可靠时的解法是
+       宿主侧读 DisplayCutout,往 :root 注入同名变量覆盖这里 —— 所以下面所有地方
+       都只用 --sa-*,不直接写 env(),留出那个覆盖点。 */
+  --sa-top: env(safe-area-inset-top, 0px);
+  --sa-bottom: env(safe-area-inset-bottom, 0px);
+  --sa-left: env(safe-area-inset-left, 0px);
+  --sa-right: env(safe-area-inset-right, 0px);
+
+  /* —— 动效 ——
+     一套曲线,别各处各拍一个。 */
+  --e-out: cubic-bezier(0.2, 0, 0, 1); /* 页面转场 / 进场 */
+  --e-spring: cubic-bezier(0.32, 0.72, 0, 1); /* sheet 回弹 */
+}
+
+* {
+  -webkit-tap-highlight-color: transparent; /* 安卓默认那块蓝框和我们自己的按压反馈会打架 */
+  -webkit-touch-callout: none; /* 长按图片弹"保存图片"会顶掉我们的长按菜单 */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  overscroll-behavior-y: none; /* 关掉安卓的整页橡皮筋,我们自己做下拉刷新 */
+}
+
+/* ★ WebView 是透明的(要露出垫在底下的 mpv SurfaceView)。播放时给 html 挂 .playing,
+   把背景整个撤掉 —— 不撤的话视频被这一层不透明底盖死,表现是"有声音没画面"。
+   TV 端 tv.css 里是同一条,那边有 Rust 测试钉着。 */
+html.playing,
+html.playing body {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------
+   骨架
+   ------------------------------------------------------------ */
+
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* 左右安全区(横屏时刘海在侧边)。上下由 topbar / tabs 各自吃。 */
+  padding-left: var(--sa-left);
+  padding-right: var(--sa-right);
+  box-sizing: border-box;
+}
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  /* 底栏是 fixed,内容要给它让出高度,否则最后一条永远被压住 */
+  padding-bottom: calc(var(--tabbar-h) + var(--sa-bottom));
+}
+
+.app.full .page {
+  padding-bottom: 0;
+}
+
+.pad {
+  padding: var(--pad);
+}
+
+/* ------------------------------------------------------------
+   顶栏 / 底栏
+   ★ 两者都是 position:fixed。它们在 DOM 里是 .page 的**兄弟**,不是后代 ——
+     只要祖先带了 transform 或 will-change,fixed 就不再以视口为参照,
+     页面一做转场底栏就跟着滑走。PC 端右键菜单偏位、TV 端底栏跑到屏幕上方,
+     都是这一条。别把它们挪进页面容器里。
+   ------------------------------------------------------------ */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: calc(var(--topbar-h) + var(--sa-top));
+  padding: var(--sa-top) 4px 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.tb-back,
+.tb-r > button {
+  width: var(--tap);
+  height: var(--tap);
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  border-radius: var(--r);
+}
+
+.tb-gap {
+  width: 12px;
+}
+
+.tb-t {
+  flex: 1;
+  min-width: 0;
+}
+
+.tb-title {
+  font-size: 17px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-sub {
+  font-size: 12px;
+  color: var(--fg-2);
+}
+
+.tb-r {
+  display: flex;
+  align-items: center;
+}
+
+.tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  height: calc(var(--tabbar-h) + var(--sa-bottom));
+  padding-bottom: var(--sa-bottom);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+  border: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  /* 只有 opacity 和 transform 参与动画 —— 颜色变化用 color 是重绘但不重排,可接受 */
+  transition: color 140ms var(--e-out);
+}
+
+.tab.on {
+  color: var(--acc);
+}
+
+.tab:active {
+  transform: scale(0.94);
+}
+
+/* ------------------------------------------------------------
+   卡片
+   ------------------------------------------------------------ */
+
+.mcard-wrap {
+  width: 112px;
+  flex: none;
+}
+
+/* 横向缩略图(继续观看/剧集)比海报宽,不然一行只放得下一张半 */
+.row-scroll .mcard-wrap:has(.ar-thumb) {
+  width: 168px;
+}
+
+.mcard {
+  position: relative;
+  width: 100%;
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--bg-2);
+  /* 触摸屏没有 hover 态。不给按压反馈,用户不确定自己点没点上 —— 于是会再点一次。 */
+  transition: transform 180ms var(--e-out);
+}
+
+.mcard.down {
+  transform: scale(0.96);
+  transition-duration: 120ms;
+}
+
+.ar-poster {
+  aspect-ratio: 2 / 3;
+}
+
+.ar-thumb {
+  aspect-ratio: 16 / 9;
+}
+
+.mcard img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transition: opacity 160ms var(--e-out);
+}
+
+.mcard img.ready {
+  opacity: 1;
+}
+
+.mskel {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--bg-2) 25%, #262633 37%, var(--bg-2) 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -135% 0;
+  }
+}
+
+.mfallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--fg-3);
+}
+
+.m-badge-tl,
+.m-played,
+.m-count {
+  position: absolute;
+  top: 5px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  font-weight: 600;
+}
+
+.m-badge-tl {
+  left: 5px;
+  background: rgba(0, 0, 0, 0.68);
+  color: #ffd479;
+}
+
+.m-played,
+.m-count {
+  right: 5px;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+}
+
+.m-played {
+  background: var(--ok);
+}
+
+.m-count {
+  background: var(--acc);
+}
+
+.m-prog {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.m-prog i {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+}
+
+.mcap {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--fg-2);
+  line-height: 1.35;
+  /* 两行封顶。一行会把「剧名 · S1E5」截得认不出是哪部 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 首屏 12 张错开淡入。**滚动出来的不参与**(Card.tsx 里 index>=12 就不加 .enter)——
+   否则边滚边闪,看着像在掉帧。 */
+.mcard.enter {
+  animation: cardin 260ms var(--e-out) backwards;
+}
+
+@keyframes cardin {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ------------------------------------------------------------
+   轨道 / 网格
+   ------------------------------------------------------------ */
+
+.row {
+  margin-top: 18px;
+  /* ★ 屏幕外的轨道整条跳过渲染。
+     实测(用户真实服务器):首页 15 个媒体库 = **284 个 <img> 元素**在 DOM 里。
+     图片本身有 loading=lazy 兜着(实测同一时刻只有 102 张真的在下载),但布局和绘制
+     仍然要为这 284 个节点买单 —— 手机 CPU 上这就是滚动掉帧。
+     content-visibility 是零依赖的解法,先用它;真到量出掉帧那天再谈虚拟列表
+     (见 ui/mobile/README.md 的依赖表:先量再优化)。
+     ★ contain-intrinsic-size 必须给,否则未渲染的轨道高度算 0,滚动条长度会一路乱跳。
+       230px ≈ 标题 24 + 海报卡 168 + 标题两行 38。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 230px;
+}
+
+.row-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 var(--pad) 8px;
+}
+
+.row-hd h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sk-t {
+  width: 96px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  animation: shimmer 1.2s linear infinite;
+  background: linear-gradient(90deg, var(--bg-2) 25%, #262633 37%, var(--bg-2) 63%);
+  background-size: 400% 100%;
+}
+
+.row-more {
+  background: none;
+  border: 0;
+  color: var(--fg-2);
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.row-scroll {
+  display: flex;
+  gap: var(--gap);
+  padding: 0 var(--pad);
+  overflow-x: auto;
+  /* proximity 不是 mandatory:轻扫一下不会被硬拽到下一张,重扫才吸附。
+     mandatory 在手机上手感很粘,像在跟系统较劲。 */
+  scroll-snap-type: x proximity;
+  /* ★ 必须给 scroll-padding,否则 snap 会把 padding-left **吃掉**。
+     `scroll-snap-align: start` 对齐的是 snapport 起点(= 滚动端口边缘,不含 padding),
+     于是浏览器一上来就自动滚动 16px 把第一张卡贴到容器左边 —— 表现是
+     **第一张卡片被屏幕左缘切掉一块**,而 padding-left 在计算样式里明明是 16px。
+     实测:scrollLeft 恰好等于 padding-left。删 snap 也能"修好",但那是把手感一起扔了。 */
+  scroll-padding-left: var(--pad);
+  scroll-padding-right: var(--pad);
+  scrollbar-width: none;
+}
+
+.row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.row-scroll > * {
+  scroll-snap-align: start;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gap);
+  padding: 0 var(--pad);
+}
+
+/* 网格里的卡片不吃固定宽度,跟着列走 */
+.grid .mcard-wrap {
+  width: auto;
+}
+
+/* ------------------------------------------------------------
+   首页
+   ------------------------------------------------------------ */
+
+.hero {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+.hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  animation: fadein 320ms var(--e-out);
+}
+
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ★ 不用渐变遮罩。全屏渐变每帧都要重新合成,而且渐变边界在低分屏上是糊的。
+   裸文字压在亮场景上会看不清 → 给它**自带一块不透明底**,不是加回渐变。
+   这条口径是 TV 端评审时定的,手机 GPU 更弱,更该守。 */
+.hero-cap {
+  position: absolute;
+  left: var(--pad);
+  bottom: var(--pad);
+  right: var(--pad);
+  background: rgba(0, 0, 0, 0.66);
+  border-radius: var(--r);
+  padding: 8px 10px;
+}
+
+.hero-title {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.hero-sub {
+  font-size: 12px;
+  color: var(--fg-2);
+  margin-top: 2px;
+}
+
+.hero-dots {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 5px;
+}
+
+.hero-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.hero-dots i.on {
+  background: #fff;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  padding: 14px var(--pad) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  flex: none;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: transform 180ms var(--e-out);
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip.on {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-fg);
+}
+
+/* ------------------------------------------------------------
+   搜索
+   ------------------------------------------------------------ */
+
+.sf {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: var(--pad);
+  padding: 0 12px;
+  height: var(--tap);
+  border-radius: var(--r);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+}
+
+.sf input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  /* ★ 16px 是硬下限。小于 16px 时安卓/iOS 会在聚焦输入框时**自动放大整页**,
+     版式当场错位。这是移动端最经典的"我明明没写缩放"。 */
+  font-size: 16px;
+}
+
+.sf-x {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: var(--fg-3);
+}
+
+.sgrp {
+  margin-top: 8px;
+}
+
+.sgrp h2 {
+  margin: 0;
+  padding: 10px var(--pad) 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------
+   设置
+   ------------------------------------------------------------ */
+
+.settings {
+  padding: 8px 0 24px;
+}
+
+.sgroup {
+  margin-top: 18px;
+}
+
+.sgroup h2 {
+  margin: 0;
+  padding: 0 var(--pad) 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+
+.cells {
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+/* 整行可点。让用户去点右边那个 24px 的箭头是设计事故。 */
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 0 var(--pad);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+  font-size: 15px;
+  text-align: left;
+  transition: background-color 120ms var(--e-out);
+}
+
+.cell:last-child {
+  border-bottom: 0;
+}
+
+.cell:active {
+  background: var(--bg-2);
+}
+
+.cell-i {
+  color: var(--fg-2);
+  display: grid;
+  place-items: center;
+}
+
+.cell-l {
+  flex: 1;
+}
+
+.cell-s {
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+.ver {
+  text-align: center;
+  color: var(--fg-3);
+  font-size: 12px;
+  padding: 28px 0 12px;
+}
+
+/* ------------------------------------------------------------
+   登录闸口
+   ------------------------------------------------------------ */
+
+.login {
+  height: 100%;
+  overflow-y: auto;
+  padding: calc(var(--sa-top) + 28px) 0 calc(var(--sa-bottom) + 16px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.lg-top {
+  padding: 0 var(--pad) 4px;
+}
+
+.lg-brand {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--fg-2);
+}
+
+.lg-brand span {
+  color: var(--acc);
+}
+
+.lg-h1 {
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.lg-chips {
+  padding-top: 16px;
+}
+
+.lg-pane {
+  flex: 1;
+  padding: 18px var(--pad) 0;
+  animation: fadein 200ms var(--e-out);
+}
+
+/* 主按钮吸在底部安全区上方。键盘升起时表单会滚动,按钮跟着滚出屏幕的话
+   用户得先收键盘才能提交 —— 那是每次登录都要多做一次的动作。 */
+.lg-acts {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  padding: 12px var(--pad) calc(12px + var(--sa-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+.lg-acts .btn {
+  flex: 1;
+}
+
+/* ------------------------------------------------------------
+   表单原语
+   —— 这些类名由 ui/desktop/pages/sources/sourceForms.tsx 发出(三端共用那份表单)。
+      它只吐结构不带样式,版式由各端自己给。改类名要两端一起看。
+   ------------------------------------------------------------ */
+
+.field,
+.fld {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.field > span,
+.fld > span {
+  display: block;
+  font-size: 13px;
+  color: var(--fg-2);
+  margin-bottom: 6px;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--tap);
+  padding: 0 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg);
+  /* 16px 下限,理由同 .sf input */
+  font-size: 16px;
+  outline: 0;
+}
+
+textarea {
+  padding: 12px;
+  min-height: 96px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--acc);
+}
+
+.hint,
+.as-dim,
+.dim {
+  color: var(--fg-3);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.btn {
+  min-height: var(--tap);
+  padding: 0 18px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: transform 180ms var(--e-out);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+}
+
+.btn.primary {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-fg);
+}
+
+.btn.ghost {
+  background: none;
+}
+
+.btn.big {
+  min-height: 52px;
+}
+
+.seg {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.seg button {
+  flex: 1;
+  min-height: 40px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-size: 14px;
+}
+
+.seg button.on {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-fg);
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 添加服务器表单里的块 */
+.as-blocks,
+.as-block {
+  margin-bottom: 14px;
+}
+
+.as-block-hd {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-2);
+  margin-bottom: 8px;
+}
+
+.as-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.as-grid2,
+.as-grid3 {
+  display: grid;
+  gap: 10px;
+}
+
+/* ★ 手机上一律单列。PC 那边 as-grid3 是三列,照搬过来每个输入框只剩 100px 宽,
+   而输入框最小可用宽度是"能看见自己打的地址"。 */
+.as-grid2,
+.as-grid3 {
+  grid-template-columns: 1fr;
+}
+
+.as-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.as-warn {
+  color: #ffca6b;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.as-qr,
+.as-scan {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 0;
+}
+
+.as-qr img,
+.as-scan img {
+  width: 190px;
+  height: 190px;
+  border-radius: var(--r);
+  background: #fff;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.as-qr.placeholder {
+  min-height: 190px;
+  justify-content: center;
+  color: var(--fg-3);
+}
+
+.as-scan-side {
+  text-align: center;
+}
+
+.as-export {
+  margin-top: 12px;
+}
+
+/* ------------------------------------------------------------
+   对话框 / 提示
+   ------------------------------------------------------------ */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.55);
+  animation: fadein 160ms var(--e-out);
+}
+
+.dlg {
+  position: fixed;
+  z-index: 100;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 85%;
+  overflow-y: auto;
+  background: var(--bg-1);
+  /* 手机上对话框从底部升起(拇指够得着),不是屏幕正中弹出 */
+  border-radius: 16px 16px 0 0;
+  padding: 18px var(--pad) calc(18px + var(--sa-bottom));
+  animation: sheetin 300ms var(--e-spring);
+}
+
+@keyframes sheetin {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+.dhd {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.dbd {
+  color: var(--fg-2);
+  line-height: 1.6;
+}
+
+.dft {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.dft .btn {
+  flex: 1;
+}
+
+.bad {
+  background: rgba(255, 95, 86, 0.12);
+  border: 1px solid rgba(255, 95, 86, 0.35);
+  border-radius: var(--r);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bad b {
+  color: var(--bad);
+}
+
+/* toast 默认在中部偏下(三端统一口径)。
+   ★ fixed 定位 —— 同样不能被带 transform 的祖先包住。 */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 22%;
+  z-index: 200;
+  transform: translateX(-50%);
+  max-width: 80vw;
+  padding: 10px 16px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.86);
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+  animation: fadein 180ms var(--e-out);
+}
+
+.empty {
+  padding: 56px var(--pad);
+  text-align: center;
+}
+
+.empty b {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+/* ------------------------------------------------------------
+   错误边界
+   ------------------------------------------------------------ */
+
+.pb-crash {
+  padding: 40px var(--pad);
+}
+
+.pb-h {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--bad);
+}
+
+.pb-m {
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--fg-2);
+  word-break: break-all;
+  line-height: 1.55;
+}
+
+.pb-hint {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin-bottom: 16px;
+}
+
+/* ------------------------------------------------------------
+   横屏
+   ★ 断点用 orientation,**不用宽度断点**:折叠屏展开时宽度像平板,但仍是竖屏,
+     按宽度判会把竖着的折叠屏当成横屏来排,内容全挤在中间一条。
+   ------------------------------------------------------------ */
+
+@media (orientation: landscape) {
+  .grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .mcard-wrap {
+    width: 96px;
+  }
+
+  .row-scroll .mcard-wrap:has(.ar-thumb) {
+    width: 150px;
+  }
+
+  /* 横屏时 16:9 的 Hero 会吃掉整屏 —— 压扁,给下面的轨道留出空间 */
+  .hero {
+    aspect-ratio: 21 / 7;
+  }
+}
+
+/* ------------------------------------------------------------
+   降低动效偏好
+   ★ 系统开了"减少动画"就全关。不是可选的礼貌 —— 有前庭功能障碍的用户
+     会因为滑动转场产生真实的眩晕。
+   ------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

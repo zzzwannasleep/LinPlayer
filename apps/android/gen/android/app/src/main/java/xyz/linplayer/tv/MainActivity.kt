@@ -1,5 +1,8 @@
 package xyz.linplayer.tv
 
+import android.app.UiModeManager
+import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -14,15 +17,35 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 /**
- * TV 宿主 Activity。除了 Tauri 自带的那点事,这里还担三件**缺一不可**的活:
+ * 安卓宿主 Activity(**TV 和手机同一个**)。除了 Tauri 自带的那点事,
+ * 这里还担四件**缺一不可**的活:
  *
  *  1. 加载 libmpv.so —— 必须从 Java 侧 System.loadLibrary,不能只靠 Rust 那边 dlopen。
  *  2. 造渲染面 —— 一层 SurfaceView 垫在透明 WebView 底下,把 Surface 递给 mpv。
  *  3. 转发遥控器按键 —— 返回键/媒体键被 Activity 吃掉的话,WebView 根本收不到。
+ *  4. **告诉前端这是不是电视** —— 一个 APK 装两种设备,前端要据此加载
+ *     ui/tv 还是 ui/mobile(两套完整界面,不是响应式断点)。
  *
- * 三件事的理由分别写在下面各自的位置。
+ * 四件事的理由分别写在下面各自的位置。
+ *
+ * ★ 包名是 `xyz.linplayer.tv` 只是历史(TV 端先建的),**别改** ——
+ *   `applicationId` 早已是 `xyz.linplayer.app`,那才是用户和商店看见的东西。
+ *   理由见 app/build.gradle.kts 里 applicationId 上方那段。
  */
 class MainActivity : TauriActivity() {
+
+  /**
+   * 这台设备是不是电视。
+   *
+   * ★ 判据只用 `UiModeManager.currentModeType` —— 这是安卓官方给的、
+   *   厂商必须正确上报的那一个信号。**不要**改成猜屏幕尺寸/有没有触摸屏:
+   *   带触摸屏的一体机、投屏盒子、模拟器全都能把这类特征猜反,而猜反的
+   *   表现不是一个小 bug,是**用户拿到了另一端的整套界面**。
+   */
+  private val isTelevision: Boolean by lazy {
+    (getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager)?.currentModeType ==
+      Configuration.UI_MODE_TYPE_TELEVISION
+  }
 
   companion object {
     /**
@@ -64,16 +87,33 @@ class MainActivity : TauriActivity() {
     super.onCreate(savedInstanceState)
     /* 播放器全屏:把状态栏/导航栏藏起来,并让它们只在划出时短暂出现。
        TV 上本来多半没有这两条,但盒子形态千奇百怪 —— 藏掉是零成本的保险,
-       而留着就是「屏幕多大画面就该多大」之外多出来的那一截。 */
+       而留着就是「屏幕多大画面就该多大」之外多出来的那一截。
+
+       ★ **手机上不能这么干。** 这里原本是无条件隐藏,那是纯 TV 时代的写法:
+         手机用户在浏览首页/媒体库/设置时看不到时间、信号、电量,退出应用还得
+         先划一下才找得到导航条 —— 这是「把电视的做法搬到手机上」最典型的一种。
+         手机只在**播放页**才该全屏,那由前端在进入播放时另行请求(见 ui/mobile),
+         不是开机就藏。 */
     WindowCompat.getInsetsController(window, window.decorView).apply {
       systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-      hide(WindowInsetsCompat.Type.systemBars())
+      if (isTelevision) hide(WindowInsetsCompat.Type.systemBars())
     }
   }
 
   override fun onWebViewCreate(webView: WebView) {
     /* UI 层必须透明,否则它会把底下的视频整个盖住 —— 这就是「有声音没画面」。 */
     webView.setBackgroundColor(Color.TRANSPARENT)
+
+    /* ★ 给电视的 UA 打个标,index-android.html 那个 shim 据此决定加载哪套 UI。
+       必须在这里设:onWebViewCreate 跑在 Wry 建 WebView 的**中途**,此时还没导航,
+       改 UA 才来得及被首个请求带上。放到 post{} 里就晚了 —— 那时 shim 已经跑完,
+       表现是电视上永远进手机 UI,而且不报错。
+
+       只在电视上加标、手机上原样不动:让「没有标」成为默认路径,
+       这样桌面 Tauri 壳和浏览器(它们都没有标)开发调试时天然走手机 UI。 */
+    if (isTelevision) {
+      webView.settings.userAgentString = webView.settings.userAgentString + " LinPlayerTV"
+    }
 
     /* ★ post 而不是直接做:onWebViewCreate 触发时 WebView 还没 attach 到父容器,
        这时 webView.parent 是 null,加不进去(而且不会报错,只是静默什么都没发生)。 */

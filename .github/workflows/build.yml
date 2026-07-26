@@ -34,6 +34,8 @@ on:
       - 'package-lock.json'
       - 'index.html'
       - 'index-tv.html'
+      - 'index-mobile.html'
+      - 'index-android.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
       - '.github/workflows/build.yml'
@@ -52,6 +54,8 @@ on:
       - 'package-lock.json'
       - 'index.html'
       - 'index-tv.html'
+      - 'index-mobile.html'
+      - 'index-android.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
       - '.github/workflows/build.yml'
@@ -543,11 +547,17 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      # 前端必须先出 dist —— 安卓壳的 frontendDist 指向它,且 TV 走的是 index-tv.html。
+      # 前端必须先出 dist —— 安卓壳的 frontendDist 指向它。
+      # 安卓是**一个 APK 装两种设备**:壳打开 index-android.html(分流 shim),
+      # 它按 MainActivity 打在 UA 上的标转到 index-tv.html 或 index-mobile.html。
+      # ★ 三个都要验。vite 的 rollupOptions.input 漏列哪个,那个就**静默产不出来**,
+      #   而构建 exit 0 —— 装到设备上打开是一片空白,CI 却全绿。
       - name: Build frontend
         run: |
           npm run build
-          test -f dist/index-tv.html || { echo "::error::dist/index-tv.html 不存在,TV 入口没打进产物"; exit 1; }
+          for f in index-android.html index-tv.html index-mobile.html; do
+            test -f "dist/$f" || { echo "::error::dist/$f 不存在 —— 检查 vite.config.ts 的 rollupOptions.input 是否漏列"; exit 1; }
+          done
 
       # 签名密钥是可选的。
       # ★ 不能把 secrets 写进 step 的 if: —— 那个上下文里读不到 secrets,条件恒假,

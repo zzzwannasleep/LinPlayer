@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover 是安全区的前提:不写它,env(safe-area-inset-*) 全部返回 0,
+         而且**不报错** —— 表现是刘海/挖孔把顶栏标题吃掉一半。
+         user-scalable=no:双指缩放在一个全屏媒体应用里只会把版式搞乱,
+         而放大文字这件事交给系统字号(rem 会跟着走)。 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <!-- 强制深色。手机端不跟随系统主题(见 ui/mobile/README.md 的硬约束):
+         浅色主题在一个满屏封面图的应用里没有意义,而两套配色要维护两遍。 -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0b0f" />
+    <title>LinPlayer</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/ui/mobile/main.tsx"></script>
+  </body>
+</html>

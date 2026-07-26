@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LinPlayer</title>
+    <style>
+      /* 这一屏理论上只存在几毫秒,但**必须是黑的**:WebView 是透明的(要露出垫在
+         底下的 mpv SurfaceView),默认白底会在启动时闪一道白。 */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0b0b0f;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      /* ============================================================
+         安卓壳的分流 shim —— TV 和手机是同一个 APK,这里决定加载哪套 UI。
+
+         ## 为什么是一个 APK
+         AndroidManifest 里 leanback 和 touchscreen 都是 required="false",
+         applicationId 已经是 xyz.linplayer.app 且被 CI(build.yml:785)钉死
+         —— 换包名等于老用户收不到覆盖升级。出第二个 APK 要多一套签名、
+         多一条 CI、多一个用户装错的机会,而省下的只是几百 KB 的前端 bundle。
+
+         ## 判据只认宿主注入的 UA 标,不做特征猜测
+         MainActivity 在 onWebViewCreate 里读 UiModeManager.currentModeType,
+         是 UI_MODE_TYPE_TELEVISION 才往 UA 尾巴上加 " LinPlayerTV"。
+
+         ★ 不用 navigator.maxTouchPoints / 屏幕尺寸之类的"特征猜测":
+           带触摸屏的一体机、投屏盒子、模拟器全都能把它猜反,而猜反的表现是
+           **用户拿到的是另一端的整套界面**,不是一个小 bug。宁可少一个兜底,
+           也不要一个会静默出错的兜底。
+
+         ★ 没有标就走手机端:桌面 Tauri 壳和浏览器都没有这个标,而在 PC 上
+           开发调试的默认需求是手机 UI(TV UI 有 index-tv.html 可以直接开)。
+         ============================================================ */
+      var tv = / LinPlayerTV\b/.test(navigator.userAgent);
+      /* replace 而不是 assign:这一屏不该进历史栈,否则安卓返回键会退回到
+         这个空白 shim,再按一次才退出应用 —— 用户看到的是"按返回闪一下黑屏"。 */
+      location.replace(tv ? "index-tv.html" : "index-mobile.html");
+    </script>
+  </body>
+</html>

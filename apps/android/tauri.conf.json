@@ -14,8 +14,8 @@
     "windows": [
       {
         "label": "main",
-        "url": "index-tv.html",
-        "title": "LinPlayer TV",
+        "url": "index-android.html",
+        "title": "LinPlayer",
         "transparent": true
       }
     ],
