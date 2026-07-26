@@ -253,11 +253,46 @@ async fn play(
     Ok(resume_secs)
 }
 
-/* ponytail: 本地下载文件的起播先不接 —— 它还要先把下载索引这条链路在安卓上跑通。
-   保持明确报错而不是假装成功:假装成功的表现是黑屏等一个永远不来的 status。 */
+/// 播放已下载完成的本地文件。传的是**任务 id**,不是路径。
+///
+/// 2026-07-26 接上(此前是个直接返回错的桩)。下载功能在手机上价值最高 ——
+/// 离线通勤看片正是手机独有的场景,下得了却播不了等于下载页是个摆设。
+///
+/// 与桌面同名命令同构,少的两件事安卓本来就没有:
+///   - `apply_playback_defaults`(硬解档位/杜比开关是桌面设置项)
+///   - `show_video`(桌面要显隐那个独立的 mpv 顶层窗口;安卓是 SurfaceView,一直在)
 #[tauri::command]
-fn play_local(_id: String, _resume_secs: f64) -> Result<f64, String> {
-    Err("安卓端暂不支持播放本地下载文件".to_string())
+fn play_local(
+    state: State<'_, AppState>,
+    ps: State<'_, PlayerState>,
+    id: String,
+    resume_secs: f64,
+) -> Result<f64, String> {
+    let path = state.download.completed_path(&id).ok_or("该任务尚未下载完成")?;
+    /* 索引说完成了不代表文件还在 —— 用户可能自己删了/挪走了,或者外部存储被卸载。
+       不先确认的话 mpv 会拿着一个不存在的路径静默失败,表现是黑屏等一个永远不来的 status。 */
+    if !std::path::Path::new(&path).is_file() {
+        return Err(format!("文件已不存在:{path}"));
+    }
+    poclog(&format!("PLAY LOCAL id={id} path={path}"));
+    {
+        let guard = ensure_player(&ps)?;
+        let p = guard.as_ref().ok_or("播放器未就绪")?;
+        let _ = p.take_error_eof();
+        p.load_at(&path, resume_secs)?;
+        p.set_pause(false);
+    }
+    /* 本地文件不属于任何 Emby 条目 —— 三个上下文都要清干净,否则:
+         playback 不清 → 进度会被上报到**上一部**在线播放的条目上
+         scrobble_ctx 不清 → Trakt/Bangumi 记成看了那一部
+         wh_ctx 不清 → 本地观看记录也记到那一部头上
+       三个都是"不报错但记错账"的静默 bug。 */
+    *ps.playback.lock().unwrap() = None;
+    *state.source_play_entry.lock().unwrap() = None; // 非源播放,停 302 看门狗
+    *state.scrobble_ctx.lock().unwrap() = None;
+    *state.wh_ctx.lock().unwrap() = None;
+    state.resign_count.store(0, Ordering::Relaxed);
+    Ok(resume_secs)
 }
 
 /// 解析源文件为直链并用 mpv 播放(带逐流 headers)。返回起播秒数。
@@ -4827,6 +4862,47 @@ mod tests {
                 "「{k}」已经有人处理了,把它从 KNOWN_UNHANDLED 里删掉"
             );
         }
+    }
+
+    /// 手机前端 `ui/mobile` 会调的命令,一个都不能漏注册 —— 与 TV 那条同形态,
+    /// 但**清单分开两份**:合并了就分不清某条命令是谁要的,砍 TV 功能时会误伤手机端。
+    ///
+    /// 清单 `mobile-commands.txt` 是从 `ui/mobile/**` 对 `@shared/api` 的真实 import
+    /// 反推出来的(含 `ui/desktop/pages/sources/sourceForms` —— 手机端的登录/添加源
+    /// 复用的就是那一份表单)。加页面/加调用后重新生成一次。
+    ///
+    /// 反向验证:把 generate_handler! 里任意一条手机端要用的命令注释掉 → 本测试立刻红。
+    #[test]
+    fn every_mobile_invoke_names_a_registered_command() {
+        let me = include_str!("lib.rs");
+        let handlers = me
+            .split_once("generate_handler![")
+            .expect("找不到 generate_handler!")
+            .1
+            .split_once("])")
+            .expect("generate_handler! 没有收尾")
+            .0;
+        let registered: Vec<&str> = handlers
+            .lines()
+            .map(|l| l.trim().trim_end_matches(','))
+            .filter(|s| !s.is_empty() && !s.starts_with("//"))
+            .collect();
+
+        let api_ts = include_str!("../../../ui/shared/api.ts");
+        let cmds = include_str!("../mobile-commands.txt");
+        let mut n = 0;
+        for cmd in cmds.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            n += 1;
+            assert!(
+                registered.contains(&cmd),
+                "手机端命令清单里的 `{cmd}` 没在 generate_handler! 注册 ——                  用户走到那个页面就报 command not found(而且编译期一声不吭)"
+            );
+            assert!(
+                api_ts.contains(&format!("\"{cmd}\"")),
+                "`{cmd}` 在手机端清单里,但 ui/shared/api.ts 里找不到它 ——                  清单和前端漂移了,先查是不是命令改名了"
+            );
+        }
+        assert!(n > 60, "手机端清单只有 {n} 条,多半是文件读岔了");
     }
 
     /// TV 前端 `ui/tv` 会调的命令,一个都不能漏注册 —— 漏了**不会编译报错**,

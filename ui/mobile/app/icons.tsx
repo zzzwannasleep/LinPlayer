@@ -36,4 +36,9 @@ export {
   IconInfo,
   IconList,
   IconMenu,
+  IconRewind,
+  IconForward,
+  IconVolume,
+  IconFolder,
+  IconFile,
 } from "../../desktop/app/icons";

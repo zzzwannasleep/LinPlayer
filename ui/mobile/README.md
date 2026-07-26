@@ -19,10 +19,10 @@
 | | 数量 |
 |---|---|
 | `apps/desktop/src/lib.rs` 注册 | 249 |
-| `apps/android/src/lib.rs` 注册 | 82 |
-| 安卓缺 | **171** |
+| `apps/android/src/lib.rs` 注册 | **233**(2026-07-26 从 82 补上来的) |
+| 安卓不做 | 20(全是真·桌面专属,见下面的分诊表 X 行) |
 
-缺的那 171 条**绝大多数不是没实现**,是安卓壳没注册。`set_speed` 那一批在
+当初缺的那 171 条**绝大多数不是没实现**,是安卓壳没注册。`set_speed` 那一批在
 `apps/desktop/src/lib.rs:2004` 只是对 `crates/mpv` 的三行薄包装,而 `apps/android/Cargo.toml:31`
 已经链了 `crates/mpv` —— **搬过去就是复制薄包装,不是重写**。
 
@@ -181,11 +181,14 @@ PC 有 9 个入口,手机底栏**只留三个**。剩下的这样安置:
 | `app/PageBoundary.tsx` | 页面级错误边界 | ✅ |
 | `components/Card.tsx` `components/Row.tsx` | 海报卡(长按 = PC 的右键)/ 横滑轨道 | ✅ |
 | `theme/mobile.css` | 全站样式 + token。**页面不新写 CSS 文件** | ✅ |
-| `components/Sheet.tsx` | bottom sheet(三档位跟手) | 待建 |
-| `components/MiniPlayer.tsx` | 迷你播放器(手机独有,PC 没有) | 待建 |
-| `components/Gestures.ts` | 播放器手势识别 | 待建 |
-| `components/PullRefresh.tsx` | 下拉刷新 | 待建 |
-| `theme/player.css` | 播放器 OSD | 待建 |
+| `components/Sheet.tsx` | bottom sheet(三档位跟手,自己吃返回键) | ✅ |
+| `components/MiniPlayer.tsx` | 迷你播放器(手机独有,PC 没有) | ✅ |
+| `components/Gestures.ts` | 播放器手势识别(六个手势 + 方向锁) | ✅ |
+| `components/PullRefresh.tsx` | 下拉刷新 | ✅ |
+| `pages/*.tsx` | 15 个页面,逐个见「现状」表 | ✅ |
+
+**没有 `theme/player.css`** —— 播放器样式并进了 `theme/mobile.css`。
+本来规划里给它单开一个文件,落码时发现那会破坏「页面不新写 CSS 文件」这条规矩本身。
 
 **安全区没有单独的 ts 文件** —— `theme/mobile.css` 里的 `--sa-top/-bottom/-left/-right`
 就是那个接缝:现在它们的值来自 `env(safe-area-inset-*)`,全站只认这四个变量、不直接写 `env()`。
@@ -215,38 +218,83 @@ PC 有 9 个入口,手机底栏**只留三个**。剩下的这样安置:
 | **P1** | 收藏 / 下载 / 排行榜 / 追剧日历 / 服务器 / 网盘 + M1 命令 | 每页真机走一遍 |
 | **P2** | 插件 / Ani-RSS + M2 命令 | 同上 |
 
-`play_local`(`apps/android/src/lib.rs:172` 目前直接返回错)在 **P0-b 一起修** ——
-下载功能在手机上价值最高,下得了却播不了等于下载页是摆设。
+`play_local` 原本是个直接返回错的桩,已在这一轮接上 —— 下载功能在手机上价值最高
+(离线通勤看片是手机独有的场景),下得了却播不了等于下载页是个摆设。
 
 ---
 
 ## 现状(2026-07-26)
 
-**P0-a 骨架已落地并在真壳里验过。** 已完成:
+**P0 ~ P2 全部落地并在真壳里逐页验过。**
 
-- 入口 `index-mobile.html` + 分流 shim `index-android.html`,`vite.config.ts` 四入口全出产物(CI 已加断言)
-- `MainActivity` 判 `UiModeManager` 打 UA 标;顺带修掉「手机上无条件隐藏系统栏」(那是 TV 的做法)
-- 底栏三 Tab + 每 Tab 独立栈 + 返回键四级优先级
-- 首页(Hero / chip 行 / 继续观看 / 接下来看 / 每库一条轨道)、搜索(全服聚合)、设置、首启闸口
+| 页面 | 状态 |
+|---|---|
+| 首页(Hero / chip 行 / 继续观看 / 接下来看 / 每库一条轨道) | ✅ |
+| 搜索(全服聚合,300ms 防抖) | ✅ |
+| 设置(源分组 / 扩展 / 存储) | ✅ |
+| 媒体库(服务端排序+分面筛选,IntersectionObserver 触底翻页) | ✅ |
+| 详情(沉浸式 / 版本 sheet / 分季 sheet / 演职员 / 相似) | ✅ |
+| 播放(六手势 + OSD + 字幕/音轨/倍速 sheet) | ✅ |
+| 迷你播放器(手机独有) | ✅ |
+| 收藏 / 下载 / 排行榜 / 追剧日历 | ✅ |
+| 服务器 / 添加服务器 / 网盘 | ✅ |
+| 插件市场(三页签 + 权限弹窗) / Ani-RSS | ✅ |
 
-**验证方式**:跑桌面 Tauri 壳(`target/debug/app.exe`)+ `npm run dev`,
-用 WebView2 的 `--remote-debugging-port` 把页面导到 `index-mobile.html`,
-CDP `Emulation.setDeviceMetricsOverride` 设 390×844 手机指标,再截图。
-真 invoke、真 Emby 数据、真图片协议 —— 浏览器里 `window.__TAURI_INTERNALS__` 不存在,
-所有 invoke 都是 `TypeError`,**截图好看不代表接得通**。
+后端:`apps/android` 注册 **233/249**,余下 20 条是真·桌面专属(见上面的分诊表)。
+守卫测试 `every_mobile_invoke_names_a_registered_command` 拿 `mobile-commands.txt`(81 条,
+从 `ui/mobile/**` 的真实 import 反推)比对注册表和 `api.ts`。
+
+### 六个手势(用 CDP 派发**真实触摸事件**实测过,不是调 handler)
+
+| 手势 | 实测 |
+|---|---|
+| 右半屏竖滑 | 音量 100 → 46.6,HUD「音量 55%」 |
+| 左半屏竖滑 | 亮度蒙版 opacity 0.503,HUD「亮度 57%」 |
+| 横滑 | 210px → **+64.0 秒**(理论 64.6,误差 <1%) |
+| 双击 | +10.5 秒 |
+| 长按 | speed=2,松手回 1 |
+| 单击 | OSD true → false |
+
+## 怎么自检(照这个来,别只看编译绿)
+
+```bash
+npm run dev                                     # vite on 1420
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9223"   ./target/debug/app.exe                        # 桌面壳,带 CDP
+# 再用 CDP: Page.navigate 到 index-mobile.html
+#           Emulation.setDeviceMetricsOverride 390x844 mobile:true
+```
+
+真 invoke、真 Emby 数据、真图片协议、真 mpv。**浏览器里 `window.__TAURI_INTERNALS__`
+不存在,所有 invoke 都是 `TypeError` —— 截图好看不代表接得通。**
 
 > ⚠️ `--window-size` 给的是窗口不是布局视口:headless 下 `--window-size=390` 时
 > `innerWidth` 实测是 504,按 390 截出来的图看着像"布局溢出",差点据此改错代码。
-> 量手机版式必须走 `Emulation.setDeviceMetricsOverride`。
+> 判有没有横向溢出要看 `document.documentElement.scrollWidth === innerWidth`,别看截图边缘。
 
-**这一轮真机自检抓到的两个 bug**(都是编译绿、肉眼不一定看得出的):
+> ⚠️ 查手势的 HUD 必须在**抬手之前** —— `onEnd` 会清掉它。第一版测试在 touchEnd
+> 之后查,得出"竖滑手势没生效"的错误结论,差点去改一段本来是对的代码。
 
-1. `scroll-snap-align: start` 把轨道的 `padding-left` **吃掉了** —— snap 对齐的是滚动端口
-   边缘(不含 padding),浏览器一上来自动滚 16px,第一张卡被屏幕左缘切掉。
-   实测 `scrollLeft` 恰好等于 `padding-left`。修法是 `scroll-padding-left`,不是删 snap。
-2. 首页 15 个媒体库 = **284 个 `<img>` 在 DOM 里**(图片本身有 lazy 兜着,同一时刻只 102 张在下)。
-   已给 `.row` 上 `content-visibility: auto` + `contain-intrinsic-size`,零依赖。
+## 真机走查抓到的 bug(全是编译绿、CI 绿、PageBoundary 也没触发)
 
-**下一步**:P0-b —— 媒体库 / 详情 / 播放页 + 六个手势 + MiniPlayer + M0 命令 + `play_local`。
-底栏 chip 行点进去的五个页面目前是**显式的「还没落地」占位**(不做假 UI,假 UI 在评审时
-会被当成已经做好了)。
+1. **`scroll-snap-align: start` 吃掉横滑容器的 `padding-left`** —— snap 对齐的是滚动端口
+   边缘(不含 padding),浏览器一上来自动滚,实测 `scrollLeft` 恰好等于 `padding-left`,
+   第一张卡被屏幕左缘切掉。修法是 `scroll-padding-left`,**不是删 snap**(那是把手感一起扔)。
+2. **首页 15 个媒体库 = 284 个 `<img>` 在 DOM 里**(lazy 只挡住下载,同一时刻 102 张在下,
+   布局绘制仍要为 284 个节点买单)。解:`.row` 上 `content-visibility:auto` + `contain-intrinsic-size`。
+3. **详情页「版本」二字被压成竖排两行** —— 版本名可以很长,flex 没给标签 `flex:none`
+   就去挤它。计算样式里一切正常,只有画出来才看得见。
+4. **排行榜整屏空白且一个字都没有** —— 本地构建没带弹弹play 编译期凭据,
+   `ranking_categories` 返回 0 条,而代码落到了一个 `{busy ? "加载中…" : ""}` 分支。
+   CDP 里 `crash=null`、不报错,只有把截图看一眼才发现是白板。**空态必须说人话。**
+5. **`d.setHours(0,0,0,0)` 原地改掉了 `useMemo` 缓存的 week 数组** —— 日历翻周会越翻越偏。
+6. **日历的 `dayCmp` 不能用 `i - todayIdx`** —— 翻到上一周时 `todayIdx` 是 -1,
+   那个式子恒为正,整周都被判成"还没播"。只在非当前周才错,当周截图上完全看不出来。
+
+## 后面还能做的(明确没做,不是忘了)
+
+- **亮度是 Web 层模拟的**(一层黑蒙版,只能变暗)。真调系统亮度要走宿主
+  `Window.attributes.screenBrightness`,那是宿主侧的活。这里**不假装**已经做了。
+- **后台播放 / 锁屏控制**:没有 MediaSession,离开 App 播放会停。
+- **Ani-RSS 只做订阅列表,不做设置表单** —— 那是几十个字段的服务端 Config 镜像,
+  手机上逐个填是灾难。**这是取舍,不是没做完。**
+- `env(safe-area-inset-*)` 在安卓 WebView 上**还没在真机验过**。
