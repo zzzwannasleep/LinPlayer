@@ -6,7 +6,12 @@
 | 目录 | 状态 | 说明 |
 |------|------|------|
 | `desktop/` | 在用 | Tauri 2 壳，Windows / Linux。前端取 `ui/desktop`，产物 `target/release/app.exe` |
-| `android/` | 在用 | Android TV 壳（Tauri 2 mobile）。前端取 `dist/index-tv.html`，出 APK 见 `android/README.md`。**播放器还是桩**——仓库里没有安卓 libmpv `.so`；接的时候直接链现成的，不自建 JNI 封装 |
+| `android/` | 在用 | Android 壳（Tauri 2 mobile），**一个 APK 同时装 TV 和手机**。壳打开 `dist/index-android.html`（分流 shim），它按 `MainActivity` 打在 UA 上的标转到 `index-tv.html` 或 `index-mobile.html`。出 APK 见 `android/README.md` |
+
+> ⚠️ 「播放器还是桩」这句话曾经挂在上面那一格里，**是过时的**：`android/Cargo.toml` 链的就是
+> `crates/mpv`（和桌面同一份），真 libmpv + SurfaceView，`MainActivity` 里 `System.loadLibrary("mpv")`
+> 那段注释写得很清楚。真正还是桩的只有 `play_local`（播放已下载到本地的文件，`src/lib.rs:172`）。
+> 2026-07-26 核实。
 
 ## desktop 的几个约定
 

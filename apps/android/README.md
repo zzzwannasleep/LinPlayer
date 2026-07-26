@@ -1,7 +1,18 @@
-# apps/android —— Android TV 宿主壳
+# apps/android —— Android 宿主壳(TV + 手机,同一个 APK)
 
-Tauri 2 mobile 壳,产物是能装在 Android TV 上的 APK。前端取 `dist/index-tv.html`
-(vite 多入口,见根 `vite.config.ts`),不是桌面那套 `index.html`。
+Tauri 2 mobile 壳。**一个 APK 同时装电视和手机** —— manifest 里 `leanback` 和
+`touchscreen` 都是 `required="false"`,`LAUNCHER` 和 `LEANBACK_LAUNCHER` 两个 category 都有。
+
+壳打开的是 `dist/index-android.html`(几行的**分流 shim**),不是桌面那套 `index.html`:
+`MainActivity` 判 `UiModeManager.currentModeType`,是电视就给 WebView 的 UA 加一个
+` LinPlayerTV` 标,shim 据此 `location.replace()` 到 `index-tv.html` 或 `index-mobile.html`。
+
+★ **不出第二个 APK。** `applicationId` 是 `xyz.linplayer.app` 且被 `build.yml` 硬校验 ——
+换包名等于老用户收不到覆盖升级。两个包名还要多一套签名、多一条 CI、多一个装错的机会,
+而省下的只是几百 KB 的前端 bundle(APK 体积的大头是 libmpv)。
+
+★ UA 标必须在 `onWebViewCreate` 里打,不能放进那个 `post{}` —— 那时 shim 已经跑完了,
+表现是电视上永远进手机 UI,而且不报错。
 
 ## 怎么出包
 
