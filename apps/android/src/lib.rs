@@ -19,6 +19,19 @@
 //! libmpv.so 确实进了 APK。首次真机跑挂了先看 `adb logcat -s mpv`。
 
 mod imgcache;
+mod shaders;
+/* 插件系统的三个宿主模块 —— 与 apps/desktop 是**同一份文件**(2026-07-26 从那边复制)。
+   引擎(QuickJS)本身在 crates/core::plugins,这三个只是把平台能力落到壳上:
+     pluginassets —— `lpplugin://` 协议,插件目录里的图标/逃生舱页面
+     pluginmarket —— 插件市场源(命令实现体在这里,不在 lib.rs)
+     plugins_host —— PluginHost trait 的壳侧实现(player/ui/emby 通道)
+   ★ 它们只依赖 linplayer_core / tauri / tokio / async-trait,不碰 Win32/X11 —— 所以能跨编译。
+   ★ 命令必须用**裸名字**注册进 generate_handler!(写成 `pluginmarket::xxx` 虽然编译得过,
+     但 Tauri 生成的命令名会带上模块前缀,前端 invoke 不到)——所以这里 `use pluginmarket::*`。 */
+mod pluginassets;
+mod pluginmarket;
+use pluginmarket::*;
+mod plugins_host;
 
 use linplayer_core::config::{Account, AppConfig, Prefs};
 use linplayer_core::emby::{self, Item, LoginResult, Session};
@@ -38,8 +51,17 @@ use linplayer_core::source::{
     MediaSourceBackend, QrPoll, QrStart, SourceEntry, SourceKind, SourceServer,
 };
 use linplayer_core::sync::{bangumi, trakt};
+use linplayer_core::danmaku::{self, DanmakuAuthType, DanmakuComment, DanmakuSourceConfig};
+use linplayer_core::config::DanmakuServer;
+use linplayer_core::media::{pick_tracks, TrackPrefs};
+use linplayer_core::net::cf;
+use linplayer_core::plugins::PluginManager;
+use linplayer_core::source::quark_tv;
+use linplayer_core::watch_history as wh;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::oneshot;
 use tauri::{Emitter, Manager, State};
 
 struct AppState {
@@ -61,6 +83,39 @@ struct AppState {
     companion: Mutex<Option<linplayer_core::companion::Companion>>,
     // 当前在放什么(标题, 副标题)。mpv 的 Status 里没有片名,而手机控制台要显示。
     now_playing: Mutex<Option<(String, Option<String>)>>,
+
+    /* ---- 2026-07-26 手机端接入时补齐(与 apps/desktop 的 AppState 同名同义) ----
+       ★ 这些字段和桌面壳是**逐字对应**的。两边漂移不会编译报错,只会让某个命令
+         在手机上行为和 PC 不一样 —— 加字段时两边一起加。 */
+    /// Ani-RSS 管理接口(listAni/config/…)不在 MediaSourceBackend trait 上,trait object 取不到,
+    /// 故另存具体类型。**与 source_backends[Anirss] 是同一个 Arc**,共享同一份 token_cache。
+    anirss: Arc<AniRssBackend>,
+    /// 当前正在播放的源条目(entry_id, entry_name),供 302 重签重解析;None=非源播放
+    source_play_entry: Mutex<Option<(String, String)>>,
+    /// 连续 302 重签次数(防死循环),每次新播放清零
+    resign_count: AtomicU32,
+    /// CF 优选:server_id -> 本地钉 IP 反代句柄
+    cf_proxy: Mutex<HashMap<String, linplayer_core::net::cf::CfProxyHandle>>,
+    /// 本地观看记录(跨服务器续播)。长驻,自持存盘。
+    watch_history: linplayer_core::watch_history::WatchHistory,
+    /// 剧 -> TMDB id 缓存(跨服匹配剧集要它;每部剧只查一次)
+    series_tmdb: Mutex<HashMap<String, Option<String>>>,
+    /// 当前这集的弹幕(已过滤/已合并的最终版)。留一份在核层是为了改样式档位时
+    /// 不必让前端把几万条再过一遍 IPC —— 见 danmaku_attach。
+    danmaku_comments: Mutex<Vec<DanmakuComment>>,
+    /// 弹幕 ASS 的文件名序号(每次重新生成换个名字)
+    danmaku_seq: AtomicU32,
+    /// 自动挂弹幕的连号锚点:seriesId|seasonId -> (集号, 弹弹Play episodeId)
+    danmaku_anchors: Mutex<HashMap<String, (i64, i64)>>,
+    /// 观看记录续播:本次会话已经问过的条目(问过一次就别再弹)
+    wh_done: Mutex<std::collections::HashSet<String>>,
+    /// 待确认的跨服续播候选
+    wh_ctx: Mutex<Option<(String, linplayer_core::watch_history::Candidate, Option<String>)>>,
+    /// 插件管理器。OnceLock:setup 里建好后再塞进来。
+    plugins: OnceLock<Arc<PluginManager>>,
+    /// 插件 ui 通道:等前端 plugin_ui_respond 回填的 oneshot
+    ui_pending: Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>,
+    ui_seq: AtomicU64,
 }
 
 fn session_of(state: &State<'_, AppState>) -> Result<Session, String> {
@@ -115,6 +170,38 @@ async fn play(
     media_source_id: Option<String>,
 ) -> Result<f64, String> {
     let s = session_of(&state)?;
+
+    /* 跨服务器续播的上下文。**不接这一段的话,watch_history_* 那几条命令注册了也是死的** ——
+       没有人往 wh_ctx 里写,列表永远空、续播永远只认本服进度,而且不报错。
+       (2026-07-26 手机端接入时补:桌面早就有,安卓这半边一直缺。)
+       ★ 与桌面同构:ctx 和取流地址并发打,两者互不依赖。能 join 的前提是这两条路上
+         **没有跨 await 持有的 std Mutex** —— build_wh_ctx→series_tmdb_cached 的锁在 await
+         之前就出了作用域。往这两条路上加锁时务必重新确认,否则 join! 把两个 future 放同一
+         线程轮询,一方持锁 await、另一方去抢同一把锁 = 自我死锁,症状是起播直接吊死不报错。 */
+    let ctx = build_wh_ctx(&state, &s, &item_id).await;
+    let resume_secs = match &ctx {
+        Some((scope, cand, series_tmdb)) => {
+            let cross = state.config.lock().unwrap().prefs.cross_server_resume;
+            state
+                .watch_history
+                .resolve_resume_position_ticks(
+                    scope,
+                    cand,
+                    series_tmdb.as_deref(),
+                    Some((resume_secs * wh::TICKS_PER_SEC as f64) as i64),
+                    cand.played,
+                    cross,
+                )
+                .map(|t| t as f64 / wh::TICKS_PER_SEC as f64)
+                .unwrap_or(resume_secs)
+        }
+        // 取不到匹配判据(网络抖/权限)不该拦住播放,按前端给的进度走。
+        None => resume_secs,
+    };
+    *state.wh_ctx.lock().unwrap() = ctx;
+    /* 回传去重集按「一次播放」计生命周期:不清的话,看完第二集时第一集的去重键还在,
+       同一台服务器会被判成"已回传过"而跳过 —— 静默漏传。 */
+    state.wh_done.lock().unwrap().clear();
     // 版本筛选正则(wiki regex-filters)与桌面同源,先取出再 await(别跨 await 攥 std Mutex)。
     let version_regex = state.config.lock().unwrap().prefs.version_regex.clone();
     let target =
@@ -311,6 +398,8 @@ async fn stop_playback(
     ps: State<'_, PlayerState>,
     pos: f64,
 ) -> Result<(), String> {
+    // 停止时必须落地,不受节流 —— 漏了它就是"看完退出,进度没记住"。
+    capture_history(&state, pos, true);
     // 先上报再拆播放器:反过来的话 pos 已经取不到了。
     let target = ps.playback.lock().unwrap().take();
     if let Some(t) = target {
@@ -507,6 +596,8 @@ async fn report_progress(
     pos: f64,
     paused: bool,
 ) -> Result<(), String> {
+    // 本地观看记录(跨服续播的数据来源)。force=false → 走内部节流,不会每几秒写一次盘。
+    capture_history(&state, pos, false);
     let target = ps.playback.lock().unwrap().clone();
     let Some(t) = target else { return Ok(()) }; // 无会话(网盘源)跳过
     let s = session_of(&state)?;
@@ -2022,9 +2113,2173 @@ fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()
    入口
    ============================================================ */
 
+/* 与桌面同名的辅助项(同样是 2026-07-26 从 apps/desktop 搬来的,理由见下一段注释)。 */
+type Json = serde_json::Value;
+
+/// 取某剧的 TMDB id,按 seriesId 缓存(含「查过但没有」的负缓存,别对没刮削的剧反复打服务器)。
+/// 对齐 Dart 的 _seriesTmdbCache。
+async fn series_tmdb_cached(state: &State<'_, AppState>, s: &Session, series_id: &str) -> Option<String> {
+    if let Some(hit) = state.series_tmdb.lock().unwrap().get(series_id) {
+        return hit.clone();
+    }
+    let got = emby::series_tmdb_id(&state.http, s, series_id).await;
+    state.series_tmdb.lock().unwrap().insert(series_id.to_string(), got.clone());
+    got
+}
+
+/// 装配播放条目的观看记录上下文:取带匹配判据的 Item -> Candidate(+剧的 TMDB id)。
+/// 失败不该阻断播放 —— 观看记录是增值功能,不是播放的前置。
+async fn build_wh_ctx(
+    state: &State<'_, AppState>,
+    s: &Session,
+    item_id: &str,
+) -> Option<(String, wh::Candidate, Option<String>)> {
+    let item = emby::item_for_history(&state.http, s, item_id).await.ok()?;
+    let cand = wh::Candidate::from(&item);
+    let series_tmdb = match cand.series_id.as_deref() {
+        Some(sid) => series_tmdb_cached(state, s, sid).await,
+        None => None,
+    };
+    Some((scope_of(s), cand, series_tmdb))
+}
+
+/// 把当前进度记进本地观看记录。force=true 用于停止播放(必须落地,不受节流)。
+fn capture_history(state: &State<'_, AppState>, pos: f64, force: bool) {
+    let ctx = state.wh_ctx.lock().unwrap().clone();
+    let Some((scope, cand, series_tmdb)) = ctx else { return };
+    state.watch_history.capture_playback(
+        &scope,
+        &cand,
+        series_tmdb.as_deref(),
+        (pos * wh::TICKS_PER_SEC as f64) as i64,
+        wh::WriteSource::InternalPlayer,
+        90, // 看过阈值:与 Emby 默认一致
+        false,
+        force,
+    );
+}
+
+// ---------- 弹幕 ----------
+fn danmaku_cfg(s: &DanmakuServer) -> DanmakuSourceConfig {
+    /* 鉴权**不再让用户选**,由地址推导(见 danmaku::derive_auth 上的查证依据)。
+       ★ 但老配置里显式存过 auth_type 的源要继续按老的走 —— 用户可能配着 headerToken
+         的自建端,推导不出来;为了「简化 UI」把人家配好的源弄失效,那是砸招牌。
+       所以:auth_type 为空 = 新源,走推导;非空 = 老源,尊重原值。 */
+    /* "" 和 "none" 都当「没选过」→ 走推导。
+       ★ 不能只认空串:老 UI 新建源时写死的就是 "none",全端存量源多半都是它。
+         只认空串的话推导对绝大多数源永远不生效(而且不报错)。
+         "none" 本身也不携带信息,推导出来只会更准(比如把 ?token= 拆对)。 */
+    let auto = matches!(s.auth_type.trim(), "" | "none");
+    let (api_url, auth_type, token) = if auto {
+        let (u, a, t) = linplayer_core::danmaku::derive_auth(&s.api_url);
+        (u, a, t)
+    } else {
+        let a = match s.auth_type.as_str() {
+            "pathToken" => DanmakuAuthType::PathToken,
+            "headerToken" => DanmakuAuthType::HeaderToken,
+            "queryToken" => DanmakuAuthType::QueryToken,
+            _ => DanmakuAuthType::None,
+        };
+        (s.api_url.clone(), a, (!s.token.is_empty()).then(|| s.token.clone()))
+    };
+    // id/name 必须逐源取,不能写死 —— 多源下写死会让所有源撞成同一身份,分组结果串台。
+    DanmakuSourceConfig {
+        id: if s.id.trim().is_empty() { s.api_url.clone() } else { s.id.clone() },
+        name: if s.name.trim().is_empty() { "自建源".into() } else { s.name.clone() },
+        api_url,
+        official: false,
+        auth_type: Some(auth_type),
+        token,
+        app_id: None,
+        app_secret: None,
+    }
+}
+
+fn official_danmaku_cfg() -> Option<DanmakuSourceConfig> {
+    let (app_id, app_secret) = linplayer_core::secrets::dandan_creds()?;
+    Some(DanmakuSourceConfig {
+        id: DANDAN_OFFICIAL_SOURCE_ID.into(),
+        name: "弹弹Play".into(),
+        api_url: String::new(), // official=true 走固定 OFFICIAL_BASE
+        official: true,
+        auth_type: Some(DanmakuAuthType::None),
+        token: None,
+        app_id: Some(app_id),
+        app_secret: Some(app_secret),
+    })
+}
+
+/// 诊断日志。旧版直接往 %TEMP% 根丢 linplayer_poc.log —— 现在收进自己的 logs/。
+fn app_log_path() -> std::path::PathBuf {
+    linplayer_core::paths::logs_dir().join("app.log")
+}
+
+fn account_info(a: &linplayer_core::Account, active: bool) -> AccountInfo {
+    account_info_with(a, active, AccountStatus::Unknown)
+}
+
+fn scope_of(s: &Session) -> String {
+    wh::scope_key(&s.server, &s.user_id)
+}
+
+/// 播放器可调项快照(前端 OSD 一次拉齐,不用逐个 get)。
+#[derive(serde::Serialize)]
+struct PlayerOpts {
+    speed: f64,
+    volume: f64,
+    muted: bool,
+    audio_delay: f64,
+    sub_delay: f64,
+    hwdec: String,
+    shader_count: usize,
+    /// 当前在播的这一版是不是杜比视界。
+    ///
+    /// 给前端的用途:播放页「更多」里那行「杜比视界软解」开关**必须照实反映现状**。
+    /// 核层现在会按设置自动给 DV 切软解 —— 前端要是还把这行初始化成写死的 false,
+    /// 用户看到的就是「明明已经在软解,开关却显示关着」,典型的 UI 撒谎。
+    dolby_vision: bool,
+}
+
+/// 应用超分档位的结果。
+/// ★ 为什么不只回一个数:`count>0` 只能证明 mpv **收下了**路径,**证明不了 shader 会跑**。
+///   Anime4K 每个 pass 都带 `//!WHEN 输出>源*1.2`,窗口没比源大就整条链空转 —— 画面一点没变,
+///   而旧版 UI 照样报「超分已生效 · 挂载 6 个 shader」。那就是在撒谎,正是本项目最贵的那类 bug。
+#[derive(serde::Serialize)]
+struct ShaderApplied {
+    /// mpv 收下的 shader 数(0 而档位非 off = 连挂都没挂上)。
+    count: usize,
+    /// 当前尺寸下这条链会不会真的跑。None = 没在播,尺寸未知,不下结论。
+    will_run: Option<bool>,
+    /// will_run=false 时的人话解释(带真实数字),UI 直接显示。
+    note: Option<String>,
+}
+
+/// 组装参与本次请求的弹幕源:启用的自建源(按 priority)+ 官方弹弹Play(有编译期凭据才有)。
+/// 对齐 Dart 的 `sourcesFor(allowOfficial:)` —— 启用/排序/官方过滤都在宿主这层决定。
+fn danmaku_sources(state: &State<'_, AppState>, allow_official: bool) -> Vec<DanmakuSourceConfig> {
+    let mut out: Vec<DanmakuSourceConfig> = state
+        .config
+        .lock()
+        .unwrap()
+        .enabled_danmaku_sources()
+        .iter()
+        .filter(|s| !s.api_url.trim().is_empty())
+        .map(danmaku_cfg)
+        .collect();
+    if allow_official {
+        out.extend(official_danmaku_cfg());
+    }
+    out
+}
+
+/// 内置的弹弹Play 默认源在设置页的展示信息。
+///
+/// 它**不在** `danmaku_sources` 里(凭据是编译期注入的,不落配置文件),所以设置页
+/// 原来根本看不见它 —— 用户会以为「一个弹幕源都没有」,而实际上默认源一直在工作。
+/// 这里单独透出来给 UI 显示,只读:名字固定、地址是官方的、凭据不给前端。
+#[derive(serde::Serialize)]
+struct OfficialDanmaku {
+    name: String,
+    /// 编译期没注入凭据的构建里它就是不可用的,得如实说,别显示成「已启用」。
+    available: bool,
+}
+
+/// 活跃会话的基址跟随当前生效线路(含 CF 改写)重新对齐。
+/// 开关反代后必须调:否则改写只对**之后**新建的会话生效,当前这条还打老地址 ——
+/// 表现为"开了优选没反应,重启才生效"。
+fn refresh_session_base(state: &AppState, server_id: &str) {
+    let cfg = state.config.lock().unwrap();
+    let is_active = cfg.active_account().map(|a| a.server == server_id).unwrap_or(false);
+    if !is_active {
+        return;
+    }
+    if let Some(url) = cfg.find(server_id).map(|a| a.active_line_url()) {
+        if let Some(s) = state.session.lock().unwrap().as_mut() {
+            s.server = url;
+        }
+    }
+}
+
+pub(crate) fn plugins_mgr(state: &AppState) -> Result<Arc<PluginManager>, String> {
+    state.plugins.get().cloned().ok_or_else(|| "插件系统未就绪".to_string())
+}
+
+fn sync_plugin_source_grants(state: &AppState) {
+    let Some(mgr) = state.plugins.get() else { return };
+    let mut per_plugin: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let cfg = state.config.lock().unwrap();
+        for a in &cfg.accounts {
+            if let Some((plugin_id, _)) = a.source_kind.as_plugin() {
+                if let Some(src) = a.source.as_ref() {
+                    per_plugin
+                        .entry(plugin_id.to_string())
+                        .or_default()
+                        .push(src.base_url.clone());
+                }
+            }
+        }
+    }
+    // 已启用但一个源都没配的插件也要显式清空,否则上一轮的授权会留着。
+    for (plugin_id, _, _) in mgr.data_sources() {
+        per_plugin.entry(plugin_id).or_default();
+    }
+    for (plugin_id, urls) in per_plugin {
+        mgr.set_source_grants(&plugin_id, &urls);
+    }
+}
+
+fn poclog(msg: &str) {
+    use std::io::Write;
+    let path = app_log_path();
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{msg}");
+    }
+}
+
+#[derive(serde::Serialize)]
+struct BatchAddResult {
+    /// 加成功的服务器主键(= 生效线路 URL);失败为 None。
+    server_id: Option<String>,
+    /// 展示名。
+    name: String,
+    /// 失败原因;成功为 None。
+    error: Option<String>,
+}
+
+/// 跨服回传设置(主开关 / 范围 / 是否带进度)。
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WritebackSettings {
+    enabled: bool,
+    /// "all" | "first" | "latest"
+    range: String,
+    include_progress: bool,
+}
+
+/// 弹弹Play 官方源配置(编译期加密注入凭据齐才有);无凭据返回 None。
+/// 官方弹弹Play 源的 id。★ 是 "official",不是 Dart 那边的 "dandanplay" ——
+/// 自动挂弹幕的 episodeId 连号快路径要按它认源,写错了不报错,只是快路径永远不命中。
+const DANDAN_OFFICIAL_SOURCE_ID: &str = "official";
+
+fn require_danmaku_sources(state: &State<'_, AppState>) -> Result<Vec<DanmakuSourceConfig>, String> {
+    let v = danmaku_sources(state, true);
+    if v.is_empty() {
+        return Err("未配置弹幕服务器(且无官方弹弹Play凭据)".into());
+    }
+    Ok(v)
+}
+
+// ---------- 夸克 TV 扫码登录 ----------
+#[derive(serde::Serialize)]
+struct QuarkScan {
+    device_id: String,
+    qr_data: String,
+    query_token: String,
+}
+
+/// 取(ani-rss 后端 + 当前服务器)。当前活跃源不是 ani-rss 时直接报错 —— 管理接口只对 ani-rss 有意义。
+fn anirss_ctx(state: &State<'_, AppState>) -> Result<(Arc<AniRssBackend>, SourceServer), String> {
+    let (kind, server) = state.source.lock().unwrap().clone().ok_or("未登录源")?;
+    if kind != SourceKind::anirss() {
+        return Err("当前源不是 Ani-RSS".to_string());
+    }
+    Ok((state.anirss.clone(), server))
+}
+
+#[derive(serde::Serialize)]
+struct CfProxyStatus {
+    server_id: String,
+    local_url: String,
+    pinned_ip: String,
+}
+
+/// 多线程加载(预取代理)设置。threads 引擎内部 clamp 到 2~4。
+/// `servers` = 开了这功能的账号 id(Account.server);空表 = 全关。
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PrefetchSettings {
+    servers: Vec<String>,
+    threads: usize,
+    cache_bytes: u64,
+}
+
+/// 章节(跳过片头片尾 + 进度条缩略图)。两个功能同一份数据,前端只拉一次。
+/// 返回 `(章节表, 片头区间, 片尾起点)` —— 区间判定放核层,免得前端各写一套匹配规则。
+#[derive(serde::Serialize)]
+struct ChapterInfo {
+    chapters: Vec<linplayer_core::emby::Chapter>,
+    /// 用户开了「自动跳过」且真识别出片头时才非空。关着开关时这里恒为 None ——
+    /// 前端不必再判一次开关(判两次早晚判岔)。
+    intro: Option<(f64, f64)>,
+    /// 片尾 `(开始, 结束)`。结束 == 总时长 = 片尾之后没别的了(别 seek,那等于强行结束播放)。
+    outro: Option<(f64, f64)>,
+    /// 缩略图开关(关着时前端别去加载章节图,白费流量)。
+    thumbs: bool,
+}
+
+/* ============================================================
+   2026-07-26 从 apps/desktop/src/lib.rs 搬过来的命令实现体。
+
+   ★ 为什么是复制而不是共享一个 crate:
+     `apps/android` 刻意**不依赖 apps/desktop**(那个包绑死 Win32/X11,交叉编译第一步就死),
+     而 `#[tauri::command]` 又不能放进 `crates/core`(core 是故意不依赖 tauri 的)。
+     真正的解法是再抽一个 `crates/shell`,但那是把 5800 行的桌面壳整体重构 ——
+     不能顺手做。所以这里沿用本仓库既有的做法:壳侧薄包装各自一份,
+     **真逻辑全在 crates/core 和 crates/mpv**(这批 146 个命令平均 10.5 行)。
+
+   ★ 这是一处「两处只改一处」的风险面。改这批命令时两边一起改。
+
+   ★ 与桌面的唯一系统性差异:播放器在安卓是独立的 `PlayerState`(它的生命周期跟 Surface 走,
+     不能跟 AppState 一起建),所以凡是碰播放器的命令,签名里的 `state.player`
+     都改成了 `ps.player`。
+   ============================================================ */
+
+/// 取播放器再执行一段操作。与桌面同名宏,只是这里吃的是 `PlayerState`。
+macro_rules! with_player {
+    ($state:expr, $p:ident => $body:expr) => {{
+        let guard = $state.player.lock().unwrap();
+        let $p = guard.as_ref().ok_or("播放器未就绪")?;
+        $body;
+        Ok(())
+    }};
+}
+
+/// 重新登录:**地址不用填**,拿账号当前生效的线路去认证,只换凭据。
+///
+/// 用户 2026-07-15:「重新登录是重新填写账密,线路不用重新填写,用的还是服务器线路里面的线路」。
+///
+/// ## 为什么不能复用 `login`
+/// `login` 是按**登录时用的那个地址**做 upsert 的(`result.server`)。
+/// 而这里认证走的是 `direct_line_url()`(可能是某条 CDN 线路),它 ≠ 账号主键 `a.server`。
+/// 拿 login 顶替 → upsert 命中不到原账号 → **凭空多出一台服务器**,原账号还在,
+/// 用户以为重登好了,其实是加了一台。EditDialog 上原本就有一段注释在警告这个坑,
+/// 现在地址挪进线路表,这个坑就更近了 —— 所以这里 find_mut 定点改字段,不 upsert。
+///
+/// ## 用户名也能改
+/// 编辑框的「账号」现在可编辑。改账号 = 换了个人,token/user_id 全得换 —— 必须真登一次,
+/// 不能只把 user_name 字段改掉(那样 token 还是旧用户的,表现为「显示是新账号、
+/// 看到的还是旧账号的媒体库」这种要命的静默错位)。
+#[tauri::command]
+async fn relogin(
+    state: State<'_, AppState>,
+    server_id: String,
+    username: String,
+    password: String,
+) -> Result<(), String> {
+    // ★ 锁不跨 await。
+    let (line_url, device_id) = {
+        let cfg = state.config.lock().unwrap();
+        let a = cfg.find(&server_id).ok_or("找不到该服务器")?;
+        (a.direct_line_url().to_string(), cfg.device_id.clone())
+    };
+    let (_, result) = emby::login(&state.http, &line_url, &username, &password, &device_id).await?;
+
+    let is_active = {
+        let mut cfg = state.config.lock().unwrap();
+        let a = cfg.find_mut(&server_id).ok_or("找不到该服务器")?;
+        // 定点换凭据。**不动 server/name/remark/icon/lines/active_line** —— 那些是用户的编辑。
+        a.token = result.token.clone();
+        a.user_id = result.user_id.clone();
+        a.user_name = result.user_name.clone();
+        a.password = (!password.is_empty()).then_some(password);
+        cfg.save();
+        cfg.active_account().map(|x| x.server == server_id).unwrap_or(false)
+    };
+    // 是当前活跃账号就顺手把内存会话也换了,否则后续请求还在拿旧 token 打 401。
+    if is_active {
+        let cfg = state.config.lock().unwrap();
+        let a = cfg.find(&server_id).ok_or("找不到该服务器")?;
+        *state.session.lock().unwrap() = Some(Session {
+            server: a.active_line_url(),
+            token: a.token.clone(),
+            user_id: a.user_id.clone(),
+            device_id: cfg.device_id.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// 启动时的活跃源(浏览型)——前端据此决定落文件浏览页而不是媒体库。
+#[tauri::command]
+fn current_source(state: State<'_, AppState>) -> Option<AccountInfo> {
+    let cfg = state.config.lock().unwrap();
+    cfg.active_account().filter(|a| a.is_file_browse()).map(|a| account_info(a, true))
+}
+
+#[tauri::command]
+async fn list_items(state: State<'_, AppState>, parent_id: String) -> Result<Vec<Item>, String> {
+    let s = session_of(&state)?;
+    // 保持返回 Vec<Item>:现有前端 invoke<Item[]>("list_items", { parentId }) 直接 .map,
+    // 改成 ItemPage 会在运行时炸(tsc 是泛型断言,拦不住)。要总数/翻页/筛选走 list_items_page。
+    Ok(emby::items(&state.http, &s, &parent_id, &emby::ItemQuery::default())
+        .await?
+        .items)
+}
+
+/// 测试连接 / 取服务器公开信息(草稿页 06「测试连接」)。★ 登录前调用,故不走 session_of。
+#[tauri::command]
+async fn test_connection(state: State<'_, AppState>, server: String) -> Result<emby::ServerInfo, String> {
+    emby::server_info(&state.http, &server).await
+}
+
+/// 合集(BoxSet)。
+#[tauri::command]
+async fn list_collections(state: State<'_, AppState>) -> Result<Vec<Item>, String> {
+    let s = session_of(&state)?;
+    emby::collections(&state.http, &s).await
+}
+
+/// 网络图标库(改图标弹窗浏览用)。默认命中 24h 缓存,force=true 重新拉四源。
+/// 返回空 = 从没拉成功过且本次也失败 → 前端提示「拉取失败」。
+#[tauri::command]
+// 不再收 State:图标库拉的是公共图标仓库、不是 Emby,用默认 UA 的通用客户端就够
+// (见 http.rs 的 UA 口径),不需要 AppState 里那个 Emby 客户端。
+async fn icon_library(force: bool) -> Result<Vec<linplayer_core::icon_library::IconEntry>, String> {
+    // async 命令 tauri 要求返 Result;库本身不报错(失败回退旧缓存/空)。
+    Ok(linplayer_core::icon_library::library(&http::client(), force).await)
+}
+
+/// 当前账号是不是该服务器的管理员。前端据此决定右键菜单里出不出那三项管理动作。
+#[tauri::command]
+async fn is_admin(state: State<'_, AppState>) -> Result<bool, String> {
+    let s = session_of(&state)?;
+    emby::is_admin(&state.http, &s).await
+}
+
+/// 刷新某个库/条目的元数据。full=false 只补缺失,full=true 强制重刮。
+#[tauri::command]
+async fn refresh_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    full: bool,
+) -> Result<(), String> {
+    let s = session_of(&state)?;
+    emby::refresh_item(&state.http, &s, &item_id, full).await
+}
+
+/// 扫描整台服务器的媒体库文件(找新加进来的片子)。
+#[tauri::command]
+async fn scan_libraries(state: State<'_, AppState>) -> Result<(), String> {
+    let s = session_of(&state)?;
+    emby::scan_all_libraries(&state.http, &s).await
+}
+
+/// 编辑服务器:名称/备注/图标/TLS 放行/密码。None=不改该字段。
+#[tauri::command]
+fn update_account(
+    state: State<'_, AppState>,
+    server_id: String,
+    name: Option<String>,
+    remark: Option<String>,
+    icon_url: Option<String>,
+    allow_insecure_tls: Option<bool>,
+    password: Option<String>,
+) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    let a = cfg.find_mut(&server_id).ok_or("找不到该服务器")?;
+    if let Some(v) = name {
+        a.name = v;
+    }
+    // 备注/图标传空串 = 清空,传 None = 不动。
+    if let Some(v) = remark {
+        a.remark = (!v.trim().is_empty()).then_some(v);
+    }
+    if let Some(v) = icon_url {
+        a.icon_url = (!v.trim().is_empty()).then_some(v);
+    }
+    if let Some(v) = allow_insecure_tls {
+        a.allow_insecure_tls = v;
+    }
+    if let Some(v) = password {
+        a.password = (!v.is_empty()).then_some(v);
+    }
+    cfg.save();
+    Ok(())
+}
+
+/// 启动参数里的 `linplayer://...`(系统通过协议拉起我们时会作为 argv 传进来)。
+/// 前端进主界面后调一次;有值就走确认流程。
+///
+/// ⚠️ 只在**冷启动**时有效。App 已经开着时再点深链,系统会拉起第二个进程 ——
+/// 那需要单实例守卫(tauri-plugin-single-instance),没接,已知缺口。
+#[tauri::command]
+fn startup_deep_link() -> Option<String> {
+    std::env::args().skip(1).find(|a| a.starts_with("linplayer://"))
+}
+
+/// 用户从本地挑一张图当服务器图标。返回 data URI 供前端立刻显示。
+#[tauri::command]
+fn set_account_icon_file(
+    state: State<'_, AppState>,
+    server_id: String,
+    file_path: String,
+) -> Result<String, String> {
+    let uri = linplayer_core::icon_cache::set_from_file(&server_id, &file_path)?;
+    // icon_url 记成本地路径:重装/清缓存后还能从原文件重建,不用让用户再挑一次。
+    let mut cfg = state.config.lock().unwrap();
+    let a = cfg.find_mut(&server_id).ok_or("找不到该服务器")?;
+    a.icon_url = Some(file_path);
+    cfg.save();
+    Ok(uri)
+}
+
+/// 清掉图标缓存,下次 account_icon 会重新下载(服务器换了 logo 时用)。
+#[tauri::command]
+fn clear_account_icon(server_id: String) {
+    linplayer_core::icon_cache::clear(&server_id);
+}
+
+/// 解析分享文本 → 结构化账号块。**纯解析,不登录、不落盘** ——
+/// 前端拿去展示让用户核对/补用户名,确认后再调 batch_add_servers。
+#[tauri::command]
+fn batch_parse(text: String) -> Vec<linplayer_core::server_batch::ParsedServerBlock> {
+    linplayer_core::server_batch::parse_share_text(&text)
+}
+
+/// 解析 `linplayer://add-server?...` 深链。
+///
+/// ⚠️ 返回 Some **不等于**可以直接加号 —— 深链可能来自任何网页/聊天窗口。
+/// 前端必须弹确认框展示服务器地址和用户名,由用户点头后才调 batch_add_servers。
+#[tauri::command]
+fn parse_deep_link(url: String) -> Option<linplayer_core::server_batch::DeepLinkAddServer> {
+    linplayer_core::server_batch::parse_deep_link(&url)
+}
+
+/// 批量添加:逐块逐线路试登录,第一条通的线路即设为生效线路,其余线路留着备用。
+///
+/// 为什么要逐线路试:分享文本里的「主线路」经常是最不通的那条(被墙/限速),
+/// 直接钉死第 0 条会让用户加完就连不上,还得自己去线路列表里一条条点。
+///
+/// 参数:
+/// - `fallback_username` / `fallback_password`:用户在 UI 里补的,套用到所有 username 为空的块。
+/// - `fallback_name`:深链带来的服务器名(`?name=`);取不到 SystemInfo.serverName 时用。
+#[tauri::command]
+async fn batch_add_servers(
+    state: State<'_, AppState>,
+    blocks: Vec<linplayer_core::server_batch::ParsedServerBlock>,
+    fallback_username: Option<String>,
+    fallback_password: Option<String>,
+    fallback_name: Option<String>,
+) -> Result<Vec<BatchAddResult>, String> {
+    use linplayer_core::server_batch as sb;
+    let device_id = state.config.lock().unwrap().device_id.clone();
+    let mut out = Vec::new();
+
+    for block in &blocks {
+        let lines = sb::server_lines(block);
+        if lines.is_empty() {
+            continue;
+        }
+        // 空串要当「缺用户名」处理,不能 unwrap_or_default 后闷头登 ——
+        // 深链里 ?user= 显式给空串正是这种情况。
+        let username = block
+            .username
+            .clone()
+            .or_else(|| fallback_username.clone())
+            .filter(|s| !s.trim().is_empty());
+        let password = block
+            .password
+            .clone()
+            .or_else(|| fallback_password.clone())
+            .unwrap_or_default();
+        let display = lines[0].name.clone();
+        let Some(username) = username else {
+            out.push(BatchAddResult {
+                server_id: None,
+                name: display,
+                error: Some("缺用户名".into()),
+            });
+            continue;
+        };
+
+        let mut added = None;
+        let mut last_err = String::new();
+        for (i, line) in lines.iter().enumerate() {
+            match emby::login(&state.http, &line.url, &username, &password, &device_id).await {
+                Ok((session, result)) => {
+                    let name = emby::server_info(&state.http, &line.url)
+                        .await
+                        .map(|si| si.name)
+                        .ok()
+                        .filter(|n| !n.trim().is_empty())
+                        .or_else(|| fallback_name.clone())
+                        .unwrap_or_default();
+                    let icon = sb::build_icon_url(
+                        &line.url,
+                        Some(&result.user_id),
+                        result.primary_image_tag.as_deref(),
+                    );
+                    {
+                        let mut cfg = state.config.lock().unwrap();
+                        cfg.upsert(Account {
+                            server: result.server.clone(),
+                            token: result.token.clone(),
+                            user_id: result.user_id.clone(),
+                            user_name: result.user_name.clone(),
+                            name,
+                            icon_url: Some(icon),
+                            password: (!password.is_empty()).then(|| password.clone()),
+                            lines: lines.clone(),
+                            active_line: i, // 试通的那条即生效线路
+                            ..Default::default()
+                        });
+                        // 块里带的弹幕线路并进全局弹幕源(接着现有源的 priority 往后排)。
+                        let base = cfg.danmaku_sources.len() as i32;
+                        for src in sb::danmaku_sources_of(block, base) {
+                            if !cfg.danmaku_sources.iter().any(|x| x.id == src.id) {
+                                cfg.danmaku_sources.push(src);
+                            }
+                        }
+                        cfg.save();
+                    }
+                    *state.session.lock().unwrap() = Some(session);
+                    *state.source.lock().unwrap() = None;
+                    added = Some(result.server);
+                    break;
+                }
+                Err(e) => last_err = e,
+            }
+        }
+        match added {
+            Some(id) => out.push(BatchAddResult {
+                server_id: Some(id),
+                name: display,
+                error: None,
+            }),
+            None => out.push(BatchAddResult {
+                server_id: None,
+                name: display,
+                // 所有线路都没通才算失败,报最后一条的错。
+                error: Some(if last_err.is_empty() {
+                    "所有线路均无法连接".into()
+                } else {
+                    last_err
+                }),
+            }),
+        }
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+async fn probe_lines(state: State<'_, AppState>, server_id: String) -> Result<Vec<LineProbe>, String> {
+    let urls = line_urls(&state, &server_id)?;
+    // 并发探测:线路多时别串行等超时(6s × N 会把用户等睡着)。
+    let tasks: Vec<_> = urls
+        .into_iter()
+        .enumerate()
+        .map(|(index, url)| {
+            let http = state.http.clone();
+            tokio::spawn(async move {
+                let ms = probe_one(&http, &url).await;
+                LineProbe { index, url, ms }
+            })
+        })
+        .collect();
+    let mut out = Vec::with_capacity(tasks.len());
+    for t in tasks {
+        out.push(t.await.map_err(|e| format!("线路测速任务失败:{e}"))?);
+    }
+    Ok(out)
+}
+
+/// 观看记录列表。scope=None 取全部(跨服务器);否则只取当前服务器。
+#[tauri::command]
+fn watch_history_list(state: State<'_, AppState>, current_only: bool) -> Vec<wh::Record> {
+    if current_only {
+        match session_of(&state) {
+            Ok(s) => state.watch_history.load_scope(&scope_of(&s)),
+            Err(_) => Vec::new(),
+        }
+    } else {
+        state.watch_history.load_all()
+    }
+}
+
+#[tauri::command]
+fn watch_history_clear(state: State<'_, AppState>) {
+    state.watch_history.clear_all();
+}
+
+#[tauri::command]
+fn watch_history_delete(state: State<'_, AppState>, record_id: String) {
+    state.watch_history.delete_record(&record_id);
+}
+
+#[tauri::command]
+fn get_writeback_settings(state: State<'_, AppState>) -> WritebackSettings {
+    let p = &state.config.lock().unwrap().prefs;
+    WritebackSettings {
+        enabled: p.cross_server_writeback,
+        range: p.cross_server_writeback_range.clone(),
+        include_progress: p.cross_server_writeback_progress,
+    }
+}
+
+#[tauri::command]
+fn set_writeback_settings(
+    state: State<'_, AppState>,
+    settings: WritebackSettings,
+) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.prefs.cross_server_writeback = settings.enabled;
+    // from_wire 对无法识别的值静默回落 "all" —— 那会让用户以为选了"仅初次"其实在写所有服。
+    // 宁可在这里拒掉。
+    if !matches!(settings.range.as_str(), "all" | "first" | "latest") {
+        return Err(format!("未知的回传范围: {}", settings.range));
+    }
+    cfg.prefs.cross_server_writeback_range = settings.range;
+    cfg.prefs.cross_server_writeback_progress = settings.include_progress;
+    cfg.save();
+    Ok(())
+}
+
+/// 恢复扫描:拿本地观看记录去当前服务器找对应条目,strong 匹配的自动回写进度,
+/// possible 匹配的放进 prompt_candidates 交给用户确认。
+///
+/// ⚠️ 这会**往当前服务器写**播放进度,不是只读扫描。前端别在进页面时自动跑,
+/// 要给用户一个明确的「扫描并恢复」按钮。
+#[tauri::command]
+async fn watch_history_scan_restore(
+    state: State<'_, AppState>,
+) -> Result<linplayer_core::watch_history_sync::RestoreReport, String> {
+    let s = session_of(&state)?;
+    let scope = scope_of(&s);
+    linplayer_core::watch_history_sync::scan_restore(&state.http, &s, &state.watch_history, &scope)
+        .await
+}
+
+/// 用户确认某个 possible 候选后,把它写进当前服务器。
+#[tauri::command]
+async fn watch_history_restore_candidate(
+    state: State<'_, AppState>,
+    candidate: wh::RestoreCandidate,
+) -> Result<bool, String> {
+    let s = session_of(&state)?;
+    linplayer_core::watch_history_sync::restore_candidate(
+        &state.http,
+        &s,
+        &state.watch_history,
+        &candidate,
+    )
+    .await
+}
+
+/// 取播放器当前可调项。
+#[tauri::command]
+fn player_opts(ps: State<'_, PlayerState>) -> Result<PlayerOpts, String> {
+    // ★ 先取 DV 标志再拿 player 锁。反过来会在两把锁之间形成固定的持有顺序依赖,
+    //   本项目在 [[prefetch-proxy-deadlock]] 上栽过同类跟头,不给它长出来的机会。
+    let dolby_vision = ps
+        .playback
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|t| t.is_dolby_vision);
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    Ok(PlayerOpts {
+        dolby_vision,
+        speed: p.speed(),
+        volume: p.volume(),
+        muted: p.muted(),
+        audio_delay: p.audio_delay(),
+        sub_delay: p.sub_delay(),
+        hwdec: p.hwdec(),
+        shader_count: p.shader_count(),
+    })
+}
+
+#[tauri::command]
+fn set_speed(ps: State<'_, PlayerState>, speed: f64) -> Result<(), String> {
+    with_player!(ps, p => p.set_speed(speed))
+}
+
+#[tauri::command]
+fn set_volume(ps: State<'_, PlayerState>, volume: f64) -> Result<(), String> {
+    with_player!(ps, p => p.set_volume(volume))
+}
+
+#[tauri::command]
+fn set_mute(ps: State<'_, PlayerState>, mute: bool) -> Result<(), String> {
+    with_player!(ps, p => p.set_mute(mute))
+}
+
+#[tauri::command]
+fn set_audio_delay(ps: State<'_, PlayerState>, secs: f64) -> Result<(), String> {
+    with_player!(ps, p => p.set_audio_delay(secs))
+}
+
+#[tauri::command]
+fn set_sub_delay(ps: State<'_, PlayerState>, secs: f64) -> Result<(), String> {
+    with_player!(ps, p => p.set_sub_delay(secs))
+}
+
+#[tauri::command]
+fn set_aspect_ratio(ps: State<'_, PlayerState>, ratio: String) -> Result<(), String> {
+    with_player!(ps, p => p.set_aspect_ratio(&ratio))
+}
+
+#[tauri::command]
+fn set_hwdec(ps: State<'_, PlayerState>, mode: String) -> Result<(), String> {
+    with_player!(ps, p => p.set_hwdec(&mode))
+}
+
+/// 字幕样式(字体/缩放/字号/位置/背景/混合)。None 的项不动。
+///
+/// ★ 这些 `sub-*` 属性**主次字幕共用** —— 不是偷懒,是 mpv 就没有分开的那一份:
+/// 2026-07-16 用 ctypes 拉 libmpv 的 `property-list` 实测,`secondary-*` 名下总共只有
+/// sid / ass-override / delay / pos / visibility / text / start / end / lines,
+/// **不存在 secondary-sub-font-size / -font / -color**(set 回 -8 property not found)。
+/// 所以「次字幕单独设字体大小」在 mpv 层面无法实现,UI 上就该如实标成主次共用,
+/// 别造一个假的次字幕字号 stepper 骗人。
+#[tauri::command]
+fn set_sub_style(
+    ps: State<'_, PlayerState>,
+    font: Option<String>,
+    scale: Option<f64>,
+    position: Option<f64>,
+    background: Option<bool>,
+    blend_mode: Option<String>,
+) -> Result<(), String> {
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    if let Some(f) = font {
+        p.set_sub_font(&f);
+    }
+    if let Some(sc) = scale {
+        p.set_sub_scale(sc);
+    }
+    if let Some(pos) = position {
+        p.set_sub_position(pos);
+    }
+    if let Some(b) = background {
+        p.set_sub_background(b);
+    }
+    if let Some(m) = blend_mode {
+        p.set_sub_blend_mode(&m);
+    }
+    Ok(())
+}
+
+/// 次字幕(双字幕)。id 为空 = 关。
+#[tauri::command]
+fn set_secondary_sub(ps: State<'_, PlayerState>, id: String) -> Result<(), String> {
+    with_player!(ps, p => p.set_secondary_sub(&id))
+}
+
+#[tauri::command]
+fn set_secondary_sub_opts(
+    ps: State<'_, PlayerState>,
+    delay: Option<f64>,
+    position: Option<f64>,
+    ass_override: Option<String>,
+) -> Result<(), String> {
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    if let Some(d) = delay {
+        p.set_secondary_sub_delay(d);
+    }
+    if let Some(pos) = position {
+        p.set_secondary_sub_position(pos);
+    }
+    if let Some(m) = ass_override {
+        p.set_secondary_sub_ass_override(&m);
+    }
+    Ok(())
+}
+
+/// 加载外挂字幕(本地路径或 URL)。secondary=true 挂成次字幕。
+#[tauri::command]
+fn add_subtitle(
+    ps: State<'_, PlayerState>,
+    url: String,
+    title: Option<String>,
+    secondary: Option<bool>,
+) -> Result<(), String> {
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    let t = title.unwrap_or_else(|| "外挂字幕".into());
+    if secondary.unwrap_or(false) {
+        p.add_secondary_sub(&url, &t)
+    } else {
+        p.add_subtitle(&url, &t);
+        Ok(())
+    }
+}
+
+/// 超分档位清单 `(id, 显示名, 滤镜家族)`。第三个字段是家族名(Anime4K/FSR/NVIDIA),UI 按它分三组。
+#[tauri::command]
+fn shader_levels() -> Vec<(&'static str, &'static str, &'static str)> {
+    shaders::levels()
+}
+
+/// 应用超分档位。挂载后**双重回读**:glsl-shaders 校验挂没挂上,尺寸校验会不会真跑
+/// (见 [[superres-and-toast]]:旧 Flutter 桌面软件纹理根本不跑 glsl,必须回读校验)。
+#[tauri::command]
+fn set_shader_level(ps: State<'_, PlayerState>, level: String) -> Result<ShaderApplied, String> {
+    // .glsl 是 include_str! 编进二进制、首次用时落盘的 —— 丢了能重生成,归 cache/。
+    let dir = linplayer_core::paths::cache_dir("shaders");
+    let paths = shaders::shader_paths(&dir, &level)?;
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    /* 强度是**档位设计的一部分**(见 shaders::preset 的注释),每次挂载都得重设:
+       glsl-shader-opts 是全局的,不设就吃 shader 自带默认(CAS STR=0.5,只开一半)——
+       用户实测「看不太出来」正是这个。切到 off 时 opts 为空串,顺带把上一档的参数清掉。 */
+    let opts = shaders::shader_opts(&level);
+    if !p.set_shader_opts(opts) {
+        poclog(&format!("警告: glsl-shader-opts 没设上({level} 的强度 {opts} 不会生效)"));
+    }
+    p.set_shaders(&paths);
+    let count = p.shader_count();
+    if !paths.is_empty() && count == 0 {
+        return Err("超分未生效(mpv 未接受 shader)".into());
+    }
+    if paths.is_empty() {
+        return Ok(ShaderApplied { count, will_run: None, note: None });
+    }
+
+    let (video, output) = (p.video_size(), p.output_size());
+    let will_run = shaders::will_run(&level, video, output);
+    let note = match (will_run, video, output) {
+        (Some(false), Some((vw, vh)), Some((ow, oh))) => Some(format!(
+            "这档是**放大**滤镜,当前尺寸下不会生效:要求画面区大于源的 {:.1} 倍才工作。\
+             现在源 {vw:.0}×{vh:.0}、画面区只有 {ow:.0}×{oh:.0}({:.2}×)—— 你在缩小画面,没有可放大的。\
+             按 F 全屏即可生效;想在窗口里就见效,请选「锐化」「去噪」「锐化+去噪」这三档。",
+            shaders::WHEN_RATIO,
+            ow / vw,
+        )),
+        _ => None,
+    };
+    Ok(ShaderApplied { count, will_run, note })
+}
+
+/// mpv 属性直读/直写 + 命令直通。插件桥和一次性调参用(对齐 Flutter 的
+/// mpvGetProperty/mpvSetProperty/mpvCommand);有专用命令的优先用专用命令。
+#[tauri::command]
+fn mpv_get(ps: State<'_, PlayerState>, name: String) -> Result<Option<String>, String> {
+    let guard = ps.player.lock().unwrap();
+    Ok(guard.as_ref().ok_or("播放器未就绪")?.get_property(&name))
+}
+
+#[tauri::command]
+fn mpv_set(ps: State<'_, PlayerState>, name: String, value: String) -> Result<(), String> {
+    with_player!(ps, p => p.set_property(&name, &value))
+}
+
+#[tauri::command]
+fn mpv_command(ps: State<'_, PlayerState>, args: Vec<String>) -> Result<(), String> {
+    let guard = ps.player.lock().unwrap();
+    guard.as_ref().ok_or("播放器未就绪")?.command(&args)
+}
+
+/// 按已存偏好自动选轨(起播后前端调一次)。返回实际选中的 (aid, sid)。
+#[tauri::command]
+fn apply_prefs(state: State<'_, AppState>,
+    ps: State<'_, PlayerState>) -> Result<(Option<String>, Option<String>), String> {
+    let prefs = state.config.lock().unwrap().prefs.clone();
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    let tracks = p.tracks();
+    let (aid, sid) = pick_tracks(
+        &tracks,
+        TrackPrefs {
+            audio_lang: prefs.audio_lang.as_deref(),
+            sub_lang: prefs.sub_lang.as_deref(),
+            sub_enabled: prefs.sub_enabled,
+            audio_regex: &prefs.audio_regex,
+            sub_regex: &prefs.sub_regex,
+        },
+    );
+    p.apply_tracks(aid.clone(), sid.clone());
+    Ok((aid, sid))
+}
+
+/// 设置页的正则合法性校验。**必须问 Rust**:前端的 JS RegExp 语法集和 Rust 的
+/// regex crate 不同(Rust 无前后瞻/反向引用),用 JS 校验会放过 Rust 编译不过的写法,
+/// 于是设置存下了却永不命中,还一声不吭。空串合法(= 关闭该项)。
+#[tauri::command]
+fn validate_track_regex(pattern: String) -> Result<(), String> {
+    linplayer_core::media::validate_track_regex(&pattern)
+}
+
+/// 保存三条筛选正则(版本/字幕/音频)。非法直接拒,不落盘。
+#[tauri::command]
+fn set_track_regexes(
+    state: State<'_, AppState>,
+    version_regex: String,
+    sub_regex: String,
+    audio_regex: String,
+) -> Result<(), String> {
+    for p in [&version_regex, &sub_regex, &audio_regex] {
+        linplayer_core::media::validate_track_regex(p)?;
+    }
+    let mut cfg = state.config.lock().unwrap();
+    // 同 set_prefs:只改这三项,别整体覆盖 Prefs。
+    cfg.prefs = Prefs { version_regex, sub_regex, audio_regex, ..cfg.prefs.clone() };
+    cfg.save();
+    Ok(())
+}
+
+/// 自建弹幕源列表(设置页增删改查)。
+#[tauri::command]
+fn get_danmaku_config(state: State<'_, AppState>) -> Vec<DanmakuServer> {
+    state.config.lock().unwrap().danmaku_sources.clone()
+}
+
+#[tauri::command]
+fn get_official_danmaku() -> OfficialDanmaku {
+    OfficialDanmaku {
+        name: "弹弹Play".into(),
+        available: linplayer_core::secrets::dandan_creds().is_some(),
+    }
+}
+
+/// 覆写自建弹幕源表。id 为空的自动补一个(用 api_url 做稳定身份)。
+#[tauri::command]
+fn set_danmaku_config(
+    state: State<'_, AppState>,
+    sources: Vec<DanmakuServer>,
+) -> Result<(), String> {
+    let mut cfg = state.config.lock().unwrap();
+    cfg.danmaku_sources = sources
+        .into_iter()
+        .map(|mut s| {
+            if s.id.trim().is_empty() {
+                s.id = s.api_url.trim().trim_end_matches('/').to_string();
+            }
+            s
+        })
+        .collect();
+    cfg.save();
+    Ok(())
+}
+
+/// 按标题搜弹幕**条目**(不带集列表)。多源并行,分组返回供用户挑源。
+/// 集列表在用户点了条目之后走 [`danmaku_episodes`] 单独取 —— 一次搜索出几百集
+/// 用户「眼都看花了」,而且 /search/episodes 也慢得多。
+#[tauri::command]
+async fn danmaku_search(
+    state: State<'_, AppState>,
+    keyword: String,
+) -> Result<Vec<danmaku::DanmakuSourceGroup>, String> {
+    let sources = require_danmaku_sources(&state)?;
+    Ok(danmaku::search_all_grouped(&state.http, &sources, &keyword).await)
+}
+
+/// 取某源某条目的集列表(用户点开某部番时才发)。
+#[tauri::command]
+async fn danmaku_episodes(
+    state: State<'_, AppState>,
+    source_id: String,
+    anime_id: String,
+    anime_title: String,
+) -> Result<Vec<danmaku::DanmakuEpisode>, String> {
+    let sources = require_danmaku_sources(&state)?;
+    let cfg = sources
+        .iter()
+        .find(|c| c.id == source_id)
+        .ok_or_else(|| format!("弹幕源不存在: {source_id}"))?;
+    danmaku::episodes_for_anime(&state.http, cfg, &anime_id, &anime_title).await
+}
+
+/// 智能匹配:按标题/集号/文件名多源并行匹配,返回候选(带评分)供自动或手动挑。
+#[tauri::command]
+async fn danmaku_match(
+    state: State<'_, AppState>,
+    input: danmaku::MatchInput,
+) -> Result<Vec<danmaku::DanmakuMatchCandidate>, String> {
+    let sources = require_danmaku_sources(&state)?;
+    Ok(danmaku::match_all(&state.http, &sources, &input).await)
+}
+
+/// 自动匹配的分数门槛(前端据此决定「自动挂上」还是「让用户挑」)。
+#[tauri::command]
+fn danmaku_min_auto_score() -> f64 {
+    danmaku::MIN_AUTO_SCORE
+}
+
+/// 取某集弹幕评论(走缓存)。preferred_source 指定用哪个源;不指定则按 priority 依次试。
+#[tauri::command]
+async fn danmaku_load(
+    state: State<'_, AppState>,
+    episode_id: String,
+    source_id: Option<String>,
+    ch_convert: Option<i32>,
+) -> Result<Vec<DanmakuComment>, String> {
+    let sources = require_danmaku_sources(&state)?;
+    Ok(danmaku::get_comments_from_all(
+        &state.http,
+        &sources,
+        &episode_id,
+        source_id.as_deref(),
+        ch_convert.unwrap_or(0),
+    )
+    .await)
+}
+
+/// 播放开始时自动匹配并挂弹幕。对齐 Dart DanmakuAutoLoader。
+///
+/// 返回 None = 没自动挂(没匹配上 / 分数不够 / 取到空弹幕)。这不是错误:
+/// 给非动漫内容硬塞错配弹幕比不挂更糟,用户仍可手动搜索。
+///
+/// 快路径:弹弹Play 同一作品的 episodeId 是连号的(第 N 集 +1 = 第 N+1 集)。
+/// 追番看下一集时直接 +1 取,省一次 match 往返。猜错(跨季/特殊编号)会取到空弹幕,
+/// 自动退回全量匹配 —— 所以「取到非空」就是这条快路径的兜底校验,别去掉。
+///
+/// `anchor_key`:剧集锚点键(seriesId|seasonId);网盘/无剧集上下文传 None 即关掉快路径。
+#[tauri::command]
+async fn danmaku_auto_load(
+    state: State<'_, AppState>,
+    input: danmaku::MatchInput,
+    options: danmaku::FilterOptions,
+    ch_convert: Option<i32>,
+    anchor_key: Option<String>,
+) -> Result<Option<Vec<DanmakuComment>>, String> {
+    let sources = require_danmaku_sources(&state)?;
+    let ch = ch_convert.unwrap_or(0);
+    let finish = |raw: Vec<DanmakuComment>| danmaku::apply_filter_and_dedup(raw, &options);
+
+    // 快路径:紧邻下一集。
+    if let (Some(key), Some(ep)) = (anchor_key.as_ref(), input.episode_no) {
+        let guess = {
+            let anchors = state.danmaku_anchors.lock().unwrap();
+            anchors.get(key).and_then(|(a_ep, a_id)| (ep == a_ep + 1).then_some(a_id + 1))
+        };
+        if let Some(gid) = guess {
+            let raw = danmaku::get_comments_from_all(
+                &state.http,
+                &sources,
+                &gid.to_string(),
+                Some(DANDAN_OFFICIAL_SOURCE_ID),
+                ch,
+            )
+            .await;
+            if !raw.is_empty() {
+                state
+                    .danmaku_anchors
+                    .lock()
+                    .unwrap()
+                    .insert(key.clone(), (ep, gid));
+                return Ok(Some(finish(raw)));
+            }
+        }
+    }
+
+    let candidates = danmaku::match_all(&state.http, &sources, &input).await;
+    let Some(best) = candidates.into_iter().next().filter(|c| c.score >= danmaku::MIN_AUTO_SCORE)
+    else {
+        return Ok(None);
+    };
+    let raw = danmaku::get_comments_from_all(
+        &state.http,
+        &sources,
+        &best.episode_id,
+        Some(&best.source_id),
+        ch,
+    )
+    .await;
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    // 只有官方源 + episodeId 是纯数字时才记锚点 —— 自建源的 id 未必连号,
+    // 拿去 +1 会取到隔壁作品的弹幕(不报错,只是全篇对不上)。
+    if best.source_id == DANDAN_OFFICIAL_SOURCE_ID {
+        if let (Some(key), Some(ep), Ok(id)) =
+            (anchor_key, input.episode_no, best.episode_id.parse::<i64>())
+        {
+            state.danmaku_anchors.lock().unwrap().insert(key, (ep, id));
+        }
+    }
+    Ok(Some(finish(raw)))
+}
+
+/// 过滤 + 去重(屏蔽词/屏蔽用户/合并重复)。渲染参数不在这层 —— 那是前端的事。
+#[tauri::command]
+fn danmaku_filter(
+    comments: Vec<DanmakuComment>,
+    options: danmaku::FilterOptions,
+) -> Vec<DanmakuComment> {
+    danmaku::apply_filter_and_dedup(comments, &options)
+}
+
+/// 导入弹弹Play 导出的屏蔽词 XML。
+#[tauri::command]
+fn danmaku_import_blocklist(xml: String) -> danmaku::DanmakuFilterImportResult {
+    danmaku::import_dandanplay_blocklist_xml(&xml)
+}
+
+#[tauri::command]
+fn danmaku_cache_clear() -> usize {
+    danmaku::cache_clear()
+}
+
+#[tauri::command]
+fn danmaku_cache_size() -> u64 {
+    danmaku::cache_disk_size_bytes()
+}
+
+/// 加载本地弹幕文件(xml / json / ass / ssa)。格式按**内容**嗅探,不只信扩展名 ——
+/// 用户从别处存下来的弹幕改过名是常事。
+///
+/// 整文件解析失败返回 Err:绝不能返回空 Vec 假装成功,那会让用户看到
+/// 「加载成功但一条弹幕都没有」然后无从排查。单条畸形则跳过。
+#[tauri::command]
+fn danmaku_load_local(path: String) -> Result<Vec<DanmakuComment>, String> {
+    let p = std::path::Path::new(&path);
+    let content = std::fs::read(p).map_err(|e| format!("读不到弹幕文件: {e}"))?;
+    // 弹幕文件常见 GBK/UTF-16 编码,但 from_utf8_lossy 至少不会整个失败;
+    // 真乱码时下面的解析会因为找不到 <d>/cues 而报错,不会静默返回空。
+    let text = String::from_utf8_lossy(&content);
+    let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    linplayer_core::danmaku::local::parse(name, &text)
+}
+
+/// 生成弹幕 ASS 并挂给 mpv。
+///
+/// `comments` 传 `None` = 沿用上一次那份 —— 只改字号/透明度/区域/速度档位时
+/// 不必把几万条弹幕再过一遍 IPC(一次几 MB,连点档位会明显发顿)。
+#[tauri::command]
+fn danmaku_attach(
+    state: State<'_, AppState>,
+    ps: State<'_, PlayerState>,
+    comments: Option<Vec<DanmakuComment>>,
+    options: danmaku::ass::AssOptions,
+) -> Result<(), String> {
+    if let Some(c) = comments {
+        *state.danmaku_comments.lock().unwrap() = c;
+    }
+    let list = state.danmaku_comments.lock().unwrap().clone();
+    if list.is_empty() {
+        // 没弹幕就别挂一条空轨:secondary-sid 被占着,用户挂双语字幕会莫名其妙。
+        if let Some(p) = ps.player.lock().unwrap().as_ref() {
+            p.clear_danmaku_sub();
+        }
+        return Ok(());
+    }
+    let text = danmaku::ass::to_ass(&list, &options);
+    let dir = linplayer_core::paths::cache_dir("danmaku-ass");
+    /* 每次换个文件名,并把旧的清掉。同名覆盖理论上也行,但 sub-add 同一路径时
+       libass/mpv 是否重读没有书面保证,而这个坑一旦踩中的表现是「档位调了没反应」——
+       和「设置没生效」长得一模一样,极难排查。换名字是一行的代价,买断这个不确定性。 */
+    let seq = state.danmaku_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    let path = dir.join(format!("dm-{seq}.ass"));
+    std::fs::write(&path, text).map_err(|e| format!("弹幕 ASS 写盘失败: {e}"))?;
+    let guard = ps.player.lock().unwrap();
+    guard.as_ref().ok_or("播放器未就绪")?.set_danmaku_sub(&path.to_string_lossy());
+    Ok(())
+}
+
+/// 摘掉弹幕轨(关弹幕 / 退出播放页)。
+#[tauri::command]
+fn danmaku_detach(state: State<'_, AppState>,
+    ps: State<'_, PlayerState>) {
+    state.danmaku_comments.lock().unwrap().clear();
+    if let Some(p) = ps.player.lock().unwrap().as_ref() {
+        p.clear_danmaku_sub();
+    }
+}
+
+/// 弹幕显隐。只切可见性,不卸载 —— 重新打开不用再生成整份 ASS。
+#[tauri::command]
+fn danmaku_visible(ps: State<'_, PlayerState>, on: bool) {
+    if let Some(p) = ps.player.lock().unwrap().as_ref() {
+        p.set_danmaku_visible(on);
+    }
+}
+
+/// 起扫码:生成 device_id,拿二维码内容 + query_token。
+#[tauri::command]
+async fn quark_scan_start(state: State<'_, AppState>) -> Result<QuarkScan, String> {
+    let device_id = quark_tv::gen_device_id();
+    let (qr_data, query_token) = quark_tv::get_login_code(&state.http, &device_id)
+        .await
+        .map_err(|e| e.message)?;
+    Ok(QuarkScan { device_id, qr_data, query_token })
+}
+
+/// 轮询扫码结果:用户确认后拿 code→换 refresh_token→建立夸克 TV 源为活跃源。
+/// 返回 true=登录成功;false=尚未确认(继续轮询)。
+#[tauri::command]
+async fn quark_scan_poll(
+    state: State<'_, AppState>,
+    device_id: String,
+    query_token: String,
+) -> Result<bool, String> {
+    let code = match quark_tv::get_code(&state.http, &device_id, &query_token).await {
+        Ok(c) if !c.is_empty() => c,
+        _ => return Ok(false), // 未确认/接口报错 -> 继续轮询
+    };
+    let (_access, refresh) = quark_tv::exchange_token(&state.http, &device_id, &code, false)
+        .await
+        .map_err(|e| e.message)?;
+    let mut extra = HashMap::new();
+    extra.insert("device_id".to_string(), device_id);
+    extra.insert("refresh_token".to_string(), refresh);
+    let server = SourceServer {
+        id: "quark-tv".to_string(),
+        base_url: String::new(),
+        username: None,
+        password: None,
+        token: None,
+        extra,
+    };
+    *state.source.lock().unwrap() = Some((SourceKind::quark(), server));
+    Ok(true)
+}
+
+/// 302 看门狗:探测直链是否失效(END_FILE=error),失效则重解析并从 pos 续播。返回是否重签了。
+/// 前端播放中每轮轮询调用;仅对网盘源播放生效(Emby 直链稳定,不重签)。
+#[tauri::command]
+async fn source_watchdog(state: State<'_, AppState>,
+    ps: State<'_, PlayerState>, pos: f64) -> Result<bool, String> {
+    // 无失效信号 or 非源播放 -> 什么都不做
+    let errored = {
+        let guard = ps.player.lock().unwrap();
+        match guard.as_ref() {
+            Some(p) => p.take_error_eof(),
+            None => return Ok(false),
+        }
+    };
+    let entry = state.source_play_entry.lock().unwrap().clone();
+    let (Some((entry_id, entry_name)), true) = (entry, errored) else {
+        return Ok(false);
+    };
+    let Some((kind, server)) = state.source.lock().unwrap().clone() else {
+        return Ok(false);
+    };
+    // 连续重签超上限:文件本身放不了(非过期),放弃以免死循环。
+    if state.resign_count.load(Ordering::Relaxed) >= 3 {
+        *state.source_play_entry.lock().unwrap() = None;
+        poclog("302 重签连续 3 次仍失败,放弃");
+        return Ok(false);
+    }
+    state.resign_count.fetch_add(1, Ordering::Relaxed);
+    let backend = source_backend(&state, &kind)?;
+    let entry = SourceEntry {
+        id: entry_id,
+        name: entry_name,
+        is_dir: false,
+        is_video: true,
+        size: None,
+        thumb_url: None,
+        raw: None,
+    };
+    // 重解析拿新直链,从原位置续播。
+    let resolved = backend
+        .resolve_play(&state.http, &server, &entry, None)
+        .await
+        .map_err(|e| e.message)?;
+    poclog(&format!("302 重签 -> {}", resolved.url));
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    p.load_with_headers(
+        &resolved.url,
+        pos,
+        &resolved.http_headers,
+        resolved.user_agent_override.as_deref(),
+    )?;
+    p.set_pause(false);
+    Ok(true)
+}
+
+#[tauri::command]
+async fn anirss_list_ani(state: State<'_, AppState>) -> Result<Vec<Json>, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.list_ani(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_play_list(state: State<'_, AppState>, ani: Json) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.play_list(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_get_themoviedb_group(state: State<'_, AppState>, ani: Json) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_themoviedb_group(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_torrents_infos(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.torrents_infos(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_search_bgm(state: State<'_, AppState>, name: String) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.search_bgm(&state.http, &s, &name).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_get_ani_by_subject_id(state: State<'_, AppState>, id: String) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_ani_by_subject_id(&state.http, &s, &id).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_add_ani(state: State<'_, AppState>, ani: Json) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.add_ani(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_set_ani(state: State<'_, AppState>, ani: Json) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.set_ani(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_delete_ani(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    delete_files: bool,
+) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.delete_ani(&state.http, &s, &ids, delete_files).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_refresh_ani(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.refresh_ani(&state.http, &s, &id).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_refresh_all(state: State<'_, AppState>) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.refresh_all(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_update_total_episode_number(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    force: bool,
+) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.update_total_episode_number(&state.http, &s, &ids, force).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_batch_enable(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    value: bool,
+) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.batch_enable(&state.http, &s, &ids, value).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_get_config(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_config(&state.http, &s).await.map_err(|e| e.message)
+}
+
+/// 回写设置。前端**必须**回传 anirss_get_config 拿到的完整 map 改字段后的结果,否则丢字段。
+#[tauri::command]
+async fn anirss_set_config(state: State<'_, AppState>, config: Json) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.set_config(&state.http, &s, config).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_about(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.about(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_preview_ani(state: State<'_, AppState>, ani: Json) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.preview_ani(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+/// 从 previewAni 的返回里提取条目列表(服务端装 List 的 key 不定,core 按形状找)。纯解析,不发请求。
+#[tauri::command]
+fn anirss_preview_items(preview: Json) -> Vec<Json> {
+    linplayer_core::source::anirss::preview_items(&preview)
+}
+
+#[tauri::command]
+async fn anirss_download_path(state: State<'_, AppState>, ani: Json) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.download_path(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_get_bgm_title(state: State<'_, AppState>, ani: Json) -> Result<String, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_bgm_title(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_get_themoviedb_name(state: State<'_, AppState>, ani: Json) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_themoviedb_name(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_refresh_cover(state: State<'_, AppState>, ani: Json) -> Result<String, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.refresh_cover(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_scrape(state: State<'_, AppState>, ani: Json, force: bool) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.scrape(&state.http, &s, ani, force).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_batch_scrape(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    force: bool,
+) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.batch_scrape(&state.http, &s, &ids, force).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_rate(state: State<'_, AppState>, ani: Json) -> Result<i64, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.rate(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_set_rate(state: State<'_, AppState>, ani: Json) -> Result<i64, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.set_rate(&state.http, &s, ani).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_me_bgm(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.me_bgm(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_mikan(
+    state: State<'_, AppState>,
+    text: String,
+    season: Option<Json>,
+) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.mikan(&state.http, &s, &text, season).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_mikan_group(state: State<'_, AppState>, url: String) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.mikan_group(&state.http, &s, &url).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_ani_bt(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.ani_bt(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_ani_bt_group(state: State<'_, AppState>, bgm_id: String) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.ani_bt_group(&state.http, &s, &bgm_id).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_anime_garden_list(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.anime_garden_list(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_anime_garden_group(state: State<'_, AppState>, bgm_id: String) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.anime_garden_group(&state.http, &s, &bgm_id).await.map_err(|e| e.message)
+}
+
+/// 由 RSS 生成订阅 Ani(之后 anirss_add_ani 添加)。kind = mikan/ani-bt/anime-garden/other。
+#[tauri::command]
+async fn anirss_rss_to_ani(
+    state: State<'_, AppState>,
+    url: String,
+    kind: String,
+    bgm_url: Option<String>,
+    subgroup: String,
+    enable: bool,
+) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.rss_to_ani(&state.http, &s, &url, &kind, bgm_url.as_deref(), &subgroup, enable)
+        .await
+        .map_err(|e| e.message)
+}
+
+/// 取某文件的字幕。filename = PlayItem.filename 的 base64 原文(**勿再编码**)。
+#[tauri::command]
+async fn anirss_get_subtitles(state: State<'_, AppState>, filename: String) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_subtitles(&state.http, &s, &filename).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_logs(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.logs(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_download_logs(state: State<'_, AppState>) -> Result<String, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.download_logs(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_clear_logs(state: State<'_, AppState>) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.clear_logs(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_clear_cache(state: State<'_, AppState>) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.clear_cache(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_ping(state: State<'_, AppState>) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.ping(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_download_login_test(state: State<'_, AppState>, config: Json) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.download_login_test(&state.http, &s, config).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_test_proxy(
+    state: State<'_, AppState>,
+    url: String,
+    config: Json,
+) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.test_proxy(&state.http, &s, &url, config).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_test_ip_whitelist(state: State<'_, AppState>) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.test_ip_whitelist(&state.http, &s).await.map_err(|e| e.message)
+}
+
+/// 触发服务端自更新(升级 ani-rss 本体)。
+#[tauri::command]
+async fn anirss_server_update(state: State<'_, AppState>) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.server_update(&state.http, &s).await.map_err(|e| e.message)
+}
+
+/// 停止/重启服务(status 由服务端定义,0 通常为停止)。
+#[tauri::command]
+async fn anirss_stop(state: State<'_, AppState>, status: i64) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.stop(&state.http, &s, status).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_new_notification(state: State<'_, AppState>) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.new_notification(&state.http, &s).await.map_err(|e| e.message)
+}
+
+#[tauri::command]
+async fn anirss_get_emby_views(
+    state: State<'_, AppState>,
+    notification_config: Json,
+) -> Result<Json, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.get_emby_views(&state.http, &s, notification_config).await.map_err(|e| e.message)
+}
+
+/// 导出设置的下载 URL(带令牌;交给浏览器/系统打开)。
+#[tauri::command]
+async fn anirss_export_config_url(state: State<'_, AppState>) -> Result<String, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.export_config_url(&state.http, &s).await.map_err(|e| e.message)
+}
+
+/// 导入设置(bytes = 配置文件字节;前端用 File.arrayBuffer() 传数字数组)。
+#[tauri::command]
+async fn anirss_import_config(
+    state: State<'_, AppState>,
+    bytes: Vec<u8>,
+    filename: String,
+) -> Result<(), String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.import_config(&state.http, &s, &bytes, &filename).await.map_err(|e| e.message)
+}
+
+/// 经服务端代理取图的 URL(TMDB 相对路径等)。
+#[tauri::command]
+async fn anirss_proxy_image_url(state: State<'_, AppState>, img_url: String) -> Result<String, String> {
+    let (b, s) = anirss_ctx(&state)?;
+    b.proxy_image_url(&state.http, &s, &img_url).await.map_err(|e| e.message)
+}
+
+/// 清 token 缓存(重新登录前调;下次请求会用账密重登)。
+#[tauri::command]
+fn anirss_clear_token(state: State<'_, AppState>, server_id: String) {
+    state.anirss.clear_token(&server_id);
+}
+
+// ---------- CF 优选反代命令 ----------
+/// 跑 CF 优选测速,返回排好序的候选 IP(最优在前)。validate_host 传 Emby 域名可剔除
+/// 「TCP 通但 HTTP 死」的边缘;传 None/空则跳过 HTTP 校验。
+#[tauri::command]
+async fn cf_speed_test(
+    validate_host: Option<String>,
+    test_url: Option<String>,
+) -> Result<Vec<linplayer_core::net::cf::CfTestResult>, String> {
+    let mut o = linplayer_core::net::cf::CfSpeedTestOptions::default();
+    if let Some(h) = validate_host {
+        o.validate_host = h;
+    }
+    if let Some(u) = test_url.filter(|s| !s.is_empty()) {
+        o.test_url = u;
+    }
+    Ok(linplayer_core::net::cf::speed_test(o).await)
+}
+
+/// 为某台服务器开启 CF 优选反代,并**登记路由改写** —— 之后该服的 `active_line_url()`
+/// 返回本地反代基址,Emby API / 封面图 / mpv 取流全部自动改走优选 IP。
+/// 已开则热切换 IP(端口与本地基址不变,对进行中的会话无感)。
+#[tauri::command]
+async fn cf_proxy_enable(
+    state: State<'_, AppState>,
+    server_id: String,
+    ip: String,
+) -> Result<String, String> {
+    // 已开 → 只热切 IP。注意别在持锁期间 await。
+    let existing = {
+        let m = state.cf_proxy.lock().unwrap();
+        m.get(&server_id).map(|h| h.port)
+    };
+    if existing.is_some() {
+        let handle = state.cf_proxy.lock().unwrap().remove(&server_id);
+        if let Some(h) = handle {
+            h.update_ip(ip).await;
+            let url = cf::runtime::local_url_for(&server_id).unwrap_or_default();
+            state.cf_proxy.lock().unwrap().insert(server_id, h);
+            return Ok(url);
+        }
+    }
+
+    let (upstream, allow_insecure) = {
+        let cfg = state.config.lock().unwrap();
+        let a = cfg.find(&server_id).ok_or("找不到该服务器")?;
+        // 上游必须用 direct_line_url:用 active_line_url 会在反代已开时把反代自己当上游,
+        // 打成 127.0.0.1 → 127.0.0.1 的自环。
+        (a.direct_line_url().to_string(), a.allow_insecure_tls)
+    };
+    let (scheme, host, port) = cf::runtime::split_upstream(&upstream);
+    let handle = linplayer_core::net::cf::start_proxy(scheme, host, port, ip, allow_insecure)
+        .await
+        .ok_or("CF 反代起服失败(IP 非法?)")?;
+    let local = cf::runtime::local_base(&upstream, handle.port);
+    cf::runtime::bind(&server_id, &local);
+    state.cf_proxy.lock().unwrap().insert(server_id.clone(), handle);
+    refresh_session_base(&state, &server_id);
+    Ok(local)
+}
+
+/// 关闭某服的反代,撤销路由改写,恢复直连原线路。
+#[tauri::command]
+fn cf_proxy_disable(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
+    cf::runtime::unbind(&server_id);
+    state.cf_proxy.lock().unwrap().remove(&server_id); // Drop 停服
+    refresh_session_base(&state, &server_id);
+    Ok(())
+}
+
+/// 当前所有生效的反代改写(设置页展示"哪台服在走优选、钉的哪个 IP")。
+#[tauri::command]
+async fn cf_proxy_status(state: State<'_, AppState>) -> Result<Vec<CfProxyStatus>, String> {
+    let ports: Vec<(String, String)> = cf::runtime::all().into_iter().collect();
+    let mut out = Vec::new();
+    for (server_id, local_url) in ports {
+        // pinned_ip 要 await,不能在持锁时取;先把句柄摘出来问完再放回。
+        let handle = state.cf_proxy.lock().unwrap().remove(&server_id);
+        let pinned_ip = match handle {
+            Some(h) => {
+                let ip = h.pinned_ip().await;
+                state.cf_proxy.lock().unwrap().insert(server_id.clone(), h);
+                ip
+            }
+            None => String::new(),
+        };
+        out.push(CfProxyStatus { server_id, local_url, pinned_ip });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+fn get_prefetch_settings(state: State<'_, AppState>) -> PrefetchSettings {
+    let p = &state.config.lock().unwrap().prefs;
+    PrefetchSettings {
+        servers: p.prefetch_servers.clone(),
+        threads: p.prefetch_threads,
+        // 钳回合法区间再给前端:老配置可能存着 16/32MB 这类小值或离谱值,
+        // 原样透出去会让设置页一保存就被拒,连开关服务器都点不动。
+        cache_bytes: p.prefetch_cache_bytes.clamp(
+            linplayer_core::config::PREFETCH_CACHE_MIN,
+            linplayer_core::config::PREFETCH_CACHE_MAX,
+        ),
+    }
+}
+
+#[tauri::command]
+fn set_prefetch_settings(
+    state: State<'_, AppState>,
+    settings: PrefetchSettings,
+) -> Result<(), String> {
+    // 引擎会 clamp(2,4),但在这儿拒掉才有反馈 —— 悄悄 clamp 会让用户以为设了 8 线程生效了。
+    if !(2..=4).contains(&settings.threads) {
+        return Err("预取线程数只支持 2~4".into());
+    }
+    // 上下限都得拒:上限静默夹紧的话,用户设 8GB 实际只生效 4GB,毫无反馈。
+    // 区间由来见 net/prefetch.rs 的 DiskCache —— 它现在是**磁盘**占用上限(环形复用),
+    // 不再是每连接内存缓冲,所以敢给到 GB 级。
+    if !(linplayer_core::config::PREFETCH_CACHE_MIN..=linplayer_core::config::PREFETCH_CACHE_MAX)
+        .contains(&settings.cache_bytes)
+    {
+        return Err("缓存上限只支持 64MB~4GB(落盘环形缓存,决定磁盘占用)".into());
+    }
+    let mut cfg = state.config.lock().unwrap();
+    // 只留真实存在的账号:服务器删了它的 id 还赖在表里,下次加同地址的服会「自己就开着」。
+    let known: Vec<String> = cfg.accounts.iter().map(|a| a.server.clone()).collect();
+    cfg.prefs.prefetch_servers = settings
+        .servers
+        .into_iter()
+        .filter(|s| known.contains(s))
+        .collect();
+    cfg.prefs.prefetch_threads = settings.threads;
+    cfg.prefs.prefetch_cache_bytes = settings.cache_bytes;
+    cfg.save();
+    Ok(())
+}
+
+#[tauri::command]
+async fn chapter_info(
+    state: State<'_, AppState>,
+    item_id: String,
+    runtime_secs: f64,
+) -> Result<ChapterInfo, String> {
+    let s = session_of(&state)?;
+    let (skip_intro, skip_outro, thumbs) = {
+        let p = &state.config.lock().unwrap().prefs;
+        (p.skip_intro, p.skip_outro, p.preview_thumbs)
+    };
+    // 三个开关都关 = 不用打服务器。省一次请求,也省得白拉几十张章节图。
+    if !skip_intro && !skip_outro && !thumbs {
+        return Ok(ChapterInfo { chapters: Vec::new(), intro: None, outro: None, thumbs: false });
+    }
+    let chapters = linplayer_core::emby::chapters(&state.http, &s, &item_id, 320).await;
+    let intro = skip_intro
+        .then(|| linplayer_core::emby::intro_range(&chapters, runtime_secs))
+        .flatten();
+    let outro = skip_outro
+        .then(|| linplayer_core::emby::outro_range(&chapters, runtime_secs))
+        .flatten();
+    poclog(&format!(
+        "chapters item={item_id} n={} intro={intro:?} outro={outro:?}",
+        chapters.len()
+    ));
+    Ok(ChapterInfo {
+        chapters: if thumbs { chapters } else { Vec::new() },
+        intro,
+        outro,
+        thumbs,
+    })
+}
+
+/// 外部播放器起播。前端在进播放页**之前**调:返回 Ok 就别再进内置播放器了。
+///
+/// 为什么单独一个命令而不是塞进 play():play() 的返回值是「起播秒数」,
+/// 全前端都按这个契约用。硬塞一个「其实没在本机播」的语义进去,调用点迟早判漏。
+#[tauri::command]
+async fn play_external(
+    state: State<'_, AppState>,
+    item_id: String,
+    resume_secs: f64,
+    media_source_id: Option<String>,
+) -> Result<String, String> {
+    let exe = state.config.lock().unwrap().prefs.external_player.clone();
+    if exe.is_empty() {
+        return Err("未设置外部播放器".into());
+    }
+    if !std::path::Path::new(&exe).is_file() {
+        return Err(format!("外部播放器不存在: {exe}"));
+    }
+    let s = session_of(&state)?;
+    let version_regex = state.config.lock().unwrap().prefs.version_regex.clone();
+    let target =
+        emby::resolve_stream(&state.http, &s, &item_id, media_source_id.as_deref(), &version_regex)
+            .await?;
+    // mpv 系通吃 --start=;不是 mpv 的播放器会忽略未知参数或直接报错,
+    // 所以进度参数只在文件名像 mpv 时才给 —— 给错参数导致压根打不开,比不续播糟得多。
+    let is_mpv = std::path::Path::new(&exe)
+        .file_stem()
+        .and_then(|x| x.to_str())
+        .is_some_and(|x| x.to_ascii_lowercase().contains("mpv"));
+    let mut cmd = std::process::Command::new(&exe);
+    if is_mpv && resume_secs > 1.0 {
+        cmd.arg(format!("--start={resume_secs}"));
+    }
+    cmd.arg(&target.url);
+    cmd.spawn().map_err(|e| format!("启动外部播放器失败: {e}"))?;
+    poclog(&format!("外部播放器 {exe} <- {}", target.url));
+    // 上报 start:交给外部播放器后我们收不到进度了,但至少让服务器知道这次播放发生过。
+    if let Err(e) = emby::report_start(&state.http, &s, &target, resume_secs).await {
+        poclog(&format!("report_start(外部) ERR: {e}"));
+    }
+    Ok(exe)
+}
+
+/// Scrobble 一次(start/pause/stop);ids 如 {"imdb":"tt..","tmdb":123}。未连接返回 false。
+#[tauri::command]
+async fn trakt_scrobble(
+    state: State<'_, AppState>,
+    type_: String,
+    ids: serde_json::Value,
+    progress: f64,
+    action: String,
+) -> Result<bool, String> {
+    let acc = state.config.lock().unwrap().sync_trakt.clone();
+    let Some(acc) = acc else { return Ok(false) };
+    let item = serde_json::json!({ type_: { "ids": ids } });
+    Ok(trakt::scrobble(&acc, &item, progress, &action).await)
+}
+
+/// 设置条目收藏(type:1想看2看过3在看4搁置5抛弃)。更新单集前须先收藏。
+#[tauri::command]
+async fn bangumi_set_collection(
+    state: State<'_, AppState>,
+    subject_id: i64,
+    type_: i32,
+) -> Result<bool, String> {
+    let acc = state.config.lock().unwrap().sync_bangumi.clone();
+    let Some(acc) = acc else { return Ok(false) };
+    Ok(bangumi::set_collection_type(&acc, subject_id, type_).await)
+}
+
+/// 更新单集观看状态(type:2看过)。
+#[tauri::command]
+async fn bangumi_update_episode(
+    state: State<'_, AppState>,
+    subject_id: i64,
+    episode_id: i64,
+    type_: Option<i32>,
+) -> Result<bool, String> {
+    let acc = state.config.lock().unwrap().sync_bangumi.clone();
+    let Some(acc) = acc else { return Ok(false) };
+    Ok(bangumi::update_episode_status(&acc, subject_id, episode_id, type_.unwrap_or(2)).await)
+}
+
+/// 单部番的简介(Bangumi)。**按需**拉,聚焦视图只对当前那条调。
+///
+/// 为什么不在 bangumi_calendar 里一次带回:`/calendar` 的 summary 字段实测整周全空
+/// (2026-07-16),真简介只在 /v0/subjects/{id} —— 一周 111 部 = 111 次请求,
+/// 压在放送表加载路径上会把整页拖到几秒。核层带进程内缓存,滚回来是瞬时的。
+/// 取不到返回 None:**前端就别画简介**,不要编。
+#[tauri::command]
+async fn bangumi_summary(subject_id: i64) -> Result<Option<String>, String> {
+    Ok(bangumi::fetch_subject_summary(subject_id).await)
+}
+
+// ---------- 配置迁移(扫码搬服务器)命令 ----------
+/// 导出当前所有账号为二维码载荷字符串(LPSYNC1:...);前端渲染成二维码,他机扫码导入。
+/// 全程离线,载荷内账号凭据 AES 加密 + gzip。
+#[tauri::command]
+fn config_export_qr(state: State<'_, AppState>) -> String {
+    let accounts = state.config.lock().unwrap().accounts.clone();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    linplayer_core::config_transfer::encode(&accounts, now)
+}
+
+/// 导入扫到的载荷:解码 → 按 server 合并进现有账号 → 落盘。返回导入的账号数。
+#[tauri::command]
+fn config_import_qr(state: State<'_, AppState>, payload: String) -> Result<usize, String> {
+    let incoming = linplayer_core::config_transfer::decode(&payload)?;
+    let count = incoming.len();
+    let mut cfg = state.config.lock().unwrap();
+    let merged = linplayer_core::config_transfer::merge(&cfg.accounts, incoming);
+    cfg.accounts = merged;
+    if cfg.active.is_none() && !cfg.accounts.is_empty() {
+        cfg.active = Some(0);
+    }
+    cfg.save();
+    Ok(count)
+}
+
+// ---------- 付费(爱发电)命令 ----------
+/// 校验爱发电订单号(经已部署的 CF 代理,客户端不接触 afdian token)。软锁。
+#[tauri::command]
+async fn afdian_verify(
+    order_no: String,
+) -> Result<linplayer_core::sync::AfdianVerifyResult, String> {
+    Ok(linplayer_core::sync::afdian_verify(&order_no).await)
+}
+
+/// 赞助下单页地址。
+///
+/// ★ 前端**不许自己写这个 URL**。2026-07-19 踩过:核层早有正确的
+/// `AFDIAN_SPONSOR_URL`,CalendarPage.tsx 却自己硬编了一个 `afdian.com/a/linplayer`
+/// —— 页面不是作者本人的,点「前往爱发电赞助」的人全被送错地方,赞助收益直接落空,
+/// 而功能本身看起来一切正常。付款地址这种东西必须只有一份。
+#[tauri::command]
+fn afdian_sponsor_url() -> String {
+    linplayer_core::sync::AFDIAN_SPONSOR_URL.to_string()
+}
+
+// ---------- 插件命令 ----------
+#[tauri::command]
+fn plugin_list(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    Ok(plugins_mgr(&state)?.list())
+}
+
+#[tauri::command]
+fn plugin_install(state: State<'_, AppState>, path: String) -> Result<serde_json::Value, String> {
+    plugins_mgr(&state)?.install_ipk(&path)
+}
+
+#[tauri::command]
+async fn plugin_enable(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    plugins_mgr(&state)?.enable(&id).await
+}
+
+#[tauri::command]
+async fn plugin_disable(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    plugins_mgr(&state)?.disable(&id).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn plugin_uninstall(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    plugins_mgr(&state)?.uninstall(&id).await;
+    Ok(())
+}
+
+/// 触发某扩展的 handler(actions/settingsPages 的入口按钮等)。
+#[tauri::command]
+async fn plugin_trigger(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    type_id: String,
+    ext_id: String,
+    args: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let args = args.unwrap_or_else(|| serde_json::json!([]));
+    plugins_mgr(&state)?.trigger_extension(&plugin_id, &type_id, &ext_id, args).await
+}
+
+/// 触发扩展 data 里某具名字段的 handler(设置页的 load/submit)。
+#[tauri::command]
+async fn plugin_invoke_field(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    type_id: String,
+    ext_id: String,
+    field: String,
+    args: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let args = args.unwrap_or_else(|| serde_json::json!([]));
+    plugins_mgr(&state)?
+        .invoke_extension_field(&plugin_id, &type_id, &ext_id, &field, args)
+        .await
+}
+
+/// 取某类贡献点全部条目(dataSources / panels / actions / sandboxViews)。
+#[tauri::command]
+fn plugin_extensions(state: State<'_, AppState>, type_id: String) -> Result<Vec<serde_json::Value>, String> {
+    Ok(plugins_mgr(&state)?.extensions_by_type(&type_id))
+}
+
+/// 取挂在某个 slot 的全部面板。首页/侧栏/播放器叠加层各自只关心自己那一撮,
+/// 让前端拉全量再过滤等于每个位置都要重复一遍 slot 常量。
+#[tauri::command]
+fn plugin_panels(state: State<'_, AppState>, slot: String) -> Result<Vec<serde_json::Value>, String> {
+    Ok(plugins_mgr(&state)?.panels_in_slot(&slot))
+}
+
+/// 当前所有已启用插件贡献的数据源。「添加服务器」页据此列出可选的插件源。
+#[tauri::command]
+fn plugin_sources(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let mgr = plugins_mgr(&state)?;
+    // 把 manifest 里声明的 auth 表单字段一并带上 —— 前端要靠它渲染通用登录表单,
+    // 否则每接一个插件源都得改前端。
+    let decls = mgr.extensions_by_type(linplayer_core::plugins::ContributionKind::DataSources.id());
+    Ok(mgr
+        .data_sources()
+        .into_iter()
+        .map(|(plugin_id, src_id, name)| {
+            let auth = decls
+                .iter()
+                .find(|d| d["pluginId"] == plugin_id.as_str() && d["id"] == src_id.as_str())
+                .and_then(|d| d["data"].get("auth").cloned());
+            serde_json::json!({
+                "kind": linplayer_core::source::SourceKind::plugin(&plugin_id, &src_id).as_str(),
+                "pluginId": plugin_id,
+                "sourceId": src_id,
+                "name": name,
+                "auth": auth,
+            })
+        })
+        .collect())
+}
+
+
+
+/// 重载一个插件(禁用 -> 重读 manifest -> 重新启用)。
+#[tauri::command]
+async fn plugin_reload(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    plugins_mgr(&state)?.reload(&id).await
+}
+
+/// 轮询开发模式插件的入口文件是否变了,变了的自动重载,返回被重载的 id。
+///
+/// `ponytail:` 轮询 mtime 而不是上 `notify` crate —— 零新依赖,开发模式插件通常
+/// 就一两个。真嫌慢再换 notify。前端在插件页开着时每秒调一次。
+#[tauri::command]
+async fn plugin_dev_poll(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mgr = plugins_mgr(&state)?;
+    let changed = mgr.dev_plugins_changed();
+    for id in &changed {
+        let _ = mgr.reload(id).await;
+    }
+    Ok(changed)
+}
+
+/// 前端回填一次 ctx.ui 请求(showForm 的返回值等)。value=null 视为取消。
+#[tauri::command]
+fn plugin_ui_respond(state: State<'_, AppState>, id: u64, value: Option<serde_json::Value>) {
+    plugins_host::ui_respond(&state, id, value.unwrap_or(serde_json::Value::Null));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = imgcache::register(tauri::Builder::default());
+    let builder = pluginassets::register(imgcache::register(tauri::Builder::default()));
     builder
         .setup(|app| {
             /* ★ 这里的顺序是有讲究的,别挪。
@@ -2075,7 +4330,12 @@ pub fn run() {
             let mut source_backends: HashMap<SourceKind, Arc<dyn MediaSourceBackend>> =
                 HashMap::new();
             source_backends.insert(SourceKind::openlist(), Arc::new(OpenListBackend::new()));
-            source_backends.insert(SourceKind::anirss(), Arc::new(AniRssBackend::new()));
+            /* ★ Ani-RSS 建一次、存两处:管理接口(listAni/config/…)不在 MediaSourceBackend
+                  trait 上,trait object 取不到,所以 AppState 另存一份具体类型的 Arc。
+                  **必须是同一个 Arc**(clone 后 unsize 成 dyn),否则浏览时重登拿到的 token
+                  和管理接口用的是两套缓存,表现是"刚登录过,管理页还说未登录"。与桌面同构。 */
+            let anirss_backend = Arc::new(AniRssBackend::new());
+            source_backends.insert(SourceKind::anirss(), anirss_backend.clone());
             source_backends.insert(SourceKind::feiniu(), Arc::new(FeiniuBackend::new()));
             source_backends.insert(SourceKind::quark(), Arc::new(QuarkBackend::new()));
             // 与 apps/desktop/src/lib.rs 的同名表必须逐条对齐,漏一条那一端就静默不可用。
@@ -2118,6 +4378,21 @@ pub fn run() {
                 scrobble_ctx: Mutex::new(None),
                 companion: Mutex::new(None),
                 now_playing: Mutex::new(None),
+                // ---- 2026-07-26 手机端接入补齐,与 apps/desktop 的初始化逐字对应 ----
+                anirss: anirss_backend,
+                source_play_entry: Mutex::new(None),
+                resign_count: AtomicU32::new(0),
+                cf_proxy: Mutex::new(HashMap::new()),
+                watch_history: linplayer_core::watch_history::WatchHistory::default(),
+                series_tmdb: Mutex::new(HashMap::new()),
+                danmaku_comments: Mutex::new(Vec::new()),
+                danmaku_seq: AtomicU32::new(0),
+                danmaku_anchors: Mutex::new(HashMap::new()),
+                wh_done: Mutex::new(Default::default()),
+                wh_ctx: Mutex::new(None),
+                plugins: OnceLock::new(),
+                ui_pending: Mutex::new(HashMap::new()),
+                ui_seq: AtomicU64::new(0),
             });
             /* 播放器状态单独一份 State:它的生命周期和 Surface 绑,不跟 AppState 一起建。 */
             app.manage(PlayerState::default());
@@ -2133,6 +4408,15 @@ pub fn run() {
                     start_companion(h).await;
                 });
             }
+            /* 插件系统:host 持 AppHandle 落平台能力。
+               基目录和其它数据一起进 data/plugins(**不用 app_config_dir()** —— 那是由
+               tauri.conf.json 的 identifier 推出来的,改 identifier 就让已装插件静默失联)。 */
+            let base = linplayer_core::paths::data_dir("plugins");
+            let host = plugins_host::make_host(app.handle().clone());
+            let mgr = PluginManager::new(base, host);
+            let _ = app.state::<AppState>().plugins.set(mgr.clone());
+            sync_plugin_source_grants(&app.state::<AppState>());
+            tauri::async_runtime::spawn(async move { mgr.init().await });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2225,6 +4509,159 @@ pub fn run() {
             tracks,
             stop_playback,
             report_progress,
+        
+            // ---- 2026-07-26 手机端接入补齐(实现体见本文件「从 apps/desktop 搬过来」那一节)----
+            relogin,
+            list_items,
+            test_connection,
+            list_collections,
+            icon_library,
+            is_admin,
+            refresh_item,
+            scan_libraries,
+            update_account,
+            startup_deep_link,
+            set_account_icon_file,
+            clear_account_icon,
+            batch_parse,
+            parse_deep_link,
+            batch_add_servers,
+            probe_lines,
+            current_source,
+            player_opts,
+            set_speed,
+            set_volume,
+            set_mute,
+            set_audio_delay,
+            set_sub_delay,
+            set_aspect_ratio,
+            set_hwdec,
+            set_sub_style,
+            set_secondary_sub,
+            set_secondary_sub_opts,
+            add_subtitle,
+            shader_levels,
+            set_shader_level,
+            mpv_get,
+            mpv_set,
+            mpv_command,
+            apply_prefs,
+            validate_track_regex,
+            set_track_regexes,
+            source_watchdog,
+            quark_scan_start,
+            quark_scan_poll,
+            anirss_list_ani,
+            anirss_play_list,
+            anirss_get_themoviedb_group,
+            anirss_torrents_infos,
+            anirss_search_bgm,
+            anirss_get_ani_by_subject_id,
+            anirss_add_ani,
+            anirss_set_ani,
+            anirss_delete_ani,
+            anirss_refresh_ani,
+            anirss_refresh_all,
+            anirss_update_total_episode_number,
+            anirss_batch_enable,
+            anirss_get_config,
+            anirss_set_config,
+            anirss_about,
+            anirss_preview_ani,
+            anirss_preview_items,
+            anirss_download_path,
+            anirss_get_bgm_title,
+            anirss_get_themoviedb_name,
+            anirss_refresh_cover,
+            anirss_scrape,
+            anirss_batch_scrape,
+            anirss_rate,
+            anirss_set_rate,
+            anirss_me_bgm,
+            anirss_mikan,
+            anirss_mikan_group,
+            anirss_ani_bt,
+            anirss_ani_bt_group,
+            anirss_anime_garden_list,
+            anirss_anime_garden_group,
+            anirss_rss_to_ani,
+            anirss_get_subtitles,
+            anirss_logs,
+            anirss_download_logs,
+            anirss_clear_logs,
+            anirss_clear_cache,
+            anirss_ping,
+            anirss_download_login_test,
+            anirss_test_proxy,
+            anirss_test_ip_whitelist,
+            anirss_server_update,
+            anirss_stop,
+            anirss_new_notification,
+            anirss_get_emby_views,
+            anirss_export_config_url,
+            anirss_import_config,
+            anirss_proxy_image_url,
+            anirss_clear_token,
+            get_danmaku_config,
+            get_official_danmaku,
+            set_danmaku_config,
+            danmaku_search,
+            danmaku_episodes,
+            danmaku_load,
+            danmaku_match,
+            danmaku_min_auto_score,
+            danmaku_filter,
+            danmaku_import_blocklist,
+            danmaku_cache_clear,
+            danmaku_cache_size,
+            danmaku_load_local,
+            danmaku_attach,
+            danmaku_detach,
+            danmaku_visible,
+            danmaku_auto_load,
+            cf_speed_test,
+            cf_proxy_enable,
+            cf_proxy_disable,
+            cf_proxy_status,
+            get_prefetch_settings,
+            set_prefetch_settings,
+            chapter_info,
+            play_external,
+            watch_history_list,
+            watch_history_scan_restore,
+            watch_history_restore_candidate,
+            get_writeback_settings,
+            set_writeback_settings,
+            watch_history_clear,
+            watch_history_delete,
+            afdian_verify,
+            afdian_sponsor_url,
+            trakt_scrobble,
+            bangumi_set_collection,
+            bangumi_update_episode,
+            bangumi_summary,
+            config_export_qr,
+            config_import_qr,
+            plugin_list,
+            plugin_install,
+            plugin_enable,
+            plugin_disable,
+            plugin_uninstall,
+            plugin_trigger,
+            plugin_invoke_field,
+            plugin_ui_respond,
+            plugin_extensions,
+            plugin_panels,
+            plugin_sources,
+            plugin_reload,
+            plugin_dev_poll,
+            plugin_permission_catalog,
+            plugin_market_sources,
+            plugin_market_add_source,
+            plugin_market_remove_source,
+            plugin_market_toggle_source,
+            plugin_market_list,
+            plugin_market_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

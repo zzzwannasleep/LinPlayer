@@ -22,6 +22,7 @@ linplayer-core = { path = "../../crates/core" }
 linplayer-mpv = { path = "../../crates/mpv" }
 # mpv 的告警走标准 log 门面。没装 logger 时是空操作,不会panic;
 # tauri 的 android binding 会装 android_logger,所以真机上落 logcat。
+async-trait = "0.1"  # plugins_host 的 PluginHost trait 实现要它(与桌面同版本)
 log = "0.4"
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }

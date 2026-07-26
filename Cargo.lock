@@ -2635,6 +2635,7 @@ dependencies = [
 name = "linplayer-android"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "jni 0.21.1",
  "linplayer-core",
  "linplayer-mpv",
