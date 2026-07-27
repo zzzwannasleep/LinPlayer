@@ -1,28 +1,54 @@
-# apps/android —— Android 宿主壳(TV + 手机,同一个 APK)
+# apps/android —— Android 宿主壳(TV 包 + 手机包)
 
-Tauri 2 mobile 壳。**一个 APK 同时装电视和手机** —— manifest 里 `leanback` 和
-`touchscreen` 都是 `required="false"`,`LAUNCHER` 和 `LEANBACK_LAUNCHER` 两个 category 都有。
+Tauri 2 mobile 壳。同一份 Rust/Kotlin 代码出 **4 个 APK**:TV / 手机 × arm64 / arm32。
 
-壳打开的是 `dist/index-android.html`(几行的**分流 shim**),不是桌面那套 `index.html`:
-`MainActivity` 判 `UiModeManager.currentModeType`,是电视就给 WebView 的 UA 加一个
-` LinPlayerTV` 标,shim 据此 `location.replace()` 到 `index-tv.html` 或 `index-mobile.html`。
+## TV 和手机是两个包(2026-07-27 改的)
 
-★ **不出第二个 APK。** `applicationId` 是 `xyz.linplayer.app` 且被 `build.yml` 硬校验 ——
-换包名等于老用户收不到覆盖升级。两个包名还要多一套签名、多一条 CI、多一个装错的机会,
-而省下的只是几百 KB 的前端 bundle(APK 体积的大头是 libmpv)。
+在那之前是「一个 APK + `index-android.html` 按 UA 标 `location.replace`」,已经删了。
+**设备类型运行时判不准**:大屏平板、投屏一体机、模拟器都可能被判成电视,而判反的表现
+不是小 bug,是用户拿到**另一端的整套界面**。
 
-★ UA 标必须在 `onWebViewCreate` 里打,不能放进那个 `post{}` —— 那时 shim 已经跑完了,
-表现是电视上永远进手机 UI,而且不报错。
+现在壳打开哪个 html 在出包时定死,两个包**只差一个配置**:
+
+| 包 | 入口 | 怎么出 |
+|---|---|---|
+| TV | `index-tv.html` | `apps/android/tauri.conf.json` 的默认值 |
+| 手机 | `index-mobile.html` | 额外挂 `--config tauri.phone.conf.json` 覆盖窗口 url |
+
+★ **两个包的 `applicationId` 仍是同一个 `xyz.linplayer.app`,故意的。** 一台设备只会装
+其中一个,包名一致才保得住老用户的覆盖升级(`build.yml` 里有硬校验)。副作用只有
+「手机包装到盒子上会顶掉 TV 包」,那本来也是用户主动选的。
+
+★ manifest 只有一份:`leanback` 和 `touchscreen` 都是 `required="false"`,
+`LAUNCHER` 和 `LEANBACK_LAUNCHER` 两个 category 都有。两个包共用它 ——
+手机包里多一个 leanback category 不影响任何东西,不值得为它拆两份 manifest。
+
+★ **CI 里有入口闸门**(`Assert APK entry point`):从成品 APK 里读
+`assets/tauri.conf.json` 比对窗口 url。`--config` 一旦失效,出来的手机包会照样构建成功、
+照样签名、照样装得上,打开却是整套 TV 界面 —— 源码里看不出来。
+
+## ABI:arm64 和 arm32 都出
+
+arm64 是 2026-07-27 才加的。在那之前只出 `armeabi-v7a` —— 盒子无所谓(32 位包能跑在
+64 位设备上),但**手机不行**:8 Gen 4 / 天玑 9400 这一代 SoC 已经彻底砍掉 AArch32,
+32 位包装上去直接起不来。
 
 ## 怎么出包
 
 ```bash
-bash scripts/build-android-apk.sh            # release APK
-bash scripts/build-android-apk.sh --debug    # debug APK
+bash scripts/build-android-apk.sh                    # TV + arm64(默认)
+bash scripts/build-android-apk.sh --phone --arm64    # 手机 + arm64
+bash scripts/build-android-apk.sh --phone --arm32 --debug
 LP_ANDROID_PKG=linplayer-android bash scripts/build-android.sh   # 只验交叉编译,不打包
 ```
 
-产物:`gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk`
+⚠️ 脚本**不拉 `libmpv.so`**(CI 那步会拉)。本地第一次跑要手动放一份到
+`gen/android/app/src/main/jniLibs/<abi>/libmpv.so`,ABI 要和 `--arm64/--arm32` 对上,
+否则包出得来、装得上、一播放就 `UnsatisfiedLinkError`。
+
+产物:`gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`
+(名字里的 `universal` 是 gradle 的 flavor 名,不代表它含多个 ABI ——
+一次只编一个 `--target`,所以里面就一个 ABI。)
 
 **不要直接 `npx tauri android build`**:gradle 会转手调 cargo 编安卓目标,而
 rquickjs-sys 在安卓必须现跑 bindgen —— libclang/resource-dir/sysroot/INCLUDE
@@ -41,12 +67,11 @@ rquickjs-sys 在安卓必须现跑 bindgen —— libclang/resource-dir/sysroot/
 - **播放器已接原生 libmpv**(2026-07-20),与桌面共用 `crates/mpv`。四条缺一不可,
   少任何一条的表现都是「不报错但黑屏」,所以逐条记在这里:
   1. **`libmpv.so` 不入库**,由 CI 从 media-kit/libmpv-android-video-build v1.1.11
-     的 `full-armeabi-v7a.jar` 拉进 `jniLibs/`(gitignore)。选 full 是为了 PGS 图形字幕。
-     ★ **TV 包是 32 位(armeabi-v7a)**:机顶盒里 32 位用户空间仍是主流,而 32 位包
-     在 64 位设备上也能跑(反过来不行)。arm64 留给将来的安卓移动端。
-     换 ABI 要**四处一起改**:CI 的 jar/DEST、`--target`、rust targets、产物文件名,
-     以及 scripts/build-android-apk.sh。漏一处 = APK 里的 .so 和代码不是同一个 ABI,
-     构建绿、装得上、一播放就 UnsatisfiedLinkError。
+     的 `full-<abi>.jar` 拉进 `jniLibs/`(gitignore)。选 full 是为了 PGS 图形字幕。
+     ABI 由 `build.yml` 的矩阵给(`arm64-v8a` / `armeabi-v7a`),四处必须对上:
+     矩阵里的 `jni_abi`/`elf_class`/`elf_machine`、`rust_target`、`tauri_target`、产物文件名。
+     漏一处 = APK 里的 .so 和代码不是同一个 ABI,构建绿、装得上、一播放就
+     UnsatisfiedLinkError(所以 CI 里既验 libmpv.so 的 ELF 头,也验成品的 `native-code:`)。
      没跑这一步 → APK 照常绿,装上去按播放报「APK 里没有 libmpv.so」。
   2. **必须调 `av_jni_set_java_vm`**。这个二进制**没有导出 `JNI_OnLoad`**
      (`llvm-nm -D` 实测),所以 `System.loadLibrary("mpv")` 并不会替它登记 JavaVM。

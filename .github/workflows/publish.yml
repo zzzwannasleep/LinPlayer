@@ -67,12 +67,21 @@ jobs:
       - name: Verify assets (informational)
         run: |
           VER="${{ steps.resolve.outputs.version }}"
-          # 只列**真的会被构建出来**的产物。当前 build.yml 构 Windows + Linux:
-          # 苹果全线不做,Android 端待重构。
+          # 只列**真的会被构建出来**的产物(苹果全线不做,所以不列)。
           # 把不存在的平台留在这儿只会让每次发布刷一串假「缺少 xxx」,久了没人看这段输出。
+          #
+          # 安卓是 4 个包:TV / 手机各出 arm64 和 arm32。
+          # TV 和手机是**两个不同的包**,不是同一个文件换名字 —— 壳打开哪套 UI
+          # 在出包时就定死了(见 build.yml 的 build-android 矩阵)。
+          # arm32 留着是为了老盒子和老手机;新旗舰 SoC(8 Gen 4 / 天玑 9400 这一代)
+          # 已经没有 AArch32,只能装 arm64 那个。
           EXPECTED=(
             "LinPlayer-Windows-v$VER.zip"
             "LinPlayer-Linux-v$VER.zip"
+            "LinPlayer-TV-v$VER-arm64.apk"
+            "LinPlayer-TV-v$VER-arm32.apk"
+            "LinPlayer-Phone-v$VER-arm64.apk"
+            "LinPlayer-Phone-v$VER-arm32.apk"
           )
           MISSING=0
           for f in "${EXPECTED[@]}"; do

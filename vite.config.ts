@@ -50,19 +50,22 @@ export default defineConfig(async () => ({
   /* 只在**要上传**时才生成 sourcemap。没 token 还生成的话,那些 .map 会被 tauri 一起
      打进 exe 的内嵌资源(frontendDist 整个塞进二进制)= 把整份前端源码发给用户。
      删除动作挂在插件的 filesToDeleteAfterUpload 上,而插件在没 token 时压根不存在。 */
-  /* 四个入口:
+  /* 三个入口:
        index.html         → 桌面 UI(ui/desktop)
        index-tv.html      → Android TV UI(ui/tv,10-foot 版式 + 遥控焦点)
        index-mobile.html  → Android 手机 UI(ui/mobile,触摸版式 + 手势)
-       index-android.html → 安卓壳的**分流 shim**,按 UA 标转到上面两者之一
      TV 和手机是**两套完整界面**,不是彼此的响应式断点(交互模型根本不同:
      一个是遥控焦点格子,一个是拇指手势),所以各自独立入口独立产物。
      桌面用户不该下载 TV 的代码,手机用户不该下载遥控焦点库,反之亦然。
 
+     ★ 2026-07-27 删掉了第四个入口 index-android.html(那个按 UA 标 location.replace
+       的分流 shim)。**设备类型不是运行时能可靠判出来的**:大屏平板、投屏一体机、
+       模拟器都能把它判反,而判反的表现是用户拿到**另一端的整套界面**。
+       改成出包时就定死:TV 包和手机包是两个 APK,各自的壳直接打开自己那个 html
+       (见 apps/android/tauri.conf.json 与 tauri.phone.conf.json)。
+
      ★ 一旦写了 rollupOptions.input,vite 就不再默认打包 index.html,
-       **每一个都得列出来**(漏掉的那个不会报错,只是静默产不出 html)。
-       2026-07-26 加手机端时这条差点又栽:漏了 index-android.html 的话,
-       安卓壳打开的是个 404,而 CI 全绿。 */
+       **每一个都得列出来**(漏掉的那个不会报错,只是静默产不出 html)。 */
   build: {
     sourcemap: Boolean(sentryToken),
     rollupOptions: {
@@ -70,7 +73,6 @@ export default defineConfig(async () => ({
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         tv: fileURLToPath(new URL("./index-tv.html", import.meta.url)),
         mobile: fileURLToPath(new URL("./index-mobile.html", import.meta.url)),
-        android: fileURLToPath(new URL("./index-android.html", import.meta.url)),
       },
     },
   },

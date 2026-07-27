@@ -104,16 +104,14 @@ class MainActivity : TauriActivity() {
     /* UI 层必须透明,否则它会把底下的视频整个盖住 —— 这就是「有声音没画面」。 */
     webView.setBackgroundColor(Color.TRANSPARENT)
 
-    /* ★ 给电视的 UA 打个标,index-android.html 那个 shim 据此决定加载哪套 UI。
-       必须在这里设:onWebViewCreate 跑在 Wry 建 WebView 的**中途**,此时还没导航,
-       改 UA 才来得及被首个请求带上。放到 post{} 里就晚了 —— 那时 shim 已经跑完,
-       表现是电视上永远进手机 UI,而且不报错。
+    /* 这里原本给电视的 UA 加一个 " LinPlayerTV" 标,让 index-android.html 那个 shim
+       在运行时决定加载哪套 UI。2026-07-27 整条路删了:**设备类型判不准**,
+       大屏平板 / 投屏一体机 / 模拟器都可能被判成电视,而判反的表现是用户拿到
+       另一端的整套界面。现在 TV 包和手机包是两个 APK,壳打开哪个 html 在出包时
+       就定死了(apps/android/tauri.conf.json vs tauri.phone.conf.json)。
 
-       只在电视上加标、手机上原样不动:让「没有标」成为默认路径,
-       这样桌面 Tauri 壳和浏览器(它们都没有标)开发调试时天然走手机 UI。 */
-    if (isTelevision) {
-      webView.settings.userAgentString = webView.settings.userAgentString + " LinPlayerTV"
-    }
+       ⚠️ 下面 `isTelevision` 仍在用,但只剩「要不要藏系统状态栏」这一处装饰性判断,
+       判错了最多是多/少一条状态栏,不会走错界面。 */
 
     /* ★ post 而不是直接做:onWebViewCreate 触发时 WebView 还没 attach 到父容器,
        这时 webView.parent 是 null,加不进去(而且不会报错,只是静默什么都没发生)。 */

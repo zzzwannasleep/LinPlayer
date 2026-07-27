@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# 出 Android TV 的 APK。 用法: bash scripts/build-android-apk.sh [--release|--debug]
+# 出 Android APK。
+#   用法: bash scripts/build-android-apk.sh [--release|--debug] [--tv|--phone] [--arm64|--arm32]
+#   默认: --release --tv --arm64
+#
+# TV 包和手机包是**两个包**,区别只有壳打开哪个 html:
+#   --tv    → apps/android/tauri.conf.json 的默认入口 index-tv.html
+#   --phone → 额外挂 --config tauri.phone.conf.json,覆盖成 index-mobile.html
+# 别再找运行时分流的那个 shim,2026-07-27 删了(设备类型判不准,判反=用户拿到另一端的整套界面)。
+#
+# ⚠️ 这个脚本**不拉 libmpv.so**(CI 那步会拉)。本地第一次跑要手动放一份到
+#    apps/android/gen/android/app/src/main/jniLibs/<abi>/libmpv.so,ABI 要和 --arm64/--arm32 对上,
+#    否则包出得来、装得上、一播放就 UnsatisfiedLinkError。
 #
 # 为什么不能直接 `npx tauri android build`:
 # gradle 会转手调 cargo 去编安卓目标,而 rquickjs-sys 在安卓要现跑 bindgen ——
@@ -33,9 +44,6 @@ ENVV=(
   "LIBCLANG_PATH=$(cygpath -w "$PB/bin")"
   # host 侧的 bindgen(经 proc-macro rquickjs-macro 传导,永远编 host)也要 builtin 头
   "BINDGEN_EXTRA_CLANG_ARGS=-resource-dir=$RES"
-  # 预置了 per-target 变量后 cargo-ndk 就不再补 sysroot,得自带
-  "BINDGEN_EXTRA_CLANG_ARGS_armv7-linux-androideabi=--sysroot=$SYSROOT -resource-dir=$RES"
-  "BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi=--sysroot=$SYSROOT -resource-dir=$RES"
 )
 # host bindgen 还缺 WinSDK/CRT 头(stdio.h),从 vcvars64 灌 INCLUDE。
 if [ -n "${INCLUDE:-}" ]; then
@@ -58,10 +66,31 @@ else
   fi
 fi
 
-MODE="${1:---release}"
+EXTRA=()
+FLAVOR=()
+TARGET="aarch64"
+for a in "$@"; do
+  case "$a" in
+    --debug)   EXTRA+=(--debug) ;;
+    --release) ;;
+    --tv)      FLAVOR=() ;;
+    --phone)   FLAVOR=(--config tauri.phone.conf.json) ;;
+    --arm64)   TARGET="aarch64" ;;
+    --arm32)   TARGET="armv7" ;;
+    *) echo "未知参数: $a"; exit 1 ;;
+  esac
+done
+
+# bindgen 的 per-target 变量名要跟着 --arm64/--arm32 走,写死 armv7 的话
+# 换成 arm64 会退回宿主的 /usr/include,报一个和安卓毫无关系的 glibc 头找不到。
+# (预置了 per-target 变量后 cargo-ndk 就不再补 sysroot,所以得自带 --sysroot。)
+RT="armv7-linux-androideabi"
+[ "$TARGET" = "aarch64" ] && RT="aarch64-linux-android"
+ENVV+=(
+  "BINDGEN_EXTRA_CLANG_ARGS_$RT=--sysroot=$SYSROOT -resource-dir=$RES"
+  "BINDGEN_EXTRA_CLANG_ARGS_${RT//-/_}=--sysroot=$SYSROOT -resource-dir=$RES"
+)
+
 CLI="$(pwd)/node_modules/@tauri-apps/cli/tauri.js"
 cd apps/android
-[ "$MODE" = "--debug" ] && EXTRA=(--debug) || EXTRA=()
-# ★ TV 包是 **32 位(armv7)**,不是 arm64 —— 与 .github/workflows/build.yml 保持一致。
-# 两边不一致的话,本地测的包和用户装的包 ABI 不同,而症状只在真机上才出现。
-exec env "${ENVV[@]}" node "$CLI" android build --apk --target armv7 "${EXTRA[@]}"
+exec env "${ENVV[@]}" node "$CLI" android build --apk --target "$TARGET" "${FLAVOR[@]}" "${EXTRA[@]}"

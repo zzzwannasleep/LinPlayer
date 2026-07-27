@@ -1,4 +1,5 @@
-# 全端(Rust + React + Tauri)构建 → Windows/Linux 绿色包 + Android TV APK → 预发布。
+# 全端(Rust + React + Tauri)构建 → Windows/Linux 绿色包 + 4 个 Android APK
+# (TV / 手机 × arm64 / arm32)→ 预发布。
 #
 # 这个文件曾经叫 "Build Flutter",构建 Android 手机/TV 两个 APK。现在 PC 端已迁到
 # Rust 栈,苹果全线不做 —— 那两个 job 连同它们依赖的 build-libmpv-pgs.yml 一起删了。
@@ -35,7 +36,6 @@ on:
       - 'index.html'
       - 'index-tv.html'
       - 'index-mobile.html'
-      - 'index-android.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
       - '.github/workflows/build.yml'
@@ -55,7 +55,6 @@ on:
       - 'index.html'
       - 'index-tv.html'
       - 'index-mobile.html'
-      - 'index-android.html'
       - 'vite.config.ts'
       - 'tsconfig*.json'
       - '.github/workflows/build.yml'
@@ -466,7 +465,23 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # Android TV APK。
+  # Android APK —— **4 个包**:TV / 手机 × arm64 / arm32。
+  #
+  # ★ TV 和手机是两个 APK,不是一个包运行时分流。
+  #   2026-07-27 之前是「一个 APK + index-android.html 按 UA 标 location.replace」,
+  #   已删:**设备类型判不准**。大屏平板、投屏一体机、模拟器都可能被判成电视,
+  #   而判反的表现不是小 bug,是用户拿到**另一端的整套界面**。
+  #   现在壳打开哪个 html 在出包时定死:TV 用 apps/android/tauri.conf.json 的默认
+  #   入口,手机用 --config tauri.phone.conf.json 覆盖成 index-mobile.html。
+  #
+  # ★ 两个包的 applicationId 仍是同一个 xyz.linplayer.app,**故意的**:
+  #   一台设备只会装其中一个,包名一致才保得住老用户的覆盖升级(build.yml 下面
+  #   的身份断言把它钉死了)。副作用只有「手机包装到盒子上会顶掉 TV 包」,
+  #   那本来也是用户主动选的。
+  #
+  # ★ arm64 是 2026-07-27 新加的。在那之前只出 armeabi-v7a —— 盒子无所谓
+  #   (32 位包能跑在 64 位设备上),但手机端不行:8 Gen 4 / 天玑 9400 这一代
+  #   SoC 已经彻底砍掉 AArch32,32 位包装上去直接起不来。
   #
   # ★ 跑 ubuntu 不跑 windows:见文件头的说明,交叉编译安卓的那堆 libclang 坑是
   #   Windows 宿主特有的,Linux 上没有,而且 windows runner 计费 2 倍。
@@ -475,22 +490,79 @@ jobs:
   #   这种漂移不报错,只会让某一端永远收不到更新(PC 端已经栽过一次)。
   # ---------------------------------------------------------------------------
   build-android:
-    name: Build Android TV APK
+    name: Build Android ${{ matrix.flavor_label }} APK (${{ matrix.abi }})
     needs: version
     runs-on: ubuntu-latest
+
+    strategy:
+      # 一个组合挂掉别把另外三个一起掐了 —— ABI 相关的失败经常只影响一个 ABI,
+      # 全掐了就看不出到底是哪一半坏了。
+      fail-fast: false
+      # 用 include 逐条列全,不用 flavor × abi 叉乘:YAML 的矩阵没法按维度查表,
+      # 叉乘写法要在 shell 里再写一遍 if/case 把 abi 翻译成 ELF 魔数/jniLibs 目录名,
+      # 那才是真正会漏改的地方。四行摆在这里,改 ABI 时一眼看得全。
+      matrix:
+        include:
+          # ---- Android TV(入口 index-tv.html,即 tauri.conf.json 的默认值)----
+          - flavor: tv
+            flavor_label: TV
+            config_arg: ''
+            entry: index-tv.html
+            abi: arm64
+            tauri_target: aarch64
+            rust_target: aarch64-linux-android
+            jni_abi: arm64-v8a
+            elf_class: '02'
+            elf_machine: 'b7 00'
+          - flavor: tv
+            flavor_label: TV
+            config_arg: ''
+            entry: index-tv.html
+            abi: arm32
+            tauri_target: armv7
+            rust_target: armv7-linux-androideabi
+            jni_abi: armeabi-v7a
+            elf_class: '01'
+            elf_machine: '28 00'
+          # ---- 手机(入口 index-mobile.html,靠 --config 覆盖窗口 url)----
+          - flavor: phone
+            flavor_label: Phone
+            config_arg: '--config tauri.phone.conf.json'
+            entry: index-mobile.html
+            abi: arm64
+            tauri_target: aarch64
+            rust_target: aarch64-linux-android
+            jni_abi: arm64-v8a
+            elf_class: '02'
+            elf_machine: 'b7 00'
+          - flavor: phone
+            flavor_label: Phone
+            config_arg: '--config tauri.phone.conf.json'
+            entry: index-mobile.html
+            abi: arm32
+            tauri_target: armv7
+            rust_target: armv7-linux-androideabi
+            jni_abi: armeabi-v7a
+            elf_class: '01'
+            elf_machine: '28 00'
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       # ★ 安卓 job 也要装 Linux 的 GTK/webkit 开发包。
-      #   反直觉但必须:APK 是交叉编译到 armv7-linux-androideabi 的,**不需要**这些;
+      #   反直觉但必须:APK 是交叉编译到安卓目标的,**不需要**这些;
       #   但下面的 `cargo test -p linplayer-android` 是编到**宿主**(x86_64 linux)跑的,
       #   而 tauri 在 Linux 宿主上要链 glib/gtk/webkit。
       #   不装的表现是 `failed to run custom build command for glib-sys` ——
       #   报错指向 glib,和"安卓"三个字毫无关系,很容易往交叉编译上瞎找。
       #   (Windows 本地不报:那边的 tauri 不需要 GTK。典型的本地过 ≠ CI 过。)
+      #
+      # ★ 只在一个组合上装。这套包**唯一的用途**就是那个宿主侧的命令注册测试,
+      #   而那个测试和 ABI / TV-手机 都无关,四个 job 各跑一遍纯属烧钱(每次 ~1.5 分钟)。
+      #   装包和跑测试挂的是同一个 if,改的时候两个要一起改。
       - name: Install system deps
+        if: matrix.flavor == 'tv' && matrix.abi == 'arm64'
         run: |
           sudo apt-get update
           sudo apt-get install -y             libwebkit2gtk-4.1-dev             libgtk-3-dev             librsvg2-dev             libayatana-appindicator3-dev             libxrandr-dev
@@ -515,14 +587,16 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # armv7 是 TV 包实际用的;aarch64 先留着 —— 将来的安卓移动端要它,
-          # 多装一个 target 只花几秒,不值得为省它再改一次这里。
-          targets: armv7-linux-androideabi,aarch64-linux-android
+          targets: ${{ matrix.rust_target }}
 
+      # ★ shared-key 而不是 key:同一个 ABI 的 TV / 手机两个 job 编的是**一模一样**
+      #   的 Rust(两者只差壳打开哪个 html,那是配置不是代码),让它们共用一份缓存。
+      #   按 flavor 分开的话第二个 job 会从零编一遍,白烧十几分钟。
+      #   反过来 ABI 必须分开 —— 不同 target 的产物不能互相当缓存用。
       - name: Cache cargo + target
         uses: Swatinem/rust-cache@v2
         with:
-          key: android
+          shared-key: android-${{ matrix.abi }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -548,16 +622,15 @@ jobs:
         run: npm ci
 
       # 前端必须先出 dist —— 安卓壳的 frontendDist 指向它。
-      # 安卓是**一个 APK 装两种设备**:壳打开 index-android.html(分流 shim),
-      # 它按 MainActivity 打在 UA 上的标转到 index-tv.html 或 index-mobile.html。
-      # ★ 三个都要验。vite 的 rollupOptions.input 漏列哪个,那个就**静默产不出来**,
-      #   而构建 exit 0 —— 装到设备上打开是一片空白,CI 却全绿。
+      # ★ 本 job 要的那个入口必须在。vite 的 rollupOptions.input 漏列哪个,
+      #   那个就**静默产不出来**,而构建 exit 0 —— 装到设备上打开是一片空白,CI 却全绿。
+      #   (dist 是三端共用的一份,所以手机包里也躺着 index-tv.html,反之亦然。
+      #    多出来的那几百 KB 不值得为它拆两次 vite build。)
       - name: Build frontend
         run: |
           npm run build
-          for f in index-android.html index-tv.html index-mobile.html; do
-            test -f "dist/$f" || { echo "::error::dist/$f 不存在 —— 检查 vite.config.ts 的 rollupOptions.input 是否漏列"; exit 1; }
-          done
+          test -f "dist/${{ matrix.entry }}" \
+            || { echo "::error::dist/${{ matrix.entry }} 不存在 —— 检查 vite.config.ts 的 rollupOptions.input 是否漏列"; exit 1; }
 
       # 签名密钥是可选的。
       # ★ 不能把 secrets 写进 step 的 if: —— 那个上下文里读不到 secrets,条件恒假,
@@ -584,28 +657,26 @@ jobs:
       #   所以**这一步不跑就没有播放器** —— APK 照常构建、照常绿,装上去按播放才报
       #   「APK 里没有 libmpv.so」。下面有校验兜底,别把它删了当优化。
       #
-      # ★ TV 端出 **32 位(armeabi-v7a)**,不是 arm64。
-      #   机顶盒里 32 位用户空间仍是主流,32 位包在 64 位设备上也能跑(反过来不行),
-      #   所以 TV 用 v7a 覆盖面最大;arm64 留给将来的安卓移动端。
-      #   改 ABI 时**四处要一起改**:这里的 jar/DEST、下面的 --target、
-      #   rust targets(上面 dtolnay 那步)、产物文件名。漏一处的表现是
-      #   「APK 里的 .so 和代码不是同一个 ABI」→ 装得上,一播放就 UnsatisfiedLinkError。
+      # ★ ABI 由矩阵给,不再写死。改 ABI 时**四处要一起改**:矩阵里的 jni_abi/
+      #   elf_class/elf_machine、rust_target(dtolnay 那步)、tauri_target(下面 --target)、
+      #   产物文件名。漏一处的表现是「APK 里的 .so 和代码不是同一个 ABI」→
+      #   装得上,一播放就 UnsatisfiedLinkError。矩阵里一行摆全就是为了不漏。
       #
       #   来源与版本:media-kit/libmpv-android-video-build v1.1.11 的 full 变体。
       #   选 full 不选 default:full 才带 PGS 图形字幕(旧 Flutter 版就是为这个换的,
       #   见历史 commit 35a81e1e)。jar 里那个 libmediakitandroidhelper.so 是
       #   media_kit(Flutter)专用胶水,我们不用,只取 libmpv.so。
-      - name: Fetch libmpv (armeabi-v7a)
+      - name: Fetch libmpv (${{ matrix.jni_abi }})
         run: |
           set -euo pipefail
           VER="v1.1.11"
-          ABI="armeabi-v7a"
+          ABI="${{ matrix.jni_abi }}"
           DEST="apps/android/gen/android/app/src/main/jniLibs/$ABI"
           mkdir -p "$DEST"
           curl -fsSL -o /tmp/libmpv.jar             "https://github.com/media-kit/libmpv-android-video-build/releases/download/$VER/full-$ABI.jar"
           unzip -o -j /tmp/libmpv.jar "lib/$ABI/libmpv.so" -d "$DEST"
           ls -lh "$DEST/libmpv.so"
-          # ★ 校验它确实是 32 位 ARM ELF,而不是 LFS 指针/错误页/**拿错 ABI**。
+          # ★ 校验它确实是本 job 要的那个 ABI,而不是 LFS 指针/错误页/**拿错 ABI**。
           #   旧仓库在这条上栽过:APK 里是文本指针,运行时 UnsatisfiedLinkError
           #   报 "bad ELF magic 76657273"(那其实是 "vers"),构建全程是绿的。
           #   拿错 ABI 同样是构建绿、装得上、一播放就炸,所以 class/machine 一起验:
@@ -617,12 +688,12 @@ jobs:
           HDR=$(head -c 20 "$DEST/libmpv.so" | od -An -tx1 | tr -s ' ')
           echo "ELF header: $HDR"
           case "$HDR" in
-            *"7f 45 4c 46 01"*) ;;
-            *) echo "::error::libmpv.so 不是 32 位 ELF(header=$HDR)"; exit 1 ;;
+            *"7f 45 4c 46 ${{ matrix.elf_class }}"*) ;;
+            *) echo "::error::libmpv.so 的 ELF class 不是 ${{ matrix.elf_class }}(01=32位 02=64位),header=$HDR"; exit 1 ;;
           esac
           case "$HDR" in
-            *"28 00"*) ;;
-            *) echo "::error::libmpv.so 不是 ARM 32 位(e_machine 不是 28 00,header=$HDR)"; exit 1 ;;
+            *"${{ matrix.elf_machine }}"*) ;;
+            *) echo "::error::libmpv.so 的 e_machine 不是 ${{ matrix.elf_machine }}(28 00=ARM32 b7 00=AArch64),header=$HDR"; exit 1 ;;
           esac
           # ★ 这个二进制没有 JNI_OnLoad,靠 av_jni_set_java_vm 登记 JavaVM
           #   (Rust 侧 crates/mpv 的 set_android_java_vm 依赖它)。换版本/换 ABI 时这条会先红。
@@ -670,7 +741,9 @@ jobs:
       # ★ 命令对账:tv-commands.txt × generate_handler! × ui/shared/api.ts 三方比对。
       #   漏注册一个命令,构建照样绿,用户走到那个页面才报 command not found ——
       #   这条测试把那种失败提前到 CI。(本地反向验证过:注释掉 list_favorites 立刻红。)
+      #   宿主侧测试,和 ABI / TV-手机都无关 —— 只在一个组合上跑(和上面 apt 那步同一个 if)。
       - name: Command registration test
+        if: matrix.flavor == 'tv' && matrix.abi == 'arm64'
         run: cargo test -p linplayer-android
 
       - name: Build APK
@@ -706,19 +779,25 @@ jobs:
           #   scripts/build-android.sh 里原样写着这条,我照样撞了一次 —— 别再撞第三次。
           #   两种写法都传:bindgen 查 target 变量时连字符版和下划线版都认,
           #   但不同版本偏好不同,一起给最省事。
+          T="${{ matrix.rust_target }}"
           ENVV=(
-            "BINDGEN_EXTRA_CLANG_ARGS_armv7-linux-androideabi=--sysroot=$SYSROOT"
-            "BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi=--sysroot=$SYSROOT"
+            "BINDGEN_EXTRA_CLANG_ARGS_$T=--sysroot=$SYSROOT"
+            "BINDGEN_EXTRA_CLANG_ARGS_${T//-/_}=--sysroot=$SYSROOT"
           )
-          echo "sysroot = $SYSROOT"
+          echo "sysroot = $SYSROOT / target = $T"
           # ★ 必须 cd 进 apps/android:仓库里现在有**两个** tauri.conf.json
           #   (apps/desktop 和 apps/android),CLI 自动发现会挑到哪个不确定。
           #   在哪个目录跑就用哪个配置,这是唯一不含糊的写法。
+          #
+          # ★ config_arg 是手机包和 TV 包**唯一**的区别:
+          #     TV   = 空,用 tauri.conf.json 的默认入口 index-tv.html
+          #     手机 = --config tauri.phone.conf.json,把窗口 url 覆盖成 index-mobile.html
+          #   不加引号地展开是故意的(要它拆成两个参数),空串时展开成零个参数。
           cd apps/android
           if [ "${{ steps.signing.outputs.have }}" = "yes" ]; then
-            env "${ENVV[@]}" npx tauri android build --apk --target armv7
+            env "${ENVV[@]}" npx tauri android build --apk --target ${{ matrix.tauri_target }} ${{ matrix.config_arg }}
           else
-            env "${ENVV[@]}" npx tauri android build --apk --debug --target armv7
+            env "${ENVV[@]}" npx tauri android build --apk --debug --target ${{ matrix.tauri_target }} ${{ matrix.config_arg }}
           fi
 
       # 产物路径在 tauri 版本之间变过,不写死 —— 找出来再改名,找不到就明确报错,
@@ -738,18 +817,35 @@ jobs:
             echo "::error::找到多个 APK,不知道该发哪个:"; printf '  %s\n' "${APKS[@]}"; exit 1
           fi
           APK="${APKS[0]}"
-          cp "$APK" "release/LinPlayer-TV-${{ needs.version.outputs.version }}-arm32.apk"
+          cp "$APK" "release/LinPlayer-${{ matrix.flavor_label }}-v${{ needs.version.outputs.version }}-${{ matrix.abi }}.apk"
           ls -lh release/
           # ★ 体积闸门。上面那个 CARGO_PROFILE_RELEASE_DEBUG 一旦失效(改错、被别处覆盖),
-          #   APK 会从 21MB 悄悄涨回 105MB —— 构建照样绿,只有用户下载时才发现。
-          #   正常 21MB,闸门放到 60MB:既能兜住"调试信息回来了"这种量级的回归,
-          #   又不会因为正常加功能就误报。
+          #   APK 会悄悄涨回 100MB 以上 —— 构建照样绿,只有用户下载时才发现。
+          #   2026-07-27 本地实测:arm64 45MB(其中 libmpv.so 就占 16MB),arm32 略小。
+          #   闸门 60MB:兜得住"调试信息回来了"那个量级(100MB+),又留了 15MB 余量。
+          #   ⚠️ 别看到 45MB 就顺手把闸门调低到贴着现值 —— 那样加一个功能就红一次。
           SZ=$(stat -c%s release/*.apk)
           echo "APK 体积: $((SZ/1024/1024)) MB"
           if [ "$SZ" -gt 62914560 ]; then
             echo "::error::APK $((SZ/1024/1024))MB 超过 60MB 闸门 —— 多半是 CARGO_PROFILE_RELEASE_DEBUG 没生效,调试信息又被打进 .so 了"
             exit 1
           fi
+
+      # ★★ 入口闸门 —— 这是拆包之后**唯一的新失败模式**,而且是静默的:
+      #   `--config` 一旦没生效(路径写错、tauri 改了合并语义、参数被引号吞掉),
+      #   出来的手机包会照样构建成功、照样签名、照样装得上,打开却是**整套 TV 界面**。
+      #   源码里看不出来,只有装到手机上才发现。
+      #   查法:tauri CLI 把合并后的配置写进 APK 的 assets/tauri.conf.json,
+      #   直接读它比对窗口 url。(TV 包用默认配置,这条同样能兜住「谁把默认入口改了」。)
+      - name: Assert APK entry point
+        run: |
+          APK=$(ls release/*.apk)
+          unzip -p "$APK" assets/tauri.conf.json > /tmp/apk-conf.json \
+            || { echo "::error::APK 里没有 assets/tauri.conf.json —— tauri 版本变了?这条闸门要重写"; exit 1; }
+          URL=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/apk-conf.json","utf8")).app.windows[0].url)')
+          echo "窗口入口 = $URL(期望 ${{ matrix.entry }})"
+          [ "$URL" = "${{ matrix.entry }}" ] \
+            || { echo "::error::${{ matrix.flavor_label }} 包的入口是 $URL,不是 ${{ matrix.entry }} —— 装上去会进错界面"; exit 1; }
 
       # ★ Android TV 专属校验:没有 LEANBACK_LAUNCHER,应用**在 TV launcher 上根本不出现**
       #   ——「装上了但找不到」是最难自查的一类失败,所以在 CI 里硬断言。
@@ -798,6 +894,11 @@ jobs:
             || { echo "::error::应用名不是 0Player"; exit 1; }
           echo "$BADGING" | grep -q "banner=" \
             || { echo "::error::没有 android:banner —— Android TV 桌面上是块空白磁贴"; exit 1; }
+          # ★ ABI 也在成品上验。上面只验了 libmpv.so 那一个文件的 ELF 头,
+          #   而 Rust 那个 .so 的 ABI 由 --target 决定 —— 两者分属两条链路,
+          #   对不上的表现是装得上、一播放就 UnsatisfiedLinkError。
+          echo "$BADGING" | grep -q "native-code: '${{ matrix.jni_abi }}'" \
+            || { echo "::error::APK 的 native-code 不是 ${{ matrix.jni_abi }}:$(echo "$BADGING" | grep native-code)"; exit 1; }
           echo "身份校验通过"
 
       - name: Assert Android TV manifest
@@ -808,10 +909,13 @@ jobs:
           grep -q "android.hardware.touchscreen" "$M" || { echo "::error::AndroidManifest 没声明 touchscreen 非必需,TV 设备会被 Play 判为不兼容"; exit 1; }
           echo "TV manifest 校验通过"
 
+      # 名字必须带矩阵变量:同名 artifact 在 v4 里是**报错**而不是合并,
+      # 四个 job 抢一个名字会红在这一步。下面 create-prerelease 用 release-* 通配
+      # + merge-multiple 把四份合到一起。
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-android
+          name: release-android-${{ matrix.flavor }}-${{ matrix.abi }}
           path: release/*.apk
           retention-days: 7
 

@@ -1,6 +1,6 @@
 # ui/mobile —— Android 手机 UI
 
-触摸版式 + 手势优先。宿主是 `apps/android`(与 TV 端**同一个 APK**),入口 `index-mobile.html`。
+触摸版式 + 手势优先。宿主是 `apps/android`(与 TV 端**同一份壳、不同的 APK**),入口 `index-mobile.html`。
 
 对标物是 **Emby 官方安卓客户端**,目标是超过它。它被用户反复吐槽的三件事就是我们要打的三个点:
 **卡片单调 / 同一件事比竞品多点 2–3 次 / 播放器完全没有手势**。功能侧我们已经领先(核层 249 条命令),
@@ -153,14 +153,22 @@ PC 有 9 个入口,手机底栏**只留三个**。剩下的这样安置:
 
 ---
 
-## 与 TV 端共用一个 APK
+## 手机包是**独立的 APK**(2026-07-27 改的)
 
-`AndroidManifest.xml:6,12` 已经把 `leanback` 和 `touchscreen` 都声明成 `required="false"`,
-`build.gradle.kts:65` 的 `applicationId` 是 `xyz.linplayer.app`,`build.yml:785` 把这个包名钉死了
-(换包名 = 老用户收不到覆盖升级)。**所以不出第二个 APK。**
+原先是「与 TV 共用一个 APK,`index-android.html` 按 UA 标运行时 `location.replace`」。
+那条路已经删干净:**设备类型判不准**,大屏平板 / 投屏一体机 / 模拟器都可能被判成电视,
+而判反的表现不是小 bug,是用户拿到**整套 TV 界面**。
 
-分流方式:`MainActivity` 判 `uiMode == UI_MODE_TYPE_TELEVISION`,给 WebView UA 打标;
-`index-android.html` 是个几行的 shim,按标 `location.replace()` 到 `index-tv.html` 或 `index-mobile.html`。
+现在手机包 = `--config apps/android/tauri.phone.conf.json`,把窗口 url 覆盖成
+`index-mobile.html`,出包时就定死。CI 里 `Assert APK entry point` 从成品 APK 读
+`assets/tauri.conf.json` 比对 —— 这条闸门不存在的话,`--config` 失效是**静默**的
+(照样构建成功、照样签名、照样装得上,打开是 TV 界面)。
+
+★ `applicationId` 仍是 `xyz.linplayer.app`,和 TV 包**一样**(`build.gradle.kts:65`,
+`build.yml` 硬校验)。一台设备只装其中一个,包名一致才保得住覆盖升级。
+
+★ ABI 出 **arm64 和 arm32 两份**。别只发 arm32:8 Gen 4 / 天玑 9400 这代手机 SoC
+已经砍掉 AArch32,32 位包装上去起不来(盒子不受影响,所以这条以前没暴露)。
 
 > ⚠️ `namespace` 是 `xyz.linplayer.tv`,**别顺手改整齐** —— `build.gradle.kts:55-64` 有一整段
 > 说明为什么不能动它(改了要连 Kotlin 源码目录一起搬,收益为零)。
@@ -214,7 +222,7 @@ PC 有 9 个入口,手机底栏**只留三个**。剩下的这样安置:
 |---|---|---|
 | **P0-a** | 入口 + Tab + 路由栈 + 主题 + 登录 + 首页 | `npm run dev` 开 `index-mobile.html`,Chrome 手机模拟能登录 → 首页出真实 Emby 数据 |
 | **P0-b** | 搜索 + 媒体库 + 详情 + 播放页 + 手势 + MiniPlayer + M0 命令 + `play_local` | 桌面 Tauri 壳加载 `index-mobile.html`,从首页点进详情能播,六个手势全部生效 |
-| **P0-c** | 单 APK 分流 + 守卫测试 + CI | `scripts/build-android-apk.sh` 出包;手机装上走完整链路;**TV 盒子装同一个包仍进 TV UI** |
+| **P0-c** | 独立手机 APK + 守卫测试 + CI | `bash scripts/build-android-apk.sh --phone --arm64` 出包;手机装上走完整链路 |
 | **P1** | 收藏 / 下载 / 排行榜 / 追剧日历 / 服务器 / 网盘 + M1 命令 | 每页真机走一遍 |
 | **P2** | 插件 / Ani-RSS + M2 命令 | 同上 |
 
