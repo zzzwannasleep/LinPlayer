@@ -1653,6 +1653,80 @@ fn abs_url(s: &Session, path: &str) -> String {
     u
 }
 
+/* ---------- 直连地址必须**实测支持 Range** ----------
+
+   ★ 2026-07-27 用户报「跳到缓存条没缓存到的地方,画面和进度条一起卡死,别的播放器都正常」。
+     根因:PlaybackInfo 给的 DirectStreamUrl 是**相对路径**(`/videos/16612/original.mkv?…`),
+     我们把它拼在服务器根上。Emby 本体在根和 `/emby/` 两个前缀上都提供 API,所以我们
+     整套接口一直工作正常 —— 但用户那两台服务器前面挂了反代,**只有 `/emby/` 那条路由
+     正确处理 Range**:根路径下的同一个地址收到 `Range:` 也回 `200 OK` + 完整
+     Content-Length。实测两台都是如此:
+
+         GET /videos/16612/original.mkv       Range: bytes=1000000-1000099  -> 200 (整个文件)
+         GET /emby/videos/16612/original.mkv  Range: bytes=1000000-1000099  -> 206 bytes 1000000-1000099/977548032
+
+     ffmpeg 拿不到 206 就只能从当前位置**顺读丢弃**到目标字节 —— 往前跳 9 分钟就是 370MB。
+     mpv 日志里是 `https: Unexpected offset: expected N, got 0` + `Seek failed`。
+     别的播放器没事,是因为它们按 Emby 惯例把相对地址拼在 `/emby` API 根上。
+
+   ★ **不写死前缀,而是各发一次 `Range: bytes=0-0` 实测**。写死 `/emby` 会在
+     Jellyfin(没有这个前缀)和带 base path 的部署上把好地址改坏;而"哪个前缀能 Range"
+     恰恰是我们唯一在乎的性质,直接测它最省事也最准。
+     每台服务器每次运行只探一次,结果缓存。 */
+
+/// 探测结果缓存:服务器地址 -> 该用的路径前缀("" 或 "/emby")。
+static RANGE_PREFIX: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+/// 生成 `/emby` 前缀的候选路径。已经带前缀、或本来就是绝对地址 = 没有第二个候选。
+fn emby_prefixed(path: &str) -> Option<String> {
+    if path.starts_with("http") || path.starts_with("/emby/") || path == "/emby" {
+        return None;
+    }
+    Some(if path.starts_with('/') {
+        format!("/emby{path}")
+    } else {
+        format!("/emby/{path}")
+    })
+}
+
+/// 两次探测结果 -> 该用哪个前缀。
+/// 原地址能 Range 就**别动**(最少惊讶);都不行也保持原样 —— 那时换前缀只是换一种坏法,
+/// 而播放器侧的 `seek_stalled` 会把原因说给用户听。
+fn choose_prefix(plain_ok: bool, emby_ok: bool) -> &'static str {
+    if plain_ok || !emby_ok { "" } else { "/emby" }
+}
+
+/// 这个地址收到 `Range:` 会不会老老实实回 206。
+async fn supports_range(http: &reqwest::Client, url: &str) -> bool {
+    // bytes=0-0 = 只要一个字节,探测代价可以忽略。
+    match http.get(url).header("Range", "bytes=0-0").send().await {
+        Ok(r) => r.status().as_u16() == 206,
+        Err(_) => false,
+    }
+}
+
+/// 把相对播放路径换成「实测支持 Range」的那一条。失败一律回原样 —— 探测本身
+/// **绝不能挡住起播**(网络抖一下就播不了,比跳转慢严重得多)。
+async fn seekable_path(http: &reqwest::Client, s: &Session, path: &str) -> String {
+    let Some(alt) = emby_prefixed(path) else { return path.to_string() };
+    let cache = RANGE_PREFIX.get_or_init(Default::default);
+    if let Some(p) = cache.lock().unwrap().get(&s.server).cloned() {
+        return if p.is_empty() { path.to_string() } else { format!("{p}{path}") };
+    }
+    let plain_ok = supports_range(http, &abs_url(s, path)).await;
+    // 原地址就没问题的话别白探第二次。
+    let emby_ok = !plain_ok && supports_range(http, &abs_url(s, &alt)).await;
+    let pre = choose_prefix(plain_ok, emby_ok);
+    /* 换没换前缀不用另打日志:宿主起播时打的那行 `PLAY … url=` 里就带着最终地址,
+       `/emby/videos/…` 一眼可见。 */
+    cache
+        .lock()
+        .unwrap()
+        .insert(s.server.clone(), pre.to_string());
+    if pre.is_empty() { path.to_string() } else { alt }
+}
+
 /// 正确解析播放地址:POST PlaybackInfo -> 用服务器给的 DirectStreamUrl/TranscodingUrl。
 /// 返回 PlaybackTarget(含 PlaySessionId,供上报三件套贯穿使用)。
 ///
@@ -1832,7 +1906,7 @@ pub async fn resolve_stream(
         .collect();
 
     let (url, play_method) = if let Some(d) = ms.direct_stream_url.filter(|x| !x.is_empty()) {
-        (abs_url(s, &d), "DirectStream")
+        (abs_url(s, &seekable_path(http, s, &d).await), "DirectStream")
     } else if let Some(t) = ms.transcoding_url.filter(|x| !x.is_empty()) {
         (abs_url(s, &t), "Transcode")
     } else {
@@ -1948,6 +2022,33 @@ mod tests {
 
     fn ch(start: f64, name: &str) -> Chapter {
         Chapter { index: 0, start_secs: start, name: name.into(), image_url: None }
+    }
+
+    /* 「跳到没缓冲的地方就卡死,别的播放器都正常」。
+       PlaybackInfo 给的 DirectStreamUrl 是相对路径,我们拼在服务器根上;而用户那两台
+       服务器的反代**只在 `/emby/` 路由上处理 Range**,根路径下收到 Range 也回 200 +
+       整个文件。ffmpeg 于是只能顺读丢弃到目标字节(跳 9 分钟 = 370MB)。
+
+       反向验证(见 [[test-must-fail-first]]):
+       - 把 emby_prefixed 里 `path.starts_with("/emby/")` 那条守卫删掉 -> 第 3 条断言红
+         (会拼出 `/emby/emby/videos/…`);
+       - 把 choose_prefix 改成无条件 `"/emby"` -> 第 1 条红(原地址明明是好的,不该动它);
+         改成无条件 `""` -> 第 2 条红(该换的时候没换)。 */
+    #[test]
+    fn range_probe_only_switches_prefix_when_it_actually_helps() {
+        // 原地址就支持 Range(绝大多数 Emby)-> 一个字都别动。
+        assert_eq!(choose_prefix(true, true), "");
+        assert_eq!(choose_prefix(true, false), "");
+        // 原地址不认 Range 而 /emby 认 -> 换。这就是用户那两台。
+        assert_eq!(choose_prefix(false, true), "/emby");
+        // 两条都不认 -> 保持原样。换前缀只是换一种坏法,播放器侧的 seek_stalled 会说明原因。
+        assert_eq!(choose_prefix(false, false), "");
+
+        assert_eq!(emby_prefixed("/videos/1/original.mkv?a=b").as_deref(), Some("/emby/videos/1/original.mkv?a=b"));
+        assert_eq!(emby_prefixed("videos/1/x.mkv").as_deref(), Some("/emby/videos/1/x.mkv"));
+        // 服务端已经给了带前缀的相对地址,或干脆是绝对地址 -> 没有第二个候选,别叠加。
+        assert_eq!(emby_prefixed("/emby/videos/1/x.mkv"), None);
+        assert_eq!(emby_prefixed("https://h/videos/1/x.mkv"), None);
     }
 
     /// 非管理员必须判 false。判错了 = 把三个管理动作发给没权限的账号,一点就 403。
