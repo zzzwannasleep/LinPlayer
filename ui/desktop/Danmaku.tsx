@@ -53,7 +53,10 @@ export function DanmakuLayer({
     let W = 0, H = 0, dpr = 1;
     const measure = () => {
       const r = canvas.getBoundingClientRect();
-      dpr = window.devicePixelRatio || 1;
+      /* ★ dpr 封顶 2。弹幕是**每帧全屏重画**的一层,像素数直接决定 clearRect +
+         描边文字的开销:4K 屏上 dpr 常是 2.5~3,不封顶就是按 3 倍分辨率画,
+         比封顶后贵一倍多。文字本来就带描边,2 倍已经看不出锯齿。 */
+      dpr = Math.min(2, window.devicePixelRatio || 1);
       W = Math.round(r.width * dpr);
       H = Math.round(r.height * dpr);
     };
@@ -61,11 +64,21 @@ export function DanmakuLayer({
     const ro = new ResizeObserver(measure);
     ro.observe(canvas);
 
+    /* 上一帧画的时间点。暂停时时间不动 = 画面不会变,整帧可以**完全跳过**
+       (连 clearRect 都省)—— 暂停看字幕/挑选集时弹幕层就不该再占 GPU。
+       -1 表示「必须重画」(尺寸变了/换了片/刚恢复播放)。 */
+    let drawnAt = -1;
+
     const frame = () => {
       raf = requestAnimationFrame(frame);
-      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (!enabled || !comments.length) { stateRef.current.active = []; return; }
+      const resized = canvas.width !== W || canvas.height !== H;
+      if (resized) { canvas.width = W; canvas.height = H; drawnAt = -1; }
+      if (!enabled || !comments.length) {
+        // 已经清空过就别一遍遍地 clearRect(关掉弹幕后这一层是纯粹的空转)。
+        if (drawnAt !== -2) { ctx.clearRect(0, 0, canvas.width, canvas.height); drawnAt = -2; }
+        stateRef.current.active = [];
+        return;
+      }
 
       // canvas 是 dpr 放大过的位图,故 CSS px 的 fontSize 要乘 dpr 才是画布里的字号;
       // 自适应那支本就以画布像素算,不用乘。
@@ -80,6 +93,10 @@ export function DanmakuLayer({
       const ts = timeSync.current;
       // ★ 乘 speed:墙钟外推必须按倍速走,否则每次轮询都要把弹幕硬拽回真实位置。
       const t = ts.paused ? ts.base : ts.base + ((performance.now() - ts.stamp) / 1000) * (ts.speed || 1);
+      // 时间没走(暂停)且尺寸没变 -> 这一帧和上一帧逐像素相同,直接不画。
+      if (t === drawnAt) return;
+      drawnAt = t;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // seek 检测:大跳则清屏并重定位游标
       if (t < st.lastT - 0.5 || t > st.lastT + 3) {
@@ -123,26 +140,33 @@ export function DanmakuLayer({
       ctx.textBaseline = "top";
       ctx.lineWidth = Math.max(2, fs / 12);
       ctx.strokeStyle = "rgba(0,0,0,0.75)";
-      st.active = st.active.filter((a) => {
+      /* 原地压缩,不用 filter —— filter 每帧都新建一个数组,而这是**每秒 60 次**、
+         弹幕密时上百个元素的热路径。写入下标 keep 永远不会超过读下标 i,安全。 */
+      let keep = 0;
+      for (let i = 0; i < st.active.length; i++) {
+        const a = st.active[i];
         let x: number, y: number;
         if (a.mode === 4) {
+          if (t - a.born > FIXED_DUR) continue;
           x = (canvas.width - a.width) / 2;
           y = canvas.height - (a.lane + 1) * laneH;
-          if (t - a.born > FIXED_DUR) return false;
         } else if (a.mode === 5) {
+          if (t - a.born > FIXED_DUR) continue;
           x = (canvas.width - a.width) / 2;
           y = a.lane * laneH;
-          if (t - a.born > FIXED_DUR) return false;
         } else {
           x = canvas.width - (t - a.born) * a.speed;
+          if (x + a.width < 0) continue;
           y = a.lane * laneH;
-          if (x + a.width < 0) return false;
+          // 还没进屏的(倍速大跳时会有)不画,省一次描边 —— 但要留着,下一帧就该进来了。
+          if (x > canvas.width) { st.active[keep++] = a; continue; }
         }
         ctx.strokeText(a.text, x, y);
         ctx.fillStyle = a.color;
         ctx.fillText(a.text, x, y);
-        return true;
-      });
+        st.active[keep++] = a;
+      }
+      st.active.length = keep;
     };
 
     raf = requestAnimationFrame(frame);

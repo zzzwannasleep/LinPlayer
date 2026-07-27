@@ -187,3 +187,41 @@
   /* 路径共享同一个根,尾部(data/cache/temp)才是区分点 —— rtl 让省略号出现在开头、保住尾巴 */
   direction: rtl;
 }
+
+/* ---- 快捷键页 ----
+   键位胶囊沿用全局 .kbd 的样子(kbd 标签直接吃它),这里只管排布与冲突态。 */
+.st-kbdrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.st-kbdrow kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 2px 7px;
+  background: color-mix(in srgb, var(--panel) 50%, var(--bg));
+  white-space: nowrap;
+}
+/* 撞键必须一眼看见 —— 撞了的那条永远轮不到执行,而且不会报错。 */
+.st-kbdrow kbd.bad {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.st-kbdrec {
+  font-size: 12.5px;
+  color: var(--accent);
+}
+/* mpv.conf 编辑器:等宽 + 不换行折断,配置文件本来就是逐行读的。 */
+.st-mono {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}

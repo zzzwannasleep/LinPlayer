@@ -104,3 +104,5 @@ export const IconPlugin = ({ size = 20, className }: P) =>
   svg(size, className, <><path d="M9 3v3.5a1.5 1.5 0 0 1-3 0V3" /><path d="M18 3v3.5a1.5 1.5 0 0 1-3 0V3" /><rect x="4" y="6.5" width="16" height="8" rx="2" /><path d="M12 14.5V21" /></>);
 export const IconShield = ({ size = 20, className }: P) =>
   svg(size, className, <><path d="M12 3l7 3v5.5c0 4.4-2.9 8.2-7 9.5-4.1-1.3-7-5.1-7-9.5V6l7-3z" /><path d="m9 12 2.2 2.2L15.5 10" /></>);
+export const IconKeyboard = ({ size = 20, className }: P) =>
+  svg(size, className, <><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M6.5 9.5h.01M10 9.5h.01M13.5 9.5h.01M17 9.5h.01M6.5 12.8h.01M10 12.8h.01M13.5 12.8h.01M17 12.8h.01M8.5 15.6h7" /></>);

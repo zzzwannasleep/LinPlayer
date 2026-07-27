@@ -44,6 +44,9 @@ import {
   type PlaybackPrefs,
   getPlaybackPrefs,
   setPlaybackPrefs,
+  type MpvConf,
+  getMpvConf,
+  setMpvConf,
   setScreenshotDir,
   type ScreenshotDir,
   cacheSize,
@@ -78,6 +81,15 @@ import {
   type UpdateChannel,
 } from "@shared/api";
 import {
+  allBindings,
+  comboLabel,
+  comboOf,
+  conflicts,
+  onBindingsChange,
+  resetAll,
+  setKeys,
+} from "../lib/shortcuts";
+import {
   IconSun,
   IconPlay,
   IconLibrary,
@@ -87,6 +99,7 @@ import {
   IconRefresh,
   IconHeart,
   IconInfo,
+  IconKeyboard,
   IconSearch,
 } from "../app/icons";
 
@@ -625,6 +638,216 @@ function PlaybackPane() {
         disabled={!loaded}
       />
       {f.node}
+
+      <MpvConfBlock />
+    </div>
+  );
+}
+
+/* ============================================================
+   通用 · 播放器 › 自定义 mpv 配置
+   ============================================================ */
+/* 直接把 `<数据根>/data/mpv/mpv.conf` 交给 libmpv 自己解析(我们没写 ini 解析器,
+   见 crates/mpv 里 user_config_dir 上方的注释)。所以这里就是个纯文本编辑器。
+
+   两件必须如实说清楚的事,不然就是又一个「设了没用」:
+     1. 配置是 Player::new 时读的,而播放器是**进程启动时**建的 → 改完要重启应用;
+     2. 配置文件里的同名选项会盖掉我们的默认值,写坏了真能让播放起不来
+        (起不来时错误里会点名 mpv.conf,不至于让人一头雾水)。 */
+function MpvConfBlock() {
+  const f = useFlash();
+  const [conf, setConf] = useState<MpvConf | null>(null);
+  const [text, setText] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    getMpvConf()
+      .then((c) => {
+        if (!alive) return;
+        setConf(c);
+        setText(c.text);
+      })
+      .catch(f.err);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const c = await setMpvConf(text);
+      setConf(c);
+      setDirty(false);
+      f.ok(c.active ? "已保存 —— 重启应用后生效" : "已清空,回到默认(无自定义配置)");
+    } catch (e) {
+      f.err(e);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <h4 style={{ marginTop: 26 }}>自定义 mpv 配置</h4>
+      <p className="hint">
+        内置播放器就是 mpv。这里写的内容会原样交给它解析,语法与 mpv 官网的{" "}
+        <a
+          href="https://mpv.io/manual/stable/#configuration-files"
+          onClick={(e) => {
+            e.preventDefault();
+            openUrl("https://mpv.io/manual/stable/#configuration-files");
+          }}
+        >
+          mpv.conf →
+        </a>{" "}
+        完全一致(一行一条 <code>选项=值</code>,<code>#</code> 开头是注释)。
+        <b> 同名选项会覆盖 LinPlayer 的默认值</b>,写错可能导致播放起不来 —— 起不来时
+        回到这里清空即可。
+      </p>
+      <p className="hint" style={{ marginTop: -4 }}>
+        文件位置:<code className="muted">{conf?.path ?? "读取中…"}</code>
+        {conf && !conf.active && <span> (尚未创建 —— 当前不加载任何自定义配置)</span>}
+      </p>
+      <div className="fld">
+        <textarea
+          className="field st-mono"
+          rows={10}
+          spellCheck={false}
+          placeholder={"# 例:\n# 缓存加大一点\ncache=yes\ndemuxer-max-bytes=256MiB\n\n# 音频输出设备延迟\naudio-delay=0"}
+          value={text}
+          disabled={!conf}
+          onChange={(e) => {
+            setText(e.target.value);
+            setDirty(true);
+          }}
+        />
+        <div className="st-actions" style={{ marginTop: 8 }}>
+          <button className="btn primary" disabled={!conf || busy || !dirty} onClick={save}>
+            {busy ? "保存中…" : "保存"}
+          </button>
+          <button
+            className="btn"
+            disabled={!conf || busy || (!text && !conf.active)}
+            onClick={() => {
+              setText("");
+              setDirty(true);
+            }}
+          >
+            清空
+          </button>
+          {conf?.active && (
+            <span className="hint" style={{ margin: 0 }}>
+              下次启动应用时加载
+            </span>
+          )}
+          {f.node}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ============================================================
+   通用 · 快捷键
+   ============================================================ */
+/* 表在 lib/shortcuts.ts,这儿只负责渲染 + 录键。**不要**在这里再抄一份命令清单 ——
+   抄一份就是又一处「两处只改了一处」(本仓库的高发病)。 */
+function ShortcutsPane() {
+  const f = useFlash();
+  const [, bump] = useState(0);
+  const [recording, setRecording] = useState<string | null>(null);
+  useEffect(() => onBindingsChange(() => bump((n) => n + 1)), []);
+
+  /* 录键。用 capture 抢在全局分发器之前 —— 不抢的话按 Alt+1 会当场跳去首页,
+     根本录不了任何已经被占用的键(而用户最想改的恰恰就是那些)。 */
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") { setRecording(null); return; }
+      const combo = comboOf(e);
+      if (!combo) return; // 只按了修饰键,继续等
+      setKeys(recording, [combo]);
+      setRecording(null);
+      f.ok(`已设为 ${comboLabel(combo)}`);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [recording]);
+
+  const rows = allBindings();
+  const bad = conflicts();
+  const groups = [...new Set(rows.map((r) => r.cmd.group))];
+
+  return (
+    <div className="mdpane">
+      <h4>快捷键</h4>
+      <p className="hint">
+        点「改键」再按一次新组合即可(<kbd>Esc</kbd> 取消)。播放中和主界面是两套作用域,
+        同一个键在两边可以各管各的,只有**同一作用域内**撞键才算冲突(会标红)。
+      </p>
+      <p className="hint" style={{ marginTop: -4 }}>
+        没有列在这里的按钮怎么办:按 <kbd>;</kbd> 会给当前屏幕上**每一个**可点元素发一个
+        字母标签,输字母即点击 —— 排序、筛选、右键菜单项、卡片上的收藏钮都算在内。
+        按 <kbd>?</kbd> 随时看当前可用的键。
+      </p>
+      <div className="st-actions" style={{ margin: "4px 0 14px" }}>
+        <button
+          className="btn"
+          onClick={() => {
+            resetAll();
+            f.ok("已全部恢复默认");
+          }}
+        >
+          全部恢复默认
+        </button>
+        {f.node}
+      </div>
+
+      {groups.map((g) => (
+        <div key={g}>
+          <h4 style={{ marginTop: 18 }}>{g}</h4>
+          {rows
+            .filter((r) => r.cmd.group === g)
+            .map(({ cmd, keys }) => (
+              <div className="setrow" key={cmd.id}>
+                <span className="l">
+                  <span className="t">{cmd.label}</span>
+                  <span className="d">
+                    {cmd.scope === "player" ? "播放中" : cmd.scope === "app" ? "主界面" : "任何时候"}
+                  </span>
+                </span>
+                <span className="ctl st-kbdrow">
+                  {recording === cmd.id ? (
+                    <span className="st-kbdrec">按下新的组合键…</span>
+                  ) : keys.length === 0 ? (
+                    <span className="st-kbdrec">未设置</span>
+                  ) : (
+                    keys.map((k) => (
+                      <kbd key={k} className={bad.has(k) ? "bad" : undefined} title={bad.has(k) ? "和另一条命令撞键了" : undefined}>
+                        {comboLabel(k)}
+                      </kbd>
+                    ))
+                  )}
+                  <button className="btn" onClick={() => setRecording(recording === cmd.id ? null : cmd.id)}>
+                    {recording === cmd.id ? "取消" : "改键"}
+                  </button>
+                  {/* 只有改过的才给「恢复」,没改过时那个按钮点了什么都不会发生。 */}
+                  {keys.join() !== cmd.keys.join() && (
+                    <button className="btn ghost" onClick={() => setKeys(cmd.id, cmd.keys)}>
+                      恢复
+                    </button>
+                  )}
+                </span>
+              </div>
+            ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -2538,6 +2761,7 @@ const SECTIONS: { sec: string; items: ItemDef[] }[] = [
     items: [
       { id: "appearance", label: "外观与语言", icon: <IconSun size={16} /> },
       { id: "playback", label: "播放器", icon: <IconPlay size={16} /> },
+      { id: "shortcuts", label: "快捷键", icon: <IconKeyboard size={16} /> },
       { id: "danmaku", label: "弹幕", icon: <IconLibrary size={16} /> },
       { id: "subtrans", label: "字幕翻译", icon: <IconFile size={16} /> },
     ],
@@ -2635,6 +2859,7 @@ export default function SettingsPage({ theme, setTheme }: Props) {
 
             {active === "appearance" && <AppearancePane theme={theme} setTheme={setTheme} />}
             {active === "playback" && <PlaybackPane />}
+            {active === "shortcuts" && <ShortcutsPane />}
             {active === "danmaku" && <DanmakuPane />}
             {active === "subtrans" && <SubTransPane />}
             {active === "cf" && <CfPane />}

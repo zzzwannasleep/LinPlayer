@@ -1183,6 +1183,15 @@ export const getPlaybackPrefs = () => invoke<PlaybackPrefs>("get_playback_prefs"
 export const setPlaybackPrefs = (settings: PlaybackPrefs) =>
   invoke<void>("set_playback_prefs", { settings });
 
+/** 自定义 mpv 配置(`<数据根>/data/mpv/mpv.conf`)。
+ *  存的是**文件原文**,libmpv 自己解析(我们没写 ini 解析器)。
+ *  ★ 只在 `Player::new` 时读一次,而播放器是进程启动时建的 —— 改完必须重启应用。
+ *  active=false 表示文件不存在,即完全不加载任何配置(出厂状态)。 */
+export type MpvConf = { text: string; path: string; active: boolean };
+export const getMpvConf = () => invoke<MpvConf>("get_mpv_conf");
+/** 空文本 = 删掉配置文件,回到出厂状态。写不进去(权限/只读盘)会报错,不静默。 */
+export const setMpvConf = (text: string) => invoke<MpvConf>("set_mpv_conf", { text });
+
 /** 章节。跳过片头片尾与进度条缩略图**共用**这一份数据,起播后拉一次即可。
  *  chapters 为空 = 服务端没有章节(没刮削),两个功能都自动静默不工作 —— 这是正常情况。
  *  intro/outro 已由核层按开关判好:开关关着时恒为 null,前端不用再判一次。 */

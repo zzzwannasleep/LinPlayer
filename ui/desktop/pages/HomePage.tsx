@@ -44,6 +44,17 @@ type Props = {
   reloadKey: number;
 };
 
+/* 上一次整页纵向滚动的时刻。用户 2026-07-27:「改成鼠标默认上下浏览,只有碰到卡片了
+   才左右滑动 —— 现在只要在栏里面滚一下就变成左右滑动了,这不方便浏览」。
+
+   光判「指针在不在卡片上」还不够:整页往下滚的时候画面在动、指针不动,压根不用挪鼠标
+   就会一路压过好几张卡片,照样会被轨道劫持走。所以再加一条**连续滚动锁** ——
+   页面刚滚过就把滚轮完整还给页面,直到滚动停下来。
+   模块级变量而不是 context:HomePage 只有一个,穿三层 props 传一个时间戳不值当。 */
+let lastPageScroll = 0;
+/** 滚动停下多久之后才允许轨道再接管纵向滚轮。 */
+const RAIL_LOCK_MS = 320;
+
 /**
  * 横向轨道:草稿末条注「轨道右端悬停显现翻页箭头 ›,滚轮横向滚动;不用移动端的惯性滑动」。
  * 三种轨道(继续观看/媒体库/最新)共用一套滚动+箭头逻辑,不各写一遍。
@@ -69,6 +80,15 @@ function Rail({ children }: { children: ReactNode }) {
 
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      /* ★ 纵向滚轮默认**归页面**,只有两个条件同时成立才借给轨道:
+           1. 指针真的落在一张卡片上(轨道的空隙/内边距不算);
+           2. 页面不是正在连续往下滚(见 lastPageScroll 上方的注释)。
+         Shift + 滚轮仍然是「就是要横着滚」的通用手势,直接放行。 */
+      if (!e.shiftKey) {
+        const t = e.target as HTMLElement | null;
+        if (!t?.closest?.(".pcard, .hm-lib")) return;
+        if (performance.now() - lastPageScroll < RAIL_LOCK_MS) return;
+      }
       // 该方向已经到头就把滚轮还给页面,否则鼠标停在轨道上整页都滚不动了。
       const canScroll =
         e.deltaY > 0
@@ -211,6 +231,8 @@ export default function HomePage({
   /** 顶栏随内容滚动淡出(标注 4)。直接写 DOM 上的 CSS 变量,不走 state ——
       滚动每帧 setState 会把整页(含所有海报)重渲一遍。 */
   const onScroll = (e: { currentTarget: HTMLDivElement }) => {
+    // 轨道靠它判断「用户正在连续翻页,别抢滚轮」(见 Rail 上方的 lastPageScroll)。
+    lastPageScroll = performance.now();
     const el = cbarRef.current;
     if (!el) return;
     el.style.setProperty("--cbar-fade", String(Math.max(0, 1 - e.currentTarget.scrollTop / 140)));

@@ -4257,6 +4257,40 @@ fn set_playback_prefs(state: State<'_, AppState>, settings: PlaybackPrefs) -> Re
     Ok(())
 }
 
+/* ---------- 自定义 mpv 配置(设置页「播放器 › mpv 配置」)----------
+
+   存的就是 `<数据根>/data/mpv/mpv.conf` **这个文件本身**,不塞进 config.json ——
+   它是要原样交给 libmpv 去解析的文本,在 JSON 里绕一圈只是多两轮转义,
+   而且用户完全可以直接拿编辑器改那个文件(路径在界面上给了)。
+   加载时机与风险见 crates/mpv 里 `user_config_dir` 上方的长注释。 */
+#[derive(serde::Serialize)]
+struct MpvConf {
+    text: String,
+    /// 文件绝对路径 —— 界面要显示它,用户才知道能直接拿编辑器改。
+    path: String,
+    /// 文件在不在(= 下次启动会不会真去加载它)。空内容 = 不建文件 = 出厂状态。
+    active: bool,
+}
+
+fn mpv_conf_now() -> MpvConf {
+    MpvConf {
+        text: mpv::read_user_conf(),
+        path: mpv::user_conf_path().to_string_lossy().into_owned(),
+        active: mpv::user_conf_path().is_file(),
+    }
+}
+
+#[tauri::command]
+fn get_mpv_conf() -> MpvConf {
+    mpv_conf_now()
+}
+
+#[tauri::command]
+fn set_mpv_conf(text: String) -> Result<MpvConf, String> {
+    mpv::write_user_conf(&text)?;
+    Ok(mpv_conf_now())
+}
+
 /// 章节(跳过片头片尾 + 进度条缩略图)。两个功能同一份数据,前端只拉一次。
 /// 返回 `(章节表, 片头区间, 片尾起点)` —— 区间判定放核层,免得前端各写一套匹配规则。
 #[derive(serde::Serialize)]
@@ -5306,6 +5340,8 @@ pub fn run() {
             set_prefetch_settings,
             get_playback_prefs,
             set_playback_prefs,
+            get_mpv_conf,
+            set_mpv_conf,
             chapter_info,
             play_external,
             play_local,

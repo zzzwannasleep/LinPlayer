@@ -742,3 +742,84 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; font-family
 }
 .pb-hint { margin-top: 12px; font-size: 12px; color: var(--ink-3); line-height: 1.6; }
 .pb-crash .btn { margin-top: 16px; }
+
+/* ============================================================
+   按键提示层(`;`)与快捷键一览(`?`)
+   两者都必须盖在**所有**东西之上:播放页 OSD 的 z-index 最高到 3,
+   toast 是 50,插件 UI 更高 —— 这里取 900 以上,而且是 position:fixed,
+   免得被某个带 transform 的祖先变成相对定位(本仓库栽过,见
+   [[transform-keyframe-breaks-fixed]])。挂载点在 App 的最外层。
+   ============================================================ */
+.hintlayer {
+  position: fixed; inset: 0; z-index: 950;
+  background: rgba(0, 0, 0, 0.28);
+  /* 标签本身不吃鼠标,整层点一下就是取消。 */
+  cursor: default;
+}
+.hint {
+  position: absolute;
+  transform: translate(-4px, -6px);
+  display: inline-flex; gap: 1px;
+  padding: 2px 4px; border-radius: 5px;
+  background: #f5c451; color: #1b1300;
+  font-family: var(--mono); font-size: 11px; font-weight: 700; line-height: 1.2;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+/* 已经输对的那几位压暗 —— 两位标签时才看得出还差哪一位。 */
+.hint b.done { opacity: 0.38; }
+.hint-empty {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  padding: 10px 16px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line-strong); color: var(--ink);
+  font-size: 13px;
+}
+
+.kbdhelp {
+  position: fixed; inset: 0; z-index: 940;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+.kbdhelp .kh-box {
+  width: min(720px, calc(100vw - 60px));
+  max-height: min(74vh, 640px);
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line-strong); border-radius: 14px;
+  box-shadow: var(--card-shadow); color: var(--ink);
+}
+.kbdhelp .kh-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+  font-size: 14px; font-weight: 700;
+}
+.kbdhelp .kh-hd .x {
+  border: none; background: transparent; color: var(--ink-3);
+  font-size: 15px; cursor: pointer; padding: 2px 6px;
+}
+.kbdhelp .kh-hd .x:hover { color: var(--ink); }
+/* 两栏:命令一多单栏就要滚很久,而这是个「扫一眼」的面板。 */
+.kbdhelp .kh-bd {
+  overflow: auto; padding: 6px 18px 14px;
+  columns: 2; column-gap: 26px;
+}
+.kbdhelp .kh-grp { break-inside: avoid; margin-top: 12px; }
+.kbdhelp .kh-lab {
+  font-size: 11.5px; font-weight: 700; letter-spacing: 0.4px;
+  color: var(--ink-3); margin-bottom: 4px;
+}
+.kbdhelp .kh-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 3px 0; font-size: 12.5px;
+}
+.kbdhelp .kh-keys { display: flex; gap: 5px; flex-shrink: 0; }
+.kbdhelp kbd {
+  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  border: 1px solid var(--line-strong); border-bottom-width: 2px;
+  border-radius: 5px; padding: 1px 6px;
+  background: color-mix(in srgb, var(--panel) 50%, var(--bg));
+  white-space: nowrap;
+}
+.kbdhelp .kh-ft {
+  padding: 10px 18px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-3);
+}

@@ -251,6 +251,44 @@ fn shader_cache_dir() -> std::path::PathBuf {
     linplayer_core::paths::cache_dir("shader-cache")
 }
 
+/* ---------- 用户自定义 mpv 配置 ----------
+
+   libmpv 默认 `config=no`:**一个配置文件都不读**(这正是 libmpv 和 mpv 命令行
+   最大的行为差异)。把 `config=yes` + `config-dir=<目录>` 在 mpv_initialize **之前**
+   设上,mpv 就会自己去解析 `<目录>/mpv.conf`、`input.conf`、`scripts/` ——
+   我们一行 ini 解析器都不用写。
+
+   ★ 配置文件是在 mpv_initialize 里解析的,**晚于** Player::new 里那一串 set_option,
+     所以用户写的同名选项会**盖掉**我们的默认值。这就是「自定义内置的 mpv」要的效果,
+     代价是写坏了真能把播放搞挂(比如 vo=null)。故:
+       - 只在 mpv.conf 真的存在时才打开这条路(没建过文件的用户完全不受影响);
+       - 打开后回读 config-dir 确认(见 Player::new 末尾),别又是一次静默失效。 */
+
+/// 用户 mpv 配置目录(`<数据根>/data/mpv/`)。
+pub fn user_config_dir() -> std::path::PathBuf {
+    linplayer_core::paths::data_dir("mpv")
+}
+/// 用户 mpv 配置文件路径。
+pub fn user_conf_path() -> std::path::PathBuf {
+    user_config_dir().join("mpv.conf")
+}
+/// 读回用户配置。没建过就是空串(不是错误 —— 绝大多数用户永远不会碰它)。
+pub fn read_user_conf() -> String {
+    std::fs::read_to_string(user_conf_path()).unwrap_or_default()
+}
+/// 写用户配置。全空 = 删文件,回到「完全不读配置」的出厂状态。
+pub fn write_user_conf(text: &str) -> Result<(), String> {
+    let p = user_conf_path();
+    if text.trim().is_empty() {
+        return match std::fs::remove_file(&p) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("删除 mpv.conf 失败: {e}")),
+        };
+    }
+    std::fs::write(&p, text).map_err(|e| format!("写入 mpv.conf 失败: {e}"))
+}
+
 // ---------- 平台相关:视频顶层窗口 ----------
 /* 两端同构,只有系统 API 不同:
      建一个**独立顶层**、无边框、不进任务栏、不抢焦点的窗口给 mpv 当渲染面(wid),
@@ -880,26 +918,63 @@ pub struct Player {
          属性暂时读不到 ≠ 播放位置变成 0,所以读不到就沿用上一次读到的值。 */
     last_pos: Arc<AtomicU64>,
     last_dur: Arc<AtomicU64>,
-    /* seek 闩:(目标位置, 发出时刻)。见 [`Player::seek_abs`] / [`Player::status`]。 */
-    seek_latch: Arc<std::sync::Mutex<Option<(f64, std::time::Instant)>>>,
+    /* seek 闩。见 [`Player::seek_abs`] / [`Player::status`]。 */
+    seek_latch: Arc<std::sync::Mutex<Option<SeekLatch>>>,
+}
+
+/// 一次进行中的 seek。
+#[derive(Clone, Copy)]
+struct SeekLatch {
+    target: f64,
+    at: std::time::Instant,
+    /// 是否亲眼见过 mpv 的 `seeking=yes`。见过之后再变回 no,就是**确定**落地了 ——
+    /// 这比「位置和目标差多少」可靠得多(关键帧落点可以离目标好几秒)。
+    saw_seeking: bool,
 }
 
 /// 认为 seek 已到位的容差。比一个 GOP 略宽 —— mpv 默认按关键帧落点,
 /// 精确落在请求秒数上是例外而不是常态。
 const SEEK_SETTLE_SECS: f64 = 1.5;
-/// seek 闩最长压制多久。超时就放行真值,免得一次 seek 失败把进度条永久钉在目标位置上
-/// (那是把「弹回旧位置」换成了更难查的「永远不动」)。
+/// seek 闩最长压制多久。**只在 mpv 说自己没在 seek 的时候计时** —— 也就是说它管的
+/// 是「命令根本没被执行」这一种失败,而不是「网络慢、seek 做得久」。后者由 `seeking`
+/// 属性负责,爱做多久做多久,闩一直压着。
 const SEEK_LATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2500);
 
-/// seek 闩的判定本体。抽成自由函数是为了能**脱离 libmpv 单测** ——
-/// Player::new 要建叠加窗口、要桌面会话,CI 上跑不了。
-fn apply_seek_latch(latch: &mut Option<(f64, std::time::Instant)>, reported: f64) -> f64 {
-    let Some((target, at)) = *latch else { return reported };
-    if (reported - target).abs() <= SEEK_SETTLE_SECS || at.elapsed() >= SEEK_LATCH_TIMEOUT {
-        *latch = None; // 到位/等够了 -> 之后一律用真值
-        return reported;
+/* seek 闩的判定本体。抽成自由函数是为了能**脱离 libmpv 单测** ——
+   Player::new 要建叠加窗口、要桌面会话,CI 上跑不了。
+
+   ★ `reported` 必须是**这一拍真读到的** time-pos(`None` = mpv 说读不到),
+     绝对不能传「读不到就沿用上次」的那个粘性值。原来传的正是粘性值,而粘性值
+     在 seek 期间恰好等于闩的目标位(latched_time 每拍都把目标写回 last_pos)——
+     于是 `|reported - target| == 0`,闩在**第一次 time-pos 读不到时就自解除**。
+     本地文件 seek 一拍就完事,time-pos 从不缺席,所以看不出问题;网络流 seek 中
+     time-pos 频繁不可用,闩当场松掉,下一拍 mpv 报的还是**旧位置**,进度条就跳回去/
+     跳到别处 —— 这就是用户报的「本地跟手、服务器上一拖就乱」的根因。 */
+fn apply_seek_latch(
+    latch: &mut Option<SeekLatch>,
+    reported: Option<f64>,
+    seeking: bool,
+) -> Option<f64> {
+    let Some(l) = latch.as_mut() else { return reported };
+    if seeking {
+        // mpv 亲口说还在 seek:此刻的 time-pos 一定不是新位置,报目标位,别计时超时。
+        l.saw_seeking = true;
+        return Some(l.target);
     }
-    target
+    // 位置读不到 -> 继续压制。见上面为什么不能拿粘性值来比。
+    let Some(r) = reported else { return Some(l.target) };
+    /* 松闩的三条路,任一成立即可:
+         1. 见过一整轮 seeking=yes 又回到 no —— mpv 确定落地了,真值就是新位置;
+         2. 位置已经落在目标附近(seek 快到一拍都没抓到 seeking=yes,本地文件常见);
+         3. 等够了 —— 命令多半压根没生效,继续压着只会变成「进度条永远不动」。 */
+    if l.saw_seeking
+        || (r - l.target).abs() <= SEEK_SETTLE_SECS
+        || l.at.elapsed() >= SEEK_LATCH_TIMEOUT
+    {
+        *latch = None;
+        return Some(r);
+    }
+    Some(l.target)
 }
 unsafe impl Send for Player {}
 
@@ -1013,11 +1088,35 @@ impl Player {
                 set("msg-level", "all=v");
                 set("log-file", &mpv_log_path().to_string_lossy());
             }
+
+            /* 用户自定义 mpv 配置(设置页「播放器 · mpv 配置」)。理由与风险见
+               user_config_dir 上方那段长注释。**必须在 mpv_initialize 之前**设 ——
+               配置文件正是在 initialize 里解析的,晚一步就完全不生效且不报错。 */
+            let user_conf = user_conf_path();
+            let use_user_conf = user_conf.is_file();
+            if use_user_conf {
+                set("config", "yes");
+                set("config-dir", &user_config_dir().to_string_lossy());
+            }
+
             let rc = mpv_initialize(ctx);
             if rc < 0 {
                 let e = err_str(rc);
                 mpv_terminate_destroy(ctx);
-                return Err(format!("mpv_initialize 失败: {e}"));
+                /* 用户配置里一个非法选项就能让 initialize 直接失败,而错误串里
+                   通常只有 "options/…" 这类天书 —— 不点名 mpv.conf 的话,用户
+                   根本想不到是自己刚才在设置页写的那几行。 */
+                return Err(if use_user_conf {
+                    format!(
+                        "mpv_initialize 失败: {e}(已启用自定义 mpv.conf,\
+                         多半是里面有非法选项 —— 去 设置 › 播放器 › mpv 配置 清空重试)"
+                    )
+                } else {
+                    format!("mpv_initialize 失败: {e}")
+                });
+            }
+            if use_user_conf {
+                poclog(&format!("已加载用户 mpv 配置: {}", user_conf.display()));
             }
 
             /* ★ 回读校验 shader 缓存真设上了。上面那个 set() **吞掉 mpv 的返回码** ——
@@ -1293,23 +1392,36 @@ impl Player {
     pub fn seek_abs(&self, secs: f64) -> Result<(), String> {
         let t = secs.max(0.0);
         self.last_pos.store(t.to_bits(), Ordering::Relaxed);
-        *self.seek_latch.lock().unwrap() = Some((t, std::time::Instant::now()));
+        *self.seek_latch.lock().unwrap() = Some(SeekLatch {
+            target: t,
+            at: std::time::Instant::now(),
+            saw_seeking: false,
+        });
         self.cmd(&["seek", &secs.to_string(), "absolute"])
     }
     /* seek 之后、mpv 真正跳过去之前,`time-pos` 仍**报得出**旧位置(不是读不到)。
        轮询正好落在这个窗口里,界面就会把用户刚拖到的位置弹回原处 —— 而画面已经跳走了。
        这就是「拖完进度条自己跳回去、条和画面对不上」的直接来源。
        所以在 seek 到位之前一律报目标位置;到位(或等超时)就立刻放行真值。 */
-    fn latched_time(&self, reported: f64) -> f64 {
-        let out = apply_seek_latch(&mut self.seek_latch.lock().unwrap(), reported);
-        self.last_pos.store(out.to_bits(), Ordering::Relaxed);
-        out
+    fn latched_time(&self) -> f64 {
+        /* ★ 传**这一拍真读到的**值(try_f64,读不到就是 None),不能传 sticky_f64 ——
+           理由见 apply_seek_latch 上方那段。粘性回落只在闩已经松掉、且属性确实
+           读不到时才用得上,所以放在返回 None 的那条分支里。 */
+        let fresh = self.try_f64("time-pos");
+        let seeking = self.get_str("seeking").as_deref() == Some("yes");
+        let out = apply_seek_latch(&mut self.seek_latch.lock().unwrap(), fresh, seeking);
+        match out {
+            Some(v) => {
+                self.last_pos.store(v.to_bits(), Ordering::Relaxed);
+                v
+            }
+            None => f64::from_bits(self.last_pos.load(Ordering::Relaxed)),
+        }
     }
 
     pub fn status(&self) -> Status {
-        let reported = self.sticky_f64("time-pos", &self.last_pos);
         Status {
-            time: self.latched_time(reported),
+            time: self.latched_time(),
             duration: self.sticky_f64("duration", &self.last_dur),
             paused: self.get_str("pause").as_deref() == Some("yes"),
             /* demuxer-cache-time 是**已缓冲数据的最后一个时间戳(绝对)**,不是时长
@@ -1842,30 +1954,85 @@ mod tests {
 
        反向验证:把 status() 里的 `self.latched_time(reported)` 改回 `reported`,
        第一条断言立刻红(1000 != 600)。 */
+    fn latch_at(target: f64, at: std::time::Instant) -> Option<SeekLatch> {
+        Some(SeekLatch { target, at, saw_seeking: false })
+    }
+    fn latch(target: f64) -> Option<SeekLatch> {
+        latch_at(target, std::time::Instant::now())
+    }
+
     #[test]
     fn seek_latch_reports_target_until_mpv_catches_up() {
-        let now = std::time::Instant::now();
-        let mut latch = Some((600.0, now));
+        let mut l = latch(600.0);
 
         // 刚发完 seek,mpv 还报旧位置 -> 必须报目标位,不能弹回旧位置。
-        assert_eq!(apply_seek_latch(&mut latch, 120.0), 600.0);
-        assert!(latch.is_some(), "还没到位,闩不能提前松");
+        assert_eq!(apply_seek_latch(&mut l, Some(120.0), false), Some(600.0));
+        assert!(l.is_some(), "还没到位,闩不能提前松");
 
         // mpv 落到最近关键帧(599.2,差 0.8s < 容差)-> 算到位,放行真值并松闩。
-        assert_eq!(apply_seek_latch(&mut latch, 599.2), 599.2);
-        assert!(latch.is_none(), "到位后必须松闩,否则真值永远出不来");
+        assert_eq!(apply_seek_latch(&mut l, Some(599.2), false), Some(599.2));
+        assert!(l.is_none(), "到位后必须松闩,否则真值永远出不来");
 
         // 松闩之后一律透传,进度条继续正常走。
-        assert_eq!(apply_seek_latch(&mut latch, 601.5), 601.5);
+        assert_eq!(apply_seek_latch(&mut l, Some(601.5), false), Some(601.5));
     }
 
     /* 闩必须有超时。seek 失败(网络流跳不过去)时若一直压制,
        现象会从「弹回旧位置」变成更难查的「进度条永远不动」—— 那是拿一个 bug 换另一个。 */
     #[test]
     fn seek_latch_gives_up_after_timeout() {
-        let stale = std::time::Instant::now() - SEEK_LATCH_TIMEOUT - std::time::Duration::from_millis(1);
-        let mut latch = Some((600.0, stale));
-        assert_eq!(apply_seek_latch(&mut latch, 120.0), 120.0, "超时后必须放行真值");
-        assert!(latch.is_none());
+        let stale =
+            std::time::Instant::now() - SEEK_LATCH_TIMEOUT - std::time::Duration::from_millis(1);
+        let mut l = latch_at(600.0, stale);
+        assert_eq!(
+            apply_seek_latch(&mut l, Some(120.0), false),
+            Some(120.0),
+            "超时后必须放行真值"
+        );
+        assert!(l.is_none());
+    }
+
+    /* ★ 用户 2026-07-27 报的「服务器上一拖就乱」的回归钉。
+
+       网络流 seek 期间 time-pos 会**时有时无**。老实现把「读不到就沿用上次」的粘性值
+       喂给闩,而粘性值此刻正好等于目标位 —— 一比就相等,闩当场自解除;下一拍 mpv 报的
+       还是旧位置,进度条于是跳回去(或跳到缓冲位置),画面和读数彻底对不上。
+
+       反向验证(必须做,见 [[test-must-fail-first]]):把 latched_time 里的
+       `self.try_f64("time-pos")` 换回 `Some(self.sticky_f64(...))`,或把本函数第一行
+       的 `let Some(r) = reported else ...` 删掉,这条立刻红。 */
+    #[test]
+    fn seek_latch_survives_unreadable_time_pos() {
+        let mut l = latch(600.0);
+        // 第一拍:位置读不到(网络流 seek 中的常态)。绝不能因此松闩。
+        assert_eq!(apply_seek_latch(&mut l, None, false), Some(600.0));
+        assert!(l.is_some(), "位置暂时读不到不等于 seek 到位了,闩不能松");
+        // 第二拍:位置回来了,但 mpv 还没跳过去,报的仍是旧位置 -> 继续压制。
+        assert_eq!(apply_seek_latch(&mut l, Some(120.0), false), Some(600.0));
+        assert!(l.is_some());
+    }
+
+    /* mpv 的 seek 落点可以离目标很远(只能落关键帧,或服务端 Range 给的位置)。
+       只靠 1.5s 容差的话,这种 seek 要一直压到超时才放行 —— 中间进度条是钉住的。
+       `seeking` 属性给的是权威信号:见过 yes 再回到 no = 确定落地,立刻放行真值。 */
+    #[test]
+    fn seek_latch_releases_when_mpv_finishes_seeking() {
+        let mut l = latch(600.0);
+        assert_eq!(apply_seek_latch(&mut l, Some(120.0), true), Some(600.0), "seek 中报目标位");
+        assert!(l.is_some());
+        // seeking 落回 no,而落点离目标 5s(远超容差)—— 照样必须松闩放行真值。
+        assert_eq!(apply_seek_latch(&mut l, Some(595.0), false), Some(595.0));
+        assert!(l.is_none(), "mpv 已经 seek 完了,闩没有理由再压");
+    }
+
+    /* seek 做得久(慢服务器)不该被超时打断:只要 mpv 还在 seek,就一直报目标位。
+       否则超时一到就放行旧位置 —— 正是「画面回退了、进度条反而前进」的来源。 */
+    #[test]
+    fn seek_latch_timeout_does_not_fire_while_still_seeking() {
+        let stale =
+            std::time::Instant::now() - SEEK_LATCH_TIMEOUT - std::time::Duration::from_secs(5);
+        let mut l = latch_at(600.0, stale);
+        assert_eq!(apply_seek_latch(&mut l, Some(120.0), true), Some(600.0));
+        assert!(l.is_some(), "mpv 还在 seek,超时不该生效");
     }
 }

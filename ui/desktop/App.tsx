@@ -19,14 +19,12 @@ import {
   applyPrefs,
   currentSession,
   currentSource,
-  danmakuAttach,
   danmakuAutoLoad,
   danmakuDetach,
   danmakuEpisodes,
   danmakuLoad,
   danmakuMatch,
   danmakuMinAutoScore,
-  danmakuVisible,
   danmakuSearch,
   defaultDanmakuFilter,
   fmtBitrate,
@@ -99,6 +97,8 @@ import {
   IconVolume,
 } from "./app/icons";
 import { PluginSlot } from "./components/PluginHost";
+import HintOverlay, { ShortcutsHelp } from "./components/HintOverlay";
+import { installDispatcher, setScope, useCommand } from "./lib/shortcuts";
 import "@shared/tokens.css";
 import "./theme/ui.css";
 import "./theme/plugins.css";
@@ -134,11 +134,17 @@ const DM_SPEEDS: [number, string][] = [[14, "极慢"], [11, "慢"], [8, "中"], 
 const DM_SIZES: [number | null, string, number][] = [
   [16, "极小", 32], [20, "小", 40], [null, "中", 49], [28, "大", 60], [34, "极大", 72],
 ];
-/** 弹幕渲染引擎。mpv = 生成 ASS 交 libass(默认);web = 老的网页 Canvas 层。
-    默认走 mpv:网页层每帧自己算位置,而位置插值里没有倍速,倍速下每 250ms 硬跳一次。 */
-const DM_ENGINES: [DmEngine, string][] = [["mpv", "mpv(流畅)"], ["web", "网页层"]];
-type DmEngine = "mpv" | "web";
 const DM_DEFAULT = 2; // 两张表的「中」都在下标 2
+
+/* 弹幕渲染:**只有网页 Canvas 层这一种**,不给用户选(用户 2026-07-27:
+   「为什么会有渲染方式?这个不需要用户自定义…你二选一就行了」)。
+
+   为什么二选一选的是网页层而不是 mpv:mpv 那条路是把弹幕生成 ASS 挂到
+   **secondary-sid** 上,而次字幕位只有一个 —— 开了弹幕就没法开双语字幕,
+   反过来也一样。一个设置项换来两个功能互斥,不如把它去掉。
+   当初改用 mpv 是为了治「倍速下弹幕一顿一顿」,但那个 bug 的真因是网页层的
+   墙钟插值里漏了倍速因子(见 Danmaku.tsx 的 TimeSync),那已经修好了,
+   不需要靠换渲染引擎来绕。 */
 
 /* 弹幕显示设置的持久化(用户 2026-07-16:「在某一集调整了,后续就不用再重新调整」)。
 
@@ -148,12 +154,12 @@ const DM_DEFAULT = 2; // 两张表的「中」都在下标 2
    为它们往 config.rs 加字段 = 让核层存一份自己永远不读的数据。
    ★ 但「用不到」不等于「可以不存」:换片会重建整个播放器状态,不落盘就每集都要重调。 */
 const DM_KEY = "player:danmaku";
-type DmSettings = { on: boolean; opacity: number; area: number; speed: number; size: number; engine: DmEngine };
+type DmSettings = { on: boolean; opacity: number; area: number; speed: number; size: number };
 /* ★ on 的默认从 false 改成了 true,这是**配套改动**不是口味改动:
    以前靠 autoDanmaku 匹配成功时 setDmOn(true) 把它顶开,所以默认 false 也看得到弹幕;
    现在开关是用户的持久化偏好,自动匹配不能再擅自翻它(翻了就等于「关不掉」),
    于是默认必须自己立起来。没匹配到弹幕时 dmComments 为空,开着也只是一层空画布,观感不变。 */
-const DM_FALLBACK: DmSettings = { on: true, opacity: 80, area: 1, speed: DM_DEFAULT, size: DM_DEFAULT, engine: "mpv" };
+const DM_FALLBACK: DmSettings = { on: true, opacity: 80, area: 1, speed: DM_DEFAULT, size: DM_DEFAULT };
 
 /** 读回存档。★ 必须逐项夹紧:存档是上个版本写的,档位表增删过之后
     旧下标可能越界 → DM_SPEEDS[7] = undefined → 解构 [0] 直接崩在渲染里。 */
@@ -170,8 +176,7 @@ function loadDm(): DmSettings {
       area: idx(p.area, DM_AREAS.length, DM_FALLBACK.area),
       speed: idx(p.speed, DM_SPEEDS.length, DM_FALLBACK.speed),
       size: idx(p.size, DM_SIZES.length, DM_FALLBACK.size),
-      // 存档里没有 engine 的老用户 → 走默认的 mpv(升级即得流畅版,不用自己去翻设置)
-      engine: p.engine === "web" || p.engine === "mpv" ? p.engine : DM_FALLBACK.engine,
+      // 老存档里可能还留着 engine —— 直接忽略,渲染方式已经不是用户选项了。
     };
   } catch {
     return DM_FALLBACK; // 存档坏了就用默认,不能让它挡住起播
@@ -229,6 +234,9 @@ export default function App() {
   const [entering, setEntering] = useState(false);
   const enterTimer = useRef<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  /** 按键提示层(`;`)/ 快捷键一览(`?`)。都是全局的,播放中也能开。 */
+  const [hints, setHints] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const [playing, setPlaying] = useState<Item | null>(null);
   const [status, setStatus] = useState<Status>({ time: 0, duration: 0, paused: false, buffered: 0, eof: false });
@@ -330,7 +338,7 @@ export default function App() {
   /* 显示设置从存档起步(用户:「某一集调整了,后续不用再重新调整」)。
      useState 的初值写成**函数**:不写函数的话 loadDm() 每次渲染都会跑一遍读 localStorage。 */
   const [dm, setDm] = useState<DmSettings>(loadDm);
-  const { on: dmOn, opacity: dmOpacity, area: dmArea, speed: dmSpeed, size: dmSize, engine: dmEngine } = dm;
+  const { on: dmOn, opacity: dmOpacity, area: dmArea, speed: dmSpeed, size: dmSize } = dm;
   /** 改一项 = 存一次。写在同一个函数里,不靠各调用点自觉 —— 漏一处就是「这项不记」。
    *  ★ 收函数式入参:键盘快捷键的 handler 挂在一个 deps 里**没有 dm** 的 effect 上,
    *    直接读渲染作用域的 dmOn 会读到注册那一刻的旧值(按 D 只切一次就再也切不动)。
@@ -397,17 +405,15 @@ export default function App() {
     document.documentElement.style.setProperty("--detail-blur", String(prefs.detail_blur));
   }, [prefs.detail_blur]);
 
-  // 全局 Ctrl+K 唤起搜索。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        if (session && !playing) setSearchOpen(true);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [session, playing]);
+  /* 全局快捷键。整个 app 只有这一条 keydown 监听(见 lib/shortcuts.ts 的开头)——
+     以前 App 和 Shell 各挂各的,谁也列不出全部键位,更谈不上让用户改键。 */
+  useEffect(() => installDispatcher(), []);
+  // 播放页开着 = player 作用域:此时 Alt+1 之类不该把底下那一页切走。
+  useEffect(() => setScope(playing ? "player" : "app"), [playing]);
+
+  useCommand("search", () => { if (session && !playing) setSearchOpen(true); });
+  useCommand("hints", () => setHints(true));
+  useCommand("help", () => setHelpOpen(true));
 
   const trackLang = (list: Track[], id: string) => list.find((t) => t.id === id)?.lang || "";
   async function persistPrefs(next: Prefs) {
@@ -463,42 +469,14 @@ export default function App() {
     }
   }
 
-  /* ---- 弹幕交给 mpv 渲染(engine=mpv,默认)----
-
-     生成 ASS → sub-add 到 mpv 的次字幕位,之后时间轴/倍速/seek/暂停全归 mpv,
-     前端一帧都不用算。根治的是「插值里没有倍速」那个 bug(见 danmaku/ass.rs 头注释)。
-
-     ★ comments 只在**它自己变**的时候才传:改字号/透明度这些档位会重跑本 effect,
-       每次都推几万条过 IPC 的话,连点 stepper 就会一顿一顿的。核层留了上一份。 */
-  const dmSentRef = useRef<DanmakuComment[] | null>(null);
+  /* 起播时摘一次 mpv 的弹幕轨。
+     ★ 这不是多余的:从「弹幕交给 mpv」那个版本升上来的用户,本次进程里只要还有
+       残留的 ASS 弹幕轨占着 secondary-sid,双语字幕就会「挂上了却显示的是弹幕」。
+       没挂过的时候这条命令是空操作,代价为零。 */
   useEffect(() => {
-    if (!playing || dmEngine !== "mpv") return;
-    const fresh = dmSentRef.current !== dmComments;
-    dmSentRef.current = dmComments;
-    danmakuAttach(fresh ? dmComments : null, {
-      // libass 在 Windows 上直接读系统字体;Linux 走 fontconfig,雅黑多半不存在,
-      // 给个通用族名让它自己挑,别写死一个不存在的字体名(那会静默回落到看不懂的字形)。
-      font: IS_LINUX ? "Sans" : "Microsoft YaHei",
-      font_size: DM_SIZES[dmSize][2],
-      opacity: dmOpacity,
-      area_percent: DM_AREAS[dmArea],
-      scroll_secs: DM_SPEEDS[dmSpeed][0],
-    }).catch((e) => fail("弹幕渲染", e));
-  }, [playing, dmEngine, dmComments, dmSize, dmOpacity, dmArea, dmSpeed]);
-
-  /* 弹幕开关走 mpv 的次字幕可见性:不卸载,重开不用再生成整份 ASS。 */
-  useEffect(() => {
-    if (!playing || dmEngine !== "mpv") return;
-    danmakuVisible(dmOn).catch(() => {});
-  }, [playing, dmOn, dmEngine]);
-
-  /* 离开播放页 / 切回网页层渲染 → 摘掉弹幕轨。
-     不摘的话次字幕位一直被占着,用户去挂双语字幕会「挂上了但显示的是弹幕」。 */
-  useEffect(() => {
-    if (playing && dmEngine === "mpv") return;
-    dmSentRef.current = null;
+    if (!playing) return;
     danmakuDetach().catch(() => {});
-  }, [playing, dmEngine]);
+  }, [playing]);
 
   /* 自动跳过片头/片尾。挂在已有的 500ms 状态轮询上,不另开定时器。
      ★ 每片各跳一次(skipped ref):不设这个闸,用户手动倒回去看片头会被立刻再踹走一次,
@@ -754,11 +732,25 @@ export default function App() {
      Alt-Tab 走人(那时连 pointerup 都不会来)。三条任意一条到了就收工。 */
   useEffect(() => {
     if (seeking == null) return;
+    // 一次拖动只提交一次:pointerup 和 blur 可能一起到。
+    let done = false;
     const commit = () => {
+      if (done) return;
+      done = true;
       const v = seekingRef.current;
-      seekingRef.current = null;
-      setSeeking(null);
-      if (v != null) seekApi(v).catch(() => {});
+      if (v == null) { setSeeking(null); return; }
+      /* ★ 松手后**先等核层收下这次 seek,再放开 seeking**。
+         原来是同步 `setSeeking(null)` 然后异步发 seek —— 中间这段时间
+         `curTime` 已经退回 `status.time`(还是拖动前的旧位置),而 250ms 的轮询
+         很容易正好落在里面:进度条先弹回原处,等核层的 seek 闩生效再跳到新位置。
+         本地文件 seek 快得看不出来,服务器上就是用户报的「拖一下条自己乱跳」。
+         失败也要放开,否则一次 seek 失败会把进度条永久钉住(老 bug 的另一半)。 */
+      seekApi(v).catch(() => {}).finally(() => {
+        // 等待期间用户又拖起来了就别插手,否则会把新的一次拖动当场掐断。
+        if (seekingRef.current !== v) return;
+        seekingRef.current = null;
+        setSeeking(null);
+      });
     };
     window.addEventListener("pointerup", commit);
     window.addEventListener("pointercancel", commit);
@@ -1235,52 +1227,52 @@ export default function App() {
     window.addEventListener("mouseup", up);
   };
 
-  /* 键盘快捷键(草稿 kbdcard,取代移动端手势)。仅播放时生效,全部真调核层。 */
-  useEffect(() => {
-    if (!playing) return;
-    const onKey = (e: KeyboardEvent) => {
-      // 输入框里不劫持,否则弹幕搜索框敲不了字。
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-      switch (e.key) {
-        case " ": e.preventDefault(); togglePause(); break;
-        // 位置从 ref 取,不从 state ——「快捷键要用到 status」是这个 effect 依赖 status
-        // 的唯一理由,而 status 每 250ms 换一个新对象,依赖它 = 每秒 4 次卸载重装监听器。
-        case "ArrowLeft": e.preventDefault(); doSeek(statusRef.current.time - 10); break;
-        case "ArrowRight": e.preventDefault(); doSeek(statusRef.current.time + 10); break;
-        case "ArrowUp":
-        case "ArrowDown": {
-          e.preventDefault();
-          applyVolume(volume + (e.key === "ArrowUp" ? 5 : -5));
-          setVbar((b) => b?.kind === "vol" ? b : { kind: "vol", x: 24 }); // 顺手把竖条弹出来当读数
-          break;
-        }
-        case "f": case "F": e.preventDefault(); toggleFullscreen(); break;
-        case "Escape":
-          e.preventDefault();
-          if (ctx) setCtx(null);
-          else if (vbar) setVbar(null);
-          else if (panel) setPanel(null);
-          else exitFullscreen();
-          break;
-        case "[": e.preventDefault(); applySpeed(speed - 0.25); say(`倍速 ${(Math.max(0.25, speed - 0.25)).toFixed(2)}×`); break;
-        case "]": e.preventDefault(); applySpeed(speed + 0.25); say(`倍速 ${(Math.min(5, speed + 0.25)).toFixed(2)}×`); break;
-        case "m": case "M": e.preventDefault(); applyMute(!muted); say(muted ? "已取消静音" : "已静音"); break;
-        case "p": case "P": e.preventDefault(); goEpisode(prevEp, "上"); break;
-        case "n": case "N": e.preventDefault(); goEpisode(nextEp, "下"); break;
-        case "s": case "S": e.preventDefault(); doShot(); break;
-        case "d": case "D": e.preventDefault(); patchDm((d) => ({ on: !d.on })); break;
-        default: break;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // ★ 依赖里**去掉了 status**:它每 250ms 就是一个新对象,留着等于每秒把
-    //   keydown 监听器卸载重装 4 次(还连带重建整个 onKey 闭包)。真正要用到的
-    //   只有 status.time,已改走 statusRef。其余几项都是低频状态,留着无妨。
-  }, [playing, panel, vbar, ctx, prevEp, nextEp, volume, muted, speed]);
+  /* 播放页快捷键。全部走命令注册(lib/shortcuts.ts),用户可在 设置 › 快捷键 改键。
+     ★ 位置一律从 statusRef 取,不从 status state —— status 每 250ms 换一个新对象,
+       读渲染作用域的那份会拿到注册那一刻的旧值。 */
+  const bumpVol = (d: number) => {
+    applyVolume(volume + d);
+    setVbar((b) => (b?.kind === "vol" ? b : { kind: "vol", x: 24 })); // 顺手把竖条弹出来当读数
+  };
+  useCommand("play-pause", playing ? togglePause : null);
+  useCommand("seek-back", playing ? () => doSeek(statusRef.current.time - 10) : null);
+  useCommand("seek-fwd", playing ? () => doSeek(statusRef.current.time + 10) : null);
+  useCommand("seek-back-long", playing ? () => doSeek(statusRef.current.time - 60) : null);
+  useCommand("seek-fwd-long", playing ? () => doSeek(statusRef.current.time + 60) : null);
+  useCommand("vol-up", playing ? () => bumpVol(5) : null);
+  useCommand("vol-down", playing ? () => bumpVol(-5) : null);
+  useCommand("mute", playing ? () => { applyMute(!muted); say(muted ? "已取消静音" : "已静音"); } : null);
+  useCommand("fullscreen", playing ? toggleFullscreen : null);
+  useCommand("prev-ep", playing ? () => goEpisode(prevEp, "上") : null);
+  useCommand("next-ep", playing ? () => goEpisode(nextEp, "下") : null);
+  useCommand("speed-down", playing ? () => { applySpeed(speed - 0.25); say(`倍速 ${Math.max(0.25, speed - 0.25).toFixed(2)}×`); } : null);
+  useCommand("speed-up", playing ? () => { applySpeed(speed + 0.25); say(`倍速 ${Math.min(5, speed + 0.25).toFixed(2)}×`); } : null);
+  useCommand("speed-reset", playing ? () => { applySpeed(1); say("倍速 1.00×"); } : null);
+  useCommand("screenshot", playing ? doShot : null);
+  useCommand("copy-time", playing ? copyTime : null);
+  useCommand("danmaku-toggle", playing ? () => patchDm((d) => ({ on: !d.on })) : null);
+  /* Esc 是**逐层收起**:右键菜单 → 音量条 → 面板 → 退全屏。一把全关掉的话,
+     用户想关一个小面板结果连全屏也退了。 */
+  useCommand("close-player", playing ? () => {
+    if (ctx) setCtx(null);
+    else if (vbar) setVbar(null);
+    else if (panel) setPanel(null);
+    else exitFullscreen();
+  } : null);
+  /* 九个面板各一条键,再按一次同一条键收起。
+     不复用下面渲染期的 togglePanel:那个 const 声明在早退分支之后,
+     从这儿引用等于给自己埋一个 TDZ 地雷。两行代码,直接写。 */
+  const panelCmd = (p: Exclude<Panel, null>) =>
+    playing ? () => { setPanel((cur) => (cur === p ? null : p)); setVbar(null); } : null;
+  useCommand("panel-eps", panelCmd("eps"));
+  useCommand("panel-audio", panelCmd("audio"));
+  useCommand("panel-sub", panelCmd("sub"));
+  useCommand("panel-danmaku", panelCmd("danmaku"));
+  useCommand("panel-super", panelCmd("super"));
+  useCommand("panel-line", panelCmd("line"));
+  useCommand("panel-version", panelCmd("version"));
+  useCommand("panel-speed", panelCmd("speed"));
+  useCommand("panel-more", panelCmd("more"));
 
   /* ★ danmaku_search 回的是 Vec<DanmakuSourceGroup>(一源一组),**不是**番剧数组:
      曾经这里按 {anime_id, anime_title, episodes} 收,渲染时 a.episodes.map() 直接
@@ -1399,10 +1391,9 @@ export default function App() {
         <div className="p-dim" style={{ opacity: ((100 - brightness) / 100) * 0.85 }} />
       )}
 
-      {/* 弹幕层。engine=mpv 时这一层**整个不存在** —— 弹幕是 mpv 的一条 ASS 字幕轨,
-          不透明度/显示区域都写进 ASS 了,再套一层 CSS 反而会二次衰减。
-          留着网页层是给「要双语字幕 + 弹幕同时开」的人兜底:secondary-sid 只有一个位子。 */}
-      {playing && dmEngine === "web" && (
+      {/* 弹幕层(唯一的渲染方式,见文件顶部 DM_DEFAULT 上方那段)。
+          不透明度/显示区域是这一层的 CSS,速度/字号是 DanmakuLayer 的 props。 */}
+      {playing && (
         <div
           className="p-dmwrap"
           style={{ opacity: dmOpacity / 100, clipPath: `inset(0 0 ${100 - DM_AREAS[dmArea]}% 0)` }}
@@ -1814,11 +1805,6 @@ export default function App() {
                       {stepper("字体大小", DM_SIZES[dmSize][1],
                         () => patchDm({ size: Math.max(0, dmSize - 1) }),
                         () => patchDm({ size: Math.min(DM_SIZES.length - 1, dmSize + 1) }))}
-                      {/* 渲染方式。默认 mpv;只有需要「双语字幕 + 弹幕同开」时才退回网页层
-                          (弹幕占的是 mpv 的次字幕位,和双语字幕抢同一个位子)。 */}
-                      {stepper("渲染方式", DM_ENGINES.find((e) => e[0] === dmEngine)?.[1] ?? dmEngine,
-                        () => patchDm({ engine: dmEngine === "mpv" ? "web" : "mpv" }),
-                        () => patchDm({ engine: dmEngine === "mpv" ? "web" : "mpv" }))}
                     </div>
                   </>
                 )}
@@ -2032,6 +2018,11 @@ export default function App() {
 
       {/* toast 放 player-layer 外:OSD 淡出时提示还得看得见 */}
       {toast && <div className="toast">{toast}</div>}
+
+      {/* 按键提示 / 快捷键一览:挂在最外层,主界面和播放页都能用
+          (播放时 .app-root 是 display:none,挂在里面等于播放中用不了)。 */}
+      <HintOverlay open={hints} onClose={() => setHints(false)} />
+      <ShortcutsHelp open={helpOpen} scope={playing ? "player" : "app"} onClose={() => setHelpOpen(false)} />
     </>
   );
 }

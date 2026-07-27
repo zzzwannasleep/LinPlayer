@@ -101,11 +101,21 @@
 .p-scrubrow { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .p-tc { font-family: var(--mono); font-size: 12px; color: #fff; min-width: 46px; }
 .p-tc.l { text-align: right; }
+/* 三层要一眼分得清:未缓冲(底槽) < 已缓冲 < 已播放。
+   ★ 原来底槽 0.16 / 缓冲 0.22 —— 两个几乎一样的灰,叠在明暗不定的画面上根本看不出
+     缓冲到哪儿了(用户 2026-07-27:「颜色有点接近,不明显」)。
+     底槽压成半透明黑(不管画面是亮是暗都稳),缓冲提到实打实的浅灰。 */
 .p-scrub {
   position: relative; flex: 1; height: 6px; border-radius: 3px;
-  background: rgba(255, 255, 255, 0.16); cursor: pointer;
+  background: rgba(0, 0, 0, 0.42); cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
 }
-.p-scrub .buf { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255, 255, 255, 0.22); border-radius: 3px; }
+.p-scrub .buf {
+  position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.55);
+  /* 缓冲边界跟着网络走,直接改宽度会一格一格地跳。 */
+  transition: width 260ms linear;
+}
 .p-scrub .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
 .p-scrub .knob { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: #fff; transform: translate(-50%, -50%); box-shadow: 0 0 8px rgba(0, 0, 0, 0.5); }
 /* 状态是轮询来的(250ms 一拍),直接照着画就是一秒四格的顿挫 ——「进度不走」的观感
@@ -114,9 +124,10 @@
    两拍之间正好接上,不会出现走走停停。拖动中禁用过渡,否则滑块黏着手指后面走。 */
 .p-scrub .fill { transition: width 260ms linear; }
 .p-scrub .knob { transition: left 260ms linear; }
-.p-scrub.dragging .fill, .p-scrub.dragging .knob { transition: none; }
+/* 拖动中三条全部禁过渡:滑块要贴着手指走,缓冲条也别在拖动时慢悠悠地追。 */
+.p-scrub.dragging .fill, .p-scrub.dragging .knob, .p-scrub.dragging .buf { transition: none; }
 @media (prefers-reduced-motion: reduce) {
-  .p-scrub .fill, .p-scrub .knob { transition: none; }
+  .p-scrub .fill, .p-scrub .knob, .p-scrub .buf { transition: none; }
 }
 .p-scrub input { position: absolute; inset: -6px 0; width: 100%; opacity: 0; cursor: pointer; }
 /* 悬停预览气泡(草稿 pin 18 的 .prev):时间读数 +(有则)服务端章节图缩略图。

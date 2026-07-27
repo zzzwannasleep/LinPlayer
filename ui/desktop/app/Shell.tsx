@@ -11,7 +11,8 @@ import {
 import SearchOverlay from "../components/SearchOverlay";
 import { useTheme } from "@shared/theme";
 import Sidebar from "./Sidebar";
-import { type PageId } from "./nav";
+import { NAV_COMMANDS, type PageId } from "./nav";
+import { useCommand } from "../lib/shortcuts";
 import HomePage from "../pages/HomePage";
 import LibraryPage from "../pages/LibraryPage";
 import DetailPage from "../pages/DetailPage";
@@ -110,26 +111,20 @@ export default function Shell({
     };
   }, []);
 
-  /* 通用规则 legend:「下拉刷新 → 工具栏刷新按钮 · F5」;标注 12:「Alt+← = 返回」。
-     挂在 Shell 不挂 App:reloadKey / detailStack 都是 Shell 的状态。
-     搜索浮层开着时不接管 —— 那时 F5 该由浮层自己管,而且 Alt+← 更没意义。 */
-  useEffect(() => {
-    if (searchOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F5") {
-        e.preventDefault();
-        setReloadKey((k) => k + 1);
-        return;
-      }
-      // 只在详情栈非空时吃掉 Alt+←,否则用户在别处按会以为没反应。
-      if (e.altKey && e.key === "ArrowLeft" && detailStack.length > 0) {
-        e.preventDefault();
-        backDetail();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [searchOpen, detailStack.length]);
+  /* 主界面的快捷键。实现挂这儿(reloadKey / detailStack / page 都是 Shell 的状态),
+     键位和分发在 lib/shortcuts.ts —— 用户可在 设置 › 快捷键 改键。
+     搜索浮层开着时整组不接管:那时 F5/翻页都该归浮层。 */
+  const live = !searchOpen;
+  useCommand("refresh", () => setReloadKey((k) => k + 1), live);
+  useCommand("back", () => { if (detailStack.length > 0) backDetail(); }, live);
+  useCommand("toggle-sidebar", () => setCollapsed((v) => !v), live);
+  useCommand("toggle-theme", toggle, live);
+  /* 九个页面各一条 Alt+数字。详情栈要先清 —— 不清的话切了页仍停在详情上,
+     看起来「按了没反应」(nav() 本来就做这件事)。 */
+  for (const [cmd, pid] of NAV_COMMANDS) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- NAV_COMMANDS 是模块级常量,顺序和长度永远不变
+    useCommand(cmd, () => nav(pid), live);
+  }
 
   /**
    * 聚合搜索的结果可能属于别的服务器。核层 item_detail/play 都走「当前活跃服务器」,
