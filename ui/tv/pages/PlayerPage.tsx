@@ -215,6 +215,17 @@ export default function PlayerPage({
         </div>
       )}
 
+      {/* 跳转卡死。同样**不跟着 OSD 收起** —— 这是故障说明不是控件。
+          播放器修不了它(根因是服务器不认 HTTP Range,ffmpeg 只能顺读丢弃到目标字节),
+          但让用户对着不动的进度条干等是我们的错。 */}
+      {st?.seek_stalled && !vproblem && (
+        <div className="osd-fault">
+          <div className="h">跳转很慢</div>
+          <div className="d">这台服务器不接受 HTTP Range 请求,跳到未缓冲的位置要等它把中间的数据下完。</div>
+          <div className="d dim">跳到已缓冲的位置是即时的。</div>
+        </div>
+      )}
+
       {/* 顶栏:全透明,标题块自带不透明底 */}
       {osd && (
         <div className="osd-top">

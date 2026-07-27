@@ -94,6 +94,8 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
 
   const hideAt = useRef(0);
   const ended = useRef(false);
+  /** 「跳转卡住了」是否已经提示过。一次 seek 只说一次,别每秒刷一条。 */
+  const stallSaid = useRef(false);
   const stRef = useRef<Status | null>(null);
   stRef.current = st;
   const surface = useRef<HTMLDivElement>(null);
@@ -154,6 +156,15 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
         const s = await getStatus();
         if (!alive) return;
         setSt(s);
+        /* 跳转卡死。播放器**修不了**(根因是服务器不认 HTTP Range,ffmpeg 只能从当前
+           位置顺读丢弃到目标字节),但不能让用户对着不动的进度条干等。一次 seek 只说一次。 */
+        if (s.seek_stalled) {
+          if (!stallSaid.current) {
+            stallSaid.current = true;
+            setHud({ kind: "跳转很慢", text: "服务器不接受 Range 请求,要等中间的数据下完" });
+            window.setTimeout(() => setHud(null), 5000);
+          }
+        } else stallSaid.current = false;
         timeSync.current = { base: s.time, stamp: performance.now(), paused: s.paused, speed: speedRef.current };
         /* ★ 播完收尾传 duration 而不是 time:mpv 停在最后一帧时 time 通常差最后
            零点几秒,传 time 算出来是 99%,服务端不算「看完」,Trakt/Bangumi 一次都不触发。

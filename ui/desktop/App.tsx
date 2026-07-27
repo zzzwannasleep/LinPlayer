@@ -259,6 +259,8 @@ export default function App() {
   const tick = useRef(0);
   /// status 轮询连续失败的拍数。见轮询里的 catch —— 用来把「一直读不到」说出来。
   const statusFail = useRef(0);
+  /// 「这次 seek 卡住了」是否已经说过。一次 seek 只提示一次,别每 250ms 刷一条。
+  const stallSaid = useRef(false);
   /// status 的最新值。给那些**不该因为进度走动而重建**的回调用(键盘快捷键)。
   const statusRef = useRef<Status>({ time: 0, duration: 0, paused: false, buffered: 0, eof: false });
   /** 播一份初始状态。★ state 和 ref **必须一起写** —— 轮询里那条「duration=0 不覆盖
@@ -876,6 +878,15 @@ export default function App() {
         statusRef.current = fixed;
         setStatus(fixed);
         if (st.time > 0) setReady(true); // 时间开始走 = 已出画,撤黑屏
+        /* 跳转卡死。★ 播放器**修不了**这件事(根因是服务器不认 HTTP Range,ffmpeg 只能
+           从当前位置顺读丢弃到目标字节),但让用户对着一个不动的进度条干等是我们的错。
+           一次 seek 只说一次;mpv 跳完了就复位,下一次卡住还会再说。 */
+        if (st.seek_stalled) {
+          if (!stallSaid.current) {
+            stallSaid.current = true;
+            say("跳转很慢:这台服务器不接受 HTTP Range 请求,跳到未缓冲的位置要等它把中间的数据下完");
+          }
+        } else stallSaid.current = false;
         // speed 必须带上:两次轮询之间靠墙钟外推,不乘倍速就每 250ms 硬跳一次(见 TimeSync)。
         timeSync.current = { base: st.time, stamp: performance.now(), paused: st.paused, speed: speedRef.current };
         statusFail.current = 0;

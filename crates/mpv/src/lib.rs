@@ -896,6 +896,22 @@ const SEEK_SETTLE_SECS: f64 = 1.5;
 /// 是「命令根本没被执行」这一种失败,而不是「网络慢、seek 做得久」。后者由 `seeking`
 /// 属性负责,爱做多久做多久,闩一直压着。
 const SEEK_LATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(2500);
+/* seek 卡多久算「这条流根本跳不动」,该告诉用户而不是让他干等。
+
+   ★ 真实成因(2026-07-27 在用户两台服务器上实测):服务器**宣称** `Accept-Ranges: bytes`
+     却对任何 `Range:` 请求都回 `200 OK` + 完整 Content-Length。ffmpeg 于是拿不到
+     206,只能从当前位置**顺读丢弃**到目标字节 —— 往前跳 9 分钟就是 370MB。
+     mpv 日志里是 `https: Unexpected offset: expected N, got 0` + `Seek failed`。
+     同一份二进制在支持 Range 的服务器上 seek 秒到,所以这不是播放器的问题。
+   ★ 门槛必须**明显大于**近距离 seek 的耗时:同样那台服务器上跳 3 秒实测要 7s 才落地
+     (2MB 的顺读),12s 能把「慢」和「这辈子到不了」分开。 */
+const SEEK_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+
+/* 「这次 seek 卡住了」。判据只有一条:mpv 亲口说还在 seek,而这已经是很久以前发出的了。
+   不看位置差 —— 卡住的时候 time-pos 通常压根读不到。 */
+fn seek_stalled(latch: &Option<SeekLatch>, seeking: bool) -> bool {
+    matches!(latch, Some(l) if seeking && l.at.elapsed() >= SEEK_STALL_TIMEOUT)
+}
 
 /* seek 闩的判定本体。抽成自由函数是为了能**脱离 libmpv 单测** ——
    Player::new 要建叠加窗口、要桌面会话,CI 上跑不了。
@@ -1383,25 +1399,33 @@ impl Player {
        轮询正好落在这个窗口里,界面就会把用户刚拖到的位置弹回原处 —— 而画面已经跳走了。
        这就是「拖完进度条自己跳回去、条和画面对不上」的直接来源。
        所以在 seek 到位之前一律报目标位置;到位(或等超时)就立刻放行真值。 */
-    fn latched_time(&self) -> f64 {
+    /// 返回 (对外报的位置, 这次 seek 是不是卡住了)。
+    fn latched_time(&self) -> (f64, bool) {
         /* ★ 传**这一拍真读到的**值(try_f64,读不到就是 None),不能传 sticky_f64 ——
            理由见 apply_seek_latch 上方那段。粘性回落只在闩已经松掉、且属性确实
            读不到时才用得上,所以放在返回 None 的那条分支里。 */
         let fresh = self.try_f64("time-pos");
         let seeking = self.get_str("seeking").as_deref() == Some("yes");
-        let out = apply_seek_latch(&mut self.seek_latch.lock().unwrap(), fresh, seeking);
-        match out {
+        let mut latch = self.seek_latch.lock().unwrap();
+        // 先判卡死再套闩:apply_seek_latch 可能把闩清掉,清掉之后就无从判断了。
+        let stalled = seek_stalled(&latch, seeking);
+        let out = apply_seek_latch(&mut latch, fresh, seeking);
+        drop(latch);
+        let pos = match out {
             Some(v) => {
                 self.last_pos.store(v.to_bits(), Ordering::Relaxed);
                 v
             }
             None => f64::from_bits(self.last_pos.load(Ordering::Relaxed)),
-        }
+        };
+        (pos, stalled)
     }
 
     pub fn status(&self) -> Status {
+        let (time, seek_stalled) = self.latched_time();
         Status {
-            time: self.latched_time(),
+            time,
+            seek_stalled,
             duration: self.sticky_f64("duration", &self.last_dur),
             paused: self.get_str("pause").as_deref() == Some("yes"),
             /* demuxer-cache-time 是**已缓冲数据的最后一个时间戳(绝对)**,不是时长
@@ -1685,6 +1709,9 @@ pub struct Status {
     pub buffered: f64,
     /// 本片是否已正常播放到结尾(keep-open=yes 时画面停在最后一帧,时间不再前进)。
     pub eof: bool,
+    /// mpv 已经在这一次 seek 上卡了很久(见 [`SEEK_STALL_TIMEOUT`])。
+    /// 界面拿它把「跳过去以后画面和进度条都不动」这件事**说出来**,而不是让用户干等。
+    pub seek_stalled: bool,
     /// 画面这条链的自检结果。见 [`Player::video_diag`]。
     pub video: VideoDiag,
 }
@@ -1903,6 +1930,31 @@ mod tests {
         let mut l = latch_at(600.0, stale);
         assert_eq!(apply_seek_latch(&mut l, Some(120.0), true), Some(600.0));
         assert!(l.is_some(), "mpv 还在 seek,超时不该生效");
+    }
+
+    /* 「跳到缓存条没缓存到的地方就卡死,画面和进度条都不动」。
+       根因在服务器:它宣称 Accept-Ranges 却对 Range 请求回 200 + 整个文件,
+       ffmpeg 只能顺读丢弃到目标字节(跳 9 分钟 = 370MB)。我们改不了那件事,
+       但**不能让用户对着一个不动的进度条干等** —— 卡够久就得说出来。
+
+       反向验证(见 [[test-must-fail-first]]):把 seek_stalled 里的 `seeking &&`
+       删掉,第一条断言(没在 seek 就不算卡)当场红;把 `l.at.elapsed() >= …`
+       改成 `true`,第二条(刚发出去的 seek 不算卡)当场红。 */
+    #[test]
+    fn seek_stall_is_only_reported_when_mpv_is_stuck_seeking() {
+        let fresh = latch(600.0);
+        assert!(!seek_stalled(&fresh, true), "刚发出去的 seek 不算卡");
+        assert!(!seek_stalled(&fresh, false), "没在 seek 更不算卡");
+
+        let old = latch_at(
+            600.0,
+            std::time::Instant::now() - SEEK_STALL_TIMEOUT - std::time::Duration::from_secs(1),
+        );
+        assert!(seek_stalled(&old, true), "mpv 还在 seek 且已经过了很久 = 卡住了");
+        /* ★ 这一条是关键:seeking=no 说明 mpv 早就跳完了,闩只是还没被下一拍收掉。
+           不判 seeking 的话,任何一次超过 12 秒没再动过的播放都会被误报成"卡住"。 */
+        assert!(!seek_stalled(&old, false), "mpv 说自己没在 seek,那就不是卡在 seek 上");
+        assert!(!seek_stalled(&None, true), "没有闩就没有正在进行的 seek");
     }
 
     /* 用户报的「视频还没加载完就点进度条跳转」。
