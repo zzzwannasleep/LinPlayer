@@ -756,7 +756,11 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; font-family
   /* 标签本身不吃鼠标,整层点一下就是取消。 */
   cursor: default;
 }
-.hint {
+/* ★ 别叫 .hint —— 这个仓库里 `.hint` 早就是设置页/添加服务器页所有说明文字的类名
+   (66 处 <p className="hint">)。第一版就叫 .hint,结果全 app 的说明文字变成了
+   浮空的黄底块,而 tsc / vite / 单测**全绿**:CSS 类名撞车没有任何工具会报。
+   新起的全局类名先 grep 一遍 —— 这就是 [[repo-layout-2026-07]] 说的「两处只改了一处」的近亲。 */
+.hintkey {
   position: absolute;
   transform: translate(-4px, -6px);
   display: inline-flex; gap: 1px;
@@ -767,8 +771,8 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; font-family
   pointer-events: none;
 }
 /* 已经输对的那几位压暗 —— 两位标签时才看得出还差哪一位。 */
-.hint b.done { opacity: 0.38; }
-.hint-empty {
+.hintkey b.done { opacity: 0.38; }
+.hintkey-empty {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   padding: 10px 16px; border-radius: 10px;
   background: var(--panel); border: 1px solid var(--line-strong); color: var(--ink);

@@ -2,7 +2,6 @@
 // 对齐 Dart lib/core/api/danmaku/(dandan_signing + danmaku_source)、lib/core/utils/
 // (danmaku_matcher + danmaku_filter + danmaku_postprocess)、danmaku_cache。
 // 签名:X-Signature = Base64(SHA256(AppId + Timestamp + Path + AppSecret))。
-pub mod ass;
 pub mod local;
 use base64::Engine;
 use md5::Md5;

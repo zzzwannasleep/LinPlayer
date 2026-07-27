@@ -875,34 +875,6 @@ export const setPrefs = (p: TrackPrefs) =>
     subEnabled: p.sub_enabled,
   });
 
-/* ---------- 弹幕渲染(交给 mpv 的 libass)----------
-
-   老的网页 Canvas 版每帧自己算位置,位置来自 250ms 轮询 + performance.now() 插值,
-   而那段插值**没有把倍速算进去** —— 2x 时弹幕按 1x 爬、每 250ms 被拽回去,
-   就是用户说的「正常速度也卡、倍速更卡」。交给 libass 后时间轴归 mpv,前端零开销。 */
-export type DanmakuAssOptions = {
-  /** 版面分辨率(libass 会等比缩放到实际画面)。省略 = 1920×1080。 */
-  play_res_x?: number;
-  play_res_y?: number;
-  font?: string;
-  /** 字号,单位是 play_res_y 那套坐标(1080 基准),**不是** CSS px。 */
-  font_size?: number;
-  opacity?: number;
-  area_percent?: number;
-  scroll_secs?: number;
-  fixed_secs?: number;
-  outline?: number;
-  bold?: boolean;
-};
-
-/** 生成 ASS 并挂给 mpv。`comments` 传 null = 沿用核层上次那份(只改档位时别再推几万条过 IPC)。 */
-export const danmakuAttach = (
-  comments: DanmakuComment[] | null,
-  options: DanmakuAssOptions,
-) => invoke<void>("danmaku_attach", { comments, options });
-export const danmakuDetach = () => invoke<void>("danmaku_detach");
-export const danmakuVisible = (on: boolean) => invoke<void>("danmaku_visible", { on });
-
 // ---------- 网盘源 ----------
 export const sourceLogin = (
   kind: string,

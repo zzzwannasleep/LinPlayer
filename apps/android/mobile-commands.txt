@@ -14,7 +14,6 @@ config_export_qr
 config_import_qr
 current_session
 current_source
-danmaku_visible
 download_clear_completed
 download_enqueue
 download_list
@@ -79,3 +78,4 @@ tracks
 trakt_calendar
 update_account
 views
+danmaku_auto_load

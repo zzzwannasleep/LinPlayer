@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  type DanmakuComment,
+  type DanmakuMatchInput,
+  type Item,
   type Status,
   type Track,
-  danmakuVisible,
+  danmakuAutoLoad,
+  defaultDanmakuFilter,
   fmtTime,
   playerOpts,
   reportProgress,
@@ -16,6 +20,7 @@ import {
   stopPlayback,
 } from "@shared/api";
 import { pollTracks } from "@shared/track-poll";
+import { DanmakuLayer, type TimeSync } from "@shared/Danmaku";
 import { attachGestures } from "../components/Gestures";
 import Sheet from "../components/Sheet";
 import { onShellKey, pushBackHandler } from "../app/backkey";
@@ -45,6 +50,8 @@ import {
 
 type Props = {
   title?: string;
+  /** 正在播的条目。只用来给弹幕自动匹配喂剧名/集号/时长(route.title 是拼好的串,搜不到)。 */
+  item?: Item | null;
   onBack: () => void;
   /** 收进迷你播放器(不停播) */
   onMinimize: () => void;
@@ -54,14 +61,24 @@ type Panel = null | "sub" | "audio" | "speed";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3] as const;
 
-export default function PlayerPage({ title, onBack, onMinimize }: Props) {
+export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
   const [st, setSt] = useState<Status | null>(null);
   const [trk, setTrk] = useState<Track[]>([]);
   const [osd, setOsd] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
   const [speed, setSpeedState] = useState(1);
 
+  /* 弹幕。渲染走**网页 Canvas 层**,和 PC 端同一个组件(@shared/Danmaku)——
+     曾经有一条「生成 ASS 挂给 mpv 的 secondary-sid」的路,已经整条删掉:
+     次字幕位只有一个,占了就没法开双语字幕。
+     ★ 这一页原来只有一个调 danmakuVisible 的按钮,而**从来没有人加载过弹幕** ——
+       那个开关切的是 mpv 的次字幕可见性,点了要么没反应、要么把用户的双语字幕关掉。 */
   const [dm, setDm] = useState(true);
+  const [dmComments, setDmComments] = useState<DanmakuComment[]>([]);
+  /* 播放时钟快照。轮询是 1s 一拍,弹幕要 60fps —— 两拍之间靠墙钟外推。
+     `speed` 必须带上,不然倍速下弹幕按 1x 爬,每秒被真值硬拽回去一次。 */
+  const timeSync = useRef<TimeSync>({ base: 0, stamp: performance.now(), paused: false, speed: 1 });
+  const speedRef = useRef(1);
   /** 手势指示器:亮度/音量/进度预览 */
   const [hud, setHud] = useState<null | { kind: string; text: string; pct?: number }>(null);
   const [boost, setBoost] = useState(false); // 长按 2× 中
@@ -97,9 +114,28 @@ export default function PlayerPage({ title, onBack, onMinimize }: Props) {
   useEffect(() => {
     playerOpts().then((o) => {
       setSpeedState(o.speed);
+      speedRef.current = o.speed;
       volRef.current = o.volume;
     }).catch(() => {});
   }, []);
+
+  /* 弹幕自动匹配。整套多源并行 + 分数门槛 + 下一集锚点都在核层,这里只负责喂输入。
+     全程 catch:弹幕挂不上绝不能影响播放,但失败也不静默改状态 —— 没匹配到就是空列表,
+     开关照样能点,只是画布上什么都没有。 */
+  useEffect(() => {
+    if (!item) return;
+    let alive = true;
+    const input: DanmakuMatchInput = {
+      title: item.series_name ?? item.name, // 剧集要用剧名,Episode.name 是「第 N 集」搜不到
+      episode_no: item.episode_no,
+      file_name: item.name,
+      duration_secs: item.runtime_secs > 0 ? item.runtime_secs : null,
+    };
+    danmakuAutoLoad(input, defaultDanmakuFilter(), null, item.series_id ?? null)
+      .then((c) => { if (alive && c) setDmComments(c); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [item?.id]);
 
   /* 状态轮询 1s。轮询而不是订阅:核层没有 status 推送通道,而且轮询在卸载时天然停掉。 */
   useEffect(() => {
@@ -109,6 +145,7 @@ export default function PlayerPage({ title, onBack, onMinimize }: Props) {
         const s = await getStatus();
         if (!alive) return;
         setSt(s);
+        timeSync.current = { base: s.time, stamp: performance.now(), paused: s.paused, speed: speedRef.current };
         /* ★ 播完收尾传 duration 而不是 time:mpv 停在最后一帧时 time 通常差最后
            零点几秒,传 time 算出来是 99%,服务端不算「看完」,Trakt/Bangumi 一次都不触发。
            另外 keep-open 下 END_FILE 永远不发,判播完只能读 eof(见 [[mpv-keepopen-eof-detection]])。 */
@@ -242,7 +279,9 @@ export default function PlayerPage({ title, onBack, onMinimize }: Props) {
         },
         onLongPress: (on) => {
           setBoost(on);
-          void setSpeed(on ? 2 : speed);
+          const v = on ? 2 : speed;
+          speedRef.current = v; // 弹幕的墙钟外推按倍速走,不同步这里 2× 时弹幕会一直被拽
+          void setSpeed(v);
         },
       },
     );
@@ -255,6 +294,12 @@ export default function PlayerPage({ title, onBack, onMinimize }: Props) {
 
   return (
     <div className="player" ref={surface}>
+      {/* 弹幕层。垫在 OSD 之下、亮度蒙版之上;pointer-events:none,不能吃掉手势。
+          没有弹幕时它就是一张空画布(组件内部会整帧跳过,不占 GPU)。 */}
+      <div className="pl-dmwrap">
+        <DanmakuLayer comments={dmComments} timeSync={timeSync} enabled={dm} />
+      </div>
+
       {/* 亮度蒙版。pointer-events:none —— 它不能吃掉手势。 */}
       {dim > 0 && <div className="pl-dim" style={{ opacity: dim }} />}
 
@@ -329,11 +374,7 @@ export default function PlayerPage({ title, onBack, onMinimize }: Props) {
             <button
               type="button"
               className={`pl-txt${dm ? " on" : ""}`}
-              onClick={() => {
-                const next = !dm;
-                setDm(next);
-                void danmakuVisible(next);
-              }}
+              onClick={() => setDm((v) => !v)}
             >
               弹幕
             </button>
@@ -359,6 +400,7 @@ export default function PlayerPage({ title, onBack, onMinimize }: Props) {
               className={`opt${s === speed ? " on" : ""}`}
               onClick={() => {
                 setSpeedState(s);
+                speedRef.current = s;
                 void setSpeed(s);
                 setPanel(null);
               }}

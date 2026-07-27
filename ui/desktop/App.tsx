@@ -20,7 +20,6 @@ import {
   currentSession,
   currentSource,
   danmakuAutoLoad,
-  danmakuDetach,
   danmakuEpisodes,
   danmakuLoad,
   danmakuMatch,
@@ -73,7 +72,7 @@ import {
   tracks as tracksApi,
 } from "@shared/api";
 import { pollTracks } from "@shared/track-poll";
-import { DanmakuLayer, type DanmakuComment, type TimeSync } from "./Danmaku";
+import { DanmakuLayer, type DanmakuComment, type TimeSync } from "@shared/Danmaku";
 import LoginPage from "./pages/LoginPage";
 import Shell from "./app/Shell";
 import Titlebar from "./app/Titlebar";
@@ -468,15 +467,6 @@ export default function App() {
       say(`弹幕自动匹配失败:${e} · 可在弹幕面板手动搜索`);
     }
   }
-
-  /* 起播时摘一次 mpv 的弹幕轨。
-     ★ 这不是多余的:从「弹幕交给 mpv」那个版本升上来的用户,本次进程里只要还有
-       残留的 ASS 弹幕轨占着 secondary-sid,双语字幕就会「挂上了却显示的是弹幕」。
-       没挂过的时候这条命令是空操作,代价为零。 */
-  useEffect(() => {
-    if (!playing) return;
-    danmakuDetach().catch(() => {});
-  }, [playing]);
 
   /* 自动跳过片头/片尾。挂在已有的 500ms 状态轮询上,不另开定时器。
      ★ 每片各跳一次(skipped ref):不设这个闸,用户手动倒回去看片头会被立刻再踹走一次,

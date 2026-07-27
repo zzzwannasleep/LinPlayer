@@ -100,11 +100,6 @@ struct AppState {
     watch_history: linplayer_core::watch_history::WatchHistory,
     /// 剧 -> TMDB id 缓存(跨服匹配剧集要它;每部剧只查一次)
     series_tmdb: Mutex<HashMap<String, Option<String>>>,
-    /// 当前这集的弹幕(已过滤/已合并的最终版)。留一份在核层是为了改样式档位时
-    /// 不必让前端把几万条再过一遍 IPC —— 见 danmaku_attach。
-    danmaku_comments: Mutex<Vec<DanmakuComment>>,
-    /// 弹幕 ASS 的文件名序号(每次重新生成换个名字)
-    danmaku_seq: AtomicU32,
     /// 自动挂弹幕的连号锚点:seriesId|seasonId -> (集号, 弹弹Play episodeId)
     danmaku_anchors: Mutex<HashMap<String, (i64, i64)>>,
     /// 观看记录续播:本次会话已经问过的条目(问过一次就别再弹)
@@ -3369,64 +3364,6 @@ fn danmaku_load_local(path: String) -> Result<Vec<DanmakuComment>, String> {
     linplayer_core::danmaku::local::parse(name, &text)
 }
 
-/// 生成弹幕 ASS 并挂给 mpv。
-///
-/// `comments` 传 `None` = 沿用上一次那份 —— 只改字号/透明度/区域/速度档位时
-/// 不必把几万条弹幕再过一遍 IPC(一次几 MB,连点档位会明显发顿)。
-#[tauri::command]
-fn danmaku_attach(
-    state: State<'_, AppState>,
-    ps: State<'_, PlayerState>,
-    comments: Option<Vec<DanmakuComment>>,
-    options: danmaku::ass::AssOptions,
-) -> Result<(), String> {
-    if let Some(c) = comments {
-        *state.danmaku_comments.lock().unwrap() = c;
-    }
-    let list = state.danmaku_comments.lock().unwrap().clone();
-    if list.is_empty() {
-        // 没弹幕就别挂一条空轨:secondary-sid 被占着,用户挂双语字幕会莫名其妙。
-        if let Some(p) = ps.player.lock().unwrap().as_ref() {
-            p.clear_danmaku_sub();
-        }
-        return Ok(());
-    }
-    let text = danmaku::ass::to_ass(&list, &options);
-    let dir = linplayer_core::paths::cache_dir("danmaku-ass");
-    /* 每次换个文件名,并把旧的清掉。同名覆盖理论上也行,但 sub-add 同一路径时
-       libass/mpv 是否重读没有书面保证,而这个坑一旦踩中的表现是「档位调了没反应」——
-       和「设置没生效」长得一模一样,极难排查。换名字是一行的代价,买断这个不确定性。 */
-    let seq = state.danmaku_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(rd) = std::fs::read_dir(&dir) {
-        for e in rd.flatten() {
-            let _ = std::fs::remove_file(e.path());
-        }
-    }
-    let path = dir.join(format!("dm-{seq}.ass"));
-    std::fs::write(&path, text).map_err(|e| format!("弹幕 ASS 写盘失败: {e}"))?;
-    let guard = ps.player.lock().unwrap();
-    guard.as_ref().ok_or("播放器未就绪")?.set_danmaku_sub(&path.to_string_lossy());
-    Ok(())
-}
-
-/// 摘掉弹幕轨(关弹幕 / 退出播放页)。
-#[tauri::command]
-fn danmaku_detach(state: State<'_, AppState>,
-    ps: State<'_, PlayerState>) {
-    state.danmaku_comments.lock().unwrap().clear();
-    if let Some(p) = ps.player.lock().unwrap().as_ref() {
-        p.clear_danmaku_sub();
-    }
-}
-
-/// 弹幕显隐。只切可见性,不卸载 —— 重新打开不用再生成整份 ASS。
-#[tauri::command]
-fn danmaku_visible(ps: State<'_, PlayerState>, on: bool) {
-    if let Some(p) = ps.player.lock().unwrap().as_ref() {
-        p.set_danmaku_visible(on);
-    }
-}
-
 /// 起扫码:生成 device_id,拿二维码内容 + query_token。
 #[tauri::command]
 async fn quark_scan_start(state: State<'_, AppState>) -> Result<QuarkScan, String> {
@@ -4420,9 +4357,7 @@ pub fn run() {
                 cf_proxy: Mutex::new(HashMap::new()),
                 watch_history: linplayer_core::watch_history::WatchHistory::default(),
                 series_tmdb: Mutex::new(HashMap::new()),
-                danmaku_comments: Mutex::new(Vec::new()),
-                danmaku_seq: AtomicU32::new(0),
-                danmaku_anchors: Mutex::new(HashMap::new()),
+                        danmaku_anchors: Mutex::new(HashMap::new()),
                 wh_done: Mutex::new(Default::default()),
                 wh_ctx: Mutex::new(None),
                 plugins: OnceLock::new(),
@@ -4650,9 +4585,6 @@ pub fn run() {
             danmaku_cache_clear,
             danmaku_cache_size,
             danmaku_load_local,
-            danmaku_attach,
-            danmaku_detach,
-            danmaku_visible,
             danmaku_auto_load,
             cf_speed_test,
             cf_proxy_enable,

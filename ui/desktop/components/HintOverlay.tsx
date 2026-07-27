@@ -158,13 +158,13 @@ export default function HintOverlay({ open, onClose }: { open: boolean; onClose:
   return (
     <div className="hintlayer" onClick={onClose}>
       {shown.map((h) => (
-        <span className="hint" key={h.label} style={{ left: h.x, top: h.y }}>
+        <span className="hintkey" key={h.label} style={{ left: h.x, top: h.y }}>
           {h.label.split("").map((c, i) => (
             <b key={i} className={i < typed.length ? "done" : ""}>{c.toUpperCase()}</b>
           ))}
         </span>
       ))}
-      {hits.length === 0 && <div className="hint-empty">这一屏没有可点的元素</div>}
+      {hits.length === 0 && <div className="hintkey-empty">这一屏没有可点的元素</div>}
     </div>
   );
 }

@@ -179,6 +179,7 @@ export default function App() {
           <Body
             route={route}
             session={session}
+            playing={playing}
             onOpen={openItem}
             onGo={goPage}
             onPlay={playItem}
@@ -239,6 +240,7 @@ const LABELS: Partial<Record<PageId, string>> = {
 function Body({
   route,
   session,
+  playing,
   onOpen,
   onGo,
   onPlay,
@@ -247,6 +249,8 @@ function Body({
 }: {
   route: Route;
   session: LoginResult | null;
+  /** 正在播的条目。播放页拿它给弹幕自动匹配喂剧名/集号(route.title 是拼好的串,搜不到)。 */
+  playing: Item | null;
   onOpen: (it: Item) => void;
   onGo: (p: PageId, parentId?: string, title?: string) => void;
   onPlay: (it: Item, mediaSourceId?: string | null) => void;
@@ -284,6 +288,8 @@ function Body({
       return (
         <PlayerPage
           title={route.title}
+          /* 弹幕自动匹配要剧名/集号/时长 —— route 里只有一个标题串,匹配不出东西。 */
+          item={playing}
           onBack={() => {
             onStopped();
             onBack();

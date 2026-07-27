@@ -1505,6 +1505,20 @@ textarea:focus {
   overflow: hidden;
 }
 
+/* 弹幕层。和 PC 端同一个 Canvas 组件(@shared/Danmaku)——
+   曾经那条「生成 ASS 挂 mpv secondary-sid」的路已整条删掉:次字幕位只有一个,
+   占了就开不了双语字幕。★ pointer-events:none,六个手势全靠底下那层收。 */
+.pl-dmwrap {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.pl-dmwrap .danmaku-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 /* 亮度蒙版。★ pointer-events:none —— 它绝不能吃掉手势。 */
 .pl-dim {
   position: absolute;

@@ -86,11 +86,6 @@ struct AppState {
     watch_history: linplayer_core::watch_history::WatchHistory,
     // 剧 -> TMDB id 缓存(跨服匹配剧集要它;每部剧只查一次)。对齐 Dart _seriesTmdbCache。
     series_tmdb: Mutex<HashMap<String, Option<String>>>,
-    /* 当前这集的弹幕(已过滤/已合并的最终版)。留一份在核层是为了改样式档位时
-       不必让前端把几万条再过一遍 IPC —— 见 danmaku_attach。 */
-    danmaku_comments: Mutex<Vec<DanmakuComment>>,
-    // 弹幕 ASS 的文件名序号(每次重新生成换个名字,见 danmaku_attach 里的说明)。
-    danmaku_seq: AtomicU32,
     // server_id -> 连通状态三态。probe_accounts 刷新,list_accounts 读;不落盘(重启即重探)。
     account_status: Mutex<HashMap<String, AccountStatus>>,
     // 自动挂弹幕的连号锚点:seriesId|seasonId -> (集号, 弹弹Play episodeId)。
@@ -1833,8 +1828,6 @@ async fn stop_playback(state: State<'_, AppState>, pos: f64) -> Result<(), Strin
         let guard = state.player.lock().unwrap();
         if let Some(p) = guard.as_ref() {
             p.set_pause(true);
-            // 弹幕轨随播放会话一起收:留着会一直占住次字幕位。
-            p.clear_danmaku_sub();
         }
     }
     // 退出播放页 → 视频窗藏起来。不藏的话主窗一最小化,桌面上就露出一个黑窗。
@@ -3150,70 +3143,6 @@ fn danmaku_load_local(path: String) -> Result<Vec<DanmakuComment>, String> {
     linplayer_core::danmaku::local::parse(name, &text)
 }
 
-/* ---------- 弹幕渲染:交给 mpv 的 libass ----------
-
-   老实现是前端 Canvas 每帧自己画,位置靠 250ms 轮询 + `performance.now()` 插值 ——
-   **那段插值里没有倍速**,2x 播放时弹幕按 1x 爬再每 250ms 被拽回去,每秒 4 次硬跳。
-   用户报的「正常速度也卡、倍速更卡」是这个,不是绘制开销。
-
-   换成 ASS 之后弹幕就是一条字幕轨:时间轴/倍速/seek/暂停全归 mpv,
-   前端一帧都不用算。副作用是 mpv 的截图/录制会带上弹幕(正好是想要的)。 */
-
-/// 生成弹幕 ASS 并挂给 mpv。
-///
-/// `comments` 传 `None` = 沿用上一次那份 —— 只改字号/透明度/区域/速度档位时
-/// 不必把几万条弹幕再过一遍 IPC(一次几 MB,连点档位会明显发顿)。
-#[tauri::command]
-fn danmaku_attach(
-    state: State<'_, AppState>,
-    comments: Option<Vec<DanmakuComment>>,
-    options: danmaku::ass::AssOptions,
-) -> Result<(), String> {
-    if let Some(c) = comments {
-        *state.danmaku_comments.lock().unwrap() = c;
-    }
-    let list = state.danmaku_comments.lock().unwrap().clone();
-    if list.is_empty() {
-        // 没弹幕就别挂一条空轨:secondary-sid 被占着,用户挂双语字幕会莫名其妙。
-        if let Some(p) = state.player.lock().unwrap().as_ref() {
-            p.clear_danmaku_sub();
-        }
-        return Ok(());
-    }
-    let text = danmaku::ass::to_ass(&list, &options);
-    let dir = linplayer_core::paths::cache_dir("danmaku-ass");
-    /* 每次换个文件名,并把旧的清掉。同名覆盖理论上也行,但 sub-add 同一路径时
-       libass/mpv 是否重读没有书面保证,而这个坑一旦踩中的表现是「档位调了没反应」——
-       和「设置没生效」长得一模一样,极难排查。换名字是一行的代价,买断这个不确定性。 */
-    let seq = state.danmaku_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(rd) = std::fs::read_dir(&dir) {
-        for e in rd.flatten() {
-            let _ = std::fs::remove_file(e.path());
-        }
-    }
-    let path = dir.join(format!("dm-{seq}.ass"));
-    std::fs::write(&path, text).map_err(|e| format!("弹幕 ASS 写盘失败: {e}"))?;
-    let guard = state.player.lock().unwrap();
-    guard.as_ref().ok_or("播放器未就绪")?.set_danmaku_sub(&path.to_string_lossy());
-    Ok(())
-}
-
-/// 摘掉弹幕轨(关弹幕 / 退出播放页)。
-#[tauri::command]
-fn danmaku_detach(state: State<'_, AppState>) {
-    state.danmaku_comments.lock().unwrap().clear();
-    if let Some(p) = state.player.lock().unwrap().as_ref() {
-        p.clear_danmaku_sub();
-    }
-}
-
-/// 弹幕显隐。只切可见性,不卸载 —— 重新打开不用再生成整份 ASS。
-#[tauri::command]
-fn danmaku_visible(state: State<'_, AppState>, on: bool) {
-    if let Some(p) = state.player.lock().unwrap().as_ref() {
-        p.set_danmaku_visible(on);
-    }
-}
 
 // ---------- 文件浏览型源命令(网盘/追番)----------
 fn source_backend(
@@ -5036,8 +4965,6 @@ pub fn run() {
             source: Mutex::new(source),
             watch_history: linplayer_core::watch_history::WatchHistory::default(),
             series_tmdb: Mutex::new(HashMap::new()),
-            danmaku_comments: Mutex::new(Vec::new()),
-            danmaku_seq: AtomicU32::new(0),
             wh_ctx: Mutex::new(None),
             source_play_entry: Mutex::new(None),
             resign_count: AtomicU32::new(0),
@@ -5321,9 +5248,6 @@ pub fn run() {
             danmaku_cache_clear,
             danmaku_cache_size,
             danmaku_load_local,
-            danmaku_attach,
-            danmaku_detach,
-            danmaku_visible,
             danmaku_auto_load,
             cf_speed_test,
             cf_proxy_enable,
