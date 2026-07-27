@@ -110,11 +110,12 @@
   background: rgba(0, 0, 0, 0.42); cursor: pointer;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
 }
+/* left/width 都由内联样式给:缓冲段从播放头画到缓冲末端,不是从 0 画起(理由见 App.tsx)。 */
 .p-scrub .buf {
-  position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px;
+  position: absolute; top: 0; bottom: 0; border-radius: 3px;
   background: rgba(255, 255, 255, 0.55);
-  /* 缓冲边界跟着网络走,直接改宽度会一格一格地跳。 */
-  transition: width 260ms linear;
+  /* 缓冲边界跟着网络走,直接改宽度会一格一格地跳;left 跟着播放头,和 .fill 同一条曲线。 */
+  transition: width 260ms linear, left 260ms linear;
 }
 .p-scrub .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
 .p-scrub .knob { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; background: #fff; transform: translate(-50%, -50%); box-shadow: 0 0 8px rgba(0, 0, 0, 0.5); }
@@ -130,6 +131,9 @@
   .p-scrub .fill, .p-scrub .knob, .p-scrub .buf { transition: none; }
 }
 .p-scrub input { position: absolute; inset: -6px 0; width: 100%; opacity: 0; cursor: pointer; }
+/* 时长还不知道(起播/换片)时进度条是禁用的 —— 见 App.tsx 里 input 的 disabled。
+   光禁用不改鼠标样式的话,手型还在那儿摆着,用户只会以为"点了没反应"。 */
+.p-scrub.idle, .p-scrub.idle input { cursor: default; }
 /* 悬停预览气泡(草稿 pin 18 的 .prev):时间读数 +(有则)服务端章节图缩略图。
    有图时是竖排(图在上、时间在下),没图时只剩时间读数 —— 布局两种情况都得成立,
    所以用 flex column 而不是给 .tc 定位。

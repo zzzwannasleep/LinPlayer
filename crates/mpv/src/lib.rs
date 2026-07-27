@@ -835,14 +835,26 @@ fn cmd_raw(ctx: *mut mpv_handle, args: &[&str]) -> Result<(), String> {
 struct SubState {
     loaded: bool,                   // 当前文件是否已 FILE_LOADED
     pending: Vec<(String, String)>, // (url, title),等 FILE_LOADED 后由事件线程挂
-    /* 弹幕 ASS 的路径。和普通外挂字幕分开排队,因为它还要额外指到 secondary-sid,
-       而且**只保留最后一条** —— 用户连点「字号+」时前面几版都作废,排成队会挂一串。 */
+    /* 起播途中用户拖/点进度条留下的目标位。★ 和外挂字幕**同一个坑、同一个解法**:
+       `seek` 发在 FILE_LOADED 之前只会拿到「命令失败」——mpv 那会儿还没有文件可跳。
+       而闩在发命令之前就设上了,于是现象是:进度条压着用户拖到的位置 2.5s,然后
+       弹回 `start=` 的续播点,画面从头到尾没跳过 —— 用户报的「没加载完就点进度条,
+       之后调进度稳定复现、画面不变」正是这个。
+       只留最后一条:起播时连点几下,只有最后那次算数(和 seek 的语义一致)。 */
+    pending_seek: Option<f64>,
 }
 
-/// 挂弹幕 ASS 并指到 secondary-sid。先摘掉上一条(改档位是「重新生成再挂」)。
-///
-/// 走 secondary 而不是主字幕位:主位要留给用户真正的字幕轨,
-/// 否则一开弹幕字幕就没了 —— 那是「修好一个坏掉另一个」。
+impl SubState {
+    /// 收下一次 seek。`true` = 文件已开好,调用方现在就发命令;
+    /// `false` = 已排进 `pending_seek`,调用方**别发**,等 FILE_LOADED 由事件线程补发。
+    fn queue_seek(&mut self, target: f64) -> bool {
+        if self.loaded {
+            return true;
+        }
+        self.pending_seek = Some(target);
+        false
+    }
+}
 
 pub struct Player {
     ctx: *mut mpv_handle,
@@ -860,6 +872,9 @@ pub struct Player {
          属性暂时读不到 ≠ 播放位置变成 0,所以读不到就沿用上一次读到的值。 */
     last_pos: Arc<AtomicU64>,
     last_dur: Arc<AtomicU64>,
+    /* 缓冲末端时间戳,同样是「暂时读不到 ≠ 变成 0」。原来走 get_f64,缓冲饥饿或
+       seek 重开 demuxer 的那几拍读不到,界面就收到 buffered=0 —— 缓冲条整条闪没。 */
+    last_buf: Arc<AtomicU64>,
     /* seek 闩。见 [`Player::seek_abs`] / [`Player::status`]。 */
     seek_latch: Arc<std::sync::Mutex<Option<SeekLatch>>>,
 }
@@ -1089,9 +1104,15 @@ impl Player {
             let eof = Arc::new(AtomicBool::new(false));
             let running = Arc::new(AtomicBool::new(true));
             let subs: Arc<std::sync::Mutex<SubState>> = Default::default();
+            let seek_latch: Arc<std::sync::Mutex<Option<SeekLatch>>> = Default::default();
             let ctx_addr = ctx as usize;
-            let (e2, r2, eof2, subs2) =
-                (error_eof.clone(), running.clone(), eof.clone(), subs.clone());
+            let (e2, r2, eof2, subs2, latch2) = (
+                error_eof.clone(),
+                running.clone(),
+                eof.clone(),
+                subs.clone(),
+                seek_latch.clone(),
+            );
             let event_thread = std::thread::spawn(move || {
                 let ctx = ctx_addr as *mut mpv_handle;
                 while r2.load(Ordering::Relaxed) {
@@ -1103,11 +1124,26 @@ impl Player {
                        挂载放在事件线程里做,而不是让调用方阻塞等:两端的调用点都在
                        播放器锁内,在那儿等 FILE_LOADED 等于拿着锁卡住整个 UI。 */
                     if (*ev).event_id == MPV_EVENT_FILE_LOADED {
-                        let queued = {
+                        let (queued, seek_to) = {
                             let mut st = subs2.lock().unwrap();
                             st.loaded = true;
-                            std::mem::take(&mut st.pending)
+                            (std::mem::take(&mut st.pending), st.pending_seek.take())
                         };
+                        /* 起播途中攒下的那次 seek,现在才发得出去。
+                           ★ 必须重置闩的计时起点:闩是用户拖的那一刻设的,加载花掉的几秒
+                             会让它一进来就判超时,真正的 seek 还没落地进度条就弹回去了。 */
+                        if let Some(t) = seek_to {
+                            if let Some(l) = latch2.lock().unwrap().as_mut() {
+                                l.at = std::time::Instant::now();
+                            }
+                            match cmd_raw(ctx, &["seek", &t.to_string(), "absolute"]) {
+                                Ok(()) => poclog(&format!("起播途中的 seek 已补发: {t:.1}s")),
+                                Err(e) => {
+                                    poclog(&format!("起播途中的 seek 补发失败: {e}"));
+                                    *latch2.lock().unwrap() = None;
+                                }
+                            }
+                        }
                         /* 就在事件线程里挂,**不要**另开线程:Drop 的顺序是
                            running=false → join(事件线程) → mpv_terminate_destroy,
                            只有跑在这根线程上才被 join 保护住;另开的线程会绕过它,
@@ -1151,7 +1187,8 @@ impl Player {
                 event_thread: Some(event_thread),
                 last_pos: Arc::new(AtomicU64::new(0)),
                 last_dur: Arc::new(AtomicU64::new(0)),
-                seek_latch: Arc::new(std::sync::Mutex::new(None)),
+                last_buf: Arc::new(AtomicU64::new(0)),
+                seek_latch,
             })
         }
     }
@@ -1265,6 +1302,7 @@ impl Player {
            起点直接落 start_secs,续播时第一拍就是对的。 */
         self.last_pos.store(start_secs.max(0.0).to_bits(), Ordering::Relaxed);
         self.last_dur.store(0f64.to_bits(), Ordering::Relaxed);
+        self.last_buf.store(0f64.to_bits(), Ordering::Relaxed);
         *self.seek_latch.lock().unwrap() = None; // 上一集没落地的 seek 别压制新片的位置
         /* 字幕状态跟着换片一起复位:loaded 不清的话,下一集的 set_external_subs 会
            以为文件已经开好而立刻 sub-add(其实新文件还没加载完,又回到 -12);
@@ -1273,6 +1311,7 @@ impl Player {
             let mut st = self.subs.lock().unwrap();
             st.loaded = false;
             st.pending.clear();
+            st.pending_seek = None; // 上一集没发出去的 seek 别落到新片头上
         }
         self.set_str("http-header-fields", header_fields);
         // 源没指定 UA 就用访问 Emby 的那个(用户 2026-07-19 定的 UA 口径)。
@@ -1319,12 +1358,26 @@ impl Player {
     pub fn seek_abs(&self, secs: f64) -> Result<(), String> {
         let t = secs.max(0.0);
         self.last_pos.store(t.to_bits(), Ordering::Relaxed);
+        /* 缓冲末端跟着跳:seek 会重开 demuxer,旧的 buffered 是**跳之前**那一段的末端。
+           往回拖时它比新位置大一大截,粘性值再把它兜住,缓冲条就停在用户跳走的地方不动。 */
+        self.last_buf.store(t.to_bits(), Ordering::Relaxed);
         *self.seek_latch.lock().unwrap() = Some(SeekLatch {
             target: t,
             at: std::time::Instant::now(),
             saw_seeking: false,
         });
-        self.cmd(&["seek", &secs.to_string(), "absolute"])
+        /* 文件还没开好 -> 排队,等 FILE_LOADED 由事件线程补发。判断和入队在同一把锁内,
+           不留 TOCTOU 缝(理由同 add_subtitle)。这里返回 Ok:命令确实收下了,只是晚点发。 */
+        if !self.subs.lock().unwrap().queue_seek(t) {
+            return Ok(());
+        }
+        // ★ 发 `t` 不是 `secs`:负数被 max(0.0) 夹过,闩记的是 0 而命令送 -30,两边对不上。
+        let r = self.cmd(&["seek", &t.to_string(), "absolute"]);
+        if r.is_err() {
+            // 命令根本没发出去就别让闩压着 —— 压满 2.5s 只是把进度条钉在一个到不了的位置上。
+            *self.seek_latch.lock().unwrap() = None;
+        }
+        r
     }
     /* seek 之后、mpv 真正跳过去之前,`time-pos` 仍**报得出**旧位置(不是读不到)。
        轮询正好落在这个窗口里,界面就会把用户刚拖到的位置弹回原处 —— 而画面已经跳走了。
@@ -1354,7 +1407,7 @@ impl Player {
             /* demuxer-cache-time 是**已缓冲数据的最后一个时间戳(绝对)**,不是时长
                (那是 demuxer-cache-duration)。界面按 buffered/duration 画缓冲条,
                口径正是绝对位置,别顺手改成 duration 版。 */
-            buffered: self.get_f64("demuxer-cache-time"),
+            buffered: self.sticky_f64("demuxer-cache-time", &self.last_buf),
             /* ★ 用 `eof-reached` 属性判播完,**不能**只靠 END_FILE 事件:
                我们开着 keep-open=yes,mpv 到结尾时是「暂停在最后一帧」而**不卸载文件**,
                这种情况下 END_FILE 压根不发 —— 只监听事件就是个永远不触发的死分支。
@@ -1850,5 +1903,29 @@ mod tests {
         let mut l = latch_at(600.0, stale);
         assert_eq!(apply_seek_latch(&mut l, Some(120.0), true), Some(600.0));
         assert!(l.is_some(), "mpv 还在 seek,超时不该生效");
+    }
+
+    /* 用户报的「视频还没加载完就点进度条跳转」。
+       mpv 在 FILE_LOADED 之前**没有文件可跳**,那时发 `seek` 只会拿回一个命令错误 ——
+       而闩已经设上了,于是进度条压着用户点的位置 2.5s,再弹回 `start=` 的续播点,
+       画面从头到尾没动过。解法和外挂字幕同一个:没开好就排队,FILE_LOADED 再补发。
+
+       反向验证(见 [[test-must-fail-first]]):把 queue_seek 的 `if self.loaded` 分支
+       删掉、改成无条件 `return true`,本测试第一条断言当场红。 */
+    #[test]
+    fn seek_before_file_loaded_is_queued_not_sent() {
+        let mut st = SubState::default(); // loaded=false —— loadfile 刚发出去的状态
+        assert!(!st.queue_seek(300.0), "文件没开好就不能发 seek,必须排队");
+        assert_eq!(st.pending_seek, Some(300.0));
+
+        // 起播途中连点几下:只有最后那次算数(和 seek 的语义一致,排成队会跳一串)。
+        assert!(!st.queue_seek(900.0));
+        assert_eq!(st.pending_seek, Some(900.0));
+
+        // FILE_LOADED 之后就该当场发,不再入队。
+        st.loaded = true;
+        st.pending_seek = None;
+        assert!(st.queue_seek(120.0), "文件已开好,seek 必须立刻发出去");
+        assert_eq!(st.pending_seek, None, "已开好的文件不该再往队列里塞");
     }
 }

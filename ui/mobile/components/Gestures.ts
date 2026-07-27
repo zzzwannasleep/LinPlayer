@@ -121,7 +121,9 @@ export function attachGestures(
     if (lock === "seek") {
       const c = getCtx();
       const secs = ((e.clientX - startX) / el.clientWidth) * H_SECONDS_PER_SCREEN;
-      seekTarget = Math.max(0, Math.min(c.duration || 0, c.time + secs));
+      /* 上界 `|| Infinity` 不是 `|| 0`:时长还没就绪(起播/换片)时 `Math.min(0, …)`
+         会把目标一律夹成 0,横滑调进度变成「一律跳回片头」。夹不住就交给 mpv 夹。 */
+      seekTarget = Math.max(0, Math.min(c.duration || Infinity, c.time + secs));
       h.onSeekPreview(seekTarget);
     } else {
       // 向上是增加 → dy 为负,所以取反

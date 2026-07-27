@@ -261,6 +261,9 @@ export default function App() {
   const statusFail = useRef(0);
   /// status 的最新值。给那些**不该因为进度走动而重建**的回调用(键盘快捷键)。
   const statusRef = useRef<Status>({ time: 0, duration: 0, paused: false, buffered: 0, eof: false });
+  /** 播一份初始状态。★ state 和 ref **必须一起写** —— 轮询里那条「duration=0 不覆盖
+      已知时长」读的是 ref,只写 state 的话它会拿到**上一集**的时长当兜底。 */
+  const putStatus = (s: Status) => { statusRef.current = s; setStatus(s); };
   /** 本片是否已按 eof 收过尾。见轮询里的 eof 分支 —— 一片只准触发一次。 */
   const ended = useRef(false);
   const idleTimer = useRef<number | null>(null);
@@ -628,7 +631,7 @@ export default function App() {
       setPlaying(it);
       // 版本:详情页指定了就照它高亮,否则等 item_media 回来按服务端第一个初始化。
       setCurMsId(mediaSourceId ?? null);
-      setStatus({ time: resume, duration: it.runtime_secs, paused: false, buffered: 0, eof: false });
+      putStatus({ time: resume, duration: it.runtime_secs, paused: false, buffered: 0, eof: false });
       afterStart(it);
     } catch (e) {
       /* ★ 原来是 alert():Windows 原生模态框,和整套暗色 UI 完全不搭,而且**阻塞**——
@@ -653,7 +656,7 @@ export default function App() {
       };
       setPlaying(synth);
       setCurMsId(null);
-      setStatus({ time: resume, duration: 0, paused: false, buffered: 0, eof: false });
+      putStatus({ time: resume, duration: 0, paused: false, buffered: 0, eof: false });
       afterStart(synth);
     } catch (e) {
       say(`播放下载文件失败:${e}`);
@@ -667,7 +670,7 @@ export default function App() {
       const synth: Item = { id: entry.id, name: entry.name, type_: "Video", is_folder: false, has_primary: false, runtime_secs: 0, resume_secs: 0, series_name: null, episode_no: null, season_no: null, video_height: null, bitrate: null, size_bytes: null, played: false, unplayed_item_count: 0, genres: [], year: null, rating: null, provider_ids: {}, presentation_unique_key: null, path: null, series_id: null, date_updated: null, sort_name: null };
       setPlaying(synth);
       setCurMsId(null);
-      setStatus({ time: start, duration: 0, paused: false, buffered: 0, eof: false });
+      putStatus({ time: start, duration: 0, paused: false, buffered: 0, eof: false });
       afterStart(synth);
     } catch (e) {
       say(`播放失败:${e}`);
@@ -708,7 +711,17 @@ export default function App() {
     setStatus((s) => ({ ...s, paused: p }));
     reportProgress(status.time, p);
   }
-  const doSeek = (t: number) => { const v = Math.max(0, Math.min(status.duration || t, t)); seekApi(v); setStatus((s) => ({ ...s, time: v })); };
+  // 失败要吞:seekApi 会 reject(核层「播放器未就绪」),不接就是一条 unhandled rejection。
+  const doSeek = (t: number) => { const v = Math.max(0, Math.min(status.duration || t, t)); seekApi(v).catch(() => {}); setStatus((s) => ({ ...s, time: v })); };
+
+  /* 换片时把「没提交完的拖动」清掉。核层每次 loadfile 都把 duration 记账清回 0,
+     所以这一个 effect 就把 切集 / 切版本 / 换源 / 关播放器 四个入口一起兜住了 ——
+     不然 `curTime = seeking ?? status.time`,新片的进度条会被钉在**上一集**拖到的位置。 */
+  useEffect(() => {
+    if (status.duration > 0) return;
+    seekingRef.current = null;
+    setSeeking(null);
+  }, [status.duration > 0]);
 
   /* ★ 进度条的「松手提交」必须挂在 **window** 上,不能挂在 <input> 自己身上。
 
@@ -853,8 +866,15 @@ export default function App() {
     timer.current = window.setInterval(async () => {
       try {
         const st = await statusApi();
-        statusRef.current = st;
-        setStatus(st);
+        /* ★ duration=0 **不能**盖掉已知时长。
+           起播时上面用 Emby 的 runtime_secs 播下了正确时长,而核层每次 loadfile 都把
+           duration 记账清回 0,mpv 要到 FILE_LOADED 才报得出来 —— 中间这几拍(服务器上
+           能有好几秒)如果照单全收,进度条量程会塌成 `Math.max(1, 0)` = **1 秒**:
+           用户点在条中间,算出来的目标是 0.5 秒而不是片长的一半,于是"点了跳转→画面
+           没动、条贴在缓冲头上"。这正是用户报的那条。塌了的量程比没有量程更危险。 */
+        const fixed = st.duration > 0 ? st : { ...st, duration: statusRef.current.duration };
+        statusRef.current = fixed;
+        setStatus(fixed);
         if (st.time > 0) setReady(true); // 时间开始走 = 已出画,撤黑屏
         // speed 必须带上:两次轮询之间靠墙钟外推,不乘倍速就每 250ms 硬跳一次(见 TimeSync)。
         timeSync.current = { base: st.time, stamp: performance.now(), paused: st.paused, speed: speedRef.current };
@@ -1473,7 +1493,7 @@ export default function App() {
                   精度也如实说:章节图每章一张(通常几分钟一张),不是逐秒的 trickplay 雪碧图,
                   悬停到哪就取**不晚于该时间点**的那一张。 */}
               <div
-                className={`p-scrub${seeking != null ? " dragging" : ""}`}
+                className={`p-scrub${seeking != null ? " dragging" : ""}${status.duration > 0 ? "" : " idle"}`}
                 onMouseMove={(e) => {
                   const r = e.currentTarget.getBoundingClientRect();
                   const x = Math.max(0, Math.min(r.width, e.clientX - r.left));
@@ -1481,7 +1501,13 @@ export default function App() {
                 }}
                 onMouseLeave={() => setHoverT(null)}
               >
-                <span className="buf" style={{ width: `${bufPct}%` }} />
+                {/* ★ 缓冲段从**播放头**画起,不是从 0 画起。
+                    `demuxer-cache-time` 是缓冲末端的绝对时间戳,而 mpv 的解复用缓存只往
+                    **前**存:跳到 50 分钟处时缓存区间是 [50:00, 50:04],0~50 分钟一个字节
+                    都没有。从 0 画到 50:04 既是假的,更要命的是它的右边缘正好压在播放头上 ——
+                    实测服务器上缓冲只领先 4 秒(0.05% 宽),两条边缘完全重合,
+                    看起来就是「进度条卡在缓存进度上面」(用户 2026-07-27 的原话)。 */}
+                <span className="buf" style={{ left: `${pct}%`, width: `${Math.max(0, bufPct - pct)}%` }} />
                 <span className="fill" style={{ width: `${pct}%` }} />
                 <span className="knob" style={{ left: `${pct}%` }} />
                 {hoverT && status.duration > 0 && (
@@ -1502,9 +1528,15 @@ export default function App() {
                     <span className="tc">{fmtTime(hoverT.t)}</span>
                   </span>
                 )}
+                {/* ★ 时长还不知道(起播/换片,核层的 duration 记账是 0)时**必须禁用**。
+                    量程会退化成 `Math.max(1, 0)` = 1 秒:用户点在条中间,算出来的目标是
+                    **0.5 秒**,而不是片长的一半。核层照单全收地 seek 到片头,画面看着"没动",
+                    进度条则贴在刚缓冲出来的那一点点上 —— 这就是用户报的「还没加载完就点进度条,
+                    条跟着缓存走、画面不变」。量程不可信的时候,这个控件就不该能操作。 */}
                 <input
                   type="range" min={0} max={Math.max(1, status.duration)} step={0.5}
                   value={curTime}
+                  disabled={!(status.duration > 0)}
                   onChange={(e) => { const v = Number(e.target.value); seekingRef.current = v; setSeeking(v); }}
                   // 提交在 window 的 pointerup/pointercancel/blur 上,见 doSeek 下面那个 effect。
                 />

@@ -83,6 +83,15 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
   const [hud, setHud] = useState<null | { kind: string; text: string; pct?: number }>(null);
   const [boost, setBoost] = useState(false); // 长按 2× 中
 
+  /* 进度条拖动中的值。★ 三件事得一起做,少一件就是一类具体的 bug:
+     1) 拖动期间用它盖住 1s 轮询的 st.time —— 否则还没松手就被真值拽回原处;
+     2) 提交挂在 **window** 的 pointerup 上,不能挂 <input> 自己身上 —— 手指划出条外
+        再抬起,input 根本收不到事件,进度条从此钉死(PC 端栽过;这一页的注释写着
+        「不能挂 input 上」,而下面正是挂在 input 上);
+     3) 等核层收下 seek 再放开,失败也放开(不放开 = 一次失败把条永久钉住)。 */
+  const [seeking, setSeeking] = useState<number | null>(null);
+  const seekingRef = useRef<number | null>(null);
+
   const hideAt = useRef(0);
   const ended = useRef(false);
   const stRef = useRef<Status | null>(null);
@@ -196,8 +205,11 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
     async (d: number) => {
       const s = stRef.current;
       if (!s) return;
-      const p = Math.max(0, Math.min(s.duration || 0, s.time + d));
-      await seek(p);
+      /* ★ 上界写 `duration || Infinity`,**不能**是 `|| 0`。起播/换片时核层的 duration
+         记账还是 0,`Math.min(0, ...)` 会把目标一律夹成 0 —— 用户在加载期双击快进,
+         结果是跳回片头。时长未知时不封顶就好:mpv 自己会把 seek 夹在文件范围内。 */
+      const p = Math.max(0, Math.min(s.duration || Infinity, s.time + d));
+      await seek(p).catch(() => {});
       setSt({ ...s, time: p });
       bump();
     },
@@ -266,7 +278,7 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
         /* ★ 抬手才 seek 一次。拖动期间每帧发 seek 会把 mpv 的命令队列灌满 ——
            本项目在进度条上栽过:「拖动松手弹回」的根因就是 seek 排队。 */
         onSeekCommit: (target) => {
-          void seek(target);
+          void seek(target).catch(() => {}); // 核层没就绪会 reject,不接就是 unhandled rejection
           const s = stRef.current;
           if (s) setSt({ ...s, time: target });
         },
@@ -287,8 +299,37 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
     );
   }, [jump, speed]);
 
-  const dur = st?.duration || 0;
-  const pos = st?.time ?? 0;
+  /* 松手提交。挂 window,理由见 seeking 那段。依赖写 `seeking == null` 而不是 seeking:
+     拖动中每动一像素都重挂一遍监听器毫无意义,只要「有没有在拖」这一位变了才需要。 */
+  useEffect(() => {
+    if (seeking == null) return;
+    let done = false;
+    const commit = () => {
+      if (done) return;
+      done = true;
+      const v = seekingRef.current;
+      if (v == null) { setSeeking(null); return; }
+      seek(v).catch(() => {}).finally(() => {
+        if (seekingRef.current !== v) return; // 等待期间又拖起来了就别插手
+        seekingRef.current = null;
+        setSeeking(null);
+      });
+    };
+    window.addEventListener("pointerup", commit);
+    window.addEventListener("pointercancel", commit);
+    window.addEventListener("blur", commit);
+    return () => {
+      window.removeEventListener("pointerup", commit);
+      window.removeEventListener("pointercancel", commit);
+      window.removeEventListener("blur", commit);
+    };
+  }, [seeking == null]);
+
+  /* ★ 核层每次 loadfile 都把 duration 记账清回 0,mpv 要到 FILE_LOADED 才报得出来。
+     这几拍(服务器上能有好几秒)里拿 Emby 的 runtime 顶上,否则进度条量程塌成 1 秒:
+     用户点在条中间,目标是 0.5 秒而不是片长的一半 —— 看着就是「点了跳转画面没动」。 */
+  const dur = st?.duration || item?.runtime_secs || 0;
+  const pos = seeking ?? st?.time ?? 0;
   const subs = trk.filter((t) => t.kind === "sub");
   const auds = trk.filter((t) => t.kind === "audio");
 
@@ -332,8 +373,10 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
           <div className="pl-bar">
             <span className="pl-t">{fmtTime(pos)}</span>
             {/* 进度条也可点/可拖 —— 手势之外还留着它,因为"精确跳到某处"用手势做不到。
-                ★ onMouseUp 不能挂在 input 自己身上:拖出界再松手就钉死了(PC 端栽过)。
-                  这里用 onChange 更新预览 + onPointerUp 挂在容器上提交。 */}
+                ★ 时长还不知道(起播/换片)时**必须禁用**:量程会退化成 `dur || 1` = 1 秒,
+                  用户点在条中间算出来的目标是 0.5 秒而不是片长的一半 —— 核层照单全收地
+                  跳回片头,看着就是「点了没反应、画面不变,条贴在缓冲头上」。
+                ★ 提交挂在 window 上,见上面 seeking 那段(挂 input 自己身上=拖出界钉死)。 */}
             <input
               className="pl-seek"
               type="range"
@@ -341,12 +384,13 @@ export default function PlayerPage({ title, item, onBack, onMinimize }: Props) {
               max={dur || 1}
               step={1}
               value={pos}
+              disabled={!(dur > 0)}
               onChange={(e) => {
                 const v = Number(e.target.value);
-                setSt((s) => (s ? { ...s, time: v } : s));
+                seekingRef.current = v;
+                setSeeking(v);
                 bump();
               }}
-              onPointerUp={(e) => void seek(Number((e.target as HTMLInputElement).value))}
             />
             <span className="pl-t">{fmtTime(dur)}</span>
           </div>

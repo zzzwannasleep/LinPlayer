@@ -135,8 +135,11 @@ export default function PlayerPage({
   const jump = useCallback(
     async (d: number) => {
       if (!st) return;
-      const p = Math.max(0, Math.min(st.duration || 0, st.time + d));
-      await seek(p);
+      /* ★ 上界 `|| Infinity`,**不是** `|| 0`。起播/换片时核层的 duration 记账还是 0,
+         `Math.min(0, …)` 把目标一律夹成 0 —— 加载期按方向键快进,画面反而跳回片头。
+         时长未知就不封顶,mpv 自己会把 seek 夹在文件范围内。 */
+      const p = Math.max(0, Math.min(st.duration || Infinity, st.time + d));
+      await seek(p).catch(() => {});
       setSt({ ...st, time: p });
       bump();
     },
@@ -313,7 +316,10 @@ function ProgressBar({
       onFocus={() => setFocused(true)}
       onEnter={() => {}}
     >
-      <div className="buf" style={{ width: `${buf}%` }} />
+      {/* 缓冲段从**播放头**画起:demuxer 的缓存只往前存,跳到 50 分钟处时
+          [0, 50:00] 一个字节都没有,从 0 画就是假的 —— 而且它的右边缘会正好压在
+          播放头上,看起来像「进度条卡在缓存进度上」。同 PC 端口径。 */}
+      <div className="buf" style={{ left: `${pct}%`, width: `${Math.max(0, buf - pct)}%` }} />
       <div className="pl" style={{ width: `${pct}%` }} />
       <div className="kn" style={{ left: `${pct}%` }} />
     </FocusItem>

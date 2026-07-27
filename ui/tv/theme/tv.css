@@ -745,9 +745,9 @@ body {
   position: relative;
   margin-bottom: 18px;
 }
+/* left/width 都由内联样式给(从播放头画到缓冲末端,见 PlayerPage.tsx)。 */
 .bar .buf {
   position: absolute;
-  left: 0;
   top: 0;
   bottom: 0;
   background: #59626f;
