@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { type SourceEntry, sourceListDir, sourcePlay, sourceSearch } from "@shared/api";
-import { IconChevronRight, IconClose, IconFile, IconFolder, IconSearch } from "../app/icons";
+import { Icon } from "../app/icons";
+import { useCtx } from "../app/ctx";
+import Page from "../components/Page";
 
 /* 网盘 / 文件浏览型源。
 
@@ -16,7 +18,10 @@ import { IconChevronRight, IconClose, IconFile, IconFolder, IconSearch } from ".
    源端全盘搜索;后端返回「该源不支持搜索」时退回当前目录本地过滤。
    直接不给搜索框是更省事,但网盘动辄上千文件,没有搜索基本没法用。 */
 
-export default function NetdiskPage({ onPlaySource }: { onPlaySource: () => void }) {
+export default function NetdiskPage() {
+  const { back } = useCtx();
+  /* 播放本地/网盘文件后退回上一页 —— mpv 已经在放了，继续堆在文件列表上没意义。 */
+  const onPlaySource = back;
   /** 目录栈。栈底是根(null)。**不用路由栈** —— 理由见文件头。 */
   const [stack, setStack] = useState<{ id: string | null; name: string }[]>([{ id: null, name: "根目录" }]);
   const [entries, setEntries] = useState<SourceEntry[] | null>(null);
@@ -60,9 +65,10 @@ export default function NetdiskPage({ onPlaySource }: { onPlaySource: () => void
   };
 
   return (
+    <Page title="网盘文件" onBack={back} enterKey={entries}>
     <div className="nd">
       <div className="sf">
-        <IconSearch size={18} />
+        <Icon n="search" size={18} />
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -82,7 +88,7 @@ export default function NetdiskPage({ onPlaySource }: { onPlaySource: () => void
             }}
             aria-label="清空"
           >
-            <IconClose size={18} />
+            <Icon n="close" size={18} />
           </button>
         )}
       </div>
@@ -114,15 +120,16 @@ export default function NetdiskPage({ onPlaySource }: { onPlaySource: () => void
                 void sourcePlay(e, 0).then(onPlaySource);
               }}
             >
-              <span className="cell-i">{e.is_dir ? <IconFolder size={20} /> : <IconFile size={20} />}</span>
+              <span className="cell-i"><Icon n={e.is_dir ? "folder" : "file"} size={20} /></span>
               <span className="cell-l">{e.name}</span>
               {!e.is_dir && e.size != null && <span className="cell-s">{fmt(e.size)}</span>}
-              {e.is_dir && <IconChevronRight size={18} />}
+              {e.is_dir && <Icon n="chevR" size={18} />}
             </button>
           ))}
         </div>
       )}
     </div>
+    </Page>
   );
 }
 

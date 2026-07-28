@@ -497,6 +497,48 @@ pub async fn views(http: &reqwest::Client, s: &Session) -> Result<Vec<Item>, Str
     fetch_items(http, s, &url).await
 }
 
+/// 媒体库规模统计。手机端首页顶栏那三个数字(电影 / 集 / 总计)和聚合视界每个源
+/// 那行「1.6k 电影 · 99k 集」都用它。
+#[derive(Serialize, Default, Clone, Debug)]
+pub struct Counts {
+    pub movie: u64,
+    pub series: u64,
+    pub episode: u64,
+    pub boxset: u64,
+}
+
+/// `GET /Items/Counts?UserId=` —— **一次调用**拿到全库规模,不要自己翻页数条目。
+///
+/// ★ `UserId` 必须带。不带的话服务端把**该用户看不到的库**也算进去。
+///   2026-07-28 在 mecf.mebimmer.de 上实测的差值:
+///     带 UserId  → Movie 1579 / Series 2393 / Episode 98476
+///     不带       → Movie 1618 / Series 2652 / Episode 99346
+///   差 39 部电影、259 部剧、870 集 —— 数字看着都"像那么回事",所以漏了不会有人发现。
+///
+/// ★ 这个端点在**这台服务器上实测 200**;别假设所有 Emby fork 都有(本文件里
+///   /Items/Filters、/Years、/Tags 就都是 404)。所以调用方必须容忍它失败 ——
+///   统计条是锦上添花,不该让首页整个报错。
+pub async fn counts(http: &reqwest::Client, s: &Session) -> Result<Counts, String> {
+    let url = format!("{}/Items/Counts?UserId={}", s.server, s.user_id);
+    let resp = http
+        .get(&url)
+        .header("X-Emby-Token", &s.token)
+        .send()
+        .await
+        .map_err(|e| format!("网络错误: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("请求失败: HTTP {}", resp.status()));
+    }
+    let j: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
+    let n = |k: &str| j[k].as_u64().unwrap_or(0);
+    Ok(Counts {
+        movie: n("MovieCount"),
+        series: n("SeriesCount"),
+        episode: n("EpisodeCount"),
+        boxset: n("BoxSetCount"),
+    })
+}
+
 /// 媒体库浏览的查询条件。全 Option = 不传就不进 URL,老调用点(只给 parent_id)照旧能编。
 #[derive(Default, Deserialize)]
 pub struct ItemQuery {
@@ -682,17 +724,39 @@ pub struct ItemDetail {
     pub series_id: Option<String>,
     pub season_no: Option<i64>,
     pub episode_no: Option<i64>,
+    /// 分级(TV-14 / PG-13 …)。选片时真的会看,比画质标签有用。缺省 = 服务器没刮到。
+    pub official_rating: Option<String>,
+    /// 剧集状态,实测值 `Continuing` / `Ended` / `Unreleased`。电影没有这一项。
+    pub status: Option<String>,
+    /// 标语(Taglines[0])。**实测只有 34% 的条目有** —— 没有就整行不画,不留空位。
+    pub tagline: Option<String>,
+    /// Series → 季数;Season → 集数。手机端详情页拿它决定要不要画季选择条。
+    pub child_count: Option<i64>,
     pub children: Vec<Item>, // Series/Season → 剧集(按季+集号排序);Movie/Episode → 空
     pub people: Vec<Person>,
 }
 
+/// 条目详情。
+///
+/// `with_children`:是否把**全部分集**一起拉回来。
+/// ★ 桌面/TV 端传 true(它们的详情页就是一屏铺完所有集)。
+/// ★ **手机端传 false** —— 手机版详情页按季分页拉集(`season_episodes`)。
+///   实测这台服务器上最长的剧 2648 集,全量拉是 1813.9KB / 1841ms,
+///   分页 30 条是 20.0KB / 435ms。`content-visibility` 只省渲染,
+///   省不掉这 1.8MB 的下载和解析。
 pub async fn detail(
     http: &reqwest::Client,
     s: &Session,
     item_id: &str,
+    with_children: bool,
 ) -> Result<ItemDetail, String> {
+    /* Taglines / OfficialRating / Status 是 2026-07-28 加的,在 mecf.mebimmer.de 上实测有值:
+         Status="Continuing"  OfficialRating="TV-14"  Taglines=["在演艺圈（这个世界）中，谎言就是武器"]
+       "这剧完结没有" 是选片时真会问的问题，比画质标签有用得多。
+       ★ 电影没有 Status，Taglines 常为空数组 —— 两者都是 Option，前端没值就**整行不画**，
+         不留空位。 */
     let url = format!(
-        "{}/Users/{}/Items/{item_id}?Fields=Overview,Genres,ProductionYear,CommunityRating,PremiereDate,People",
+        "{}/Users/{}/Items/{item_id}?Fields=Overview,Genres,ProductionYear,CommunityRating,PremiereDate,People,Taglines,OfficialRating,Status,ChildCount",
         s.server, s.user_id
     );
     let resp = http
@@ -707,8 +771,8 @@ pub async fn detail(
     let j: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
     let type_ = j["Type"].as_str().unwrap_or_default().to_string();
 
-    // Series/Season 才拉子集(全部集,跨季按季号+集号排序)。
-    let children = if type_ == "Series" || type_ == "Season" {
+    // Series/Season 才拉子集(全部集,跨季按季号+集号排序)。手机端不要这一坨。
+    let children = if with_children && (type_ == "Series" || type_ == "Season") {
         episodes(http, s, item_id).await.unwrap_or_default()
     } else {
         Vec::new()
@@ -754,6 +818,16 @@ pub async fn detail(
         series_id: j["SeriesId"].as_str().map(String::from),
         season_no: j["ParentIndexNumber"].as_i64(),
         episode_no: j["IndexNumber"].as_i64(),
+        official_rating: j["OfficialRating"].as_str().filter(|x| !x.is_empty()).map(String::from),
+        status: j["Status"].as_str().filter(|x| !x.is_empty()).map(String::from),
+        // Taglines 是数组，取第一条。实测只有 34% 的条目有 —— 前端没值就不画那一行。
+        tagline: j["Taglines"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str())
+            .filter(|x| !x.is_empty())
+            .map(String::from),
+        child_count: j["ChildCount"].as_i64(),
         children,
         people,
     })
@@ -912,6 +986,81 @@ async fn post_admin(http: &reqwest::Client, s: &Session, url: &str) -> Result<()
 /// 某剧全部剧集(递归跨季,按季号→集号升序)。
 /// 原来写 `Limit=500` —— 服务端夹到 200,长剧(如 500+ 集的动画/长篇剧)**直接缺集**,
 /// 而且缺得无声无息:详情页分集列表就是少,用户以为服务器没有。改翻页。
+/// 一季。手机端详情页的季 Tab 条用它。
+#[derive(Serialize, Clone, Debug)]
+pub struct SeasonInfo {
+    pub id: String,
+    /// **服务器返回的 Name,不要自己拼「第 N 季」**。
+    /// 实测真名是 "全 1 季" / "果宝特攻2" / "怪奇物语 4" —— 自己拼在真机上对不上。
+    pub name: String,
+    pub index_no: Option<i64>,
+    /// 这一季有多少集。决定图文列表还是集号网格(>50 集切网格)。
+    pub child_count: i64,
+    pub unplayed: i64,
+    pub has_primary: bool,
+}
+
+/// 某剧的季列表。`/Users/{u}/Items?ParentId={seriesId}` —— 实测返回 Type=Season,
+/// 带 ChildCount 和 UserData.UnplayedItemCount(2026-07-28 于 mecf.mebimmer.de 实测)。
+///
+/// ★ 有些剧**没有季**(单季番剧直接挂集)。那种情况这里返回空 Vec,
+///   调用方要回落到「拿 seriesId 当 parent 直接分页拉集」——
+///   不回落的表现是"点进去一集都没有",而且不报错。
+pub async fn seasons(http: &reqwest::Client, s: &Session, series_id: &str) -> Result<Vec<SeasonInfo>, String> {
+    let url = format!(
+        "{}/Users/{}/Items?ParentId={}&IncludeItemTypes=Season&SortBy=IndexNumber&SortOrder=Ascending&Fields=ChildCount",
+        s.server, s.user_id, series_id
+    );
+    let resp = http
+        .get(&url)
+        .header("X-Emby-Token", &s.token)
+        .send()
+        .await
+        .map_err(|e| format!("网络错误: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("请求失败: HTTP {}", resp.status()));
+    }
+    let j: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
+    Ok(j["Items"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|v| SeasonInfo {
+                    id: v["Id"].as_str().unwrap_or_default().to_string(),
+                    name: v["Name"].as_str().unwrap_or_default().to_string(),
+                    index_no: v["IndexNumber"].as_i64(),
+                    child_count: v["ChildCount"].as_i64().unwrap_or(0),
+                    unplayed: v["UserData"]["UnplayedItemCount"].as_i64().unwrap_or(0),
+                    has_primary: v.get("ImageTags").and_then(|x| x.get("Primary")).is_some(),
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// 某季(或某剧)的分集**分页**拉取。手机端详情页滚到底续拉靠它。
+///
+/// ★ `parent_id` 可以是季 id,也可以是剧 id(没分季的剧)。
+/// ★ 不走 `fetch_all_paged` —— 这里要的就是"只拿这一页",全量拉正是要避开的那件事。
+/// ★ 带 `Fields=MediaSources` 才有分集卡那行「2160p · 45M · 18.4G」。
+pub async fn season_episodes(
+    http: &reqwest::Client,
+    s: &Session,
+    parent_id: &str,
+    start_index: i64,
+    limit: i64,
+) -> Result<ItemPage, String> {
+    let url = format!(
+        "{}/Users/{}/Items?ParentId={}&IncludeItemTypes=Episode&Recursive=true&SortBy=ParentIndexNumber,IndexNumber&SortOrder=Ascending&Fields=PrimaryImageAspectRatio,MediaSources,Overview,PremiereDate&StartIndex={}&Limit={}",
+        s.server,
+        s.user_id,
+        parent_id,
+        start_index,
+        limit.min(SERVER_PAGE_CAP as i64),
+    );
+    fetch_page(http, s, &url).await
+}
+
 async fn episodes(
     http: &reqwest::Client,
     s: &Session,

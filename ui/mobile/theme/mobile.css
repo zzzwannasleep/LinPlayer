@@ -1,61 +1,171 @@
 /* ============================================================
-   LinPlayer 手机端全站样式。
+   LinPlayer 手机端全站样式 —— 动效系统 + 版式
+
+   ## 出处
+   这份文件来自 `docs/mobile-drafts/app.css`(能跑的原型,评审台 87 格逐格看过)。
+   落码时**逐条照搬**,只改了三处必须改的:
+     1. `--sa-*` 从写死常量换成 `env(safe-area-inset-*)`(草稿在 iframe 里拿不到真安全区,
+        用 `.sa-on` 模拟;真机上转屏 env() 自己会换,草稿那条 landscape 手动模拟规则反而打架)
+     2. `--mo` 恒为 1(评审台把它设成 4 来 0.25× 慢放逐帧看。留着这个变量是零成本,
+        真机排查动效时改一个值就能慢放)
+     3. 末尾补回草稿没覆盖的三块:错误边界 / 迷你播放器 / 弹幕层
 
    ## 规矩(与 ui/tv 一致)
    - **页面不新写 CSS 文件**,全站样式都在这里。散着写必然长出两套间距。
-   - **强制深色,不 import @shared/tokens.css**:那份 token 带侧栏宽/标题栏高/
-     正文最大宽度等 PC 专属量,还有一整条浅色分支。手机端一屏全是封面图,
-     浅色主题没有意义,而两套配色要维护两遍。
-   - **只动 transform 和 opacity**。其余属性一律触发重排/重绘,
-     安卓 WebView 比桌面弱得多。
-   - **禁 backdrop-filter**(安卓 WebView 黑块 bug)、禁动画 box-shadow / filter /
-     width / height / top / left。
-   - 触摸目标 ≥48dp,主要操作排在屏幕下 1/3(拇指可达区)。
+   - **强制深色,不 import @shared/tokens.css**:那份 token 带侧栏宽/标题栏高/正文最大宽度
+     等 PC 专属量,还有一整条浅色分支。手机端一屏全是封面图,浅色主题没有意义。
+
+   ## 三条硬约束(违反了出的是掉帧不是审美问题)
+   - 只动 transform / opacity。禁动画 width/height/top/left/box-shadow/filter
+   - position:fixed 的东西(底栏/sheet/toast)不能被带 transform 或 will-change 的祖先包住
+
+   ## backdrop-filter:解禁了,但每一处都带 @supports 降级
+   README 里那条「禁 backdrop-filter(安卓 WebView 黑块 bug)」查下来指向的是
+   react-native-webview 的 issue,已关闭,不是 Chromium 的问题;Chrome / Android WebView
+   76+(2019-07)就支持且不需要 -webkit- 前缀。所以底栏玻璃胶囊、顶栏、角标这几处用了它。
+   ★ 但 `@supports` 只挡得住「不支持」,挡不住「支持但渲染成黑块」——
+     这一条**只有真机能签字**。真机上如果出现黑块,把 5 处 backdrop-filter 删掉即可,
+     每一处旁边都已经放好了纯色降级分支。
+
+   ## 全局慢放
+   所有时长都写成 calc(<基准> * var(--mo))。--mo 恒为 1,这层开销是零;
+   排查动效时把 :root 上的 --mo 改成 4 就是 0.25× 慢放,逐帧看得清。
    ============================================================ */
 
 :root {
-  /* —— 颜色 —— */
-  --bg: #0b0b0f;
-  --bg-1: #14141b;
-  --bg-2: #1c1c25;
-  --line: #2a2a36;
-  --fg: #f2f2f6;
-  --fg-2: #a8a8b8;
-  --fg-3: #6e6e80;
+  /* ────────────────────────────────────────────────
+     动效 token
+     来源:material-components-android/docs/theming/Motion.md(easing + duration)
+           m3.material.io motion(spring:阻尼比 ζ + 刚度 k)
+     ★ M3 的 emphasized **不是 cubic-bezier**,官方给的是两段贝塞尔路径:
+       M 0,0 C .05,0 .133333,.06 .166666,.4 C .208333,.82 .25,1 1,1
+       CSS 的 cubic-bezier() 只能表达一段 —— 所以它只能写成 linear()。
+       我们原来那条 cubic-bezier(.2,0,0,1) 其实是 M3 的 **standard**,
+       是最平淡的一条,不是 emphasized。这是"动效没质感"的根因之一。
+     ──────────────────────────────────────────────── */
+
+  --mo: 1; /* 全局时长倍率。评审台可调,落码恒为 1 */
+
+  /* —— 时长阶梯(M3 duration token,原样搬) —— */
+  --t1: calc(50ms * var(--mo));
+  --t2: calc(100ms * var(--mo));
+  --t3: calc(150ms * var(--mo));
+  --t4: calc(200ms * var(--mo));
+  --t5: calc(250ms * var(--mo));
+  --t6: calc(300ms * var(--mo));
+  --t7: calc(350ms * var(--mo));
+  --t8: calc(400ms * var(--mo));
+  --t9: calc(450ms * var(--mo));
+  --t10: calc(500ms * var(--mo));
+
+  /* —— 曲线族 1:standard(克制,用于常规状态变化) —— */
+  --e-std: cubic-bezier(0.2, 0, 0, 1);
+  --e-std-decel: cubic-bezier(0, 0, 0, 1);
+  --e-std-accel: cubic-bezier(0.3, 0, 1, 1);
+
+  /* —— 曲线族 2:emphasized(有表现力,用于转场/主角元素) ——
+     前 17% 慢慢起步、然后猛地冲过去、最后长长地收 —— 这个"起步的迟疑"
+     正是 cubic-bezier 做不出、而人眼一看就觉得"高级"的东西。 */
+  --e-emph: linear(
+    0 0%, 0.0169 4.5%, 0.075 9.1%, 0.2055 13.6%, 0.5333 18.2%, 0.7251 22.7%,
+    0.8081 27.3%, 0.8579 31.8%, 0.892 36.4%, 0.9169 40.9%, 0.9359 45.5%,
+    0.9506 50%, 0.9623 54.5%, 0.9716 59.1%, 0.979 63.6%, 0.9848 68.2%,
+    0.9895 72.7%, 0.9931 77.3%, 0.9958 81.8%, 0.9977 86.4%, 0.999 90.9%,
+    0.9998 95.5%, 1 100%
+  );
+  --e-emph-decel: cubic-bezier(0.05, 0.7, 0.1, 1); /* 进场 */
+  --e-emph-accel: cubic-bezier(0.3, 0, 0.8, 0.15); /* 退场 */
+
+  /* —— 曲线族 3:弹簧 ——
+     由 (ζ, k) 解阻尼振荡方程采样而来(gen-easing.mjs 可复算)。
+     时长不是拍的,是弹簧自己的收敛时长。 */
+
+  /* ζ=0.9 k=1400 · 过冲 0.2% —— 按压/开关这种"不该弹"的地方 */
+  --sp-snap-t: calc(206ms * var(--mo));
+  --sp-snap: linear(
+    0 0%, 0.0368 3.8%, 0.1235 7.7%, 0.2336 11.5%, 0.35 15.4%, 0.4622 19.2%,
+    0.5644 23.1%, 0.6538 26.9%, 0.7296 30.8%, 0.7923 34.6%, 0.8432 38.5%,
+    0.8836 42.3%, 0.9152 46.2%, 0.9394 50%, 0.9578 53.8%, 0.9714 57.7%,
+    0.9813 61.5%, 0.9883 65.4%, 0.9933 69.2%, 0.9966 73.1%, 0.9988 76.9%,
+    1.0002 80.8%, 1.001 84.6%, 1.0014 88.5%, 1.0015 92.3%, 1.0008 96.2%, 1 100%
+  );
+
+  /* ζ=0.8 k=380 · 过冲 1.5% @61% —— 主力弹簧(sheet 回弹 / 卡片入场 / 面板) */
+  --sp-t: calc(443ms * var(--mo));
+  --sp: linear(
+    0 0%, 0.0461 3.8%, 0.1542 7.7%, 0.2894 11.5%, 0.4291 15.4%, 0.5596 19.2%,
+    0.6737 23.1%, 0.7684 26.9%, 0.8437 30.8%, 0.9012 34.6%, 0.9434 38.5%,
+    0.973 42.3%, 0.9927 46.2%, 1.0049 50%, 1.0116 53.8%, 1.0146 57.7%,
+    1.0151 61.5%, 1.0141 65.4%, 1.0124 69.2%, 1.0103 73.1%, 1.0082 76.9%,
+    1.0062 80.8%, 1.0046 84.6%, 1.0032 88.5%, 1.0021 92.3%, 1.0008 96.2%, 1 100%
+  );
+
+  /* ζ=0.6 k=800 · 过冲 9.5% @34% —— 明显的弹。只给"要抢注意力"的东西
+     (成功提示 / 收藏心跳 / FAB)。到处用会显得廉价。 */
+  --sp-bouncy-t: calc(408ms * var(--mo));
+  --sp-bouncy: linear(
+    0 0%, 0.0818 3.8%, 0.2678 7.7%, 0.487 11.5%, 0.6928 15.4%, 0.8597 19.2%,
+    0.9788 23.1%, 1.0519 26.9%, 1.087 30.8%, 1.0946 34.6%, 1.0848 38.5%,
+    1.0663 42.3%, 1.0455 46.2%, 1.0264 50%, 1.0113 53.8%, 1.0007 57.7%,
+    0.9944 61.5%, 0.9915 65.4%, 0.9911 69.2%, 0.9922 73.1%, 0.994 76.9%,
+    0.996 80.8%, 0.9977 84.6%, 0.9991 88.5%, 1.0001 92.3%, 1.0004 96.2%, 1 100%
+  );
+
+  /* ────────────────────────────────────────────────
+     颜色 —— 在原 token 上加了「表面层级」。
+     原来只有 bg / bg-1 / bg-2 三档且都很接近,叠起来分不出层次,
+     所以整个界面看着是"平的"。这里拉开明度并给每层配一条边。
+     ──────────────────────────────────────────────── */
+  --bg: #0e0e13;
+  --s1: #17171e; /* 卡片 / 单元格 */
+  --s2: #1e1e27; /* 浮起:sheet / 面板 */
+  --s3: #262630; /* 更浮:菜单 / 骨架 */
+  --line: #26262f;
+  --line-2: #383843;
+
+  --fg: #f4f4f8;
+  --fg-2: #a3a3b4;
+  --fg-3: #6b6b7c;
+
   --acc: #5b8cff;
-  --acc-fg: #ffffff;
+  --acc-dim: rgba(91, 140, 255, 0.16);
+  --acc-fg: #fff;
   --ok: #37c26a;
+  --warn: #e0a95b;
   --bad: #ff5f56;
 
-  /* —— 尺寸 —— */
-  /* 48dp 是 Material / WCAG AA 的触摸目标下限。所有可点元素以它为底。 */
+  /* 尺寸 */
   --tap: 48px;
   --topbar-h: 52px;
-  --tabbar-h: 56px;
+  --tabbar-h: 58px;
   --gap: 12px;
   --pad: 16px;
-  --r: 10px;
+  --r: 12px;
+  --r-sm: 8px;
+  --r-lg: 18px;
 
   /* —— 安全区 ——
-     刘海/挖孔/手势导航条。前提是 index-mobile.html 里写了 viewport-fit=cover,
+     刘海 / 挖孔 / 手势导航条。前提是 index-mobile.html 里写了 viewport-fit=cover,
      没写的话这几个 env() 全部返回 0,而且**不报错** —— 表现是标题被刘海吃掉一半。
-     ★ 安卓 WebView 上 env() 的可靠性需要真机复核(README 已记)。不可靠时的解法是
-       宿主侧读 DisplayCutout,往 :root 注入同名变量覆盖这里 —— 所以下面所有地方
-       都只用 --sa-*,不直接写 env(),留出那个覆盖点。 */
+
+     ★ 草稿里这四个是写死的常量 +「.sa-on」模拟(评审台在 iframe 里跑,拿不到真安全区),
+       落码换回 env():转屏时刘海从顶部跑到侧边,env() 自己会换,草稿那条
+       `@media (orientation:landscape)` 手动模拟的规则在真机上是多余且会打架的。
+     ★ 安卓 WebView 上 env() 的可靠性**还没在真机验过**。不可靠时的解法是宿主侧读
+       DisplayCutout 往 :root 注入同名变量覆盖这里 —— 所以全站只认 --sa-*,
+       任何地方都不直接写 env(),留出那个覆盖点。 */
   --sa-top: env(safe-area-inset-top, 0px);
   --sa-bottom: env(safe-area-inset-bottom, 0px);
   --sa-left: env(safe-area-inset-left, 0px);
   --sa-right: env(safe-area-inset-right, 0px);
 
-  /* —— 动效 ——
-     一套曲线,别各处各拍一个。 */
-  --e-out: cubic-bezier(0.2, 0, 0, 1); /* 页面转场 / 进场 */
-  --e-spring: cubic-bezier(0.32, 0.72, 0, 1); /* sheet 回弹 */
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 * {
-  -webkit-tap-highlight-color: transparent; /* 安卓默认那块蓝框和我们自己的按压反馈会打架 */
-  -webkit-touch-callout: none; /* 长按图片弹"保存图片"会顶掉我们的长按菜单 */
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  box-sizing: border-box;
 }
 
 html,
@@ -69,1037 +179,15 @@ body {
   background: var(--bg);
   color: var(--fg);
   font: 15px/1.5 system-ui, -apple-system, "Noto Sans SC", "Microsoft YaHei", sans-serif;
-  overscroll-behavior-y: none; /* 关掉安卓的整页橡皮筋,我们自己做下拉刷新 */
+  overscroll-behavior-y: none;
+  overflow: hidden;
 }
 
-/* ★ WebView 是透明的(要露出垫在底下的 mpv SurfaceView)。播放时给 html 挂 .playing,
-   把背景整个撤掉 —— 不撤的话视频被这一层不透明底盖死,表现是"有声音没画面"。
-   TV 端 tv.css 里是同一条,那边有 Rust 测试钉着。 */
+/* 播放时 WebView 要透出底下的 mpv SurfaceView */
 html.playing,
 html.playing body {
   background: transparent;
 }
-
-/* ------------------------------------------------------------
-   骨架
-   ------------------------------------------------------------ */
-
-.app {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  /* 左右安全区(横屏时刘海在侧边)。上下由 topbar / tabs 各自吃。 */
-  padding-left: var(--sa-left);
-  padding-right: var(--sa-right);
-  box-sizing: border-box;
-}
-
-.page {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  /* 底栏是 fixed,内容要给它让出高度,否则最后一条永远被压住 */
-  padding-bottom: calc(var(--tabbar-h) + var(--sa-bottom));
-}
-
-.app.full .page {
-  padding-bottom: 0;
-}
-
-.pad {
-  padding: var(--pad);
-}
-
-/* ------------------------------------------------------------
-   顶栏 / 底栏
-   ★ 两者都是 position:fixed。它们在 DOM 里是 .page 的**兄弟**,不是后代 ——
-     只要祖先带了 transform 或 will-change,fixed 就不再以视口为参照,
-     页面一做转场底栏就跟着滑走。PC 端右键菜单偏位、TV 端底栏跑到屏幕上方,
-     都是这一条。别把它们挪进页面容器里。
-   ------------------------------------------------------------ */
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: calc(var(--topbar-h) + var(--sa-top));
-  padding: var(--sa-top) 4px 0;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-  flex: none;
-}
-
-.tb-back,
-.tb-r > button {
-  width: var(--tap);
-  height: var(--tap);
-  display: grid;
-  place-items: center;
-  background: none;
-  border: 0;
-  color: var(--fg);
-  border-radius: var(--r);
-}
-
-.tb-gap {
-  width: 12px;
-}
-
-.tb-t {
-  flex: 1;
-  min-width: 0;
-}
-
-.tb-title {
-  font-size: 17px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tb-sub {
-  font-size: 12px;
-  color: var(--fg-2);
-}
-
-.tb-r {
-  display: flex;
-  align-items: center;
-}
-
-.tabs {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 30;
-  display: flex;
-  height: calc(var(--tabbar-h) + var(--sa-bottom));
-  padding-bottom: var(--sa-bottom);
-  background: var(--bg-1);
-  border-top: 1px solid var(--line);
-}
-
-.tab {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  background: none;
-  border: 0;
-  color: var(--fg-3);
-  font-size: 11px;
-  /* 只有 opacity 和 transform 参与动画 —— 颜色变化用 color 是重绘但不重排,可接受 */
-  transition: color 140ms var(--e-out);
-}
-
-.tab.on {
-  color: var(--acc);
-}
-
-.tab:active {
-  transform: scale(0.94);
-}
-
-/* ------------------------------------------------------------
-   卡片
-   ------------------------------------------------------------ */
-
-.mcard-wrap {
-  width: 112px;
-  flex: none;
-}
-
-/* 横向缩略图(继续观看/剧集)比海报宽,不然一行只放得下一张半 */
-.row-scroll .mcard-wrap:has(.ar-thumb) {
-  width: 168px;
-}
-
-.mcard {
-  position: relative;
-  width: 100%;
-  border-radius: var(--r);
-  overflow: hidden;
-  background: var(--bg-2);
-  /* 触摸屏没有 hover 态。不给按压反馈,用户不确定自己点没点上 —— 于是会再点一次。 */
-  transition: transform 180ms var(--e-out);
-}
-
-.mcard.down {
-  transform: scale(0.96);
-  transition-duration: 120ms;
-}
-
-.ar-poster {
-  aspect-ratio: 2 / 3;
-}
-
-.ar-thumb {
-  aspect-ratio: 16 / 9;
-}
-
-.mcard img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  opacity: 0;
-  transition: opacity 160ms var(--e-out);
-}
-
-.mcard img.ready {
-  opacity: 1;
-}
-
-.mskel {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, var(--bg-2) 25%, #262633 37%, var(--bg-2) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.2s linear infinite;
-}
-
-@keyframes shimmer {
-  to {
-    background-position: -135% 0;
-  }
-}
-
-.mfallback {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--fg-3);
-}
-
-.m-badge-tl,
-.m-played,
-.m-count {
-  position: absolute;
-  top: 5px;
-  font-size: 10px;
-  line-height: 1;
-  padding: 3px 5px;
-  border-radius: 5px;
-  font-weight: 600;
-}
-
-.m-badge-tl {
-  left: 5px;
-  background: rgba(0, 0, 0, 0.68);
-  color: #ffd479;
-}
-
-.m-played,
-.m-count {
-  right: 5px;
-  color: #fff;
-  display: grid;
-  place-items: center;
-  min-width: 16px;
-}
-
-.m-played {
-  background: var(--ok);
-}
-
-.m-count {
-  background: var(--acc);
-}
-
-.m-prog {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.22);
-}
-
-.m-prog i {
-  display: block;
-  height: 100%;
-  background: var(--acc);
-}
-
-.mcap {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--fg-2);
-  line-height: 1.35;
-  /* 两行封顶。一行会把「剧名 · S1E5」截得认不出是哪部 */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* 首屏 12 张错开淡入。**滚动出来的不参与**(Card.tsx 里 index>=12 就不加 .enter)——
-   否则边滚边闪,看着像在掉帧。 */
-.mcard.enter {
-  animation: cardin 260ms var(--e-out) backwards;
-}
-
-@keyframes cardin {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-}
-
-/* ------------------------------------------------------------
-   轨道 / 网格
-   ------------------------------------------------------------ */
-
-.row {
-  margin-top: 18px;
-  /* ★ 屏幕外的轨道整条跳过渲染。
-     实测(用户真实服务器):首页 15 个媒体库 = **284 个 <img> 元素**在 DOM 里。
-     图片本身有 loading=lazy 兜着(实测同一时刻只有 102 张真的在下载),但布局和绘制
-     仍然要为这 284 个节点买单 —— 手机 CPU 上这就是滚动掉帧。
-     content-visibility 是零依赖的解法,先用它;真到量出掉帧那天再谈虚拟列表
-     (见 ui/mobile/README.md 的依赖表:先量再优化)。
-     ★ contain-intrinsic-size 必须给,否则未渲染的轨道高度算 0,滚动条长度会一路乱跳。
-       230px ≈ 标题 24 + 海报卡 168 + 标题两行 38。 */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 230px;
-}
-
-.row-hd {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  padding: 0 var(--pad) 8px;
-}
-
-.row-hd h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.sk-t {
-  width: 96px;
-  height: 16px;
-  border-radius: 4px;
-  background: var(--bg-2);
-  animation: shimmer 1.2s linear infinite;
-  background: linear-gradient(90deg, var(--bg-2) 25%, #262633 37%, var(--bg-2) 63%);
-  background-size: 400% 100%;
-}
-
-.row-more {
-  background: none;
-  border: 0;
-  color: var(--fg-2);
-  font-size: 13px;
-  padding: 4px 0;
-}
-
-.row-scroll {
-  display: flex;
-  gap: var(--gap);
-  padding: 0 var(--pad);
-  overflow-x: auto;
-  /* proximity 不是 mandatory:轻扫一下不会被硬拽到下一张,重扫才吸附。
-     mandatory 在手机上手感很粘,像在跟系统较劲。 */
-  scroll-snap-type: x proximity;
-  /* ★ 必须给 scroll-padding,否则 snap 会把 padding-left **吃掉**。
-     `scroll-snap-align: start` 对齐的是 snapport 起点(= 滚动端口边缘,不含 padding),
-     于是浏览器一上来就自动滚动 16px 把第一张卡贴到容器左边 —— 表现是
-     **第一张卡片被屏幕左缘切掉一块**,而 padding-left 在计算样式里明明是 16px。
-     实测:scrollLeft 恰好等于 padding-left。删 snap 也能"修好",但那是把手感一起扔了。 */
-  scroll-padding-left: var(--pad);
-  scroll-padding-right: var(--pad);
-  scrollbar-width: none;
-}
-
-.row-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.row-scroll > * {
-  scroll-snap-align: start;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--gap);
-  padding: 0 var(--pad);
-}
-
-/* 网格里的卡片不吃固定宽度,跟着列走 */
-.grid .mcard-wrap {
-  width: auto;
-}
-
-/* ------------------------------------------------------------
-   首页
-   ------------------------------------------------------------ */
-
-.hero {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  background: var(--bg-1);
-  overflow: hidden;
-}
-
-.hero-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-  animation: fadein 320ms var(--e-out);
-}
-
-@keyframes fadein {
-  from {
-    opacity: 0;
-  }
-}
-
-/* ★ 不用渐变遮罩。全屏渐变每帧都要重新合成,而且渐变边界在低分屏上是糊的。
-   裸文字压在亮场景上会看不清 → 给它**自带一块不透明底**,不是加回渐变。
-   这条口径是 TV 端评审时定的,手机 GPU 更弱,更该守。 */
-.hero-cap {
-  position: absolute;
-  left: var(--pad);
-  bottom: var(--pad);
-  right: var(--pad);
-  background: rgba(0, 0, 0, 0.66);
-  border-radius: var(--r);
-  padding: 8px 10px;
-}
-
-.hero-title {
-  font-size: 18px;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.hero-sub {
-  font-size: 12px;
-  color: var(--fg-2);
-  margin-top: 2px;
-}
-
-.hero-dots {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
-  gap: 5px;
-}
-
-.hero-dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.4);
-}
-
-.hero-dots i.on {
-  background: #fff;
-}
-
-.chips {
-  display: flex;
-  gap: 8px;
-  padding: 14px var(--pad) 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.chips::-webkit-scrollbar {
-  display: none;
-}
-
-.chip {
-  flex: none;
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: var(--bg-1);
-  color: var(--fg);
-  font-size: 13px;
-  white-space: nowrap;
-  transition: transform 180ms var(--e-out);
-}
-
-.chip:active {
-  transform: scale(0.96);
-}
-
-.chip.on {
-  background: var(--acc);
-  border-color: var(--acc);
-  color: var(--acc-fg);
-}
-
-/* ------------------------------------------------------------
-   搜索
-   ------------------------------------------------------------ */
-
-.sf {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: var(--pad);
-  padding: 0 12px;
-  height: var(--tap);
-  border-radius: var(--r);
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  color: var(--fg-3);
-}
-
-.sf input {
-  flex: 1;
-  min-width: 0;
-  background: none;
-  border: 0;
-  outline: 0;
-  color: var(--fg);
-  /* ★ 16px 是硬下限。小于 16px 时安卓/iOS 会在聚焦输入框时**自动放大整页**,
-     版式当场错位。这是移动端最经典的"我明明没写缩放"。 */
-  font-size: 16px;
-}
-
-.sf-x {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  background: none;
-  border: 0;
-  color: var(--fg-3);
-}
-
-.sgrp {
-  margin-top: 8px;
-}
-
-.sgrp h2 {
-  margin: 0;
-  padding: 10px var(--pad) 8px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-/* ------------------------------------------------------------
-   设置
-   ------------------------------------------------------------ */
-
-.settings {
-  padding: 8px 0 24px;
-}
-
-.sgroup {
-  margin-top: 18px;
-}
-
-.sgroup h2 {
-  margin: 0;
-  padding: 0 var(--pad) 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-2);
-}
-
-.cells {
-  background: var(--bg-1);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-/* 整行可点。让用户去点右边那个 24px 的箭头是设计事故。 */
-.cell {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 56px;
-  padding: 0 var(--pad);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--fg);
-  font-size: 15px;
-  text-align: left;
-  transition: background-color 120ms var(--e-out);
-}
-
-.cell:last-child {
-  border-bottom: 0;
-}
-
-.cell:active {
-  background: var(--bg-2);
-}
-
-.cell-i {
-  color: var(--fg-2);
-  display: grid;
-  place-items: center;
-}
-
-.cell-l {
-  flex: 1;
-}
-
-.cell-s {
-  color: var(--fg-3);
-  font-size: 13px;
-}
-
-.ver {
-  text-align: center;
-  color: var(--fg-3);
-  font-size: 12px;
-  padding: 28px 0 12px;
-}
-
-/* ------------------------------------------------------------
-   登录闸口
-   ------------------------------------------------------------ */
-
-.login {
-  height: 100%;
-  overflow-y: auto;
-  padding: calc(var(--sa-top) + 28px) 0 calc(var(--sa-bottom) + 16px);
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-}
-
-.lg-top {
-  padding: 0 var(--pad) 4px;
-}
-
-.lg-brand {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--fg-2);
-}
-
-.lg-brand span {
-  color: var(--acc);
-}
-
-.lg-h1 {
-  font-size: 24px;
-  font-weight: 700;
-  margin-top: 6px;
-}
-
-.lg-chips {
-  padding-top: 16px;
-}
-
-.lg-pane {
-  flex: 1;
-  padding: 18px var(--pad) 0;
-  animation: fadein 200ms var(--e-out);
-}
-
-/* 主按钮吸在底部安全区上方。键盘升起时表单会滚动,按钮跟着滚出屏幕的话
-   用户得先收键盘才能提交 —— 那是每次登录都要多做一次的动作。 */
-.lg-acts {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  gap: 10px;
-  padding: 12px var(--pad) calc(12px + var(--sa-bottom));
-  background: var(--bg);
-  border-top: 1px solid var(--line);
-}
-
-.lg-acts .btn {
-  flex: 1;
-}
-
-/* ------------------------------------------------------------
-   表单原语
-   —— 这些类名由 ui/desktop/pages/sources/sourceForms.tsx 发出(三端共用那份表单)。
-      它只吐结构不带样式,版式由各端自己给。改类名要两端一起看。
-   ------------------------------------------------------------ */
-
-.field,
-.fld {
-  display: block;
-  margin-bottom: 14px;
-}
-
-.field > span,
-.fld > span {
-  display: block;
-  font-size: 13px;
-  color: var(--fg-2);
-  margin-bottom: 6px;
-}
-
-input,
-select,
-textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: var(--tap);
-  padding: 0 12px;
-  border-radius: var(--r);
-  border: 1px solid var(--line);
-  background: var(--bg-1);
-  color: var(--fg);
-  /* 16px 下限,理由同 .sf input */
-  font-size: 16px;
-  outline: 0;
-}
-
-textarea {
-  padding: 12px;
-  min-height: 96px;
-  line-height: 1.5;
-  resize: vertical;
-}
-
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: var(--acc);
-}
-
-.hint,
-.as-dim,
-.dim {
-  color: var(--fg-3);
-  font-size: 12.5px;
-  line-height: 1.5;
-}
-
-.btn {
-  min-height: var(--tap);
-  padding: 0 18px;
-  border-radius: var(--r);
-  border: 1px solid var(--line);
-  background: var(--bg-1);
-  color: var(--fg);
-  font-size: 15px;
-  font-weight: 500;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  transition: transform 180ms var(--e-out);
-}
-
-.btn:active {
-  transform: scale(0.97);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-}
-
-.btn.primary {
-  background: var(--acc);
-  border-color: var(--acc);
-  color: var(--acc-fg);
-}
-
-.btn.ghost {
-  background: none;
-}
-
-.btn.big {
-  min-height: 52px;
-}
-
-.seg {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.seg button {
-  flex: 1;
-  min-height: 40px;
-  border-radius: var(--r);
-  border: 1px solid var(--line);
-  background: var(--bg-1);
-  color: var(--fg-2);
-  font-size: 14px;
-}
-
-.seg button.on {
-  background: var(--acc);
-  border-color: var(--acc);
-  color: var(--acc-fg);
-}
-
-.spinner {
-  width: 16px;
-  height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.28);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* 添加服务器表单里的块 */
-.as-blocks,
-.as-block {
-  margin-bottom: 14px;
-}
-
-.as-block-hd {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--fg-2);
-  margin-bottom: 8px;
-}
-
-.as-line {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.as-grid2,
-.as-grid3 {
-  display: grid;
-  gap: 10px;
-}
-
-/* ★ 手机上一律单列。PC 那边 as-grid3 是三列,照搬过来每个输入框只剩 100px 宽,
-   而输入框最小可用宽度是"能看见自己打的地址"。 */
-.as-grid2,
-.as-grid3 {
-  grid-template-columns: 1fr;
-}
-
-.as-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-
-.as-warn {
-  color: #ffca6b;
-  font-size: 12.5px;
-  line-height: 1.5;
-  margin-bottom: 10px;
-}
-
-.as-qr,
-.as-scan {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 0;
-}
-
-.as-qr img,
-.as-scan img {
-  width: 190px;
-  height: 190px;
-  border-radius: var(--r);
-  background: #fff;
-  padding: 8px;
-  box-sizing: border-box;
-}
-
-.as-qr.placeholder {
-  min-height: 190px;
-  justify-content: center;
-  color: var(--fg-3);
-}
-
-.as-scan-side {
-  text-align: center;
-}
-
-.as-export {
-  margin-top: 12px;
-}
-
-/* ------------------------------------------------------------
-   对话框 / 提示
-   ------------------------------------------------------------ */
-
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  background: rgba(0, 0, 0, 0.55);
-  animation: fadein 160ms var(--e-out);
-}
-
-.dlg {
-  position: fixed;
-  z-index: 100;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  max-height: 85%;
-  overflow-y: auto;
-  background: var(--bg-1);
-  /* 手机上对话框从底部升起(拇指够得着),不是屏幕正中弹出 */
-  border-radius: 16px 16px 0 0;
-  padding: 18px var(--pad) calc(18px + var(--sa-bottom));
-  animation: sheetin 300ms var(--e-spring);
-}
-
-@keyframes sheetin {
-  from {
-    transform: translateY(100%);
-  }
-}
-
-.dhd {
-  font-size: 17px;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-
-.dbd {
-  color: var(--fg-2);
-  line-height: 1.6;
-}
-
-.dft {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  margin-top: 18px;
-}
-
-.dft .btn {
-  flex: 1;
-}
-
-.bad {
-  background: rgba(255, 95, 86, 0.12);
-  border: 1px solid rgba(255, 95, 86, 0.35);
-  border-radius: var(--r);
-  padding: 10px 12px;
-  margin-bottom: 14px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.bad b {
-  color: var(--bad);
-}
-
-/* toast 默认在中部偏下(三端统一口径)。
-   ★ fixed 定位 —— 同样不能被带 transform 的祖先包住。 */
-.toast {
-  position: fixed;
-  left: 50%;
-  bottom: 22%;
-  z-index: 200;
-  transform: translateX(-50%);
-  max-width: 80vw;
-  padding: 10px 16px;
-  border-radius: 20px;
-  background: rgba(0, 0, 0, 0.86);
-  color: #fff;
-  font-size: 14px;
-  text-align: center;
-  animation: fadein 180ms var(--e-out);
-}
-
-.empty {
-  padding: 56px var(--pad);
-  text-align: center;
-}
-
-.empty b {
-  display: block;
-  font-size: 16px;
-  margin-bottom: 6px;
-}
-
-/* ------------------------------------------------------------
-   错误边界
-   ------------------------------------------------------------ */
-
-.pb-crash {
-  padding: 40px var(--pad);
-}
-
-.pb-h {
-  font-size: 17px;
-  font-weight: 600;
-  color: var(--bad);
-}
-
-.pb-m {
-  margin: 10px 0;
-  font-size: 13px;
-  color: var(--fg-2);
-  word-break: break-all;
-  line-height: 1.55;
-}
-
-.pb-hint {
-  font-size: 12.5px;
-  color: var(--fg-3);
-  margin-bottom: 16px;
-}
-
-/* ------------------------------------------------------------
-   横屏
-   ★ 断点用 orientation,**不用宽度断点**:折叠屏展开时宽度像平板,但仍是竖屏,
-     按宽度判会把竖着的折叠屏当成横屏来排,内容全挤在中间一条。
-   ------------------------------------------------------------ */
-
-@media (orientation: landscape) {
-  .grid {
-    grid-template-columns: repeat(6, 1fr);
-  }
-
-  .mcard-wrap {
-    width: 96px;
-  }
-
-  .row-scroll .mcard-wrap:has(.ar-thumb) {
-    width: 150px;
-  }
-
-  /* 横屏时 16:9 的 Hero 会吃掉整屏 —— 压扁,给下面的轨道留出空间 */
-  .hero {
-    aspect-ratio: 21 / 7;
-  }
-}
-
-/* ------------------------------------------------------------
-   降低动效偏好
-   ★ 系统开了"减少动画"就全关。不是可选的礼貌 —— 有前庭功能障碍的用户
-     会因为滑动转场产生真实的眩晕。
-   ------------------------------------------------------------ */
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1112,402 +200,2703 @@ textarea:focus {
 }
 
 /* ============================================================
-   以下是 P0-b / P1 / P2 各页的样式。
-   仍然只有这一个 CSS 文件 —— 页面不新写 .css(与 ui/tv 同规矩:
-   散着写必然长出两套间距,而且没人知道该改哪一份)。
+   骨架:页面栈 / 顶栏 / 底栏
    ============================================================ */
 
-/* ---------- 通用:工具条 chip / 选项列表 / sheet 内的动作条 ---------- */
-
-.lib-bar {
-  align-items: center;
-  padding-top: 12px;
+.app {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding-left: var(--sa-left);
+  padding-right: var(--sa-right);
+  overflow: hidden;
 }
 
-.lib-total {
-  margin-left: auto;
-  padding-right: var(--pad);
+/* ★ 全屏播放时 .app **不吃横向安全区**。
+   画面必须铺满整个屏幕(含刘海那一条),避让刘海是 **OSD 自己的事** ——
+   在这里缩进去的话,视频左边会平白留一条 44px 的黑边,而且播放页再避让一次
+   就是**同一个安全区算了两遍**(实测按钮离屏幕边 90px,而不是想要的 46px)。
+   `has-tabs` 是全屏的反义:ctx.fullscreen(true) 会把它摘掉。 */
+.app:not(.has-tabs) {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* ── 页面栈 ──
+   ★ 每个页面是绝对定位的一层。转场靠两层同时动(共享轴 X),
+     不是"卸载旧的挂新的"。现状 ui/mobile 是后者,所以一帧完成、看不到转场。
+   ★ 这一层带 transform 动画 —— 所以底栏/sheet/toast **必须**是它的兄弟,
+     不能是后代(transform 会给后代的 fixed 建包含块)。 */
+/* 三条 Tab 各自一条页面栈,三条栈叠在同一个坑里,只显示当前那条。
+   ★ 切 Tab 用 M3 的 fade-through:旧的先淡出并轻微缩小(90ms),
+     新的延后 90ms 淡入并从 0.94 长回 1。
+     **不用横向滑动** —— 底栏三个目的地是**平级**的,横滑意味着"有前后顺序"。 */
+.stacks {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.stack {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.stack[hidden] {
+  display: none;
+}
+.stack.tab-out {
+  animation: tab-out calc(90ms * var(--mo)) var(--e-emph-accel) both;
+}
+.stack.tab-in {
+  animation: tab-in calc(210ms * var(--mo)) var(--e-emph-decel) calc(90ms * var(--mo)) both;
+}
+@keyframes tab-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+
+.pg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  will-change: transform;
+}
+
+/* 入栈:新页从右侧 emphasized-decelerate 进,旧页左移 25% 并压暗
+   (25% 这个视差比来自 iOS —— 前景 100% / 背景 25%) */
+.pg.in-push {
+  animation: pg-in-push var(--t8) var(--e-emph-decel) both;
+}
+.pg.out-push {
+  animation: pg-out-push var(--t8) var(--e-emph-decel) both;
+}
+.pg.in-pop {
+  animation: pg-in-pop var(--t7) var(--e-emph-decel) both;
+}
+.pg.out-pop {
+  animation: pg-out-pop var(--t7) var(--e-emph-accel) both;
+}
+
+@keyframes pg-in-push {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes pg-out-push {
+  to {
+    transform: translateX(-25%);
+  }
+}
+@keyframes pg-in-pop {
+  from {
+    transform: translateX(-25%);
+  }
+}
+@keyframes pg-out-pop {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 旧页压暗的那一层。分开做是因为不能动 filter/box-shadow,
+   而给 .pg 自己上 opacity 会把整页(含文字)一起淡掉,看着是"闪"。 */
+.pg-scrim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.pg.out-push > .pg-scrim {
+  animation: scrim-in var(--t8) var(--e-emph-decel) both;
+}
+.pg.in-pop > .pg-scrim {
+  animation: scrim-out var(--t7) var(--e-emph-decel) both;
+}
+@keyframes scrim-in {
+  to {
+    opacity: 0.4;
+  }
+}
+@keyframes scrim-out {
+  from {
+    opacity: 0.4;
+  }
+}
+
+/* 侧滑返回跟手时 */
+.stack.dragging .pg {
+  animation: none !important;
+  transition: none !important;
+}
+
+.pg-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ★ 悬浮底栏是盖在内容上的,所以内容必须自己让出「胶囊高 + 离底距离 + 安全区」,
+   否则最后一条永远压在底栏下面。这是悬浮式导航的固有代价,必须补。 */
+.app.has-tabs .pg-body {
+  padding-bottom: calc(var(--tabbar-h) + var(--sa-bottom) + 16px);
+}
+
+.pad {
+  padding: var(--pad);
+}
+.dim {
+  color: var(--fg-2);
+}
+.mono {
+  font-family: var(--mono);
+}
+
+/* ── 顶栏 ──
+   滚动时才出现底色和分隔线。一上来就画一条线 = 首屏被无谓地切了一刀。 */
+.topbar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: calc(var(--topbar-h) + var(--sa-top));
+  padding: var(--sa-top) 4px 0;
+  flex: none;
+}
+/* ★ 顶栏也用玻璃,和底栏同一种材质 —— 一页里出现"不透明顶栏 + 玻璃底栏"
+   是材质语言不统一,眼睛会觉得两条是两个时代的东西。
+   ★ 底边不用 1px 实线,用一条渐变到透明的细线:实线在内容滚过时是一刀硬切。 */
+.topbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(14, 14, 19, 0.62);
+  backdrop-filter: blur(20px) saturate(170%);
+  opacity: 0;
+  transition: opacity var(--t4) var(--e-std);
+  pointer-events: none;
+}
+.topbar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.11) 18%, rgba(255, 255, 255, 0.11) 82%, transparent);
+  opacity: 0;
+  transition: opacity var(--t4) var(--e-std);
+  pointer-events: none;
+}
+.topbar.solid::after {
+  opacity: 1;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .topbar::before {
+    background: rgba(14, 14, 19, 0.96);
+  }
+}
+.topbar.solid::before {
+  opacity: 1;
+}
+.topbar > * {
+  position: relative;
+}
+
+.tb-back,
+.tb-r > button {
+  width: var(--tap);
+  height: var(--tap);
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  border-radius: 50%;
+  flex: none;
+}
+.tb-t {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+}
+.tb-title {
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 标题跟随滚动从「大标题」收成「小标题」——只动 transform,不动 font-size */
+.tb-title.big {
+  transform-origin: left center;
+  transition: transform var(--t5) var(--e-std);
+}
+.tb-sub {
   font-size: 12px;
+  color: var(--fg-2);
+}
+.tb-r {
+  display: flex;
+  align-items: center;
   flex: none;
 }
 
-.lib-more {
-  text-align: center;
+/* ── 底栏 ──
+   ★ 必须是 .stack 的兄弟。指示器是一个滑块,不是给每个 tab 各自加边框。 */
+/* ============================================================
+   底栏 —— 悬浮液态玻璃胶囊
+   ★ 旧版是「贴底 + 不透明 + 一条上边框」,那是 iOS 7 时代的做法。
+     iOS 26 的实测形态:**悬浮胶囊、离底约 21pt、Liquid Glass 材质**。
+   ★ backdrop-filter:查证过 —— Chrome 76+(2019-07)起支持,Android WebView 同版本,
+     **不需要 -webkit- 前缀**。仓库里那条「安卓 WebView 黑块 bug」查下来是
+     react-native-webview 的 issue,已关闭/过时,不是 Chromium 的问题。
+     即便如此仍然给 @supports 降级 —— 三行的成本,换掉"万一"。
+   ============================================================ */
+
+.tabs[hidden] {
+  display: none;
+}
+
+.tabs {
+  /* ★ 「靠近底部」——不是悬浮孤岛,也不是死死贴在屏幕最下沿(用户 2026-07-28)。
+     两次都试过了:
+       悬浮胶囊(左右 18 / 底 14) → "漏风",四周都能看见内容,像一块飘着的板
+       完全贴底(0 边距 0 圆角)   → 太硬,和屏幕边缘焊在一起
+     现在:左右 6px、底 7px + 安全区,圆角 20px —— 贴着但不焊死。 */
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: block;
+  padding: 0 6px calc(var(--sa-bottom) + 7px);
+  /* 上下栏随滚动方向显隐。只动 transform / opacity。 */
+  transition:
+    transform var(--t6) var(--e-emph-decel),
+    opacity var(--t4) var(--e-std);
+}
+.tabs.bar-off {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+.tabs-inner {
+  display: flex;
+  width: 100%;
+  height: var(--tabbar-h);
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(18, 18, 24, 0.58);
+  backdrop-filter: blur(28px) saturate(190%) brightness(1.06);
+  /* 一圈极淡的边 + 顶部一道高光 —— 这两层才是"玻璃"而不是"半透明方块" */
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 8px 26px -10px rgba(0, 0, 0, 0.8);
+}
+
+/* 顶栏同样随滚动方向显隐 */
+.topbar {
+  transition:
+    transform var(--t6) var(--e-emph-decel),
+    opacity var(--t4) var(--e-std);
+}
+.topbar.bar-off {
+  transform: translateY(-100%);
+  opacity: 0;
+}
+
+/* 不支持就退成实心 —— 半透明但没模糊的底栏,文字会糊在封面上读不清 */
+@supports not (backdrop-filter: blur(1px)) {
+  .tabs-inner {
+    background: rgba(16, 16, 22, 0.96);
+  }
+}
+
+.tab {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: none;
+  border: 0;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 10.5px;
+  font-weight: 520;
+  letter-spacing: 0.01em;
+  transition: color var(--t3) var(--e-std);
+}
+.tab.on {
+  color: #fff;
+}
+/* 选中态:一颗药丸底。iOS 26 用品牌色填充,这里用 accent 的半透明 + 一圈亮边 */
+.tab-ic {
+  position: relative;
+  width: 54px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+}
+.tab-ic::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 15px;
+  background: linear-gradient(180deg, rgba(120, 160, 255, 0.42), rgba(91, 140, 255, 0.3));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transform: scaleX(0.4) scaleY(0.6);
+  opacity: 0;
+  transition:
+    transform var(--sp-snap-t) var(--sp-snap),
+    opacity var(--t3) var(--e-std);
+}
+.tab.on .tab-ic::before {
+  transform: scale(1);
+  opacity: 1;
+}
+.tab-ic svg {
+  position: relative;
+  transition: transform var(--sp-snap-t) var(--sp-snap);
+}
+.tab.on .tab-ic svg {
+  transform: translateY(-1px) scale(1.05);
+}
+.tab:active .tab-ic svg {
+  transform: scale(0.88);
+  transition-duration: var(--t2);
+}
+
+/* ============================================================
+   按压反馈 —— 全站统一的一条
+   ★ 现状是各处各写一个 :active{transform:scale(.96)},而且回弹用减速曲线,
+     手感是"软塌塌黏回去"。这里统一:按下去快(t2 + accel),弹回来用弹簧。
+   ============================================================ */
+.press {
+  transition: transform var(--sp-snap-t) var(--sp-snap);
+}
+.press:active,
+.press.down {
+  transform: scale(0.955);
+  transition: transform var(--t2) var(--e-std-accel);
+}
+.press-sm:active,
+.press-sm.down {
+  transform: scale(0.97);
+}
+
+/* 涟漪。Material 规格:600ms linear,scale 0→2,opacity 提前 100ms 开始淡出。
+   ★ 用一个 <i> 子元素做,不用伪元素 —— 伪元素没法拿到触点坐标。 */
+.rip {
+  position: relative;
+  overflow: hidden;
+}
+.rip > i.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.18;
+  transform: scale(0);
+  pointer-events: none;
+  animation: rip calc(600ms * var(--mo)) linear forwards;
+}
+@keyframes rip {
+  to {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+   按钮 / chip / 单元格
+   ============================================================ */
+
+.btn {
+  min-height: var(--tap);
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: var(--r);
+  border: 1px solid var(--line-2);
+  background: var(--s2);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 560;
+  transition: transform var(--sp-snap-t) var(--sp-snap);
+}
+.btn:active {
+  transform: scale(0.97);
+  transition: transform var(--t2) var(--e-std-accel);
+}
+.btn.primary {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-fg);
+}
+.btn.ghost {
+  background: none;
+}
+.btn.danger {
+  color: var(--bad);
+  border-color: rgba(255, 95, 86, 0.4);
+}
+.btn[disabled] {
+  opacity: 0.4;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  padding: 14px var(--pad) 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  scroll-padding-left: var(--pad);
+}
+.chips::-webkit-scrollbar {
+  display: none;
+}
+/* ★ 旧版是 5 个一模一样的「灰底 + 灰边 + 灰字」药丸,像 debug 面板。
+   去掉边框、提亮文字、底色压到几乎看不见 —— chip 的作用是导航不是装饰,
+   它不该比它旁边的封面还抢眼。 */
+.chip {
+  flex: none;
+  min-height: 36px;
+  padding: 0 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 18px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13.5px;
+  font-weight: 520;
+  white-space: nowrap;
+  transition:
+    transform var(--sp-snap-t) var(--sp-snap),
+    color var(--t3) var(--e-std),
+    background-color var(--t3) var(--e-std),
+    border-color var(--t3) var(--e-std);
+}
+.chip:active {
+  transform: scale(0.94);
+  transition-duration: var(--t2);
+}
+.chip.on {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--acc-fg);
+}
+
+.cells {
+  background: var(--s1);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px var(--pad);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+  font-size: 15px;
+  text-align: left;
+  transition: background-color var(--t2) var(--e-std);
+}
+.cell:last-child {
+  border-bottom: 0;
+}
+.cell:active {
+  background: var(--s3);
+}
+.cell-i {
+  color: var(--fg-2);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.cell-l {
+  flex: 1;
+  min-width: 0;
+}
+.cell-s {
   color: var(--fg-3);
+  font-size: 13px;
+  flex: none;
+}
+.cell-arrow {
+  color: var(--fg-3);
+  flex: none;
+  transition: transform var(--t3) var(--e-std);
+}
+.cell:active .cell-arrow {
+  transform: translateX(2px);
+}
+
+/* ============================================================
+   就地调节行 —— 分段 / 步进 / 滑块
+   ============================================================
+   ★ 少选项和数值型**不该开二次弹窗**。「点开 → 选 → 关掉」三步只为把
+     「中」改成「大」,而分段控件一步就完。弹窗只留给
+     选项多且互斥的(超分十几档、语言列表)和需要填表的(正则、代理)。 */
+.crow {
+  padding: 12px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.crow:last-child { border-bottom: 0; }
+.crow-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+}
+.crow-t { flex: 1; min-width: 0; font-size: 15px; }
+.crow-s { font-size: 12px; color: var(--fg-3); margin-top: 2px; line-height: 1.4; }
+.crow-v {
+  flex: none;
+  color: var(--fg-2);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.seg {
+  display: flex;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--s2);
+}
+.seg button {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg-2);
   font-size: 12.5px;
-  padding: 20px 0 8px;
+  font-weight: 560;
+  transition: background-color var(--t3) var(--e-std), color var(--t3) var(--e-std);
+}
+/* 视觉 44px、命中区 48px —— 和横屏播放器 chip 同一个手法 */
+.seg button::after { content: ""; position: absolute; inset: -2px 0; }
+.seg button.on { background: var(--acc); color: var(--acc-fg); }
+
+.stepper {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--s2);
+}
+.stepper button {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  display: grid;
+  place-items: center;
+}
+.stepper button:active { background: var(--s3); }
+.stepper button[disabled] { color: var(--fg-3); }
+.stepper .v {
+  min-width: 62px;
+  text-align: center;
+  font-size: 13.5px;
+  font-weight: 620;
+  font-variant-numeric: tabular-nums;
+}
+
+.rng {
+  display: block;
+  width: 100%;
+  margin: 16px 0 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-2);
+  outline: 0;
+}
+.rng::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--acc);
+  border: 3px solid var(--bg);
+}
+
+/* 开关。M3 的做法:滑块在移动中先被"捏扁"再回圆(scaleX),这一下是手感的来源。 */
+.sw {
+  position: relative;
+  width: 50px;
+  height: 30px;
+  flex: none;
+  border-radius: 15px;
+  border: 2px solid var(--line-2);
+  background: var(--s3);
+  transition:
+    background-color var(--t4) var(--e-std),
+    border-color var(--t4) var(--e-std);
+}
+.sw > i {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--fg-3);
+  transform-origin: center;
+  transition:
+    transform var(--sp-t) var(--sp),
+    background-color var(--t4) var(--e-std);
+}
+.sw.on {
+  background: var(--acc);
+  border-color: var(--acc);
+}
+.sw.on > i {
+  background: #fff;
+  transform: translateX(20px);
+}
+.sw:active > i {
+  transform: scaleX(1.35);
+}
+.sw.on:active > i {
+  transform: translateX(14px) scaleX(1.35);
+}
+
+/* ============================================================
+   卡片
+   ============================================================ */
+
+.card {
+  width: 111px;
+  flex: none;
+  scroll-snap-align: start;
+}
+.card.thumb {
+  width: 166px;
+}
+.card.wide {
+  width: 100%;
+}
+
+.card-a {
+  position: relative;
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--s2);
+  /* ★ 卡片阴影是"分层感"的来源(实测一流都给 8-16px 模糊 / 0.3-0.5 透明)。
+     之前一点阴影都没有,所有卡片和背景贴在同一个平面上 —— 那正是"平"的由来。
+     ★ 阴影是**静态**的,不参与动画,所以不违反"禁动画 box-shadow"。 */
+  box-shadow: 0 10px 24px -8px rgba(0, 0, 0, 0.62);
+  transition: transform var(--sp-snap-t) var(--sp-snap);
+}
+.card-a.down {
+  transform: scale(0.955);
+  transition: transform var(--t2) var(--e-std-accel);
+}
+.ar-poster {
+  aspect-ratio: 2 / 3;
+}
+.ar-thumb {
+  aspect-ratio: 16 / 9;
+}
+.ar-sq {
+  aspect-ratio: 1;
+}
+
+.card-a img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0;
+  transform: scale(1.04);
+  transition:
+    opacity var(--t6) var(--e-std),
+    transform var(--t10) var(--e-std-decel);
+}
+/* 图片就位:淡入 + 极轻的回缩。★ 已在缓存里的图走 .instant,一帧都不动 ——
+   不这样的话每次滚回去都闪一次,那是"看起来在掉帧"的常见来源。 */
+.card-a img.ready {
+  opacity: 1;
+  transform: scale(1);
+}
+.card-a img.instant {
+  transition: none;
+}
+
+/* 骨架。★ 不用扫光(shimmer):扫光是个**无限循环**动画,一屏几十张卡就是几十条
+   永不停止的合成任务,安卓 WebView 上这本身就掉帧。改成两档明度的呼吸,
+   周期 1.8s,只动 opacity。 */
+.skel {
+  position: absolute;
+  inset: 0;
+  background: var(--s3);
+  animation: breathe calc(1800ms * var(--mo)) var(--e-std) infinite;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.skel-line {
+  height: 12px;
+  border-radius: 4px;
+  background: var(--s3);
+  animation: breathe calc(1800ms * var(--mo)) var(--e-std) infinite;
+}
+
+/* ── 封面角标(小) ──
+   ★ 尺寸克制:字号 10、内边距 3/5。它压在封面上,大一分就多毁一分画面。
+   ★ 底色用半透明黑 + 玻璃,不用实色块 —— 实色块在浅色封面上像贴了张纸。 */
+.b-ep,
+.b-rate {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  min-width: 17px;
+  padding: 2.5px 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.6);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .b-ep,
+  .b-rate {
+    background: rgba(0, 0, 0, 0.34);
+    backdrop-filter: blur(10px) saturate(170%);
+  }
+}
+/* 未看集数用 accent 提示"还有多少没看";看完了换成绿勾 */
+.b-ep {
+  background: rgba(91, 140, 255, 0.85);
+}
+@supports (backdrop-filter: blur(1px)) {
+  .b-ep { background: rgba(91, 140, 255, 0.7); }
+}
+.b-ep.done {
+  background: rgba(55, 194, 106, 0.85);
+  padding: 3px 4px;
+}
+.b-rate::before {
+  content: "★";
+  font-size: 8.5px;
+  margin-right: 2px;
+  opacity: 0.9;
+}
+
+.b-tl,
+.b-tr,
+.b-q {
+  position: absolute;
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.b-tl {
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #ffd479;
+}
+.b-q {
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #9ad0ff;
+  letter-spacing: 0.04em;
+}
+.b-tr {
+  top: 6px;
+  right: 6px;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  min-width: 18px;
+  background: var(--acc);
+}
+.b-tr.played {
+  background: var(--ok);
+}
+/* 打勾/角标进场用弹簧 —— 它是"状态刚变了"的信号,值得弹一下 */
+.b-tr.pop {
+  animation: pop var(--sp-bouncy-t) var(--sp-bouncy) both;
+}
+@keyframes pop {
+  from {
+    transform: scale(0);
+  }
+}
+
+.prog {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.24);
+}
+.prog > i {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+  transform-origin: left;
+}
+
+/* ★ 卡片下的文字**只留一行**。Netflix / Plex 干脆一个字都不写 ——
+   海报本身就带片名,再写一遍是冗余,而两行标题 + 一行副标题会把视觉重心
+   从封面抢走,一屏全是字。这里的取舍:媒体库轨道不写(海报有名),
+   「继续观看 / 接下来看」写一行(需要知道是第几集)。 */
+.card-cap {
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-weight: 540;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-sub {
+  font-size: 10.5px;
+  color: var(--fg-3);
+  /* ★ 只隔 1px:名字和年份要读成**一组**,隔开了就变成两块互不相干的字 */
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 入场:上移 + 淡入 + 极轻的放大。stagger 由 JS 给 --i,间隔 40ms。
+   ★ 只给首屏。滚出来的不参与 —— 边滚边闪比不动更像掉帧。 */
+.enter {
+  animation: enter var(--t7) var(--e-emph-decel) backwards;
+  animation-delay: calc(var(--i, 0) * 40ms * var(--mo));
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+}
+
+/* ============================================================
+   轨道 / 网格
+   ============================================================ */
+
+.row {
+  margin-top: 26px;
+  /* ★ 屏幕外整条跳过渲染。contain-intrinsic-size 必须给,否则未渲染的行算 0 高,
+     滚动条长度一路乱跳。★ 入场动画的元素不能自己带 content-visibility
+     (会被跳过),所以它上在 .row 上、动画在 .card 上。 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 216px;
+}
+.row-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 var(--pad) 10px;
+}
+.row-hd h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.row-more {
+  background: none;
+  border: 0;
+  color: var(--fg-2);
+  font-size: 13px;
+  padding: 4px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.row-scroll {
+  display: flex;
+  gap: 8px;
+  /* ★ **右边不留白**(用户 2026-07-28):手机屏就这么宽,横滑到底还空出 16px
+     是白扔掉一块可视面积。左边要留(和标题对齐),右边不留(卡片被屏幕边缘切开,
+     这本身就是"还能往右滑"的暗示)。 */
+  padding: 0 0 4px var(--pad);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  /* ★ 不给 scroll-padding 的话,snap 会把 padding-left 吃掉,第一张卡被屏幕左缘切掉 */
+  scroll-padding-left: var(--pad);
+  scroll-padding-right: var(--pad);
+  scrollbar-width: none;
+}
+.row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── 网格 ──
+   ★ 曾经是 `grid-template-columns: repeat(3,1fr)` + `.grid .card{width:auto}`,
+     后果是**卡片宽度跟着容器走** —— 同一张卡在不同页面(容器内边距不同)会变成
+     103 / 111 / 128 三种宽度,一眼就是"一些大一些小"。量出来一个页面上有 5 种尺寸。
+   ★ 改成 flex-wrap + **卡片保持自己的固定宽度**:全站任何地方的同类卡片
+     像素级一致。111×3 + 12×2 = 357,正好铺满 358 的可用宽度,看起来仍是三列。 */
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  /* ★ 右边不留 padding(用户 2026-07-28):手机屏就这么宽,右边空 16px 是白扔面积。
+     左边留 16 和标题对齐,右边贴到屏幕边。 */
+  padding: 0 0 0 var(--pad);
+  row-gap: 16px;
+  /* ★ 列间距用 calc **精确铺满**,右边零留白:
+     3 张 111 的海报 → 间距 (100% - 333px) / 2 —— 无论容器多宽都刚好贴边。
+     写死 12px 的话总会剩个零头,那就是"右边留白"。 */
+  column-gap: calc((100% - 3 * 111px) / 2);
+}
+/* 16:9 集封面**不用网格** —— 166×2 + 间距怎么排都在右边剩一块,
+   横滑轨道才是它的形态(见 p-aggregate.js 里的说明)。 */
+
+/* ============================================================
+   首页 Hero
+   ============================================================ */
+
+/* ── 氛围光 ──
+   把当前 Hero 的主色扩散到页面顶部。★ 这是"高级感"最便宜的一招:
+   没有它,界面就是「一张彩色大图 + 一层死灰 UI」,两者毫无关系;
+   有了它,整个首屏像是被这部片子的颜色染过。
+   两层轮流 crossfade(和 Hero 图同步),**只动 opacity**。 */
+.ambient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 96vh;
+  pointer-events: none;
+  z-index: 0;
+}
+.ambient > i {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 900ms var(--e-std);
+}
+.ambient > i.on {
+  opacity: 1;
+}
+
+.hero {
+  position: relative;
+  z-index: 1;
+  aspect-ratio: 5 / 6;
+  max-height: 60vh;
+  overflow: hidden;
+  background: var(--s1);
+}
+.hero-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity var(--t10) var(--e-std);
+}
+.hero-layer.on {
+  opacity: 1;
+}
+.hero-layer img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* Ken Burns:恒速(linear),幅度小(1→1.08)。ease 会让"漂移"看起来在加速,很怪。 */
+  animation: kenburns calc(14s * var(--mo)) linear both;
+}
+@keyframes kenburns {
+  from {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  to {
+    transform: scale(1.08) translate3d(-1.5%, -1%, 0);
+  }
+}
+/* ★ 渐变遮罩:这是一层**静态**渐变,只在首次栅格化时算一次,
+   不参与任何动画 —— 和「禁动画 filter/gradient」不冲突。
+   现状用的是一块黑色不透明底,那个是"贴纸感"的来源。 */
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--bg) 2%,
+    rgba(8, 8, 12, 0.92) 16%,
+    rgba(8, 8, 12, 0.55) 38%,
+    rgba(8, 8, 12, 0.1) 62%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+/* ── Hero 文案区(2026-07-28 改) ──
+   用户定的:去掉 eyebrow 那行、去掉播放/详情两个按钮、去掉画质标签,
+   整体**缩小并居中**,标题上面放**艺术字**(Emby 的 Logo 图)。
+   ★ 去掉按钮不等于不能播 —— 整块 Hero 本身可点(点进详情),
+     播放入口在详情页和长按菜单里。这是"少即是多":首屏第一眼要的是"这是什么",
+     不是逼人立刻做选择。 */
+.hero-cap {
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+/* 艺术字。宽度封顶 62%,高度封顶 —— 片名长短差别很大,不封顶的话
+   四个字的片名会顶到天上去。object-fit:contain 保证不变形。 */
+.hero-logo {
+  display: block;
+  max-width: 62%;
+  max-height: 56px;
+  object-fit: contain;
+  margin-bottom: 1px;
+}
+/* Hero 上的那行小字。★ 原来是**蓝色**的「剧集 · 最近更新」——
+   在一张彩色大图上再插一个高饱和的蓝,是廉价感的直接来源。
+   改成半透明白 + 一个小圆点前缀,让它退到标题后面去。 */
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.72);
+  margin-bottom: 10px;
+}
+.hero-eyebrow::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--acc);
+  flex: none;
+}
+/* 艺术字下面那行是**小标题**,不是主标题 —— 它的作用是"艺术字看不清时兜底" */
+.hero-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.92);
+  text-wrap: balance;
+}
+/* ★ 元信息不再用「灰色描边小方块」并排(那是开发者审美:2024 ★8.9 DV 三个框)。
+   改成一行点号分隔的纯文字,只有画质那一项保留成标签 —— 它是唯一需要被"认出来"的。 */
+.hero-meta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.62);
+  margin-top: 7px;
+}
+.hero-meta .sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.36);
+}
+.hero-meta .q {
+  padding: 2.5px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.hero-acts {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+.hero-acts .btn {
+  min-height: 46px;
+  font-size: 15.5px;
+  font-weight: 620;
+}
+/* 主按钮做成**白底黑字**(Netflix / Apple TV 的做法):在一张彩图上,
+   白色是唯一不会和画面打架的高对比色;蓝色按钮压在彩色剧照上会显得脏。 */
+.hero-acts .btn.primary {
+  background: #fff;
+  border-color: #fff;
+  color: #0b0b0f;
+}
+/* 次按钮用玻璃 —— 和底栏同一种材质,整页的材质语言才统一 */
+.hero-acts .btn.glass {
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(18px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  .hero-acts .btn.glass {
+    background: rgba(40, 40, 50, 0.82);
+  }
+}
+/* Hero 文字换片时逐条错开进场 —— 图 crossfade 的同时文字重新"落位" */
+.hero-cap.swap > * {
+  animation: enter var(--t8) var(--e-emph-decel) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms * var(--mo));
+}
+/* 页码指示器移到底部居中 —— Hero 文案已经居中了,指示器还挂在右下角会失衡 */
+.hero-dots {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 7px;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+.hero-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.35);
+  transition:
+    width var(--t5) var(--e-std),
+    background-color var(--t5) var(--e-std);
+}
+.hero-dots i.on {
+  width: 16px;
+  background: #fff;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid var(--line-2);
+  font-size: 10.5px;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--fg-2);
+}
+.tag.acc {
+  color: #9ad0ff;
+  border-color: rgba(91, 140, 255, 0.45);
+}
+.tag.star {
+  color: #ffd479;
+  border-color: rgba(255, 212, 121, 0.35);
+}
+
+/* ============================================================
+   Bottom sheet
+   ============================================================ */
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  background: #000;
+  opacity: 0;
+  transition: opacity var(--t6) var(--e-std);
+}
+.scrim.on {
+  opacity: 0.55;
+}
+.scrim.drag {
+  transition: none;
+}
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  max-height: 88%;
+  display: flex;
+  flex-direction: column;
+  background: var(--s2);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  border-top: 1px solid var(--line-2);
+  transform: translateY(100%);
+  transition: transform var(--sp-t) var(--sp);
+  will-change: transform;
+}
+.sheet.on {
+  transform: translateY(0);
+}
+/* 拖拽期间必须关掉 transition —— 不关的话跟手慢一帧,手感上就是「粘」 */
+.sheet.drag {
+  transition: none;
+}
+.sheet-grip {
+  padding: 12px var(--pad) 10px;
+  touch-action: none;
+  flex: none;
+}
+.sheet-grip > i {
+  display: block;
+  width: 40px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 2px;
+  background: var(--line-2);
+  transition: transform var(--t4) var(--e-std);
+}
+.sheet.drag .sheet-grip > i {
+  transform: scaleX(1.25);
+}
+.sheet-title {
+  font-size: 16.5px;
+  font-weight: 640;
+  text-align: center;
+}
+.sheet-sub {
+  font-size: 12px;
+  color: var(--fg-3);
+  text-align: center;
+  margin-top: 2px;
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0 calc(14px + var(--sa-bottom));
+}
+/* sheet 内的项逐条进场 —— sheet 本身在动,项也在动,两层叠出"内容跟着容器一起来" */
+.sheet.on .sheet-body .opt {
+  animation: enter var(--t6) var(--e-emph-decel) backwards;
+  animation-delay: calc(80ms * var(--mo) + var(--i, 0) * 26ms * var(--mo));
+}
+.sheet-acts {
+  display: flex;
+  gap: 10px;
+  padding: 12px var(--pad) calc(12px + var(--sa-bottom));
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+.sheet-acts .btn {
+  flex: 1;
 }
 
 .opts {
   display: flex;
   flex-direction: column;
 }
-
 .opt {
-  min-height: 52px;
-  padding: 12px var(--pad);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 10px var(--pad) 10px calc(var(--pad) + 26px);
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--line);
   color: var(--fg);
   font-size: 15px;
   text-align: left;
+  transition: background-color var(--t2) var(--e-std);
 }
-
-.opt:last-child {
-  border-bottom: 0;
+.opt:active {
+  background: var(--s3);
 }
-
-.opt.on {
+.opt-t {
+  flex: 1;
+  min-width: 0;
+}
+.opt-s {
+  font-size: 12.5px;
+  color: var(--fg-3);
+  margin-top: 2px;
+}
+/* 选中勾:从左边划进来 + 弹一下,不是"直接出现一个勾" */
+.opt::before {
+  content: "";
+  position: absolute;
+  left: var(--pad);
+  top: 50%;
+  width: 15px;
+  height: 8px;
+  margin-top: -6px;
+  border-left: 2px solid var(--acc);
+  border-bottom: 2px solid var(--acc);
+  transform: rotate(-45deg) scale(0.4) translateX(-6px);
+  opacity: 0;
+  transition:
+    transform var(--sp-bouncy-t) var(--sp-bouncy),
+    opacity var(--t3) var(--e-std);
+}
+.opt.on::before {
+  transform: rotate(-45deg) scale(1) translateX(0);
+  opacity: 1;
+}
+.opt.on .opt-t {
   color: var(--acc);
   font-weight: 600;
 }
+/* ★ 分组标题不上 mono / uppercase / 字距:中文本身等宽,拉字距只会"散",
+   而 uppercase 对中文无效却会把混排的英文全变大写。这条全站统一。 */
+.opt-grp {
+  padding: 18px var(--pad) 8px;
+  font-size: 12.5px;
+  font-weight: 640;
+  color: var(--fg-3);
+}
 
-.opt.bad {
+/* ============================================================
+   Toast
+   ============================================================ */
+
+.toasts {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--tabbar-h) + var(--sa-bottom) + 14px);
+  z-index: 200;
+  /* 全屏(播放页)时底栏没了,toast 要落下来,否则悬在半空 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.app:not(.has-tabs) .toasts {
+  bottom: calc(var(--sa-bottom) + 22px);
+}
+
+.toast {
+  max-width: 86%;
+  padding: 11px 16px;
+  border-radius: 22px;
+  background: var(--s3);
+  border: 1px solid var(--line-2);
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toast-in var(--sp-t) var(--sp) both;
+}
+.toast.out {
+  animation: toast-out var(--t5) var(--e-emph-accel) forwards;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.9);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+.toast.ok {
+  color: var(--ok);
+}
+.toast.bad {
   color: var(--bad);
 }
 
-.opt:active {
-  background: var(--bg-2);
-}
-
-.sheet-acts {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  gap: 10px;
-  padding: 12px 0 4px;
-  background: var(--bg-1);
-}
-
-.sheet-acts .btn {
-  flex: 1;
-}
-
-.fgrp {
-  margin-bottom: 18px;
-}
-
-.fgrp h3 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--fg-2);
-  font-weight: 600;
-}
-
-.fchips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-/* ---------- Bottom sheet ----------
-   只动 transform。height/top 动画每帧重排,安卓 WebView 上直接掉到 30fps。 */
-
-.sheet {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 100;
-  max-height: 62%;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-1);
-  border-radius: 16px 16px 0 0;
-  border-top: 1px solid var(--line);
-  animation: sheetin 320ms var(--e-spring);
-  transition: transform 280ms var(--e-spring);
-}
-
-.sheet.tall {
-  max-height: 90%;
-}
-
-/* 拖拽期间关掉 transition —— 不关的话跟手会慢一帧,手感上就是「粘」 */
-.sheet.dragging {
-  transition: none;
-}
-
-.sheet-grip {
-  padding: 10px var(--pad) 8px;
-  /* 抓手 + 标题整条都可拖:只给一个 36px 的小横条很难抓中。
-     touch-action:none 是必须的 —— 不写的话浏览器会先把竖向拖拽当成页面滚动。 */
-  touch-action: none;
-  flex: none;
-}
-
-.sheet-grip > i {
-  display: block;
-  width: 36px;
-  height: 4px;
-  margin: 0 auto 8px;
-  border-radius: 2px;
-  background: var(--fg-3);
-}
-
-.sheet-title {
-  font-size: 16px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.sheet-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px var(--pad) calc(12px + var(--sa-bottom));
-}
-
-/* opts 在 sheet 里要顶满宽度(sheet-body 自己有 padding,这里抵消掉) */
-.sheet-body .opts {
-  margin: 0 calc(var(--pad) * -1);
-}
-
-/* ---------- 下拉刷新 ---------- */
-
-.pr {
-  position: relative;
-}
+/* ============================================================
+   下拉刷新
+   ============================================================ */
 
 .pr-ind {
   position: absolute;
-  top: -40px;
-  left: 0;
-  right: 0;
-  height: 40px;
+  top: 0;
+  left: 50%;
+  z-index: 15;
+  width: 34px;
+  height: 34px;
+  margin-left: -17px;
   display: grid;
   place-items: center;
-}
-
-.pr-ind > i {
-  width: 18px;
-  height: 18px;
   border-radius: 50%;
-  border: 2px solid var(--fg-3);
-  border-top-color: transparent;
+  background: var(--s3);
+  border: 1px solid var(--line-2);
+  transform: translateY(-50px);
+  opacity: 0;
+  pointer-events: none;
+}
+.pr-ind.spin > svg {
+  animation: spin calc(1000ms * var(--mo)) linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.pr-ind > i.ready {
-  border-color: var(--acc);
-  border-top-color: transparent;
+/* ============================================================
+   长按菜单(= PC 的右键)
+   ============================================================ */
+
+.menu {
+  position: absolute;
+  z-index: 150;
+  min-width: 190px;
+  padding: 6px;
+  border-radius: var(--r);
+  background: var(--s3);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.8);
+  transform-origin: var(--ox, 50%) var(--oy, 0%);
+  animation: menu-in var(--sp-t) var(--sp) both;
+}
+.menu.out {
+  animation: menu-out var(--t4) var(--e-emph-accel) forwards;
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+@keyframes menu-out {
+  to {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+.menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--fg);
+  font-size: 14.5px;
+  text-align: left;
+}
+.menu button:active {
+  background: var(--s2);
+}
+.menu button.bad {
+  color: var(--bad);
+}
+.menu-sep {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--line);
 }
 
-.pr-ind > i.spinner {
-  border-color: rgba(255, 255, 255, 0.25);
-  border-top-color: var(--acc);
-  animation: spin 0.7s linear infinite;
+/* 长按被"举起来"的那张卡 */
+.lifted {
+  z-index: 149;
+  animation: lift var(--sp-t) var(--sp) forwards;
+}
+@keyframes lift {
+  to {
+    transform: scale(1.06);
+  }
 }
 
-/* ---------- 详情页 ---------- */
+/* ============================================================
+   空态 / 错误态 / 加载
+   ★ 空态必须说人话。曾经排行榜整屏空白一个字都没有,原因是代码落进了
+     `{busy ? "加载中…" : ""}` 分支 —— 那不是空态,那是白板。
+   ============================================================ */
+
+.empty {
+  padding: 56px var(--pad);
+  text-align: center;
+  animation: enter var(--t8) var(--e-emph-decel) both;
+}
+.empty-ic {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--s2);
+  color: var(--fg-3);
+}
+.empty b {
+  display: block;
+  font-size: 16px;
+  font-weight: 620;
+  margin-bottom: 6px;
+}
+.empty .dim {
+  font-size: 13.5px;
+  max-width: 30ch;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+.empty .btn {
+  margin-top: 18px;
+}
+
+/* ============================================================
+   详情页
+   ============================================================ */
 
 .dt-hero {
   position: relative;
-  aspect-ratio: 16 / 9;
-  background: var(--bg-1);
+  aspect-ratio: 3 / 4;
+  max-height: 62vh;
+  overflow: hidden;
+  background: var(--s1);
+  /* 共享元素落点。FLIP 从卡片飞到这里。 */
 }
-
-.dt-bd {
+.dt-hero img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-
-/* 不用渐变遮罩,用不透明底 —— 理由同首页 Hero */
+.dt-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    var(--bg) 1%,
+    rgba(8, 8, 12, 0.94) 14%,
+    rgba(8, 8, 12, 0.5) 40%,
+    rgba(8, 8, 12, 0.15) 66%,
+    rgba(8, 8, 12, 0.35) 100%
+  );
+  pointer-events: none;
+}
 .dt-cap {
   position: absolute;
   left: var(--pad);
   right: var(--pad);
-  bottom: var(--pad);
-  background: rgba(0, 0, 0, 0.68);
-  border-radius: var(--r);
-  padding: 8px 10px;
+  bottom: 12px;
 }
-
 .dt-title {
-  font-size: 19px;
-  font-weight: 700;
-  line-height: 1.25;
+  font-size: 26px;
+  font-weight: 720;
+  line-height: 1.14;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
 }
-
 .dt-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
   font-size: 12.5px;
-  margin-top: 3px;
+  color: var(--fg-2);
 }
-
 .dt-acts {
   display: flex;
-  gap: 8px;
-  padding: 14px var(--pad) 0;
+  gap: 10px;
+  padding: 16px var(--pad) 0;
 }
-
 .dt-play {
-  flex: 1; /* 满宽:不用瞄准 */
+  flex: 1;
 }
-
 .dt-ico {
   width: var(--tap);
   padding: 0;
   flex: none;
 }
-
 .dt-ico.on {
   color: var(--bad);
-  border-color: var(--bad);
+  border-color: rgba(255, 95, 86, 0.5);
+  background: rgba(255, 95, 86, 0.1);
+}
+/* 收藏心跳:点下去弹一下。这是"我知道你点到了"最省事的表达。 */
+.dt-ico.beat > svg {
+  animation: beat var(--sp-bouncy-t) var(--sp-bouncy);
+}
+@keyframes beat {
+  from {
+    transform: scale(0.4);
+  }
 }
 
 .dt-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  /* ★ 版本名可以很长("香港奇案 (2026)-Part-2 - 2160p - WEB-DL HQ HDR.mkv"),
-     不给标签 flex:none 的话 flex 会去挤它,「版本」两个字被压成竖排两行。
-     真机截图上抓到的 —— 计算样式里一切正常,只有画出来才看得见。 */
+  gap: 12px;
   width: 100%;
-  min-height: 52px;
-  margin-top: 14px;
+  min-height: 54px;
+  margin-top: 16px;
   padding: 0 var(--pad);
-  background: var(--bg-1);
+  background: var(--s1);
   border: 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   color: var(--fg);
   font-size: 15px;
+  text-align: left;
 }
-
+/* ★ 版本名可以很长,标签必须 flex:none —— 否则「版本」两个字被压成竖排两行。
+   计算样式里一切正常,只有画出来才看得见。 */
 .dt-row > span:first-child {
   flex: none;
 }
-
-/* 值这一侧允许收缩并省略,别把标签挤走 */
 .dt-row > span:last-child {
   min-width: 0;
   text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--fg-2);
 }
 
 .dt-ov {
-  margin: 16px 0 0;
+  margin: 18px 0 0;
   padding: 0 var(--pad);
   color: var(--fg-2);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.7;
+  position: relative;
 }
-
+.dt-ov.clamp .dt-ov-t {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dt-ov-more {
+  background: none;
+  border: 0;
+  color: var(--acc);
+  font-size: 13.5px;
+  padding: 6px 0 0;
+}
 .dt-sec {
-  margin-top: 22px;
+  margin-top: 26px;
 }
 
-/* 分集:一行一集。不做网格 —— 集名长度差异大,网格会让每格高度不齐。 */
 .eps {
   display: flex;
   flex-direction: column;
 }
-
 .ep {
   display: flex;
   gap: 12px;
   align-items: center;
   width: 100%;
-  padding: 10px var(--pad);
+  padding: 11px var(--pad);
   background: none;
   border: 0;
   border-bottom: 1px solid var(--line);
   color: var(--fg);
   text-align: left;
+  transition: background-color var(--t2) var(--e-std);
 }
-
 .ep:active {
-  background: var(--bg-2);
+  background: var(--s1);
 }
-
 .ep-th {
   position: relative;
-  width: 116px;
+  width: 124px;
   aspect-ratio: 16 / 9;
   flex: none;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   overflow: hidden;
-  background: var(--bg-2);
+  background: var(--s2);
 }
-
 .ep-th img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-
+/* 悬停/按下时缩略图上浮出一个播放键 */
+.ep-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity var(--t3) var(--e-std);
+}
+.ep:active .ep-play {
+  opacity: 1;
+}
 .ep-t {
   min-width: 0;
   flex: 1;
 }
-
 .ep-n {
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.35;
+  font-weight: 540;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-
 .ep-m {
   font-size: 12px;
-  margin-top: 3px;
+  color: var(--fg-3);
+  margin-top: 4px;
 }
 
 .person {
-  width: 76px;
+  width: 80px;
   flex: none;
   text-align: center;
+  scroll-snap-align: start;
 }
-
 .person-av {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 6px;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 8px;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--bg-2);
+  background: var(--s2);
+  transition: transform var(--sp-snap-t) var(--sp-snap);
 }
-
+.person:active .person-av {
+  transform: scale(0.93);
+}
 .person-av img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-
 .person-n {
   font-size: 12px;
   line-height: 1.3;
 }
-
 .person-r {
   font-size: 11px;
+  color: var(--fg-3);
+  margin-top: 2px;
 }
 
-/* ---------- 播放页 ----------
-   整层是手势区。OSD 用 opacity 显隐,**不用 display:none** ——
-   display 切换会让 OSD 每次出现都重排一次整层。 */
+/* ============================================================
+   搜索
+   ============================================================ */
 
-.player {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  /* 手势要吃掉浏览器的默认平移/缩放,否则竖滑会把页面一起带走 */
-  touch-action: none;
+.sf {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px var(--pad) 4px;
+  padding: 0 14px;
+  height: var(--tap);
+  border-radius: var(--r);
+  background: var(--s1);
+  border: 1px solid var(--line);
+  color: var(--fg-3);
+  transition: border-color var(--t4) var(--e-std);
+}
+.sf:focus-within {
+  border-color: var(--acc);
+}
+.sf input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  /* ★ 16px 是硬下限:小于它安卓会在聚焦时自动放大整页,版式当场错位 */
+  font-size: 16px;
+}
+.sf-x {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  color: var(--fg-3);
+  border-radius: 50%;
+}
+.sgrp h2 {
+  margin: 0;
+  padding: 16px var(--pad) 10px;
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--fg-2);
+}
+
+/* ============================================================
+   杂项列表(下载 / 日历 / 排行 / 插件 / Ani-RSS / 服务器 / 网盘)
+   ============================================================ */
+
+.sgroup {
+  margin-top: 22px;
+}
+.sgroup > h2 {
+  margin: 0;
+  padding: 0 var(--pad) 10px;
+  font-size: 13px;
+  font-weight: 620;
+  color: var(--fg-2);
+}
+
+.bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--s3);
   overflow: hidden;
 }
+.bar > i {
+  display: block;
+  height: 100%;
+  background: var(--acc);
+  transform-origin: left;
+  transition: transform var(--t8) var(--e-std);
+}
+/* 不定长进度:一段来回扫,不用无限扫光 */
+.bar.indet > i {
+  width: 40%;
+  animation: indet calc(1400ms * var(--mo)) var(--e-std) infinite;
+}
+@keyframes indet {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
 
-/* 弹幕层。和 PC 端同一个 Canvas 组件(@shared/Danmaku)——
-   曾经那条「生成 ASS 挂 mpv secondary-sid」的路已整条删掉:次字幕位只有一个,
-   占了就开不了双语字幕。★ pointer-events:none,六个手势全靠底下那层收。 */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+}
+
+/* 排行榜的名次 */
+.rk-no {
+  width: 30px;
+  flex: none;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--fg-3);
+}
+.rk-no.top {
+  color: #ffd479;
+}
+.rk-d {
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.rk-d.up {
+  color: var(--ok);
+}
+.rk-d.down {
+  color: var(--bad);
+}
+
+/* 日历 */
+.cal-day {
+  display: flex;
+  gap: 12px;
+  padding: 14px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+.cal-d {
+  width: 46px;
+  flex: none;
+  text-align: center;
+}
+.cal-dn {
+  font-size: 12px;
+  color: var(--fg-3);
+}
+.cal-dd {
+  font-size: 17px;
+  font-weight: 660;
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+.cal-day.today .cal-dd {
+  color: var(--acc);
+}
+.cal-day.today .cal-d::after {
+  content: "";
+  display: block;
+  width: 5px;
+  height: 5px;
+  margin: 5px auto 0;
+  border-radius: 50%;
+  background: var(--acc);
+}
+.cal-list {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cal-it {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  background: var(--s1);
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.cal-it .t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-it .h {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--fg-3);
+  flex: none;
+}
+.cal-it.soon {
+  border-color: rgba(91, 140, 255, 0.4);
+}
+.cal-it.done {
+  opacity: 0.62;
+}
+
+/* 服务器 / 插件 / 订阅的通用行 */
+.lit {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px var(--pad);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+  text-align: left;
+  transition: background-color var(--t2) var(--e-std);
+}
+.lit:active {
+  background: var(--s1);
+}
+.lit-ic {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  font-size: 15px;
+  font-weight: 700;
+}
+.lit-t {
+  flex: 1;
+  min-width: 0;
+}
+.lit-n {
+  font-size: 14.5px;
+  font-weight: 560;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.lit-s {
+  font-size: 12px;
+  color: var(--fg-3);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--fg-3);
+}
+.dot.on {
+  background: var(--ok);
+}
+.dot.off {
+  background: var(--bad);
+}
+
+/* ============================================================
+   登录 / 添加服务器
+   ============================================================ */
+
+.login {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.lg-top {
+  padding: calc(var(--sa-top) + 26px) var(--pad) 0;
+  flex: none;
+}
+.lg-brand {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--fg-2);
+  letter-spacing: 0.02em;
+}
+.lg-brand span {
+  color: var(--acc);
+}
+.lg-h1 {
+  font-size: 26px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+  margin-top: 8px;
+}
+.lg-p {
+  color: var(--fg-2);
+  font-size: 13.5px;
+  margin-top: 6px;
+}
+.lg-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.lg-pane {
+  padding: 18px var(--pad) 0;
+  animation: enter var(--t7) var(--e-emph-decel) both;
+}
+.lg-acts {
+  display: flex;
+  gap: 10px;
+  padding: 12px var(--pad) calc(12px + var(--sa-bottom));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  flex: none;
+}
+.lg-acts .btn {
+  flex: 1;
+}
+
+.field {
+  display: block;
+  margin-bottom: 15px;
+}
+.field > span {
+  display: block;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  margin-bottom: 7px;
+}
+.field input,
+.field select {
+  width: 100%;
+  height: var(--tap);
+  padding: 0 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--s1);
+  color: var(--fg);
+  font-size: 16px;
+  outline: 0;
+  transition: border-color var(--t4) var(--e-std);
+}
+.field input:focus {
+  border-color: var(--acc);
+}
+
+.qr {
+  width: 200px;
+  height: 200px;
+  margin: 8px auto 0;
+  border-radius: var(--r);
+  background: #fff;
+  display: grid;
+  place-items: center;
+  animation: enter var(--t8) var(--e-emph-decel) both;
+}
+
+/* ============================================================
+   播放页 —— 详见 player.css 段
+   ============================================================ */
+
+.player {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  touch-action: none;
+  overflow: hidden;
+  background: #000;
+}
+/* 草稿里用一张"画面"顶替原生 mpv 层 */
+.pl-video {
+  position: absolute;
+  inset: 0;
+}
+.pl-video img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  opacity: 0.85;
+}
+.pl-dim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+  transition: opacity var(--t2) linear;
+}
+
+/* OSD。★ 快显慢隐:淡入 100ms / 淡出 1000ms(Video.js 源码里就是这个非对称)。
+   我们现状是 200ms 对称 —— 隐得太快,眼睛会觉得"啪"地被夺走。
+   ★ 顶栏底栏还要各自带位移:纯 opacity 是"图层闪了一下",不是"东西滑走了"。 */
+.pl-osd {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity calc(1000ms * var(--mo)) var(--e-std);
+}
+.pl-osd.on {
+  opacity: 1;
+  pointer-events: auto;
+  transition-duration: var(--t2);
+}
+.pl-top,
+.pl-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transition: transform calc(1000ms * var(--mo)) var(--e-std);
+}
+.pl-osd.on .pl-top,
+.pl-osd.on .pl-bottom {
+  transform: translateY(0);
+  transition-duration: var(--t5);
+  transition-timing-function: var(--e-emph-decel);
+}
+.pl-top {
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--sa-top) + 8px) 10px 26px;
+  transform: translateY(-16px);
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.78), transparent);
+}
+.pl-bottom {
+  bottom: 0;
+  padding: 30px 12px calc(var(--sa-bottom) + 10px);
+  transform: translateY(16px);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.82), transparent);
+}
+.pl-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pl-sub {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.62);
+  margin-top: 2px;
+}
+.pl-ico {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  flex: none;
+  transition: transform var(--sp-snap-t) var(--sp-snap);
+}
+.pl-ico:active {
+  transform: scale(0.88);
+  transition-duration: var(--t2);
+}
+
+/* 进度条。★ 拖动时**加粗**(3→6px)并把 thumb 放大 —— 现状是拖不拖都一样粗,
+   手指盖住之后完全不知道自己有没有抓住它。 */
+.pl-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px 6px;
+}
+.pl-t {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+  flex: none;
+}
+.pl-track {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  touch-action: none;
+}
+.pl-track-bg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.26);
+  transition: transform var(--t4) var(--e-std);
+  transform-origin: center;
+}
+.pl-track.drag .pl-track-bg {
+  transform: scaleY(2);
+}
+.pl-buf,
+.pl-fill {
+  position: absolute;
+  left: 0;
+  height: 3px;
+  border-radius: 2px;
+  transform-origin: left;
+  transition: transform var(--t4) var(--e-std);
+}
+.pl-buf {
+  right: 0;
+  background: rgba(255, 255, 255, 0.4);
+}
+.pl-fill {
+  right: 0;
+  background: var(--acc);
+}
+.pl-track.drag .pl-buf,
+.pl-track.drag .pl-fill {
+  transition: none;
+}
+.pl-track.drag .pl-buf,
+.pl-track.drag .pl-fill {
+  height: 6px;
+}
+.pl-thumb {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  border-radius: 50%;
+  background: #fff;
+  transition:
+    transform var(--sp-snap-t) var(--sp-snap),
+    left var(--t4) var(--e-std);
+}
+.pl-track.drag .pl-thumb {
+  transform: scale(1.5);
+  transition-property: transform;
+}
+
+.pl-ctl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  padding: 2px 0 8px;
+}
+.pl-play {
+  width: 60px;
+  height: 60px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.pl-more {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 0;
+}
+.pl-more::-webkit-scrollbar {
+  display: none;
+}
+.pl-txt {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 13px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.32);
+  color: #fff;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: transform var(--sp-snap-t) var(--sp-snap);
+}
+.pl-txt:active {
+  transform: scale(0.94);
+  transition-duration: var(--t2);
+}
+.pl-txt.on {
+  border-color: var(--acc);
+  color: #bcd3ff;
+  background: rgba(91, 140, 255, 0.18);
+}
+
+/* 手势 HUD */
+.pl-hud {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  min-width: 150px;
+  padding: 14px 20px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.78);
+  text-align: center;
+  pointer-events: none;
+  animation: hud-in var(--t3) var(--e-emph-decel) both;
+}
+@keyframes hud-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
+}
+.pl-hud.out {
+  animation: hud-out var(--t5) var(--e-emph-accel) forwards;
+}
+@keyframes hud-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+.pl-hud-k {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.06em;
+}
+.pl-hud-v {
+  font-size: 24px;
+  font-weight: 660;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+}
+.pl-hud-bar {
+  margin-top: 10px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+.pl-hud-bar > i {
+  display: block;
+  height: 100%;
+  background: #fff;
+  transform-origin: left;
+}
+
+/* 竖向音量/亮度条(贴在对应那半屏的边上,比中央 HUD 更符合"我在这一侧操作") */
+.pl-vbar {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 42%;
+  margin-top: -21%;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+  pointer-events: none;
+  animation: hud-in var(--t3) var(--e-emph-decel) both;
+}
+.pl-vbar.l {
+  left: 18px;
+}
+.pl-vbar.r {
+  right: 18px;
+}
+.pl-vbar > i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #fff;
+  transform-origin: bottom;
+}
+
+/* 双击 ±10s 的涟漪。★ 现状完全没有(README 写了「涟漪 + 秒数」,代码里没有)。
+   半屏遮罩 + 从触点扩散的圆 + 数字。连点会累加(+10 → +20 → +30)。 */
+.pl-dt {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 42%;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  overflow: hidden;
+}
+.pl-dt.l {
+  left: 0;
+  border-radius: 0 50% 50% 0;
+}
+.pl-dt.r {
+  right: 0;
+  border-radius: 50% 0 0 50%;
+}
+.pl-dt-wave {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(0);
+  animation: dt-wave calc(600ms * var(--mo)) linear forwards;
+}
+@keyframes dt-wave {
+  to {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+.pl-dt-t {
+  position: relative;
+  text-align: center;
+  font-size: 13px;
+  animation: dt-t calc(700ms * var(--mo)) var(--e-std) forwards;
+}
+@keyframes dt-t {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  20%,
+  70% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.pl-dt-n {
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 700;
+  display: block;
+  margin-top: 4px;
+}
+/* 三角箭头组:逐个亮,像在"催" */
+.pl-dt-ar {
+  display: flex;
+  justify-content: center;
+  gap: 1px;
+}
+.pl-dt-ar > i {
+  opacity: 0.25;
+  animation: ar calc(700ms * var(--mo)) linear infinite;
+}
+.pl-dt-ar > i:nth-child(2) {
+  animation-delay: calc(140ms * var(--mo));
+}
+.pl-dt-ar > i:nth-child(3) {
+  animation-delay: calc(280ms * var(--mo));
+}
+@keyframes ar {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  25% {
+    opacity: 1;
+  }
+}
+
+/* 长按 2× */
+.pl-boost {
+  position: absolute;
+  top: calc(var(--sa-top) + 14px);
+  left: 50%;
+  padding: 8px 16px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+  font-weight: 560;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  animation: boost-in var(--sp-t) var(--sp) both;
+}
+@keyframes boost-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -14px) scale(0.9);
+  }
+  to {
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+/* 缓冲转圈。★ 延迟 300ms 才出现 —— 不延迟的话每次小卡顿都闪一下菊花,
+   那个"闪"本身比卡顿更烦人。 */
+.pl-buffering {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: fade-in var(--t4) var(--e-std) calc(300ms * var(--mo)) both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.pl-spin {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #fff;
+  animation: spin calc(1000ms * var(--mo)) linear infinite;
+}
+
+/* 播放器面板的样式**整块搬到了 p-player.js**(v2 起有 drawer / pop 两种形态)。
+   ★ 这里原本留着 v1 的 `.pl-panel { top:0; right:0; bottom:0 }`,
+     新版的小浮层没有覆盖 right/bottom,于是被这三行**拉伸到贴着屏幕右下角** ——
+     JS 明明算好了坐标,浮层却长在别处。删掉,不要留两份定义。 */
+
+/* 锁屏 */
+.pl-lock {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  margin-top: -22px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 0;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  animation: hud-in var(--t4) var(--e-emph-decel) both;
+}
+
+/* ============================================================
+   工具
+   ============================================================ */
+
+.flex {
+  display: flex;
+}
+.between {
+  justify-content: space-between;
+}
+.center {
+  align-items: center;
+}
+.g8 {
+  gap: 8px;
+}
+.g12 {
+  gap: 12px;
+}
+.f1 {
+  flex: 1;
+  min-width: 0;
+}
+.fn {
+  flex: none;
+}
+.mt8 {
+  margin-top: 8px;
+}
+.mt16 {
+  margin-top: 16px;
+}
+.hide {
+  display: none !important;
+}
+
+/* ============================================================
+   草稿没覆盖的三块 —— 从旧 theme/mobile.css 搬过来,按新 token 重上色
+
+   草稿评审台是纯前端原型:没有真 mpv(所以没有弹幕层)、没有真播放会话
+   (所以没有迷你播放器)、也不会渲染崩(所以没有错误边界)。
+   这三块是**真码独有的**,不是漏做。
+   ============================================================ */
+
+/* ---------- 弹幕层 ----------
+   和 PC 端同一个 Canvas 组件(@shared/Danmaku)。曾经那条「生成 ASS 挂 mpv
+   secondary-sid」的路已整条删掉:次字幕位只有一个,占了就开不了双语字幕。
+   ★ pointer-events:none —— 六个手势全靠底下那层收,这层绝不能吃事件。 */
 .pl-dmwrap {
   position: absolute;
   inset: 0;
@@ -1519,201 +2908,36 @@ textarea:focus {
   display: block;
 }
 
-/* 亮度蒙版。★ pointer-events:none —— 它绝不能吃掉手势。 */
-.pl-dim {
-  position: absolute;
-  inset: 0;
-  background: #000;
-  pointer-events: none;
-}
-
-.pl-hud {
-  position: absolute;
-  left: 50%;
-  top: 42%;
-  transform: translate(-50%, -50%);
-  min-width: 132px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.78);
-  text-align: center;
-  pointer-events: none;
-}
-
-.pl-hud-k {
-  font-size: 11px;
-  color: var(--fg-2);
-}
-
-.pl-hud-v {
-  font-size: 20px;
-  font-weight: 600;
-  margin-top: 2px;
-  font-variant-numeric: tabular-nums;
-}
-
-.pl-hud-bar {
-  margin-top: 8px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.pl-hud-bar i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--acc);
-}
-
-.pl-boost {
-  position: absolute;
-  top: calc(var(--sa-top) + 16px);
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 6px 14px;
-  border-radius: 16px;
-  background: rgba(0, 0, 0, 0.78);
-  font-size: 13px;
-  pointer-events: none;
-}
-
-.pl-osd {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms var(--e-out);
-}
-
-.pl-osd.on {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.pl-top {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: calc(var(--sa-top) + 6px) 6px 6px;
-}
-
-/* 标题自带不透明底,不靠渐变 —— 全屏渐变每帧重新合成,边界远看还是糊的 */
-.pl-title {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 10px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.62);
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pl-ico {
-  width: var(--tap);
-  height: var(--tap);
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.5);
-  border: 0;
-  border-radius: 50%;
-  color: #fff;
-  flex: none;
-}
-
-.pl-mini-ico {
-  width: 18px;
-  height: 12px;
-  border: 2px solid currentColor;
-  border-radius: 3px;
-}
-
-.pl-bottom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 10px 10px calc(10px + var(--sa-bottom));
-  background: rgba(0, 0, 0, 0.62);
-}
-
-.pl-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pl-t {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
-
-.pl-seek {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  accent-color: var(--acc);
-  background: none;
-}
-
-.pl-ctl {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-  padding: 6px 0;
-}
-
-.pl-play {
-  width: 62px;
-  height: 62px;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-/* 右组必须图标+文字:裸图标方块用户第一反应是「那是什么」 */
-.pl-more {
-  display: flex;
-  justify-content: space-around;
-}
-
-.pl-txt {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 44px;
-  padding: 0 10px;
-  background: none;
-  border: 0;
-  color: var(--fg-2);
-  font-size: 13px;
-}
-
-.pl-txt.on {
-  color: var(--acc);
-}
-
-/* ---------- 迷你播放器 ---------- */
-
+/* ---------- 迷你播放器(手机独有,PC 没有) ----------
+   ★ 悬浮底栏是「离底 7px + 左右 6px」的胶囊,迷你条要垫在它**上面**,
+     所以 bottom 要把胶囊高、离底距离、安全区三样都算进去 —— 少算一样就压住底栏。 */
 .mini {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(var(--tabbar-h) + var(--sa-bottom));
-  z-index: 28;
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: calc(var(--tabbar-h) + var(--sa-bottom) + 7px + 8px);
+  z-index: 29;
   display: flex;
   align-items: center;
   gap: 8px;
   height: 56px;
-  padding: 0 8px 0 var(--pad);
-  background: var(--bg-2);
-  border-top: 1px solid var(--line);
+  padding: 0 8px 0 12px;
+  border-radius: var(--r-lg);
+  background: var(--s3);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  animation: mini-in var(--sp-t) var(--sp) both;
+}
+@keyframes mini-in {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+}
+/* 全屏(播放页)时不画 —— 它和底栏同进同出 */
+.app:not(.has-tabs) .mini {
+  display: none;
 }
 
 .mini-prog {
@@ -1722,32 +2946,30 @@ textarea:focus {
   left: 0;
   right: 0;
   height: 2px;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.14);
 }
-
 .mini-prog i {
   display: block;
   height: 100%;
   background: var(--acc);
+  transform-origin: 0 50%;
 }
 
 .mini-t {
   flex: 1;
   min-width: 0;
 }
-
 .mini-title {
   font-size: 14px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .mini-sub {
   font-size: 11.5px;
+  color: var(--fg-3);
   font-variant-numeric: tabular-nums;
 }
-
 .mini-ico {
   width: 44px;
   height: 44px;
@@ -1757,471 +2979,833 @@ textarea:focus {
   border: 0;
   color: var(--fg);
   flex: none;
+  border-radius: 999px;
 }
 
-/* ---------- 下载 ---------- */
-
-.dl {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px var(--pad);
-  border-bottom: 1px solid var(--line);
+/* ---------- 错误边界 ----------
+   窗口是透明的,React 渲染一抛错就是**一片黑**,不是空白。
+   所以这一屏必须自带底色,否则"崩了"和"没画"长得一模一样。 */
+.pb-crash {
+  padding: 40px var(--pad);
+  background: var(--bg);
+  min-height: 100%;
 }
-
-.dl:last-child {
-  border-bottom: 0;
-}
-
-.dl-t {
-  flex: 1;
-  min-width: 0;
-}
-
-.dl-n {
-  font-size: 14px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dl-m {
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-.dl-bar {
-  margin-top: 6px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.14);
-}
-
-.dl-bar i {
-  display: block;
-  height: 100%;
-  border-radius: 2px;
-  background: var(--acc);
-}
-
-.sgroup h2 .row-more {
-  float: right;
-}
-
-/* ---------- 追剧日历 ---------- */
-
-.cal-wk {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px var(--pad) 4px;
-}
-
-.cal-day {
-  margin-top: 16px;
-}
-
-.cal-day h2 {
-  margin: 0;
-  padding: 0 var(--pad) 8px;
-  font-size: 15px;
+.pb-h {
+  font-size: 17px;
   font-weight: 600;
+  color: var(--bad);
 }
-
-.cal-day.today h2 {
-  color: var(--acc);
+.pb-m {
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--fg-2);
+  word-break: break-all;
+  line-height: 1.55;
 }
-
-.cal-badge {
-  margin-left: 8px;
-  padding: 2px 7px;
-  border-radius: 9px;
-  background: var(--acc);
-  color: var(--acc-fg);
-  font-size: 11px;
-}
-
-.cal-none {
-  padding: 0 var(--pad) 4px;
+.pb-hint {
   font-size: 12.5px;
-}
-
-.cal-it {
-  display: flex;
-  gap: 12px;
-  padding: 8px var(--pad);
-}
-
-/* 已播完的压暗,正在播的高亮一条边 —— 只用 opacity 和 border-color,不动布局 */
-.cal-it.past {
-  opacity: 0.5;
-}
-
-.cal-it.airing {
-  border-left: 3px solid var(--acc);
-  padding-left: calc(var(--pad) - 3px);
-}
-
-.cal-th {
-  width: 54px;
-  aspect-ratio: 3 / 4;
-  flex: none;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--bg-2);
-}
-
-.cal-th img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.cal-t {
-  min-width: 0;
-  flex: 1;
-}
-
-/* ★ 标题不做 line-clamp —— 截成「…」等于显示不全(PC 端评审时明确纠正过) */
-.cal-n {
-  font-size: 14px;
-  line-height: 1.4;
-  word-break: break-word;
-}
-
-.cal-m {
-  font-size: 12px;
-  margin-top: 3px;
-}
-
-/* ---------- 排行榜 ---------- */
-
-.rk-it {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 10px var(--pad);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--fg);
-  text-align: left;
-}
-
-.rk-it:active {
-  background: var(--bg-2);
-}
-
-.rk-n {
-  width: 26px;
-  flex: none;
-  text-align: center;
-  font-size: 15px;
-  font-weight: 700;
   color: var(--fg-3);
-  font-variant-numeric: tabular-nums;
+  margin-bottom: 16px;
 }
 
-.rk-n.top {
-  color: #ffca6b;
+/* ============================================================
+   各页版式 —— 来自草稿的**每页自带 CSS 块**
+
+   ★ 这一段差点整个丢掉。草稿的 app.css 只有全站骨架和通用组件(433 条规则),
+     每个页面模块自己在文件顶部还挂着一段 `const CSS` + `document.head.append(h("style"))`。
+     只搬 app.css 的话,一 grep 会发现 166 个类没有样式 —— 而草稿跑起来是好的,
+     因为那些规则在 JS 里。**是靠读 document.styleSheets 发现有 7 张表才查出来的**,
+     光看截图完全看不出缺了什么(截图是对的)。
+
+   ★ 落码合并到这一份:ui/mobile 的规矩是「页面不新写 CSS 文件」。
+     草稿那种「JS 里带一段 CSS」在原型里是对的(一个文件自带全部依赖,好评审),
+     在真码里是错的(样式散落 = 长出两套间距)。
+   ============================================================ */
+
+/* ---------- 首页 Hero / 环境光(草稿 p-home.js) ---------- */
+.home{position:relative}
+/* 氛围光垫在最底,其余内容都浮在它上面 */
+.home>*:not(.ambient){position:relative;z-index:1}
+.home-bar{position:absolute;top:0;left:0;right:0;z-index:25;pointer-events:none}
+.home-bar>*{pointer-events:auto}
+.home-bar .tb-title{font-size:17px;font-weight:700;letter-spacing:-.01em;
+  text-shadow:0 1px 14px rgba(0,0,0,.85)}
+.home-bar button{color:#fff}
+/* 左上角库统计 —— 三格并排,数字在上、标签在下。
+   数字用等宽字体:不等宽的话每次刷新数字变了,后面的标签会左右抖。 */
+.hstat{display:flex;align-items:center;gap:9px;background:none;border:0;
+  padding:2px 6px;text-align:left;color:#fff}
+.hs-i{display:flex;flex-direction:column;align-items:flex-start;line-height:1.05}
+.hs-i b{font-size:14px;font-weight:700;letter-spacing:-.02em;
+  text-shadow:0 1px 10px rgba(0,0,0,.9)}
+.hs-i span{font-size:9.5px;color:rgba(255,255,255,.55);margin-top:2px}
+.hs-d{width:1px;height:16px;background:rgba(255,255,255,.18)}
+/* 顶栏要给两行统计留高度 */
+.home-bar{height:auto;min-height:calc(var(--topbar-h) + var(--sa-top));align-items:flex-end;
+  padding-bottom:8px}
+/* chip 行离 Hero 更远一点 —— 原来 14px,和轨道间距几乎一样,整页没有节奏 */
+.home .chips{padding-top:20px;padding-bottom:2px}
+/* 第一条轨道离 chip 行拉开,让"入口区"和"内容区"分开 */
+.home .chips + div > .row:first-child{margin-top:26px}
+
+/* ---------- 聚合视界(草稿 p-aggregate.js) ---------- */
+/* ---- 快捷入口:四个方块,一行 ----
+   ★ 底部留 22px(用户 2026-07-28):按钮和第一张卡片贴太近,拇指从卡片往上滑
+     很容易蹭到按钮 —— 误触先不说,视觉上也是两块功能挤在一起没有分界。 */
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px var(--pad) 22px}
+.quick-i{display:flex;flex-direction:column;align-items:center;gap:7px;
+  padding:13px 4px 11px;border:0;border-radius:14px;
+  background:rgba(255,255,255,.06);color:var(--fg);font-size:11.5px;font-weight:520}
+.quick-i:active{background:rgba(255,255,255,.1)}
+.quick-ic{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;
+  background:rgba(91,140,255,.16);color:#9dbcff}
+
+/* ---- 一个源一节 ---- */
+.agg-src{margin-top:26px}
+/* 第一节不用再叠 margin —— 上面那 22px 已经是分界了 */
+.agg-src:first-of-type{margin-top:0}
+.src-hd{display:flex;align-items:center;gap:10px;padding:0 var(--pad) 10px}
+.src-ic{width:32px;height:32px;flex:none;display:grid;place-items:center;border-radius:10px;
+  background:rgba(255,255,255,.07);color:var(--fg-2)}
+.src-t{flex:1;min-width:0}
+.src-n{font-size:16px;font-weight:680;letter-spacing:-.01em}
+.src-m{font-size:11.5px;color:var(--fg-3);margin-top:2px;font-variant-numeric:tabular-nums}
+.src-empty{margin:0 var(--pad);padding:16px;border-radius:12px;text-align:center;
+  font-size:12.5px;color:var(--fg-3);background:rgba(255,255,255,.035)}
+.agg-sec{margin-top:20px}
+
+/* 搜索结果里的来源标 */
+.src-tag{position:absolute;left:5px;bottom:5px;max-width:calc(100% - 10px);
+  padding:3px 6px;border-radius:5px;font-size:9.5px;font-weight:600;
+  background:rgba(0,0,0,.68);color:rgba(255,255,255,.9);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@supports (backdrop-filter: blur(1px)){
+  .src-tag{background:rgba(0,0,0,.42);backdrop-filter:blur(10px) saturate(160%)}
 }
 
-.rk-th {
-  width: 44px;
-  aspect-ratio: 3 / 4;
-  flex: none;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--bg-2);
+/* ---- 线路管理 ---- */
+.ping{flex:none;display:flex;align-items:baseline;gap:2px;font-size:11px;color:var(--fg-3)}
+.ping b{font-size:15px;font-weight:700}
+.ping.good b{color:var(--ok)}
+.ping.mid b{color:var(--warn)}
+.ping.bad b{color:var(--bad)}
+.note-box{padding:12px 14px;border-radius:10px;background:rgba(91,140,255,.09);
+  border:1px solid rgba(91,140,255,.2);font-size:13px;line-height:1.65;color:var(--fg-2)}
+
+/* ---------- 列表族(媒体库/收藏/下载/排行/日历/搜索)(草稿 p-lists.js) ---------- */
+.lp-total{padding:2px var(--pad) 10px;font-size:12.5px;color:var(--fg-3)}
+.lp-more{display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:18px var(--pad) calc(24px + var(--sa-bottom));color:var(--fg-3);font-size:13px}
+.spin-ic{display:inline-flex;animation:p-spin 900ms linear infinite}
+@keyframes p-spin{to{transform:rotate(360deg)}}
+
+.chips-row{display:flex;align-items:center;gap:4px}
+.chips-row .chips{flex:1;min-width:0}
+.viewsw{display:flex;flex:none;margin:14px var(--pad) 0 4px;
+  border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.viewsw button{width:38px;height:38px;display:grid;place-items:center;
+  background:var(--s1);color:var(--fg-3);border:0}
+.viewsw button:active{opacity:.7}
+.viewsw button.on{background:var(--acc);color:var(--acc-fg)}
+
+.dl-acts{display:flex;gap:8px;margin-top:8px}
+.dl-btn{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+  background:var(--s2);border:1px solid var(--line);color:var(--fg-2);flex:none}
+.dl-btn:active{background:var(--s3)}
+
+.cal-nav{display:flex;align-items:center;justify-content:space-between;padding:6px var(--pad) 4px}
+.cal-nav button{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  background:none;border:0;color:var(--fg-2)}
+.cal-nav button:active{background:var(--s2)}
+.cal-range{font-size:14.5px;font-weight:620}
+.cal-empty{font-size:12.5px;color:var(--fg-3);padding:9px 2px}
+
+.rk-item{display:flex;align-items:center;gap:12px;width:100%;padding:11px var(--pad);
+  border:0;border-bottom:1px solid var(--line);background:none;text-align:left;color:var(--fg)}
+.rk-item:active{background:var(--s1)}
+.rk-t{flex:1;min-width:0}
+.rk-tt{font-size:14.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rk-ts{font-size:12px;color:var(--fg-3);margin-top:3px}
+
+/* ---------- 详情页 / 单集页(草稿 p-detail.js) ---------- */
+/* ── Hero ──
+   16:9(原来是 3:4 / 62vh)。390 宽的屏幕上 = 219px,加上下面的元信息条
+   刚好让通栏播放按钮落在首屏内 —— 这是这次改动最主要的收益。 */
+.dt-hero{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--s1)}
+.dt-hero>img{width:100%;height:100%;object-fit:cover;display:block}
+.dt-cap{position:absolute;left:var(--pad);right:var(--pad);bottom:10px;text-align:center}
+.dt-logo{display:block;margin:0 auto;max-width:66%;max-height:52px;object-fit:contain}
+.dt-logo-fb{font-size:24px;font-weight:720;letter-spacing:-.025em;line-height:1.14;
+  text-shadow:0 2px 18px rgba(0,0,0,.9)}
+.dt-name{font-size:13px;color:rgba(255,255,255,.72);margin-top:2px;
+  text-shadow:0 1px 10px rgba(0,0,0,.9)}
+
+/* ── 元信息 ──
+   一行流式排,挤不下就换行。分隔符用细竖线,不用「·」——
+   「·」和片名里的间隔号长得一样,读起来会粘在一起。 */
+.dt-head{padding:12px var(--pad) 0}
+.dt-mi{display:flex;flex-wrap:wrap;align-items:center;gap:7px;
+  font-size:12.5px;color:var(--fg-2);line-height:1.5}
+.mi-d{width:1px;height:10px;background:var(--line);flex:none}
+.mi-star{display:inline-flex;align-items:center;gap:3px;color:var(--warn)}
+.mi-cert{border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px;
+  color:var(--fg-3)}
+.mi-on{color:var(--ok)}
+
+/* ── 操作条 ── */
+.dt-acts{display:flex;gap:10px;padding:13px 0 0}
+.dt-play{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;min-width:0}
+.dt-play-t{font-weight:600}
+.dt-play-s{font-size:12px;opacity:.72;font-weight:400}
+.dt-ico{width:var(--tap);padding:0;flex:none}
+.dt-ico.on{color:var(--bad);border-color:rgba(255,95,86,.5);background:rgba(255,95,86,.1)}
+.dt-ico.beat>svg{animation:beat var(--sp-bouncy-t) var(--sp-bouncy)}
+@keyframes beat{from{transform:scale(1)}40%{transform:scale(1.28)}to{transform:scale(1)}}
+
+/* ── 标语 / 简介 ──
+   标语实测只有 34% 的条目有 —— 没有就整行不画。 */
+.dt-intro{padding:15px var(--pad) 0}
+.dt-tag{font-size:13px;font-style:italic;color:var(--fg-3);margin-bottom:7px}
+.dt-ov{position:relative;color:var(--fg-2);font-size:14px;line-height:1.62}
+.dt-ov.dim{color:var(--fg-3)}
+.dt-ov.clamp .dt-ov-t{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;
+  overflow:hidden}
+/* 「更多」浮在最后一行行尾:绝对定位 + 渐变把被压住的字化掉。
+   另起一行的话,3 行简介会平白多占一行高度。 */
+.dt-ov.clamp .dt-ov-more{position:absolute;right:0;bottom:0;padding-left:26px;
+  background:linear-gradient(90deg,transparent,var(--bg) 26px)}
+.dt-ov-more{background:none;border:0;color:var(--acc);font-size:13.5px;font-weight:560;
+  padding:0;margin-top:2px;cursor:pointer}
+
+/* ── 信息行(媒体信息 / 版本) ── */
+.dt-rows{margin-top:16px;border-top:1px solid var(--line)}
+.dt-row{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;
+  padding:0 var(--pad);background:none;border:0;border-bottom:1px solid var(--line);
+  color:var(--fg);font-size:14px;text-align:left}
+.dt-row:active{background:var(--s1)}
+.dt-row-l{display:inline-flex;align-items:center;gap:8px;flex:none;color:var(--fg-2)}
+/* ★ 版本名可以很长("沙丘2.2024.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos")。
+   值那一格必须 min-width:0 才会省略,否则把「媒体信息」四个字挤成竖排。
+   计算样式里一切正常,只有画出来才看得见。 */
+.dt-row-v{flex:1;min-width:0;text-align:right;color:var(--fg-3);font-size:12.5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mi-path{padding:6px var(--pad) 4px;font-size:11.5px;color:var(--fg-3);
+  word-break:break-all;font-family:var(--mono,ui-monospace,monospace)}
+
+.dt-sec{margin-top:24px}
+
+/* ── 季 Tab 条 ──
+   ★ sticky。父链上任何一个 transform / filter / backdrop-filter 都会让它静默失效,
+     所以 .dt-eps **不参与** dt-enter 动画(见文件底部的排除)。 */
+/* ★ top 是 **0**,不是 topbar-h + sa-top。
+   顶栏是 .pg-body 的**兄弟**不在滚动容器里,滚动视口的上边缘已经在顶栏下面了 ——
+   再加一次顶栏高度就是算两遍(实测把季条钉在了 192px 而不是 96px)。
+   这种错不报错、也不"失效",只是钉错地方,只有量出来才知道。 */
+.season-bar{position:sticky;top:0;z-index:8;
+  background:var(--bg);padding:2px 0 8px}
+.season-bar[hidden]{display:none}
+.season-scroll{display:flex;gap:8px;overflow-x:auto;padding:0 var(--pad);
+  scroll-snap-type:x proximity;overscroll-behavior-x:contain;-ms-overflow-style:none;
+  scrollbar-width:none}
+.season-scroll::-webkit-scrollbar{display:none}
+.season-t{flex:none;scroll-snap-align:start;display:flex;flex-direction:column;
+  align-items:flex-start;gap:1px;padding:6px 12px;border-radius:9px;border:1px solid var(--line);
+  background:var(--s1);color:var(--fg-2);font-size:13px;line-height:1.25;max-width:180px}
+.season-t>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.season-t>i{font-size:10.5px;color:var(--fg-3);font-style:normal}
+.season-t.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.season-t.on>i{color:rgba(255,255,255,.78)}
+
+.ep-mode{width:32px;height:32px;display:grid;place-items:center;background:none;border:0;
+  color:var(--fg-2)}
+
+/* ── 集:图文列表 ──
+   ★ content-visibility 让屏幕外的集不参与布局/绘制(WebView 88+)。
+     contain-intrinsic-size 必须给**真实高度**,给错会留白或滚不到底。 */
+.ep-box.as-list{display:flex;flex-direction:column}
+.ep{display:flex;gap:12px;align-items:flex-start;width:100%;padding:10px var(--pad);
+  background:none;border:0;text-align:left;color:var(--fg);
+  content-visibility:auto;contain-intrinsic-size:auto 104px}
+.ep:active{background:var(--s1)}
+.ep.seen{opacity:.62}
+.ep-th{position:relative;width:132px;aspect-ratio:16/9;flex:none;border-radius:8px;
+  overflow:hidden;background:var(--s2)}
+.ep-th img{width:100%;height:100%;object-fit:cover;display:block}
+.ep-done{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;
+  background:var(--ok);color:#04140b;display:grid;place-items:center}
+.ep-t{min-width:0;flex:1;padding-top:1px}
+.ep-n{font-size:14px;line-height:1.32;font-weight:560;display:-webkit-box;
+  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ep-n>b{color:var(--fg-3);font-weight:600;margin-right:6px}
+.ep-m{font-size:11.5px;color:var(--fg-3);margin-top:3px}
+/* 分集简介实测缺 9.5% —— 缺了整行不画,所以这里不能设 min-height */
+.ep-o{font-size:12px;color:var(--fg-3);line-height:1.45;margin-top:4px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* ── 集:集号网格 ──
+   >50 集自动切到这个。862 集单季的剧上,这是唯一走得通的形态。 */
+.ep-box.as-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;
+  padding:2px var(--pad) 0}
+.epc{position:relative;aspect-ratio:1;border-radius:9px;border:1px solid var(--line);
+  background:var(--s1);color:var(--fg-2);font-size:13px;display:grid;place-items:center;
+  overflow:hidden;content-visibility:auto;contain-intrinsic-size:auto 52px}
+.epc:active{background:var(--s2)}
+.epc.seen{color:var(--fg-3);background:var(--s2);border-color:transparent}
+.epc.part{border-color:var(--acc);color:var(--fg)}
+.epc>i{position:absolute;left:0;right:0;bottom:0;height:2.5px;background:var(--acc);
+  transform-origin:left}
+
+.ep-foot{padding:14px var(--pad) 0;display:flex;justify-content:center}
+.ep-more{width:100%;min-height:40px;border-radius:10px;border:1px solid var(--line);
+  background:var(--s1);color:var(--fg-2);font-size:13px}
+.ep-more:active{background:var(--s2)}
+.ep-all{font-size:12px;color:var(--fg-3)}
+
+/* ── 演职员 ──
+   18.6% 没头像 —— .fb 是兜底,和有头像的一样大,不掉队。 */
+.person{width:78px;flex:none;text-align:center;scroll-snap-align:start}
+.person-av{width:64px;height:64px;margin:0 auto 7px;border-radius:50%;overflow:hidden;
+  background:var(--s2);transition:transform var(--t3) var(--e-std)}
+.person-av.fb{display:grid;place-items:center;font-size:22px;font-weight:600;color:#fff}
+.person:active .person-av{transform:scale(.93)}
+.person-av img{width:100%;height:100%;object-fit:cover;display:block}
+.person-n{font-size:12px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.person-r{font-size:11px;color:var(--fg-3);margin-top:2px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.row-scroll.crew{margin-top:12px}
+
+/* ── 单集详情页 ── */
+.ep-hero{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--s1)}
+.ep-hero>img{width:100%;height:100%;object-fit:cover;display:block}
+.prog.big{position:absolute;left:0;right:0;bottom:0;height:3.5px;background:rgba(255,255,255,.2)}
+.prog.big>i{display:block;height:100%;background:var(--acc);transform-origin:left}
+.epd-head{padding:14px var(--pad) 0}
+.epd-crumb{font-size:12px;color:var(--acc);font-weight:560}
+.epd-title{font-size:20px;font-weight:680;letter-spacing:-.02em;line-height:1.25;
+  margin:4px 0 8px}
+.epd-nav{display:flex;gap:10px;padding:18px var(--pad) 0}
+.epd-nb{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:9px 11px;
+  border-radius:11px;border:1px solid var(--line);background:var(--s1);color:var(--fg);
+  text-align:left}
+.epd-nb.r{justify-content:flex-end;text-align:right}
+.epd-nb.off{color:var(--fg-3);font-size:12px;justify-content:center;background:none}
+.epd-nb>div{min-width:0}
+.epd-nb i{display:block;font-size:10.5px;color:var(--fg-3);font-style:normal}
+.epd-nb b{display:block;font-size:12.5px;font-weight:520;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.card.cur .card-a{outline:2px solid var(--acc);outline-offset:1px}
+
+/* ── 进场 ──
+   ★ .dt-eps **不在这个列表里**:它里面有 sticky 的季条,
+     祖先带 transform 会让 sticky 静默失效。 */
+.dt-enter{animation:dt-enter var(--t8) var(--e-emph-decel) backwards;
+  animation-delay:calc(200ms * var(--mo) + var(--i,0) * 45ms * var(--mo))}
+@keyframes dt-enter{from{opacity:0;transform:translateY(16px)}}
+.dt-cap>*{animation:dt-enter var(--t8) var(--e-emph-decel) backwards;
+  animation-delay:calc(160ms * var(--mo) + var(--i,0) * 55ms * var(--mo))}
+.ep-box .ep,.ep-box .epc{animation:enter var(--t6) var(--e-emph-decel) backwards;
+  animation-delay:calc(380ms * var(--mo) + var(--i,0) * 22ms * var(--mo))}
+
+/* ---------- 播放页 OSD(草稿 p-player.js) ---------- */
+/* ══════════ 播放页 v3 ══════════
+   九宫格版式(用户定):左上标题 / 右上四个入口 / 左中截图锁屏 / 右中倍速条 /
+   左下换集 / 中下播放 / 右下轨道弹幕选集。 */
+
+.pl-dm{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.dm-i{position:absolute;left:100%;white-space:nowrap;font-size:17px;font-weight:600;
+  color:#fff;opacity:.82;text-shadow:0 1px 2px rgba(0,0,0,.85);animation:dm linear infinite}
+@keyframes dm{to{transform:translateX(calc(-100vw - 100%))}}
+
+/* ── OSD:快显 + 两种慢隐 ──
+   入 150ms。出分两种:超时自动收 500ms(余光里不刺眼)/ 用户点掉 200ms(他让它走就得走)。
+   ★ Video.js 源码是 入100/出1000,但那是**鼠标**播放器,慢淡出在防指针抖动闪烁;
+     触屏没有 hover,一刀切照抄 1000ms 就是"点了没反应"。 */
+.pl-osd{position:absolute;inset:0;opacity:0;pointer-events:none;
+  transition:opacity var(--t10) var(--e-emph-accel)}
+.pl-osd.quick{transition-duration:var(--t4)}
+.pl-osd.on{opacity:1;pointer-events:auto;transition:opacity var(--t3) var(--e-emph-decel)}
+
+/* ★ 层级:scrim 必须在 OSD **下面**。
+   上一版 scrim(9) 盖在 OSD(2) 上,面板一开上下栏被压暗 = 用户说的"渐隐",
+   面板一关 scrim 淡出 = "又快速显隐了一下"。
+   把 OSD 抬到 10,面板开关期间上下栏一动不动;显隐只由"点一下画面"控制。 */
+.pl-scrim{position:absolute;inset:0;z-index:8;background:rgba(0,0,0,.34);opacity:0;
+  transition:opacity var(--t6) var(--e-std)}
+.pl-scrim.on{opacity:1}
+
+/* ── 左上:返回 + 标题 ── */
+.pl-top{position:absolute;left:0;right:0;top:0;z-index:10;
+  display:flex;align-items:center;gap:6px;
+  padding:calc(var(--sa-top) + 5px) calc(var(--sa-right) + 2px) 5px calc(var(--sa-left) + 2px)}
+.pl-top::before{content:"";position:absolute;left:0;right:0;top:0;bottom:-34px;z-index:-1;
+  background:linear-gradient(to bottom,rgba(0,0,0,.72) 0%,rgba(0,0,0,.4) 55%,transparent 100%);
+  pointer-events:none}
+.pl-osd .pl-top{transform:translateY(-10px);transition:transform var(--t10) var(--e-emph-accel)}
+.pl-osd.on .pl-top{transform:translateY(0);transition:transform var(--t6) var(--e-emph-decel)}
+.pl-osd.quick .pl-top,.pl-osd.quick .pl-bottom{transition-duration:var(--t4)}
+
+/* 标题滚动。★ 只有放不下才滚(JS 加 .run),放得下还滚是纯噪音。
+   ★ **完整滚一圈,不来回弹。** 上一版是"滚到末尾再倒回来",用户原话:「很丑」。
+     现在复制一份跟在后面,整体左移 一份宽+空档,第二份正好落到第一份原来的位置 ——
+     循环无缝,看上去就是文字一直往左流。
+   ★ 开头停 12% 让人先读到片名;速度由 JS 按 40px/s 反算成 duration,兜 6 秒下限。 */
+.pl-title{flex:1;min-width:0;overflow:hidden;
+  -webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 26px),transparent 100%);
+  mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 26px),transparent 100%)}
+.pl-title-i{display:inline-flex;white-space:nowrap;
+  font-size:14.5px;font-weight:560;line-height:1.3;
+  text-shadow:0 1px 3px rgba(0,0,0,.55)}
+.pl-title-t{white-space:nowrap;flex:none}
+.pl-title.run .pl-title-i{animation:marq linear infinite}
+@keyframes marq{
+  0%,12%{transform:translateX(0)}
+  100%{transform:translateX(calc(-1 * var(--w)))}
 }
 
-.rk-th img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
+/* ── 右上:版本 / 线路 / 超分 / 更多 ──
+   ★ margin-left 24px:标题和这一组之间要留一口气,不然顶栏从左到右挤成一条。
+     顶栏本来的 gap 只有 6px —— 那是给返回键和标题之间用的,
+     标题右边缘紧贴按钮组时,长标题滚起来更像是"撞上去"。 */
+.pl-acts{display:flex;align-items:center;gap:5px;flex:none;margin-left:24px}
+.pl-act{position:relative;flex:none;display:inline-flex;align-items:center;gap:5px;
+  height:30px;padding:0 10px;border:0;border-radius:15px;
+  background:rgba(255,255,255,.14);color:#fff;font-size:12.5px;font-weight:500;white-space:nowrap;
+  transition:background var(--t3) var(--e-std),transform var(--sp-snap-t) var(--sp-snap)}
+.pl-act::after{content:"";position:absolute;left:0;right:0;top:-7px;bottom:-7px}
+.pl-act:active{transform:scale(.93);background:rgba(255,255,255,.26)}
+.pl-act.act{background:rgba(255,255,255,.32)}
+
+/* ── 圆形图标键 ──
+   44px。M3 建议 48,但横屏总高只有 390px:两颗 48 上下叠就是 25% 的屏。
+   这是**明知道规范的取舍**,不是没看规范。 */
+.pl-ico{width:44px;height:44px;flex:none;display:grid;place-items:center;
+  background:none;border:0;border-radius:50%;color:#fff;
+  transition:transform var(--sp-snap-t) var(--sp-snap),background var(--t3) var(--e-std)}
+.pl-ico>span{filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+.pl-ico:active{transform:scale(.86);background:rgba(255,255,255,.16);transition-duration:var(--t2)}
+.pl-ico.sm{width:32px;height:32px}
+
+/* ── 左中 / 右中 ──
+   ★ 屏幕两侧的中间以前是空的。爱奇艺、优酷把截图和锁屏放这 ——
+     横屏双手握持时,左右两侧中部正好在拇指的自然落点上。 */
+.pl-side{position:absolute;top:50%;translate:0 -50%;z-index:10;
+  display:flex;flex-direction:column;align-items:center;gap:10px}
+.pl-side.l{left:calc(var(--sa-left) + 2px)}
+.pl-side.r{right:calc(var(--sa-right) + 2px)}
+.pl-osd .pl-side.l{transform:translateX(-12px);opacity:0;
+  transition:transform var(--t8) var(--e-emph-accel),opacity var(--t8) var(--e-emph-accel)}
+.pl-osd .pl-side.r{transform:translateX(12px);opacity:0;
+  transition:transform var(--t8) var(--e-emph-accel),opacity var(--t8) var(--e-emph-accel)}
+.pl-osd.on .pl-side{transform:none;opacity:1;
+  transition:transform var(--t6) var(--e-emph-decel),opacity var(--t5) var(--e-emph-decel)}
+
+.pl-round{width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:50%;
+  background:rgba(0,0,0,.42);color:#fff;
+  transition:transform var(--sp-snap-t) var(--sp-snap),background var(--t3) var(--e-std)}
+@supports (backdrop-filter: blur(1px)){.pl-round{background:rgba(0,0,0,.3);backdrop-filter:blur(14px)}}
+.pl-round:active{transform:scale(.88);background:rgba(0,0,0,.62)}
+
+/* 截图白闪 —— 没有反馈的话用户会怀疑到底截没截到 */
+.pl-flash{position:absolute;inset:0;z-index:14;background:#fff;pointer-events:none;
+  animation:shot calc(320ms * var(--mo)) var(--e-std) forwards}
+@keyframes shot{0%{opacity:0}12%{opacity:.85}100%{opacity:0}}
+
+/* ── 倍速条:上加 / 中显示 / 下减 ──
+   ★ **矩形**,不是胶囊。上一版 border-radius 22px 把它做成了一颗药丸,
+     用户原话:「圆角丑的要死」。这是一条**竖直的控件条**,不是一颗按钮 ——
+     形状本来就该是矩形。只留 5px 让边角不扎手。 */
+.pl-sp{display:flex;flex-direction:column;align-items:center;overflow:hidden;
+  width:44px;padding:0;border-radius:5px;background:rgba(0,0,0,.46);color:#fff}
+@supports (backdrop-filter: blur(1px)){.pl-sp{background:rgba(0,0,0,.34);backdrop-filter:blur(14px)}}
+.pl-sp-b{width:44px;height:38px;display:grid;place-items:center;border:0;background:none;color:#fff;
+  transition:transform var(--sp-snap-t) var(--sp-snap),opacity var(--t3) var(--e-std),
+    background var(--t3) var(--e-std)}
+.pl-sp-b:active:not(:disabled){background:rgba(255,255,255,.16)}
+.pl-sp-b:active{transform:scale(.84)}
+.pl-sp-b:disabled{opacity:.3}
+.pl-sp-v{min-width:44px;padding:3px 0;text-align:center;
+  font-family:var(--mono);font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums;
+  border-top:1px solid rgba(255,255,255,.16);border-bottom:1px solid rgba(255,255,255,.16);
+  transition:color var(--t3) var(--e-std)}
+.pl-sp-v.on{color:var(--acc-2,#8ab4ff)}
+
+/* ── 底栏 ── */
+.pl-bottom{position:absolute;left:0;right:0;bottom:0;z-index:10;
+  padding:4px 0 calc(var(--sa-bottom) + 6px)}
+/* ★ 横向内边距**下放到每一簇自己身上**,底栏本体不吃。
+   贴边之后左右不对称(左边要让开刘海 46px、右边贴到 2px),
+   如果 padding 加在底栏上,grid 的 1fr auto 1fr 就是在**内容盒**里居中 ——
+   中间三键相对**屏幕**偏 22px。全宽 grid 才是相对屏幕居中。 */
+.pl-bar{padding-left:calc(var(--sa-left) + 2px);padding-right:calc(var(--sa-right) + 2px)}
+.pl-cl.l{padding-left:calc(var(--sa-left) + 2px)}
+.pl-cl.r{padding-right:calc(var(--sa-right) + 2px)}
+.pl-bottom::before{content:"";position:absolute;left:0;right:0;bottom:0;top:-40px;z-index:-1;
+  background:linear-gradient(to top,rgba(0,0,0,.78) 0%,rgba(0,0,0,.42) 52%,transparent 100%);
+  pointer-events:none}
+.pl-osd .pl-bottom{transform:translateY(10px);transition:transform var(--t10) var(--e-emph-accel)}
+.pl-osd.on .pl-bottom{transform:translateY(0);transition:transform var(--t6) var(--e-emph-decel)}
+
+.pl-bar{display:flex;align-items:center;gap:10px;height:26px}
+.pl-t{font-family:var(--mono);font-size:11.5px;font-variant-numeric:tabular-nums;
+  color:rgba(255,255,255,.88);flex:none;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+.pl-t-r{background:none;border:0;padding:0 2px;height:22px;border-radius:6px;
+  transition:background var(--t3) var(--e-std)}
+.pl-t-r:active{background:rgba(255,255,255,.18)}
+
+.pl-track{position:relative;flex:1;height:26px;display:flex;align-items:center;touch-action:none}
+.pl-track-bg{position:absolute;left:0;right:0;height:3px;border-radius:2px;
+  background:rgba(255,255,255,.26);transition:height var(--t4) var(--e-std)}
+.pl-buf,.pl-fill{position:absolute;left:0;right:0;height:3px;border-radius:2px;
+  transform-origin:left;transition:transform var(--t4) var(--e-std),height var(--t4) var(--e-std)}
+.pl-buf{background:rgba(255,255,255,.42)}
+.pl-fill{background:var(--acc)}
+.pl-track.drag .pl-track-bg,.pl-track.drag .pl-buf,.pl-track.drag .pl-fill{height:6px}
+.pl-thumb{position:absolute;width:12px;height:12px;margin-left:-6px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.45);
+  transition:transform var(--sp-snap-t) var(--sp-snap),left var(--t4) var(--e-std)}
+.pl-track.drag .pl-thumb{transform:scale(1.55);transition-property:transform}
+
+/* ★ grid 1fr auto 1fr —— 中簇是**真的居中**。
+   flex + space-between 的话,左右两簇宽度不等时中间会偏;
+   电影没有换集键,左簇是空的,偏得更明显。 */
+.pl-ctl{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:44px;gap:8px}
+.pl-cl{display:flex;align-items:center;gap:2px}
+.pl-cl.l{justify-self:start}
+.pl-cl.m{justify-self:center;gap:6px}
+.pl-cl.r{justify-self:end;gap:5px}
+.pl-play{width:46px;height:46px;background:rgba(255,255,255,.14)}
+.pl-play:active{background:rgba(255,255,255,.26)}
+
+.pl-chip{position:relative;flex:none;display:inline-flex;align-items:center;gap:5px;
+  height:32px;padding:0 11px;border:0;border-radius:16px;
+  background:rgba(255,255,255,.14);color:#fff;font-size:12.5px;font-weight:500;white-space:nowrap;
+  transition:background var(--t3) var(--e-std),transform var(--sp-snap-t) var(--sp-snap)}
+/* 视觉 32px、命中区 44px。横屏视觉上不能再高,可手指不认视觉。 */
+.pl-chip::after{content:"";position:absolute;left:0;right:0;top:-6px;bottom:-6px}
+.pl-chip:active{transform:scale(.93);background:rgba(255,255,255,.26)}
+.pl-chip.on{background:var(--acc);color:#fff}
+.pl-chip.act{background:rgba(255,255,255,.32)}
+.pl-chip-l{line-height:1}
+/* 逐个错开入场。★ 只排进场:退场也排队的话,最后一个会在别人都没了之后还孤零零亮着 */
+.pl-osd.on .pl-chip,.pl-osd.on .pl-act{
+  animation:chipIn calc(260ms * var(--mo)) var(--e-emph-decel) backwards;
+  animation-delay:calc(var(--i,0) * 28ms * var(--mo))}
+@keyframes chipIn{from{opacity:0;transform:translateY(8px) scale(.9)}}
+
+/* 锁定后除了那颗锁什么都不剩。位置就在截图/锁屏原来的地方,不用满屏找。 */
+.player.locked .pl-osd{opacity:0;pointer-events:none}
+.pl-lock{position:absolute;left:calc(var(--sa-left) + 2px);top:50%;margin-top:-21px;
+  width:42px;height:42px;display:grid;place-items:center;border:0;border-radius:50%;
+  background:rgba(0,0,0,.5);color:#fff;z-index:13;
+  animation:lockIn calc(300ms * var(--mo)) var(--e-emph-decel) backwards}
+@supports (backdrop-filter: blur(1px)){.pl-lock{backdrop-filter:blur(12px)}}
+@keyframes lockIn{from{opacity:0;transform:translateX(-14px)}}
+
+/* ══ 面板 ══ */
+.pl-panel{position:absolute;z-index:11;
+  background:rgba(24,24,27,.78);
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 18px 48px rgba(0,0,0,.55);
+  display:flex;flex-direction:column;overflow:hidden;
+  opacity:0;transition:opacity var(--t5) var(--e-emph-accel),transform var(--t5) var(--e-emph-accel)}
+.pl-panel.on{opacity:1;transition:opacity var(--t6) var(--e-emph-decel),transform var(--t6) var(--e-emph-decel)}
+@supports (backdrop-filter: blur(1px)){
+  .pl-panel{backdrop-filter:blur(28px) saturate(1.5)}
+}
+/* 不支持模糊就退成实心:半透明**又没模糊**的面板,底下的弹幕和画面会糊在文字上 */
+@supports not (backdrop-filter: blur(1px)){
+  .pl-panel{background:rgba(20,20,24,.97)}
+  .pl-stats{background:rgba(0,0,0,.9)}
 }
 
-.rk-t {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
+/* 横屏抽屉 = **浮动卡片**,四边留 10px。
+   上一版是贴边全高的实心板、四个直角、没有模糊 —— 那就是"丑"的具体来源:
+   它看起来像一个系统对话框砸在视频上,而不是浮在视频上的一层。 */
+.pl-panel.drawer{right:10px;top:10px;bottom:10px;width:min(370px,47%);
+  border-radius:20px;transform:translateX(20px) scale(.98)}
+.pl-panel.drawer.on{transform:none}
+
+/* 小浮层:贴着触发它的按钮长出来(transform-origin 由 JS 指到按钮中心) */
+.pl-panel.pop{z-index:12;width:auto;min-width:150px;max-width:230px;max-height:74%;
+  border-radius:16px;transform:scale(.88)}
+.pl-panel.pop.on{transform:scale(1)}
+.pl-pop-hd{padding:9px 14px 4px;font-size:11px;font-weight:600;letter-spacing:.4px;color:var(--fg-3)}
+
+.pl-panel-hd{display:flex;align-items:center;gap:8px;padding:11px 8px 9px 16px;flex:none}
+.pl-panel-hd h3{margin:0;font-size:15px;font-weight:620;line-height:1.2}
+.pl-panel-sub{display:block;margin-top:2px;font-size:11.5px;color:var(--fg-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-panel-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  padding-bottom:8px;-webkit-overflow-scrolling:touch}
+.pl-panel.pop .pl-panel-body{padding-bottom:6px}
+.pl-panel.on .pl-panel-body .opt,.pl-panel.on .pl-eprow{
+  animation:optIn calc(240ms * var(--mo)) var(--e-emph-decel) backwards;
+  animation-delay:calc(var(--i,0) * 14ms * var(--mo))}
+@keyframes optIn{from{opacity:0;transform:translateY(6px)}}
+
+/* ══ 选集:封面 + 两行 ══
+   封面 16:9(分集缩略图实测 100% 有,可以放心当主视觉);
+   第一行稍大 = 季度集数 + 集名,第二行稍小 = 时长 · 分辨率 · 码率 · 标签。 */
+.pl-eps{padding:2px 0 4px}
+.pl-eprow{position:relative;width:100%;display:flex;align-items:center;gap:11px;
+  padding:7px var(--pad);border:0;background:none;color:var(--fg);text-align:left;
+  transition:background var(--t3) var(--e-std)}
+.pl-eprow:active{background:rgba(255,255,255,.07)}
+.pl-eprow.on{background:rgba(91,140,255,.13)}
+.pl-ep-th{position:relative;flex:none;width:104px;aspect-ratio:16/9;border-radius:7px;
+  overflow:hidden;background:var(--s1)}
+.pl-ep-th img{width:100%;height:100%;object-fit:cover;display:block}
+/* 看完打勾 / 看了一半画进度线 —— 两件事分开表达,写成一行字扫的时候分不出来 */
+.pl-ep-done{position:absolute;right:4px;top:4px;width:17px;height:17px;border-radius:50%;
+  display:grid;place-items:center;background:var(--ok,#4ade80);color:#06240f}
+.pl-ep-prog{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--acc);
+  transform-origin:left}
+.pl-ep-tx{flex:1;min-width:0}
+.pl-ep-t{font-size:13.5px;font-weight:560;line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-ep-m{margin-top:3px;display:flex;align-items:center;gap:5px;
+  font-size:11.5px;color:var(--fg-3);white-space:nowrap;overflow:hidden}
+.pl-ep-m>span{overflow:hidden;text-overflow:ellipsis}
+.pl-ep-tag{flex:none;padding:0 4px;border-radius:3px;font-size:9.5px;font-weight:700;
+  letter-spacing:.3px;background:rgba(255,255,255,.16);color:var(--fg-2)}
+.pl-ep-tag.dv{background:rgba(160,90,255,.28);color:#d9c2ff}
+.pl-ep-now{flex:none;padding:1px 6px;border-radius:9px;font-size:10.5px;font-weight:600;
+  background:var(--acc);color:#fff}
+
+/* 版本 / 线路 两个分页(用户定:"线路和版本合一块") */
+.pl-tabs{display:flex;gap:6px;padding:0 12px 10px;flex:none}
+.pl-tab{flex:1;height:32px;border:0;border-radius:9px;
+  background:rgba(255,255,255,.08);color:var(--fg-2);
+  font-size:13px;font-weight:560;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  transition:background var(--t3) var(--e-std),color var(--t3) var(--e-std)}
+.pl-tab b{font-family:var(--mono);font-size:11px;font-weight:600;opacity:.7}
+.pl-tab.on{background:var(--acc);color:#fff}
+.pl-tab.on b{opacity:.85}
+
+/* 分组标题吸顶 —— 14 个版本 / 34 条线路滚起来,不吸顶就不知道自己在哪一组 */
+.pl-grp{position:sticky;top:0;z-index:1;
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:7px var(--pad) 5px;font-size:11.5px;font-weight:600;color:var(--fg-3);
+  background:rgba(24,24,27,.92)}
+@supports (backdrop-filter: blur(1px)){.pl-grp{background:rgba(24,24,27,.6);backdrop-filter:blur(12px)}}
+.pl-grp b{font-family:var(--mono);font-weight:600;opacity:.75}
+
+/* 「自动 · 用最快的」钉在最上面 —— 34 条线路让人自己挑等于抽签 */
+.pl-auto{background:rgba(91,140,255,.08)}
+
+/* 延迟条:数字之外再给一个能**扫**的形状。34 条时眼睛读不过来 34 个数字。 */
+.pl-ping{display:flex;flex-direction:column;align-items:flex-end;gap:3px;
+  margin-left:auto;padding-left:10px;flex:none;width:62px}
+.pl-ping b{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--fg-3)}
+.pl-ping i{display:block;width:100%;height:3px;border-radius:2px;transform-origin:right;
+  background:currentColor}
+.pl-ping.fast{color:#4ade80}
+.pl-ping.mid{color:#fbbf24}
+.pl-ping.slow{color:#f87171}
+.pl-ping.dead{color:var(--fg-3)}
+.pl-dead{opacity:.45}
+.pl-dead .opt-t{text-decoration:line-through}
+
+/* 面板里的滑杆 */
+.pl-sl{padding:10px var(--pad) 12px;font-size:13.5px}
+.pl-sl-v{font-family:var(--mono);font-size:12px;color:var(--fg-2)}
+.pl-sl-t{position:relative;height:24px;display:flex;align-items:center;margin-top:4px;touch-action:none}
+.pl-sl-bg{position:absolute;left:0;right:0;height:3px;border-radius:2px;
+  background:rgba(255,255,255,.18);transition:transform var(--t4) var(--e-std)}
+.pl-sl-t.drag .pl-sl-bg{transform:scaleY(2)}
+.pl-sl-t>i{position:absolute;left:0;right:0;height:3px;border-radius:2px;background:var(--acc);transform-origin:left}
+.pl-sl-th{position:absolute;width:13px;height:13px;margin-left:-6.5px;border-radius:50%;
+  background:#fff;transition:transform var(--sp-snap-t) var(--sp-snap)}
+.pl-sl-t.drag .pl-sl-th{transform:scale(1.5)}
+
+.pl-tog,.pl-rb{padding-left:var(--pad)}
+.pl-tog::before,.pl-rb::before{display:none}
+.pl-rb{gap:11px}
+.pl-vr-v{margin-left:auto;font-size:12.5px;color:var(--fg-3);white-space:nowrap}
+.pl-vr .cell-arrow{margin-left:2px}
+.pl-note{margin:8px var(--pad) 4px;padding:9px 11px;border-radius:var(--r-sm);
+  background:rgba(91,140,255,.12);border:1px solid rgba(91,140,255,.26);
+  font-size:12px;line-height:1.6;color:var(--fg-2)}
+
+/* ══ 播放信息:小牌子不是面板 ══ */
+.pl-stats{position:absolute;left:12px;top:calc(var(--sa-top) + 56px);z-index:11;
+  width:236px;padding:8px 10px 9px;border-radius:12px;
+  background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.1);
+  font-family:var(--mono);font-size:11px;line-height:1.5;
+  animation:statsIn calc(280ms * var(--mo)) var(--e-emph-decel) backwards}
+@supports (backdrop-filter: blur(1px)){.pl-stats{backdrop-filter:blur(16px)}}
+@keyframes statsIn{from{opacity:0;transform:translateY(-8px) scale(.96)}}
+.pl-stats-hd{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:4px;font-family:var(--font);font-size:12px}
+.pl-stats-r{display:flex;justify-content:space-between;gap:10px}
+.pl-stats-r span{color:rgba(255,255,255,.55);flex:none}
+.pl-stats-r b{font-weight:500;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ══ 竖屏 ══
+   竖屏 390×844 里 16:9 的画面只有 219px 高,上下都是黑边 ——
+   OSD 压在黑边上不算遮挡,所以按钮放大、面板改底部 sheet。 */
+.player.portrait .pl-ico{width:46px;height:46px}
+.player.portrait .pl-play{width:54px;height:54px}
+.player.portrait .pl-chip{height:34px;font-size:13px}
+/* ★ 竖屏右上角**只留图标**。
+   实测:390px 宽下,返回键 + 四个带文字的按钮吃掉 323px,
+   标题框只剩 **37px** —— 标题在里面滚,滚的是一个字宽的窗口,等于没有。
+   横屏 844px 放得下文字,所以只在竖屏收成图标。 */
+.player.portrait .pl-act{width:38px;height:38px;padding:0;justify-content:center;border-radius:19px}
+.player.portrait .pl-act>span:last-child{display:none}
+.player.portrait .pl-acts{gap:4px}
+.player.portrait .pl-round,.player.portrait .pl-sp,.player.portrait .pl-sp-b{width:46px}
+.player.portrait .pl-bottom{padding:6px 12px calc(var(--sa-bottom) + 10px)}
+.player.portrait .pl-panel.drawer{left:0;right:0;bottom:0;top:auto;width:auto;
+  max-height:64%;border-radius:20px 20px 0 0;border-bottom:0;transform:translateY(24px)}
+.player.portrait .pl-panel.drawer.on{transform:none}
+.player.portrait .pl-panel.drawer::before{content:"";position:absolute;left:50%;top:7px;
+  width:34px;height:4px;margin-left:-17px;border-radius:2px;background:rgba(255,255,255,.24);z-index:2}
+.player.portrait .pl-panel-hd{padding-top:18px}
+
+/* 关掉动效时,排队入场和标题滚动一律取消 ——
+   要"别动"的用户要的不是"动得快一点"。 */
+@media (prefers-reduced-motion: reduce){
+  .pl-osd.on .pl-chip,.pl-osd.on .pl-act,.pl-panel.on .pl-panel-body .opt,
+  .pl-stats,.pl-lock{animation:none}
+  .pl-title.run .pl-title-i{animation:none}
 }
 
-.rk-title {
-  font-size: 14px;
-  line-height: 1.35;
+/* ---------- 设置族(设置/服务器/加服务器/线路/图标/插件/网盘)(草稿 p-settings.js) ---------- */
+.field textarea {
+  width: 100%; min-height: 96px; padding: 12px 14px;
+  border-radius: var(--r); border: 1px solid var(--line);
+  background: var(--s1); color: var(--fg); font-size: 16px; font-family: var(--mono);
+  outline: 0; resize: vertical;
+  transition: border-color var(--t4) var(--e-std);
 }
+.field textarea:focus { border-color: var(--acc); }
 
-.rk-sub {
-  font-size: 12px;
-  margin-top: 2px;
+.field-row { display: flex; gap: 10px; align-items: flex-end; }
+.field-row .field { flex: 1; }
+.field-row .btn { flex: none; }
+
+.linklike {
+  display: inline-flex; align-items: center; min-height: 48px; padding: 0 2px;
+  background: none; border: 0; color: var(--acc); font-size: 13.5px; font-weight: 560;
 }
+.linklike:active { opacity: 0.6; }
 
-/* ---------- 服务器 ---------- */
+.qr-grid { display: grid; width: 168px; height: 168px; gap: 1.2px; }
+.qr-grid i { display: block; border-radius: 1px; }
 
-.srv-it {
-  align-items: center;
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; padding: 6px 10px; }
+.crumb {
+  min-height: 48px; padding: 0 6px; background: none; border: 0;
+  color: var(--fg-2); font-size: 13.5px; border-radius: 8px;
 }
+.crumb:active { background: var(--s1); }
+.crumb.cur { color: var(--fg); font-weight: 640; }
+.crumb-sep { color: var(--fg-3); padding: 0 1px; font-size: 12px; }
 
-.srv-ic {
-  width: 34px;
-  height: 34px;
-  flex: none;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--bg-2);
+.search-wrap { padding: 4px var(--pad) 10px; }
+.search-wrap input {
+  width: 100%; height: var(--tap); padding: 0 14px;
+  border-radius: var(--r); border: 1px solid var(--line);
+  background: var(--s1); color: var(--fg); font-size: 16px; outline: 0;
+  transition: border-color var(--t4) var(--e-std);
+}
+.search-wrap input:focus { border-color: var(--acc); }
+
+.perm-list { display: flex; flex-direction: column; gap: 14px; padding: 2px 0 6px; }
+.perm-item { display: flex; gap: 10px; align-items: flex-start; }
+.perm-item .perm-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 9px;
+  display: grid; place-items: center; background: var(--s1); color: var(--fg-2); margin-top: 1px;
+}
+.perm-item b { font-size: 14px; font-weight: 600; display: block; }
+.perm-item .perm-desc { font-size: 12.5px; color: var(--fg-3); margin-top: 2px; }
+
+.anr-th { width: 68px; height: 40px; border-radius: 8px; overflow: hidden; flex: none; background: var(--s1); }
+.anr-th img { width: 100%; height: 100%; object-fit: cover; }
+
+.btn.sm { min-height: 48px; padding: 0 14px; font-size: 13.5px; }
+
+/* ── 服务器行:图标 + 名字 + 状态 + 地址/备注 ── */
+.lit-n b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: inherit; }
+.dot.warn { background: var(--warn); }
+.dot.unk { background: var(--fg-3); }
+.srv-ic-img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.srv-gly { font-size: 20px; line-height: 1; color: var(--fg-2); }
+.lit-rm { font-size: 12px; color: var(--fg-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── 源类型选择:分组网格。12+ 种横滑 chip 要滑三屏还看不到全貌 ── */
+.src-sec { font-size: 12px; font-weight: 640; color: var(--fg-3); padding: 14px var(--pad) 8px; letter-spacing: .02em; }
+.src-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 var(--pad); }
+.src-it {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  min-height: 78px; padding: 10px 6px; border-radius: var(--r);
+  background: var(--s1); border: 1.5px solid transparent; color: var(--fg-2);
+  transition: border-color var(--t3) var(--e-std), color var(--t3) var(--e-std);
+}
+.src-it .src-n { font-size: 11.5px; font-weight: 560; text-align: center; line-height: 1.25; }
+.src-it.on { border-color: var(--acc); color: var(--acc); background: var(--acc-dim); }
+
+/* ── 线路管理 ── */
+.ln { display: flex; align-items: center; gap: 10px; padding: 11px var(--pad); border-bottom: 1px solid var(--line);
+      background: var(--bg); transition: background-color var(--t2) var(--e-std); }
+.ln:active { background: var(--s1); }
+.ln.on { background: var(--acc-dim); }
+.ln.drag { background: var(--s2); box-shadow: 0 8px 24px rgba(0,0,0,.42); border-radius: var(--r); border-bottom-color: transparent; }
+.ln-t { flex: 1; min-width: 0; }
+.ln-n { font-size: 14px; font-weight: 560; display: flex; align-items: center; gap: 7px; }
+.ln-n b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: inherit; }
+.ln-u { font-size: 11.5px; color: var(--fg-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ln-ms { flex: none; font-size: 11.5px; font-weight: 640; font-variant-numeric: tabular-nums;
+         padding: 3px 7px; border-radius: 6px; background: var(--s1); color: var(--fg-3); }
+.ln-ms.fast { color: var(--ok); }
+.ln-ms.slow { color: var(--warn); }
+.ln-ms.dead { color: var(--bad); }
+.ln-grip { flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: var(--fg-3);
+           touch-action: none; margin-right: -10px; }
+.ln-ph { border-bottom: 1px dashed var(--acc); }
+
+/* ── 图标选择 ── */
+.ico-prev { display: flex; align-items: center; gap: 14px; padding: 16px var(--pad); }
+.ico-prev .pv { width: 64px; height: 64px; border-radius: 16px; flex: none; display: grid; place-items: center;
+                background: var(--s2); border: 1px solid var(--line); font-size: 30px; color: var(--fg-2); overflow: hidden; }
+.ico-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 4px var(--pad) 16px; }
+.ico-it { aspect-ratio: 1; border-radius: var(--r); background: var(--s1); border: 1.5px solid transparent;
+          display: grid; place-items: center; font-size: 22px; color: var(--fg-2); overflow: hidden;
+          transition: border-color var(--t3) var(--e-std); }
+.ico-it.on { border-color: var(--acc); background: var(--acc-dim); color: var(--acc); }
+.ico-it .lbl { font-size: 9px; line-height: 1.1; text-align: center; padding: 0 3px; color: var(--fg-3);
+               overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ico-it .sq { width: 26px; height: 26px; border-radius: 7px; margin-bottom: 3px; }
+
+/* ── 表单里的说明脚注(比 placeholder 更能承载"为什么") ── */
+.f-note { font-size: 12px; color: var(--fg-3); line-height: 1.5; margin: -2px 0 4px; }
+.f-warn { font-size: 12px; color: var(--warn); line-height: 1.5; margin: 4px 0 0; }
+.req-star { color: var(--bad); font-style: normal; }
+.field.bad input { border-color: var(--bad); }
+
+/* ── 弹幕源列表 ── */
+.dm-b { font-size: 11px; color: var(--fg-3); }
+
+/* ---------- 没有封面时的兜底 ----------
+   草稿里每个 mock 条目都有图,所以没写这条。真数据里 `has_primary === false`
+   是常态(网盘源、刚入库还没刮削的条目)—— 不给兜底的话那张卡是**一块纯色**,
+   看着像加载失败。 */
+.mfallback {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-}
-
-.srv-ic img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.srv-ph {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--fg-2);
-}
-
-.cell.srv-it .cell-l {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.srv-n {
-  font-size: 15px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 这一行是**备注**,不是域名 */
-.srv-r {
-  font-size: 12px;
-}
-
-.srv-st {
-  font-size: 12px;
-  flex: none;
-}
-
-.srv-st.ok {
-  color: var(--ok);
-}
-
-.srv-st.warn {
-  color: #ffca6b;
-}
-
-.srv-st.bad {
-  color: var(--bad);
-}
-
-.srv-st.dim {
   color: var(--fg-3);
+  background: linear-gradient(160deg, var(--s2), var(--s1));
 }
 
-.srv-more {
-  width: 34px;
-  text-align: center;
-  color: var(--fg-3);
-  font-size: 18px;
-  flex: none;
-}
-
-.cell.on {
-  background: rgba(91, 140, 255, 0.09);
-}
-
-/* ---------- 网盘 ---------- */
-
-.nd-up {
-  display: block;
-  width: 100%;
-  padding: 10px var(--pad);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--acc);
-  font-size: 14px;
-  text-align: left;
-}
-
-/* ---------- 插件 ---------- */
-
-.pg-it {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px var(--pad);
-  border-bottom: 1px solid var(--line);
-}
-
-.pg-it:last-child {
-  border-bottom: 0;
-}
-
-.pg-ic {
-  width: 40px;
-  height: 40px;
-  flex: none;
-  border-radius: 9px;
+/* 页面栈的内层容器。★ 和按 Tab 分的 `.stack` **不能同名** ——
+   同名的话 querySelectorAll(".stack") 数出双倍,而 CSS 上两层都是
+   absolute/inset:0 又刚好看不出毛病,是那种"能跑但结构是错的"最难查的情况。 */
+.pg-stack {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  background: var(--bg-2);
-}
-
-.pg-ic img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.pg-t {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.pg-n {
-  font-size: 15px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.pg-badge {
-  padding: 1px 6px;
-  border-radius: 8px;
-  background: var(--bg-2);
-  color: var(--fg-2);
-  font-size: 10.5px;
-  flex: none;
-}
-
-.pg-d,
-.pg-m {
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-.pg-d {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.pg-err {
-  margin-top: 4px;
-  font-size: 12px;
-  color: var(--bad);
-}
-
-.pg-ft {
-  padding: 16px var(--pad);
-  display: flex;
-  justify-content: center;
-}
-
-.perm {
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 14px;
-}
-
-.perm:last-child {
-  border-bottom: 0;
-}
-
-/* ---------- Ani-RSS ---------- */
-
-.anr-it {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  width: 100%;
-  padding: 10px var(--pad);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--fg);
-  text-align: left;
-}
-
-.anr-it.off {
-  opacity: 0.55;
-}
-
-.anr-th {
-  width: 48px;
-  aspect-ratio: 3 / 4;
-  flex: none;
-  border-radius: 6px;
-  overflow: hidden;
-  background: var(--bg-2);
-}
-
-.anr-th img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.anr-t {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.anr-n {
-  font-size: 14px;
-  line-height: 1.35;
-}
-
-.anr-m,
-.anr-ep {
-  font-size: 12px;
-  margin-top: 2px;
-}
-
-/* ---------- 添加服务器(登录闸口的另一种版式) ---------- */
-
-.as {
-  padding-top: 8px;
-}
-
-/* ---------- 横屏补充 ---------- */
-
-@media (orientation: landscape) {
-  /* 详情页横屏:16:9 的背景图会吃掉整屏,压成一条给下面的内容留位置 */
-  .dt-hero {
-    aspect-ratio: 32 / 9;
-  }
-
-  .eps {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  /* 播放控制横屏时往中间收,别贴到屏幕最外沿(那儿是手掌握持区) */
-  .pl-bottom {
-    padding-left: max(24px, var(--sa-left));
-    padding-right: max(24px, var(--sa-right));
-  }
-
-  .cal-th {
-    width: 44px;
-  }
 }

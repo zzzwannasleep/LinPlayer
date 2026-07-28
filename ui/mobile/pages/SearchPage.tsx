@@ -1,51 +1,74 @@
 import { useEffect, useRef, useState } from "react";
-import { type Item, type LoginResult, type ServerGroup, aggregateSearch } from "@shared/api";
-import Card from "../components/Card";
-import { IconClose, IconSearch } from "../app/icons";
+import { type ServerGroup, aggregateSearch } from "@shared/api";
+import { useCtx } from "../app/ctx";
+import { Icon } from "../app/icons";
+import { choreograph, haptic } from "../app/motion";
+import Page from "../components/Page";
+import { Card, Empty, usePress } from "../components/ui";
 
-/* 搜索(底栏第二个 Tab)。
-
-   ★ 为什么值得占一个 Tab:手机上没有 PC 的 Ctrl+K 浮层,也没有 TV 的语音键。
-     搜索是手机上进入内容最短的一条路 —— 藏进顶栏图标就是每次多一次点击,
-     而这正是 Emby 官方安卓端被吐槽最多的那类问题。
+/* 搜索。
+   ★ 底栏那三个 Tab 里**没有它**了 —— 搜索条并进了「聚合视界」顶部
+     (跨源找东西和跨源看有什么是同一件事的两面)。这一页留着是给
+     "从别处点进搜索"用的,版式和聚合视界里的搜索一致。
 
    ★ 用 aggregateSearch(全服聚合)而不是 search(当前服):
-     用户装了几台服务器就不该被迫先想"这部片在哪台上"。核层已经做了聚合,
-     前端不用它才是浪费。跨服结果**不给长按菜单** —— 长按里的收藏/标记已看
-     是对"当前活跃服务器"写的,对着别的服务器的条目按下去会写错地方。 */
+     用户装了几台服务器就不该被迫先想"这部片在哪台上"。
+     跨服结果**不给长按菜单** —— 长按里的收藏/标记已看是对"当前活跃服务器"写的,
+     对着别的服务器的条目按下去会写错地方,而且不报错。
+
+   ★ 「大家在搜」那一块**没有做**:核层没有热搜数据源,编一份写死的关键词
+     就是假 UI —— 假 UI 在评审时会被当成"已经做好了",那比空白更贵。
+     「最近搜索」是真的(存在本机 localStorage)。 */
 
 const DEBOUNCE_MS = 300;
+const RECENT_KEY = "lp.mobile.recentSearch";
+const RECENT_MAX = 8;
 
-export default function SearchPage({
-  session,
-  onOpen,
-}: {
-  session: LoginResult;
-  onOpen: (it: Item) => void;
-}) {
+const readRecent = (): string[] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+};
+
+export default function SearchPage() {
+  const { session, back, openItem } = useCtx();
   const [q, setQ] = useState("");
-  const [groups, setGroups] = useState<ServerGroup[]>([]);
+  const [groups, setGroups] = useState<ServerGroup[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recent, setRecent] = useState<string[]>(readRecent);
   const inputRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
+  /* ★ `alive` 必须在 effect 作用域里声明,**不能**在 setTimeout 回调里 ——
+     那样每次超时都是一个新的 alive,cleanup 改不到它,迟到的响应照样 set,
+     快速改词时结果会闪回上一个词。三端都栽过。 */
   useEffect(() => {
     const s = q.trim();
     if (!s) {
-      setGroups([]);
+      setGroups(null);
       setBusy(false);
       return;
     }
-    setBusy(true);
-    /* 防抖 300ms。没有它的话每敲一个字母都打一次全服聚合搜索 ——
-       手机上输入法联想还会一次性吐进来好几个字符,那就是几次并发往返。
-
-       ★ alive 必须声明在 effect 作用域,不能声明在 setTimeout 回调里:
-         那样每次超时都是一个新的 alive,cleanup 根本改不到它,
-         迟到的响应照样 set —— 表现是快速改词时结果闪回上一个词的。 */
     let alive = true;
+    setBusy(true);
     const t = window.setTimeout(() => {
       aggregateSearch(s)
-        .then((g) => alive && setGroups(g))
+        .then((g) => {
+          if (!alive) return;
+          setGroups(g);
+          if (g.length) {
+            const next = [s, ...recent.filter((x) => x !== s)].slice(0, RECENT_MAX);
+            setRecent(next);
+            try {
+              localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+            } catch {
+              /* 隐私模式下 localStorage 会抛。搜索本身不该因此失败。 */
+            }
+          }
+        })
         .catch(() => alive && setGroups([]))
         .finally(() => alive && setBusy(false));
     }, DEBOUNCE_MS);
@@ -53,65 +76,119 @@ export default function SearchPage({
       alive = false;
       window.clearTimeout(t);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  const total = groups.reduce((n, g) => n + g.items.length, 0);
+  useEffect(() => {
+    choreograph(bodyRef.current);
+  }, [groups]);
+
+  const clearBtn = usePress<HTMLButtonElement>();
 
   return (
-    <div className="search">
-      {/* 输入框固定在顶部:手机键盘会顶起下半屏,输入框跟着内容滚走的话
-          用户就看不见自己打了什么。 */}
+    <Page title="搜索" onBack={back}>
       <div className="sf">
-        <IconSearch size={18} />
+        <Icon n="search" size={18} />
         <input
-          ref={inputRef}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="搜索全部服务器"
-          /* enterKeyHint=search 让安卓输入法的回车键显示成放大镜而不是换行。
-             一个属性的事,但少了它用户会觉得"这个框怪怪的"。 */
+          type="search"
+          placeholder="搜索标题、演员、导演…"
           enterKeyHint="search"
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck={false}
+          value={q}
+          ref={inputRef}
+          autoFocus
+          onChange={(e) => setQ(e.target.value)}
         />
-        {q && (
-          <button type="button" className="sf-x" onClick={() => setQ("")} aria-label="清空">
-            <IconClose size={18} />
-          </button>
-        )}
+        <button
+          type="button"
+          className="sf-x"
+          aria-label="清空"
+          ref={clearBtn}
+          style={{ visibility: q ? "visible" : "hidden" }}
+          onClick={() => {
+            setQ("");
+            inputRef.current?.focus();
+          }}
+        >
+          <Icon n="close" size={15} />
+        </button>
       </div>
 
-      {!q.trim() ? (
-        <div className="empty">
-          <div className="dim">输入片名、剧名或演员</div>
-        </div>
-      ) : busy && !total ? (
-        <div className="empty">
-          <div className="dim">搜索中…</div>
-        </div>
-      ) : !total ? (
-        <div className="empty">
-          <div className="dim">没有找到「{q.trim()}」</div>
-        </div>
-      ) : (
-        groups
-          .filter((g) => g.items.length > 0)
-          .map((g) => (
-            <section key={g.server_id} className="sgrp">
-              {/* 服务器名必须显示:同一部片可能几台都有,不标出来用户不知道点的是哪个 */}
-              <h2>
-                {g.server_name}
-                <span className="dim"> · {g.items.length}</span>
-              </h2>
-              <div className="grid">
-                {g.items.map((it, i) => (
-                  <Card key={`${g.server_id}:${it.id}`} item={it} session={session} index={i} onOpen={onOpen} />
+      <div ref={bodyRef}>
+        {!q ? (
+          recent.length ? (
+            <div className="sgroup">
+              <h2>最近搜索</h2>
+              <div className="chips">
+                {recent.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    className="chip"
+                    onClick={() => {
+                      haptic("tap");
+                      setQ(r);
+                    }}
+                  >
+                    {r}
+                  </button>
                 ))}
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={() => {
+                    setRecent([]);
+                    try {
+                      localStorage.removeItem(RECENT_KEY);
+                    } catch {
+                      /* 同上 */
+                    }
+                  }}
+                >
+                  <Icon n="trash" size={14} />
+                  清空
+                </button>
               </div>
-            </section>
+            </div>
+          ) : (
+            <Empty icon="search" title="搜点什么" desc="一次搜全部已登录的源,结果按源分开列。" />
+          )
+        ) : busy && !groups ? (
+          /* 骨架而不是"搜索中…"三个字 —— 骨架能让人预判结果长什么样 */
+          <div className="grid">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div className="card" key={i}>
+                <div className="card-a ar-poster">
+                  <div className="skel" />
+                </div>
+                <div className="skel-line" style={{ marginTop: 8, width: "78%" }} />
+              </div>
+            ))}
+          </div>
+        ) : !groups?.length ? (
+          <Empty
+            icon="search"
+            title={`没有找到「${q}」`}
+            desc="每一台源都搜过了。检查有没有打错字,或者换个关键词 —— 有些片源用的是英文原名。"
+          />
+        ) : (
+          groups.map((g) => (
+            <div className="sgroup" key={g.server_id}>
+              <div className="row-hd">
+                <h2>{g.server_name}</h2>
+                <span className="dim" style={{ fontSize: 12.5 }}>
+                  {g.items.length} 条
+                </span>
+              </div>
+              <div className="grid">
+                {session &&
+                  g.items.map((it, i) => (
+                    <Card key={it.id} item={it} session={session} index={i} onOpen={(x) => openItem(x)} />
+                  ))}
+              </div>
+            </div>
           ))
-      )}
-    </div>
+        )}
+      </div>
+    </Page>
   );
 }

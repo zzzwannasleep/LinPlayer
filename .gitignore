@@ -119,3 +119,6 @@ apps/android/gen/schemas/desktop-schema.json
 apps/android/gen/schemas/windows-schema.json
 apps/android/gen/schemas/linux-schema.json
 apps/android/gen/schemas/macos-schema.json
+
+# 手机端自检脚本的截图产出(node ui/mobile/check-shell.mjs)
+ui/mobile/check-shots/

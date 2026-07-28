@@ -16,7 +16,9 @@ import {
   torrentOf,
 } from "@shared/anirss-model";
 import Sheet from "../components/Sheet";
-import { IconRefresh, IconTrash } from "../app/icons";
+import { Icon } from "../app/icons";
+import { useCtx } from "../app/ctx";
+import Page from "../components/Page";
 
 /* Ani-RSS 追番订阅。
 
@@ -34,6 +36,7 @@ import { IconRefresh, IconTrash } from "../app/icons";
 const TORRENT_POLL_MS = 3000;
 
 export default function AniRssPage() {
+  const { back } = useCtx();
   const [list, setList] = useState<Ani[] | null>(null);
   const [err, setErr] = useState("");
   const [torrents, setTorrents] = useState<ReturnType<typeof torrentOf>[]>([]);
@@ -92,11 +95,29 @@ export default function AniRssPage() {
     }
   };
 
-  if (err) return <div className="empty"><b>连不上 Ani-RSS</b><div className="dim">{err}</div></div>;
-  if (!list) return <div className="empty"><div className="dim">加载中…</div></div>;
-  if (!list.length) return <div className="empty"><div className="dim">还没有订阅。添加订阅请在 PC 端做。</div></div>;
+  /* ★ 早退分支也要包进 <Page> —— 不包的话连不上服务器时这一页没有返回按钮，
+     只能按物理返回键退出。 */
+  if (err)
+    return (
+      <Page title="Ani-RSS 订阅" onBack={back}>
+        <div className="empty"><b>连不上 Ani-RSS</b><div className="dim">{err}</div></div>
+      </Page>
+    );
+  if (!list)
+    return (
+      <Page title="Ani-RSS 订阅" onBack={back}>
+        <div className="pad dim" style={{ fontSize: 13 }}>加载中…</div>
+      </Page>
+    );
+  if (!list.length)
+    return (
+      <Page title="Ani-RSS 订阅" onBack={back}>
+        <div className="empty"><b>还没有订阅</b><div className="dim">添加订阅要填几十个字段的表单，那在手机上是灾难 —— 请在 PC 端加。</div></div>
+      </Page>
+    );
 
   return (
+    <Page title="Ani-RSS 订阅" onBack={back} enterKey={list}>
     <div className="anr">
       <div className="chips lib-bar">
         <button
@@ -105,7 +126,7 @@ export default function AniRssPage() {
           disabled={busy}
           onClick={() => void run("已触发全部刷新", anirssRefreshAll)}
         >
-          <IconRefresh size={15} /> 全部刷新
+          <Icon n="refresh" size={15} /> 全部刷新
         </button>
         <span className="lib-total dim">{list.length}</span>
       </div>
@@ -174,7 +195,7 @@ export default function AniRssPage() {
                 className="opt bad"
                 onClick={() => void run("已删除订阅及文件", () => anirssDeleteAni([sel.id], true))}
               >
-                <IconTrash size={18} /> 删除订阅及文件
+                <Icon n="trash" size={18} /> 删除订阅及文件
                 <div className="dim">连同已下载的文件一起删,不可撤销</div>
               </button>
             </>
@@ -184,5 +205,6 @@ export default function AniRssPage() {
 
       {toast && <div className="toast" onClick={() => setToast("")}>{toast}</div>}
     </div>
+    </Page>
   );
 }

@@ -1,27 +1,40 @@
-import { useSourceForms } from "../../desktop/pages/sources/sourceForms";
+import { useRef, useState } from "react";
+import { haptic, toast } from "../app/motion";
+import {
+  KIND_QR,
+  SourceForm,
+  SrcPicker,
+  checkRequired,
+  emptyForm,
+  submitSource,
+  type FormState,
+} from "../components/SourceForm";
 
 /* 首启闸口 —— 一台源都没有时的那一屏。
 
-   ★ 表单**不重写**,用 `useSourceForms` 那一份。
-     那个 hook 是三端共用的数据源表单实现,页面只负责摆版式(它自己的注释就是这么写的)。
-     手机端再抄一份的下场:新增一个源类型时改了 PC、漏了手机,
-     手机用户永远看不到那个源,**而且两边都不报错** —— 这是本仓库的头号高发病。
-     加源请改 sourceForms.tsx 的 BUILTIN_SOURCES,改那一处,三端同时生效。
+   ★ 它就是**添加服务器页的另一种版式**,表单共用 `components/SourceForm`。
+     抄一份的下场:新增一个源类型时改了添加页、漏了这里,而**两边都不报错** ——
+     这是本仓库的头号高发病。加源只改 SourceForm 里的 `SOURCE_KINDS` 一处。
 
    ★ 手机版式与 PC 的差异:
      - 不做居中卡片:手机屏幕本来就窄,再套一层卡片只剩一条缝
-     - 源芯片横滑一行(插件源数量是运行时才知道的,换行会让高度抖)
+     - 源类型是**分组网格**(和添加页一致),不是横滑 chip
      - 主按钮**吸在底部安全区上方** —— 键盘升起时表单会滚动,
        按钮跟着滚出屏幕的话用户得先收键盘才能提交,那是每次登录都要多做一次的动作 */
 
-const EXCLUDE = [
-  /* 批量粘贴导入:手机上没有"从别处复制一大段配置"的场景(那是 PC 换机时的路子),
-     而手机有更好的解:扫码搬配置(qrsync,留着)。 */
-  "batch",
-];
+/** 批量粘贴导入:第一次装 App 时没有"从别处复制一大段配置"的场景(那是 PC 换机的路子),
+ *  而手机有更好的解 —— 扫码搬配置(qrsync,留着)。 */
+const EXCLUDE = ["batch"];
 
 export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const f = useSourceForms({ exclude: EXCLUDE, onDone: onLoggedIn });
+  const [kind, setKind] = useState("emby");
+  const [f, setF] = useState<FormState>(emptyForm);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const pane = useRef<HTMLDivElement>(null);
+  const set = (p: Partial<FormState>) => setF((s) => ({ ...s, ...p }));
+
+  const hasConnect = !KIND_QR.has(kind) && kind !== "qrsync";
 
   return (
     <div className="login">
@@ -30,47 +43,60 @@ export default function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
           Lin<span>Player</span>
         </div>
         <div className="lg-h1">添加第一个片源</div>
+        <div className="lg-p">Emby、飞牛、各家网盘都行 —— 先加一个,后面还能再加。</div>
       </div>
 
-      <div className="chips lg-chips">
-        {f.sources.map((s) => (
+      <div className="lg-body">
+        <SrcPicker
+          cur={kind}
+          exclude={EXCLUDE}
+          onPick={(id) => {
+            setKind(id);
+            setF(emptyForm());
+            setErr("");
+          }}
+        />
+
+        {/* key 挂在 kind 上:换源等于换一整套字段,让 React 重建这棵子树,淡入自然重放 */}
+        <div className="lg-pane" key={kind} ref={pane}>
+          {err && (
+            <div className="bad" onClick={() => setErr("")}>
+              <b>连接失败</b>
+              <div>{err}</div>
+            </div>
+          )}
+          <SourceForm kind={kind} f={f} set={set} />
+        </div>
+      </div>
+
+      {hasConnect && (
+        <div className="lg-acts">
           <button
-            key={s.id}
             type="button"
-            className={`chip${f.sel === s.id ? " on" : ""}`}
-            onClick={() => {
-              f.setSel(s.id);
-              f.setErr("");
-              f.setToast("");
+            className="btn primary"
+            disabled={busy}
+            onClick={async () => {
+              // ★ 本地校验先跑,过了才发请求 —— 等服务端回来才说"名字没填"是白等一趟网络
+              if (!checkRequired(pane.current)) return;
+              setBusy(true);
+              setErr("");
+              haptic("tap");
+              try {
+                await submitSource(kind, f);
+                haptic("ok");
+                toast("已添加", "ok");
+                onLoggedIn();
+              } catch (e) {
+                setErr(String(e));
+              } finally {
+                setBusy(false);
+              }
             }}
           >
-            {s.label}
+            {busy ? "连接中…" : "添加并进入"}
           </button>
-        ))}
-      </div>
-
-      {/* key 挂在 sel 上:换源等于换一整套字段,让 React 重建这棵子树,淡入自然重放 */}
-      <div className="lg-pane" key={f.sel}>
-        {f.err && (
-          <div className="bad" onClick={() => f.setErr("")}>
-            <b>连接失败</b>
-            <div>{f.err}</div>
-          </div>
-        )}
-        {f.fields()}
-      </div>
-
-      <div className="lg-acts">
-        {f.sel === "emby" && (
-          <button type="button" className="btn ghost" disabled={f.busy} onClick={f.doTest}>
-            {f.testState === "busy" ? "测试中…" : f.testState === "ok" ? "✓ 连接成功" : "测试连接"}
-          </button>
-        )}
-        {f.primary("添加并进入")}
-      </div>
-
-      {f.deepDialog}
-      {f.toast && <div className="toast">{f.toast}</div>}
+        </div>
+      )}
     </div>
   );
 }

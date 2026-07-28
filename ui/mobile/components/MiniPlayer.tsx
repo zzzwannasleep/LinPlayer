@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { type Status, fmtTime, setPause, status as getStatus, stopPlayback } from "@shared/api";
-import { IconClose, IconPause, IconPlay } from "../app/icons";
+import { Icon } from "../app/icons";
 
 /* 迷你播放器 —— **PC 端没有这个东西**,是手机端独有的。
 
@@ -51,10 +51,11 @@ export default function MiniPlayer({
 
   return (
     <div className="mini" onClick={onExpand} role="button" tabIndex={0}>
-      <div className="mini-prog"><i style={{ width: `${pct}%` }} /></div>
+      {/* 只动 transform，不动 width —— 改 width 每秒一次重排 */}
+      <div className="mini-prog"><i style={{ transform: `scaleX(${pct / 100})` }} /></div>
       <div className="mini-t">
         <div className="mini-title">{title ?? "正在播放"}</div>
-        <div className="mini-sub dim">
+        <div className="mini-sub">
           {st ? `${fmtTime(st.time)} / ${fmtTime(st.duration)}` : "…"}
         </div>
       </div>
@@ -69,7 +70,7 @@ export default function MiniPlayer({
           setSt({ ...st, paused: !st.paused });
         }}
       >
-        {st?.paused ? <IconPlay size={22} /> : <IconPause size={22} />}
+        <Icon n={st?.paused ? "play" : "pause"} size={22} />
       </button>
       <button
         type="button"
@@ -81,7 +82,7 @@ export default function MiniPlayer({
           void stopPlayback(st?.time ?? 0).finally(onClose);
         }}
       >
-        <IconClose size={20} />
+        <Icon n="close" size={20} />
       </button>
     </div>
   );

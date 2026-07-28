@@ -763,6 +763,112 @@ async fn aggregate_search(
     Ok(groups)
 }
 
+#[derive(serde::Serialize)]
+struct SourceOverview {
+    server_id: String,
+    server_name: String,
+    source_kind: String,
+    is_file_browse: bool,
+    active: bool,
+    counts: emby::Counts,
+    resume: Vec<Item>,
+}
+
+/// 聚合视界 / 首页统计的数据源:每个已登录源的**规模 + 最近观看记录**,一次拿齐。
+///
+/// ★ 为什么合成一条命令而不是「counts 一条、resume 一条」:手机端首页顶栏和聚合视界
+///   要的是同一批数据(N 台服务器 × 两个请求)。拆成两条前端就得发 2N 次 invoke,
+///   而且两批数据到达时间不同 —— 页面会先画出"有数字没内容"再补上,那是可见的抖动。
+///
+/// ★ 单台失败隔离:某台服务器不通 / 不支持 /Items/Counts(fork 上是真会 404 的,
+///   本文件里 /Items/Filters、/Years、/Tags 就都是 404),只让它那一节是零,
+///   不能让整页报错。counts 和 resume **各自**吞错。
+///
+/// ★ 文件浏览型源(网盘)没有 Emby 那套接口,直接给零 —— 它们仍然出现在列表里,
+///   因为用户确实有这么一台源,藏起来只会让人以为"我的网盘丢了"。
+#[tauri::command]
+async fn aggregate_overview(state: State<'_, AppState>) -> Result<Vec<SourceOverview>, String> {
+    /* ★ `active` 在 config 上不在 Account 上——先把“哪一台是当前”读出来再放手锁，
+       别在 spawn 里再去拿锁（那是跨线程持锁）。 */
+    let (accounts, device_id, active_server) = {
+        let cfg = state.config.lock().unwrap();
+        (
+            cfg.accounts.clone(),
+            cfg.device_id.clone(),
+            cfg.active_account().map(|a| a.server.clone()),
+        )
+    };
+    let mut handles = Vec::new();
+    for a in accounts {
+        let http = state.http.clone();
+        let device_id = device_id.clone();
+        let is_active = active_server.as_deref() == Some(a.server.as_str());
+        handles.push(tauri::async_runtime::spawn(async move {
+            let base = SourceOverview {
+                server_id: a.server.clone(),
+                server_name: a.display_name(),
+                source_kind: a.source_kind.as_str().to_string(),
+                is_file_browse: a.is_file_browse(),
+                active: is_active,
+                counts: emby::Counts::default(),
+                resume: Vec::new(),
+            };
+            if a.is_file_browse() {
+                return base;
+            }
+            let s = Session {
+                // 必须走生效线路 —— 理由同 aggregate_search:用户切到备用线是因为主线不通,
+                // 打主线的结果是这台服静默变成"零条目",查都没处查。
+                server: a.active_line_url(),
+                token: a.token.clone(),
+                user_id: a.user_id.clone(),
+                device_id,
+            };
+            let (counts, resume) = tokio::join!(emby::counts(&http, &s), emby::resume(&http, &s, 12));
+            SourceOverview {
+                counts: counts.unwrap_or_default(),
+                resume: resume.unwrap_or_default(),
+                ..base
+            }
+        }));
+    }
+    let mut out = Vec::new();
+    for h in handles {
+        if let Ok(v) = h.await {
+            out.push(v);
+        }
+    }
+    Ok(out)
+}
+
+/// 截图。手机版播放页左中那颗相机键（用户 2026-07-28 定的九宫格）。
+///
+/// ★ 和桌面版的区别：不读 `prefs.screenshot_dir`。
+///   那个设置项靠桌面文件对话框选目录，而 `pick_directory` 在安卓上是
+///   明确不做的（SAF 是另一套交互）。所以这里直接落到数据根下的
+///   `screenshots/` —— 它就是外部应用专属目录，文件管理器看得见、不需任何权限。
+///   **不是系统相册** —— 往相册写要过 MediaStore，那是宏层的活；
+///   前端的提示文案必须跟实话说，别写"已保存到相册"。
+#[tauri::command]
+fn screenshot(ps: State<'_, PlayerState>, dir: Option<String>) -> Result<String, String> {
+    let base = match dir.filter(|d| !d.trim().is_empty()) {
+        Some(d) => std::path::PathBuf::from(d),
+        None => linplayer_core::paths::root().join("screenshots"),
+    };
+    std::fs::create_dir_all(&base).map_err(|e| format!("建截图目录失败: {e}"))?;
+    let guard = ps.player.lock().unwrap();
+    let p = guard.as_ref().ok_or("播放器未就绪")?;
+    let at = p.status().time.max(0.0) as i64;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = base.join(format!("shot-{stamp}-{at}s.png"));
+    let s = path.to_string_lossy().into_owned();
+    p.screenshot_to(&s)?;
+    Ok(s)
+}
+
 /// 切换活跃服务器。Emby 装 session,浏览型源装 source —— 一张表两种形态,
 /// 切换必须两边都对齐,否则会留着上一个服的会话在那儿(切服失败还打错服务器)。
 #[tauri::command]
@@ -904,9 +1010,42 @@ async fn list_random(state: State<'_, AppState>, limit: u32) -> Result<Vec<Item>
 async fn item_detail(
     state: State<'_, AppState>,
     item_id: String,
+    // 缺省 = true（桌面/TV 的旧调用点不传，行为不变）。
+    // 手机端传 false：它按季分页拉集，不需要这一坨。
+    with_children: Option<bool>,
 ) -> Result<emby::ItemDetail, String> {
     let s = session_of(&state)?;
-    emby::detail(&state.http, &s, &item_id).await
+    emby::detail(&state.http, &s, &item_id, with_children.unwrap_or(true)).await
+}
+
+/// 某剧的季列表（手机端详情页的季 Tab 条）。
+/// ★ 季名用**服务器返回的 Name**，前端不要拼「第 N 季」。
+#[tauri::command]
+async fn series_seasons(
+    state: State<'_, AppState>,
+    series_id: String,
+) -> Result<Vec<emby::SeasonInfo>, String> {
+    let s = session_of(&state)?;
+    emby::seasons(&state.http, &s, &series_id).await
+}
+
+/// 分集分页。parent_id 可以是季 id，也可以是剧 id（没分季的剧）。
+#[tauri::command]
+async fn season_episodes(
+    state: State<'_, AppState>,
+    parent_id: String,
+    start_index: Option<i64>,
+    limit: Option<i64>,
+) -> Result<emby::ItemPage, String> {
+    let s = session_of(&state)?;
+    emby::season_episodes(
+        &state.http,
+        &s,
+        &parent_id,
+        start_index.unwrap_or(0),
+        limit.unwrap_or(30),
+    )
+    .await
 }
 
 /// 条目的全部版本+流(详情页「版本/音轨/字幕」选择器 + 媒体信息块)。
@@ -4394,6 +4533,8 @@ pub fn run() {
             login,
             current_session,
             aggregate_search,
+            aggregate_overview,
+            screenshot,
             set_active_server,
             views,
             list_items_page,
@@ -4406,6 +4547,8 @@ pub fn run() {
             list_resume,
             list_random,
             item_detail,
+            series_seasons,
+            season_episodes,
             item_media,
             list_favorites,
             set_favorite,

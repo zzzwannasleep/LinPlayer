@@ -173,8 +173,30 @@ export type ItemDetail = {
   series_id: string | null;
   season_no: number | null;
   episode_no: number | null;
+  /** 分级（TV-14 / PG-13 …）。选片时真的会看，比画质标签有用。null = 服务器没刮到。 */
+  official_rating: string | null;
+  /** 剧集状态，实测值 `Continuing` / `Ended` / `Unreleased`。电影永远是 null。 */
+  status: string | null;
+  /** 标语。**实测只有 34% 的条目有** —— 没值就**整行不画**，不留空位。 */
+  tagline: string | null;
+  /** Series → 季数；Season → 集数。 */
+  child_count: number | null;
+  /** ★ 只有 `itemDetail(id)`（不传 withChildren）才有值。
+   *  手机端走 `itemDetailLite` + `seasonEpisodes` 分页，这里恒为空数组。 */
   children: Item[];
   people: Person[];
+};
+
+/** 一季。 */
+export type SeasonInfo = {
+  id: string;
+  /** ★ **服务器返回的名字**，别自己拼「第 N 季」——
+   *  实测真名是 "全 1 季" / "果宝特攻2" / "怪奇物语 4"，自己拼在真机上对不上。 */
+  name: string;
+  index_no: number | null;
+  child_count: number;
+  unplayed: number;
+  has_primary: boolean;
 };
 
 export type Status = {
@@ -647,6 +669,18 @@ export function clearItemCache() {
  *  实测(mecf.mebimmer.de):相似度靠谱,可能混 Series+Movie,单击照常进各自详情。 */
 export const similarItems = (itemId: string) => invoke<Item[]>("similar_items", { itemId });
 
+/** 某剧的季列表。**返回空数组是合法的** —— 有些剧没分季（集直接挂在剧下），
+ *  那种情况把 seriesId 当 parent 直接调 seasonEpisodes。
+ *  不回落的表现是"点进去一集都没有"，而且不报错。 */
+export const seriesSeasons = (seriesId: string) =>
+  invoke<SeasonInfo[]>("series_seasons", { seriesId });
+
+/** 分集分页。parentId 可以是季 id 也可以是剧 id。
+ *  ★ 手机端的分集列表必须走它，不能用 itemDetail().children：
+ *    实测最长那部剧 2648 集，全量拉 1813.9KB / 1841ms，分页 30 条 20.0KB / 435ms。 */
+export const seasonEpisodes = (parentId: string, startIndex = 0, limit = 30) =>
+  invoke<ItemPage>("season_episodes", { parentId, startIndex, limit });
+
 /** 网络图标库的一个条目(改图标弹窗浏览用)。 */
 export type IconEntry = { name: string; url: string; source: string };
 /** 网络图标库(四个聚合源,核层 24h 缓存)。force=true 重新拉。空数组 = 拉取失败或空。 */
@@ -659,6 +693,22 @@ export const itemDetail = async (itemId: string): Promise<ItemDetail> => {
   detailMemo.set(itemId, { at: Date.now(), v });
   return v;
 };
+
+/** 不带分集的详情。**手机端用这个。**
+ *
+ *  ★ 和 itemDetail 共用同一个缓存池是**不行**的:两者的 `children` 一个有一个没有,
+ *    先进 lite 的话桌面端拿到的详情会莫名少了整个剧集列表。所以另起一个 key 前缀。 */
+export const itemDetailLite = async (itemId: string): Promise<ItemDetail> => {
+  const key = `lite:${itemId}`;
+  const hit = peekItemDetail(key);
+  if (hit) return hit;
+  const v = await invoke<ItemDetail>("item_detail", { itemId, withChildren: false });
+  detailMemo.set(key, { at: Date.now(), v });
+  return v;
+};
+
+/** 同步偷 lite 缓存(首屏不空白用)。取不到返回 undefined,**不发请求**。 */
+export const peekItemDetailLite = (itemId: string) => peekItemDetail(`lite:${itemId}`);
 
 // ---------- 播放器能力(对齐旧 Flutter video_player_service 契约) ----------
 export type PlayerOpts = {
@@ -785,6 +835,24 @@ export function fmtRes(height: number | null): string {
 
 export const aggregateSearch = (query: string) =>
   invoke<ServerGroup[]>("aggregate_search", { query });
+
+/** 一台源的规模 + 最近观看记录。手机端首页顶栏统计和聚合视界都用它。 */
+export type SourceOverview = {
+  server_id: string;
+  /** 用户在服务器页起的名(空则回落 host)。**不带账户名和地址** */
+  server_name: string;
+  source_kind: SourceKind;
+  /** 网盘/文件浏览型源 —— 没有 Emby 那套接口,counts 恒为 0、resume 恒为空 */
+  is_file_browse: boolean;
+  active: boolean;
+  counts: { movie: number; series: number; episode: number; boxset: number };
+  resume: Item[];
+};
+
+/** 全部源的规模与观看记录,一次拿齐(每台并行,单台失败只让它自己是零)。
+ *  ★ counts 来自 `/Items/Counts?UserId=` —— 有些 Emby fork 上这个端点是 404,
+ *    那台就是一排 0。**别据此判断"用户库是空的"**,要判空看 resume 和 views。 */
+export const aggregateOverview = () => invoke<SourceOverview[]>("aggregate_overview");
 
 export const setActiveServer = (serverId: string) =>
   invoke<void>("set_active_server", { serverId });

@@ -16,7 +16,9 @@ import {
   resolvePluginAssetUrl,
 } from "@shared/api";
 import Sheet from "../components/Sheet";
-import { IconRefresh, IconTrash } from "../app/icons";
+import { Icon } from "../app/icons";
+import { useCtx } from "../app/ctx";
+import Page from "../components/Page";
 
 /* 插件。三个页签:市场 / 已装 / 源。与 PC 端同结构。
 
@@ -33,8 +35,10 @@ import { IconRefresh, IconTrash } from "../app/icons";
 type Tab = "market" | "installed" | "sources";
 
 export default function PluginsPage() {
+  const { back } = useCtx();
   const [tab, setTab] = useState<Tab>("market");
   return (
+    <Page title="插件" onBack={back}>
     <div className="pg">
       <div className="chips lib-bar">
         {(
@@ -53,6 +57,7 @@ export default function PluginsPage() {
       {tab === "installed" && <Installed />}
       {tab === "sources" && <Sources />}
     </div>
+    </Page>
   );
 }
 
@@ -116,7 +121,7 @@ function Market() {
       </div>
       <div className="pg-ft">
         <button type="button" className="btn ghost" onClick={() => load(true)}>
-          <IconRefresh size={16} /> 刷新市场
+          <Icon n="refresh" size={16} /> 刷新市场
         </button>
       </div>
 
@@ -195,7 +200,7 @@ function Installed() {
             aria-label="卸载"
             onClick={() => pluginUninstall(p.id).then(load)}
           >
-            <IconTrash size={20} />
+            <Icon n="trash" size={20} />
           </button>
         </div>
       ))}
@@ -244,7 +249,7 @@ function Sources() {
                 aria-label="移除"
                 onClick={() => pluginMarketRemoveSource(s.id).then(setList)}
               >
-                <IconTrash size={20} />
+                <Icon n="trash" size={20} />
               </button>
             )}
           </div>

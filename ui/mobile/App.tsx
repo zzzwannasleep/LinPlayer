@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AccountInfo,
   type Item,
@@ -9,36 +9,36 @@ import {
   play,
 } from "@shared/api";
 import { consumeBack, onShellKey } from "./app/backkey";
-import { FULLSCREEN_PAGES, type PageId } from "./app/nav";
-import { useNav, type Route } from "./app/router";
+import { PageCtx, type Ctx } from "./app/ctx";
+import { FULLSCREEN_PAGES, TABS, type PageId, type TabId } from "./app/nav";
+import { flipTo, toast, wait, type FlipSource } from "./app/motion";
+import PageStack from "./app/PageStack";
 import PageBoundary from "./app/PageBoundary";
 import Tabs from "./app/Tabs";
-import TopBar from "./app/TopBar";
+import { useNav, type Frame, type Route } from "./app/router";
 import MiniPlayer from "./components/MiniPlayer";
-import AniRssPage from "./pages/AniRssPage";
-import AddServerPage from "./pages/AddServerPage";
+import { Empty } from "./components/ui";
+
+import HomePage from "./pages/HomePage";
+import AggregatePage, { ResumePage } from "./pages/AggregatePage";
+import SearchPage from "./pages/SearchPage";
+import LibraryPage from "./pages/LibraryPage";
+import FavoritesPage from "./pages/FavoritesPage";
+import DownloadsPage from "./pages/DownloadsPage";
+import RankingsPage from "./pages/RankingsPage";
 import CalendarPage from "./pages/CalendarPage";
 import DetailPage from "./pages/DetailPage";
-import DownloadsPage from "./pages/DownloadsPage";
-import FavoritesPage from "./pages/FavoritesPage";
-import HomePage from "./pages/HomePage";
-import LibraryPage from "./pages/LibraryPage";
-import LoginPage from "./pages/LoginPage";
-import NetdiskPage from "./pages/NetdiskPage";
+import EpisodePage from "./pages/EpisodePage";
 import PlayerPage from "./pages/PlayerPage";
-import PluginsPage from "./pages/PluginsPage";
-import RankingsPage from "./pages/RankingsPage";
-import SearchPage from "./pages/SearchPage";
+import SettingsPage, { SettingsSubPage } from "./pages/SettingsPage";
 import ServersPage from "./pages/ServersPage";
-import SettingsPage from "./pages/SettingsPage";
-
-/** 侧滑返回:只在**左缘 20px** 起手才认。
- *  不设这个窗口的话,首页的横滑轨道拨一下就退出页面了 —— 轨道横滑优先,
- *  这是 README 里写死的三条手势冲突裁决之一。 */
-const EDGE_PX = 20;
-/** 松手阈值:走过屏宽 35%,或者速度够快(利落地一甩) */
-const BACK_RATIO = 0.35;
-const BACK_VELOCITY = 0.5;
+import AddServerPage from "./pages/AddServerPage";
+import LinesPage from "./pages/LinesPage";
+import IconPage from "./pages/IconPage";
+import NetdiskPage from "./pages/NetdiskPage";
+import PluginsPage from "./pages/PluginsPage";
+import AniRssPage from "./pages/AniRssPage";
+import LoginPage from "./pages/LoginPage";
 
 export default function App() {
   /* undefined = 还在问核层要会话。**不能当"没登录"处理** —— 否则每次启动都闪一下首启页。 */
@@ -46,10 +46,9 @@ export default function App() {
   const [source, setSource] = useState<AccountInfo | null>(null);
   /** 正在播的条目。收进 MiniPlayer 后还要靠它显示片名、以及重新展开。 */
   const [playing, setPlaying] = useState<Item | null>(null);
-  const [toast, setToast] = useState("");
 
   const nav = useNav();
-  const { route, tab, depth, goTab, push, pop, popToRoot } = nav;
+  const { tab, stacks, route, depth, goTab, push, replace, pop, popToRoot } = nav;
 
   /* 会话闸口。
      ★ **必须同时问 currentSession 和 currentSource。**
@@ -70,9 +69,9 @@ export default function App() {
   }, [loadGate]);
 
   /* 安卓物理返回键。优先级从内到外,漏掉任何一层都是一类具体的 bug:
-       1) 覆盖层(sheet/面板)自己吃掉  —— 漏了:面板没关,页面先退了
+       1) 覆盖层(sheet/菜单)自己吃掉  —— 漏了:面板没关,页面先退了
        2) 当前 Tab 栈深 >1 → 弹一层     —— 漏了:详情页按返回直接退出应用
-       3) 不在首页 Tab → 回首页 Tab     —— 漏了:在设置页按返回直接退出应用(安卓惯例)
+       3) 不在首页 Tab → 回首页 Tab     —— 漏了:在服务器页按返回直接退出应用(安卓惯例)
        4) 首页 Tab 栈底 → 交给壳(退出) —— 我们**不做任何事**,让 Activity 处理 */
   useEffect(
     () =>
@@ -85,11 +84,29 @@ export default function App() {
     [pop, tab, goTab],
   );
 
-  const openItem = useCallback((it: Item) => push({ page: "detail", itemId: it.id, title: it.name }), [push]);
-  const goPage = useCallback(
-    (page: PageId, parentId?: string, title?: string) => push({ page, parentId, title }),
+  /* ── FLIP 共享元素 ──
+     卡片 → 详情页 Hero。起点在点卡片的那一刻记下来(此时卡片还在屏幕上),
+     终点由详情页挂载后自己认领。★ 起点必须**当场**取,等 push 之后卡片已经
+     跟着旧页滑走了,getBoundingClientRect 拿到的是滑到一半的位置。 */
+  const flip = useRef<FlipSource | null>(null);
+
+  const openItem = useCallback(
+    (it: Item, from?: FlipSource | null) => {
+      flip.current = from ?? null;
+      push({ page: "detail", itemId: it.id, title: it.name });
+    },
     [push],
   );
+
+  /** 详情页 Hero 挂好后调它,把卡片那张图飞过来。 */
+  const claimFlip = useCallback(async (el: HTMLElement | null) => {
+    const from = flip.current;
+    flip.current = null;
+    if (!from || !el) return;
+    /* 等一帧让新页排好版 —— 立刻量的话 Hero 还没拿到最终尺寸,飞过去会错位。 */
+    await wait(16);
+    await flipTo(from, el);
+  }, []);
 
   /* 起播。★ 与 TV 端同一条路:先 await play(),成功了才导航 ——
      反过来的话起播失败会停在一个空的播放页上,用户只看到黑屏。 */
@@ -100,20 +117,75 @@ export default function App() {
         setPlaying(it);
         push({ page: "player", itemId: it.id, title: it.name });
       } catch (e) {
-        setToast(`播放失败:${e}`);
+        toast(`播放失败:${e}`, "bad");
       }
     },
     [push],
   );
 
-  /* 侧滑返回。挂在页面容器上,只认左缘起手。
-     ★ 播放页**不挂**(它的横滑是进度手势)—— 见下面 full 的判断。 */
-  const pageRef = useRef<HTMLElement>(null);
-  const swipe = useRef<{ x: number; t: number } | null>(null);
-  const [swipeX, setSwipeX] = useState(0);
+  const ctx = useMemo<Ctx>(
+    () => ({
+      session: session ?? null,
+      route,
+      go: push,
+      replace,
+      back: () => void pop(),
+      openItem,
+      play: playItem,
+      reloadGate: () => void loadGate(),
+    }),
+    [session, route, push, replace, pop, openItem, playItem, loadGate],
+  );
+
+  /* ── 切 Tab 的 fade-through ──
+     旧的先淡出并轻微缩小(90ms),新的延后 90ms 淡入。
+     ★ 不用横向滑动 —— 底栏三个目的地是**平级**的,横滑意味着"有前后顺序"。
+     ★ 三条栈的 DOM 全程挂着,切换只动 hidden 和两个动画类。
+
+     ★★ `hidden` **完全由这个 effect 管,不能同时写成 JSX 属性**。
+     两边一起写会出一个只有真渲染才现形的 bug:JSX 上写 `hidden={t.id !== tab}` 的话,
+     React 认为这个属性归它管;而这里为了做转场又直接改 `el.hidden` ——
+     等 React 下一次 render 时,它比对**自己上一次的虚拟值**发现没变,于是
+     **不会把属性写回去**。表现是切过一次 Tab 之后,被藏起来那条栈的 `hidden`
+     属性永远消失了,三条栈全部可见叠在一起。
+     实测症状:在「首页」Tab 上量到的却是「服务器」那条栈的内容 —— 因为
+     `document.querySelector` 一路匹配到了最后一条。 */
+  const stacksRef = useRef<HTMLDivElement>(null);
+  const prevTab = useRef<TabId | null>(null);
+  useEffect(() => {
+    const root = stacksRef.current;
+    if (!root) return;
+    const all = [...root.querySelectorAll<HTMLElement>(".stack")];
+    const to = all.find((s) => s.dataset.tab === tab);
+    if (!to) return;
+
+    // 首次挂载:直接定住,不放动画(第一屏凭空淡入很怪)
+    if (prevTab.current === null) {
+      all.forEach((s) => (s.hidden = s !== to));
+      prevTab.current = tab;
+      return;
+    }
+    if (prevTab.current === tab) return;
+    const from = all.find((s) => s.dataset.tab === prevTab.current);
+    prevTab.current = tab;
+    if (!from) return;
+
+    from.classList.add("tab-out");
+    to.hidden = false;
+    to.classList.add("tab-in");
+    const t1 = setTimeout(() => {
+      // 除了新的那条,其余一律藏起来 —— 只藏 from 的话,中途快速连点会漏掉一条
+      all.forEach((s) => (s.hidden = s !== to));
+      from.classList.remove("tab-out");
+    }, 90);
+    const t2 = setTimeout(() => to.classList.remove("tab-in"), 400);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [tab]);
 
   const full = FULLSCREEN_PAGES.has(route.page);
-  const canSwipeBack = !full && depth > 1;
 
   if (session === undefined) {
     // 首帧什么都不画。有会话就直接进首页,没有才画登录页 —— 中间不闪任何东西
@@ -132,202 +204,133 @@ export default function App() {
     );
   }
 
-  const bar = titleFor(route);
   /* 播放中且不在播放页 = 该出迷你播放器。
-     ★ 它和底栏一样是 fixed,所以必须是 .page 的**兄弟**,不能塞进页面里 ——
-       页面转场带 transform,fixed 会跟着一起滑走。 */
+     ★ 它和底栏一样在页面栈**外面**,不能塞进页面里 —— 页面转场带 transform,
+       它会跟着一起滑走。 */
   const showMini = playing != null && route.page !== "player";
 
   return (
-    <div className={`app${full ? " full" : ""}`}>
-      {!full && (
-        <TopBar
-          title={bar.title}
-          sub={bar.sub}
-          onBack={depth > 1 ? () => void pop() : undefined}
-        />
-      )}
-
-      <main
-        className="page"
-        ref={pageRef}
-        key={`${tab}:${depth}`}
-        style={swipeX ? { transform: `translateX(${swipeX}px)` } : undefined}
-        onPointerDown={(e) => {
-          if (!canSwipeBack || e.clientX > EDGE_PX) return;
-          swipe.current = { x: e.clientX, t: e.timeStamp };
-        }}
-        onPointerMove={(e) => {
-          if (!swipe.current) return;
-          setSwipeX(Math.max(0, e.clientX - swipe.current.x));
-        }}
-        onPointerUp={(e) => {
-          const s = swipe.current;
-          swipe.current = null;
-          if (!s) return;
-          const dx = e.clientX - s.x;
-          const v = dx / Math.max(1, e.timeStamp - s.t);
-          setSwipeX(0);
-          if (dx > window.innerWidth * BACK_RATIO || v > BACK_VELOCITY) void pop();
-        }}
-        onPointerCancel={() => {
-          swipe.current = null;
-          setSwipeX(0);
-        }}
-      >
-        <PageBoundary resetKey={`${route.page}:${route.itemId ?? route.parentId ?? ""}`}>
-          <Body
-            route={route}
-            session={session}
-            playing={playing}
-            onOpen={openItem}
-            onGo={goPage}
-            onPlay={playItem}
-            onBack={() => void pop()}
-            onStopped={() => setPlaying(null)}
-          />
-        </PageBoundary>
-      </main>
-
-      {showMini && (
-        <MiniPlayer
-          title={playing?.name}
-          onExpand={() => push({ page: "player", itemId: playing!.id, title: playing!.name })}
-          onClose={() => setPlaying(null)}
-        />
-      )}
-
-      {!full && (
-        <Tabs
-          tab={tab}
-          onTab={(t) => {
-            if (t === tab && depth > 1) popToRoot();
-            else goTab(t);
-          }}
-        />
-      )}
-
-      {toast && (
-        <div className="toast" onClick={() => setToast("")}>
-          {toast}
+    <PageCtx.Provider value={ctx}>
+      <div className={`app${full ? "" : " has-tabs"}`}>
+        <div className="stacks" ref={stacksRef}>
+          {/* ★ `.stack` 上**故意不写受控的 `hidden`** —— 可见性全由上面那个 effect 管
+              (理由写在那里)。这里一律先 `hidden`,effect 在挂载时立刻把当前那条打开,
+              这样第一帧也不会三条栈叠在一起闪一下。 */}
+          {TABS.map((t) => (
+            <div className="stack" data-tab={t.id} key={t.id} hidden>
+              <PageStack
+                frames={stacks[t.id]}
+                onPop={() => void pop()}
+                /* 播放页禁用侧滑返回 —— 它的横滑要留给进度手势。
+                   这是 README 里写死的三条手势冲突裁决之一。 */
+                canSwipe={(f) => !FULLSCREEN_PAGES.has(f.route.page)}
+                render={(f) => (
+                  <PageBoundary resetKey={f.key}>
+                    <Body
+                      frame={f}
+                      playing={playing}
+                      onClaimFlip={claimFlip}
+                      onStopped={() => setPlaying(null)}
+                    />
+                  </PageBoundary>
+                )}
+              />
+            </div>
+          ))}
         </div>
-      )}
-    </div>
+
+        {showMini && (
+          <MiniPlayer
+            title={playing?.name}
+            onExpand={() => push({ page: "player", itemId: playing!.id, title: playing!.name })}
+            onClose={() => setPlaying(null)}
+          />
+        )}
+
+        {!full && (
+          <Tabs
+            tab={tab}
+            onTab={(t) => {
+              if (t === tab && depth > 1) popToRoot();
+              else goTab(t);
+            }}
+          />
+        )}
+      </div>
+    </PageCtx.Provider>
   );
 }
 
-function titleFor(r: Route): { title: string; sub?: string } {
-  if (r.page === "home") return { title: "首页" };
-  if (r.page === "search") return { title: "搜索" };
-  if (r.page === "settings") return { title: "设置" };
-  return { title: r.title ?? LABELS[r.page] ?? r.page };
-}
-
-const LABELS: Partial<Record<PageId, string>> = {
-  library: "媒体库",
-  favorites: "收藏",
-  downloads: "下载",
-  rankings: "排行榜",
-  calendar: "追剧日历",
-  servers: "服务器",
-  addserver: "添加服务器",
-  netdisk: "网盘",
-  plugins: "插件",
-  anirss: "Ani-RSS 订阅",
-  detail: "详情",
-};
-
 function Body({
-  route,
-  session,
+  frame,
   playing,
-  onOpen,
-  onGo,
-  onPlay,
-  onBack,
+  onClaimFlip,
   onStopped,
 }: {
-  route: Route;
-  session: LoginResult | null;
+  frame: Frame;
   /** 正在播的条目。播放页拿它给弹幕自动匹配喂剧名/集号(route.title 是拼好的串,搜不到)。 */
   playing: Item | null;
-  onOpen: (it: Item) => void;
-  onGo: (p: PageId, parentId?: string, title?: string) => void;
-  onPlay: (it: Item, mediaSourceId?: string | null) => void;
-  onBack: () => void;
+  onClaimFlip: (el: HTMLElement | null) => void;
   onStopped: () => void;
 }) {
-  /* 只连了网盘的用户没有 Emby 会话 —— 依赖 session 的页面对他们一条都取不到。
-     **不画一个全空的页面**,那看着像"加载失败"。 */
-  const needSession = (node: (s: LoginResult) => ReactElement) =>
-    session ? node(session) : (
-      <Todo page={route.page} note="这一页要 Emby 会话。当前只登录了网盘/文件浏览型源。" />
-    );
-
-  switch (route.page) {
+  const r: Route = frame.route;
+  switch (r.page) {
     case "home":
-      return needSession((s) => <HomePage session={s} onOpen={onOpen} onGo={onGo} />);
+      return <HomePage />;
+    case "aggregate":
+      return <AggregatePage />;
+    case "resume":
+      return <ResumePage />;
     case "search":
-      return needSession((s) => <SearchPage session={s} onOpen={onOpen} />);
-    case "settings":
-      return <SettingsPage onGo={onGo} />;
+      return <SearchPage />;
     case "library":
-      return needSession((s) => (
-        <LibraryPage
-          session={s}
-          parentId={route.parentId}
-          onOpen={onOpen}
-          onPickView={(v) => onGo("library", v.id, v.name)}
-        />
-      ));
-    case "detail":
-      return needSession((s) => (
-        <DetailPage session={s} itemId={route.itemId} onPlay={onPlay} onOpen={onOpen} />
-      ));
-    case "player":
-      return (
-        <PlayerPage
-          title={route.title}
-          /* 弹幕自动匹配要剧名/集号/时长 —— route 里只有一个标题串,匹配不出东西。 */
-          item={playing}
-          onBack={() => {
-            onStopped();
-            onBack();
-          }}
-          /* 收起 ≠ 停止:只退出这一页,mpv 继续放,MiniPlayer 接管 */
-          onMinimize={onBack}
-        />
-      );
+      return <LibraryPage parentId={r.parentId} title={r.title} />;
     case "favorites":
-      return needSession((s) => <FavoritesPage session={s} onOpen={onOpen} />);
+      return <FavoritesPage />;
     case "downloads":
       return <DownloadsPage />;
     case "rankings":
-      return <RankingsPage onOpen={onOpen} />;
+      return <RankingsPage />;
     case "calendar":
       return <CalendarPage />;
+    case "detail":
+      return <DetailPage itemId={r.itemId} onHero={onClaimFlip} />;
+    case "episode":
+      return <EpisodePage itemId={r.itemId} season={r.season} ep={r.ep} />;
+    case "player":
+      return <PlayerPage title={r.title} item={playing} onStopped={onStopped} />;
+    case "settings":
+      return <SettingsPage />;
+    case "settingsSub":
+      return <SettingsSubPage group={r.group} />;
     case "servers":
-      return <ServersPage onGo={onGo} />;
-    case "addserver":
-      return <AddServerPage onDone={onBack} />;
+      return <ServersPage />;
+    case "addServer":
+      return <AddServerPage />;
+    case "lines":
+      return <LinesPage serverId={r.serverId} />;
+    case "icon":
+      return <IconPage serverId={r.serverId} />;
     case "netdisk":
-      return <NetdiskPage onPlaySource={onBack} />;
+      return <NetdiskPage />;
     case "plugins":
       return <PluginsPage />;
     case "anirss":
       return <AniRssPage />;
     default:
-      return <Todo page={route.page} />;
+      return <Unknown page={r.page} />;
   }
 }
 
-/** 还没落的页。**故意写成一眼能认出是未完成** —— 不做假 UI。
- *  假 UI 在评审时会被当成"已经做好了",那比空白更贵。 */
-function Todo({ page, note }: { page: PageId; note?: string }) {
+/** 路由表漏了一格。**故意写成一眼能认出是漏的** —— 不做假 UI。 */
+function Unknown({ page }: { page: PageId }) {
   return (
-    <div className="empty">
-      <b>{LABELS[page] ?? page}</b>
-      <div className="dim">{note ?? "这一页还没落地。规划见 ui/mobile/README.md 的分期表。"}</div>
+    <div className="pg-body">
+      <Empty
+        icon="info"
+        title={`没有「${page}」这一页`}
+        desc="路由表和入口对不上了。加页面要同时改 app/nav.ts 的 PageId 和 App.tsx 的 Body —— 只改一处的表现就是这个。"
+      />
     </div>
   );
 }

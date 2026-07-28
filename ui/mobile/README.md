@@ -66,23 +66,29 @@
 
 ## 版式口径
 
-### 底栏只有三个 Tab
+### 底栏只有三个 Tab(2026-07-28 换过一次)
 
 ```
-首页 │ 搜索 │ 设置
+首页 │ 聚合视界 │ 服务器
 ```
 
-PC 有 9 个入口,手机底栏**只留三个**。剩下的这样安置:
+上一版是「首页 / 搜索 / 设置」。换的理由:
 
-| PC 入口 | 手机端去处 |
+- **搜索并进「聚合视界」** —— 聚合搜索本来就是"跨源找东西",和"跨源看有什么"是同一件事的两面,
+  拆成两个 Tab 是把一件事切两半。搜索条在聚合视界顶部,少一次点击就到。
+- **设置从底栏挪到首页右上角** —— 它是低频的配置入口,不配占拇指最贵的位置;
+  「服务器」才是高频(多源用户天天切)。
+
+其余入口的去处:
+
+| 入口 | 去处 |
 |---|---|
-| 媒体库 · 收藏 · 下载 · 排行榜 · 追剧日历 | **首页顶部的横滑 chip 行**,点进各自页面(进栈) |
-| 服务器 · 插件 · 网盘 · Ani-RSS | **设置** 页的分组项 |
-| 添加服务器 | 服务器页内,含**摄像头扫码**(手机独有) |
+| 继续观看 · 收藏 · 排行榜 · 追剧日历 | **聚合视界顶部的四个方块**(`.quick`)。原来是首页的 chip 行,用户 2026-07-28:"很难看没有用" |
+| 媒体库 | 首页每个库一条轨道,标题右边「更多」进去 |
+| 服务器 · 插件 · 网盘 · Ani-RSS | **设置**页的「片源」分组 |
+| 添加服务器 | 服务器页右上角 + 首启闸口 |
 
-**理由**:底栏是拇指最贵的位置,只配给「随时想去」的三件事。
-媒体库/收藏/排行榜/日历都是「进去逛一会儿」的目的地,做成首页 chip 反而比塞进底栏更快到达 ——
-底栏 5 个图标的可点面积会被压到 48dp 以下,而 chip 行可以横滑放任意多个且带文字。
+**为什么不是 5 个**:5 个图标平分屏宽后单个可点区会被压到 48dp 以下(Material / WCAG 的下限)。
 
 ### 横竖屏跟随系统
 
@@ -185,7 +191,13 @@ PC 有 9 个入口,手机底栏**只留三个**。剩下的这样安置:
 | `app/backkey.ts` | 安卓物理返回键桥 + 返回键消费栈 | ✅ |
 | `app/nav.ts` | Tab / chip / 页面 id 定义 | ✅ |
 | `app/Tabs.tsx` `app/TopBar.tsx` | 底栏 / 顶栏 | ✅ |
-| `app/icons.tsx` | **只是从 `ui/desktop/app/icons` 再导出**,不重画一套(理由写在文件里) | ✅ |
+| `app/icons.tsx` | **55 个内联 SVG**(路径来自草稿)。不再从 desktop 再导出 —— 理由写在文件头 | ✅ |
+| `app/motion.ts` | 动效原语:haptic / press / longPress / FLIP / sheet / toast / menu / 下拉刷新 / 播放器手势 | ✅ |
+| `app/PageStack.tsx` | 页面栈:`.pg` 分层 + push/pop 转场 + 侧滑返回(跟手时绕过 React) | ✅ |
+| `app/ctx.ts` | 页面上下文(go / replace / back / openItem / play / session) | ✅ |
+| `components/Page.tsx` | 页面骨架:**每页自己的顶栏** + 可滚动体 + 进场编排 | ✅ |
+| `components/ui.tsx` | 共用组件词汇:Card / Row / Grid / Cell / Group / SegRow / StepRow / SliderRow / Opt | ✅ |
+| `components/SourceForm.tsx` | 数据源表单。**添加服务器 / 首启闸口 / 重新登录三处共用** | ✅ |
 | `app/PageBoundary.tsx` | 页面级错误边界 | ✅ |
 | `components/Card.tsx` `components/Row.tsx` | 海报卡(长按 = PC 的右键)/ 横滑轨道 | ✅ |
 | `theme/mobile.css` | 全站样式 + token。**页面不新写 CSS 文件** | ✅ |
@@ -306,3 +318,46 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9223"   ./target/
 - **Ani-RSS 只做订阅列表,不做设置表单** —— 那是几十个字段的服务端 Config 镜像,
   手机上逐个填是灾难。**这是取舍,不是没做完。**
 - `env(safe-area-inset-*)` 在安卓 WebView 上**还没在真机验过**。
+
+
+---
+
+## 2026-07-28:整套按 `docs/mobile-drafts` 接入
+
+草稿(87 格评审板逐格看过的可运行原型)整体落进来了。除了版式,还有几件不那么显眼的:
+
+### 样式来源分两处,别只搬 `app.css`
+草稿的 `app.css` 只有全站骨架和通用组件(433 条规则)。**每个页面模块自己在文件顶部还挂着
+一段 `const CSS` + `document.head.append(h("style"))`** —— 六个页面共 406 条规则。
+只搬 `app.css` 的话一 grep 会发现 **166 个类"没有样式"**,而草稿跑起来是好的。
+是靠读 `document.styleSheets` 发现有 7 张表才查出来的,**光看截图完全看不出缺了什么**。
+落码时全部合进 `theme/mobile.css`(这里的规矩是「页面不新写 CSS 文件」)。
+
+### 为这一版新加的核层能力(都在两个宿主里各注册了一次)
+| 命令 | 干什么 | 为什么非加不可 |
+|---|---|---|
+| `aggregate_overview` | 每个源的规模 + 最近观看记录,一次拿齐 | 首页顶栏统计和聚合视界要的是同一批数据(N 台 × 2 个请求)。拆两条命令的话前端要发 2N 次 invoke,而且两批数据到达时间不同,页面会先画出"有数字没内容"再补上 |
+| `emby::counts` | `/Items/Counts?UserId=` | **必须带 UserId**。2026-07-28 在 mecf.mebimmer.de 实测:带 vs 不带差 39 部电影 / 259 部剧 / 870 集 —— 数字都"像那么回事",漏了不会有人发现 |
+| `series_seasons` | 季列表(带服务器给的季名和 ChildCount) | 季名要用**服务器返回的 Name**,实测真名是 "全 1 季" / "果宝特攻2",自己拼「第 N 季」在真机上对不上 |
+| `season_episodes` | 分集**分页** | 实测最长的剧 2648 集,全量拉 1813.9KB / 1841ms;分页 30 条 20.0KB / 435ms。`content-visibility` 只省渲染,省不掉这 1.8MB 的下载 |
+| `item_detail(withChildren)` | 详情不带全部分集 | 同上。桌面/TV 不传这个参数,行为不变 |
+| `screenshot`(安卓) | 播放页左中那颗相机键 | 桌面版读 `prefs.screenshot_dir`(靠文件对话框选),安卓没有 —— 直接落到数据根下的 `screenshots/` |
+| `ItemDetail.{official_rating,status,tagline,child_count}` | 分级 / 连载状态 / 标语 | "这剧完结没有"是选片时真会问的问题,比画质标签有用。三个字段都在真服务器上实测有值 |
+
+### 自检
+`node ui/mobile/check-shell.mjs`(先 `npx vite build`)。它**真渲染**,验:
+挂载 / 三条栈 / 底栏 / 横向溢出 / 首启闸口 / 源类型 id / 必填字段位置 / 逐个设置子页 /
+「能就地调的没退回弹窗」。
+
+两条纪律写在文件头:判横向溢出只看 `scrollWidth === innerWidth` 别看截图;
+断言必须先红过。
+
+### 这一轮真渲染抓到、而编译和 CI 都绿的两个 bug
+1. **React 控制的 `hidden` 和命令式 `el.hidden` 打架**。`.stack` 上写了 `hidden={t.id !== tab}`,
+   而切 Tab 的 fade-through 又直接改 `el.hidden` —— React 下次 render 比对**自己上一次的虚拟值**
+   发现没变,**不会把属性写回去**。表现:切过一次 Tab 之后三条栈全部可见叠在一起,
+   在「首页」上量到的却是「服务器」那条栈的内容。
+   修法:`hidden` **完全交给 effect 管**,JSX 上一律先 `hidden`。
+2. **`.stack` 类名套了两层**(App 的 Tab 容器一层、PageStack 自己又一层)。
+   `querySelectorAll(".stack")` 数出 6 个,而 CSS 上两层都是 `absolute/inset:0` 又刚好看不出毛病。
+   内层改名 `.pg-stack`。
