@@ -22,6 +22,7 @@ import {
   setPlayed,
   similarItems,
   thumbUrl,
+  defaultVersion,
 } from "@shared/api";
 import { useCtx } from "../app/ctx";
 import { Icon } from "../app/icons";
@@ -126,7 +127,8 @@ export default function DetailPage({
       .then((v) => {
         if (!alive) return;
         setVersions(v);
-        setVer(v[0] ?? null);
+        // 显示正则会挑中的那条(= 核层起播会挑的那条),不是列表第一条。
+        setVer(defaultVersion(v));
         setVerPicked(false);
       })
       .catch(() => {});

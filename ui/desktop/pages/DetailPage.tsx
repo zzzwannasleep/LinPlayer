@@ -15,6 +15,7 @@ import {
   fmtRes,
   fmtSize,
   fmtTime,
+  defaultVersion,
   getPrefs,
   itemDetail,
   peekItemDetail,
@@ -271,9 +272,12 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
     };
   }, [isEpisode, d?.series_id, d?.season_no]);
 
-  /* 显示用:没手动选就显示第一条(和服务器顺序一致);起播传参用的是下面的 pickedVerId。 */
-  const ver = versions[verIdx ?? 0] ?? null;
+  /* 显示用:没手动选就显示**正则会挑中的那条**(defaultVersion),不是列表第一条 ——
+     显示第一条而实际播另一条,用户看到的就是「正则没生效」。
+     起播传参用的是 pickedVerId:没手动选就传 null,让核层自己按正则挑(两边同一个结论)。 */
+  const ver = verIdx === null ? defaultVersion(versions) : (versions[verIdx] ?? null);
   const pickedVerId = verIdx === null ? null : (ver?.id ?? null);
+  const verIdxShown = ver ? versions.indexOf(ver) : 0;
   const audios = useMemo(() => ver?.streams.filter((s) => s.type_ === "Audio") ?? [], [ver]);
   const subs = useMemo(() => ver?.streams.filter((s) => s.type_ === "Subtitle") ?? [], [ver]);
 
@@ -759,7 +763,7 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
                       {versions.map((v, i) => (
                         <div
                           key={v.id}
-                          className={`li${i === (verIdx ?? 0) ? " on" : ""}`}
+                          className={`li${i === verIdxShown ? " on" : ""}`}
                           onClick={() => {
                             setVerIdx(i);
                             setDd(null);

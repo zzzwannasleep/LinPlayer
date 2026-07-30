@@ -355,6 +355,12 @@ pub struct MediaVersion {
     pub bitrate: Option<i64>,
     pub runtime_secs: f64,
     pub streams: Vec<StreamInfo>,
+    /// ★ 版本筛选正则会挑中的就是这一条(wiki regex-filters)。
+    /// 起播时用户没手动选版本 → `resolve_stream` 挑的正是它,所以详情页/播放器的
+    /// 「当前版本」必须显示它,否则界面说在放第一条、实际在放另一条,
+    /// 用户看到的就是「正则根本没生效」——这正是 2026-07-30 那次误判的成因。
+    /// 正则留空/没命中 → 全 false,调用方回落第一条(和核层的回落一致)。
+    pub preferred: bool,
 }
 
 impl From<RawMediaSource> for MediaVersion {
@@ -399,15 +405,21 @@ impl From<RawMediaSource> for MediaVersion {
             bitrate: m.bitrate,
             runtime_secs: m.runtime_ticks.unwrap_or(0) as f64 / 1e7,
             streams,
+            // 单条源看不出「有没有被正则挑中」——那是整批比出来的,在 media_versions 里补。
+            preferred: false,
         }
     }
 }
 
 /// 取条目全部版本+流(走 PlaybackInfo,拿到的才是服务端真判定可播的源)。
+/// `version_regex` 只用来标 `preferred`,不影响返回哪些版本 —— 和 `resolve_stream`
+/// 打的是同一个 PlaybackInfo 端点、同一批 MediaSource、同一套匹配文本,
+/// 所以这里标出来的那条,就是真起播时会被选中的那条。
 pub async fn media_versions(
     http: &reqwest::Client,
     s: &Session,
     item_id: &str,
+    version_regex: &str,
 ) -> Result<Vec<MediaVersion>, String> {
     let url = format!(
         "{}/Items/{}/PlaybackInfo?UserId={}",
@@ -430,12 +442,14 @@ pub async fn media_versions(
         media_sources: Option<Vec<RawMediaSource>>,
     }
     let w: Wrap = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
-    Ok(w
-        .media_sources
-        .unwrap_or_default()
-        .into_iter()
-        .map(MediaVersion::from)
-        .collect())
+    let raw = w.media_sources.unwrap_or_default();
+    let texts: Vec<String> = raw.iter().map(source_match_text).collect();
+    let hit = crate::media::pick_index(&texts, version_regex);
+    let mut out: Vec<MediaVersion> = raw.into_iter().map(MediaVersion::from).collect();
+    if let Some(i) = hit {
+        out[i].preferred = true;
+    }
+    Ok(out)
 }
 
 /// 首页 Hero 的随机推荐(草稿页 01:大幅剧照轮播)。只要有剧照的,否则 Hero 是空的。
@@ -2291,6 +2305,33 @@ mod tests {
         );
         // 没命中 / 没设 → 调用方回落第一条(旧行为不变)
         assert_eq!(crate::media::pick_index(&texts, "8K"), None);
+        assert_eq!(crate::media::pick_index(&texts, ""), None);
+    }
+
+    /// ★ `preferred` 必须和 `resolve_stream` 挑的是**同一条**。
+    /// 这两条路以前各走各的:起播按正则挑了第二条,而详情页/播放器面板照样高亮第一条 ——
+    /// 用户看到的界面全在说「在放第一条」,于是判定「正则根本没生效」
+    /// (2026-07-30 用户实测报的就是这个,而那时起播其实已经是对的)。
+    #[test]
+    fn preferred_marks_the_same_source_resolve_stream_would_pick() {
+        let raw = r#"{
+            "MediaSources": [
+                { "Id": "a", "Name": ".1080P.BDRip@北宇治字幕组.简体内嵌", "Container": "mp4",
+                  "MediaStreams": [{ "Type": "Video", "Codec": "h264", "Height": 1080 }] },
+                { "Id": "b", "Name": ".1080P.BDRip@喵萌奶茶屋.简日双语", "Container": "mp4",
+                  "MediaStreams": [{ "Type": "Video", "Codec": "h264", "Height": 1080 }] }
+            ],
+            "PlaySessionId": "p"
+        }"#;
+        let info: PlaybackInfoResp = serde_json::from_str(raw).unwrap();
+        let texts: Vec<String> = info.media_sources.iter().map(source_match_text).collect();
+        // 起播这条路(resolve_stream 里就是这一句)
+        let picked = crate::media::pick_index(&texts, "喵萌").unwrap_or(0);
+        assert_eq!(picked, 1);
+        // 显示这条路(media_versions 里就是这一句)—— 必须得出同一个下标
+        let shown = crate::media::pick_index(&texts, "喵萌");
+        assert_eq!(shown, Some(picked), "「显示哪条」和「播哪条」必须是同一条");
+        // 没设正则 → 谁都不标,前端回落第一条(= resolve_stream 的 unwrap_or(0))
         assert_eq!(crate::media::pick_index(&texts, ""), None);
     }
 

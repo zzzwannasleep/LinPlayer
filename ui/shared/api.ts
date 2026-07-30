@@ -139,7 +139,16 @@ export type MediaVersion = {
   bitrate: number | null;
   runtime_secs: number;
   streams: StreamInfo[];
+  /** ★ 版本筛选正则挑中的就是这条(wiki regex-filters);用户没手动选版本时核层起播挑的
+   *  也正是它。**「当前版本」一律显示它**,别再默认显示 `[0]` ——
+   *  否则界面说在放第一条、实际在放另一条,用户只会得出「正则根本没生效」。
+   *  正则留空/没命中 → 全 false,`defaultVersion` 回落第一条(和核层一致)。 */
+  preferred: boolean;
 };
+
+/** 「当前版本」的唯一算法。三端 + 详情页/播放器面板共用,别各写各的。 */
+export const defaultVersion = (vs: MediaVersion[]): MediaVersion | null =>
+  vs.find((v) => v.preferred) ?? vs[0] ?? null;
 
 /** 列表卡片标题:剧集补上剧名。
     ★ 用户 2026-07-16「继续观看名称写具体的季度和集数,样式 SxxExx」:

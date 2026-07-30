@@ -70,6 +70,7 @@ import {
   status as statusApi,
   stopPlayback,
   tracks as tracksApi,
+  defaultVersion,
 } from "@shared/api";
 import { pollTracks } from "@shared/track-poll";
 import { DanmakuLayer, type DanmakuComment, type TimeSync } from "@shared/Danmaku";
@@ -974,9 +975,12 @@ export default function App() {
     itemMedia(playing.id)
       .then((vs) => {
         setVersions(vs);
-        // play() 不传 mediaSourceId 时核层用服务端给的第一个,故没切过版本时就高亮它。
-        // 以前这里写死 i===0,切完版本高亮还赖在第一行 —— 别再用下标当选中态。
-        setCurMsId((id) => id ?? vs[0]?.id ?? null);
+        /* 没切过版本时高亮**核层实际挑中的那条**(defaultVersion:正则命中 ＞ 第一条)。
+           ★ 这里原来写死回落 vs[0] —— 于是版本正则明明生效了、放的是第二条,
+             面板却始终高亮第一条,连「更多 · 播放信息」的规格也是第一条的。
+             用户照着界面看,只能得出「正则根本没生效」(2026-07-30 挂真机复现)。
+           以前更早的一版是写死 i===0,切完版本高亮还赖在第一行 —— 别再用下标当选中态。 */
+        setCurMsId((id) => id ?? defaultVersion(vs)?.id ?? null);
       })
       .catch(() => setVersions([]));
   }, [panel, playing, versions]);
@@ -1341,7 +1345,9 @@ export default function App() {
   const subs = tracks.filter((t) => t.kind === "sub");
   /* 「更多 · 播放信息」的静态规格(用户 2026-07-16:要常见静态项 —— 分辨率/码率/大小/
      字幕格式/音频格式,不要动态的时长/状态)。取当前在播版本的流规格(item_media)。 */
-  const curVer = versions?.find((v) => v.id === curMsId) ?? versions?.[0] ?? null;
+  /* 没手动切过版本(curMsId 为 null)时,在播的是**正则挑中的那条** —— 回落 versions[0]
+     会让面板高亮第一条而实际在放另一条,用户据此判定「正则没生效」(2026-07-30 实测)。 */
+  const curVer = versions?.find((v) => v.id === curMsId) ?? defaultVersion(versions ?? []);
   const vStream = curVer?.streams.find((s) => s.type_ === "Video") ?? null;
   const uniqCodecs = (kind: string) =>
     curVer ? [...new Set(curVer.streams.filter((s) => s.type_ === kind).map((s) => s.codec.toUpperCase()))].join(" / ") : "";
@@ -1858,11 +1864,14 @@ export default function App() {
                           const vid = v.streams.find((s) => s.type_ === "Video");
                           const spec = [fmtRes(vid?.height ?? null), vid?.video_range && vid.video_range !== "SDR" ? vid.video_range : null].filter(Boolean).join(" ");
                           return (
-                            <button key={v.id} className={`p-li${v.id === curMsId ? " on" : ""}`} onClick={() => switchVersion(v)}>
+                            <button key={v.id} className={`p-li${v.id === curVer?.id ? " on" : ""}`} onClick={() => switchVersion(v)}>
                               <span className="rad" />
                               <span className="col">
-                                <span className="t1">{spec || v.name}</span>
-                                <span className="t2">{[v.container?.toUpperCase(), fmtBitrate(v.bitrate)].filter(Boolean).join(" · ")}</span>
+                                {/* ★ 名字必须在第一行。同一部片的几条版本在这个库里常常**分辨率完全一样**
+                                    (差的是字幕组/压制组),只画「1080p / MKV · 10M」等于四行长得一模一样,
+                                    用户既选不动、也看不出版本规则到底挑中了哪条。 */}
+                                <span className="t1">{v.name || spec}</span>
+                                <span className="t2">{[spec, v.container?.toUpperCase(), fmtBitrate(v.bitrate)].filter(Boolean).join(" · ")}</span>
                               </span>
                               <span className="rt">{fmtSize(v.size_bytes)}</span>
                             </button>

@@ -10,6 +10,9 @@
  *      → 关掉面板就没了,重进还是空;
  *   3. 起播后的 apply_prefs 只在 1.2s 打一枪,网络流那会儿 track-list 还没 demux 出内封轨
  *      → 字幕/音频正则匹配了个空表。(这条在 track-poll.test.mjs 里测,不在这)
+ *   4. 详情页/播放器面板的「当前版本」写死回落列表第一条,而实际在播的是正则挑中的那条 ——
+ *      **起播其实已经对了,界面却全程在说「在放第一条」**,用户据此判定「正则根本没生效」
+ *      (2026-07-30 用户挂真机实测报的就是这个)。核层现在给 `preferred` 标出那一条。
  * 所以断言的落点是**发给核层的 invoke 参数**,不是 UI 上有没有那个输入框。
  *
  * ## 跑法
@@ -139,9 +142,13 @@ const st = (i, t, extra = {}) => ({
    **不要**默认拿第一条 —— 所以「传了第一条的 id」和「传 null」在这里是可分辨的。 */
 const VERS = [
   { id: "ms-1080", name: "1080p x264", container: "mkv", size_bytes: 1e9, bitrate: 5e6,
-    runtime_secs: 3600, streams: [st(0, "Video", { height: 1080 }), st(1, "Audio"), st(2, "Subtitle")] },
+    runtime_secs: 3600, preferred: false,
+    streams: [st(0, "Video", { height: 1080 }), st(1, "Audio"), st(2, "Subtitle")] },
+  /* ★ preferred = 版本正则挑中的那条(核层 media_versions 标的)。这里故意标**第二条**:
+     界面必须显示它,而不是列表第一条 —— 显示第一条、播第二条,用户看到的就是「正则没生效」。 */
   { id: "ms-4k", name: "2160p HEVC", container: "mkv", size_bytes: 4e9, bitrate: 2e7,
-    runtime_secs: 3600, streams: [st(0, "Video", { height: 2160 }), st(1, "Audio"), st(2, "Subtitle")] },
+    runtime_secs: 3600, preferred: true,
+    streams: [st(0, "Video", { height: 2160 }), st(1, "Audio"), st(2, "Subtitle")] },
 ];
 const DATA = {
   current_session: { server: "http://stub", token: "t", user_id: "u", user_name: "stub" },
@@ -229,6 +236,14 @@ const mobileDetail = async () => {
 console.log("\n── 版本正则:没手动选版本时必须传 null ──");
 await mobileDetail();
 must(await ev(`!!${mTop}.querySelector('.dt-play')`), "进得了详情页(有播放按钮)");
+const mVerRow = await ev(`(() => {
+  const r = [...${mTop}.querySelectorAll('.dt-row')].find(x => x.innerText.startsWith('版本'));
+  return r ? r.innerText.replace(/\s+/g, ' ') : '';
+})()`);
+must(
+  /2160p/.test(mVerRow),
+  `「版本」那行要显示正则挑中的那条(2160p),实际「${mVerRow}」—— 显示第一条而播第二条 = 用户眼里的「没生效」`,
+);
 await resetCalls();
 await ev(`${mTop}.querySelector('.dt-play').click()`);
 await sleep(900);
@@ -311,6 +326,14 @@ console.log("\n── 版本正则:没手动选版本时必须传 null ──");
 await ev(`document.querySelector('.pcard')?.click()`);
 await sleep(1800);
 must(await ev(`!!document.querySelector('.dt-playbar .btn.primary')`), "进得了详情页(有播放按钮)");
+const dVerSel = await ev(`(() => {
+  const s = [...document.querySelectorAll('.sel')].find(x => x.innerText.startsWith('版本'));
+  return s ? s.innerText.replace(/\s+/g, ' ') : '';
+})()`);
+must(
+  /2160p/.test(dVerSel),
+  `版本选择器要显示正则挑中的那条(2160p),实际「${dVerSel}」`,
+);
 await resetCalls();
 await ev(`document.querySelector('.dt-playbar .btn.primary')?.click()`);
 await sleep(1000);

@@ -36,6 +36,7 @@ import {
   status as getStatus,
   stopPlayback,
   thumbUrl,
+  defaultVersion,
 } from "@shared/api";
 import { pollTracks } from "@shared/track-poll";
 import { DanmakuLayer, type TimeSync } from "@shared/Danmaku";
@@ -190,7 +191,8 @@ export default function PlayerPage({
         itemMedia(item.id)
           .then((v) => {
             setVersions(v);
-            setCurVer(v[0]?.id ?? null);
+            // 没手动切过 = 在播正则挑中的那条,不是列表第一条(高亮错了就等于告诉用户「没生效」)。
+            setCurVer(defaultVersion(v)?.id ?? null);
           })
           .catch(() => {});
       }

@@ -17,6 +17,7 @@ import {
   type ItemDetail,
   type LoginResult,
   type MediaVersion,
+  defaultVersion,
 } from "@shared/api";
 import type { Route } from "../App";
 import { Icon } from "../app/icons";
@@ -255,7 +256,7 @@ function Movie({
   const media = useAsync(() => itemMedia(d.id), [d.id]);
   const [picks, setPicks] = useState<Picks>(NO_PICKS);
   /** 当前生效的版本:用户没挑就是服务器给的第一个。 */
-  const cur = picks.ver ?? media.data?.[0] ?? null;
+  const cur = picks.ver ?? defaultVersion(media.data ?? []);
 
   return (
     <FocusColumn focusKey="DETAIL_MOVIE">

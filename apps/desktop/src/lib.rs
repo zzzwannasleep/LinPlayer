@@ -715,7 +715,9 @@ async fn item_media(
     item_id: String,
 ) -> Result<Vec<emby::MediaVersion>, String> {
     let s = session_of(&state)?;
-    emby::media_versions(&state.http, &s, &item_id).await
+    // 版本正则只用来标 preferred:前端据此显示「当前版本」,和真起播时挑的那条对齐。
+    let version_regex = state.config.lock().unwrap().prefs.version_regex.clone();
+    emby::media_versions(&state.http, &s, &item_id, &version_regex).await
 }
 
 /// 首页 Hero 随机推荐。

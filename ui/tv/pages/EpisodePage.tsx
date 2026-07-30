@@ -25,6 +25,7 @@ import {
   type MediaVersion,
   type StreamInfo,
   type Track,
+  defaultVersion,
 } from "@shared/api";
 import type { Route } from "../App";
 import { onTvKey } from "../app/focus";
@@ -133,12 +134,15 @@ export default function EpisodePage({
   const resume = d.resume_secs > 1 ? d.resume_secs : 0;
   /** 当前生效的版本:用户没挑就是服务器给的第一个。媒体信息块和轨道映射都按它算。
    *  (名字不叫 cur —— 上面那个 cur 是"本集在分集表里的那一行",两回事。) */
-  const curVer = picks.ver ?? media.data?.[0] ?? null;
+  /* 显示用:没手动挑就显示正则挑中的那条。 */
+  const curVer = picks.ver ?? defaultVersion(media.data ?? []);
 
   const start = async (secs: number) => {
     setMsg(null);
     try {
-      await play(curId, secs, curVer?.id ?? null);
+      /* ★ 只传**用户真挑过的**版本。传 curVer(没挑时=列表第一条)等于每次都手动指定了
+         第一版,核层的版本筛选正则整个被跳过。 */
+      await play(curId, secs, picks.ver?.id ?? null);
       go({ page: "player" });
       /* ★ 落轨放在导航之后且不 await:applyPicks 要等 mpv 的 track-list 出来
          (见它自己的注释),阻塞在这儿会让按下播放到画面出现之间多卡一两秒。 */
