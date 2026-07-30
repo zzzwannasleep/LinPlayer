@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  开机那一瞬间系统闪出来的图标。
+
+  ★ 为什么要有这个文件:Android 12 起系统**强制**给每个应用画一屏 SplashScreen,
+    图标默认取 `android:icon`。而 `@mipmap/ic_launcher` 是一张**满幅**的传统图标
+    (没有自适应图标那 1/3 的安全边距),系统按自适应图标的口径把它塞进 240dp 的
+    画布再放大 —— 结果就是启动瞬间一张巨大的、糊掉的图标闪一下。
+    用户 2026-07-30 报的「进入软件会有一个加载瞬间把图标放的巨大」就是这个。
+
+  ★ 解法是把尺寸**钉死**:图标居中画 108dp,外面留白由 layer-list 的画布提供。
+    这样无论系统给多大的画布,图标都是这么大。
+
+  ★ 这里**不动 `android:icon` 本身** —— 那是桌面/抽屉里的启动器图标,
+    用户没说要换。只改开屏这一处。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="108dp"
+        android:height="108dp"
+        android:drawable="@mipmap/ic_launcher"
+        android:gravity="center" />
+</layer-list>

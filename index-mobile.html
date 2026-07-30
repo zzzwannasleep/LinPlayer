@@ -15,8 +15,60 @@
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#0b0b0f" />
     <title>LinPlayer</title>
+    <!-- 启动动画。**内联**在 head 里,不进 CSS 包 —— 它要在样式表和 JS 都还没到达时
+         就能画出来,进了包就等于"要等包下完才有动画",那就没意义了。
+         谁来撤它:App.tsx 在会话闸口出结果那一刻(见那里的 effect)。
+         不在 React 挂载时撤:挂载完到会话回来之间还有一段问核层的空窗,
+         那段时间撤早了就是一片黑。 -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        background: #0b0b0f;
+        color: #f4f4f7;
+        font: 600 22px/1 system-ui, -apple-system, "Noto Sans SC", sans-serif;
+        letter-spacing: -0.02em;
+        /* 撤场只做一次 160ms 淡出 —— 硬切会在首屏留一记"闪" */
+        transition: opacity 160ms ease;
+      }
+      #boot.off {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot span {
+        color: #5b8cff;
+      }
+      #boot i {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: 2.4px solid rgba(255, 255, 255, 0.14);
+        border-top-color: #5b8cff;
+        animation: boot-spin 720ms linear infinite;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot i {
+          animation-duration: 2.4s;
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot">
+      <div>Lin<span>Player</span></div>
+      <i></i>
+    </div>
     <div id="root"></div>
     <script type="module" src="/ui/mobile/main.tsx"></script>
   </body>

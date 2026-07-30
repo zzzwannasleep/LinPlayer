@@ -68,6 +68,19 @@ export default function App() {
     return onAccountsChanged(loadGate);
   }, [loadGate]);
 
+  /* 撤掉 index-mobile.html 里那块启动动画。
+     ★ 撤的时机是**会话闸口出结果**,不是 React 挂载完 —— 挂载完到会话回来之间
+       还有一段问核层的空窗(真机上是几十到几百毫秒),那段时间第一帧什么都没有。
+       撤早了用户看到的就是"启动动画闪一下 → 黑一下 → 才进来"。 */
+  useEffect(() => {
+    if (session === undefined) return;
+    const b = document.getElementById("boot");
+    if (!b) return;
+    b.classList.add("off");
+    const t = setTimeout(() => b.remove(), 200);
+    return () => clearTimeout(t);
+  }, [session]);
+
   /* 安卓物理返回键。优先级从内到外,漏掉任何一层都是一类具体的 bug:
        1) 覆盖层(sheet/菜单)自己吃掉  —— 漏了:面板没关,页面先退了
        2) 当前 Tab 栈深 >1 → 弹一层     —— 漏了:详情页按返回直接退出应用
@@ -150,10 +163,20 @@ export default function App() {
      属性永远消失了,三条栈全部可见叠在一起。
      实测症状:在「首页」Tab 上量到的却是「服务器」那条栈的内容 —— 因为
      `document.querySelector` 一路匹配到了最后一条。 */
-  const stacksRef = useRef<HTMLDivElement>(null);
+  /* ★ 容器用 **callback ref 存进 state**,不用 useRef。
+     useRef 版本有一个只有冷启动才现形的 bug:第一次 render 时 `session === undefined`,
+     组件早退成 `<div className="app" />` —— `.stacks` **根本不在 DOM 里**,
+     于是这个 effect 拿到 null 直接 return,`prevTab` 还停在 null。
+     等会话回来第二次 render 把 `.stacks` 挂上时,`tab` 一个字都没变 ——
+     依赖数组是 `[tab]`,**effect 不会再跑**。结果:三条栈的 `hidden` 谁也没摘,
+     `.stack[hidden]{display:none}` 把整个应用画成一块空屏,只剩底栏那条胶囊浮着。
+     再点「首页」也没用:`setTab("home")` 值没变,React 直接 bail out。
+     必须点一次别的 Tab 才会活过来。
+     把容器本身放进依赖里,DOM 一挂上就重跑一次,这条时序缝就没了。 */
+  const [stacksEl, setStacksEl] = useState<HTMLDivElement | null>(null);
   const prevTab = useRef<TabId | null>(null);
   useEffect(() => {
-    const root = stacksRef.current;
+    const root = stacksEl;
     if (!root) return;
     const all = [...root.querySelectorAll<HTMLElement>(".stack")];
     const to = all.find((s) => s.dataset.tab === tab);
@@ -183,7 +206,7 @@ export default function App() {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [tab]);
+  }, [tab, stacksEl]);
 
   const full = FULLSCREEN_PAGES.has(route.page);
 
@@ -212,7 +235,7 @@ export default function App() {
   return (
     <PageCtx.Provider value={ctx}>
       <div className={`app${full ? "" : " has-tabs"}`}>
-        <div className="stacks" ref={stacksRef}>
+        <div className="stacks" ref={setStacksEl}>
           {/* ★ `.stack` 上**故意不写受控的 `hidden`** —— 可见性全由上面那个 effect 管
               (理由写在那里)。这里一律先 `hidden`,effect 在挂载时立刻把当前那条打开,
               这样第一帧也不会三条栈叠在一起闪一下。 */}

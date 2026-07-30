@@ -194,7 +194,10 @@ export function Row({
   return (
     <div className="row">
       <div className="row-hd">
-        {skeleton ? (
+        {/* ★ 标题**先立住**,只有连标题都还不知道时才画灰条。
+            库名是一次 `views()` 就拿到的,而每个库的条目要各自再打一趟 ——
+            这中间的几百毫秒里把已经知道的标题也藏起来,等于白白多空一屏。 */}
+        {skeleton && !title ? (
           <div className="skel-line" style={{ width: 104, height: 16 }} />
         ) : (
           <h2>{title}</h2>

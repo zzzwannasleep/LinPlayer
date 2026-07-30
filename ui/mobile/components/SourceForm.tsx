@@ -4,11 +4,13 @@ import {
   type SourceKind,
   batchAddServers,
   batchParse,
+  currentSource,
   login,
   sourceLogin,
   sourcePasswordLogin,
   sourceQrPoll,
   sourceQrStart,
+  updateAccount,
 } from "@shared/api";
 import { Icon } from "../app/icons";
 import { haptic, toast } from "../app/motion";
@@ -319,6 +321,9 @@ function QrPane({ kind, name }: { kind: string; name: string }) {
           /* ★ 扫码确认后拿到的 credentials 要**原样**塞进 sourceLogin 的 extra 落库,
              别自己拆开重组 —— 各家的字段名不一样,拆错就是"扫了但没登上"。 */
           await sourceLogin(kind, "", "", "", null, r.credentials).catch((e) => toast(String(e), "bad"));
+          /* ★ 扫码型同样要补名字。`nameRef` 一直存在却没人用过 ——
+             表现和账密型一样:名称填了、进去显示的是地址。 */
+          await nameIt(nameRef.current);
           toast("已添加", "ok");
         }
       } catch {
@@ -535,22 +540,49 @@ function QrSyncPane() {
    ★ 顺序:先校验(本地,零成本)→ 再发请求。
    ============================================================ */
 
+/** 把用户填的「服务器名称」落库。
+ *
+ *  ★ **核层的 login / source_login 都不收 name**(确实如此,不是漏传参数),
+ *    所以名字只能加完之后补一刀 `update_account`。少了这一刀的表现是:
+ *    表单上名称还标着必填星号、也确实填了,进首页/聚合视界看到的却是
+ *    `display_name()` 的回落值 —— 服务器的 **host**。用户会以为"显示的是线路名"。
+ *    PC 端(desktop/pages/sources/sourceForms.tsx)一直是补这一刀的,手机端漏了。
+ *
+ *  ★ `source_login` 的返回是 `()`,拿不到账号键 —— 登录成功后它就是**当前活跃源**,
+ *    回读 `current_source` 拿键。这条和 PC 端同一个写法。
+ *
+ *  ★ 改名失败**不能**把"已经加成功"变成"报错了":名字没写上顶多显示成地址。 */
+async function nameIt(name: string, serverId?: string): Promise<void> {
+  const nm = name.trim();
+  if (!nm) return;
+  try {
+    const key = serverId ?? (await currentSource())?.server;
+    if (key) await updateAccount(key, { name: nm });
+  } catch {
+    /* 名字没落上不影响源已经加成功 */
+  }
+}
+
 export async function submitSource(kind: string, f: FormState): Promise<void> {
   if (KIND_UP.has(kind)) {
     if (kind === "emby") {
-      await login(f.url.trim(), f.user.trim(), f.pass);
+      const res = await login(f.url.trim(), f.user.trim(), f.pass);
+      await nameIt(f.name, res.server);
       return;
     }
     await sourceLogin(kind as SourceKind, f.url.trim(), f.user.trim(), f.pass, null, null);
+    await nameIt(f.name);
     return;
   }
   if (KIND_COOKIE.has(kind)) {
     await sourceLogin(kind as SourceKind, "", "", "", f.cookie.trim(), null);
+    await nameIt(f.name);
     return;
   }
   if (KIND_PHONE.has(kind)) {
     const cred = await sourcePasswordLogin(kind, f.phone.trim(), f.pass);
     await sourceLogin(kind as SourceKind, "", f.phone.trim(), "", null, cred);
+    await nameIt(f.name);
     return;
   }
   if (KIND_QR.has(kind)) {
@@ -559,4 +591,5 @@ export async function submitSource(kind: string, f: FormState): Promise<void> {
   }
   // stremio 及兜底
   await sourceLogin(kind as SourceKind, f.url.trim(), "", "", null, null);
+  await nameIt(f.name);
 }

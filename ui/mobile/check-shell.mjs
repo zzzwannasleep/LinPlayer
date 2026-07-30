@@ -288,6 +288,75 @@ must(shell2.glass, "底栏是 .tabs > .tabs-inner 两层(外层定位、内层�
 must(() => shell2.pgs === 3, `三条栈各一格 .pg(共 ${shell2.pgs} 格)`);
 must(shell2.hasTabs, ".app 带 has-tabs(内容才会给悬浮底栏让出高度)");
 must(shell2.scrollW === shell2.innerW, `没有横向溢出(${shell2.scrollW} = ${shell2.innerW})`);
+
+/* ★ 这一节是补的洞。2026-07-30 之前上面那些断言**全绿**,而真跑起来是
+   「一整块空屏,只剩底栏那条胶囊浮着」—— 因为三条栈的 `hidden` 谁也没被摘掉
+   (App.tsx 里那个 effect 依赖 `[tab]`,而 `.stacks` 是会话回来之后才挂上的,
+   tab 一个字没变,effect 再也没跑第二次)。
+   老断言查不出来的原因很具体:`shell2.text` 里的那几个字是**底栏三个 Tab 的
+   label**,`document.querySelector('.home-bar ...')` 又不看可见性 —— 所以
+   「页面有文字」「进得了设置」两条都照样过。
+   判据必须是**当前 Tab 那条栈真的可见**,而不是"页面上有东西"。 */
+const vis = await ev(`(() => {
+  const ss = [...document.querySelectorAll(".stack")];
+  const shown = ss.filter(s => !s.hidden);
+  const pg = shown[0]?.querySelector(".pg");
+  const body = pg?.querySelector(".pg-body");
+  return {
+    shown: shown.map(s => s.dataset.tab),
+    pgPos: pg && getComputedStyle(pg).position,
+    pgH: pg?.getBoundingClientRect().height ?? 0,
+    bodyH: body?.clientHeight ?? 0,
+    viewH: window.innerHeight,
+  };
+})()`);
+console.log("   " + JSON.stringify(vis));
+must(() => JSON.stringify(vis.shown) === JSON.stringify(["home"]),
+  `冷启动后可见的栈正好是 home 一条(实际:${vis.shown.join(",") || "一条都没有 —— 整屏是空的"})`);
+/* ★ `.pg` 必须一直是 absolute。下拉刷新曾经无脑写 `host.style.position="relative"`,
+   把它顶回文档流 —— 高度从 844 塌成内容高度,`.pg-body` 跟着塌,
+   **整页一动不动**(用户报的「首页不能滑动」)。内联样式压得过样式表,
+   所以 CSS 怎么看都是对的。只有量运行时的 computed position 才看得见。 */
+must(() => vis.pgPos === "absolute", `首页那一格仍是 position:absolute(实际 ${vis.pgPos})`);
+must(() => vis.pgH === vis.viewH, `首页那一格撑满视口(${vis.pgH} = ${vis.viewH})—— 塌了就滑不动`);
+must(() => vis.bodyH > 0, `滚动容器有高度(${vis.bodyH}px)`);
+
+/* 图标库那 1468 张图**必须收进格子**。少一条 `.ico-it img` 的尺寸规则,
+   图就按天然尺寸(普遍 256~512px)画在 65px 的格子里,只露左上角一小块。
+   这里不进图标页(桩里图标库是空的),直接量这条 CSS 规则本身。 */
+/* 两步走:先挂上去,等图解码完再量。一步写成 Promise 是量不到的 ——
+   `Runtime.evaluate` 默认不 await,拿回来的是个空对象(这条自己踩过)。 */
+await ev(`(() => {
+  const cell = document.createElement("div");
+  cell.className = "ico-it";
+  cell.id = "__icoprobe";
+  cell.style.cssText = "width:64px;height:64px;position:fixed;left:-999px;top:0";
+  const im = document.createElement("img");
+  // 512×512 的图,和真图标库一个量级
+  im.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="red"/></svg>';
+  cell.appendChild(im);
+  document.body.appendChild(cell);
+})()`);
+await sleep(300);
+const icoFit = await ev(`(() => {
+  const cell = document.getElementById("__icoprobe");
+  const im = cell.querySelector("img");
+  const r = im.getBoundingClientRect();
+  const out = { w: Math.round(r.width), h: Math.round(r.height),
+                nat: im.naturalWidth, fit: getComputedStyle(im).objectFit };
+  cell.remove();
+  return out;
+})()`);
+console.log("   " + JSON.stringify(icoFit));
+must(() => icoFit.nat === 512, `探针那张图确实是 512px 的(实际 ${icoFit.nat})—— 不是的话下面两条测了个寂寞`);
+must(() => icoFit.w > 0 && icoFit.w <= 64 && icoFit.h <= 64,
+  `512px 的图标被收进 64px 的格子(实际 ${icoFit.w}×${icoFit.h})—— 溢出就只看得见左上角`);
+must(() => icoFit?.fit === "contain", `用 contain 不用 cover(图标有留白构图,cover 会裁边)`);
+
+/* 启动动画。会话已经回来了,这时它必须已经撤掉 —— 撤不掉就是一块盖住全屏的板,
+   而它是 fixed + z-index:999,底下什么都点不到。 */
+const bootGone = await ev(`!document.getElementById("boot")`);
+must(bootGone, "会话回来后启动动画已撤(#boot 不在了)");
 /* ★ 空数据下**必须说人话**,不能是白板 */
 must(() => shell2.text.length > 10, `首页空态有文字:「${shell2.text}」`);
 

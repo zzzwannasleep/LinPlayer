@@ -447,7 +447,16 @@ export function pullRefresh(scroller: HTMLElement, onRefresh: () => void | Promi
     stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>`;
   const host = scroller.parentElement;
   if (!host) return () => {};
-  host.style.position = "relative";
+  /* ★ **只在 host 本来就是 static 时才动它**。
+     无脑写 `host.style.position = "relative"` 会把 `.pg` 的 `position:absolute`
+     顶掉 —— 内联样式压得过样式表。`.pg` 一旦从绝对定位掉回文档流,
+     `inset:0` 就不再撑满,这个 `display:flex;flex-direction:column` 的容器
+     高度塌成内容高度,里面 `flex:1` 的 `.pg-body` 跟着塌 ——
+     **scrollHeight === clientHeight,整页一动不动**。
+     症状是「首页滑不动」,而 CSS 里怎么看都是对的,因为错的是运行时那一行内联样式。
+     只有首页和聚合视界挂了下拉刷新,所以也只有这两页滑不动 —— 这正是它最容易被
+     误判成"首页的锅"的原因。 */
+  if (getComputedStyle(host).position === "static") host.style.position = "relative";
   host.prepend(ind);
   const TH = 68;
   let act = false;

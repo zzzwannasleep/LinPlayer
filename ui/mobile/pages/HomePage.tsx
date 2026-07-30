@@ -148,8 +148,15 @@ export default function HomePage() {
       offBars();
       offPull();
     };
+    /* ★ 依赖不能是 `[]`。这一页有两个早退分支(没有 Emby 会话 / 首屏加载失败),
+       走到那两个分支时 `.pg-body` 根本没渲染,`bodyRef.current` 是 null ——
+       effect 空跑一次就再也不跑了。等用户加完服务器 / 点了重试,页面画出来了,
+       下拉刷新和"上下栏随滚动显隐"却**永远装不上**,而且一声不吭。
+       这和 App.tsx 里三条栈那个 bug 是同一类:**effect 的前提是 DOM 存在,
+       依赖数组却没有任何东西反映它什么时候存在**。
+       把这两个决定分支走向的 state 放进来,DOM 一出现就重装一遍(有 cleanup,可重入)。 */
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [session, err]);
 
   useEffect(() => {
     choreograph(bodyRef.current);
@@ -328,7 +335,12 @@ export default function HomePage() {
                   <Row
                     key={v.id}
                     title={v.name}
-                    items={byLib[v.id] ?? []}
+                    items={byLib[v.id]}
+                    /* ★ 这个库的条目还没回来 → 画骨架卡,**不要画一条空轨道**。
+                       空轨道看着像"这个库是空的",而且它高度是 0,后面的轨道会
+                       先挤上来、数据一到再往下弹一次 —— 那一跳就是"很难看"。
+                       各库各自到、各自换,不等最慢的那一个。 */
+                    skeleton={byLib[v.id] ? 0 : 1}
                     session={session}
                     onOpen={(it, el) => openItem(it, el ? flipOf(el) : null)}
                     onMore={() => go({ page: "library", parentId: v.id, title: v.name })}

@@ -175,7 +175,16 @@ export default function IconPage({ serverId }: { serverId?: string }) {
             </div>
           </div>
           {lib === null ? (
-            <div className="pad dim" style={{ fontSize: 13 }}>正在拉图标库…</div>
+            /* ★ 骨架格,不是一行「正在拉图标库…」。索引要联网拉一次(1468 项),
+               这几百毫秒里给一行小字 = 版面先塌一次、数据到了再撑回来。
+               骨架把最终版式**提前占住**,内容到位时是"填进去"而不是"弹出来"。 */
+            <div className="ico-grid" aria-busy="true">
+              {Array.from({ length: 20 }, (_, i) => (
+                <div key={i} className="ico-it">
+                  <div className="skel" style={{ width: "100%", height: "100%" }} />
+                </div>
+              ))}
+            </div>
           ) : !hits.length ? (
             <Empty
               icon="image"

@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -154,7 +155,51 @@ class MainActivity : TauriActivity() {
         sv, 0,
         ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
       )
+
+      pushSafeAreaToWeb(parent, webView)
     }
+  }
+
+  /**
+   * 把真实的系统栏/刘海边距喂给前端的 `--sa-*` 变量。
+   *
+   * ## 为什么非做不可
+   * 前端(ui/mobile/theme/mobile.css)四个安全区 token 写的是
+   * `env(safe-area-inset-*)`,而我们在 onCreate 里开了 **edge-to-edge** ——
+   * WebView 的视口于是铺满整块屏,**底部那条系统导航条压在视口里面**。
+   * 偏偏 Android WebView 的 `env(safe-area-inset-bottom)` 只反映**刘海**,
+   * 导航条一律返回 **0**,而且不报错。后果是:
+   *   - 悬浮底栏 `bottom:0 + 7px`,整条胶囊有一大半画在系统导航条底下;
+   *   - 内容给底栏让的 `tabbar-h + sa-bottom + 24px` 里 sa-bottom 是 0,
+   *     底栏自己却被系统导航条往上顶 —— 看着就是「Tab 栏把下面的内容挡住了」。
+   * 顶部同理:状态栏/挖孔那一条也白让了。
+   *
+   * mobile.css 里早就留好了这个覆盖点(「全站只认 --sa-*,任何地方都不直接写 env()」),
+   * 这里把它接上。给不出值时保持原样(0),不会比现在更差。
+   *
+   * ★ 单位必须**除以 density** 转成 CSS px。WindowInsets 给的是物理像素,
+   *   直接当 px 塞进去,在 3x 屏上会让出三倍高度 —— 底下空一大条。
+   * ★ 监听器返回 `insets` **原样往下传**:吃掉的话 WebView 自己的插入物处理就断了。
+   * ★ 电视上系统栏是隐藏的,四个值天然是 0,这段对 TV 包等于不存在。
+   */
+  private fun pushSafeAreaToWeb(root: ViewGroup, webView: WebView) {
+    ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+      val i = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+      )
+      val d = resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+      val js = buildString {
+        append("(function(s){")
+        append("s.setProperty('--sa-top','").append(i.top / d).append("px');")
+        append("s.setProperty('--sa-bottom','").append(i.bottom / d).append("px');")
+        append("s.setProperty('--sa-left','").append(i.left / d).append("px');")
+        append("s.setProperty('--sa-right','").append(i.right / d).append("px');")
+        append("})(document.documentElement.style)")
+      }
+      webView.evaluateJavascript(js, null)
+      insets
+    }
+    ViewCompat.requestApplyInsets(root)
   }
 
   /**

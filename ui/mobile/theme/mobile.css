@@ -354,8 +354,13 @@ html.playing body {
 
 /* ★ 悬浮底栏是盖在内容上的,所以内容必须自己让出「胶囊高 + 离底距离 + 安全区」,
    否则最后一条永远压在底栏下面。这是悬浮式导航的固有代价,必须补。 */
+/* ★ 末尾那个常数原来是 `+ 16px`,量出来内容离底栏可见上沿只剩 **8.6px**
+   (设置 → 播放 子页,390×844)。8.6px 在拇指尺度上等于零 —— 最后一行看着就是
+   「贴在底栏上/被挡住」。24px 才是一眼能看出「这条到底了」的间距。
+   ★ 这里加多少和 --sa-bottom 无关:底栏自己也吃同一个 sa-bottom,
+     两边同增同减,净间距恒等于 `+N - 7px`。所以要改就改这个 N。 */
 .app.has-tabs .pg-body {
-  padding-bottom: calc(var(--tabbar-h) + var(--sa-bottom) + 16px);
+  padding-bottom: calc(var(--tabbar-h) + var(--sa-bottom) + 24px);
 }
 
 .pad {
@@ -3774,6 +3779,13 @@ html.playing body {
 .ico-it { aspect-ratio: 1; border-radius: var(--r); background: var(--s1); border: 1.5px solid transparent;
           display: grid; place-items: center; font-size: 22px; color: var(--fg-2); overflow: hidden;
           transition: border-color var(--t3) var(--e-std); }
+/* ★ 图标库里的图**必须自己收进格子**。
+   少了这一条,`<img>` 按**天然尺寸**渲染(图标库里普遍是 256~512px),
+   而 `.ico-it` 只有 60 来 px 且 `overflow:hidden` —— 于是每一格只露出那张图的
+   **左上角一小块**,60 格看下来像 60 块随机色斑,根本认不出是什么图标。
+   这类错不报错、控制台干净,只有量 img 的 getBoundingClientRect 才看得见。
+   contain 不是 cover:图标是有留白构图的,cover 会把边缘裁掉。 */
+.ico-it img { width: 100%; height: 100%; object-fit: contain; display: block; padding: 9px; }
 .ico-it.on { border-color: var(--acc); background: var(--acc-dim); color: var(--acc); }
 .ico-it .lbl { font-size: 9px; line-height: 1.1; text-align: center; padding: 0 3px; color: var(--fg-3);
                overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

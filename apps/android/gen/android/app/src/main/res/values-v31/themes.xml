@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      API 31+ 的开屏。
+
+      ★ 这个文件存在的唯一理由是把系统开屏那张**被放大的图标**摁回正常大小
+        (见 drawable/splash_icon.xml 里的说明)。三条缺一不可:
+          - windowSplashScreenBackground   开屏底色。不给的话跟 windowBackground 走,
+                                           而我们那个是**透明** —— 开屏会是一块随机底色。
+          - windowSplashScreenAnimatedIcon 尺寸钉死的图标,治「巨大」。
+          - windowSplashScreenAnimationDuration 系统只把它当提示,但不给的话
+                                           某些 ROM 会按默认值多停一会儿。
+
+      ★ windowBackground 仍然必须**透明** —— 视频从 SurfaceView 透上来那条链
+        (见 values/themes.xml 里那段长注释)。这里是 API 31+ 的完整覆盖,
+        **必须把它一起写上**:同名 style 在这个目录里是整条替换,不是叠加,
+        漏了它的表现是「安卓 12 以上有声音没画面」,而 12 以下一切正常。
+    -->
+    <style name="Theme.linplayer_android" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">#0b0b0f</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <item name="android:windowSplashScreenAnimationDuration">200</item>
+    </style>
+</resources>
