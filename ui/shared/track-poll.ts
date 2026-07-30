@@ -1,4 +1,4 @@
-import { tracks as tracksApi, type Track } from "./api";
+import { applyPrefs, tracks as tracksApi, type Track } from "./api";
 
 /** 起播后把音轨/字幕轨探到稳定为止,期间每轮都回调最新结果。
  *
@@ -34,6 +34,13 @@ export function pollTracks(onUpdate: (t: Track[]) => void): () => void {
       } else {
         stable = 0;
         lastLen = t.length;
+        /* ★ 轨表变了就按偏好重选一次(核层 apply_prefs:正则 ＞ 首选语言)。
+           这一步原来只在桌面 App 的「起播后 1.2s」打一枪、手机端和 TV 端一次都不调 ——
+           而 apply_prefs 匹配的正是**当时的** track-list:网络流那会儿内封轨还没 demux 出来,
+           于是用户按官网写好的字幕/音频正则匹配了个空表,表现就是「设了没反应」。
+           轨表稳定后循环自己会停,所以不会一直顶掉用户播放中手动切的轨
+           (wiki 的优先级:手动切过的 ＞ 正则命中 ＞ 首选语言)。 */
+        if (t.length > 0) await applyPrefs().catch(() => {});
       }
     } catch {
       /* 播放器还没就绪:继续探,不该刷屏也不该弹错。 */

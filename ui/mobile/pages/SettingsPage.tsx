@@ -28,6 +28,7 @@ import {
   setPrefetchSettings,
   setPrefs,
   setShaderLevel,
+  setTrackRegexes,
   setUpdateSettings,
   setWritebackSettings,
   shaderLevels,
@@ -365,7 +366,25 @@ function PlaybackSub() {
         </div>
       </Sheet>
 
-      <RegexSheet open={regex} pr={pr} onClose={() => setRegex(false)} onSave={(p) => setPr({ ...pr, ...p })} />
+      {/* ★ onSave 必须**真的落库**。原来这里只有 setPr(改本地 React state),
+          面板一关就没了、重进设置页读回来还是空 —— 用户按官网写好的正则从来没到过核层,
+          而且全程一声不吭(同「手机端表单的服务器名称从来没落库」那个老坑)。
+          校验也在核层:JS 的 RegExp 认前后瞻、Rust 的 regex crate 不认,
+          拿浏览器校验会放过一条存得下却永不命中的正则。 */}
+      <RegexSheet
+        open={regex}
+        pr={pr}
+        onClose={() => setRegex(false)}
+        onSave={async (p) => {
+          const next = { ...pr, ...p };
+          await setTrackRegexes({
+            version_regex: next.version_regex.trim(),
+            sub_regex: next.sub_regex.trim(),
+            audio_regex: next.audio_regex.trim(),
+          });
+          setPr(next);
+        }}
+      />
     </>
   );
 }
@@ -379,7 +398,7 @@ function RegexSheet({
   open: boolean;
   pr: Prefs;
   onClose: () => void;
-  onSave: (p: Partial<Prefs>) => void;
+  onSave: (p: Partial<Prefs>) => Promise<void>;
 }) {
   const [v, setV] = useState(pr.version_regex);
   const [s, setS] = useState(pr.sub_regex);
@@ -406,8 +425,15 @@ function RegexSheet({
         <button
           type="button"
           className="btn primary"
-          onClick={() => {
-            onSave({ version_regex: v, sub_regex: s, audio_regex: a });
+          onClick={async () => {
+            /* 非法正则核层直接拒、不落盘(和官网「正则非法不会保存」的承诺一致),
+               所以失败要把错弹出来并**留在面板上**让用户改,不能照样说「已保存」再关掉。 */
+            try {
+              await onSave({ version_regex: v, sub_regex: s, audio_regex: a });
+            } catch (e) {
+              toast(`正则不合法:${e}`, "bad");
+              return;
+            }
             toast("规则已保存 —— 下次起播生效", "ok");
             onClose();
           }}

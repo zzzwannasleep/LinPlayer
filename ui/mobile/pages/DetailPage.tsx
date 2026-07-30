@@ -87,6 +87,11 @@ export default function DetailPage({
   const [err, setErr] = useState("");
   const [versions, setVersions] = useState<MediaVersion[]>([]);
   const [ver, setVer] = useState<MediaVersion | null>(null);
+  /* ★ 用户**动过**版本选择器没有。`ver` 一进页面就被填成第一条(要给「版本」那行显示),
+     所以它不能当「选过了」的判据 —— 起播时无脑把它的 id 传给核层,
+     resolve_stream 就走「手动指定版本」分支,版本筛选正则整个被跳过
+     (wiki regex-filters:手动选的 ＞ 正则命中 ＞ 列表第一个)。 */
+  const [verPicked, setVerPicked] = useState(false);
   const [similar, setSimilar] = useState<Item[]>([]);
   const [fav, setFav] = useState(false);
   const [busy, setBusy] = useState("");
@@ -122,6 +127,7 @@ export default function DetailPage({
         if (!alive) return;
         setVersions(v);
         setVer(v[0] ?? null);
+        setVerPicked(false);
       })
       .catch(() => {});
     similarItems(itemId).then((s) => alive && setSimilar(s)).catch(() => {});
@@ -321,7 +327,7 @@ export default function DetailPage({
               onClick={() => {
                 if (!target) return;
                 haptic("tap");
-                void play(target, isSeries ? null : ver?.id ?? null);
+                void play(target, isSeries || !verPicked ? null : ver?.id ?? null);
               }}
             />
             <IcoBtn
@@ -525,6 +531,7 @@ export default function DetailPage({
                 .join(" · ")}
               onClick={() => {
                 setVer(v);
+                setVerPicked(true);
                 haptic("sel");
                 setSheet(null);
               }}

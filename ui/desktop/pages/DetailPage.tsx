@@ -159,7 +159,12 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
   const [prefs, setPrefsLocal] = useState<Prefs | null>(null);
 
   const [versions, setVersions] = useState<MediaVersion[]>([]);
-  const [verIdx, setVerIdx] = useState(0);
+  /* ★ null = **用户没动过版本选择器**,不是「选了第 0 个」。这两者对核层是天差地别:
+     起播时传了 id,resolve_stream 就走「手动指定版本」分支,版本筛选正则整个被跳过
+     (wiki regex-filters 写的优先级是「手动选的 ＞ 正则命中 ＞ 列表第一个」)。
+     原来这里是 useState(0),等于每次都替用户「手动选了第一版」——
+     于是版本正则从上线起就一次都没生效过,还一声不吭。 */
+  const [verIdx, setVerIdx] = useState<number | null>(null);
   const [audioIdx, setAudioIdx] = useState<number | null>(null);
   const [subIdx, setSubIdx] = useState<number | null>(null);
   const [dd, setDd] = useState<DdKind>(null);
@@ -206,7 +211,7 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
     setExpand(false);
     setPlayedLocal(item.played);
     setVersions([]);
-    setVerIdx(0);
+    setVerIdx(null);
     setAudioIdx(null);
     setSubIdx(null);
     setDd(null);
@@ -266,7 +271,9 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
     };
   }, [isEpisode, d?.series_id, d?.season_no]);
 
-  const ver = versions[verIdx] ?? null;
+  /* 显示用:没手动选就显示第一条(和服务器顺序一致);起播传参用的是下面的 pickedVerId。 */
+  const ver = versions[verIdx ?? 0] ?? null;
+  const pickedVerId = verIdx === null ? null : (ver?.id ?? null);
   const audios = useMemo(() => ver?.streams.filter((s) => s.type_ === "Audio") ?? [], [ver]);
   const subs = useMemo(() => ver?.streams.filter((s) => s.type_ === "Subtitle") ?? [], [ver]);
 
@@ -649,7 +656,7 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
             {(!isSeries || episodes.length > 0) && (
               <button
                 className="btn primary big"
-                onClick={() => target && onPlay(target, isSeries ? null : ver?.id ?? null)}
+                onClick={() => target && onPlay(target, isSeries ? null : pickedVerId)}
                 disabled={!target}
               >
                 <IconPlay size={16} /> {playLabel}
@@ -752,7 +759,7 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
                       {versions.map((v, i) => (
                         <div
                           key={v.id}
-                          className={`li${i === verIdx ? " on" : ""}`}
+                          className={`li${i === (verIdx ?? 0) ? " on" : ""}`}
                           onClick={() => {
                             setVerIdx(i);
                             setDd(null);

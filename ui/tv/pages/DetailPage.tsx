@@ -406,7 +406,10 @@ function Buttons({
   const start = async (secs: number) => {
     setMsg(null);
     try {
-      await play(playId, secs, version?.id ?? null);
+      /* ★ 起播只传**用户真挑过的**版本。`version` 是显示用的当前版本,没挑时它=服务器给的
+         第一个 —— 把它传下去等于每次都「手动指定了第一版」,核层 resolve_stream 就走
+         手动分支,版本筛选正则整个被跳过(wiki regex-filters:手动选的 ＞ 正则命中 ＞ 第一个)。 */
+      await play(playId, secs, picks ? picks.ver?.id ?? null : version?.id ?? null);
       go({ page: "player" });
       /* ★ 落轨放在导航之后且不 await:applyPicks 要等 mpv 的 track-list 出来,
          阻塞在这儿会让按下播放到画面出现之间多卡一两秒。 */
