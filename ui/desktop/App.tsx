@@ -1059,11 +1059,18 @@ export default function App() {
     } catch (e) { fail("切换版本", e); }
   }
 
-  // 标题溢出才跑马灯,短标题白晃眼(草稿标注 17)。
+  /* 标题溢出才跑马灯,短标题白晃眼(草稿标注 17)。
+     速度按溢出量算,不是写死时长 —— 写死时长 = 标题越长划得越快,长剧名根本来不及看清
+     (用户 2026-07-30)。30px/s 是舒适阅读速度;关键帧两头各留 18% 停顿,所以
+     总时长 = 行程时间 / 0.64,下限 12s 免得短溢出一晃而过。 */
   useEffect(() => {
     const el = titleRef.current;
     if (!el) { setMarquee(false); return; }
-    setMarquee(el.scrollWidth > el.clientWidth + 2);
+    const over = el.scrollWidth - el.clientWidth;
+    if (over <= 2) { setMarquee(false); return; }
+    el.style.setProperty("--p-marq-x", `${-over}px`);
+    el.style.setProperty("--p-marq-dur", `${Math.max(12, Math.round(over / 30 / 0.64))}s`);
+    setMarquee(true);
   }, [playing]);
 
   const epIndex = playing ? siblings.findIndex((s) => s.id === playing.id) : -1;

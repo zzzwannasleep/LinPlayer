@@ -39,8 +39,14 @@
 /* 标题:剧名 · S1E4 · 集名。溢出才跑马灯(.run 由 JS 量 scrollWidth 决定,短标题不晃)。 */
 .p-title { font-size: 14px; font-weight: 600; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); overflow: hidden; white-space: nowrap; max-width: 38vw; }
 .p-title b { display: inline-block; font-weight: 600; }
-.p-title.run b { animation: p-marquee 14s linear infinite; padding-right: 56px; }
-@keyframes p-marquee { 0%, 8% { transform: translateX(0); } 92%, 100% { transform: translateX(calc(-100% + 38vw)); } }
+/* 时长/位移都由 JS 按实际溢出量算(见 App.tsx 那个量 scrollWidth 的 effect):
+   固定 30px/s 的匀速 + 两头各停一拍。原来写死 14s 和 -100%+38vw —— 标题越长跑得越快,
+   长剧名一眨眼就划过去,而且 38vw 是 max-width 不是真宽度,位移本身也偏。 */
+.p-title.run b { animation: p-marquee var(--p-marq-dur, 20s) linear infinite; }
+@keyframes p-marquee {
+  0%, 18% { transform: translateX(0); }
+  82%, 100% { transform: translateX(var(--p-marq-x, 0)); }
+}
 /* 拖动区:标题与右侧按钮之间的弹性空白。它顶掉了 .p-top-r 原来的 margin-left:auto。 */
 .p-drag { flex: 1; align-self: stretch; min-width: 0; }
 .p-top-r { display: flex; align-items: center; gap: 4px; }

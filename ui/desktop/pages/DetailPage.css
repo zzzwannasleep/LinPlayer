@@ -172,25 +172,66 @@
   opacity: 0; transition: opacity var(--dur-fast) var(--ease);
 }
 .dt-ep:hover .dt-ep-play { opacity: 1; }
+/* 选集栏封面视图里「正在看的这一集」*/
+.dt-ep.cur { border-color: var(--accent); background: var(--accent-soft); }
+.dt-ep .en .cb {
+  display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 4px;
+  background: var(--accent); color: var(--accent-ink); font-size: 10px; line-height: 15px; vertical-align: 1px;
+}
 .dt-ep .lines { display: flex; flex-direction: column; gap: 5px; padding-top: 3px; min-width: 0; }
 .dt-ep .en { font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dt-ep .em { font-size: 10px; color: var(--ink-3); font-family: var(--mono); }
 
-/* ---------- ⑥ 演职人员(草稿 804-813:64px 圆头像 + 右端箭头) ---------- */
+/* ---------- ⑤' 集数选择栏(集详情;集号 / 封面两种版式) ---------- */
+.dt-epcount { font-size: 12px; color: var(--ink-3); margin-right: 4px; }
+.dt-epbar { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: thin; }
+.dt-epno {
+  position: relative; flex: 0 0 auto; min-width: 42px; height: 34px; padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel);
+  color: var(--ink-2); font-size: 13px; font-family: var(--mono);
+  display: grid; place-items: center; cursor: pointer; user-select: none;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.dt-epno:hover { background: var(--panel-2); border-color: var(--accent); color: var(--ink); }
+.dt-epno.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); cursor: default; }
+/* 看完 = 左下角小绿点(格子太小塞不下绿勾,同色不同形) */
+.dt-epno.done::after {
+  content: ""; position: absolute; left: 4px; bottom: 4px;
+  width: 5px; height: 5px; border-radius: 50%; background: #37b24d;
+}
+/* 悬停才现的 ▶:直接起播,不用先进那一集的详情 */
+.dt-epno .pl {
+  position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; border-radius: 50%;
+  border: none; background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+  opacity: 0; transition: opacity var(--dur-fast) var(--ease);
+}
+.dt-epno:hover .pl { opacity: 1; }
+
+/* ---------- ⑥ 演职人员 ----------
+   原来是 64px 圆头像(照搬移动端草稿)。用户 2026-07-30:PC 不缺这点空间,改矩形卡 ——
+   2:3 竖版人像 + 名字/角色,和海报卡一个语言;圆头像那点尺寸在 4K 上根本看不清脸。 */
 .dt-castwrap { position: relative; }
-.dt-castrail { padding: 4px 34px 12px 0; }
-.dt-cast { flex: 0 0 auto; width: 64px; text-align: center; }
+.dt-castrail { padding: 4px 38px 12px 0; gap: 10px; }
+.dt-cast {
+  flex: 0 0 auto; width: 118px; text-align: left; cursor: default;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+  padding: 8px; overflow: hidden;
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.dt-cast:hover { background: var(--panel-2); border-color: var(--line-strong); }
 .dt-cast .av {
-  width: 64px; height: 64px; aspect-ratio: 1; border-radius: 50%;
+  width: 100%; height: auto; aspect-ratio: 2 / 3; border-radius: 7px;
   overflow: hidden; background: var(--panel-2); border: 1px solid var(--line);
-  margin: 0 auto 6px; display: grid; place-items: center;
+  margin: 0 0 7px; display: grid; place-items: center;
 }
 .dt-cast .av img { width: 100%; height: 100%; object-fit: cover; }
-.dt-cast .av .ini { font-size: 20px; color: var(--ink-3); font-weight: 600; }
-.dt-cast .cn { font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dt-cast .cr { font-size: 10px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-cast .av .ini { font-size: 30px; color: var(--ink-3); font-weight: 600; }
+.dt-cast .cn { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dt-cast .cr { font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .dt-railarrow {
-  position: absolute; right: 0; top: 34px; transform: translateY(-50%);
+  /* 竖着居中对准人像那块(118×1.5≈177 → 一半 88),别再按 64px 圆头像的 34 算 */
+  position: absolute; right: 0; top: 96px; transform: translateY(-50%);
   width: 28px; height: 44px; border-radius: 8px;
   background: color-mix(in srgb, var(--panel) 70%, var(--bg));
   border: 1px solid var(--line-strong); color: var(--ink-2);

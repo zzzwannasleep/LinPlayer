@@ -61,6 +61,22 @@ type Props = {
 /** 哪个下拉是打开态(同一时刻只开一个)。 */
 type DdKind = "line" | "ver" | "audio" | "sub" | "season" | null;
 
+/** 版式的记忆位:剧集页分集网格/列表、集详情选集的集号/封面。 */
+const EPVIEW_KEY = "lp.detail.epview";
+const SIBVIEW_KEY = "lp.detail.sibview";
+
+/** localStorage 读写:存不下(隐私模式/配额满)就是下次不记得,不该影响看片。 */
+function loadView<T extends string>(key: string, alt: T, dflt: T): T {
+  return localStorage.getItem(key) === alt ? alt : dflt;
+}
+function saveView(key: string, v: string) {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    /* 见上 */
+  }
+}
+
 function toItem(d: ItemDetail): Item {
   return {
     id: d.id,
@@ -149,7 +165,19 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
   const [dd, setDd] = useState<DdKind>(null);
 
   const [season, setSeason] = useState<number | null>(null);
-  const [epView, setEpView] = useState<"grid" | "list">("grid");
+  /* 两个版式开关都记在 localStorage(用户 2026-07-30)—— 纯前端渲染参数,
+     不值得进核层 Prefs(同 App.tsx 弹幕那五项的口径)。
+     initializer 写成函数,否则每次渲染都白读一遍 localStorage。 */
+  const [epView, setEpView] = useState<"grid" | "list">(() => loadView(EPVIEW_KEY, "list", "grid"));
+  const [sibView, setSibView] = useState<"num" | "cover">(() => loadView(SIBVIEW_KEY, "cover", "num"));
+  function pickEpView(v: "grid" | "list") {
+    setEpView(v);
+    saveView(EPVIEW_KEY, v);
+  }
+  function pickSibView(v: "num" | "cover") {
+    setSibView(v);
+    saveView(SIBVIEW_KEY, v);
+  }
   const [epCtx, setEpCtx] = useState<{ x: number; y: number; ep: Item } | null>(null);
   const [moreMenu, setMoreMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -157,6 +185,10 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
 
   /** 相似推荐(剧集/电影页底部)。null=没请求/加载中,[]=确实没有 → 整段不渲染。 */
   const [similar, setSimilar] = useState<Item[] | null>(null);
+
+  /** 集详情页的「选集」栏:同剧同季的分集(用户 2026-07-30)。走的是 App.tsx 播放器
+      选集面板同一条路 —— item_detail(剧).children 已按季+集号排好序。 */
+  const [sibs, setSibs] = useState<Item[]>([]);
 
   const isSeries = (d?.type_ ?? item.type_) === "Series";
   const isEpisode = (d?.type_ ?? item.type_) === "Episode";
@@ -183,6 +215,7 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
     setEpCtx(null);
     setMoreMenu(null);
     setSimilar(null);
+    setSibs([]);
 
     /* 相似推荐:**只给剧集/电影**(用户 2026-07-15:集详情页不要)。和详情**并发**,
        不串在 itemDetail 后面 —— 它慢不该拖累主内容出现,失败也静默(整段不渲染)。 */
@@ -219,6 +252,19 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
       alive = false;
     };
   }, [item.id, item.type_]);
+
+  /* 选集栏的数据。只在集详情拉,且必须等 d 回来(series_id 只有 item_detail 才给)。
+     失败静默:选集栏整条不渲染,不该把详情页搞红。 */
+  useEffect(() => {
+    if (!isEpisode || !d?.series_id) return;
+    let alive = true;
+    itemDetail(d.series_id)
+      .then((s) => alive && setSibs(s.children.filter((e) => e.season_no === d.season_no)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [isEpisode, d?.series_id, d?.season_no]);
 
   const ver = versions[verIdx] ?? null;
   const audios = useMemo(() => ver?.streams.filter((s) => s.type_ === "Audio") ?? [], [ver]);
@@ -407,6 +453,76 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
     }
     const failed = shownEps.length - ok;
     setToast(failed === 0 ? `已加入 ${ok} 集下载` : `已加入 ${ok}/${shownEps.length} 集,${failed} 集失败:${firstErr}`);
+  }
+
+  /** 分集卡。剧集页的分集网格 / 集详情「选集」的封面视图**共用这一张** ——
+      两处的交互口径必须一样(单击进详情、悬停 ▶ 起播、右键菜单、绿勾、进度条),
+      抄一份迟早只改一边。pick=选集栏那份:多标集号、当前这集高亮(剧集页的网格不需要,
+      那里每张卡都是「别的集」,加了反而是噪音)。 */
+  function epCard(ep: Item, pick = false) {
+    const cur = pick && ep.id === item.id;
+    const prog =
+      ep.resume_secs > 0 && ep.runtime_secs > 0 ? Math.min(100, (ep.resume_secs / ep.runtime_secs) * 100) : 0;
+    // 标注 16:分集卡一行 mono 小字「2160p · 45M · 18.4G」,缺项跳过。
+    const meta = [fmtRes(ep.video_height), fmtBitrate(ep.bitrate), fmtSize(ep.size_bytes)].filter(Boolean).join(" · ");
+    return (
+      <div
+        className={`dt-ep${cur ? " cur" : ""}`}
+        key={ep.id}
+        /* 单击进集详情。★ 这里曾为了「双击播放」把单击延后 220ms 等双击 ——
+           用户口径是「没有双击这一说」,而且那一拍延迟让单击手感发黏。
+           播放走缩略图上悬停显现的 ▶(草稿标注 16),不占双击。 */
+        onClick={() => onOpenChild(ep)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setEpCtx({ x: e.clientX, y: e.clientY, ep });
+        }}
+      >
+        <div className="th">
+          {ep.has_primary ? (
+            <img
+              src={thumbUrl(session, ep.id, 320)}
+              loading="lazy"
+              onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
+            />
+          ) : (
+            <IconPlay size={18} />
+          )}
+          {prog > 0 && (
+            <div className="progress">
+              <i style={{ width: `${prog}%` }} />
+            </div>
+          )}
+          {/* 看完打勾(绿勾,和海报卡同口径)。markPlayed 后详情重取 → d.children[].played
+              刷新 → 这里自动反显。 */}
+          {ep.played && (
+            <div className="dt-ep-chk" title="已看完">
+              <IconCheck size={12} />
+            </div>
+          )}
+          {/* 标注 16:悬停显现播放 */}
+          <button
+            className="dt-ep-play"
+            title="播放"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPlay(ep);
+            }}
+          >
+            <IconPlay size={14} />
+          </button>
+        </div>
+        <div className="lines">
+          <div className="en">
+            {cur && <span className="cb">在看</span>}
+            {pick && ep.episode_no != null ? `E${ep.episode_no} · ` : ""}
+            {ep.name}
+          </div>
+          {meta && <div className="em">{meta}</div>}
+          {!meta && ep.runtime_secs > 0 && <div className="em">{fmtTime(ep.runtime_secs)}</div>}
+        </div>
+      </div>
+    );
   }
 
   /** 媒体信息卡片区左右拖动横滑(标注 20:和 Emby 官端一致)。 */
@@ -752,7 +868,7 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
                   <button
                     className={epView === "grid" ? "on" : ""}
                     title="网格"
-                    onClick={() => setEpView("grid")}
+                    onClick={() => pickEpView("grid")}
                   >
                     <span className="dt-gridic">
                       <i />
@@ -761,77 +877,67 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
                       <i />
                     </span>
                   </button>
-                  <button className={epView === "list" ? "on" : ""} title="列表" onClick={() => setEpView("list")}>
+                  <button className={epView === "list" ? "on" : ""} title="列表" onClick={() => pickEpView("list")}>
                     <IconList size={14} />
                   </button>
                 </span>
               </div>
               <div className={`dt-epgrid${epView === "list" ? " list" : ""}`}>
-                {shownEps.map((ep) => {
-                  const prog =
-                    ep.resume_secs > 0 && ep.runtime_secs > 0
-                      ? Math.min(100, (ep.resume_secs / ep.runtime_secs) * 100)
-                      : 0;
-                  // 标注 16:分集卡一行 mono 小字「2160p · 45M · 18.4G」,缺项跳过。
-                  const meta = [fmtRes(ep.video_height), fmtBitrate(ep.bitrate), fmtSize(ep.size_bytes)]
-                    .filter(Boolean)
-                    .join(" · ");
-                  return (
-                    <div
-                      className="dt-ep"
-                      key={ep.id}
-                      /* 单击进集详情。★ 这里曾为了「双击播放」把单击延后 220ms 等双击 ——
-                         用户口径是「没有双击这一说」,而且那一拍延迟让单击手感发黏。
-                         播放走缩略图上悬停显现的 ▶(草稿标注 16),不占双击。 */
-                      onClick={() => onOpenChild(ep)}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        setEpCtx({ x: e.clientX, y: e.clientY, ep });
-                      }}
-                    >
-                      <div className="th">
-                        {ep.has_primary ? (
-                          <img
-                            src={thumbUrl(session, ep.id, 320)}
-                            loading="lazy"
-                            onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
-                          />
-                        ) : (
-                          <IconPlay size={18} />
-                        )}
-                        {prog > 0 && (
-                          <div className="progress">
-                            <i style={{ width: `${prog}%` }} />
-                          </div>
-                        )}
-                        {/* 看完打勾(绿勾,和海报卡同口径)。markPlayed 后详情重取 → d.children[].played
-                            刷新 → 这里自动反显。 */}
-                        {ep.played && (
-                          <div className="dt-ep-chk" title="已看完">
-                            <IconCheck size={12} />
-                          </div>
-                        )}
-                        {/* 标注 16:悬停显现播放 */}
-                        <button
-                          className="dt-ep-play"
-                          title="播放"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onPlay(ep);
-                          }}
-                        >
-                          <IconPlay size={14} />
-                        </button>
-                      </div>
-                      <div className="lines">
-                        <div className="en">{ep.name}</div>
-                        {meta && <div className="em">{meta}</div>}
-                        {!meta && ep.runtime_secs > 0 && <div className="em">{fmtTime(ep.runtime_secs)}</div>}
-                      </div>
-                    </div>
-                  );
-                })}
+                {shownEps.map((ep) => epCard(ep))}
               </div>
+            </>
+          )}
+
+          {/* ⑤' 集数选择栏(仅集详情,用户 2026-07-30)。两种版式自己切:
+              「集号」= 一行方块横滚,一屏看完整季;「封面」= 和剧集页分集网格同一张卡(epCard)。
+              点=进那一集的详情(同 onOpenChild,和分集网格一个入口);悬停 ▶ 直接起播。
+              只有一集就不显示 —— 没得选的选择器是摆设(草稿 979 那条规矩)。 */}
+          {isEpisode && sibs.length > 1 && (
+            <>
+              <div className="rowlab" style={{ margin: "20px 0 10px" }}>
+                <span className="h">选集</span>
+                {d?.season_no != null && <span className="genre">第 {d.season_no} 季</span>}
+                <span className="all dt-viewtoggle">
+                  <span className="dt-epcount">共 {sibs.length} 集</span>
+                  <button className={sibView === "num" ? "on" : ""} title="集号" onClick={() => pickSibView("num")}>
+                    <IconList size={14} />
+                  </button>
+                  <button className={sibView === "cover" ? "on" : ""} title="封面" onClick={() => pickSibView("cover")}>
+                    <span className="dt-gridic">
+                      <i />
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                  </button>
+                </span>
+              </div>
+              {sibView === "num" ? (
+                <div className="dt-epbar" onMouseDown={dragScroll}>
+                  {sibs.map((e) => (
+                    <span
+                      key={e.id}
+                      className={`dt-epno${e.id === item.id ? " on" : ""}${e.played ? " done" : ""}`}
+                      title={e.name}
+                      onClick={() => e.id !== item.id && onOpenChild(e)}
+                    >
+                      {e.episode_no ?? "—"}
+                      <button
+                        className="pl"
+                        title="播放"
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          onPlay(e);
+                        }}
+                      >
+                        <IconPlay size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="dt-epgrid">{sibs.map((e) => epCard(e, true))}</div>
+              )}
             </>
           )}
 
