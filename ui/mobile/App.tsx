@@ -35,7 +35,7 @@ import ServersPage from "./pages/ServersPage";
 import AddServerPage from "./pages/AddServerPage";
 import LinesPage from "./pages/LinesPage";
 import IconPage from "./pages/IconPage";
-import NetdiskPage from "./pages/NetdiskPage";
+import SourceBrowsePage from "./pages/SourceBrowsePage";
 import PluginsPage from "./pages/PluginsPage";
 import AniRssPage from "./pages/AniRssPage";
 import LoginPage from "./pages/LoginPage";
@@ -335,7 +335,10 @@ function Body({
     case "icon":
       return <IconPage serverId={r.serverId} />;
     case "netdisk":
-      return <NetdiskPage />;
+      /* 分流:资源站这类「影视目录型」源走海报墙,网盘这类「文件树型」源走文件行。
+         判据是探一次 source_categories,不是看 source_kind —— 插件源的 kind 都长
+         一个样(plugin:<id>/<src>),光看它分不出是资源站还是网盘。 */
+      return <SourceBrowsePage />;
     case "plugins":
       return <PluginsPage />;
     case "anirss":

@@ -19,7 +19,7 @@ import DetailPage from "../pages/DetailPage";
 import FavoritesPage from "../pages/FavoritesPage";
 import RankingsPage from "../pages/RankingsPage";
 import DownloadsPage from "../pages/DownloadsPage";
-import NetdiskPage from "../pages/NetdiskPage";
+import SourceBrowsePage from "../pages/SourceBrowsePage";
 import ServersPage from "../pages/ServersPage";
 import AddServerPage from "../pages/AddServerPage";
 import SettingsPage from "../pages/SettingsPage";
@@ -181,7 +181,10 @@ export default function Shell({
       case "downloads":
         return <DownloadsPage onPlayLocal={onPlayDownload} />;
       case "netdisk":
-        return <NetdiskPage onPlay={onPlaySource} onBack={() => nav("servers")} />;
+        /* 分流:资源站这类「影视目录型」源走海报墙,网盘这类「文件树型」源走文件表。
+           判据是探一次 source_categories,不是看 source_kind —— 插件源的 kind 都长
+           一个样(plugin:<id>/<src>),光看它分不出是资源站还是网盘。 */
+        return <SourceBrowsePage onPlay={onPlaySource} onBack={() => nav("servers")} title="浏览" />;
       case "anirss":
         return <AniRssPage onBack={() => nav("servers")} />;
       case "calendar":
