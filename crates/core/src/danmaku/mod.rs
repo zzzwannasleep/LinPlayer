@@ -300,6 +300,28 @@ fn parse_anime(a: &Value) -> DanmakuAnime {
 
 // ---------- 请求 ----------
 
+/// 弹弹Play 系接口**从不用 HTTP 状态码报错** —— 一律 200 + body 里的 `errorCode`。
+/// 不看这个字段,配额用尽/参数非法/鉴权失败全都长得跟「这个关键词没搜到」一模一样:
+/// `animes` 键不存在 → 解析出空表 → 界面说「未找到匹配的弹幕」。
+///
+/// 2026-08-01 实测(官方 AppId,真签名):`/search/anime`、`/search/episodes` 全部回
+/// `{"errorCode":429,"errorMessage":"已达到接口调用配额上限"}`,HTTP 200。
+/// 也就是说用户报的「弹弹play搜索不到弹幕」,界面上给的原因是**假的**。
+/// 现在如实抛出去 —— 搜不到和搜不了是两件事,用户有权知道是哪件。
+fn check_api_error(v: &Value) -> Result<(), String> {
+    match v["errorCode"].as_i64() {
+        None | Some(0) => Ok(()),
+        Some(code) => {
+            let msg = v["errorMessage"].as_str().unwrap_or("").trim();
+            Err(if msg.is_empty() {
+                format!("弹幕接口错误 {code}")
+            } else {
+                format!("{msg}(错误码 {code})")
+            })
+        }
+    }
+}
+
 async fn get_json(
     http: &reqwest::Client,
     url: &str,
@@ -317,7 +339,9 @@ async fn get_json(
         .send()
         .await
         .map_err(|e| format!("弹幕请求失败: {e}"))?;
-    resp.json().await.map_err(|e| format!("弹幕解析失败: {e}"))
+    let v: Value = resp.json().await.map_err(|e| format!("弹幕解析失败: {e}"))?;
+    check_api_error(&v)?;
+    Ok(v)
 }
 
 /// 搜番:GET /search/anime?keyword=&v2=true → 只回条目,**不带集列表**。
@@ -418,7 +442,7 @@ pub async fn match_file(
     let (headers, query) = cfg.auth_parts("/match");
     let body = serde_json::json!({
         "fileName": file_name,
-        "fileHash": file_hash.unwrap_or(""),
+        "fileHash": normalized_file_hash(file_hash, file_name),
         "fileSize": file_size.unwrap_or(0),
         "videoDuration": video_duration.unwrap_or(0.0),
     });
@@ -436,7 +460,32 @@ pub async fn match_file(
         .json()
         .await
         .map_err(|e| format!("弹幕匹配解析失败: {e}"))?;
+    check_api_error(&v)?;
     Ok(parse_match_result(&v, cfg))
+}
+
+/// `/match` 的 `fileHash` **必须是形状合法的 32 位十六进制** —— 空串直接被判
+/// `errorCode:2 一个或多个参数不符合规则`,整个响应作废。
+///
+/// 2026-08-01 真接口 A/B 实测(同一文件名、同一签名):
+///   `fileHash:""`                 → errorCode 2,matches 0 条
+///   `fileHash:"000...0"`(32 位)  → errorCode 0,matches 25 条,第一条就是对的
+///   `matchMode` 给不给、给哪个值,结果**一模一样** —— 决定成败的只有 hash 的形状。
+/// 也就是说「①文件识别」这条路从接进来的那天起就没通过一次,而且失败得毫无声响
+/// (HTTP 200 + `matches:[]`,和「这个文件真的没匹配上」长得一样)。
+///
+/// 我们播的是服务器上的流,拿不到真 hash(dandanplay 的口径是文件前 16MB 的 md5,
+/// 为它多拉 16MB 不值)。所以给一个**由文件名派生的确定性占位 hash**:形状合法、
+/// 跨会话稳定、且撞上某个真视频 hash 的概率是 2^-128 —— 服务端于是退化成按文件名匹配,
+/// 那正是我们要的。真 hash 由调用方给到时原样透传,绝不覆盖。
+fn normalized_file_hash(file_hash: Option<&str>, file_name: &str) -> String {
+    let given = file_hash.unwrap_or("").trim();
+    if given.len() == 32 && given.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return given.to_ascii_lowercase();
+    }
+    let mut h = Md5::new();
+    h.update(file_name.as_bytes());
+    format!("{:x}", h.finalize())
 }
 
 fn parse_match_result(data: &Value, cfg: &DanmakuSourceConfig) -> DanmakuMatchResult {
@@ -641,8 +690,18 @@ pub struct DanmakuMatchCandidate {
 pub struct MatchInput {
     /// 作品标题(剧集用 seriesName,否则条目名)。
     pub title: String,
+    /// 同一部作品的**其它写法**:原名(日文/罗马音)、真实发布文件名、条目名……
+    ///
+    /// 弹弹Play 的条目只有一个标题、没有别名表,所以平行语料只能由我们这边提供。
+    /// 媒体库标题是中文而弹弹Play 收录的是日文名(或反过来)时,单靠 `title` 一路
+    /// 分数恒为 0 —— 候选明明已经捞回来了,却被自己的评分扔掉。空表 = 只用 title。
+    #[serde(default)]
+    pub alt_titles: Vec<String>,
     /// 集号(剧集才有)。
     pub episode_no: Option<i64>,
+    /// 季号(剧集才有)。用来把「第一季」和「第二季」两个同名条目分开 ——
+    /// 剥掉季号之后它们的标题相似度完全一样,只有这一路信号能判。
+    pub season_no: Option<i64>,
     /// 真实文件名(文件识别用)。
     pub file_name: String,
     pub file_hash: Option<String>,
@@ -701,9 +760,9 @@ pub async fn match_all(
     http: &reqwest::Client,
     cfgs: &[DanmakuSourceConfig],
     input: &MatchInput,
-) -> Vec<DanmakuMatchCandidate> {
+) -> Result<Vec<DanmakuMatchCandidate>, String> {
     if input.title.trim().is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let input2 = input.clone();
     let per_source = parallel_by_source(http, cfgs, |http, cfg| {
@@ -711,25 +770,44 @@ pub async fn match_all(
         async move { match_one(&http, &cfg, &input).await }
     })
     .await;
-    let mut all: Vec<DanmakuMatchCandidate> = per_source.into_iter().flatten().collect();
+    let mut all = Vec::new();
+    let mut errs: Vec<String> = Vec::new();
+    for (cands, err) in per_source {
+        all.extend(cands);
+        errs.extend(err);
+    }
+    // 一条候选都没有、而且确实有源报了错 —— 那就不是「没搜到」,是「搜不了」。
+    // 吞掉的话界面只会说「未找到匹配的弹幕」,而真相可能是配额用尽 / 源挂了 / 签名错。
+    if all.is_empty() && !errs.is_empty() {
+        errs.dedup();
+        return Err(errs.join(";"));
+    }
     // 降序;NaN 不可能出现(分值全是有限算术)。
     all.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-    all
+    Ok(all)
 }
 
 /// 弹弹Play 官方推荐两条路径都跑:①文件识别 /match ②名字搜索 /search/episodes。
 /// 两路**并行**再合并去重(同源同集保留高分)。对齐 Dart DanmakuMatcher._matchOne。
+///
+/// 返回 (候选, 错误):两路**都**失败才算这个源失败 —— 一路通就还有结果可用。
+/// 2026-08-01 实测这不是理论情况:官方源 `/search/*` 回 429 配额用尽的同时,
+/// `/match` 照常工作(两者配额是分开的),留着单路结果比整源判死有用得多。
 async fn match_one(
     http: &reqwest::Client,
     cfg: &DanmakuSourceConfig,
     input: &MatchInput,
-) -> Vec<DanmakuMatchCandidate> {
+) -> (Vec<DanmakuMatchCandidate>, Option<String>) {
     let (by_search, by_file) = tokio::join!(
         search_candidates(http, cfg, input),
         match_by_file_candidates(http, cfg, input),
     );
+    let err = match (&by_search, &by_file) {
+        (Err(a), Err(_)) => Some(format!("{}: {a}", cfg.name)),
+        _ => None,
+    };
     let mut by_ep: HashMap<String, DanmakuMatchCandidate> = HashMap::new();
-    for c in by_search.into_iter().chain(by_file) {
+    for c in by_search.unwrap_or_default().into_iter().chain(by_file.unwrap_or_default()) {
         let key = format!("{}|{}", c.source_id, c.episode_id);
         match by_ep.get(&key) {
             Some(prev) if prev.score >= c.score => {}
@@ -738,34 +816,69 @@ async fn match_one(
             }
         }
     }
-    by_ep.into_values().collect()
+    (by_ep.into_values().collect(), err)
 }
 
-/// ②名字搜索:searchEpisodes(anime, episode) 服务端按集号收窄,无果退纯剧名。
-/// 对齐 Dart DanmakuMatcher._searchCandidates。失败静默(返回空)。
+/// ②名字搜索:searchEpisodes(anime, episode) 服务端按集号收窄。
+///
+/// 召回是分层的,前一层空了才走下一层 —— 因为**能匹配上的前提是先搜得到**
+/// (bangumi2anibt README:「accuracy is capped by recall」)。分数再准,候选表是空的也没用:
+///   ① 原标题 + 集号            —— 最窄,命中率也最高
+///   ② 原标题(去掉集号约束)     —— 有的源不认 episode 参数
+///   ③ 主名(剥季号/副标题)     —— 长标题会把全文检索呛住,只搜主名反而有
+///   ④ 其它写法(原名/文件名)   —— 库里是中文名而弹弹Play 收的是日文名时的救命稻草
+/// 命中即停:前一层但凡回了东西就用它,后面的层根本不发请求。
+/// (官方源有调用配额 —— 2026-08-01 实测整天都在回 429,能少打一次是一次。)
 async fn search_candidates(
     http: &reqwest::Client,
     cfg: &DanmakuSourceConfig,
     input: &MatchInput,
-) -> Vec<DanmakuMatchCandidate> {
+) -> Result<Vec<DanmakuMatchCandidate>, String> {
+    let title = input.title.trim();
     let ep_str = input.episode_no.map(|n| n.to_string());
-    let mut animes =
-        match search_episodes(http, cfg, Some(&input.title), ep_str.as_deref()).await {
-            Ok(a) => a,
-            Err(_) => return Vec::new(),
-        };
-    if animes.is_empty() && input.episode_no.is_some() {
-        animes = search_episodes(http, cfg, Some(&input.title), None)
-            .await
-            .unwrap_or_default();
+
+    // 逐层放宽的召回尝试。命中即停 —— 后面的层只是「前面全空」时的救命稻草,
+    // 每多走一层就是多打一次接口(官方源有配额),没必要一次全打。
+    let mut attempts: Vec<(String, Option<String>)> = vec![(title.to_string(), ep_str.clone())];
+    if ep_str.is_some() {
+        attempts.push((title.to_string(), None)); // ② 有的源不认 episode 参数
     }
-    animes
+    for extra in std::iter::once(core_name(title)).chain(input.alt_titles.iter().cloned()) {
+        let extra = extra.trim().to_string();
+        // 太短的写法(1~2 字)搜出来全是噪声,不值得多打一次接口。
+        if extra.chars().count() >= 3 && !attempts.iter().any(|(k, _)| k.eq_ignore_ascii_case(&extra))
+        {
+            attempts.push((extra, None));
+        }
+    }
+
+    let mut animes: Vec<DanmakuAnime> = Vec::new();
+    let mut first_err: Option<String> = None;
+    for (kw, ep) in &attempts {
+        match search_episodes(http, cfg, Some(kw), ep.as_deref()).await {
+            Ok(found) => animes = found,
+            Err(e) => {
+                first_err.get_or_insert(e);
+            }
+        }
+        if !animes.is_empty() {
+            break;
+        }
+    }
+    if animes.is_empty() {
+        return match first_err {
+            Some(e) => Err(e),
+            None => Ok(Vec::new()),
+        };
+    }
+
+    Ok(animes
         .into_iter()
         .filter_map(|anime| {
             if anime.episodes.is_empty() {
                 return None;
             }
-            let title_score = title_score(&input.title, &anime.anime_title);
+            let base = title_score(input, &anime.anime_title) + season_term(input, &anime.anime_title);
             let ep = pick_episode(&anime.episodes, input.episode_no)?;
             Some(DanmakuMatchCandidate {
                 source_id: cfg.id.clone(),
@@ -774,20 +887,23 @@ async fn search_candidates(
                 anime_title: anime.anime_title.clone(),
                 episode_id: ep.episode_id.clone(),
                 episode_title: ep.episode_title.clone(),
-                score: title_score + if episode_matches(ep, input.episode_no) { 0.3 } else { 0.0 },
+                score: base + if episode_matches(ep, input.episode_no) { 0.3 } else { 0.0 },
             })
         })
-        .collect()
+        .collect())
 }
 
 /// ①文件识别:真实文件名 + 时长调 /match。isMatched 且唯一命中最可信。
-/// 对齐 Dart DanmakuMatcher._matchByFileCandidates。失败静默(返回空)。
+/// 对齐 Dart DanmakuMatcher._matchByFileCandidates。
 async fn match_by_file_candidates(
     http: &reqwest::Client,
     cfg: &DanmakuSourceConfig,
     input: &MatchInput,
-) -> Vec<DanmakuMatchCandidate> {
-    let r = match match_file(
+) -> Result<Vec<DanmakuMatchCandidate>, String> {
+    if input.file_name.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let r = match_file(
         http,
         cfg,
         &input.file_name,
@@ -795,26 +911,26 @@ async fn match_by_file_candidates(
         input.file_size,
         input.duration_secs,
     )
-    .await
-    {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
+    .await?;
     let confident = r.is_matched && r.matches.len() == 1;
-    r.matches
+    Ok(r.matches
         .into_iter()
         .map(|m| DanmakuMatchCandidate {
             source_id: cfg.id.clone(),
             source_name: cfg.name.clone(),
             anime_id: m.anime_id,
-            // 文件识别唯一命中最可信:给到高于名字搜索满分(标题1.0+集号0.3=1.3)的分,
-            // 确保排最前;否则按标题相似度 + 小加成。
-            score: if confident { 1.5 } else { title_score(&input.title, &m.anime_title) + 0.2 },
+            // 文件识别唯一命中最可信:给到高于名字搜索满分(标题1.0+集号0.3+季号0.15=1.45)的分,
+            // 确保排最前;否则按标题相似度 + 季号一致性 + 小加成。
+            score: if confident {
+                1.6
+            } else {
+                title_score(input, &m.anime_title) + season_term(input, &m.anime_title) + 0.2
+            },
             anime_title: m.anime_title,
             episode_id: m.episode_id,
             episode_title: m.episode_title,
         })
-        .collect()
+        .collect())
 }
 
 fn pick_episode(episodes: &[DanmakuEpisode], ep_num: Option<i64>) -> Option<&DanmakuEpisode> {
@@ -854,58 +970,211 @@ fn digits_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\d+").unwrap())
 }
 
-/// 逐字对齐 Dart DanmakuMatcher._normalize:小写 → 去标点/空白 → 去「第N季/部」→ trim。
-fn normalize(s: &str) -> String {
-    static PUNCT: OnceLock<Regex> = OnceLock::new();
-    static SEASON: OnceLock<Regex> = OnceLock::new();
-    let punct = PUNCT
-        .get_or_init(|| Regex::new(r"[\s\-_:：·・,，.。!！?？\[\]\(\)（）]").unwrap());
-    let season = SEASON
-        .get_or_init(|| Regex::new(r"第[一二三四五六七八九十\d]+[季部]").unwrap());
-    let lower = s.to_lowercase();
-    let no_punct = punct.replace_all(&lower, "");
-    season.replace_all(&no_punct, "").trim().to_string()
+/* ---------- 标题相似度 ----------
+
+   口径换成 bangumi2anibt(D:\xiaochengxu\bangumi2anibt,matcher.c)那一套:
+   **归一化折叠 + Levenshtein 比率 + 长度加权的包含下限**,一条代码路径吃所有语种,
+   不写任何按语言分支的规则。
+
+   为什么换掉原来的「字符二元组 Jaccard ×0.6」:
+   1) 它给不出 0.6 以上的分。凡是没有完全相等、也没有包含关系的标题,上限就是 0.6,
+      而 MIN_AUTO_SCORE 是 0.5 —— 差一个字的标题(「葬送的芙莉莲」vs「葬送之芙莉莲」)
+      和毫不相干的标题挤在同一个窄区间里,阈值根本分不开。Levenshtein 比率给的是
+      0.86 对 0.1,这才叫可判。
+   2) 它不做任何字形折叠。全角(ＦＡＴＥ)、片假名/平假名(フリーレン vs ふりーれん)、
+      大小写、标点差异,在二元组集合上全是「不同的字符」,直接把分打到 0。
+   3) 包含关系一律记 0.7,不看长度。于是「刀」落在「刀剑神域」里 = 0.7,
+      「赛马娘」落在「赛马娘 Pretty Derby」里也 = 0.7 —— 后者显然更该信。
+      改成 0.6 + 0.4×(短/长),长度占比自己说话。
+
+   保留的:季号在这一层仍然**剥掉**(见 normalize)。季号不是标题相似度该管的事 ——
+   它是个独立且更硬的信号,单独由 season_of / season_term 处理,见下。 */
+
+/// 折叠一个字符到可比较的表面;返回 None 表示整个丢掉。
+///
+/// 做的是 NFKC + casefold 里「对标题真正有用」的那个子集:全角→半角、大写→小写、
+/// 片假名→平假名、所有分隔符/标点丢弃。完整 NFKC 和繁→简要拖进大张 Unicode 表,
+/// 不做 —— 下面的 Levenshtein 比率吃得下繁体带来的那几个字的漂移。
+fn fold(c: char) -> Option<char> {
+    let u = c as u32;
+    match u {
+        // 各种空白 + 表意空格
+        0x20 | 0x09 | 0x0A | 0x0D | 0x3000 => None,
+        // ASCII 标点(空格..'/'、':'..'@'、'['..'`'、'{'..'~')
+        0x21..=0x2F | 0x3A..=0x40 | 0x5B..=0x60 | 0x7B..=0x7E => None,
+        // CJK 标点:、。〈〉「」【】〜… 等
+        0x3001..=0x303F => None,
+        // 片假名中点「・」(不在下面的片假名区间里,得单独丢)
+        0x30FB => None,
+        // 全角 ASCII → 半角,然后再走一遍(大写还要转小写、标点还要丢)
+        0xFF01..=0xFF5E => fold(char::from_u32(u - 0xFEE0)?),
+        // 片假名 → 平假名(把假名的「宽窄」统一掉)
+        0x30A1..=0x30F6 => char::from_u32(u - 0x60),
+        _ => {
+            let lower = c.to_lowercase().next().unwrap_or(c);
+            Some(lower)
+        }
+    }
 }
 
-/// 标题相似度 0~1。完全相等 1,包含 0.7,否则字符二元组 Jaccard ×0.6。
-/// 逐字对齐 Dart DanmakuMatcher._titleScore。
-fn title_score(query: &str, candidate: &str) -> f64 {
-    let q = normalize(query);
-    let c = normalize(candidate);
-    if q.is_empty() || c.is_empty() {
+/// 标题长于这个就截断。超长标题的尾巴对匹配没有贡献,却让 Levenshtein 变成 O(n²) 的负担。
+const MAX_TITLE_CHARS: usize = 128;
+
+/// 归一化成可比较的字符序列。季号在这一步剥掉(季号由 season_term 单独判)。
+fn norm_chars(s: &str) -> Vec<char> {
+    season_re()
+        .replace_all(s, "")
+        .chars()
+        .filter_map(fold)
+        .take(MAX_TITLE_CHARS)
+        .collect()
+}
+
+/// 归一化后的字符串。仅供测试读值用(算分全走 norm_chars,不经过这里)。
+#[cfg(test)]
+fn normalize(s: &str) -> String {
+    norm_chars(s).into_iter().collect()
+}
+
+/// 两行 DP 的 Levenshtein 编辑距离。
+fn levenshtein(a: &[char], b: &[char]) -> usize {
+    if a.is_empty() {
+        return b.len();
+    }
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            let sub = prev[j] + usize::from(ca != cb);
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(sub);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+/// `small` 是否作为连续子序列出现在 `big` 里。
+fn contains_seq(big: &[char], small: &[char]) -> bool {
+    !small.is_empty() && small.len() <= big.len() && big.windows(small.len()).any(|w| w == small)
+}
+
+/// 单个「查询串 × 候选标题」的相似度,0~1。与脚本无关。
+fn similarity(query: &str, title: &str) -> f64 {
+    let (q, t) = (norm_chars(query), norm_chars(title));
+    if q.is_empty() || t.is_empty() {
         return 0.0;
     }
-    if q == c {
+    if q == t {
         return 1.0;
     }
-    if c.contains(&q) || q.contains(&c) {
-        return 0.7;
+    let maxl = q.len().max(t.len());
+    let mut ratio = 1.0 - levenshtein(&q, &t) as f64 / maxl as f64;
+    // 包含:短串整个落在长串里。按长度占比给下限 —— 占比越高越可信,
+    // 「赛马娘」在「赛马娘 Pretty Derby」里(3/16)和「刀」在「刀剑神域」里(1/4)
+    // 不该拿同一个分。等长时趋近 1.0,极短子串只到 0.6 出头。
+    let (short, long_) = if q.len() <= t.len() { (&q, &t) } else { (&t, &q) };
+    if contains_seq(long_, short) {
+        let floor = 0.6 + 0.4 * (short.len() as f64 / long_.len() as f64);
+        ratio = ratio.max(floor);
     }
-    let qg = bigrams(&q);
-    let cg = bigrams(&c);
-    if qg.is_empty() || cg.is_empty() {
-        return 0.0;
+    ratio.clamp(0.0, 1.0)
+}
+
+fn season_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)第\s*[一二三四五六七八九十两0-9]+\s*[季期部]|\bseason\s*[0-9]+\b|\b[0-9]+(?:st|nd|rd|th)\s+season\b",
+        )
+        .unwrap()
+    })
+}
+
+/// 从标题里读出季号。读不出来(没有任何季号标记)返回 None —— 调用方按第一季看待。
+///
+/// 这是**独立于标题相似度**的一路信号,而且比相似度硬:
+/// 「孤独摇滚」和「孤独摇滚 第二季」在剥掉季号后是同一个串,相似度分不开;
+/// 但季号一对,谁是谁立刻清楚。以前没有这一路 —— 第二季的片配上第一季的弹幕,
+/// 从头到尾对不上,而且**不报错**,看起来就像「弹幕匹配得不准」。
+fn season_of(title: &str) -> Option<i64> {
+    let m = season_re().find(title)?;
+    let raw = m.as_str();
+    if let Some(d) = digits_re().find(raw) {
+        return d.as_str().parse().ok();
     }
-    let inter = qg.intersection(&cg).count();
-    let union = qg.union(&cg).count();
-    if union == 0 {
-        0.0
+    cjk_number(raw)
+}
+
+/// 「二」「十」「十二」「二十一」→ 2 / 10 / 12 / 21。读不出来返回 None。
+fn cjk_number(s: &str) -> Option<i64> {
+    const DIGITS: [(char, i64); 11] = [
+        ('零', 0), ('一', 1), ('两', 2), ('二', 2), ('三', 3), ('四', 4),
+        ('五', 5), ('六', 6), ('七', 7), ('八', 8), ('九', 9),
+    ];
+    let val = |c: char| DIGITS.iter().find(|(d, _)| *d == c).map(|(_, v)| *v);
+    let chars: Vec<char> = s.chars().filter(|c| val(*c).is_some() || *c == '十').collect();
+    if chars.is_empty() {
+        return None;
+    }
+    // 「十」「十N」「N十」「N十M」四种写法,别的(百/千)动漫季号里不存在。
+    let n = match chars.iter().position(|c| *c == '十') {
+        None => val(chars[0])?,
+        Some(i) => {
+            let tens = if i == 0 { 1 } else { val(chars[i - 1])? };
+            let ones = chars.get(i + 1).copied().and_then(val).unwrap_or(0);
+            tens * 10 + ones
+        }
+    };
+    Some(n)
+}
+
+/// 季号一致性的加减分。
+///
+/// 想要的季号优先取**标题自己带的**:媒体库有两种摆法 ——
+///   A. 一部剧一个条目、季在里面 → series_name="孤独摇滚",season_no=2
+///   B. 每季各一个条目          → series_name="孤独摇滚 第二季",season_no=1
+/// 只认 season_no 的话,B 这种摆法会把正确的「第二季」候选判成错季直接压死。
+fn season_term(input: &MatchInput, candidate_title: &str) -> f64 {
+    let Some(want) = season_of(&input.title).or(input.season_no) else {
+        return 0.0; // 不知道要第几季 → 这一路不表态
+    };
+    let got = season_of(candidate_title).unwrap_or(1);
+    if want == got {
+        0.15
     } else {
-        (inter as f64 / union as f64) * 0.6
+        -0.35
     }
 }
 
-fn bigrams(s: &str) -> std::collections::HashSet<String> {
-    // Dart 按 UTF-16 code unit 切;CJK/拉丁(BMP)下与 Rust char 等价。
-    let chars: Vec<char> = s.chars().collect();
-    let mut set = std::collections::HashSet::new();
-    for w in chars.windows(2) {
-        set.insert(w.iter().collect::<String>());
-    }
-    if chars.len() == 1 {
-        set.insert(s.to_string());
-    }
-    set
+/// 剥掉季号与副标题,留下「主名」。**只用于扩大召回**,不参与算分 ——
+/// 所以它宽一点也不会造成错配,最多是多捞几个候选回来让评分去筛。
+///
+/// 长标题会把弹弹Play 的全文检索呛住:带季号、带破折号副标题的整串搜出来常常是 0 条,
+/// 而只搜主名就有。参考实现(matcher_http.c 的 core-name recall pass)也是这么干的。
+fn core_name(title: &str) -> String {
+    static SUB: OnceLock<Regex> = OnceLock::new();
+    let sub = SUB.get_or_init(|| {
+        // -副标题- / ～副标题～ / (副标题) /(副标题)/ [副标题] / :副标题 / :副标题
+        Regex::new(r"\s*[-–—]\s*[^-–—]*[-–—]\s*$|\s*[～~][^～~]*[～~]\s*$|\s*[（(\[][^）)\]]*[）)\]]\s*|\s*[:：].*$")
+            .unwrap()
+    });
+    let no_season = season_re().replace_all(title, " ");
+    sub.replace_all(no_season.trim(), "").trim().to_string()
+}
+
+/// 标题相似度 0~1:拿**所有已知的查询写法**去比候选的标题,取最好的那个。
+///
+/// 「所有写法」= 主标题 + alt_titles(原名/真实文件名/条目名,由宿主装)。
+/// 这是 bangumi2anibt README 里那句「数据库本身就是平行语料」的镜像 ——
+/// 弹弹Play 的条目只有一个标题(没有别名表),平行语料在**我们这边**:
+/// 媒体库同时握着中文名、原名和发布文件名。谁都可能是能对上的那一个,所以全试。
+fn title_score(input: &MatchInput, candidate: &str) -> f64 {
+    std::iter::once(input.title.as_str())
+        .chain(input.alt_titles.iter().map(String::as_str))
+        .filter(|s| !s.trim().is_empty())
+        .map(|q| similarity(q, candidate))
+        .fold(0.0, f64::max)
 }
 
 // ---------- 缓存(内存 LRU + 磁盘 JSON) ----------
@@ -1429,33 +1698,155 @@ mod tests {
         assert!(pick_episode(&[], Some(1)).is_none());
     }
 
+    fn q(title: &str) -> MatchInput {
+        MatchInput { title: title.into(), ..Default::default() }
+    }
+
     #[test]
     fn title_score_forms() {
-        // 完全相等(含标点/大小写/空白差异被 normalize 抹平)。
-        assert_eq!(title_score("葬送的芙莉莲", "葬送的芙莉莲"), 1.0);
-        assert_eq!(title_score("Frieren: Beyond Journey's End", "frieren beyond journey's end"), 1.0);
-        // 「第N季/部」被剥掉 → 与无季号标题相等。
-        assert_eq!(title_score("孤独摇滚 第二季", "孤独摇滚"), 1.0);
-        assert_eq!(title_score("间谍过家家 第2部", "间谍过家家"), 1.0);
-        // 包含关系 → 0.7。
-        assert_eq!(title_score("赛马娘", "赛马娘 Pretty Derby"), 0.7);
-        // 无交集 → bigram Jaccard ×0.6,必然 < 0.6。
-        let s = title_score("葬送的芙莉莲", "咒术回战");
-        assert!((0.0..0.6).contains(&s), "无关标题不该高分, got {s}");
-        // 部分重叠 → 落在 (0, 0.6)。
-        let s2 = title_score("摇曳露营", "摇曳百合");
-        assert!(s2 > 0.0 && s2 < 0.6, "部分重叠应在(0,0.6), got {s2}");
+        // 完全相等(标点/大小写/空白差异被归一化抹平)。
+        assert_eq!(title_score(&q("葬送的芙莉莲"), "葬送的芙莉莲"), 1.0);
+        assert_eq!(
+            title_score(&q("Frieren: Beyond Journey's End"), "frieren beyond journey's end"),
+            1.0
+        );
+        // 「第N季/部」被剥掉 → 与无季号标题相等(季号由 season_term 单独判,不混进相似度)。
+        assert_eq!(title_score(&q("孤独摇滚 第二季"), "孤独摇滚"), 1.0);
+        assert_eq!(title_score(&q("间谍过家家 第2部"), "间谍过家家"), 1.0);
+        // 包含关系 → 按长度占比给下限,不再一律 0.7。
+        let s = title_score(&q("赛马娘"), "赛马娘 Pretty Derby");
+        assert!((0.6..0.8).contains(&s), "短串落在长串里应偏低, got {s}");
+        // 无交集 → 低分。
+        let s = title_score(&q("葬送的芙莉莲"), "咒术回战");
+        assert!(s < 0.3, "无关标题不该高分, got {s}");
         // 空串 → 0。
-        assert_eq!(title_score("", "x"), 0.0);
-        assert_eq!(title_score("x", ""), 0.0);
-        // 单字符标题:bigrams 走 length==1 分支,不该 panic 也不该判 0(相等走 1.0)。
-        assert_eq!(title_score("A", "A"), 1.0);
+        assert_eq!(title_score(&q(""), "x"), 0.0);
+        assert_eq!(title_score(&q("x"), ""), 0.0);
+        assert_eq!(title_score(&q("A"), "A"), 1.0);
+    }
+
+    /* 新口径必须能做到旧的二元组 Jaccard 做不到的事。
+       反向验证:把 similarity 换回原来的 bigram Jaccard×0.6,下面每一条都会红 ——
+       它的天花板就是 0.6,而自动挂载门槛是 0.5,一个字之差和毫不相干挤在同一个窄区间里。 */
+    #[test]
+    fn similarity_beats_the_old_bigram_jaccard() {
+        // ① 差一两个字的标题必须明显高于门槛(旧算法:交集/并集×0.6,到不了 0.8)。
+        let s = similarity("葬送的芙莉莲", "葬送之芙莉莲");
+        assert!(s > 0.8, "一字之差应仍高度相似, got {s}");
+        // ② 全角 / 大小写 / 标点差异要被折叠掉(旧算法把全角当完全不同的字符)。
+        assert_eq!(similarity("ＳＰＹ×ＦＡＭＩＬＹ", "SPY×FAMILY"), 1.0);
+        // ×(U+00D7)和字母 x 是**两个字符**,不该折成一个 —— 但一字之差仍要高分。
+        let s = similarity("ＳＰＹ×ＦＡＭＩＬＹ", "SPY x FAMILY");
+        assert!(s > 0.85, "全角折叠后只该剩 ×/x 这一处差异, got {s}");
+        assert_eq!(similarity("Fate/stay night", "fate stay night"), 1.0);
+        // ③ 片假名 / 平假名同形(mpv 之外的库常见混用)。
+        assert_eq!(similarity("フリーレン", "ふりーれん"), 1.0);
+        // ④ 长度占比要影响包含分:整段占满的比零头的高。
+        let big = similarity("赛马娘 Pretty Derby", "赛马娘 Pretty Derby S");
+        let small = similarity("刀", "刀剑神域");
+        assert!(big > small + 0.2, "包含分必须看长度占比, big={big} small={small}");
+        // ⑤ 真正不相干的仍然要低。
+        assert!(similarity("葬送的芙莉莲", "间谍过家家") < 0.3);
+    }
+
+    /* 季号是一路**独立于标题相似度**的信号。剥掉季号后「孤独摇滚」和
+       「孤独摇滚 第二季」的相似度完全一样 —— 没有这一路,第二季的片会配上第一季的弹幕,
+       而且不报错。反向验证:让 season_term 恒返回 0.0,下面的断言立刻红。 */
+    #[test]
+    fn season_signal_separates_same_named_cours() {
+        assert_eq!(season_of("孤独摇滚 第二季"), Some(2));
+        assert_eq!(season_of("咒术回战 第2季"), Some(2));
+        assert_eq!(season_of("某作品 第十二期"), Some(12));
+        assert_eq!(season_of("Re:Zero Season 3"), Some(3));
+        assert_eq!(season_of("Bocchi the Rock 2nd Season"), Some(2));
+        assert_eq!(season_of("孤独摇滚"), None, "没有季号标记就是没有,别瞎猜");
+
+        // 摆法 A:一部剧一个条目,季号在 season_no 上。
+        let a = MatchInput { title: "孤独摇滚".into(), season_no: Some(2), ..Default::default() };
+        assert!(season_term(&a, "孤独摇滚 第二季") > 0.0, "对季要加分");
+        assert!(season_term(&a, "孤独摇滚") < 0.0, "错季要扣分");
+
+        // 摆法 B:每季各一个条目,季号写在标题里而 season_no 恒为 1。
+        // 只认 season_no 的话会把正确的「第二季」候选判成错季压死 —— 这条钉的就是那个坑。
+        let b = MatchInput { title: "孤独摇滚 第二季".into(), season_no: Some(1), ..Default::default() };
+        assert!(season_term(&b, "孤独摇滚 第二季") > 0.0, "标题自带的季号优先于 season_no");
+        assert!(season_term(&b, "孤独摇滚") < 0.0);
+
+        // 完全不知道季号 → 这一路不表态,不许凭空加减。
+        let c = q("某剧场版");
+        assert_eq!(season_term(&c, "某剧场版 第三季"), 0.0);
+    }
+
+    /* alt_titles = 我们这边的平行语料。弹弹Play 条目只有一个标题,
+       库里是中文名而它收的是日文名时,单靠 title 一路恒为 0 分 ——
+       候选明明捞回来了却被自己的评分扔掉。反向验证:去掉 title_score 里的 chain,本测试红。 */
+    #[test]
+    fn alt_titles_carry_cross_language_matches() {
+        let cn_only = q("葬送的芙莉莲");
+        assert!(title_score(&cn_only, "葬送のフリーレン") < 0.5, "跨语种字面上就是对不上的");
+        let with_alt = MatchInput {
+            title: "葬送的芙莉莲".into(),
+            alt_titles: vec!["葬送のフリーレン".into(), "Sousou no Frieren".into()],
+            ..Default::default()
+        };
+        assert_eq!(title_score(&with_alt, "葬送のフリーレン"), 1.0, "换个写法就该对上");
+        assert_eq!(title_score(&with_alt, "葬送的芙莉莲"), 1.0, "主标题这一路不能因此变差");
+    }
+
+    /* 主名召回:长标题会把全文检索呛住,只搜主名反而有。
+       剥的是「季号 + 副标题」,而且**只用于扩大召回**,不参与算分。 */
+    #[test]
+    fn core_name_strips_season_and_subtitle() {
+        assert_eq!(core_name("克雷瓦提斯 第二季 -魔兽之王与虚伪的勇者传承-"), "克雷瓦提斯");
+        assert_eq!(core_name("某作品 第3季"), "某作品");
+        assert_eq!(core_name("鬼灭之刃:锻刀村篇"), "鬼灭之刃");
+        assert_eq!(core_name("总之就是非常可爱(第二季)"), "总之就是非常可爱");
+        // 没有可剥的就原样返回 —— 不能把正常标题剥没了。
+        assert_eq!(core_name("间谍过家家"), "间谍过家家");
     }
 
     #[test]
     fn normalize_strips_punct_and_season() {
         assert_eq!(normalize("Re：从零开始的异世界生活 第二季"), "re从零开始的异世界生活");
         assert_eq!(normalize("[Sub] Title (2024)!"), "subtitle2024");
+    }
+
+    /* `/match` 的 fileHash 必须是形状合法的 32 位 hex,空串会被服务端判
+       `errorCode:2 参数不符合规则`,整条「文件识别」路作废(而且静默)。
+       2026-08-01 真接口 A/B 实测过:占位 hash 一给,同一请求就从 0 条变 25 条。 */
+    #[test]
+    fn file_hash_is_always_well_formed() {
+        let h = normalized_file_hash(None, "葬送的芙莉莲 S01E01.mkv");
+        assert_eq!(h.len(), 32);
+        assert!(h.bytes().all(|b| b.is_ascii_hexdigit()));
+        // 同名恒定 —— 跨会话稳定,服务端那边才能命中同一条缓存。
+        assert_eq!(h, normalized_file_hash(Some(""), "葬送的芙莉莲 S01E01.mkv"));
+        assert_ne!(h, normalized_file_hash(None, "别的片.mkv"));
+        // 调用方给了真 hash 就原样用(大小写归一),绝不覆盖。
+        let real = "ABCDEF0123456789ABCDEF0123456789";
+        assert_eq!(normalized_file_hash(Some(real), "x"), real.to_lowercase());
+        // 形状不对的(长度不够 / 非 hex)一律当没给。
+        assert_eq!(normalized_file_hash(Some("abc"), "x"), normalized_file_hash(None, "x"));
+        assert_eq!(normalized_file_hash(Some(&"z".repeat(32)), "x"), normalized_file_hash(None, "x"));
+    }
+
+    /* 弹弹Play 系接口从不用 HTTP 状态码报错,一律 200 + body 里的 errorCode。
+       不看它 → 配额用尽/参数非法/签名错全都长得跟「这个关键词没搜到」一模一样。
+       2026-08-01 实测两个 search 端点全部回 429「已达到接口调用配额上限」,
+       而界面上写的是「未找到匹配的弹幕」—— 界面在撒谎。 */
+    #[test]
+    fn api_error_code_is_not_swallowed() {
+        let quota = serde_json::json!({"errorCode":429,"errorMessage":"已达到接口调用配额上限","animes":[]});
+        let err = check_api_error(&quota).unwrap_err();
+        assert!(err.contains("配额"), "得把服务端给的原因原样带出来, got {err}");
+        assert!(err.contains("429"));
+        // 参数非法(fileHash 为空时 /match 回的就是这个)。
+        assert!(check_api_error(&serde_json::json!({"errorCode":2,"errorMessage":"一个或多个参数不符合规则"})).is_err());
+        // 正常响应不能被误判成错误。
+        assert!(check_api_error(&serde_json::json!({"errorCode":0,"animes":[]})).is_ok());
+        assert!(check_api_error(&serde_json::json!({"animes":[]})).is_ok(), "自建源可能压根没这个字段");
+        // 没给 errorMessage 也要能说出个所以然。
+        assert!(check_api_error(&serde_json::json!({"errorCode":500})).unwrap_err().contains("500"));
     }
 
     #[test]

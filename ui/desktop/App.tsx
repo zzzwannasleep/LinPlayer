@@ -451,10 +451,25 @@ export default function App() {
      全程 catch:弹幕挂不上绝不能反向污染起播链路 —— 但也绝不静默,退化成手动挑并说清原因
      (弹幕最常见的失败是「没配源」,吞掉的话用户只会看见弹幕莫名其妙不出来)。 */
   async function autoDanmaku(it: Item) {
+    const title = it.series_name ?? it.name; // 剧集要用剧名,Episode.name 是「第 35 集」搜不到
+    /* ★ 真实发布文件名。以前这里传的是 `it.name`,对剧集就是「第 35 集」——
+       而 `/match` 正是**按文件名**做跨语种解析的那条路,喂它条目名等于整条路白跑
+       (实测「第 35 集」返回的第一名是《NHK特集手塚治虫》第35话)。
+       Emby 的 MediaSource.Name 就是不含扩展名的真文件名;网盘/下载有 path 直接取 basename。
+       item_media 反正 1.2s 后也要拉一次(版本面板),这里提前一枪不算多。 */
+    const base = it.path?.replace(/\\/g, "/").split("/").pop() || "";
+    const vs = base ? [] : await itemMedia(it.id).catch(() => [] as MediaVersion[]);
+    const v = vs.find((x) => x.preferred) ?? vs[0];
+    const fileName = base || (v?.name ? `${v.name}.${v.container ?? "mkv"}` : it.name);
     const input: DanmakuMatchInput = {
-      title: it.series_name ?? it.name, // 剧集要用剧名,Episode.name 是「第 35 集」搜不到
+      title,
+      /* 平行语料由我们这边提供 —— 弹弹Play 条目只有一个标题。真实文件名里常带罗马音/原名,
+         条目名偶尔才是那个能对上的写法。核层对每一路都算相似度取最好的。 */
+      alt_titles: [fileName, it.name].filter((s) => s && s !== title),
       episode_no: it.episode_no,
-      file_name: it.name,
+      season_no: it.season_no,
+      file_name: fileName,
+      file_size: it.size_bytes,
       duration_secs: it.runtime_secs > 0 ? it.runtime_secs : null,
     };
     try {
@@ -470,6 +485,9 @@ export default function App() {
       }
       say(cands.length ? "弹幕候选可信度不足,请在弹幕面板手动挑选" : "未找到匹配的弹幕,可在弹幕面板手动搜索");
     } catch (e) {
+      /* ★「搜不到」和「搜不了」是两件事。核层现在会把弹弹Play 回的 errorCode 原样抛上来
+         (最常见的是 429「已达到接口调用配额上限」——2026-08-01 实测官方源整天都在回它),
+         以前这类失败被吞成空表,界面统一说「未找到匹配的弹幕」,把接口故障说成了没有弹幕。 */
       say(`弹幕自动匹配失败:${e} · 可在弹幕面板手动搜索`);
     }
   }

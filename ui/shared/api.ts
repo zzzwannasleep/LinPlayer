@@ -524,7 +524,16 @@ export type DanmakuMatchCandidate = {
 export type DanmakuMatchInput = {
   /** 剧集用 seriesName,否则条目名。 */
   title: string;
+  /** 同一部作品的**其它写法**:真实发布文件名、条目名、原名……
+   *  弹弹Play 的条目只有一个标题、没有别名表,所以平行语料只能由我们这边给。
+   *  库里是中文名而它收的是日文名(或反过来)时,单靠 title 一路恒 0 分 ——
+   *  候选明明捞回来了却被自己的评分扔掉。 */
+  alt_titles?: string[];
   episode_no?: number | null;
+  /** 季号。用来把「第一季」「第二季」两个同名条目分开 —— 剥掉季号后它们标题一模一样。 */
+  season_no?: number | null;
+  /** **真实发布文件名**,不是「第 35 集」这种条目名。
+   *  `/match` 是按文件名做跨语种解析的那条路,喂给它条目名等于白跑。 */
   file_name?: string;
   file_hash?: string | null;
   file_size?: number | null;

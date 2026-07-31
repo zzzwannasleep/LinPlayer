@@ -300,14 +300,14 @@ pub fn write_user_conf(text: &str) -> Result<(), String> {
 mod overlay {
     use std::sync::Once;
     use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-    use windows_sys::Win32::Graphics::Gdi::HBRUSH;
+    use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Graphics::Gdi::{ClientToScreen, HBRUSH};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, CreateWindowExW, DefWindowProcW, GetWindowLongPtrW, IsIconic, IsWindow,
-        IsWindowVisible, RegisterClassW, SetWindowLongPtrW, SetWindowPos, ShowWindow, GWLP_WNDPROC,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE,
-        WM_WINDOWPOSCHANGED, WNDCLASSW,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, GetClientRect,
+        GetWindowLongPtrW, GetWindowRect, IsIconic, IsWindow, IsWindowVisible, RegisterClassW,
+        SetWindowLongPtrW, SetWindowPos, ShowWindow, GWLP_WNDPROC, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SWP_NOZORDER, SW_HIDE, SW_SHOWNOACTIVATE, WM_WINDOWPOSCHANGED, WNDCLASSW,
         WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
     };
 
@@ -388,6 +388,102 @@ mod overlay {
         SetWindowPos(v, t, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
     }
 
+    /// 把视频窗铺到主窗**客户区**上,几何直接从主窗现量。
+    ///
+    /// ★ 这是「全屏后一圈白边、必须窗口化再全屏才消失」的根治点。
+    ///
+    /// 原来几何**只**由 apps/desktop 的 sync_video 摆,而它挂在 Tauri 的
+    /// Resized / Moved / Focused(true) 三个事件上。可主窗的几何还有别的路径会变,
+    /// 而那些路径**不产生**这三个事件:Alt-Tab 回来、点任务栏回来、DPI 变化、
+    /// 别的全屏应用切走再切回……于是视频窗停在上一次的矩形上,
+    /// 主窗已经铺满整个屏幕、视频窗还是窗口大小 —— 四周露出的那一圈就是用户说的白边。
+    /// 「窗口化 → 再全屏」能消掉它,恰恰是因为那两步会发 Resized,把事件那条路激活了。
+    /// 症状能被一个特定手势稳定治好,就说明缺的不是计算,是**触发**。
+    ///
+    /// 所以几何跟着 z 序一起挪进 WM_WINDOWPOSCHANGED —— 位置/尺寸/层叠任一变化都发它,
+    /// 不管变化是谁引起的。这样就不用再去枚举「还有哪些路径没覆盖到」。
+    ///
+    /// 之前不在这里做几何的理由是「钩子里拿不到 Tauri 的 inner_position」——
+    /// 那个理由不成立:GetClientRect + ClientToScreen 量的就是客户区,
+    /// 和 Tauri 的 inner_position/inner_size 是同一个矩形(2026-08-01 实测两边逐像素相同:
+    /// 窗口 203,203 1195x729 而客户区 210,204 1180x720,后者正是 Tauri 报的值)。
+    unsafe fn align_to_host(v: HWND, t: HWND) {
+        let mut rc: RECT = std::mem::zeroed();
+        if GetClientRect(t, &mut rc) == 0 {
+            return;
+        }
+        let mut org = POINT { x: 0, y: 0 };
+        if ClientToScreen(t, &mut org) == 0 {
+            return;
+        }
+        let mut cur: RECT = std::mem::zeroed();
+        let cur = if GetWindowRect(v, &mut cur) != 0 {
+            Some((cur.left, cur.top, cur.right - cur.left, cur.bottom - cur.top))
+        } else {
+            None
+        };
+        if let Some((x, y, w, h)) =
+            align_target((rc.right - rc.left, rc.bottom - rc.top), (org.x, org.y), cur)
+        {
+            SetWindowPos(v, std::ptr::null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
+        }
+    }
+
+    /// 纯几何决策:该不该动视频窗、动到哪。返回 None = 什么都别做。
+    ///
+    /// 抽出来是为了**能测** —— Win32 调用那半截测不了,这半截是整个修复里
+    /// 唯一会算错的地方。两条守则各自防一个真实的坏结果:
+    ///   · 客户区 0×0(主窗最小化)→ 不动。照着摆会把视频窗缩成 0×0,
+    ///     而它之后再也长不回来(mpv 的视口跟着塌了),表现是「最小化再恢复就没画面」。
+    ///   · 已经对上了 → 不动。我们跑在 WM_WINDOWPOSCHANGED 回调里,
+    ///     SetWindowPos 哪怕没改任何东西也会再发一条消息,白白多绕一圈重入闸。
+    fn align_target(
+        client: (i32, i32),
+        org: (i32, i32),
+        cur: Option<(i32, i32, i32, i32)>,
+    ) -> Option<(i32, i32, i32, i32)> {
+        let (w, h) = client;
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let want = (org.0, org.1, w, h);
+        if cur == Some(want) {
+            return None;
+        }
+        Some(want)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::align_target;
+
+        #[test]
+        fn align_target_moves_only_when_it_must() {
+            // 窗口化 1180x720 @(210,204) —— 2026-08-01 从真进程量到的实际值。
+            let windowed = (210, 204, 1180, 720);
+            assert_eq!(align_target((1180, 720), (210, 204), Some(windowed)), None, "对上了就别动");
+
+            // 全屏:主窗客户区变成整块屏幕,而视频窗还停在窗口化的矩形上 —— 那一圈没被盖住的
+            // 就是用户看到的白边。这一条红了就说明白边修没了。
+            assert_eq!(
+                align_target((2560, 1440), (0, 0), Some(windowed)),
+                Some((0, 0, 2560, 1440)),
+                "主窗铺满了,视频窗必须跟上"
+            );
+            // 只挪位置不改尺寸(拖动窗口)也要跟。
+            assert_eq!(
+                align_target((1180, 720), (500, 300), Some(windowed)),
+                Some((500, 300, 1180, 720))
+            );
+            // 量不到视频窗当前矩形 → 照摆一次,不要因为「不知道」就不动。
+            assert_eq!(align_target((1180, 720), (210, 204), None), Some(windowed));
+            // 主窗最小化时客户区是 0×0:必须原地不动,否则视频窗被缩成 0 再也长不回来。
+            assert_eq!(align_target((0, 0), (0, 0), Some(windowed)), None);
+            assert_eq!(align_target((1180, 0), (0, 0), Some(windowed)), None);
+            assert_eq!(align_target((-1, -1), (0, 0), None), None);
+        }
+    }
+
     pub fn sync(video: isize, tauri: isize, x: i32, y: i32, w: i32, h: i32) {
         unsafe {
             let (v, t) = (video as HWND, tauri as HWND);
@@ -429,14 +525,19 @@ mod overlay {
             && VIDEO_HWND != 0
             && !IN_SYNC.swap(true, std::sync::atomic::Ordering::Relaxed)
         {
-            /* 只跟 z 序和显隐,不动几何 —— 几何由 apps/desktop 的 sync_video 负责
-               (它才知道客户区在哪;这里拿不到 Tauri 的 inner_position)。 */
+            /* z 序、显隐、**几何**三件一起跟。几何原来不在这里(交给 Tauri 事件),
+               而 Tauri 只在 Resized/Moved/Focused(true) 三个事件上摆几何 ——
+               Alt-Tab 回来、点任务栏回来、DPI 变了都不产生那三个事件,
+               视频窗于是停在旧矩形上,全屏时四周露出一圈(用户报的白边)。见 align_to_host。 */
             let (v, t) = (VIDEO_HWND as HWND, hwnd);
             /* 句柄可能已经失效:Player 存在 Mutex<Option<Player>> 里,替换/销毁时
                视频窗就没了,而这个 static 还留着旧 HWND。拿失效句柄去 SetWindowPos
                是典型的「无声死亡」来源,先验一下再用。 */
-            if IsWindow(v) != 0 && apply_visibility(v, t) {
-                restack(v, t);
+            if IsWindow(v) != 0 {
+                align_to_host(v, t);
+                if apply_visibility(v, t) {
+                    restack(v, t);
+                }
             }
             IN_SYNC.store(false, std::sync::atomic::Ordering::Relaxed);
         }
@@ -473,6 +574,11 @@ mod overlay {
         unsafe {
             let v = video as HWND;
             if HOST_HWND != 0 {
+                /* 亮之前先对齐。视频窗藏着的这段时间主窗可能已经改过尺寸
+                   (退播放页 → 切全屏 → 再进播放页),不对齐就是「一亮出来先是旧矩形」。 */
+                if on {
+                    align_to_host(v, HOST_HWND as HWND);
+                }
                 if apply_visibility(v, HOST_HWND as HWND) {
                     restack(v, HOST_HWND as HWND);
                 }

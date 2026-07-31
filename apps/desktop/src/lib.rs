@@ -3111,7 +3111,9 @@ async fn danmaku_match(
     input: danmaku::MatchInput,
 ) -> Result<Vec<danmaku::DanmakuMatchCandidate>, String> {
     let sources = require_danmaku_sources(&state)?;
-    Ok(danmaku::match_all(&state.http, &sources, &input).await)
+    // 一条候选都没有且源报了错(配额用尽/签名错/源挂了)时这里是 Err —— 别再吞成空表,
+    // 吞掉的话前端只会说「未找到匹配的弹幕」,而那不是真相。
+    danmaku::match_all(&state.http, &sources, &input).await
 }
 
 /// 自动匹配的分数门槛(前端据此决定「自动挂上」还是「让用户挑」)。
@@ -3187,7 +3189,9 @@ async fn danmaku_auto_load(
         }
     }
 
-    let candidates = danmaku::match_all(&state.http, &sources, &input).await;
+    // 匹配**打不通**(配额用尽/源挂了)要如实往上抛。返回 None 的语义是「没有够格的匹配」,
+    // 拿它去盖住「根本没搜成」,前端就会说「未找到匹配的弹幕」——那是句谎话。
+    let candidates = danmaku::match_all(&state.http, &sources, &input).await?;
     let Some(best) = candidates.into_iter().next().filter(|c| c.score >= danmaku::MIN_AUTO_SCORE)
     else {
         return Ok(None);

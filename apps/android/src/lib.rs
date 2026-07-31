@@ -3410,7 +3410,9 @@ async fn danmaku_match(
     input: danmaku::MatchInput,
 ) -> Result<Vec<danmaku::DanmakuMatchCandidate>, String> {
     let sources = require_danmaku_sources(&state)?;
-    Ok(danmaku::match_all(&state.http, &sources, &input).await)
+    // 匹配打不通(配额用尽/签名错/源挂了)时这里是 Err —— 别吞成空表,
+    // 否则界面只会说「未找到匹配的弹幕」,而那不是真相。桌面端同款口径。
+    danmaku::match_all(&state.http, &sources, &input).await
 }
 
 /// 自动匹配的分数门槛(前端据此决定「自动挂上」还是「让用户挑」)。
@@ -3486,7 +3488,7 @@ async fn danmaku_auto_load(
         }
     }
 
-    let candidates = danmaku::match_all(&state.http, &sources, &input).await;
+    let candidates = danmaku::match_all(&state.http, &sources, &input).await?;
     let Some(best) = candidates.into_iter().next().filter(|c| c.score >= danmaku::MIN_AUTO_SCORE)
     else {
         return Ok(None);

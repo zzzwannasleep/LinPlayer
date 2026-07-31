@@ -219,21 +219,32 @@ export default function PlayerPage({
     }
   };
 
-  /* 弹幕自动匹配。全程 catch:弹幕挂不上绝不能影响播放。 */
+  /* 弹幕自动匹配。全程 catch:弹幕挂不上绝不能影响播放。
+     口径与桌面端 autoDanmaku 一字不差 —— 两端匹配结果不一致比匹配不上更难查。 */
   useEffect(() => {
     if (!item) return;
     let alive = true;
-    const input: DanmakuMatchInput = {
-      title: item.series_name ?? item.name, // 剧集要用剧名,Episode.name 是「第 N 集」搜不到
-      episode_no: item.episode_no,
-      file_name: item.name,
-      duration_secs: item.runtime_secs > 0 ? item.runtime_secs : null,
-    };
-    danmakuAutoLoad(input, defaultDanmakuFilter(), null, item.series_id ?? null)
-      .then((c) => {
-        if (alive && c) setDmComments(c);
-      })
-      .catch(() => {});
+    (async () => {
+      const title = item.series_name ?? item.name; // 剧集要用剧名,Episode.name 是「第 N 集」搜不到
+      /* ★ 真实发布文件名,不是条目名。`/match` 是按文件名做跨语种解析的那条路,
+         喂它「第 35 集」整条路白跑(实测返回的第一名是完全无关的片)。
+         MediaSource.Name 就是不含扩展名的真文件名;网盘/下载有 path 直接取 basename。 */
+      const base = item.path?.replace(/\\/g, "/").split("/").pop() || "";
+      const vs = base ? [] : await itemMedia(item.id).catch(() => [] as MediaVersion[]);
+      const v = vs.find((x) => x.preferred) ?? vs[0];
+      const fileName = base || (v?.name ? `${v.name}.${v.container ?? "mkv"}` : item.name);
+      const input: DanmakuMatchInput = {
+        title,
+        alt_titles: [fileName, item.name].filter((s) => s && s !== title),
+        episode_no: item.episode_no,
+        season_no: item.season_no,
+        file_name: fileName,
+        file_size: item.size_bytes,
+        duration_secs: item.runtime_secs > 0 ? item.runtime_secs : null,
+      };
+      const c = await danmakuAutoLoad(input, defaultDanmakuFilter(), null, item.series_id ?? null);
+      if (alive && c) setDmComments(c);
+    })().catch(() => {});
     return () => {
       alive = false;
     };
