@@ -152,7 +152,9 @@
 }
 .nd-art {
   position: relative;
-  aspect-ratio: 16 / 10;
+  /* 本页第一张真图加载后由 JS 把 --nd-art-ar 写成它的实际宽高比:
+     影视海报是 2:3、网盘缩略图多是 16:9,写死任何一个都会把另一种裁掉半张脸。 */
+  aspect-ratio: var(--nd-art-ar, 16 / 10);
   border-radius: var(--r-md);
   overflow: hidden;
   background: var(--panel-alt);
@@ -198,9 +200,17 @@
   font-size: 12.5px;
   color: var(--ink);
   font-weight: 500;
-  white-space: nowrap;
+  /* 两行。影视条目的名字带备注和年份(「某某剧 · 更新至17集 · 2026」),
+     一行 nowrap 会把最有用的那半截切掉;完全放开又会让网格行高参差。
+     鼠标悬停有 title 兜底完整文本。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
+  /* 名字只有一行时也占两行的高 —— 否则一排卡片的底边参差不齐。 */
+  min-height: 2.7em;
 }
 
 /* ---------- 右键菜单里的禁用项(核暂无命令,诚实禁用) ---------- */

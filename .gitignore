@@ -122,3 +122,7 @@ apps/android/gen/schemas/macos-schema.json
 
 # 手机端自检脚本的截图产出(node ui/mobile/check-shell.mjs)
 ui/mobile/check-shots/
+
+# 资源站接口地址清单(vod.json 之类)。里面是一串站点域名 —— 按全局红线,
+# 这类东西不进版本库,插件也不内置它:VOD 资源站插件只留一个地址输入框,用户自己填。
+vod.json

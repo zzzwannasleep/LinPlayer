@@ -52,6 +52,13 @@ const KIND_IC: Record<string, string> = {
   pan115: "cloud", pan189: "cloud", pan139: "cloud",
 };
 
+/** 这个源该进哪个浏览页;Emby 没有"它自己的浏览页"(内容摊在首页/媒体库),返回 null。
+ *  插件源的 kind 形如 `plugin:<插件id>/<源id>`,和网盘一样走通用文件浏览页。 */
+function browsePageOf(kind: string): "netdisk" | "anirss" | null {
+  if (!kind || kind === "emby") return null;
+  return kind === "anirss" ? "anirss" : "netdisk";
+}
+
 export default function ServersPage() {
   const { go, reloadGate } = useCtx();
   const [list, setList] = useState<AccountInfo[] | null>(null);
@@ -152,13 +159,29 @@ export default function ServersPage() {
               icon={icons[sv.server]}
               onMenu={(x, y) => openMenu(sv, x, y)}
               onTap={() => {
-                if (sv.active) return;
+                /* 点文件浏览型的源 = 进它的浏览页。
+                   ★ 这行原本是 `if (sv.active) return;` —— 已经是「当前」的那台再点就什么都不做。
+                     对 Emby 没问题(它的内容摊在首页/媒体库里),但网盘 / 插件源的浏览页是**另一个
+                     路由**,而手机端到那个路由的唯一另一条路是「设置 → 网盘文件」,设置的入口又是
+                     首页右上角的齿轮 —— 没有 Emby 会话时首页整个换成空状态,齿轮跟着没了。
+                     结果:只登录网盘 / 插件源的用户,浏览页一辈子进不去。PC 端的服务器页一直是点了
+                     就进(onEnter),这里对齐它。 */
+                const page = browsePageOf(sv.source_kind);
+                if (sv.active) {
+                  if (page) {
+                    haptic("tap");
+                    go(page);
+                  }
+                  return;
+                }
                 haptic("tap");
                 setActiveServer(sv.server)
                   .then(() => {
                     toast(`已切到 ${sv.name}`, "ok");
                     reloadGate();
                     load();
+                    // 放在最后:reloadGate 会重算登录闸口,先跳会被它顶回去。
+                    if (page) go(page);
                   })
                   .catch((e) => toast(String(e), "bad"));
               }}

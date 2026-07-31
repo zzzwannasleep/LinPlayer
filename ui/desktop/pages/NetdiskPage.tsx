@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from "react";
 import { type SourceEntry, sourceListDir, sourceSearch } from "@shared/api";
 import {
   IconChevronDown,
@@ -22,19 +22,25 @@ import "./NetdiskPage.css";
 type Crumb = { id: string | null; name: string };
 /* 可排序列(草稿 40:表头可排序)。
    没有 mtime:核层 SourceEntry(crates/core/src/source/mod.rs)压根没有修改时间字段,
-   排不了不存在的数据 —— 「修改时间」列保持 —,见下方渲染处注释。 */
-type SortField = "name" | "size" | "kind";
+   排不了不存在的数据 —— 「修改时间」列保持 —,见下方渲染处注释。
+
+   ★ "default" = 源怎么给就怎么显示,**不排序也不把文件夹置顶**。它是默认档。
+   以前默认是「文件夹优先 + 名称升序」,对网盘没问题,对策展型的源是灾难:
+   影视资源站返回的是「最新在前」,一按名称排就全乱了,连末尾那条「下一页 ›」
+   都会被排到最上面去。源自己排好了序的时候,前端不该自作主张。 */
+type SortField = "default" | "name" | "size" | "kind";
 type Sort = { field: SortField; asc: boolean };
 type Ctx = { x: number; y: number; entry: SourceEntry };
 
 const SUB_EXT = /\.(srt|ass|ssa|sub|vtt|sup|idx)$/i;
 
 const SORT_LABEL: Record<SortField, string> = {
+  default: "源顺序",
   name: "名称",
   size: "大小",
   kind: "类型",
 };
-const SORT_CYCLE: SortField[] = ["name", "size", "kind"];
+const SORT_CYCLE: SortField[] = ["default", "name", "size", "kind"];
 
 function fmtSize(bytes: number | null, isDir: boolean): string {
   if (isDir) return "—";
@@ -47,6 +53,16 @@ function fmtSize(bytes: number | null, isDir: boolean): string {
     i++;
   }
   return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+}
+
+/* 把一张图的实际宽高比归到几个标准版式:海报 2:3、方图 1:1、剧照 16:9。
+   直接用实测值不行 —— 同一个目录里的海报本来就有 0.71 和 0.80 的差别,而"第一张
+   加载完的是谁"取决于网络竞速,同一个目录两次进来版式会不一样(真机上量到过)。 */
+function snapRatio(w: number, h: number): number {
+  const r = w / h;
+  if (r < 0.9) return 2 / 3;
+  if (r < 1.2) return 1;
+  return 16 / 9;
 }
 
 function kindLabel(e: SourceEntry): string {
@@ -71,8 +87,14 @@ export default function NetdiskPage({
   // 服务端搜索结果:非 null 时优先显示它(全盘搜);null = 未搜索或该源不支持,退回当前目录本地过滤。
   const [searchHits, setSearchHits] = useState<SourceEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [sort, setSort] = useState<Sort>({ field: "name", asc: true });
-  const [grid, setGrid] = useState(false);
+  const [sort, setSort] = useState<Sort>({ field: "default", asc: true });
+  /* null = 跟着内容自适应(见下方 autoGrid);用户手动切过之后就听用户的。
+     不落 localStorage 是故意的:一个目录是海报墙、下一层是分集列表,两种版式各自合适,
+     把偏好钉死等于永远有一半目录是错的版式。 */
+  const [grid, setGrid] = useState<boolean | null>(null);
+  /* 海报是 2:3、视频缩略图是 16:9,写死一个必然裁掉另一种。
+     用本页第一张真正加载出来的图的实际宽高比,谁都不裁。 */
+  const [artRatio, setArtRatio] = useState<number | null>(null);
   const [ctx, setCtx] = useState<Ctx | null>(null);
 
   const currentId = trail[trail.length - 1]?.id ?? null;
@@ -84,6 +106,7 @@ export default function NetdiskPage({
     // 切目录清掉上一次的搜索态,否则会显示别处的搜索结果。
     setQuery("");
     setSearchHits(null);
+    setArtRatio(null);
     try {
       setEntries(await sourceListDir(dirId));
     } catch (e) {
@@ -183,6 +206,8 @@ export default function NetdiskPage({
     if (!src) return [];
     const list =
       q && !searchHits ? src.filter((e) => e.name.toLowerCase().includes(q)) : src.slice();
+    // 源顺序档:原样交出去。连"文件夹置顶"都不做 —— 那也是一种重排。
+    if (sort.field === "default") return list;
     const dir = sort.asc ? 1 : -1;
     list.sort((a, b) => {
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
@@ -201,6 +226,14 @@ export default function NetdiskPage({
     });
     return list;
   }, [entries, searchHits, query, sort]);
+
+  /* 这一屏过半条目带图,就默认铺成网格 —— 影视资源站的分类页会自己变成海报墙,
+     再点进去的分集列表没有图,又自己退回文件表。用户不用为此点任何按钮。 */
+  const autoGrid = useMemo(
+    () => view.length > 0 && view.filter((e) => e.thumb_url).length * 2 >= view.length,
+    [view],
+  );
+  const showGrid = grid ?? autoGrid;
 
   /** 点表头:同列切升降序,换列则从升序开始(通用文件管理器的习惯)。 */
   const clickHead = (field: SortField) =>
@@ -243,11 +276,11 @@ export default function NetdiskPage({
             <IconChevronDown size={12} />
           </button>
           <button
-            className={`ibtn${grid ? " on" : ""}`}
-            title={grid ? "切到列表" : "切到网格"}
-            onClick={() => setGrid((v) => !v)}
+            className={`ibtn${showGrid ? " on" : ""}`}
+            title={showGrid ? "切到列表" : "切到网格"}
+            onClick={() => setGrid(!showGrid)}
           >
-            <ViewIcon grid={grid} />
+            <ViewIcon grid={showGrid} />
           </button>
           <button className="ibtn" title="刷新" onClick={() => loadDir(currentId)}>
             <IconRefresh size={15} />
@@ -293,14 +326,18 @@ export default function NetdiskPage({
             <div className="empty">
               {query ? "没有匹配的文件。" : "这个目录是空的。"}
             </div>
-          ) : grid ? (
-            <div className="nd-grid enter">
+          ) : showGrid ? (
+            <div
+              className="nd-grid enter"
+              style={artRatio ? ({ "--nd-art-ar": String(artRatio) } as CSSProperties) : undefined}
+            >
               {view.map((e) => (
                 <button
                   key={e.id}
                   type="button"
                   className={`nd-cell${e.is_dir ? " nd-dir" : ""}`}
                   disabled={!e.is_dir && !e.is_video}
+                  title={e.name}
                   onDoubleClick={() => activate(e)}
                   onContextMenu={(ev) => {
                     ev.preventDefault();
@@ -309,7 +346,18 @@ export default function NetdiskPage({
                 >
                   <div className="nd-art">
                     {e.thumb_url ? (
-                      <img src={e.thumb_url} loading="lazy" alt="" />
+                      <img
+                        src={e.thumb_url}
+                        loading="lazy"
+                        alt=""
+                        onLoad={(ev) => {
+                          if (artRatio != null) return;
+                          const im = ev.currentTarget;
+                          if (im.naturalWidth > 0 && im.naturalHeight > 0) {
+                            setArtRatio(snapRatio(im.naturalWidth, im.naturalHeight));
+                          }
+                        }}
+                      />
                     ) : e.is_dir ? (
                       <IconFolder size={30} />
                     ) : (

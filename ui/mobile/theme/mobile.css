@@ -766,6 +766,61 @@ html.playing body {
   transform: translateX(2px);
 }
 
+/* ---------- 海报墙(网盘/文件源里过半条目带图时自动切换) ---------- */
+/* 列数写死 3:auto-fill 在宽度不确定的容器里会塌成 1 列(这个坑踩过一次),
+   而这一层的宽度取决于上面的 Page 布局,不值得为它赌。 */
+.nd-wall {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px var(--pad);
+}
+.nd-poster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--fg);
+  text-align: left;
+  transition: transform var(--t2) var(--e-std);
+}
+.nd-poster:active {
+  transform: scale(0.96);
+}
+.nd-poster-art {
+  position: relative;
+  /* 第一张真图加载后由 JS 写成它的实际宽高比:海报 2:3、缩略图 16:9,
+     写死任何一个都会把另一种裁掉。 */
+  aspect-ratio: var(--nd-art-ar, 2 / 3);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--s3);
+  display: grid;
+  place-items: center;
+  color: var(--fg-3);
+}
+.nd-poster-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.nd-poster-l {
+  font-size: 12.5px;
+  line-height: 1.35;
+  /* 两行:影视条目名带备注和年份(「某某剧 · 更新至17集 · 2026」),
+     一行会把最有用的那半截切掉。定高两行是为了让一排卡片底边齐。 */
+  min-height: 2.7em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
 /* ============================================================
    就地调节行 —— 分段 / 步进 / 滑块
    ============================================================
