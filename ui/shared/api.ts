@@ -291,6 +291,49 @@ export type SourceEntry = {
   raw?: unknown;
 };
 
+/* ── 影视目录(资源站这类源) ────────────────────────────────────────────
+   和 SourceEntry(文件树的一行)是两套东西,别混。网盘走 sourceListDir,
+   资源站走 sourceCategories / sourceCatalog / sourceMediaDetail。
+   对应 crates/core/src/source/mod.rs 里的 MediaCategory / MediaCard / … */
+
+/** 不支持某项能力的错误前缀。前端据此**静默换路**,而不是把它当错误弹给用户。 */
+export const UNSUPPORTED_PREFIX = "__LP_UNSUPPORTED__";
+export const isUnsupported = (e: unknown) => String(e).includes(UNSUPPORTED_PREFIX);
+
+export type MediaCategory = { id: string; name: string; children: MediaCategory[] };
+
+export type MediaCard = {
+  id: string;
+  title: string;
+  poster: string | null;
+  /** 右下角角标:「更新至17集」/「HD」。**独立字段**,不许再拼进 title。 */
+  badge: string | null;
+  year: string | null;
+  score: string | null;
+  is_series: boolean;
+};
+
+export type MediaPage = { items: MediaCard[]; page: number; has_more: boolean; total: number | null };
+
+export type MediaEpisode = { id: string; name: string; raw?: unknown };
+export type MediaLine = { id: string; name: string; episodes: MediaEpisode[] };
+
+export type MediaDetail = {
+  id: string;
+  title: string;
+  poster: string | null;
+  badge: string | null;
+  year: string | null;
+  area: string | null;
+  lang: string | null;
+  genre: string | null;
+  score: string | null;
+  overview: string | null;
+  actors: string | null;
+  director: string | null;
+  lines: MediaLine[];
+};
+
 export type ServerGroup = {
   server_id: string;
   server_name: string;
@@ -992,6 +1035,24 @@ export const sourceListDir = (dirId: string | null) =>
 /** 源端全盘搜索。后端返回「该源不支持搜索」时,调用方应退回当前目录本地过滤。 */
 export const sourceSearch = (query: string) =>
   invoke<SourceEntry[]>("source_search", { query });
+
+/* ── 影视目录 ────────────────────────────────────────────────────────────
+   进一个源时先探 sourceCategories:抛 __LP_UNSUPPORTED__ 说明这是个文件型源,
+   退回网盘页;通了就走影视浏览页。 */
+export const sourceCategories = () => invoke<MediaCategory[]>("source_categories", {});
+
+/** 目录的一页。categoryId 为 null = 全站最新;keyword 非空 = 搜索(搜索同样能翻页)。 */
+export const sourceCatalog = (categoryId: string | null, keyword: string | null, page: number) =>
+  invoke<MediaPage>("source_catalog", { categoryId, keyword, page });
+
+export const sourceMediaDetail = (id: string) => invoke<MediaDetail>("source_media_detail", { id });
+
+/** 把一集包成播放链路认识的形状 —— 播放那条路一行都不用改。 */
+export const playEpisode = (ep: MediaEpisode, title: string, resumeSecs = 0) =>
+  sourcePlay(
+    { id: ep.id, name: title, is_dir: false, is_video: true, size: null, thumb_url: null, raw: ep.raw },
+    resumeSecs,
+  );
 
 export const sourcePlay = (entry: SourceEntry, resumeSecs: number) =>
   invoke<number>("source_play", {

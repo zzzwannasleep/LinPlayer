@@ -3319,8 +3319,8 @@ async fn source_login(
     // P1 的端到端演示插件没撞上,因为它的 listDir 返回写死数据、一个请求都不发。
     grant_plugin_source_host(&state, &kind, &server.base_url);
 
-    // 列根目录以验证登录可用
-    if let Err(e) = backend.list_dir(&state.http, &server, None).await {
+    // 验证登录可用。探测口径(为什么不能只试 list_dir)见 core 里 probe_backend 的注释。
+    if let Err(e) = linplayer_core::source::probe_backend(backend.as_ref(), &state.http, &server).await {
         // 验证没过就不该留下授权 —— 按已落盘的账号重算一遍,把刚才那条临时的撤掉。
         sync_plugin_source_grants(&state);
         return Err(e.message);
@@ -3450,6 +3450,55 @@ async fn source_search(
     let backend = source_backend(&state, &kind)?;
     let r = backend
         .search(&state.http, &server, &query)
+        .await
+        .map_err(|e| e.message);
+    persist_rotated(&state, &kind, &backend);
+    r
+}
+
+/* ── 影视目录能力(资源站这类源) ─────────────────────────────────────
+   网盘走 source_list_dir(文件树),资源站走这三条(分类 / 分页目录 / 详情)。
+   不支持的源返回带 __LP_UNSUPPORTED__ 前缀的错误,前端据此静默退回文件浏览页。
+   ★ 这三条在安卓侧(apps/android/src/lib.rs)有一份独立拷贝,改这里要同步改那里。 */
+
+#[tauri::command]
+async fn source_categories(
+    state: State<'_, AppState>,
+) -> Result<Vec<linplayer_core::source::MediaCategory>, String> {
+    let (kind, server) = state.source.lock().unwrap().clone().ok_or("未登录源")?;
+    let backend = source_backend(&state, &kind)?;
+    let r = backend.categories(&state.http, &server).await.map_err(|e| e.message);
+    persist_rotated(&state, &kind, &backend);
+    r
+}
+
+#[tauri::command]
+async fn source_catalog(
+    state: State<'_, AppState>,
+    category_id: Option<String>,
+    keyword: Option<String>,
+    page: u32,
+) -> Result<linplayer_core::source::MediaPage, String> {
+    let (kind, server) = state.source.lock().unwrap().clone().ok_or("未登录源")?;
+    let backend = source_backend(&state, &kind)?;
+    let kw = keyword.as_deref().filter(|s| !s.trim().is_empty());
+    let r = backend
+        .catalog(&state.http, &server, category_id.as_deref(), kw, page.max(1))
+        .await
+        .map_err(|e| e.message);
+    persist_rotated(&state, &kind, &backend);
+    r
+}
+
+#[tauri::command]
+async fn source_media_detail(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<linplayer_core::source::MediaDetail, String> {
+    let (kind, server) = state.source.lock().unwrap().clone().ok_or("未登录源")?;
+    let backend = source_backend(&state, &kind)?;
+    let r = backend
+        .media_detail(&state.http, &server, &id)
         .await
         .map_err(|e| e.message);
     persist_rotated(&state, &kind, &backend);
@@ -5297,6 +5346,9 @@ pub fn run() {
             source_list_dir,
             source_search,
             source_play,
+            source_categories,
+            source_catalog,
+            source_media_detail,
             source_watchdog,
             quark_scan_start,
             quark_scan_poll,

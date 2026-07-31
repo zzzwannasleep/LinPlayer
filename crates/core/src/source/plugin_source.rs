@@ -24,8 +24,9 @@ use std::sync::Weak;
 use serde_json::{json, Value as Json};
 
 use super::{
-    is_video_file_name, MediaSourceBackend, PlayQuality, ResolvedPlay, SourceEntry, SourceError,
-    SourceKind, SourceServer, SourceSubtitle,
+    is_video_file_name, MediaCard, MediaCategory, MediaDetail, MediaEpisode, MediaLine, MediaPage,
+    MediaSourceBackend, PlayQuality, ResolvedPlay, SourceEntry, SourceError, SourceKind,
+    SourceServer, SourceSubtitle,
 };
 use crate::plugins::{PluginManager, UNSUPPORTED_MARKER};
 
@@ -211,6 +212,93 @@ fn resolved_from_js(v: &Json, fallback_title: &str) -> Result<ResolvedPlay, Sour
     })
 }
 
+// ── 影视目录能力的 JS ↔ Rust 映射 ────────────────────────────────────────
+// 一律「缺字段就留空」而不是报错:插件少填一个 year 不该让整页打不开。
+
+fn s(v: &Json, k: &str) -> Option<String> {
+    v.get(k)
+        .and_then(|x| match x {
+            Json::String(s) => Some(s.clone()),
+            Json::Number(n) => Some(n.to_string()),
+            _ => None,
+        })
+        .filter(|x| !x.trim().is_empty())
+}
+
+fn category_from_js(v: &Json) -> Option<MediaCategory> {
+    let id = s(v, "id")?;
+    Some(MediaCategory {
+        name: s(v, "name").unwrap_or_else(|| id.clone()),
+        id,
+        children: v
+            .get("children")
+            .and_then(|x| x.as_array())
+            .map(|a| a.iter().filter_map(category_from_js).collect())
+            .unwrap_or_default(),
+    })
+}
+
+fn card_from_js(v: &Json) -> Option<MediaCard> {
+    let id = s(v, "id")?;
+    Some(MediaCard {
+        title: s(v, "title").unwrap_or_else(|| id.clone()),
+        id,
+        poster: s(v, "poster"),
+        badge: s(v, "badge"),
+        year: s(v, "year"),
+        score: s(v, "score"),
+        is_series: v.get("isSeries").and_then(|x| x.as_bool()).unwrap_or(false),
+    })
+}
+
+fn detail_from_js(v: &Json, fallback_id: &str) -> MediaDetail {
+    MediaDetail {
+        id: s(v, "id").unwrap_or_else(|| fallback_id.to_string()),
+        title: s(v, "title").unwrap_or_default(),
+        poster: s(v, "poster"),
+        badge: s(v, "badge"),
+        year: s(v, "year"),
+        area: s(v, "area"),
+        lang: s(v, "lang"),
+        genre: s(v, "genre"),
+        score: s(v, "score"),
+        overview: s(v, "overview"),
+        actors: s(v, "actors"),
+        director: s(v, "director"),
+        lines: v
+            .get("lines")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|l| {
+                        let id = s(l, "id")?;
+                        Some(MediaLine {
+                            name: s(l, "name").unwrap_or_else(|| id.clone()),
+                            id,
+                            episodes: l
+                                .get("episodes")
+                                .and_then(|x| x.as_array())
+                                .map(|eps| {
+                                    eps.iter()
+                                        .filter_map(|e| {
+                                            let id = s(e, "id")?;
+                                            Some(MediaEpisode {
+                                                name: s(e, "name").unwrap_or_else(|| id.clone()),
+                                                id,
+                                                raw: e.get("raw").cloned(),
+                                            })
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
 #[async_trait::async_trait]
 impl MediaSourceBackend for PluginSourceBackend {
     fn kind(&self) -> SourceKind {
@@ -272,6 +360,71 @@ impl MediaSourceBackend for PluginSourceBackend {
             return Err(SourceError::msg("插件未实现 resolvePlay"));
         }
         resolved_from_js(&out, &entry.name)
+    }
+
+    // ── 影视目录能力 ──────────────────────────────────────────────────
+    // 插件没实现对应字段时 handler 派发返回 Null(不是抛错),那等同于「不支持」——
+    // 必须还原成 unsupported,否则前端会把「这个源是网盘」当成「这个源坏了」。
+
+    async fn categories(
+        &self,
+        _http: &reqwest::Client,
+        server: &SourceServer,
+    ) -> Result<Vec<MediaCategory>, SourceError> {
+        let out = self.call("categories", json!([server_for_js(server)])).await?;
+        if out.is_null() {
+            return Err(SourceError::unsupported_feature("影视目录"));
+        }
+        let arr = out
+            .as_array()
+            .ok_or_else(|| SourceError::msg("categories 必须返回数组"))?;
+        Ok(arr.iter().filter_map(category_from_js).collect())
+    }
+
+    async fn catalog(
+        &self,
+        _http: &reqwest::Client,
+        server: &SourceServer,
+        category_id: Option<&str>,
+        keyword: Option<&str>,
+        page: u32,
+    ) -> Result<MediaPage, SourceError> {
+        let req = json!({ "categoryId": category_id, "keyword": keyword, "page": page });
+        let out = self
+            .call("catalog", json!([req, server_for_js(server)]))
+            .await?;
+        if out.is_null() {
+            return Err(SourceError::unsupported_feature("影视目录"));
+        }
+        let items = out
+            .get("items")
+            .and_then(|x| x.as_array())
+            .ok_or_else(|| SourceError::msg("catalog 必须返回 { items: [...] }"))?
+            .iter()
+            .filter_map(card_from_js)
+            .collect();
+        Ok(MediaPage {
+            items,
+            page,
+            // 插件没明说就按「还有」处理会让前端无限拉空页;默认 false 更安全。
+            has_more: out.get("hasMore").and_then(|x| x.as_bool()).unwrap_or(false),
+            total: out.get("total").and_then(|x| x.as_u64()).map(|x| x as u32),
+        })
+    }
+
+    async fn media_detail(
+        &self,
+        _http: &reqwest::Client,
+        server: &SourceServer,
+        id: &str,
+    ) -> Result<MediaDetail, SourceError> {
+        let out = self
+            .call("mediaDetail", json!([id, server_for_js(server)]))
+            .await?;
+        if out.is_null() {
+            return Err(SourceError::unsupported_feature("影视目录"));
+        }
+        Ok(detail_from_js(&out, id))
     }
 }
 

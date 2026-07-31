@@ -212,6 +212,121 @@ impl ResolvedPlay {
     }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   影视目录能力(catalog)—— 可选,只有资源站这类源实现。
+
+   **网盘是文件树,资源站是影视目录,这是两种东西。** 文件树一行只需要
+   「名字 + 是不是文件夹 + 多大」,`SourceEntry` 就够了;影视目录一张卡要
+   海报、标题、「更新至17集」、年份、评分,还要分类和无限翻页。
+
+   把这些字段硬塞进 `SourceEntry`,代价是十个网盘后端(40 处构造点)全得陪着改,
+   还要背一堆它们永远填 None 的字段;而资源站也不需要 `size`。所以这里另起一套
+   类型,`SourceEntry` 一个字段都不动。
+
+   trait 上这三个方法都有默认实现(返回 unsupported),现有后端零改动。
+   前端进一个源时先探 `categories`:通了就走影视浏览页,不通就走文件浏览页。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/// 「不支持这个能力」的稳定前缀。命令层把 `SourceError` 拍成字符串交给前端,
+/// 前端只能靠文案判断 —— 靠中文提示语判断会在改文案时静默失效,所以给个标记。
+pub const UNSUPPORTED_PREFIX: &str = "__LP_UNSUPPORTED__";
+
+/// 分类。资源站的分类树只有两级,再深也照收,前端自己决定画几级。
+#[derive(Serialize, Clone, Default)]
+pub struct MediaCategory {
+    pub id: String,
+    pub name: String,
+    pub children: Vec<MediaCategory>,
+}
+
+/// 目录里的一张卡。
+#[derive(Serialize, Clone, Default)]
+pub struct MediaCard {
+    pub id: String,
+    pub title: String,
+    pub poster: Option<String>,
+    /// 右下角角标:资源站的 `vod_remarks`(「更新至17集」/「HD」/「全24集」)。
+    /// ★ 它必须是**独立字段**。没有它的时候只能拼进标题,卡片下面就变成
+    ///   「神之水滴 · 更新至17集 · 2026」—— 那不是标题,是把三样东西塞进一个格子。
+    pub badge: Option<String>,
+    pub year: Option<String>,
+    pub score: Option<String>,
+    /// 剧集(点开先看分集) vs 单片(点开直接播)。
+    pub is_series: bool,
+}
+
+/// 目录的一页。`has_more` 决定前端还要不要继续往下拉 ——
+/// 「下一页」不该是列表里的一个条目,那是把翻页伪装成内容。
+#[derive(Serialize, Clone, Default)]
+pub struct MediaPage {
+    pub items: Vec<MediaCard>,
+    pub page: u32,
+    pub has_more: bool,
+    pub total: Option<u32>,
+}
+
+/// 一集。`raw` 原样回传给 `resolve_play`,所以播放链路一行都不用改。
+#[derive(Serialize, Clone, Default)]
+pub struct MediaEpisode {
+    pub id: String,
+    pub name: String,
+    pub raw: Option<serde_json::Value>,
+}
+
+/// 一条播放线路。
+#[derive(Serialize, Clone, Default)]
+pub struct MediaLine {
+    pub id: String,
+    pub name: String,
+    pub episodes: Vec<MediaEpisode>,
+}
+
+/// 一部片的详情页数据。
+#[derive(Serialize, Clone, Default)]
+pub struct MediaDetail {
+    pub id: String,
+    pub title: String,
+    pub poster: Option<String>,
+    pub badge: Option<String>,
+    pub year: Option<String>,
+    pub area: Option<String>,
+    pub lang: Option<String>,
+    pub genre: Option<String>,
+    pub score: Option<String>,
+    pub overview: Option<String>,
+    pub actors: Option<String>,
+    pub director: Option<String>,
+    pub lines: Vec<MediaLine>,
+}
+
+/// 「添加服务器」时验证这个源确实能用。
+///
+/// ★ **不能只试 `list_dir`。** 影视目录型的源(资源站)根本不实现它 —— 它有分类、
+/// 有分页、有分集,不是文件树。只探 `list_dir` 的话那一整类源在添加这一步就被判死,
+/// 报的还是一句「插件数据源必须返回数组」,完全看不出是探测方式选错了(2026-08-01
+/// 真踩到:插件装好了、目录也能列,就是加不进服务器表)。
+///
+/// 两条能力通任意一条,就算这个源能用。
+///
+/// 放在核层而不是各端命令里:桌面和安卓的 `source_login` 是两份手工拷贝,
+/// 这种「探测口径」放在两边迟早只改一边。
+pub async fn probe_backend(
+    backend: &dyn MediaSourceBackend,
+    http: &reqwest::Client,
+    server: &SourceServer,
+) -> Result<(), SourceError> {
+    let files_err = match backend.list_dir(http, server, None).await {
+        Ok(_) => return Ok(()),
+        Err(e) => e,
+    };
+    match backend.categories(http, server).await {
+        Ok(_) => Ok(()),
+        // 两条都不通:报**文件树**那条的错。用户填错地址时那句通常更具体
+        // (「返回的不是采集接口 JSON」之类),而目录那条往往只是句「不支持」。
+        Err(cat_err) => Err(if cat_err.is_unsupported() { files_err } else { cat_err }),
+    }
+}
+
 /// 扫码登录:开始。返回给前端展示的二维码 + 一段不透明上下文(原样回传给 poll)。
 /// image 既可能是 data URI(自己画的二维码 PNG),也可能是一个图片 URL(网盘直接给图)。
 #[derive(Serialize, Clone)]
@@ -248,6 +363,14 @@ impl SourceError {
     }
     pub fn unsupported() -> Self {
         Self::msg("该源不支持搜索")
+    }
+    /// 「这个源没有这个能力」。带稳定前缀,前端据此静默退回另一条路径,
+    /// 而不是把它当成一条真错误弹给用户。
+    pub fn unsupported_feature(what: &str) -> Self {
+        Self::msg(format!("{UNSUPPORTED_PREFIX}{what}"))
+    }
+    pub fn is_unsupported(&self) -> bool {
+        self.message.contains(UNSUPPORTED_PREFIX)
     }
 }
 impl std::fmt::Display for SourceError {
@@ -326,6 +449,43 @@ pub trait MediaSourceBackend: Send + Sync {
     /// `SourceServer.extra` 后存盘。默认实现返回 None(凭据不轮换的源无需关心)。
     fn take_rotated_credentials(&self, _server_id: &str) -> Option<HashMap<String, String>> {
         None
+    }
+
+    // ── 影视目录能力(可选,见本文件中部那段说明) ──────────────────────────
+    // 三个方法默认都返回「不支持」,所以网盘那十个后端一行都不用改。
+    // 前端进一个源时先探 categories:通了走影视浏览页,不通走文件浏览页。
+
+    /// 分类树。
+    async fn categories(
+        &self,
+        _http: &reqwest::Client,
+        _server: &SourceServer,
+    ) -> Result<Vec<MediaCategory>, SourceError> {
+        Err(SourceError::unsupported_feature("影视目录"))
+    }
+
+    /// 目录的一页。`category_id` 为 None = 全站最新;`keyword` 非空 = 搜索。
+    /// 搜索和浏览共用一个方法,因为**搜索结果也要能一直往下拉** —— 分成两条
+    /// 路径的话,翻页逻辑就得写两遍,而少写的那遍就是「搜索只有第一页」。
+    async fn catalog(
+        &self,
+        _http: &reqwest::Client,
+        _server: &SourceServer,
+        _category_id: Option<&str>,
+        _keyword: Option<&str>,
+        _page: u32,
+    ) -> Result<MediaPage, SourceError> {
+        Err(SourceError::unsupported_feature("影视目录"))
+    }
+
+    /// 一部片的详情(简介 / 演职员 / 线路 / 分集)。
+    async fn media_detail(
+        &self,
+        _http: &reqwest::Client,
+        _server: &SourceServer,
+        _id: &str,
+    ) -> Result<MediaDetail, SourceError> {
+        Err(SourceError::unsupported_feature("影视目录"))
     }
 }
 
@@ -521,5 +681,81 @@ mod tests {
             .expect("未知源类型必须能读回,否则插件一卸载用户就掉光服务器");
         assert_eq!(k.as_str(), "plugin:com.gone/x");
         assert!(!k.is_emby());
+    }
+
+    /* ── 添加服务器时的能力探测 ────────────────────────────────────────
+       2026-08-01 的 P0:探测只试了 list_dir,而影视目录型的源不实现它 ——
+       插件装好了、目录也列得出来,就是**加不进服务器表**,报「插件数据源必须
+       返回数组」。这三条钉住三种源都能通过探测。 */
+
+    struct FakeBackend {
+        files: bool,
+        catalog: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl MediaSourceBackend for FakeBackend {
+        fn kind(&self) -> SourceKind {
+            SourceKind::new("fake")
+        }
+        async fn list_dir(
+            &self,
+            _h: &reqwest::Client,
+            _s: &SourceServer,
+            _d: Option<&str>,
+        ) -> Result<Vec<SourceEntry>, SourceError> {
+            if self.files {
+                Ok(vec![])
+            } else {
+                Err(SourceError::msg("插件数据源必须返回数组"))
+            }
+        }
+        async fn resolve_play(
+            &self,
+            _h: &reqwest::Client,
+            _s: &SourceServer,
+            _e: &SourceEntry,
+            _q: Option<&str>,
+        ) -> Result<ResolvedPlay, SourceError> {
+            unreachable!()
+        }
+        async fn categories(
+            &self,
+            _h: &reqwest::Client,
+            _s: &SourceServer,
+        ) -> Result<Vec<MediaCategory>, SourceError> {
+            if self.catalog {
+                Ok(vec![])
+            } else {
+                Err(SourceError::unsupported_feature("影视目录"))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_accepts_file_tree_sources() {
+        let b = FakeBackend { files: true, catalog: false };
+        assert!(probe_backend(&b, &reqwest::Client::new(), &SourceServer::default()).await.is_ok());
+    }
+
+    /// 这一条就是那个 P0 的回归:只实现影视目录、不实现 list_dir 的源必须能加进来。
+    #[tokio::test]
+    async fn probe_accepts_catalog_only_sources() {
+        let b = FakeBackend { files: false, catalog: true };
+        probe_backend(&b, &reqwest::Client::new(), &SourceServer::default())
+            .await
+            .expect("只实现影视目录的源也必须能通过添加服务器的探测");
+    }
+
+    /// 两条都不通时,要报**文件树**那条的错 —— 用户填错地址时那句更具体,
+    /// 而目录那条往往只是句「不支持」,对定位毫无帮助。
+    #[tokio::test]
+    async fn probe_reports_the_useful_error_when_both_fail() {
+        let b = FakeBackend { files: false, catalog: false };
+        let e = probe_backend(&b, &reqwest::Client::new(), &SourceServer::default())
+            .await
+            .expect_err("两条都不通必须报错");
+        assert!(e.message.contains("必须返回数组"), "拿到的是: {}", e.message);
+        assert!(!e.is_unsupported(), "不该把「不支持影视目录」当成给用户看的理由");
     }
 }
