@@ -788,13 +788,7 @@ function ShortcutsPane() {
     <div className="mdpane">
       <h4>快捷键</h4>
       <p className="hint">
-        点「改键」再按一次新组合即可(<kbd>Esc</kbd> 取消)。播放中和主界面是两套作用域,
-        同一个键在两边可以各管各的,只有**同一作用域内**撞键才算冲突(会标红)。
-      </p>
-      <p className="hint" style={{ marginTop: -4 }}>
-        没有列在这里的按钮怎么办:按 <kbd>;</kbd> 会给当前屏幕上**每一个**可点元素发一个
-        字母标签,输字母即点击 —— 排序、筛选、右键菜单项、卡片上的收藏钮都算在内。
-        按 <kbd>?</kbd> 随时看当前可用的键。
+        点「改键」后按新组合(<kbd>Esc</kbd> 取消);按 <kbd>;</kbd> 点屏上任意按钮。
       </p>
       <div className="st-actions" style={{ margin: "4px 0 14px" }}>
         <button
@@ -834,14 +828,19 @@ function ShortcutsPane() {
                       </kbd>
                     ))
                   )}
-                  <button className="btn" onClick={() => setRecording(recording === cmd.id ? null : cmd.id)}>
-                    {recording === cmd.id ? "取消" : "改键"}
-                  </button>
-                  {/* 只有改过的才给「恢复」,没改过时那个按钮点了什么都不会发生。 */}
-                  {keys.join() !== cmd.keys.join() && (
-                    <button className="btn ghost" onClick={() => setKeys(cmd.id, cmd.keys)}>
-                      恢复
-                    </button>
+                  {/* 鼠标手势录不了(录键器只收 keydown),不给改键按钮 —— 摆一个点了没反应的更差。 */}
+                  {!cmd.fixed && (
+                    <>
+                      <button className="btn" onClick={() => setRecording(recording === cmd.id ? null : cmd.id)}>
+                        {recording === cmd.id ? "取消" : "改键"}
+                      </button>
+                      {/* 只有改过的才给「恢复」,没改过时那个按钮点了什么都不会发生。 */}
+                      {keys.join() !== cmd.keys.join() && (
+                        <button className="btn ghost" onClick={() => setKeys(cmd.id, cmd.keys)}>
+                          恢复
+                        </button>
+                      )}
+                    </>
                   )}
                 </span>
               </div>

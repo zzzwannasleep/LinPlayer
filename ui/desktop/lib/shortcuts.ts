@@ -27,6 +27,10 @@ export type Command = {
   scope: Scope;
   /** 默认按键(可多个)。用户改键只覆盖这一项。 */
   keys: string[];
+  /** 鼠标手势:列在表里让用户知道有这回事,但不参与录键(录键器只收 keydown,录不到鼠标)。
+   *  keys 用 `mouse:*` 伪 combo —— 键盘永远产不出这个前缀,所以它既不会被 dispatch 命中,
+   *  也不可能和真键位撞车,不用给冲突检测开特例。 */
+  fixed?: boolean;
 };
 
 /* 默认键位。取值口径见 comboOf():全部小写,修饰键固定顺序 ctrl+alt+shift+meta。
@@ -83,6 +87,12 @@ export const COMMANDS: Command[] = [
   { id: "panel-version", label: "版本", group: "播放面板", scope: "player", keys: ["v"] },
   { id: "panel-speed", label: "倍速面板", group: "播放面板", scope: "player", keys: ["r"] },
   { id: "panel-more", label: "更多", group: "播放面板", scope: "player", keys: ["o"] },
+
+  // ---- 鼠标(手势固定,不可改键;实现在 App.tsx 的 .p-stage 上)----
+  { id: "m-speed-hold", label: "临时 2× 快进(松开还原)", group: "鼠标", scope: "player", keys: ["mouse:rhold"], fixed: true },
+  { id: "m-fullscreen", label: "全屏切换", group: "鼠标", scope: "player", keys: ["mouse:dbl"], fixed: true },
+  { id: "m-volume", label: "音量 ±5", group: "鼠标", scope: "player", keys: ["mouse:wheel"], fixed: true },
+  { id: "m-mute", label: "静音", group: "鼠标", scope: "player", keys: ["mouse:mid"], fixed: true },
 ];
 
 const BY_ID = new Map(COMMANDS.map((c) => [c.id, c]));
@@ -112,8 +122,16 @@ const KEY_LABEL: Record<string, string> = {
   arrowleft: "←", arrowright: "→", arrowup: "↑", arrowdown: "↓",
   space: "空格", escape: "Esc", backspace: "退格", enter: "回车", tab: "Tab",
 };
+/** 鼠标手势的显示名。伪 combo 见 Command.fixed。 */
+const MOUSE_LABEL: Record<string, string> = {
+  "mouse:rhold": "长按右键",
+  "mouse:dbl": "双击画面",
+  "mouse:wheel": "滚轮",
+  "mouse:mid": "中键",
+};
 /** combo → 给人看的样子("ctrl+shift+c" → "Ctrl + Shift + C")。 */
 export function comboLabel(combo: string): string {
+  if (MOUSE_LABEL[combo]) return MOUSE_LABEL[combo];
   return combo
     .split("+")
     .map((k) => KEY_LABEL[k] ?? (k.length === 1 ? k.toUpperCase() : k.toUpperCase()))

@@ -1284,6 +1284,52 @@ export default function App() {
     applyVolume(volume + d);
     setVbar((b) => (b?.kind === "vol" ? b : { kind: "vol", x: 24 })); // 顺手把竖条弹出来当读数
   };
+  /* ---- 鼠标手势 ----
+     表登记在 lib/shortcuts.ts 的「鼠标」组(fixed:true),那儿只负责让用户看得见有这回事;
+     实现在这里,不走 dispatch —— dispatch 只认 keydown。 */
+  const HOLD_MS = 300;
+  const rhold = useRef({ timer: null as number | null, prev: 1, on: false, endedAt: 0 });
+  function onStageDown(e: React.MouseEvent) {
+    if (e.button === 1) {
+      e.preventDefault(); // 中键默认是自动滚屏
+      applyMute(!muted);
+      say(muted ? "已取消静音" : "已静音");
+      return;
+    }
+    if (e.button !== 2) return;
+    rhold.current.timer = window.setTimeout(() => {
+      const h = rhold.current;
+      h.timer = null;
+      h.prev = speedRef.current; // 从**当前**倍速起跳,不写死 1.0,否则 1.5× 看的人松手会被打回 1×
+      h.on = true;
+      applySpeed(2);
+      say("2.00× 快进中");
+    }, HOLD_MS);
+  }
+  /* ★ 松手必须挂 window:按住右键把鼠标拖出播放器再松是常见动作,挂在元素自己身上收不到
+       mouseup —— 倍速就永久停在 2×。和本文件进度条「拖出界就钉死」是同一个坑。 */
+  useEffect(() => {
+    const up = () => {
+      const h = rhold.current;
+      if (h.timer) { window.clearTimeout(h.timer); h.timer = null; }
+      if (!h.on) return;
+      h.on = false;
+      h.endedAt = performance.now();
+      applySpeed(h.prev);
+      say(`倍速 ${h.prev.toFixed(2)}×`);
+    };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
+  /* Windows 上 contextmenu 是**松手时**才到 —— 长按刚拿去调速了,这一发不该再弹菜单。
+     判据用「长按刚结束」的时间戳而不是一个 suppress 标志:拖到窗口外松手时 contextmenu
+     压根不会来,标志会一直留着,把下一次正常右键吃掉。 */
+  function onStageCtx(e: React.MouseEvent) {
+    e.preventDefault();
+    if (performance.now() - rhold.current.endedAt < HOLD_MS) return;
+    setCtx({ x: e.clientX, y: e.clientY });
+  }
+
   useCommand("play-pause", playing ? togglePause : null);
   useCommand("seek-back", playing ? () => doSeek(statusRef.current.time - 10) : null);
   useCommand("seek-fwd", playing ? () => doSeek(statusRef.current.time + 10) : null);
@@ -1467,10 +1513,13 @@ export default function App() {
         <div
           className={`player-layer${idle && !panel && !vbar && !ctx ? " idle" : ""}${fsBusy ? " fs-busy" : ""}`}
         >
-          {/* 画面区:接右键菜单(草稿 L1152),点空白收起弹出层 */}
+          {/* 画面区:接右键菜单(草稿 L1152)+ 鼠标手势,点空白收起弹出层 */}
           <div
             className="p-stage"
-            onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY }); }}
+            onContextMenu={onStageCtx}
+            onMouseDown={onStageDown}
+            onDoubleClick={toggleFullscreen}
+            onWheel={(e) => bumpVol(e.deltaY < 0 ? 5 : -5)}
             onClick={() => { setVbar(null); setCtx(null); }}
           />
 
