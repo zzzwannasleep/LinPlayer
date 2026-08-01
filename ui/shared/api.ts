@@ -1288,19 +1288,61 @@ export type CfTestResult = {
   loss_rate: number;
   download_kbps: number | null;
 };
-export type CfProxyStatus = { server_id: string; local_url: string; pinned_ip: string };
+/** 粒度是**线路**:line_url 是改写表的键,server_id/line_name 只是给界面显示用的。
+ *  一台服可以有多条线,只有开了优选的那条走反代 —— 其余照旧直连。 */
+export type CfProxyStatus = {
+  line_url: string;
+  server_id: string;
+  line_name: string;
+  local_url: string;
+  pinned_ip: string;
+};
 /** 测速,已按优劣排序。validateHost 可剔除「TCP 通但 HTTP 死」的 IP。 */
 export const cfSpeedTest = (validateHost?: string | null, testUrl?: string | null) =>
   invoke<CfTestResult[]>("cf_speed_test", {
     validateHost: validateHost ?? null,
     testUrl: testUrl ?? null,
   });
-/** 开优选:返回本地反代基址;已开则热换 IP,且立即生效无需重启。 */
-export const cfProxyEnable = (serverId: string, ip: string) =>
-  invoke<string>("cf_proxy_enable", { serverId, ip });
-export const cfProxyDisable = (serverId: string) =>
-  invoke<void>("cf_proxy_disable", { serverId });
+/** 开优选:返回本地反代基址;已开则热换 IP,且立即生效无需重启。
+ *  ★ 参数是**线路地址**不是 server_id —— 优选对线路生效,同一台服的其它线路不受影响
+ *    (2026-08-01 改;旧口径会把非 CF 线路一起劫持,表现为切了线路就拉不动流)。 */
+export const cfProxyEnable = (lineUrl: string, ip: string) =>
+  invoke<string>("cf_proxy_enable", { lineUrl, ip });
+export const cfProxyDisable = (lineUrl: string) =>
+  invoke<void>("cf_proxy_disable", { lineUrl });
 export const cfProxyStatus = () => invoke<CfProxyStatus[]>("cf_proxy_status");
+
+// ---------- 播放窗(独立窗口) ----------
+/** 交给独立播放窗去播的载荷。三种起播入口共用一个信封,由播放窗按 kind 分派。 */
+export type PlayRequest =
+  | { kind: "emby"; item: unknown; media_source_id: string | null }
+  | { kind: "local"; download: unknown }
+  | { kind: "source"; entry: unknown };
+/** 打开/复用播放窗并把待播条目交给它。已开着就叫醒它换片。 */
+export const playerWindowOpen = (payload: PlayRequest) =>
+  invoke<void>("player_window_open", { payload });
+/** 播放窗起来后自取待播条目(取完即清 —— 只该被消费一次)。 */
+export const playerTakePending = () => invoke<PlayRequest | null>("player_take_pending");
+/** 关播放窗(藏起来不销毁),视频窗交还主窗。 */
+export const playerWindowClose = () => invoke<void>("player_window_close");
+
+// ---------- 预加载 ----------
+/** 预加载 ≠ 多线程加载。
+ *  预加载  = 进详情页就把「将要播的那条流」的**头 N MB + 尾 2MB** 跑热,读完即丢,
+ *           不落盘、不改播放地址;目的是把 TCP/TLS、服务端页缓存、CDN 边缘先热起来,
+ *           外加把 MKV 末尾的 cues 索引预热掉(起播第一跳就是去尾巴读它)。
+ *  多线程加载 = 播放**中**在本地起代理超前拉 Range 喂 mpv,数据落环形缓存。
+ *  两个可以同时开,管的是起播的两个不同阶段。 */
+export type PreloadSettings = { enabled: boolean; head_mb: number };
+export const getPreloadSettings = () => invoke<PreloadSettings>("get_preload_settings");
+/** head_mb > 512 核层直接报错(不静默夹紧)。 */
+export const setPreloadSettings = (settings: PreloadSettings) =>
+  invoke<void>("set_preload_settings", { settings });
+/** fire-and-forget:立刻返回,预热在后台跑。失败一律吞掉,绝不拦详情页。 */
+export const preloadItem = (itemId: string, mediaSourceId?: string | null) =>
+  invoke<void>("preload_item", { itemId, mediaSourceId: mediaSourceId ?? null });
+/** 离开详情页 / 换条目时调。起播时核层自己会掐,不用前端管。 */
+export const preloadCancel = () => invoke<void>("preload_cancel");
 
 // ---------- 多线程加载(预取代理) ----------
 /** servers = 开了该功能的账号 id(= Account.server,和 server_id 参数同一个键);空表 = 全关。

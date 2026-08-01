@@ -43,6 +43,34 @@ const CHUNK_SIZE: u64 = 4 * 1024 * 1024; // 每段 4MB
 /// 只要能把它喂满就行。64MB 在最慢的实测链路(~1.3MB/s)上也有 ~45 秒余量。
 const MAX_READ_AHEAD: u64 = 64 * 1024 * 1024;
 
+/// 单次取数(建连 + 收完 4MB 分段)的上限。超了就当这个地址不灵,作废重试。
+///
+/// ★ 存在的理由不是"调优",是**兜底**:http.rs 的三个 reqwest client 一个 timeout 都没设,
+/// 上游不回话时 `send().await` 会**永远**等下去 —— 没重试、没日志、没回退,
+/// 而供给端跟着一起等,mpv 收到 206 头之后一帧不出。用户报的「没画面没声音、
+/// 完全看不到流量」就是这个形态。宁可慢,不可吊死。
+/// 20s:**空闲**上限,不是整体上限 —— 每收到一块字节就重置。
+/// 实测最慢的链路(2026-08-01 用户那台,56~143KB/s)拉满一个 4MB 分段要 29~62 秒,
+/// 但块与块之间从不空闲 20 秒。整体超时会把这种「慢但能用」的链路误杀,别改回去。
+const CHUNK_TIMEOUT_MS: u64 = 20_000;
+
+/// 可覆盖的实际值。**只为测试存在** —— 回归测试要验「上游只连不回时不吊死」,
+/// 按真值跑一遍要一分钟,那种测试没人愿意留在门禁里(而没门禁的修复迟早退化)。
+static CHUNK_TIMEOUT_OVERRIDE_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+/// 改上面那个覆盖值的测试**必须**先拿这把锁。cargo test 是同进程多线程并行,
+/// 两个测试各设各的值、谁先跑完谁就把对方的值清回真值 —— 于是后者按 20s 真值等,
+/// 直接超时红,而它自己毫无问题。这类"测试互踩"读起来像真 bug,最费排查时间
+/// (http.rs 的三个全局 client 上记过同一笔账)。
+#[cfg(test)]
+static CHUNK_TIMEOUT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn chunk_timeout() -> Duration {
+    match CHUNK_TIMEOUT_OVERRIDE_MS.load(Ordering::Relaxed) {
+        0 => Duration::from_millis(CHUNK_TIMEOUT_MS),
+        ms => Duration::from_millis(ms),
+    }
+}
+
 /// 预取超前窗口字节数,钳进 [每 worker 一段, MAX_READ_AHEAD]。
 ///
 /// ★ 入参是用户设的**缓存上限**,但它在这里只当天花板用(用户把缓存调得很小时,
@@ -441,41 +469,83 @@ impl Origin {
                     None => (up.url.clone(), false),
                 }
             };
-            let resp = self
-                .client
-                .get(&url)
-                .header("Range", format!("bytes={start}-{end}"))
-                .send()
+            /* ★ 每次取数都必须有超时,而且必须是**空闲超时**,不是整体超时(2026-08-01)。
+
+               ## 为什么非有不可
+               在这之前 `send()`/`bytes()` 是**无限期**等待,而 http.rs 的三个 client
+               一个 timeout 都没设 —— 上游只要不回(CDN 落点失效、对端黑洞、中间设备吞包),
+               这条 worker 就永远吊在这儿:不重试、不重签、不报错、连一行日志都没有。
+               供给端 await_chunk 于是也永远等,mpv 那边表现成:206 头收到了、
+               `Stream opened successfully`,然后 duration=0 / 一帧不出 / 一条轨道都没有。
+
+               ## 为什么不能用「整体超时」
+               我第一版写的就是整体超时(15s),那是**错的**,差点当成修复发出去。
+               实测用户那条链(2026-08-01):TTFB 1.3~1.8s 正常,但吞吐只有 56~143KB/s,
+               拉满一个 4MB 分段**合法地就要 29~62 秒**。整体超时会把「慢但完全能用」的
+               链路当成故障掐掉,还会一路重试放大负载 —— 修一个静默卡死,换来一个更响的。
+               只有「**一段时间一个字节都不来**」才是真死。所以计时器每收到一块就重置。 */
+            let outcome: Result<Result<Option<Vec<u8>>, u16>, ()> = async {
+                // 建连 + 等响应头:这一段可以用整体超时,它本来就该在几秒内完成。
+                let sent = tokio::time::timeout(
+                    chunk_timeout(),
+                    self.client
+                        .get(&url)
+                        .header("Range", format!("bytes={start}-{end}"))
+                        .send(),
+                )
                 .await;
-            match resp {
-                Ok(r) if r.status().is_success() || r.status().as_u16() == 206 => {
-                    match r.bytes().await {
-                        // 长度必须**正好**是请求量,短了/长了都不能收(见函数头说明)。
-                        Ok(b) if b.len() == want => return Some(b.to_vec()),
-                        Ok(b) => logw(&format!(
-                            "段 {c} 长度不符(要 {want} 得 {}),重试",
-                            b.len()
-                        )),
-                        Err(_) => {} // 读体失败,可重试
+                let mut r = match sent {
+                    Ok(Ok(r)) if r.status().is_success() || r.status().as_u16() == 206 => r,
+                    Ok(Ok(r)) => return Ok(Err(r.status().as_u16())),
+                    Ok(Err(_)) => return Ok(Ok(None)), // 纯网络抖动,重试同一 URL
+                    Err(_) => return Err(()),          // 连响应头都等不到 = 这个地址不灵
+                };
+                // 收体:**每来一块就重置计时**,只有真的停止吐字节才判死。
+                let mut buf: Vec<u8> = Vec::with_capacity(want.min(CHUNK_SIZE as usize));
+                loop {
+                    match tokio::time::timeout(chunk_timeout(), r.chunk()).await {
+                        Ok(Ok(Some(b))) => buf.extend_from_slice(&b),
+                        Ok(Ok(None)) => return Ok(Ok(Some(buf))), // 正常读完
+                        Ok(Err(_)) => return Ok(Ok(None)),        // 读体出错,重试
+                        Err(_) => return Err(()),                 // 停吐了
                     }
                 }
-                Ok(r) => {
-                    /* 4xx/5xx = 上游拒绝该 URL(短效签名链到期常见) → 先重签换地址,下次 attempt 用新 URL。
-                       ★ 但 5xx **不一定**是链到期:开了 CF 优选时我们的上游就是本机反代,
-                         它连不上 CF 时会自己造一个 502(见 net/cf/proxy.rs 的 Bad Gateway 分支)。
-                         所以重签拿回同一个地址是常态,不能据此停用重签 —— 见 refresh_upstream。 */
-                    let _ = r.status();
-                    /* ★ 先怪 CDN 直链,再怪签名链。CDN 落点通常自带时效签名,过期后
-                       只需重走一次 302 就能拿到新落点 —— 这时候去调重签回调(重走
-                       PlaybackInfo)是杀鸡用牛刀,还平白给服务端加一次接口压力。
-                       清空 resolved 后下一 attempt 自动回落 url 并重新跟随重定向。 */
-                    if used_resolved {
-                        self.upstream.lock().await.resolved = None;
-                    } else {
-                        self.refresh_upstream().await;
-                    }
+            }
+            .await;
+
+            // Ok(()) = 这个地址还行,重试它;Err(状态码) = 地址不灵,作废/重签。
+            let resp: Result<(), u16> = match outcome {
+                Ok(Ok(Some(b))) if b.len() == want => return Some(b.to_vec()),
+                // 长度必须**正好**是请求量,短了/长了都不能收(见函数头说明)。
+                Ok(Ok(Some(b))) => {
+                    logw(&format!("段 {c} 长度不符(要 {want} 得 {}),重试", b.len()));
+                    Ok(())
                 }
-                Err(_) => {} // 纯网络抖动,重试同一 URL
+                Ok(Ok(None)) => Ok(()), // 读体失败/网络抖动,重试同一 URL
+                Ok(Err(code)) => Err(code),
+                Err(_) => {
+                    logw(&format!(
+                        "段 {c} 空闲超时({:.1}s 没有任何字节){} —— 作废当前地址重试",
+                        chunk_timeout().as_secs_f32(),
+                        if used_resolved { "(打的是 302 落点)" } else { "" }
+                    ));
+                    Err(0) // 当成「这个地址不灵」,走下面的作废/重签分支
+                }
+            };
+            if resp.is_err() {
+                /* 4xx/5xx / 超时 = 这个地址不灵(短效签名链到期最常见)。
+                   ★ 5xx **不一定**是链到期:开了 CF 优选时我们的上游就是本机反代,
+                     它连不上 CF 时会自己造一个 502(见 net/cf/proxy.rs 的 Bad Gateway 分支)。
+                     所以重签拿回同一个地址是常态,不能据此停用重签 —— 见 refresh_upstream。
+                   ★ 先怪 CDN 直链,再怪签名链。CDN 落点通常自带时效签名,过期后只需重走
+                     一次 302 就能拿到新落点 —— 这时候去调重签回调(重走 PlaybackInfo)
+                     是杀鸡用牛刀,还平白给服务端加一次接口压力。
+                     清空 resolved 后下一 attempt 自动回落 url 并重新跟随重定向。 */
+                if used_resolved {
+                    self.upstream.lock().await.resolved = None;
+                } else {
+                    self.refresh_upstream().await;
+                }
             }
             if attempt < 2 {
                 tokio::time::sleep(Duration::from_millis(300 * (attempt + 1))).await;
@@ -1705,6 +1775,168 @@ mod tests {
             "断开后又流出 {}KB —— 预取窗口 {}MB,跳一次进度条就白烧这么多用户流量",
             leaked / 1024,
             window / 1048576
+        );
+    }
+
+    /* 回归:上游**只连不回**时,代理必须放弃并断流,**不能吊死**。
+
+       用户 2026-08-01 报的「播放没画面没声音、完全看不到流量」的真因就在这:
+       fetch_chunk 里的 `send()/bytes()` 一个超时都没有(http.rs 三个 reqwest client
+       也都没设 timeout),上游一黑洞,worker 就永远等下去 —— 不重试、不重签、
+       没有任何日志,供给端跟着一起等。mpv 侧的形态是:
+         [ffmpeg] Stream opened successfully  →  然后 duration=0、一帧不出、0 条轨道。
+       curl 直接打本地代理的实测:`206, size=0, 25s 仍在等`,头发了、body 一个字节没有。
+
+       测的是「**会结束**」,不是「会成功」—— 上游是黑洞,失败才是正确结果,
+       吊死才是 bug。反向验证:把 fetch_chunk 里的 tokio::time::timeout 摘掉,
+       本测试直接超时红(而不是断言失败)。 */
+    #[tokio::test]
+    async fn black_hole_upstream_gives_up_instead_of_hanging_forever() {
+        let _g = CHUNK_TIMEOUT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // 15s×3 次跑真值要 45 秒,没人会把那种测试留在门禁里。压到 200ms。
+        CHUNK_TIMEOUT_OVERRIDE_MS.store(200, Ordering::Relaxed);
+
+        let up = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let up_port = up.local_addr().unwrap().port();
+        let total: u64 = 64 * 1024 * 1024;
+        tokio::spawn(async move {
+            let mut first = true;
+            while let Ok((mut s, _)) = up.accept().await {
+                let hold = std::mem::replace(&mut first, false);
+                tokio::spawn(async move {
+                    let mut b = [0u8; 2048];
+                    let _ = s.read(&mut b).await;
+                    if hold {
+                        /* 第一条是 probe(Range: bytes=0-0)—— 必须正常回,否则 start()
+                           拿不到 total 直接返 None,测试就退化成「代理没起来」,
+                           压根测不到 worker 那条路(这类「测了个寂寞」最难发现)。 */
+                        let _ = s
+                            .write_all(
+                                format!(
+                                    "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{total}\r\nContent-Type: video/x-matroska\r\nContent-Length: 1\r\n\r\nX"
+                                )
+                                .as_bytes(),
+                            )
+                            .await;
+                    }
+                    // 之后所有分段请求:收下,**永不回应**,也不关连接 —— 就是黑洞。
+                    std::future::pending::<()>().await;
+                });
+            }
+        });
+
+        let h = start(format!("http://127.0.0.1:{up_port}/f"), 2, 16 * 1024 * 1024, None)
+            .await
+            .expect("probe 回了 Content-Range,代理该起得来");
+
+        let mut c = TcpStream::connect(("127.0.0.1", url_port(&h.url))).await.unwrap();
+        c.write_all(b"GET /play HTTP/1.1\r\nRange: bytes=0-\r\n\r\n").await.unwrap();
+
+        /* 读到连接结束(代理放弃 → 断流关连接)。给 10 秒:200ms×3 次 + 退避 + 收尾,
+           远远够;而缺超时的旧代码在这儿会一直读不到 EOF,测试整体超时。 */
+        let ended = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut buf = [0u8; 8192];
+            loop {
+                match c.read(&mut buf).await {
+                    Ok(0) | Err(_) => return true, // 连接断了 = 代理放弃了,正确
+                    Ok(_) => {}                    // 头 + 可能的零星字节,继续读
+                }
+            }
+        })
+        .await;
+
+        CHUNK_TIMEOUT_OVERRIDE_MS.store(0, Ordering::Relaxed);
+        assert!(
+            ended.is_ok(),
+            "上游只连不回时代理没有放弃 —— 没有超时的话 worker 会永远等下去,\
+             播放器收到 206 头之后一帧不出、也没有任何日志"
+        );
+    }
+
+    /* 回归:**慢但一直在吐字节**的上游不许被掐。
+
+       这条是给我自己立的护栏。修「上游黑洞吊死」时我第一版写的是**整体超时**(15s),
+       而实测用户那条链(2026-08-01)TTFB 正常、吞吐只有 56~143KB/s,拉满一个 4MB 分段
+       合法地要 29~62 秒 —— 整体超时会把「慢但完全能用」的链路当故障掐掉,还会一路重试
+       放大负载。修一个静默卡死,换来一个更响的故障,这种"修复"比不修还糟。
+       判据只能是「一段时间**一个字节都不来**」。
+
+       本测试:每 60ms 吐一小块,总耗时远超空闲上限(120ms)。
+       反向验证:把 fetch_chunk 的收体循环换回 `r.bytes().await` 外面套一个整体
+       `timeout(chunk_timeout(), ...)`,本测试立刻红。 */
+    #[tokio::test]
+    async fn slow_but_progressing_upstream_is_not_killed() {
+        let _g = CHUNK_TIMEOUT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        CHUNK_TIMEOUT_OVERRIDE_MS.store(120, Ordering::Relaxed);
+
+        let total: u64 = 16 * 1024 * 1024;
+        let up = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let up_port = up.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = up.accept().await {
+                tokio::spawn(async move {
+                    let mut b = [0u8; 2048];
+                    let n = s.read(&mut b).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&b[..n]).to_string();
+                    // probe:Range: bytes=0-0
+                    if req.contains("bytes=0-0") {
+                        let _ = s.write_all(format!("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-0/{total}\r\nContent-Type: video/x-matroska\r\nContent-Length: 1\r\n\r\nX").as_bytes()).await;
+                        return;
+                    }
+                    // 分段:头先发,体分 10 次挤牙膏 —— 每次间隔 < 空闲上限,总时长 > 空闲上限。
+                    let want = CHUNK_SIZE as usize;
+                    let _ = s
+                        .write_all(
+                            format!("HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-{}/{total}\r\nContent-Length: {want}\r\n\r\n", want - 1)
+                                .as_bytes(),
+                        )
+                        .await;
+                    // ⚠️ 最后一块要吃掉余数。整除少几个字节 = body 比 Content-Length 短,
+                    //    reqwest 会一直等那几个字节,测出来是「拉取失败」而不是本测试想验的东西。
+                    let piece = want / 10;
+                    for i in 0..10 {
+                        tokio::time::sleep(Duration::from_millis(60)).await;
+                        let n = if i == 9 { want - piece * 9 } else { piece };
+                        if s.write_all(&vec![7u8; n]).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+
+        let h = start(format!("http://127.0.0.1:{up_port}/f"), 2, 16 * 1024 * 1024, None)
+            .await
+            .expect("probe 正常,代理该起得来");
+        let mut c = TcpStream::connect(("127.0.0.1", url_port(&h.url))).await.unwrap();
+        c.write_all(b"GET /play HTTP/1.1\r\nRange: bytes=0-1023\r\n\r\n").await.unwrap();
+
+        // 读满「头 + 1024 字节」就算通过:说明第一段被完整收下并供了出来。
+        let got = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut buf = Vec::new();
+            let mut one = [0u8; 4096];
+            loop {
+                match c.read(&mut one).await {
+                    Ok(0) | Err(_) => return buf.len(),
+                    Ok(n) => {
+                        buf.extend_from_slice(&one[..n]);
+                        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                            if buf.len() - (i + 4) >= 1024 {
+                                return 1024;
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .await;
+
+        CHUNK_TIMEOUT_OVERRIDE_MS.store(0, Ordering::Relaxed);
+        assert_eq!(
+            got.ok(),
+            Some(1024),
+            "慢速但持续吐字节的上游被掐了 —— 空闲超时被写成了整体超时,\
+             真实链路(56~143KB/s)拉一个 4MB 分段本来就要半分钟"
         );
     }
 

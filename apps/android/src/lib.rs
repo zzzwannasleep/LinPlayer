@@ -2661,7 +2661,12 @@ fn anirss_ctx(state: &State<'_, AppState>) -> Result<(Arc<AniRssBackend>, Source
 
 #[derive(serde::Serialize)]
 struct CfProxyStatus {
+    /// 走优选的**线路**地址(改写表的键)。粒度是线路不是服务器,见 net::cf::runtime 顶部。
+    line_url: String,
+    /// 它属于哪台服务器(供设置页显示服务器名);查不到时为空串。
     server_id: String,
+    /// 这条线路在账号线路表里的名字(「主线」/「CDN」…),查不到为空串。
+    line_name: String,
     local_url: String,
     pinned_ip: String,
 }
@@ -4076,74 +4081,114 @@ async fn cf_speed_test(
     Ok(linplayer_core::net::cf::speed_test(o).await)
 }
 
-/// 为某台服务器开启 CF 优选反代,并**登记路由改写** —— 之后该服的 `active_line_url()`
-/// 返回本地反代基址,Emby API / 封面图 / mpv 取流全部自动改走优选 IP。
+/// 归一化线路地址 —— 必须和 `net::cf::runtime::key` 同口径,否则句柄表和改写表会错开:
+/// 改写生效了但句柄找不到(= 关不掉),或者反过来。
+fn norm_line(u: &str) -> String {
+    u.trim().trim_end_matches('/').to_string()
+}
+
+/// 按**线路**找它属于哪台服务器(关优选 / 刷会话时要用)。
+fn server_of_line(state: &AppState, line_url: &str) -> Option<String> {
+    let want = norm_line(line_url);
+    let cfg = state.config.lock().unwrap();
+    cfg.accounts
+        .iter()
+        .find(|a| {
+            norm_line(&a.server) == want || a.lines.iter().any(|l| norm_line(&l.url) == want)
+        })
+        .map(|a| a.server.clone())
+}
+
+/// 为**某一条线路**开启 CF 优选反代,并登记路由改写 —— 之后这条线生效时,
+/// `active_line_url()` 返回本地反代基址,Emby API / 封面图 / mpv 取流全部改走优选 IP。
 /// 已开则热切换 IP(端口与本地基址不变,对进行中的会话无感)。
+///
+/// ★ 粒度是线路不是服务器(2026-08-01 改)。理由详见 net::cf::runtime 顶部那段。
 #[tauri::command]
 async fn cf_proxy_enable(
     state: State<'_, AppState>,
-    server_id: String,
+    line_url: String,
     ip: String,
 ) -> Result<String, String> {
+    let key = norm_line(&line_url);
     // 已开 → 只热切 IP。注意别在持锁期间 await。
     let existing = {
         let m = state.cf_proxy.lock().unwrap();
-        m.get(&server_id).map(|h| h.port)
+        m.get(&key).map(|h| h.port)
     };
     if existing.is_some() {
-        let handle = state.cf_proxy.lock().unwrap().remove(&server_id);
+        let handle = state.cf_proxy.lock().unwrap().remove(&key);
         if let Some(h) = handle {
             h.update_ip(ip).await;
-            let url = cf::runtime::local_url_for(&server_id).unwrap_or_default();
-            state.cf_proxy.lock().unwrap().insert(server_id, h);
+            let url = cf::runtime::local_url_for(&key).unwrap_or_default();
+            state.cf_proxy.lock().unwrap().insert(key, h);
             return Ok(url);
         }
     }
 
-    let (upstream, allow_insecure) = {
+    let server_id = server_of_line(&state, &key).ok_or("找不到这条线路所属的服务器")?;
+    let allow_insecure = {
         let cfg = state.config.lock().unwrap();
-        let a = cfg.find(&server_id).ok_or("找不到该服务器")?;
-        // 上游必须用 direct_line_url:用 active_line_url 会在反代已开时把反代自己当上游,
-        // 打成 127.0.0.1 → 127.0.0.1 的自环。
-        (a.direct_line_url().to_string(), a.allow_insecure_tls)
+        cfg.find(&server_id).map(|a| a.allow_insecure_tls).unwrap_or(false)
     };
-    let (scheme, host, port) = cf::runtime::split_upstream(&upstream);
+    // 上游就是这条线路的原始地址 —— 绝不能用 active_line_url,反代已开时会把反代自己
+    // 当上游,打成 127.0.0.1 → 127.0.0.1 的自环。
+    let (scheme, host, port) = cf::runtime::split_upstream(&key);
     let handle = linplayer_core::net::cf::start_proxy(scheme, host, port, ip, allow_insecure)
         .await
         .ok_or("CF 反代起服失败(IP 非法?)")?;
-    let local = cf::runtime::local_base(&upstream, handle.port);
-    cf::runtime::bind(&server_id, &local);
-    state.cf_proxy.lock().unwrap().insert(server_id.clone(), handle);
+    let local = cf::runtime::local_base(&key, handle.port);
+    cf::runtime::bind(&key, &local);
+    state.cf_proxy.lock().unwrap().insert(key, handle);
     refresh_session_base(&state, &server_id);
     Ok(local)
 }
 
-/// 关闭某服的反代,撤销路由改写,恢复直连原线路。
+/// 关掉**这条线路**的反代,撤销路由改写,恢复直连。
 #[tauri::command]
-fn cf_proxy_disable(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
-    cf::runtime::unbind(&server_id);
-    state.cf_proxy.lock().unwrap().remove(&server_id); // Drop 停服
-    refresh_session_base(&state, &server_id);
+fn cf_proxy_disable(state: State<'_, AppState>, line_url: String) -> Result<(), String> {
+    let key = norm_line(&line_url);
+    cf::runtime::unbind(&key);
+    state.cf_proxy.lock().unwrap().remove(&key); // Drop 停服
+    if let Some(server_id) = server_of_line(&state, &key) {
+        refresh_session_base(&state, &server_id);
+    }
     Ok(())
 }
 
-/// 当前所有生效的反代改写(设置页展示"哪台服在走优选、钉的哪个 IP")。
+/// 当前所有生效的反代改写(设置页展示"哪条线路在走优选、钉的哪个 IP")。
 #[tauri::command]
 async fn cf_proxy_status(state: State<'_, AppState>) -> Result<Vec<CfProxyStatus>, String> {
-    let ports: Vec<(String, String)> = cf::runtime::all().into_iter().collect();
+    let routes: Vec<(String, String)> = cf::runtime::all().into_iter().collect();
     let mut out = Vec::new();
-    for (server_id, local_url) in ports {
+    for (line_url, local_url) in routes {
         // pinned_ip 要 await,不能在持锁时取;先把句柄摘出来问完再放回。
-        let handle = state.cf_proxy.lock().unwrap().remove(&server_id);
+        let handle = state.cf_proxy.lock().unwrap().remove(&line_url);
         let pinned_ip = match handle {
             Some(h) => {
                 let ip = h.pinned_ip().await;
-                state.cf_proxy.lock().unwrap().insert(server_id.clone(), h);
+                state.cf_proxy.lock().unwrap().insert(line_url.clone(), h);
                 ip
             }
             None => String::new(),
         };
-        out.push(CfProxyStatus { server_id, local_url, pinned_ip });
+        let (server_id, line_name) = {
+            let cfg = state.config.lock().unwrap();
+            let want = norm_line(&line_url);
+            cfg.accounts
+                .iter()
+                .find_map(|a| {
+                    if norm_line(&a.server) == want && a.lines.is_empty() {
+                        return Some((a.server.clone(), "主线".to_string()));
+                    }
+                    a.lines
+                        .iter()
+                        .find(|l| norm_line(&l.url) == want)
+                        .map(|l| (a.server.clone(), l.name.clone()))
+                })
+                .unwrap_or_default()
+        };
+        out.push(CfProxyStatus { line_url, server_id, line_name, local_url, pinned_ip });
     }
     Ok(out)
 }

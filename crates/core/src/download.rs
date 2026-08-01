@@ -151,6 +151,16 @@ struct State {
 pub struct DownloadManager {
     state: Arc<Mutex<State>>,
     client: reqwest::Client,
+    /* ★ 自带运行时句柄,**不用裸 `tokio::spawn`**。
+       裸 spawn 要求调用线程处在 tokio 上下文里,而本管理器的写路径是被
+       **同步** `#[tauri::command]` 调的 —— tauri 在收到 IPC 的那条线程上内联执行
+       (tauri-2.11.5 webview/mod.rs:1909 `run_invoke_handler`),那是 WebView2 的
+       消息线程,没有任何 tokio 上下文。裸 spawn 在那里 panic("no reactor running"),
+       panic 穿过 FFI 边界就是整个进程消失 = 用户报的「一点下载就卡死然后闪退」。
+       (list() 不 spawn,所以下载页打得开、一动就死。)
+       句柄在 new() 里抓一次,之后从任何线程 spawn 都成立 —— 修在这里,
+       桌面/安卓两端、现有和将来新加的命令一并覆盖,不用逐个命令改成 async。 */
+    rt: tokio::runtime::Handle,
 }
 
 impl DownloadManager {
@@ -185,6 +195,8 @@ impl DownloadManager {
                 threads: 2,
             })),
             client: crate::http::emby_client(),
+            // new() 本身是 async → 一定在运行时上下文里,这里抓得到。
+            rt: tokio::runtime::Handle::current(),
         };
         mgr.process_queue();
         mgr
@@ -303,7 +315,7 @@ impl DownloadManager {
         };
         if !active {
             if let Some(it) = item {
-                tokio::spawn(async move { delete_files(&it).await });
+                self.rt.spawn(async move { delete_files(&it).await });
             }
             self.persist_blocking();
         }
@@ -325,7 +337,7 @@ impl DownloadManager {
         };
         if let Some(id) = next {
             let me = self.clone();
-            tokio::spawn(async move { me.start_download(id).await });
+            self.rt.spawn(async move { me.start_download(id).await });
         }
     }
 
@@ -520,7 +532,7 @@ impl DownloadManager {
 
     fn persist_blocking(&self) {
         let me = self.clone();
-        tokio::spawn(async move { me.persist().await });
+        self.rt.spawn(async move { me.persist().await });
     }
     async fn persist(&self) {
         let (path, json) = {
@@ -750,6 +762,44 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         assert!(!file.exists(), "remove 的既有语义就是连文件一起删,别改坏");
+    }
+
+    /* 回归:**写路径必须能在没有 tokio 上下文的线程上跑**。
+       `download_enqueue`/`pause`/`resume`/`remove`/`clear_completed` 都是**同步**
+       `#[tauri::command]`,tauri 在 IPC 线程上内联执行它们(WebView2 消息线程),
+       那里没有 tokio 上下文。管理器内部一旦裸 `tokio::spawn` 就 panic,
+       穿过 FFI 边界 = 进程直接没了(用户 2026-08-01:「一点下载整个软件卡死随后闪退」)。
+
+       这条测试**故意不放在 #[tokio::test] 里** —— 那个宏会给测试线程建好上下文,
+       bug 就永远复现不出来。必须是裸 std 线程,才和真实调用环境一致。
+       反向验证:把 rt.spawn 改回 tokio::spawn,本测试立刻红(panic 在 join 里)。 */
+    #[test]
+    fn write_path_survives_outside_tokio_context() {
+        // current_thread 就够:本测试断言的是 spawn **不 panic**,不是任务真跑完
+        // (crates/core 只开了 tokio 的 "rt",没有 rt-multi-thread)。
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let dir = std::env::temp_dir().join("lp_dl_no_ctx");
+        let _ = std::fs::remove_dir_all(&dir);
+        let m = rt.block_on(DownloadManager::new(dir.clone()));
+
+        // 这条线程和 tauri 同步命令所处的环境一致:没有 tokio 上下文。
+        let joined = std::thread::spawn(move || {
+            let mut it = item(0, false);
+            it.item_id = "no_ctx".into();
+            m.enqueue(it); // → persist_blocking + process_queue,两处 spawn
+            m.pause("no_ctx"); // → persist_blocking
+            m.resume("no_ctx"); // → persist_blocking + process_queue
+            m.forget("no_ctx"); // → persist_blocking
+        })
+        .join();
+
+        assert!(
+            joined.is_ok(),
+            "写路径在无 tokio 上下文的线程上 panic 了 —— 同步 tauri 命令正是这个环境,\
+             这一 panic 就是整个进程闪退"
+        );
+        // 运行时留到这里再落地:提前 drop 会把 spawn 出去的 persist 掐死,测出假绿。
+        drop(rt);
     }
 
     #[test]

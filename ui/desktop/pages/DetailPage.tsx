@@ -24,6 +24,8 @@ import {
   listAccounts,
   personUrl,
   posterUrl,
+  preloadCancel,
+  preloadItem,
   probeLines,
   setActiveLine,
   setFavorite,
@@ -420,6 +422,21 @@ export default function DetailPage({ session, item, onPlay, onOpenChild, onBack,
     if (isSeries) return episodes.find((c) => c.resume_secs > 0) ?? episodes[0] ?? null;
     return d ? toItem(d) : null;
   })();
+
+  /* 预加载(核层 net::preload)。进详情页就把「▶ 会播的那个条目」的头 N MB + 尾 2MB
+     跑热 —— 热的是这条流本身的路:TCP/TLS、服务端页缓存、CDN 边缘,外加 MKV 末尾的
+     cues 索引(ffmpeg 打开容器第一跳就是去尾巴读它)。fire-and-forget,失败全吞。
+
+     ★ 依赖里带上 target.id 和版本:换集/换版本要热的是**另一条流**,核层 begin()
+       会自动掐掉上一轮,不会两轮一起抢带宽。
+     ★ 这和设置页的「多线程加载」是两个功能,别合并:那个在播放中起本地代理喂 mpv,
+       这个在播放前把路跑通,数据读完即丢。 */
+  useEffect(() => {
+    if (!target) return;
+    void preloadItem(target.id, isSeries ? null : pickedVerId).catch(() => {});
+    // 离开详情页就掐 —— 用户都走了还拉,纯属白费流量。起播时核层自己也会掐一次。
+    return () => void preloadCancel().catch(() => {});
+  }, [target?.id, pickedVerId, isSeries]);
 
   const resumeTarget = target && target.resume_secs > 0 ? target : null;
   const playLabel = (() => {

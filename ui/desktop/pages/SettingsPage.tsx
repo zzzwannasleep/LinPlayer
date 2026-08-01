@@ -9,6 +9,7 @@ import {
   type CfTestResult,
   type DanmakuServer,
   type PrefetchSettings,
+  type PreloadSettings,
   type ProxyConfig,
   type SyncAccount,
   type TraktDeviceCode,
@@ -67,7 +68,9 @@ import {
   cfProxyDisable,
   cfProxyStatus,
   getPrefetchSettings,
+  getPreloadSettings,
   setPrefetchSettings,
+  setPreloadSettings,
   getCrossServerResume,
   setCrossServerResume,
   getWritebackSettings,
@@ -95,6 +98,7 @@ import {
   IconLibrary,
   IconFile,
   IconCloud,
+  IconDownload,
   IconServer,
   IconRefresh,
   IconHeart,
@@ -1499,10 +1503,32 @@ function SubTransPane() {
 
 /* ============================================================
    网络 · CF 优选加速
-   服务器的身份键就是 **account.server**(核层 cfg.find(server_id) 比的是 a.server),
-   不是 user_id、也不是 line_url —— 传错核层只会「找不到该服务器」。
+   ★ 粒度是**线路**,不是服务器(2026-08-01 改,用户原话:
+     「不应该写『为哪台服务器优选』,而是『为哪条线路优选』…服务器有很多条线路,
+      而且有些线路并没有使用 Cloudflare」)。
+   核层的改写表键就是线路地址,cf_proxy_enable/disable 收的也是 lineUrl。
+   按服务器开的旧口径会把该服**所有**线路劫持到同一个反代上,而反代上游 host 是开启时
+   那条线定死的 —— 切到非 CF 线路后连得上、拉不到数据、还不报错。
    开/关都是热生效(核层内部 refresh_session_base),此处不必提示重启。
    ============================================================ */
+
+/** 摊平成「一台服的一条线」。lines 为空 = 核层的单线路形态,用 line_url 顶一条主线出来。 */
+type LineOpt = { key: string; url: string; serverName: string; lineName: string };
+function flattenLines(accts: AccountInfo[]): LineOpt[] {
+  const out: LineOpt[] = [];
+  for (const a of accts) {
+    const serverName = a.name || hostOf(a.server) || a.server;
+    if (a.lines.length === 0) {
+      out.push({ key: a.line_url, url: a.line_url, serverName, lineName: "主线" });
+      continue;
+    }
+    for (const l of a.lines) {
+      out.push({ key: `${a.server}|${l.url}`, url: l.url, serverName, lineName: l.name || "线路" });
+    }
+  }
+  return out;
+}
+
 function CfPane() {
   const f = useFlash();
   const [accts, setAccts] = useState<AccountInfo[] | null>(null);
@@ -1510,29 +1536,31 @@ function CfPane() {
   const [ips, setIps] = useState<CfTestResult[] | null>(null);
   const [pick, setPick] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  /** 只对这台服测速:validate_host 用它的域名剔掉「TCP 通但 HTTP 死」的边缘。 */
+  /** 选中的**线路地址**。测速的 validate_host 用它的域名剔掉「TCP 通但 HTTP 死」的边缘。 */
   const [target, setTarget] = useState("");
 
   const reload = async () => {
     const [a, r] = await Promise.all([listAccounts(), cfProxyStatus()]);
     setAccts(a);
     setRows(r);
-    setTarget((t) => t || a[0]?.server || "");
+    setTarget((t) => t || flattenLines(a)[0]?.url || "");
   };
 
   useEffect(() => {
     reload().catch(f.err);
   }, []);
 
-  const cur = accts?.find((a) => a.server === target);
+  const lines = useMemo(() => flattenLines(accts ?? []), [accts]);
+  const cur = lines.find((l) => l.url === target);
 
   async function test() {
     if (busy) return;
     setBusy("test");
     setIps(null);
     try {
-      /* 测速要拿**直连**线路的域名去校验:line_url 就是未经反代改写的上游。 */
-      const res = await cfSpeedTest(hostOf(cur?.line_url ?? "") || null, null);
+      /* 测速拿**这条线路自己**的域名去校验 —— 换成别的线路的域名就等于在验错东西:
+         那台边缘可能对 A 域名活、对 B 域名死,而我们要开的是 B。 */
+      const res = await cfSpeedTest(hostOf(cur?.url ?? "") || null, null);
       setIps(res);
       setPick(res[0]?.ip ?? "");
       f.ok(res.length ? `测到 ${res.length} 个可用 IP` : "没测到可用 IP");
@@ -1543,11 +1571,11 @@ function CfPane() {
     }
   }
 
-  async function enable(serverId: string, ip: string) {
+  async function enable(lineUrl: string, ip: string) {
     if (busy || !ip) return;
-    setBusy(serverId);
+    setBusy(lineUrl);
     try {
-      const url = await cfProxyEnable(serverId, ip);
+      const url = await cfProxyEnable(lineUrl, ip);
       await reload();
       f.ok(`已启用 · ${url}`);
     } catch (e) {
@@ -1557,11 +1585,11 @@ function CfPane() {
     }
   }
 
-  async function disable(serverId: string) {
+  async function disable(lineUrl: string) {
     if (busy) return;
-    setBusy(serverId);
+    setBusy(lineUrl);
     try {
-      await cfProxyDisable(serverId);
+      await cfProxyDisable(lineUrl);
       await reload();
       f.ok("已关闭,恢复直连");
     } catch (e) {
@@ -1585,29 +1613,37 @@ function CfPane() {
     <div className="mdpane">
       <h4>CF 优选加速</h4>
       <p className="hint">
-        测出延迟低的 Cloudflare 边缘 IP,起一个本地反代把该服务器的 API / 封面 / 取流
-        全部钉到这个 IP。开关即时生效,无需重启。
+        测出延迟低的 Cloudflare 边缘 IP,起一个本地反代把**这条线路**的 API / 封面 / 取流
+        全部钉到这个 IP。同一台服的其它线路不受影响 —— 没走 Cloudflare 的线路照旧直连。
+        开关即时生效,无需重启。
       </p>
 
-      {accts.length === 0 && <p className="hint">还没有服务器,先去服务器页添加。</p>}
+      {lines.length === 0 && <p className="hint">还没有服务器,先去服务器页添加。</p>}
 
-      {accts.length > 0 && (
+      {lines.length > 0 && (
         <>
           <div className="fld">
-            <label>为哪台服务器优选</label>
+            <label>为哪条线路优选</label>
             <select
               className="field"
               style={{ cursor: "pointer" }}
               value={target}
               onChange={(e) => {
                 setTarget(e.target.value);
-                setIps(null); // 换服就得重测:上一台的结果对这台没有参考意义
+                setIps(null); // 换线就得重测:边缘对上一条线的域名活,不代表对这条也活
               }}
             >
               {accts.map((a) => (
-                <option key={a.server} value={a.server}>
-                  {a.name || hostOf(a.server) || a.server}
-                </option>
+                <optgroup key={a.server} label={a.name || hostOf(a.server) || a.server}>
+                  {(a.lines.length
+                    ? a.lines.map((l) => ({ url: l.url, name: l.name || "线路" }))
+                    : [{ url: a.line_url, name: "主线" }]
+                  ).map((l) => (
+                    <option key={l.url} value={l.url}>
+                      {l.name} · {hostOf(l.url) || l.url}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </div>
@@ -1644,33 +1680,37 @@ function CfPane() {
             <button
               className="btn primary"
               disabled={!!busy || !pick || !cur}
-              onClick={() => cur && enable(cur.server, pick)}
+              onClick={() => cur && enable(cur.url, pick)}
             >
-              {busy === cur?.server ? "启用中…" : "启用此 IP"}
+              {busy === cur?.url ? "启用中…" : "为这条线路启用"}
             </button>
           </div>
         </>
       )}
       {ips && ips.length === 0 && (
         <p className="hint" style={{ marginTop: 12 }}>
-          没测到可用 IP —— 可能是网络封锁或该服务器不在 Cloudflare 后面。
+          没测到可用 IP —— 可能是网络封锁,或**这条线路**不在 Cloudflare 后面
+          (那就别给它开优选,换一条走 CF 的线)。
         </p>
       )}
 
       <h4 style={{ marginTop: 22 }}>当前生效的优选</h4>
       {rows.length === 0 ? (
-        <p className="hint">还没有服务器在走优选,全部直连。</p>
+        <p className="hint">还没有线路在走优选,全部直连。</p>
       ) : (
         rows.map((r) => {
           const a = accts.find((x) => x.server === r.server_id);
+          const who = a?.name || hostOf(r.server_id) || r.server_id;
           return (
             <Row
-              key={r.server_id}
-              t={a?.name || hostOf(r.server_id) || r.server_id}
+              key={r.line_url}
+              /* 标题必须带线路名 —— 同一台服可能有多条线各开各的优选,
+                 只写服务器名会出现两行长得一模一样、分不清关哪条。 */
+              t={`${who} · ${r.line_name || "线路"} (${hostOf(r.line_url) || r.line_url})`}
               d={`钉住 ${r.pinned_ip || "(未知)"} · 本地反代 ${r.local_url}`}
             >
-              <button className="btn" disabled={!!busy} onClick={() => disable(r.server_id)}>
-                {busy === r.server_id ? "处理中…" : "关闭"}
+              <button className="btn" disabled={!!busy} onClick={() => disable(r.line_url)}>
+                {busy === r.line_url ? "处理中…" : "关闭"}
               </button>
             </Row>
           );
@@ -1789,6 +1829,77 @@ function PrefetchPane() {
           step={64}
           fmt={(v) => (v >= 1024 ? `${(v / 1024).toFixed(v % 1024 ? 1 : 0)} GB` : `${v} MB`)}
           onChange={(v) => commit({ cache_bytes: v * MB })}
+        />
+      </Row>
+      {f.node}
+    </div>
+  );
+}
+
+/* ============================================================
+   网络 · 预加载
+   ★ 和上面的「多线程加载」是**两个功能**,用户 2026-08-01 专门点名过它们不一样:
+     多线程加载 = 播放**中**在本地起代理超前拉 Range 喂 mpv,数据落环形缓存;
+     预加载     = 播放**前**(进详情页)把头 N MB + 尾 2MB 跑热,读完即丢,不改播放地址。
+   所以这里是独立一栏,不能并进上面那栏。
+   头部量核层是**拒绝**不是夹紧(>512MB 报错),Stepper 的 max 只做引导。
+   ============================================================ */
+function PreloadPane() {
+  const f = useFlash();
+  const [s, setS] = useState<PreloadSettings | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    getPreloadSettings()
+      .then((v) => alive && setS(v))
+      .catch(f.err);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function commit(patch: Partial<PreloadSettings>) {
+    if (!s) return;
+    const prev = s;
+    const next = { ...s, ...patch };
+    setS(next);
+    try {
+      await setPreloadSettings(next);
+      f.ok("已保存");
+    } catch (e) {
+      setS(prev);
+      f.err(e);
+    }
+  }
+
+  if (!s) {
+    return (
+      <div className="mdpane">
+        <h4>预加载</h4>
+        <p className="hint">读取中…</p>
+        {f.node}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mdpane">
+      <h4>预加载</h4>
+      <p className="hint">
+        进详情页就先热一段,起播更快。和「多线程加载」不是一回事:那个管播放中喂得满,
+        这个管起播前把路跑通。
+      </p>
+      <Row t="启用预加载" d="默认开;计费网络可关">
+        <Sw on={s.enabled} onChange={(enabled) => commit({ enabled })} />
+      </Row>
+      <Row t="预热头部" d="尾部固定热 2MB(MKV 索引在末尾,起播第一跳就读它)。0 = 只热尾部">
+        <Stepper
+          value={s.head_mb}
+          min={0}
+          max={512}
+          step={16}
+          fmt={(v) => (v === 0 ? "关" : `${v} MB`)}
+          onChange={(head_mb) => commit({ head_mb })}
         />
       </Row>
       {f.node}
@@ -2770,6 +2881,7 @@ const SECTIONS: { sec: string; items: ItemDef[] }[] = [
     items: [
       { id: "cf", label: "CF 优选加速", icon: <IconCloud size={16} /> },
       { id: "prefetch", label: "多线程加载", icon: <IconRefresh size={16} /> },
+      { id: "preload", label: "预加载", icon: <IconDownload size={16} /> },
       { id: "proxy", label: "代理设置", icon: <IconServer size={16} /> },
     ],
   },
@@ -2863,6 +2975,7 @@ export default function SettingsPage({ theme, setTheme }: Props) {
             {active === "subtrans" && <SubTransPane />}
             {active === "cf" && <CfPane />}
             {active === "prefetch" && <PrefetchPane />}
+            {active === "preload" && <PreloadPane />}
             {active === "proxy" && <ProxyPane />}
             {active === "sync" && <SyncPane />}
             {active === "account" && <AccountPane />}

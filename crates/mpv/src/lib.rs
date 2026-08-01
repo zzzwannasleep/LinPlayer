@@ -506,7 +506,12 @@ mod overlay {
        钉住它,上面整类问题一次消掉,也不用起定时器去轮询。 */
     static mut PREV_PROC: isize = 0;
     static mut VIDEO_HWND: isize = 0;
-    static HOOK: Once = Once::new();
+    /// 当前把钩子装在**哪个**宿主窗上。0 = 没装。
+    ///
+    /// 从「装一次就不管」改成可改挂,是因为播放页现在是**独立窗口**:起播时视频窗要跟
+    /// 播放窗走,退播放时再交还主窗。`PREV_PROC` 只有一个槽 —— 不先卸就装第二个,
+    /// 第一个宿主的原 wndproc 会被永久覆盖掉,那个窗口从此收不到自己的消息。
+    static mut HOOKED_HWND: isize = 0;
 
     unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let prev = PREV_PROC;
@@ -546,27 +551,51 @@ mod overlay {
 
     static IN_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-    /// 子类化主窗,接管 WM_WINDOWPOSCHANGED。只装一次;窗口活到进程结束,不用卸。
+    /// 子类化宿主窗,接管 WM_WINDOWPOSCHANGED。**可改挂**:传入不同的 host 会先把钩子从
+    /// 上一个宿主上卸下来再装到新的上面(播放页独立成窗口后,视频窗要在主窗/播放窗之间改挂)。
+    ///
+    /// ★ 必须在**宿主窗所属的那条线程**上调(= 主线程)。SetWindowLongPtr 对别的线程
+    ///   拥有的窗口会直接失败,而且不报错 —— 表现就是「改挂了但 z 序还跟着老窗口」。
     pub fn pin_below(video: isize, tauri: isize) {
         unsafe {
             VIDEO_HWND = video;
             HOST_HWND = tauri;
-            HOOK.call_once(|| {
-                let prev = GetWindowLongPtrW(tauri as HWND, GWLP_WNDPROC);
-                /* 拿不到原 wndproc 就**别装**。装了却把消息全喂给 DefWindowProcW,
-                   等于把 Tauri 的窗口过程整个换掉 —— 窗口会彻底不响应。
-                   降级成「只靠 Tauri 事件重排 z 序」(改这版之前的行为)远比这个好。 */
-                if prev == 0 {
-                    crate::poclog("装 WM_WINDOWPOSCHANGED 钩子失败(取不到原 wndproc),z 序退回事件驱动");
-                    return;
+            if HOOKED_HWND == tauri {
+                return; // 已经装在它身上,别重复装(重复装会把自己的 host_proc 存进 PREV_PROC → 无限递归)
+            }
+            /* 先卸旧的。PREV_PROC 只有一个槽:不卸就装第二个,旧宿主的原 wndproc
+               被覆盖后再也找不回来,那个窗口从此不响应 —— 比不改挂糟糕得多。 */
+            if HOOKED_HWND != 0 {
+                if IsWindow(HOOKED_HWND as HWND) != 0 && PREV_PROC != 0 {
+                    SetWindowLongPtrW(HOOKED_HWND as HWND, GWLP_WNDPROC, PREV_PROC);
                 }
-                PREV_PROC = prev;
-                SetWindowLongPtrW(tauri as HWND, GWLP_WNDPROC, host_proc as *const () as isize);
-            });
+                HOOKED_HWND = 0;
+                PREV_PROC = 0;
+            }
+            if tauri == 0 {
+                return; // 只卸不装(播放窗关掉且暂时没有新宿主)
+            }
+            let prev = GetWindowLongPtrW(tauri as HWND, GWLP_WNDPROC);
+            /* 拿不到原 wndproc 就**别装**。装了却把消息全喂给 DefWindowProcW,
+               等于把 Tauri 的窗口过程整个换掉 —— 窗口会彻底不响应。
+               降级成「只靠 Tauri 事件重排 z 序」(改这版之前的行为)远比这个好。 */
+            if prev == 0 {
+                crate::poclog("装 WM_WINDOWPOSCHANGED 钩子失败(取不到原 wndproc),z 序退回事件驱动");
+                return;
+            }
+            PREV_PROC = prev;
+            HOOKED_HWND = tauri;
+            SetWindowLongPtrW(tauri as HWND, GWLP_WNDPROC, host_proc as *const () as isize);
         }
     }
 
     static mut HOST_HWND: isize = 0;
+
+    /// 当前宿主是不是它。**还没定过宿主时一律算是**(启动早期主窗自己就是唯一候选,
+    /// 那时返 false 会把开机第一次对齐吞掉,画面停在 0×0)。
+    pub fn is_host(hwnd: isize) -> bool {
+        unsafe { HOST_HWND == 0 || HOST_HWND == hwnd }
+    }
 
     /// 开关「正在播片」。真正显不显示还要看主窗是不是最小化了,见 apply_visibility。
     pub fn set_visible(video: isize, on: bool) {
@@ -732,6 +761,13 @@ mod overlay {
        所以 Linux 这半仍然只靠 Tauri 事件驱动的 sync(),这是**已知的能力差**,
        不是忘了写。真在 X11 上遇到层级掉队,再来补事件循环那条路。 */
     pub fn pin_below(_video: isize, _tauri: isize) {}
+
+    /* X11 这半没有 wndproc 钩子,也就没有「当前宿主」的概念 —— 几何一律由 Tauri 事件
+       驱动。恒真即可:调用方拿它当闸门,返 false 会把 Linux 上的对齐整个关掉。
+       真要在 X11 上支持独立播放窗的层级跟随,得先补那条事件循环(见 pin_below 上面)。 */
+    pub fn is_host(_hwnd: isize) -> bool {
+        true
+    }
 
     pub fn sync(video: isize, tauri: isize, x_: i32, y_: i32, w: i32, h: i32) {
         let Some(x) = x11() else { return };
@@ -919,6 +955,15 @@ pub fn pin_overlay_below(video: isize, tauri: isize) {
 /// 主窗一最小化就露在桌面上。
 pub fn set_overlay_visible(video: isize, on: bool) {
     overlay::set_visible(video, on)
+}
+
+/// `hwnd` 是不是**当前**的视频窗宿主。
+///
+/// 播放页独立成窗口后,主窗和播放窗都装了几何同步回调,但视频窗只有一个 ——
+/// 非宿主窗发来的 Resized/Moved 必须原地不动,否则主窗一被拖动就会把正在播放窗里
+/// 放着的画面拽回主窗的矩形上。
+pub fn is_overlay_host(hwnd: isize) -> bool {
+    overlay::is_host(hwnd)
 }
 
 // ---------- 播放器 ----------

@@ -80,6 +80,9 @@ struct AppState {
     cf_proxy: Mutex<HashMap<String, linplayer_core::net::cf::CfProxyHandle>>,
     // 多线程下载管理器(长驻,持久化索引)。
     download: linplayer_core::download::DownloadManager,
+    // 预加载器(详情页把头/尾两段跑热)。长驻、无状态,同一时刻只热一个条目。
+    // 和上面的 prefetch 不是一回事,区别见 net::preload 顶部。
+    preload: linplayer_core::net::preload::Preloader,
     // 当前 Emby 播放的 Trakt scrobble 上下文(play 时抓取,stop 时用于收尾上报)。
     scrobble_ctx: Mutex<Option<emby::ScrobbleInfo>>,
     // 本地观看记录(跨服务器续播)。长驻,自持存盘。
@@ -97,6 +100,11 @@ struct AppState {
     wh_done: Mutex<std::collections::HashSet<String>>,
     // 当前播放条目的观看记录上下文(play 时装,progress/stop 时用)。
     wh_ctx: Mutex<Option<(String, linplayer_core::watch_history::Candidate, Option<String>)>>,
+    /* 待播条目。主窗点「播放」时塞进来,播放窗起来后自取(player_take_pending)。
+       为什么走核层而不是 URL 参数/localStorage:Item 是个结构体,塞 URL 要编码、
+       长度还有上限;localStorage 在两个 WebView2 窗口之间倒是共享,但那是**隐式**
+       耦合,读写时序全靠猜。核层是两个窗口本来就共有的那份状态,最省事也最实在。 */
+    pending_play: Mutex<Option<serde_json::Value>>,
     // 插件管理器(setup 期建,持 AppHandle 的 host)。
     plugins: OnceLock<Arc<PluginManager>>,
     // 插件 ctx.ui 请求的待回表:id -> oneshot,前端 plugin_ui_respond 回填。
@@ -184,6 +192,77 @@ fn sync_video(window: &tauri::WebviewWindow, parent: isize, state: &AppState) {
         if let (Ok(pos), Ok(size)) = (window.inner_position(), window.inner_size()) {
             mpv::sync_overlay(v, parent, pos.x, pos.y, size.width as i32, size.height as i32);
         }
+    }
+}
+
+/* ---- 视频窗的宿主:主窗 / 播放窗 ----
+
+   播放页现在是**独立窗口**(用户 2026-08-01 再次点名)。mpv 的视频窗本来就是一个独立
+   顶层窗口,原先被焊在主窗背面、跟着主窗的客户区走;现在起播时要改焊到播放窗背面,
+   退播放时再交还主窗。改挂的是两件事:
+     1) 几何来源(sync_video 拿谁的 inner_position/inner_size);
+     2) WM_WINDOWPOSCHANGED 钩子装在谁身上(mpv::pin_overlay_below,现已支持改挂)。
+   两件必须一起改 —— 只改一件的表现是「画面跟着 A 窗动、层级跟着 B 窗排」,乱得没法看。 */
+
+/// 窗口移动/缩放/激活 → 重新对齐视频窗口。**每个可能当宿主的窗口都要装一次**
+/// (主窗 + 播放窗);只有当前宿主那一份会真正生效,因为 sync_video 摆的是同一个视频窗,
+/// 而非宿主窗发来的事件会把它摆到自己身上 —— 所以内部要先确认「我才是当前宿主」。
+fn install_video_host_events(app: &tauri::AppHandle, window: &tauri::WebviewWindow) {
+    let Ok(host) = hwnd_of(window) else {
+        poclog("装几何同步失败:取不到窗口句柄");
+        return;
+    };
+    let app_handle = app.clone();
+    let win2 = window.clone();
+    /* 全屏进/出、拖拽缩放会连发多个 Resized,末帧几何要等窗口 settle 才准。
+       立即同步一次(跟手)+ 代际防抖补一发延时同步 catch 最终尺寸/z 序 —— 否则
+       退出全屏后 mpv 独立窗口可能仍停在全屏尺寸并压在上面,看着像「没退出去」
+       (用户 2026-07-16:全屏修好后又多了这个问题)。 */
+    let settle_gen = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    window.on_window_event(move |ev| {
+        if matches!(
+            ev,
+            WindowEvent::Resized(_) | WindowEvent::Moved(_) | WindowEvent::Focused(true)
+        ) {
+            // 不是当前宿主就别动视频窗 —— 否则主窗一被拖动,正在播放窗里放的画面会
+            // 被拽回主窗的矩形上(两个窗口都装了这个回调)。
+            if !mpv::is_overlay_host(host) {
+                return;
+            }
+            sync_video(&win2, host, &app_handle.state::<AppState>());
+            // ponytail: 每个 resize 事件起一个短线程等 settle;只有末代那发真重同步,
+            // 拖拽连发的中间线程 220ms 后发现代际过期即退,不重复动窗口。
+            let gen = settle_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let gen_arc = settle_gen.clone();
+            let ah = app_handle.clone();
+            let w3 = win2.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(220));
+                if gen_arc.load(std::sync::atomic::Ordering::SeqCst) != gen {
+                    return; // 又来了新事件,交给它那一发
+                }
+                let ah2 = ah.clone();
+                let _ = ah.run_on_main_thread(move || {
+                    if !mpv::is_overlay_host(host) {
+                        return;
+                    }
+                    sync_video(&w3, host, &ah2.state::<AppState>());
+                });
+            });
+        }
+    });
+}
+
+/// 把视频窗焊到 `window` 背面:立刻对齐一次 + 把 z 序钩子改挂过去。
+fn attach_video_host(window: &tauri::WebviewWindow, state: &AppState) {
+    let Ok(host) = hwnd_of(window) else {
+        poclog("改挂视频窗失败:取不到宿主窗句柄");
+        return;
+    };
+    sync_video(window, host, state);
+    let video = state.player.lock().unwrap().as_ref().map(|p| p.video_hwnd);
+    if let Some(v) = video {
+        mpv::pin_overlay_below(v, host);
     }
 }
 
@@ -1503,6 +1582,10 @@ async fn play(
     media_source_id: Option<String>,
 ) -> Result<f64, String> {
     let s = session_of(&state)?;
+
+    /* 预热到此为止:起播那一刻带宽该全给播放器。预热是为了让**这一刻**更快,
+       它自己跨过这一刻继续拉就成了和播放器抢带宽 —— 反倒把起播拖慢。 */
+    state.preload.cancel();
 
     /* 观看记录上下文 与 取流地址 **并发**打 —— 两者互不依赖,却曾经一前一后串着 await,
        白白多等 1~2 个 RTT(远程 Emby 每个 100~300ms)才轮到 mpv loadfile。
@@ -4126,81 +4209,128 @@ fn refresh_session_base(state: &AppState, server_id: &str) {
     }
 }
 
-/// 为某台服务器开启 CF 优选反代,并**登记路由改写** —— 之后该服的 `active_line_url()`
-/// 返回本地反代基址,Emby API / 封面图 / mpv 取流全部自动改走优选 IP。
+/// 归一化线路地址 —— 必须和 `net::cf::runtime::key` 同口径,否则句柄表和改写表会错开:
+/// 改写生效了但句柄找不到(= 关不掉),或者反过来。
+fn norm_line(u: &str) -> String {
+    u.trim().trim_end_matches('/').to_string()
+}
+
+/// 按**线路**找它属于哪台服务器(关优选 / 刷会话时要用)。
+fn server_of_line(state: &AppState, line_url: &str) -> Option<String> {
+    let want = norm_line(line_url);
+    let cfg = state.config.lock().unwrap();
+    cfg.accounts
+        .iter()
+        .find(|a| {
+            norm_line(&a.server) == want || a.lines.iter().any(|l| norm_line(&l.url) == want)
+        })
+        .map(|a| a.server.clone())
+}
+
+/// 为**某一条线路**开启 CF 优选反代,并登记路由改写 —— 之后这条线生效时,
+/// `active_line_url()` 返回本地反代基址,Emby API / 封面图 / mpv 取流全部改走优选 IP。
 /// 已开则热切换 IP(端口与本地基址不变,对进行中的会话无感)。
+///
+/// ★ 粒度是线路不是服务器(2026-08-01 改,用户原话:「有些线路并没有使用 Cloudflare」)。
+///   按服务器开等于把该服所有线路都劫持到同一个反代,而反代上游 host 是开启时那条线定死的
+///   —— 切到非 CF 线路就变成「连得上、没数据、不报错」。理由详见 net::cf::runtime 顶部。
 #[tauri::command]
 async fn cf_proxy_enable(
     state: State<'_, AppState>,
-    server_id: String,
+    line_url: String,
     ip: String,
 ) -> Result<String, String> {
+    let key = norm_line(&line_url);
     // 已开 → 只热切 IP。注意别在持锁期间 await。
     let existing = {
         let m = state.cf_proxy.lock().unwrap();
-        m.get(&server_id).map(|h| h.port)
+        m.get(&key).map(|h| h.port)
     };
     if existing.is_some() {
-        let handle = state.cf_proxy.lock().unwrap().remove(&server_id);
+        let handle = state.cf_proxy.lock().unwrap().remove(&key);
         if let Some(h) = handle {
             h.update_ip(ip).await;
-            let url = cf::runtime::local_url_for(&server_id).unwrap_or_default();
-            state.cf_proxy.lock().unwrap().insert(server_id, h);
+            let url = cf::runtime::local_url_for(&key).unwrap_or_default();
+            state.cf_proxy.lock().unwrap().insert(key, h);
             return Ok(url);
         }
     }
 
-    let (upstream, allow_insecure) = {
+    let server_id = server_of_line(&state, &key).ok_or("找不到这条线路所属的服务器")?;
+    let allow_insecure = {
         let cfg = state.config.lock().unwrap();
-        let a = cfg.find(&server_id).ok_or("找不到该服务器")?;
-        // 上游必须用 direct_line_url:用 active_line_url 会在反代已开时把反代自己当上游,
-        // 打成 127.0.0.1 → 127.0.0.1 的自环。
-        (a.direct_line_url().to_string(), a.allow_insecure_tls)
+        cfg.find(&server_id).map(|a| a.allow_insecure_tls).unwrap_or(false)
     };
-    let (scheme, host, port) = cf::runtime::split_upstream(&upstream);
+    // 上游就是这条线路的原始地址 —— 绝不能用 active_line_url,反代已开时会把反代自己
+    // 当上游,打成 127.0.0.1 → 127.0.0.1 的自环。
+    let (scheme, host, port) = cf::runtime::split_upstream(&key);
     let handle = linplayer_core::net::cf::start_proxy(scheme, host, port, ip, allow_insecure)
         .await
         .ok_or("CF 反代起服失败(IP 非法?)")?;
-    let local = cf::runtime::local_base(&upstream, handle.port);
-    cf::runtime::bind(&server_id, &local);
-    state.cf_proxy.lock().unwrap().insert(server_id.clone(), handle);
+    let local = cf::runtime::local_base(&key, handle.port);
+    cf::runtime::bind(&key, &local);
+    state.cf_proxy.lock().unwrap().insert(key, handle);
     refresh_session_base(&state, &server_id);
     Ok(local)
 }
 
-/// 关闭某服的反代,撤销路由改写,恢复直连原线路。
+/// 关掉**这条线路**的反代,撤销路由改写,恢复直连。
 #[tauri::command]
-fn cf_proxy_disable(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
-    cf::runtime::unbind(&server_id);
-    state.cf_proxy.lock().unwrap().remove(&server_id); // Drop 停服
-    refresh_session_base(&state, &server_id);
+fn cf_proxy_disable(state: State<'_, AppState>, line_url: String) -> Result<(), String> {
+    let key = norm_line(&line_url);
+    cf::runtime::unbind(&key);
+    state.cf_proxy.lock().unwrap().remove(&key); // Drop 停服
+    if let Some(server_id) = server_of_line(&state, &key) {
+        refresh_session_base(&state, &server_id);
+    }
     Ok(())
 }
 
 #[derive(serde::Serialize)]
 struct CfProxyStatus {
+    /// 走优选的**线路**地址(改写表的键)。
+    line_url: String,
+    /// 它属于哪台服务器(供设置页显示服务器名);查不到时为空串。
     server_id: String,
+    /// 这条线路在账号线路表里的名字(「主线」/「CDN」…),查不到为空串。
+    line_name: String,
     local_url: String,
     pinned_ip: String,
 }
 
-/// 当前所有生效的反代改写(设置页展示"哪台服在走优选、钉的哪个 IP")。
+/// 当前所有生效的反代改写(设置页展示"哪条线路在走优选、钉的哪个 IP")。
 #[tauri::command]
 async fn cf_proxy_status(state: State<'_, AppState>) -> Result<Vec<CfProxyStatus>, String> {
-    let ports: Vec<(String, String)> = cf::runtime::all().into_iter().collect();
+    let routes: Vec<(String, String)> = cf::runtime::all().into_iter().collect();
     let mut out = Vec::new();
-    for (server_id, local_url) in ports {
+    for (line_url, local_url) in routes {
         // pinned_ip 要 await,不能在持锁时取;先把句柄摘出来问完再放回。
-        let handle = state.cf_proxy.lock().unwrap().remove(&server_id);
+        let handle = state.cf_proxy.lock().unwrap().remove(&line_url);
         let pinned_ip = match handle {
             Some(h) => {
                 let ip = h.pinned_ip().await;
-                state.cf_proxy.lock().unwrap().insert(server_id.clone(), h);
+                state.cf_proxy.lock().unwrap().insert(line_url.clone(), h);
                 ip
             }
             None => String::new(),
         };
-        out.push(CfProxyStatus { server_id, local_url, pinned_ip });
+        let (server_id, line_name) = {
+            let cfg = state.config.lock().unwrap();
+            let want = norm_line(&line_url);
+            cfg.accounts
+                .iter()
+                .find_map(|a| {
+                    if norm_line(&a.server) == want && a.lines.is_empty() {
+                        return Some((a.server.clone(), "主线".to_string()));
+                    }
+                    a.lines
+                        .iter()
+                        .find(|l| norm_line(&l.url) == want)
+                        .map(|l| (a.server.clone(), l.name.clone()))
+                })
+                .unwrap_or_default()
+        };
+        out.push(CfProxyStatus { line_url, server_id, line_name, local_url, pinned_ip });
     }
     Ok(out)
 }
@@ -4325,6 +4455,200 @@ fn set_prefetch_settings(
     cfg.prefs.prefetch_cache_bytes = settings.cache_bytes;
     cfg.save();
     Ok(())
+}
+
+// ---------- 播放窗(独立窗口)----------
+/* 播放页是**独立的 Tauri 窗口**,加载同一份前端包、URL 带 `#player`,
+   前端据此只渲染播放层(见 ui/desktop/App.tsx 顶部 IS_PLAYER_WINDOW)。
+
+   ## 为什么复用同一份包,而不是抽一个播放器专用 bundle
+   播放层那一千多行(OSD / 面板 / 弹幕 / 快捷键 / seek 闩 / 进度回传 / Trakt·Bangumi 收尾)
+   是全项目回归风险最高的代码。抽出去等于把它整个重写一遍,而收益只是少几百 KB 的 JS。
+   同包 + 一个入口判断,播放层一行都不用动 —— 该省的是风险,不是字节数。
+
+   ## 为什么不用子窗口(set_parent)
+   视频窗是**独立顶层窗口**垫在下面的(见 [[rn-migration-evaluation]] 的合成缝解法)。
+   播放窗做成主窗的子窗口会把它拖进主窗的裁剪区,合成缝那套就不成立了。 */
+const PLAYER_LABEL: &str = "player";
+
+/// 打开/复用播放窗并把待播条目交给它。主窗的「播放」按钮走这条。
+#[tauri::command]
+async fn player_window_open(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    // 核层不解析这个信封 —— 它只是个中转:前端塞什么,播放窗原样取回去自己分派。
+    *state.pending_play.lock().unwrap() = Some(payload);
+
+    if let Some(w) = app.get_webview_window(PLAYER_LABEL) {
+        // 已经开着(在播另一集):叫醒它去取新的待播条目。
+        use tauri::Emitter;
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = app.emit("lp://play-pending", ());
+        attach_video_host(&w, &app.state::<AppState>());
+        return Ok(());
+    }
+
+    /* 属性对齐主窗:透明 + 无边框(播放页自绘顶栏),否则 mpv 那块黑会被系统边框框住。
+
+       ★ 位置/尺寸**照抄主窗**,不 maximize。
+         照抄 = 播放窗正好盖在用户刚才那个窗口上,视觉上就是「原地展开成播放器」,
+         而且 OSD 的所有布局假设(它一直是按主窗客户区排的)一字不用改。
+         maximize 会引入一条全新的几何路径(无边框窗最大化在 Windows 上四周溢出 8px,
+         见 [[windows-maximize-overhang]]),没必要为了开个窗把那个坑再踩一遍。 */
+    let (pos, size) = match app.get_webview_window("main") {
+        Some(m) => (m.outer_position().ok(), m.inner_size().ok()),
+        None => (None, None),
+    };
+    let mut b = tauri::WebviewWindowBuilder::new(
+        &app,
+        PLAYER_LABEL,
+        tauri::WebviewUrl::App("index.html#player".into()),
+    )
+    .title("LinPlayer")
+    .min_inner_size(640.0, 400.0)
+    .transparent(true)
+    .decorations(false)
+    .data_directory(linplayer_core::paths::webview_dir());
+    if let Some(s) = size {
+        b = b.inner_size(s.width as f64, s.height as f64);
+    } else {
+        b = b.inner_size(1180.0, 720.0);
+    }
+    if let Some(p) = pos {
+        b = b.position(p.x as f64, p.y as f64);
+    }
+    let w = b.build().map_err(|e| format!("播放窗创建失败: {e}"))?;
+
+    /* Alt+F4 / 任务栏关闭:**不能让它真关掉**。窗口一销毁,前端的 closePlayer 就再也
+       跑不了 —— mpv 还在放(有声音没窗口 = 孤儿播放器,本项目在
+       [[desktop-double-audio-orphan-player]] 上栽过),而且这一段观看进度直接丢。
+       拦下来交给前端走正规退出流程:stopPlayback 落库 → player_window_close 藏窗。 */
+    {
+        use tauri::Emitter;
+        let ah = app.clone();
+        w.on_window_event(move |ev| {
+            if let WindowEvent::CloseRequested { api, .. } = ev {
+                api.prevent_close();
+                let _ = ah.emit("lp://player-close", ());
+            }
+        });
+    }
+    install_video_host_events(&app, &w);
+    attach_video_host(&w, &app.state::<AppState>());
+    Ok(())
+}
+
+/// 播放窗起来后自取待播条目(取完即清 —— 它只该被消费一次)。
+#[tauri::command]
+fn player_take_pending(state: State<'_, AppState>) -> Option<serde_json::Value> {
+    state.pending_play.lock().unwrap().take()
+}
+
+/// 关播放窗:藏起来、把视频窗交还主窗。**不销毁** —— 重开一次 WebView2 要几百毫秒,
+/// 而「退出播放 → 再点下一集」是最高频的路径。
+#[tauri::command]
+async fn player_window_close(app: tauri::AppHandle) -> Result<(), String> {
+    show_video(&app.state::<AppState>(), false);
+    if let Some(w) = app.get_webview_window(PLAYER_LABEL) {
+        let _ = w.hide();
+    }
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.show();
+        let _ = main.set_focus();
+        attach_video_host(&main, &app.state::<AppState>());
+    }
+    Ok(())
+}
+
+// ---------- 预加载命令 ----------
+/// 预加载设置。和多线程加载**不是一回事**,见 config.rs 上 preload_enabled 的注释。
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PreloadSettings {
+    enabled: bool,
+    head_mb: u64,
+}
+
+#[tauri::command]
+fn get_preload_settings(state: State<'_, AppState>) -> PreloadSettings {
+    let p = &state.config.lock().unwrap().prefs;
+    PreloadSettings { enabled: p.preload_enabled, head_mb: p.preload_head_mb }
+}
+
+#[tauri::command]
+fn set_preload_settings(
+    state: State<'_, AppState>,
+    settings: PreloadSettings,
+) -> Result<(), String> {
+    // 拒而不夹:静默夹紧会让用户以为设了 2GB 生效了(prefetch 那边同样的口径)。
+    if settings.head_mb > linplayer_core::config::PRELOAD_HEAD_MB_MAX {
+        return Err(format!(
+            "预加载头部量最多 {}MB —— 再大就不是预热是下载了",
+            linplayer_core::config::PRELOAD_HEAD_MB_MAX
+        ));
+    }
+    let mut cfg = state.config.lock().unwrap();
+    cfg.prefs.preload_enabled = settings.enabled;
+    cfg.prefs.preload_head_mb = settings.head_mb;
+    cfg.save();
+    Ok(())
+}
+
+/// 进详情页时调:把这个条目**将要播的那条流**的头/尾两段跑热(fire-and-forget)。
+///
+/// 立刻返回,预热在后台跑;换条目/离开详情页/起播都会把它掐掉。
+/// 任何失败都只是「没热成」,一律吞掉 —— 预热绝不能把详情页拦下来。
+#[tauri::command]
+async fn preload_item(
+    state: State<'_, AppState>,
+    item_id: String,
+    media_source_id: Option<String>,
+) -> Result<(), String> {
+    let (enabled, head_mb, version_regex) = {
+        let cfg = state.config.lock().unwrap();
+        (cfg.prefs.preload_enabled, cfg.prefs.preload_head_mb, cfg.prefs.version_regex.clone())
+    };
+    if !enabled {
+        return Ok(());
+    }
+    let Ok(s) = session_of(&state) else { return Ok(()) }; // 网盘/插件源没有 Emby 会话
+    let http = state.http.clone();
+    let pre = state.preload.clone();
+    /* 解析取流地址这一步也要放后台:它本身就是一次往返,放前台等于让详情页为了
+       「预热」多等一个 RTT —— 那正好和预热要解决的问题相反。 */
+    tauri::async_runtime::spawn(async move {
+        let Ok(target) =
+            emby::resolve_stream(&http, &s, &item_id, media_source_id.as_deref(), &version_regex)
+                .await
+        else {
+            return;
+        };
+        // 转码流是分段的,Range 预热没有意义(而且会让服务端白起一路转码)。
+        if target.play_method != "DirectStream" {
+            return;
+        }
+        let st = pre
+            .warm(
+                &item_id,
+                &target.url,
+                head_mb * 1024 * 1024,
+                linplayer_core::net::preload::DEFAULT_TAIL_BYTES,
+            )
+            .await;
+        poclog(&format!(
+            "preload item={item_id} head={} tail={} canceled={}",
+            st.head_bytes, st.tail_bytes, st.canceled
+        ));
+    });
+    Ok(())
+}
+
+/// 离开详情页 / 切条目时调,掐掉正在跑的那一轮预热。
+#[tauri::command]
+fn preload_cancel(state: State<'_, AppState>) {
+    state.preload.cancel();
 }
 
 /// 播放器默认行为(设置页「播放器」区)。
@@ -5207,6 +5531,8 @@ pub fn run() {
             danmaku_anchors: Mutex::new(HashMap::new()),
             wh_done: Mutex::new(std::collections::HashSet::new()),
             download,
+            preload: Default::default(),
+            pending_play: Mutex::new(None),
             scrobble_ctx: Mutex::new(None),
             plugins: OnceLock::new(),
             ui_pending: Mutex::new(HashMap::new()),
@@ -5272,39 +5598,7 @@ pub fn run() {
                 }
             }
 
-            // 窗口移动/缩放/激活 -> 重新对齐视频窗口
-            let app_handle = app.handle().clone();
-            let win2 = window.clone();
-            // 全屏进/出、拖拽缩放会连发多个 Resized,末帧几何要等窗口 settle 才准。
-            // 立即同步一次(跟手)+ 代际防抖补一发延时同步 catch 最终尺寸/z 序 —— 否则
-            // 退出全屏后 mpv 独立窗口可能仍停在全屏尺寸并压在上面,看着像「没退出去」
-            // (用户 2026-07-16:全屏修好后又多了这个问题)。
-            let settle_gen = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-            window.on_window_event(move |ev| {
-                if matches!(
-                    ev,
-                    WindowEvent::Resized(_) | WindowEvent::Moved(_) | WindowEvent::Focused(true)
-                ) {
-                    let Some(parent) = parent else { return };
-                    sync_video(&win2, parent, &app_handle.state::<AppState>());
-                    // ponytail: 每个 resize 事件起一个短线程等 settle;只有末代那发真重同步,
-                    // 拖拽连发的中间线程 220ms 后发现代际过期即退,不重复动窗口。
-                    let gen = settle_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                    let gen_arc = settle_gen.clone();
-                    let ah = app_handle.clone();
-                    let w3 = win2.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(220));
-                        if gen_arc.load(std::sync::atomic::Ordering::SeqCst) != gen {
-                            return; // 又来了新事件,交给它那一发
-                        }
-                        let ah2 = ah.clone();
-                        let _ = ah.run_on_main_thread(move || {
-                            sync_video(&w3, parent, &ah2.state::<AppState>());
-                        });
-                    });
-                }
-            });
+            install_video_host_events(app.handle(), &window);
 
             /* 插件系统:host 持 AppHandle 落平台能力。
                基目录**不再用 app_config_dir()** —— 那是由 tauri.conf.json 的 identifier 推出来的
@@ -5500,6 +5794,13 @@ pub fn run() {
             download_remove,
             download_set_threads,
             download_clear_completed,
+            get_preload_settings,
+            set_preload_settings,
+            preload_item,
+            preload_cancel,
+            player_window_open,
+            player_take_pending,
+            player_window_close,
             get_prefetch_settings,
             set_prefetch_settings,
             get_playback_prefs,

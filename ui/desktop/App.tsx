@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import {
   type AccountInfo,
   type DanmakuAnime,
@@ -36,6 +37,9 @@ import {
   listAccounts,
   play,
   playLocal,
+  playerTakePending,
+  playerWindowClose,
+  playerWindowOpen,
   playerOpts,
   type ChapterInfo,
   chapterInfo,
@@ -225,6 +229,19 @@ const normHwdec = (h: string) =>
       ? (IS_LINUX ? "vaapi" : "d3d11va")
       : "auto-safe";
 
+/* ★ 播放页是**独立窗口**(用户 2026-08-01 再次点名)。
+   核层用 `index.html#player` 建第二个 Tauri 窗口,加载的是**同一份包** —— 这里靠 hash
+   分流:播放窗只渲染播放层,不渲染 Shell、也不受登录闸口管辖。
+
+   ## 为什么不抽一个播放器专用 bundle
+   播放层那一千多行(OSD / 面板 / 弹幕 / 快捷键 / seek 闩 / 进度回传 / Trakt·Bangumi 收尾)
+   是全项目回归风险最高的一块。抽出去等于重写一遍,收益只是少几百 KB 的 JS。
+   同包 + 一个入口判断,播放层一行都不用改 —— 该省的是风险,不是字节数。
+
+   ## 模块级常量,不是 state
+   窗口的身份在它整个生命周期里不会变,做成 state 只会多一次渲染和一堆依赖。 */
+const IS_PLAYER_WINDOW = typeof location !== "undefined" && location.hash === "#player";
+
 export default function App() {
   const [booted, setBooted] = useState(false);
   const [session, setSession] = useState<LoginResult | null>(null);
@@ -402,6 +419,36 @@ export default function App() {
       setBooted(true);
     })();
   }, []);
+
+  /* 播放窗的取件口。窗口刚起来时取一次;之后主窗每点一次「播放」都会广播
+     `lp://play-pending`,再取一次换片(窗口是复用的,不会重开)。
+
+     ★ 只在播放窗里装。主窗也监听的话,主窗会把自己刚交出去的条目又取回来自己播 ——
+       两个 mpv 同时出声,本项目在 [[desktop-double-audio-orphan-player]] 上栽过。 */
+  useEffect(() => {
+    if (!IS_PLAYER_WINDOW || !booted) return;
+    let alive = true;
+    const take = async () => {
+      const req = await playerTakePending().catch(() => null);
+      if (!alive || !req) return;
+      if (req.kind === "emby") await playItem(req.item as Item, req.media_source_id);
+      else if (req.kind === "local") await playDownload(req.download as DownloadItem);
+      else if (req.kind === "source") await playSource(req.entry as SourceEntry);
+    };
+    void take();
+    const un = listen("lp://play-pending", () => void take());
+    /* Alt+F4 关播放窗:核层拦住了真关闭并广播这条,由我们走正规退出 ——
+       stopPlayback 先把进度落库,再藏窗。直接让窗口销毁 = 孤儿 mpv + 丢这一段进度。 */
+    const unClose = listen("lp://player-close", () => void closePlayer());
+    return () => {
+      alive = false;
+      void un.then((f) => f());
+      void unClose.then((f) => f());
+    };
+    // booted 一变就装,之后不再重装 —— playItem 等函数每次渲染都是新引用,
+    // 放进依赖会让这个 effect 每帧重挂一次监听。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booted]);
 
   /* 详情页背景模糊:核层偏好 → :root 上的 --detail-blur(**无单位**数字),
      由 DetailPage.css 的 .dt-hero-bg 消费。走 CSS 变量而不是层层传 prop,
@@ -648,6 +695,12 @@ export default function App() {
           say(`外部播放器启动失败(${e}),改用内置播放器`);
         }
       }
+      /* 主窗自己**不起播** —— 把条目交给独立播放窗,由它调同一个 play()。
+         外部播放器那条分支在上面已经返回了,所以走到这儿一定是内置播放器。 */
+      if (!IS_PLAYER_WINDOW) {
+        await playerWindowOpen({ kind: "emby", item: it, media_source_id: mediaSourceId ?? null });
+        return;
+      }
       const resume = await play(it.id, it.resume_secs, mediaSourceId ?? null);
       setPlaying(it);
       // 版本:详情页指定了就照它高亮,否则等 item_media 回来按服务端第一个初始化。
@@ -667,6 +720,10 @@ export default function App() {
       .app-root.hidden 才让它露出来 —— 页面自己调 playLocal 只会有声音没画面。 */
   async function playDownload(d: DownloadItem) {
     try {
+      if (!IS_PLAYER_WINDOW) {
+        await playerWindowOpen({ kind: "local", download: d });
+        return;
+      }
       const resume = await playLocal(d.id, 0);
       const synth: Item = {
         id: d.item_id || d.id, name: d.title, type_: "Video", is_folder: false, has_primary: false,
@@ -686,6 +743,10 @@ export default function App() {
 
   async function playSource(entry: SourceEntry) {
     try {
+      if (!IS_PLAYER_WINDOW) {
+        await playerWindowOpen({ kind: "source", entry });
+        return;
+      }
       const start = await sourcePlay(entry, 0);
       // 网盘文件不是 Emby 条目:剧集号/规格字段一律 null。
       const synth: Item = { id: entry.id, name: entry.name, type_: "Video", is_folder: false, has_primary: false, runtime_secs: 0, resume_secs: 0, series_name: null, episode_no: null, season_no: null, video_height: null, bitrate: null, size_bytes: null, played: false, unplayed_item_count: 0, genres: [], year: null, rating: null, provider_ids: {}, presentation_unique_key: null, path: null, series_id: null, date_updated: null, sort_name: null };
@@ -698,10 +759,12 @@ export default function App() {
     }
   }
 
-  async function refreshSession() {
-    const s = await currentSession().catch(() => null);
-    setSession(s);
-  }
+  /* refreshSession() 已删 —— 它只拉 currentSession(核层那条 `.filter(|a| !a.is_file_browse())`
+     只认 Emby),srcAcc 永远停在旧值。挂在 onSessionChange 上就是用户 2026-08-01 报的:
+     从服务器页点卡片切到插件源/网盘/模组站 → session 变 null、srcAcc 还是 null →
+     `!session && !srcAcc` 命中 → **一脚踹回添加服务器页**,而账号其实已经切好了;
+     重启走的是 reloadEntry(两个都拉),所以「退出再进就正常」。
+     只留 reloadEntry 一个出口:切服/切线路/删服/登录,全都得两个一起刷。 */
 
   /** 会话 + 活跃文件源一起拉。**两个都要**:核层把它们分在两个命令里
    *  (current_session 只认 Emby 型,current_source 只认文件浏览型),
@@ -791,7 +854,10 @@ export default function App() {
       status 是 state,轮询回调里读到的是闭包快照,靠它落库会把进度记成播放前的旧值,
       算出来的 progress 到不了 100%,Trakt/Bangumi 的「看完」就永远不触发。 */
   async function closePlayer(pos?: number) {
-    await stopPlayback(pos ?? status.time);
+    /* ★ 失败也要往下走。stopPlayback 会在「没在播」时报错(Alt+F4 关一个空的播放窗
+       正是这种情况)—— 让它抛出去的话下面的关窗永远执行不到,窗口就**关不掉**了。
+       进度落库失败是遗憾,窗口关不掉是故障。 */
+    await stopPlayback(pos ?? status.time).catch(() => {});
     setPlaying(null);
     setTracks([]);
     setPanel(null);
@@ -799,6 +865,10 @@ export default function App() {
     setCtx(null);
     setSiblings([]);
     setBrightness(100);
+    /* 播放窗:退播放 = 关窗(核层只是 hide,不销毁 —— 重开一次 WebView2 要几百毫秒,
+       而「退出播放 → 再点下一集」是最高频的路径)。核层同时把视频窗交还主窗并把主窗提到前面。
+       ★ 必须在 stopPlayback **之后**:先关窗的话进度还没落库,这一段观看记录直接丢。 */
+    if (IS_PLAYER_WINDOW) await playerWindowClose().catch(() => {});
   }
 
   /* 全屏切换期间把 OSD 藏起来(fsBusy),等窗口尺寸稳定了再淡回来。
@@ -1056,7 +1126,7 @@ export default function App() {
       /* ★ 必须把前端 session 也拉一遍:核层改的是它自己那份会话,前端这份 session.server
          还是旧线路 —— 而 poster/backdrop/thumb/person 的 URL 全是拿 session.server 现拼的。
          不刷的话,用户正因为旧线不通才切线路,切完图片却继续打那条死线,看起来「切了跟没切一样」。 */
-      await refreshSession();
+      await reloadEntry();
       say(`已切到${lineName(acct, index)}`);
     } catch (e) { fail("切换线路", e); }
   }
@@ -1403,7 +1473,11 @@ export default function App() {
      插件源的用户在那边**永远返回 null**。老登录页只能连 Emby,所以这条一直没暴露;
      新的登录闸口把六类源全摆出来了,再只判 session 就会出现「加成功了还是回登录页,
      加一次挡一次」。 */
-  if (!session && !srcAcc) return (<><Titlebar /><LoginPage onLoggedIn={enterFromLogin} /></>);
+  /* 播放窗不受闸口管辖:它没有浏览界面,进不进得了门是主窗的事。
+     这里若不放行,会出现「主窗登录好了、播放窗弹出一个登录页」的荒唐画面 ——
+     而且播放窗的 session 是异步拉的,首帧一定是 null,那就是每次起播都闪一下登录页。 */
+  if (!IS_PLAYER_WINDOW && !session && !srcAcc)
+    return (<><Titlebar /><LoginPage onLoggedIn={enterFromLogin} /></>);
 
   const audio = tracks.filter((t) => t.kind === "audio");
   const subs = tracks.filter((t) => t.kind === "sub");
@@ -1458,28 +1532,34 @@ export default function App() {
 
   return (
     <>
-      {/* 自绘标题栏:播放时不渲染(让 mpv 全屏铺满,且不与播放器顶栏冲突)。 */}
-      {!playing && <Titlebar />}
-      <div className={`app-root${playing ? " hidden" : ""}${entering ? " entering" : ""}`}>
-        <Shell
-          /* 只连了网盘/Stremio/插件源时没有 Emby 会话 —— 用活跃源顶一个上去。
-             Shell 只拿 session.server 当「当前服务器」的标识(侧栏高亮 + 切换判断),
-             token/user_id 那两条路对文件浏览型源本来就走不到(它们不打 Emby API)。 */
-          session={session ?? { server: srcAcc!.server, token: "", user_id: "", user_name: srcAcc!.name }}
-          /* 网盘源没有 Emby 媒体库,首页会是空的 —— 直接落文件浏览页。 */
-          initialPage={!session && srcAcc ? "netdisk" : undefined}
-          onPlay={playItem}
-          onPlaySource={playSource}
-          onPlayDownload={playDownload}
-          onSessionChange={refreshSession}
-          searchOpen={searchOpen && !playing}
-          onSearch={() => setSearchOpen(true)}
-          onCloseSearch={() => setSearchOpen(false)}
-        />
-      </div>
+      {/* 自绘标题栏:播放时不渲染(让 mpv 全屏铺满,且不与播放器顶栏冲突)。
+          播放窗压根没有浏览界面,任何时候都不渲染它。 */}
+      {!playing && !IS_PLAYER_WINDOW && <Titlebar />}
+      {/* 浏览界面只在主窗。播放窗里 session 可能还没拉回来,渲染 Shell 会当场空引用崩掉
+          (见 [[transparent-window-crash-looks-like-blackscreen]]:窗口透明 + React 抛错 = 一片黑)。 */}
+      {!IS_PLAYER_WINDOW && (
+        <div className={`app-root${playing ? " hidden" : ""}${entering ? " entering" : ""}`}>
+          <Shell
+            /* 只连了网盘/Stremio/插件源时没有 Emby 会话 —— 用活跃源顶一个上去。
+               Shell 只拿 session.server 当「当前服务器」的标识(侧栏高亮 + 切换判断),
+               token/user_id 那两条路对文件浏览型源本来就走不到(它们不打 Emby API)。 */
+            session={session ?? { server: srcAcc!.server, token: "", user_id: "", user_name: srcAcc!.name }}
+            /* 网盘源没有 Emby 媒体库,首页会是空的 —— 直接落文件浏览页。 */
+            initialPage={!session && srcAcc ? "netdisk" : undefined}
+            onPlay={playItem}
+            onPlaySource={playSource}
+            onPlayDownload={playDownload}
+            onSessionChange={reloadEntry}
+            searchOpen={searchOpen && !playing}
+            onSearch={() => setSearchOpen(true)}
+            onCloseSearch={() => setSearchOpen(false)}
+          />
+        </div>
+      )}
 
-      {/* 出第一帧前的黑屏 + 加载动画:盖住 mpv 独立窗口,不露上一段残帧(用户 2026-07-16)。 */}
-      {playing && !ready && (
+      {/* 出第一帧前的黑屏 + 加载动画:盖住 mpv 独立窗口,不露上一段残帧(用户 2026-07-16)。
+          播放窗在还没拿到待播条目时也要盖着 —— 否则窗口是透明的,会直接看穿到桌面。 */}
+      {(playing ? !ready : IS_PLAYER_WINDOW) && (
         <div className="p-loading"><div className="sp" /></div>
       )}
 

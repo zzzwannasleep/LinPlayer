@@ -190,6 +190,17 @@ impl CfReverseProxy {
 
         // 头:透传上游头,剔除逐跳头与长度/编码(由本端重新框定)。
         let mut head = format!("HTTP/1.1 {code} {reason}\r\n");
+        /* ★ 必须显式 `Connection: close` —— 与 [[prefetch-keepalive-swallows-seek]] 同一个坑,
+           那边 2026-07-19 修了,**这份同构代码漏了**(用户 2026-08-01:「没有画面也没有声音…
+           即便有时候显示有流量,也依然加载不出来」,和当年一字不差)。
+
+           handle() 每条 TCP 只 read_request 一次,喂完 body 就返回、socket 随之 drop。
+           可 HTTP/1.1 默认长连接 —— 不写这头就是在对播放器承诺「这条连接还能再发请求」。
+           mpv/ffmpeg 起播必 seek(MKV 索引在末尾),它会把下一个 `Range:` **管线化发在
+           同一条 socket 上**,而那头已经没人读了:请求进黑洞、响应永不来 → 播放器干等,
+           超时后重连从头线性读 = 有流量、黑屏无声、慢得离谱。
+           声明 close 后每次 seek 老老实实新开连接,正合本代理「一请求一连接」的实现。 */
+        head.push_str("Connection: close\r\n");
         for (name, val) in resp.headers().iter() {
             let n = name.as_str();
             if is_hop_by_hop(n) || n.eq_ignore_ascii_case("content-length") {
@@ -345,5 +356,67 @@ mod tests {
     fn finds_header_boundary() {
         assert_eq!(find_head_end(b"GET / HTTP/1.1\r\nHost: x\r\n\r\nBODY"), Some(23));
         assert_eq!(find_head_end(b"incomplete\r\n"), None);
+    }
+
+    /// 极简上游:回一条固定的 200,带 Content-Length。返回它的端口。
+    async fn fake_upstream() -> u16 {
+        let l = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                tokio::spawn(async move {
+                    // 读到头结束就够了,不关心内容。
+                    let mut buf = [0u8; 2048];
+                    let _ = s.read(&mut buf).await;
+                    let _ = s
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: video/x-matroska\r\nContent-Length: 4\r\n\r\nDATA")
+                        .await;
+                });
+            }
+        });
+        port
+    }
+
+    /* 回归:反代的响应必须声明 `Connection: close`。
+
+       本代理每条 TCP 只处理**一个**请求(handle 里 read_request 一次,回完就返回、socket drop),
+       而 HTTP/1.1 默认长连接。不声明 close = 骗播放器「还能再发」,ffmpeg 一 seek 就把
+       下一个 Range 管线化到同一条已死的连接上,响应永远不来 →
+       用户报的「有流量、没画面没声音、加载巨慢」。
+
+       这条 bug 在预取代理上 2026-07-19 修过并留了同名测试(prefetch.rs
+       `response_declares_connection_close`),**这份同构代码当时漏了**。两边都得有护栏。
+       反向验证:把 handle() 里那行 `head.push_str("Connection: close\r\n")` 删掉,本测试立刻红。 */
+    #[tokio::test]
+    async fn response_declares_connection_close() {
+        let up = fake_upstream().await;
+        // scheme=http + host=localhost + ip=127.0.0.1:上游端口 → reqwest 的 .resolve 钉过去。
+        let h = start("http".into(), "localhost".into(), up, "127.0.0.1".into(), false)
+            .await
+            .expect("反代应能起来");
+
+        let mut c = TcpStream::connect(("127.0.0.1", h.port)).await.unwrap();
+        c.write_all(b"GET /x.mkv HTTP/1.1\r\nHost: localhost\r\nRange: bytes=0-\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 1024];
+        // 读到头结束即可;上游是本机,不会慢。
+        loop {
+            let n = c.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if find_head_end(&buf).is_some() {
+                break;
+            }
+        }
+        let head = String::from_utf8_lossy(&buf).to_ascii_lowercase();
+        assert!(
+            head.contains("connection: close"),
+            "CF 反代没声明 Connection: close —— 播放器会把 seek 管线化到同一条连接上永远等不到响应\n{head}"
+        );
     }
 }

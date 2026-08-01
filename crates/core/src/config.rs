@@ -65,15 +65,20 @@ impl Account {
         &self.lines[i].url
     }
 
-    /// 当前生效的线路地址。**会被 CF 优选反代改写**:该服务器开了优选反代时返回本地反代基址
-    /// (`http://127.0.0.1:port/...`),让 API 请求与 mpv 取流都改走优选 CF IP。
+    /// 当前生效的线路地址。**会被 CF 优选反代改写**:当前这条线路开了优选反代时返回本地
+    /// 反代基址(`http://127.0.0.1:port/...`),让 API 请求与 mpv 取流都改走优选 CF IP。
     /// 需要原始上游地址(起反代自身的上游、编辑线路、展示给用户看)时用 [`Account::direct_line_url`]。
     ///
     /// 这是 CF 优选的**唯一 choke point** —— 取基址一律走这里,新增取流路径别绕开它,
     /// 否则会出现「API 走优选、取流仍走原线」这种一半生效的静默故障。
+    ///
+    /// ★ 查表用的是 **direct_line_url()(当前那条线)**,不是 self.server(整台服)。
+    ///   按服务器查等于把这台服的每条线都劫持到同一个反代上,而反代的上游 host 是开启时
+    ///   那条线定死的 —— 切到没走 CF 的线路后,请求会被送去「A 线的域名 + 钉死的 CF IP」,
+    ///   连得上但拿不到数据,且不报错(见 net::cf::runtime 顶部)。
     pub fn active_line_url(&self) -> String {
-        crate::net::cf::runtime::local_url_for(&self.server)
-            .unwrap_or_else(|| self.direct_line_url().to_string())
+        let direct = self.direct_line_url();
+        crate::net::cf::runtime::local_url_for(direct).unwrap_or_else(|| direct.to_string())
     }
 
     /// 显示名:优先用户起的名,否则回落 host,再否则整个 URL。
@@ -219,6 +224,22 @@ pub struct Prefs {
     #[serde(default = "default_prefetch_cache")]
     pub prefetch_cache_bytes: u64,
 
+    /* ===== 预加载(net::preload)=====
+       进详情页就把「即将要播的那个流」的头/尾两段跑热,读完即丢。和上面的多线程加载
+       **不是一回事**:那个是播放中在本地起代理喂 mpv,这个是播放前把路跑通。
+       ## 为什么默认开
+       它只花一次几十 MB 的流量,换掉起播时那几百毫秒的冷握手 + 冷 seek,对远程 Emby
+       收益最直接;而且不改播放地址、不落盘,没有 prefetch 那种「开了放不出来」的风险面。
+       计费网络/手机流量的用户可以关。
+       ## 为什么不按服务器
+       预热是对**当前正在看的那个条目**做的,用户人就在那台服的详情页上,再让他去
+       另一个页面按服务器配一遍毫无意义。 */
+    #[serde(default = "default_true")]
+    pub preload_enabled: bool,
+    /// 头部预热量(MB)。0 = 只热尾部索引。默认 32,对齐旧 Dart preload_service。
+    #[serde(default = "default_preload_head_mb")]
+    pub preload_head_mb: u64,
+
     /* ===== 播放器默认行为 =====
        这 6 项 2026-07-19 前只存在前端 localStorage("lp.playback.local"),设置页自己都写着
        「核心尚无落点,仅存本机、尚未影响实际播放」—— 用户改了没有任何效果。现在落到这里,
@@ -283,6 +304,13 @@ fn default_prefetch_threads() -> usize {
 fn default_prefetch_cache() -> u64 {
     512 * 1024 * 1024
 }
+/// 预热头部量(MB)。32 = 旧 Dart preload_service 的口径,别随手改小:
+/// 太小盖不住起播后头几秒的解码,预热就白做了。
+fn default_preload_head_mb() -> u64 {
+    32
+}
+/// 预热头部量的合法区间(MB)。0 = 只热尾部索引;上限 512,再大就不是「预热」是「下载」了。
+pub const PRELOAD_HEAD_MB_MAX: u64 = 512;
 /// 缓存上限的合法区间(字节)。设置页与命令层共用,别各写各的。
 ///
 /// ★ 2026-07-19 从 16~32MB 放开到 64MB~4GB:分段以前全在**内存**里,峰值还要乘活跃
@@ -310,6 +338,8 @@ impl Default for Prefs {
             prefetch_servers: Vec::new(), // 见字段上的说明:空表=全关,只能按服务器主动开
             prefetch_threads: default_prefetch_threads(),
             prefetch_cache_bytes: default_prefetch_cache(),
+            preload_enabled: true,
+            preload_head_mb: default_preload_head_mb(),
             hwdec: default_hwdec(),
             default_speed: default_speed(),
             skip_intro: false,
@@ -868,24 +898,54 @@ mod tests {
     /// 取基址的人却拿不到,就是"开了优选没反应"。这条测的就是那根线通不通。
     #[test]
     fn active_line_url_is_rewritten_by_cf_runtime() {
-        // 全局改写表被所有测试共享,用唯一 id 免得和别的用例串台。
+        // 全局改写表被所有测试共享,用唯一地址免得和别的用例串台。
         let mut a = acc("https://cf-choke-point-test.example.com");
         a.lines = vec![ServerLine {
             id: "1".into(),
             name: "CDN".into(),
-            url: "https://cdn.example.com".into(),
+            url: "https://cf-choke-cdn.example.com".into(),
             remark: None,
         }];
         // 未开优选 → 与 direct 一致。
-        assert_eq!(a.active_line_url(), "https://cdn.example.com");
+        assert_eq!(a.active_line_url(), "https://cf-choke-cdn.example.com");
 
-        crate::net::cf::runtime::bind(&a.server, "http://127.0.0.1:5001");
+        crate::net::cf::runtime::bind(a.direct_line_url(), "http://127.0.0.1:5001");
         assert_eq!(a.active_line_url(), "http://127.0.0.1:5001", "开了优选却没改写 = choke point 断了");
         // direct 必须**不受**改写影响:反代自己要拿它当上游,被改写就自环了。
-        assert_eq!(a.direct_line_url(), "https://cdn.example.com");
+        assert_eq!(a.direct_line_url(), "https://cf-choke-cdn.example.com");
 
-        crate::net::cf::runtime::unbind(&a.server);
-        assert_eq!(a.active_line_url(), "https://cdn.example.com", "关了优选没恢复直连");
+        crate::net::cf::runtime::unbind("https://cf-choke-cdn.example.com");
+        assert_eq!(a.active_line_url(), "https://cf-choke-cdn.example.com", "关了优选没恢复直连");
+    }
+
+    /* 回归:优选**只作用于开它的那条线路**,不能牵连同一台服的其它线路。
+       用户 2026-08-01:「服务器有很多条线路,而且有些线路并没有使用 Cloudflare」。
+       旧实现按 server_id 登记改写 —— 一开优选,这台服的每条线都被劫持到那个反代上,
+       而反代上游 host 是开启时那条线定死的:切到非 CF 线路后请求打到「A 线域名 +
+       钉死的 CF IP」,连得上、没数据、不报错 = 用户报的加载极慢/没画面没声音。
+       反向验证:把 active_line_url() 改回按 self.server 查,本测试立刻红。 */
+    #[test]
+    fn cf_route_does_not_leak_to_the_other_lines_of_the_same_server() {
+        let mut a = acc("https://cf-perline-test.example.com");
+        a.lines = vec![
+            ServerLine { id: "1".into(), name: "CF 线".into(), url: "https://cf-perline-a.example.com".into(), remark: None },
+            ServerLine { id: "2".into(), name: "直连线".into(), url: "https://cf-perline-b.example.com".into(), remark: None },
+        ];
+
+        // 只给第 0 条线开优选。
+        a.active_line = 0;
+        crate::net::cf::runtime::bind(a.direct_line_url(), "http://127.0.0.1:5002");
+        assert_eq!(a.active_line_url(), "http://127.0.0.1:5002");
+
+        // 切到第 1 条(没走 CF 的那条)→ 必须直连,不能被上一条的反代劫持。
+        a.active_line = 1;
+        assert_eq!(
+            a.active_line_url(),
+            "https://cf-perline-b.example.com",
+            "没开优选的线路被别的线路的 CF 反代劫持了 —— 上游 host 还是 A 线的,必然拉不到数据"
+        );
+
+        crate::net::cf::runtime::unbind("https://cf-perline-a.example.com");
     }
 
     #[test]

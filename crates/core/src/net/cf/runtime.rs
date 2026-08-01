@@ -1,9 +1,17 @@
 // CF 优选反代的「路由改写」运行时(全局)。迁自 Dart cf_proxy_runtime.dart。
 //
-// 这是整套 CF 优选的**唯一改写点**:某台服务器开启优选反代后,这里登记
-// `server_id -> 本地反代基址(http://127.0.0.1:port/<原路径前缀>)`。
-// [`crate::config::Account::active_line_url`] 取值时先查这里,命中则返回本地基址,
-// 于是 Emby API 请求与 mpv 取流 URL 都自动改走本地反代 → 上游优选 CF IP,与播放器实现无关。
+// 这是整套 CF 优选的**唯一改写点**:某条线路开启优选反代后,这里登记
+// `线路地址 -> 本地反代基址(http://127.0.0.1:port/<原路径前缀>)`。
+// [`crate::config::Account::active_line_url`] 拿**当前生效线路的地址**来查,命中则返回
+// 本地基址,于是 Emby API 请求与 mpv 取流 URL 都自动改走优选 CF IP,与播放器实现无关。
+//
+// ★ 键是**线路**,不是服务器(2026-08-01 改)。
+//   原先按 server_id 登记 —— 可一台服有很多条线路,而用户明确说过「有些线路并没有使用
+//   Cloudflare」。按服务器登记等于:只要这台服开过一次优选,**它的每一条线路**都被劫持
+//   到那个 CF 反代上,连不在 CF 后面的直连线也不放过。而反代的上游 host 是开启时那条线
+//   定死的(proxy.rs 的 CfReverseProxy.host 只在 start 时取一次),于是切到别的线路后,
+//   请求被送到「A 线的域名 + 钉死的 CF IP」—— 连得上、拿不到东西,表现为加载极慢 /
+//   没画面没声音,且**全程不报错**。优选本来就是对线路做的,键就必须是线路。
 //
 // 为什么是全局静态而不是塞进 AppState:改写点必须能被 `Account` 这个纯数据类型看见,
 // 而 Account 在平台无关核里,拿不到宿主的 State。Dart 侧同理用的单例。
@@ -14,32 +22,39 @@ use std::sync::RwLock;
 
 static ROUTES: RwLock<Option<HashMap<String, String>>> = RwLock::new(None);
 
-/// 命中则返回本地反代基址,否则 None(走原始线路)。
-pub fn local_url_for(server_id: &str) -> Option<String> {
-    ROUTES.read().ok()?.as_ref()?.get(server_id).cloned()
+/// 键归一化。线路地址是用户手填的,`https://a.com/` 与 `https://a.com` 必须同键 ——
+/// 不归一化就会出现「明明开了优选,active_line_url 却查不到」的静默失效
+/// (config.rs 的 norm_line_url 同理由,那边管入表、这边管查表)。
+fn key(line_url: &str) -> String {
+    line_url.trim().trim_end_matches('/').to_string()
 }
 
-/// 登记改写:此后该服务器的 `active_line_url()` 返回 `local_url`。
-pub fn bind(server_id: impl Into<String>, local_url: impl Into<String>) {
+/// 命中则返回本地反代基址,否则 None(走原始线路)。参数是**线路地址**。
+pub fn local_url_for(line_url: &str) -> Option<String> {
+    ROUTES.read().ok()?.as_ref()?.get(&key(line_url)).cloned()
+}
+
+/// 登记改写:此后**这条线路**生效时,`active_line_url()` 返回 `local_url`。
+pub fn bind(line_url: &str, local_url: impl Into<String>) {
     if let Ok(mut g) = ROUTES.write() {
-        g.get_or_insert_with(HashMap::new).insert(server_id.into(), local_url.into());
+        g.get_or_insert_with(HashMap::new).insert(key(line_url), local_url.into());
     }
 }
 
-/// 撤销改写,恢复直连原线路。
-pub fn unbind(server_id: &str) {
+/// 撤销改写,该线路恢复直连。
+pub fn unbind(line_url: &str) {
     if let Ok(mut g) = ROUTES.write() {
         if let Some(m) = g.as_mut() {
-            m.remove(server_id);
+            m.remove(&key(line_url));
         }
     }
 }
 
-pub fn is_active(server_id: &str) -> bool {
-    local_url_for(server_id).is_some()
+pub fn is_active(line_url: &str) -> bool {
+    local_url_for(line_url).is_some()
 }
 
-/// 当前所有改写(server_id -> 本地基址),供设置页展示。
+/// 当前所有改写(线路地址 -> 本地基址),供设置页展示。
 pub fn all() -> HashMap<String, String> {
     ROUTES.read().ok().and_then(|g| g.clone()).unwrap_or_default()
 }
@@ -107,12 +122,24 @@ mod tests {
 
     #[test]
     fn bind_and_unbind_roundtrip() {
-        let id = "cf-runtime-test-server";
-        assert!(!is_active(id));
-        bind(id, "http://127.0.0.1:9999");
-        assert_eq!(local_url_for(id).as_deref(), Some("http://127.0.0.1:9999"));
-        assert!(is_active(id));
-        unbind(id);
-        assert!(!is_active(id));
+        let line = "https://cf-runtime-test.example.com";
+        assert!(!is_active(line));
+        bind(line, "http://127.0.0.1:9999");
+        assert_eq!(local_url_for(line).as_deref(), Some("http://127.0.0.1:9999"));
+        assert!(is_active(line));
+        unbind(line);
+        assert!(!is_active(line));
+    }
+
+    /* 尾斜杠必须同键。线路表里的地址是用户手打的,同一条线可能写成带斜杠、
+       而 direct_line_url() 拿到的是另一种写法 —— 不归一化就是「开了优选没生效」,
+       且不报错。反向验证:把 key() 改成原样返回,本测试立刻红。 */
+    #[test]
+    fn trailing_slash_is_the_same_line() {
+        let line = "https://cf-slash-test.example.com/emby";
+        bind(&format!("{line}/"), "http://127.0.0.1:9998");
+        assert!(is_active(line), "带尾斜杠登记的线路,不带斜杠应查得到");
+        unbind(line);
+        assert!(!is_active(&format!("{line}/")));
     }
 }
