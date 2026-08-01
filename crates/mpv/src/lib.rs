@@ -849,6 +849,10 @@ mod overlay {
     // 安卓的渲染面是 SurfaceView,层级归 Android 的 View 树管,不存在这两件事。
     pub fn set_visible(_v: isize, _on: bool) {}
     pub fn pin_below(_v: isize, _t: isize) {}
+    /// 安卓只有一个 Activity、一个 SurfaceView,不存在「哪个窗才是宿主」的问题。
+    pub fn is_host(_hwnd: isize) -> bool {
+        true
+    }
 }
 
 /// 安卓壳把 SurfaceView 的 Surface(**全局引用**)交进来。见 `mod overlay` 的注释。
@@ -924,13 +928,23 @@ pub fn set_android_java_vm(vm: *mut c_void) {
     }
 }
 
-// 其它平台(目前不做):给出可编译的空实现,免得本文件变成 Win/Linux/Android 专属。
+/* 其它平台(目前不做):给出可编译的空实现,免得本文件变成 Win/Linux/Android 专属。
+
+   ★ 这个桩**任何 CI 目标都编不到**(Win/Linux/Android 三个 cfg 把它全挡掉了),
+     所以它会静默烂掉 —— 上面每加一个 overlay 函数,这里不补就是一个只有
+     「真去做第四个平台」时才炸的洞。2026-08-02 发现它已经缺了三个函数。
+     加新函数时**必须**四个 overlay 变体一起加。 */
 #[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
 mod overlay {
     pub fn create() -> isize {
         0
     }
     pub fn sync(_v: isize, _t: isize, _x: i32, _y: i32, _w: i32, _h: i32) {}
+    pub fn set_visible(_v: isize, _on: bool) {}
+    pub fn pin_below(_v: isize, _t: isize) {}
+    pub fn is_host(_hwnd: isize) -> bool {
+        true
+    }
 }
 
 /// 建一个独立顶层无边框窗口(不进任务栏/不抢焦点),给 mpv 当渲染面。
