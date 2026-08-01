@@ -704,8 +704,6 @@ mod tests {
         assert!(AppConfig::default().companion_enabled, "手机遥控默认必须是开的");
     }
 
-    use super::*;
-
     fn acc(server: &str) -> Account {
         Account { server: server.into(), ..Default::default() }
     }

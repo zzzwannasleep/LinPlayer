@@ -190,6 +190,88 @@ struct Origin {
     client: reqwest::Client,
     on_invalid: Option<ResignFn>,
     disk: Arc<DiskCache>,
+    /// 正在拉取中的分段(段号 -> 载体)。**「边收边吐」的登记处**,见 [`Live`]。
+    /// 用 std 锁不用 tokio 锁:临界区只有 HashMap 的 get/insert/remove,里面没有 await。
+    live: std::sync::Mutex<std::collections::HashMap<u64, Arc<Live>>>,
+}
+
+/// 正在拉取中的一个分段 —— **边收边吐**的载体(2026-08-02)。
+///
+/// ## 为什么非要有它
+/// 在这之前,供给端 `serve` 必须等**整段 4MB 落盘**才吐第一个字节。
+/// 而 mpv 起播只要文件头 ~200KB + 尾部 cues 索引(MKV,ffmpeg 开容器第一跳就 seek 到尾)。
+/// 实测用户那条链(2026-08-01)吞吐只有 56~143KB/s → 一段 4MB **合法地要 29~62 秒**,
+/// 头/尾各一次,于是「开了多线程加载就没画面没声音」。直连反而能播,正是因为
+/// mpv 只拉它真正要的那几百 KB。分段粒度是给**预取**用的,不该成为**供给**的粒度。
+///
+/// 所以 worker 收到的每一块字节都立刻挂到这里并唤醒供给端,供给端要多少给多少 ——
+/// 落盘照旧(缓存/回看要它),但不再挡在播放器前面。
+///
+/// `cap` = 本段的应有长度,多出来的字节直接丢:上游给超长包时不能污染供给,
+/// 而「短了必须重试」的判据(见 `fetch_chunk` 头部)靠 `len() == want` 原样保留。
+#[derive(Default)]
+struct Live {
+    data: std::sync::Mutex<Vec<u8>>,
+    notify: Notify,
+    /// 喂食结束(成功/失败/被取消)。置位后供给端不再干等,回落到磁盘/重拉路径。
+    done: AtomicBool,
+    /// 本载体覆盖的是段内 `[base, base+cap)`。`base > 0` 只出现在**连接首段**,见 [`Stream::head_live`]。
+    base: usize,
+    cap: usize,
+}
+
+impl Live {
+    fn new(cap: usize) -> Arc<Live> {
+        Self::based(0, cap)
+    }
+
+    fn based(base: usize, cap: usize) -> Arc<Live> {
+        Arc::new(Live {
+            data: std::sync::Mutex::new(Vec::with_capacity(cap.min(CHUNK_SIZE as usize))),
+            base,
+            cap,
+            ..Default::default()
+        })
+    }
+
+    fn len(&self) -> usize {
+        self.data.lock().map(|d| d.len()).unwrap_or(0)
+    }
+
+    /// 并进新到的一块。
+    ///
+    /// ★ `skip` 是**重试**用的:第 2 次 attempt 打的是同一个 Range,前面那几 MB
+    /// 上一轮已经收下、而且很可能**已经吐给播放器了**,不能再追加一遍。
+    /// 同 URL 同 Range 返回同样的字节,是这份缓存从一开始就依赖的前提;
+    /// 靠这个 skip,重试的健壮性和改造前完全一致(既能续上,也不会重复)。
+    fn feed(&self, skip: &mut usize, b: &[u8]) {
+        if *skip >= b.len() {
+            *skip -= b.len();
+            return;
+        }
+        let b = &b[*skip..];
+        *skip = 0;
+        {
+            let Ok(mut d) = self.data.lock() else { return };
+            let room = self.cap.saturating_sub(d.len());
+            if room == 0 {
+                return;
+            }
+            d.extend_from_slice(&b[..room.min(b.len())]);
+        }
+        self.notify.notify_waiters();
+    }
+
+    /// 从**段内**偏移 `at` 起、当前已到货的部分;还没到(或压根不在本载体覆盖范围内)就是 None。
+    fn slice_from(&self, at: usize) -> Option<Vec<u8>> {
+        let i = at.checked_sub(self.base)?;
+        let d = self.data.lock().ok()?;
+        (d.len() > i).then(|| d[i..].to_vec())
+    }
+
+    fn snapshot(&self) -> Vec<u8> {
+        self.data.lock().map(|d| d.clone()).unwrap_or_default()
+    }
 }
 
 /// 落盘的分段缓存 —— **全会话共享**(所有连接共用一份),不是每连接一份。
@@ -348,7 +430,17 @@ struct ChunkState {
 
 struct Stream {
     origin: Arc<Origin>,
-    last_chunk: u64, // 本次请求 Range 的末段(含),取到这儿就收工
+    last_chunk: u64,  // 本次请求 Range 的末段(含),取到这儿就收工
+    first_chunk: u64, // 本次请求 Range 的首段
+    /// 请求起点在首段内的偏移。0 = 正好对齐,没有下面那档事。
+    head_within: usize,
+    /// 首段的**残段**载体(只覆盖 `[head_within, 段尾)`)。
+    ///
+    /// ★ 为什么它不进 `Origin::live` 也不落盘:它是**残的**。写进环形缓存会把
+    /// `[0, head_within)` 那截垃圾一起标成就绪,别的连接读同一段就拿到脏数据 ——
+    /// 那是不报错、只坏画面的一类。挂在本连接上、随连接消亡,最省事也最安全。
+    /// 代价是这一小段不进缓存(seek 回来要重下),换来每次 seek 少等平均 2MB。
+    head_live: std::sync::Mutex<Option<Arc<Live>>>,
     state: Mutex<ChunkState>,
     data_notify: Notify,   // worker -> serve:某段就绪/失败
     window_notify: Notify, // serve -> worker:窗口推进
@@ -362,6 +454,36 @@ impl Origin {
     fn chunk_len(&self, c: u64) -> usize {
         let start = c * CHUNK_SIZE;
         ((start + CHUNK_SIZE).min(self.total_size) - start) as usize
+    }
+
+    /// 开一个「正在拉取」的载体给 worker 喂。
+    ///
+    /// ★ 同一段可能被**两条连接**同时拉(`in_flight` 是每连接的),但登记处只认先到的那个:
+    /// 后到者拿回一个**没登记**的载体,自己拉自己的,绝不能两个 worker 往同一个载体里喂
+    /// —— 那是把两份字节流交错拼进一个 buffer,直接出错帧。
+    fn live_begin(&self, c: u64) -> Arc<Live> {
+        let live = Live::new(self.chunk_len(c));
+        if let Ok(mut m) = self.live.lock() {
+            m.entry(c).or_insert_with(|| live.clone());
+        }
+        live
+    }
+
+    /// 喂食结束。**必须在落盘之后调** —— 先摘牌再落盘会留出一个「两边都查不到」的空档,
+    /// 供给端在那一瞬只能干等 250ms 兜底。
+    fn live_end(&self, c: u64, me: &Arc<Live>) {
+        me.done.store(true, Ordering::SeqCst);
+        me.notify.notify_waiters();
+        if let Ok(mut m) = self.live.lock() {
+            // 只摘自己挂上去的那块牌(见 live_begin:后到者的载体压根没登记)。
+            if m.get(&c).is_some_and(|x| Arc::ptr_eq(x, me)) {
+                m.remove(&c);
+            }
+        }
+    }
+
+    fn live_get(&self, c: u64) -> Option<Arc<Live>> {
+        self.live.lock().ok()?.get(&c).cloned()
     }
 
     async fn probe(
@@ -446,6 +568,7 @@ impl Origin {
             client,
             on_invalid,
             disk,
+            live: Default::default(),
         }))
     }
 
@@ -453,13 +576,17 @@ impl Origin {
     ///
     /// ★ **必须校验长度**:分段是按 `pos / CHUNK_SIZE` 定位的,收下一个短包会让供给端
     /// 写完这几字节后 `advance_serve(c+1)` 把它清掉,而 `pos` 仍落在分段 c 内 →
-    /// 下一轮又去 `await_chunk(c)`,可 `fetch_cursor` 早过了 c,永远没人重拉 → **永远缓冲**。
+    /// 下一轮又去 `next_bytes(c)`,可 `fetch_cursor` 早过了 c,永远没人重拉 → **永远缓冲**。
     /// 上游/CDN 截断、以及我们自家 CF 反代在 chunked 路径上遇错 break 后仍补上合法结束块
     /// (见 net/cf/proxy.rs 的 stream_body),都会产出这种「格式合法但短」的响应。
-    async fn fetch_chunk(&self, c: u64) -> Option<Vec<u8>> {
-        let start = c * CHUNK_SIZE;
-        let end = (start + CHUNK_SIZE).min(self.total_size) - 1;
-        let want = (end - start + 1) as usize;
+    async fn fetch_chunk(&self, c: u64, live: &Arc<Live>) -> Option<Vec<u8>> {
+        /* ★ 起点由载体的 `base` 决定,**不是**分段边界(2026-08-02)。
+           连接首段的 base = 播放器请求的 Range 起点在段内的偏移:每次 seek 都是一条新连接
+           (响应声明 Connection: close),从边界拉就等于在播放器要的第一个字节前面
+           先白拉平均 2MB —— 150KB/s 下 = 拖一次进度条画面 13 秒不动。 */
+        let start = c * CHUNK_SIZE + live.base as u64;
+        let end = c * CHUNK_SIZE + self.chunk_len(c) as u64 - 1;
+        let want = live.cap;
         for attempt in 0..3 {
             // 优先打 302 落点(CDN 直链),省掉每段一次重定向;没跳转过就还是原地址。
             let (url, used_resolved) = {
@@ -475,7 +602,7 @@ impl Origin {
                在这之前 `send()`/`bytes()` 是**无限期**等待,而 http.rs 的三个 client
                一个 timeout 都没设 —— 上游只要不回(CDN 落点失效、对端黑洞、中间设备吞包),
                这条 worker 就永远吊在这儿:不重试、不重签、不报错、连一行日志都没有。
-               供给端 await_chunk 于是也永远等,mpv 那边表现成:206 头收到了、
+               供给端 next_bytes 于是也永远等,mpv 那边表现成:206 头收到了、
                `Stream opened successfully`,然后 duration=0 / 一帧不出 / 一条轨道都没有。
 
                ## 为什么不能用「整体超时」
@@ -484,7 +611,7 @@ impl Origin {
                拉满一个 4MB 分段**合法地就要 29~62 秒**。整体超时会把「慢但完全能用」的
                链路当成故障掐掉,还会一路重试放大负载 —— 修一个静默卡死,换来一个更响的。
                只有「**一段时间一个字节都不来**」才是真死。所以计时器每收到一块就重置。 */
-            let outcome: Result<Result<Option<Vec<u8>>, u16>, ()> = async {
+            let outcome: Result<Result<bool, u16>, ()> = async {
                 // 建连 + 等响应头:这一段可以用整体超时,它本来就该在几秒内完成。
                 let sent = tokio::time::timeout(
                     chunk_timeout(),
@@ -497,17 +624,19 @@ impl Origin {
                 let mut r = match sent {
                     Ok(Ok(r)) if r.status().is_success() || r.status().as_u16() == 206 => r,
                     Ok(Ok(r)) => return Ok(Err(r.status().as_u16())),
-                    Ok(Err(_)) => return Ok(Ok(None)), // 纯网络抖动,重试同一 URL
-                    Err(_) => return Err(()),          // 连响应头都等不到 = 这个地址不灵
+                    Ok(Err(_)) => return Ok(Ok(false)), // 纯网络抖动,重试同一 URL
+                    Err(_) => return Err(()),           // 连响应头都等不到 = 这个地址不灵
                 };
-                // 收体:**每来一块就重置计时**,只有真的停止吐字节才判死。
-                let mut buf: Vec<u8> = Vec::with_capacity(want.min(CHUNK_SIZE as usize));
+                /* 收体:**每来一块就重置计时**,只有真的停止吐字节才判死。
+                   ★ 收到就 feed —— 这就是「边收边吐」:供给端不再等整段落盘。
+                     `skip` 让重试从上一轮的断点续上,详见 Live::feed。 */
+                let mut skip = live.len();
                 loop {
                     match tokio::time::timeout(chunk_timeout(), r.chunk()).await {
-                        Ok(Ok(Some(b))) => buf.extend_from_slice(&b),
-                        Ok(Ok(None)) => return Ok(Ok(Some(buf))), // 正常读完
-                        Ok(Err(_)) => return Ok(Ok(None)),        // 读体出错,重试
-                        Err(_) => return Err(()),                 // 停吐了
+                        Ok(Ok(Some(b))) => live.feed(&mut skip, &b),
+                        Ok(Ok(None)) => return Ok(Ok(true)), // 正常读完
+                        Ok(Err(_)) => return Ok(Ok(false)),  // 读体出错,重试
+                        Err(_) => return Err(()),            // 停吐了
                     }
                 }
             }
@@ -515,13 +644,13 @@ impl Origin {
 
             // Ok(()) = 这个地址还行,重试它;Err(状态码) = 地址不灵,作废/重签。
             let resp: Result<(), u16> = match outcome {
-                Ok(Ok(Some(b))) if b.len() == want => return Some(b.to_vec()),
-                // 长度必须**正好**是请求量,短了/长了都不能收(见函数头说明)。
-                Ok(Ok(Some(b))) => {
-                    logw(&format!("段 {c} 长度不符(要 {want} 得 {}),重试", b.len()));
+                Ok(Ok(true)) if live.len() == want => return Some(live.snapshot()),
+                // 长度必须**正好**是请求量,短了不能收(见函数头说明;超长由 Live 的 cap 截掉)。
+                Ok(Ok(true)) => {
+                    logw(&format!("段 {c} 长度不符(要 {want} 得 {}),重试", live.len()));
                     Ok(())
                 }
-                Ok(Ok(None)) => Ok(()), // 读体失败/网络抖动,重试同一 URL
+                Ok(Ok(false)) => Ok(()), // 读体失败/网络抖动,重试同一 URL
                 Ok(Err(code)) => Err(code),
                 Err(_) => {
                     logw(&format!(
@@ -654,6 +783,9 @@ impl Origin {
         let st = Arc::new(Stream {
             origin: self.clone(),
             last_chunk: end / CHUNK_SIZE,
+            first_chunk: first,
+            head_within: (start - first * CHUNK_SIZE) as usize,
+            head_live: std::sync::Mutex::new(None),
             state: Mutex::new(ChunkState {
                 failed: HashSet::new(),
                 serve_chunk: first,
@@ -722,23 +854,50 @@ impl Stream {
                (12MB)拉完才罢休,纯烧用户流量。
                notified() 必须在检查 over() **之前**注册,否则 done 恰好在两者之间置位
                就会丢掉这次唤醒,worker 卡到 fetch 自然结束。 */
+            // 首段若不对齐,只拉播放器真正要的那截(残段),挂在本连接上不进共享登记处。
+            let partial = c == self.first_chunk && self.head_within > 0;
+            let live = if partial {
+                let l = Live::based(
+                    self.head_within,
+                    self.origin.chunk_len(c) - self.head_within,
+                );
+                if let Ok(mut g) = self.head_live.lock() {
+                    *g = Some(l.clone());
+                }
+                l
+            } else {
+                self.origin.live_begin(c) // 边收边吐的载体,供给端可以现读
+            };
+            let end_live = |live: &Arc<Live>| {
+                if partial {
+                    live.done.store(true, Ordering::SeqCst);
+                    live.notify.notify_waiters();
+                } else {
+                    self.origin.live_end(c, live);
+                }
+            };
             let stop = self.done_notify.notified();
             if self.over() {
+                end_live(&live);
                 break;
             }
             let fetched = tokio::select! {
-                f = self.origin.fetch_chunk(c) => f,
+                f = self.origin.fetch_chunk(c, &live) => f,
                 _ = stop => {
-                    // 连接已走,注销在飞标记再退出,免得残留把后来者挡住。
+                    // 连接已走,注销在飞标记 + 摘牌再退出,免得残留把后来者挡住。
+                    end_live(&live);
                     self.state.lock().await.in_flight.remove(&c);
                     break;
                 }
             };
             // 落盘成功才算就绪;写盘失败(磁盘满/被删)等同取数失败,断流回退直连。
+            // 残段**不落盘**(见 head_live 说明),取到即算成功,供给端从载体里读。
             let ok = match fetched {
+                Some(_) if partial => true,
                 Some(d) => self.origin.disk.put(c, d).await,
                 None => false,
             };
+            end_live(&live); // ★ 必须在 put 之后,别留查不到的空档
             {
                 let mut st = self.state.lock().await;
                 st.in_flight.remove(&c);
@@ -762,11 +921,21 @@ impl Stream {
             }
             st.serve_chunk = next;
         }
+        if next > self.first_chunk {
+            // 首段已消费完,残段载体没人再读了,别让那几 MB 挂到连接结束。
+            if let Ok(mut g) = self.head_live.lock() {
+                *g = None;
+            }
+        }
         self.window_notify.notify_waiters();
     }
 
-    // 等待分段 c 就绪。返回 Some(bytes)=就绪;None=失败/停服,供给端据此断流。
-    async fn await_chunk(&self, c: u64) -> Option<Arc<Vec<u8>>> {
+    /// 取分段 `c` 内、从段内偏移 `within` 起**当前拿得到**的字节(至少 1 字节)。
+    /// 返回 None = 失败/停服,供给端据此断流。
+    ///
+    /// ★ 2026-08-02 从「等整段就绪」改成「有多少给多少」。整段就绪是**预取**该有的粒度,
+    /// 不是**供给**该有的粒度 —— 见 [`Live`] 头部那笔 56~143KB/s 的账。
+    async fn next_bytes(&self, c: u64, within: usize) -> Option<Vec<u8>> {
         loop {
             if self.over() {
                 return None;
@@ -776,7 +945,25 @@ impl Stream {
                 // get 返回 None = 刚好被别的连接挤出槽位(不是取数失败),
                 // 落到下面的自愈分支重拉,**不能**当失败断流 —— 那就是给播放器一个 early eof。
                 if let Some(b) = self.origin.disk.get(c, len).await {
-                    return Some(Arc::new(b));
+                    return b.get(within..).filter(|s| !s.is_empty()).map(<[u8]>::to_vec);
+                }
+            }
+            /* 整段还没落盘,但它可能**正在飞** —— 已经到货的那部分立刻给播放器。
+               起播只需要头几百 KB,等满 4MB 是纯粹的白等。
+               先看本连接首段的残段载体(那是专为这条连接的起点拉的),再看共享登记处。 */
+            let head = (c == self.first_chunk)
+                .then(|| self.head_live.lock().ok().and_then(|g| g.clone()))
+                .flatten();
+            if let Some(live) = head.or_else(|| self.origin.live_get(c)) {
+                if let Some(part) = live.slice_from(within) {
+                    return Some(part);
+                }
+                if !live.done.load(Ordering::SeqCst) {
+                    // 还在喂,等下一块到货(250ms 兜底防丢唤醒,同 data_notify 的处理)。
+                    let _ =
+                        tokio::time::timeout(Duration::from_millis(250), live.notify.notified())
+                            .await;
+                    continue;
                 }
             }
             if self.state.lock().await.failed.contains(&c) {
@@ -790,7 +977,7 @@ impl Stream {
                A 的 chunk1 与 B 的 chunk5 同槽(5%4==1),B 一落盘 A 那段就没了。
 
                而 worker 认领时 `fetch_cursor` 已经自增越过 c,**再没有人会去重拉它** ——
-               于是 await_chunk 在这里无限空转:has() 永远 false,又不在 failed 里。
+               于是 next_bytes 在这里无限空转:has() 永远 false,又不在 failed 里。
                表现就是那条连接彻底饿死(播放器侧 = 有流量、黑屏/永远缓冲),
                或者对端超时后我们把连接关掉,客户端读到 early eof。
                这正是 concurrent_connections_do_not_starve_each_other 偶发红的真凶。
@@ -837,24 +1024,24 @@ impl Stream {
         let mut pos = start;
         while pos <= end && !self.over() {
             let c = pos / CHUNK_SIZE;
-            let bytes = tokio::select! {
-                b = self.await_chunk(c) => match b {
+            let within = (pos - c * CHUNK_SIZE) as usize;
+            let piece = tokio::select! {
+                b = self.next_bytes(c, within) => match b {
                     Some(b) => b,
                     None => break, // 失败/停服 -> 断流,播放器回退 fallback
                 },
                 _ = Self::peer_gone(stream) => break, // 播放器跳走了,别再等也别再拉
             };
-            let within = (pos - c * CHUNK_SIZE) as usize;
-            if within >= bytes.len() {
-                break;
+            if piece.is_empty() {
+                break; // 兜底:next_bytes 保证非空,真空了也绝不能在这儿空转
             }
-            let avail = bytes.len() - within;
             let need = (end - pos + 1) as usize;
-            let n = avail.min(need);
+            let n = piece.len().min(need);
             // write_all 在 mpv 读慢时自然阻塞 → 端到端背压,预取停在窗口内。
-            stream.write_all(&bytes[within..within + n]).await?;
+            stream.write_all(&piece[..n]).await?;
             pos += n as u64;
-            if within + n >= bytes.len() {
+            // 整段消费完才推进窗口(拿到的可能只是这一段的一部分)。
+            if within + n >= self.origin.chunk_len(c) {
                 self.advance_serve(c + 1).await;
             }
         }
@@ -1063,7 +1250,7 @@ mod tests {
        环形缓存是全连接共享的(占用恒 = 用户设的上限),槽位 = chunk % ring。
        两条连接的分段号只要模 ring 同余就落同一个槽,后写的直接盖掉先写的。
        而 worker 认领时 fetch_cursor 已经自增越过那一段,**再没人会去重拉** ——
-       await_chunk 于是无限空转(has() 永远 false,又不在 failed 里),那条连接彻底饿死。
+       next_bytes 于是无限空转(has() 永远 false,又不在 failed 里),那条连接彻底饿死。
        线上表现 = 有流量、黑屏/永远缓冲;CI 上表现 = concurrent_connections_
        do_not_starve_each_other 约 5~20% 概率红(early eof 或超时)。
 
@@ -1071,7 +1258,7 @@ mod tests {
          total 16MB = 4 段;cache 8MB + threads=1 → ring = 2 槽;
          A 从 chunk0 起、B 从 chunk2 起 —— 2 % 2 == 0 % 2,
          两条连接**正在供给的那一段**直接同槽,谁后落盘谁就把对方挤掉。
-       反向验证:把 await_chunk 里那段「倒回 fetch_cursor」删掉,本测试必然超时红。 */
+       反向验证:把 next_bytes 里那段「倒回 fetch_cursor」删掉,本测试必然超时红。 */
     #[tokio::test]
     async fn evicted_chunk_is_refetched_not_awaited_forever() {
         const TOTAL: u64 = 48 * 1024 * 1024; // 12 段
@@ -1141,8 +1328,9 @@ mod tests {
             let (mut pa, mut pb) = (0u64, 16 * 1024 * 1024u64);
             let mut buf = vec![0u8; 512 * 1024];
             /* ★ 必须**跨段**读:每条连接读 12MB = 3 段。
-               只在一段之内读是测不出来的 —— await_chunk 整段返回并留在内存里,
-               根本不会再去问磁盘,冲突压根碰不到(我第一版就这么写,摘掉修复照样绿)。 */
+               只在一段之内读是测不出来的 —— 一段之内供给端要么在直播载体上现读、
+               要么一次就把整段从盘上取回,根本不会再去问磁盘第二次,
+               槽位冲突压根碰不到(我第一版就这么写,摘掉修复照样绿)。 */
             for _ in 0..24 {
                 a.read_exact(&mut buf).await.expect("A 被挤掉后没重拉 = 饿死");
                 for (k, v) in buf.iter().enumerate() {
@@ -1373,7 +1561,7 @@ mod tests {
 
     /* 上游返回【短于请求量】的分段时，绝不能挂死。
        旧逻辑：fetch_chunk 只要 body 非空就收下 → serve 写完这 L 字节后 advance_serve(c+1)
-       把它从 ready 删掉，可 pos 仍在分段 c 内 → 下一轮又去 await_chunk(c)，
+       把它从 ready 删掉，可 pos 仍在分段 c 内 → 下一轮又去 next_bytes(c)，
        而 fetch_cursor 早过了 c，永远没人重拉 → **永远缓冲**（和用户报的症状一模一样）。
        修后：长度对不上 = 可重试，重试用尽就标失败 → 断流，播放器回退直连。
        反向验证：把 fetch_chunk 里的长度校验去掉，本测试立刻挂死超时红。 */
@@ -1439,6 +1627,285 @@ mod tests {
         assert!(r.is_ok(), "上游给短包时挂死了 = 用户报的「永远缓冲」");
     }
 
+    /* ★ 这次改造(2026-08-02「边收边吐」)的唯一验收判据。
+
+       用户症状:开了多线程加载就没画面没声音,直连反而秒开。根因不是 bug 是粒度 ——
+       供给端要等**整段 4MB** 落盘才吐第一个字节,而 mpv 起播只要头几百 KB。
+       实测那条链 56~143KB/s,一段 4MB 合法地要 29~62 秒,于是「永远加载不出来」。
+
+       这里的假上游把每个分段**匀速滴**出来(40 块 × 150ms = 一段要 6 秒),
+       断言前 256KB 必须在 2.5 秒内到 —— 也就是「还没收满一段就得开始吐」。
+       反向注入(把 next_bytes 改回只认 disk.has、删掉 live 分支)此测试必红:
+       第一个字节要等满 6 秒。
+       顺带**逐字节校验内容**:边收边吐最容易错的地方就是重试续接(Live::feed 的 skip),
+       错了就是错帧,而错帧不报错、只是画面坏掉。 */
+    #[tokio::test]
+    async fn first_bytes_reach_the_player_before_the_whole_chunk_arrives() {
+        const TOTAL: u64 = 40 * 1024 * 1024;
+        const PIECES: usize = 40;
+        const GAP_MS: u64 = 150; // 一段 4MB 要 40*150ms = 6 秒
+        let byte_at = |i: u64| (i % 251) as u8;
+
+        let up = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let up_port = up.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut c, _)) = up.accept().await {
+                tokio::spawn(async move {
+                    let (_m, rg) = match read_request(&mut c).await {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+                    let (s, e) = match rg {
+                        Some((s, e)) => (s, e.unwrap_or(TOTAL - 1).min(TOTAL - 1)),
+                        None => (0, TOTAL - 1),
+                    };
+                    let len = e - s + 1;
+                    let nl = String::from_utf8(vec![13, 10]).unwrap();
+                    let head = format!(
+                        "HTTP/1.1 206 Partial Content{nl}\
+                         Content-Range: bytes {s}-{e}/{TOTAL}{nl}\
+                         Content-Type: video/mp4{nl}\
+                         Content-Length: {len}{nl}{nl}"
+                    );
+                    if c.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    // 探大小的 bytes=0-0 不用滴,一次给完(否则代理起不来)。
+                    let pieces = if len <= 1 { 1 } else { PIECES };
+                    let per = len.div_ceil(pieces as u64);
+                    let mut off = 0u64;
+                    while off < len {
+                        let n = per.min(len - off);
+                        let body: Vec<u8> =
+                            (0..n).map(|k| byte_at(s + off + k)).collect();
+                        if c.write_all(&body).await.is_err() {
+                            return;
+                        }
+                        off += n;
+                        if off < len {
+                            tokio::time::sleep(Duration::from_millis(GAP_MS)).await;
+                        }
+                    }
+                });
+            }
+        });
+
+        let h = start(format!("http://127.0.0.1:{up_port}/f"), 2, 32 * 1024 * 1024, None)
+            .await
+            .expect("探测该成功");
+
+        let mut cli = TcpStream::connect(("127.0.0.1", url_port(&h.url))).await.unwrap();
+        let t0 = std::time::Instant::now();
+        cli.write_all(b"GET /play HTTP/1.1\r\nRange: bytes=0-\r\n\r\n")
+            .await
+            .unwrap();
+
+        let mut one = [0u8; 1];
+        let mut w = Vec::new();
+        loop {
+            cli.read_exact(&mut one).await.unwrap();
+            w.push(one[0]);
+            if w.len() >= 4 && &w[w.len() - 4..] == b"\r\n\r\n" {
+                break;
+            }
+        }
+        let mut got = vec![0u8; 256 * 1024];
+        cli.read_exact(&mut got).await.expect("前 256KB 该读得到");
+        let dt = t0.elapsed();
+
+        for (k, v) in got.iter().enumerate() {
+            assert_eq!(*v, byte_at(k as u64), "边收边吐把字节喂错位了 @{k}");
+        }
+        assert!(
+            dt < Duration::from_millis(2500),
+            "前 256KB 花了 {:.1}s —— 供给端还在等整段 4MB(要 {:.1}s)才吐,\
+             这正是用户报的「开了多线程加载就加载不出来」",
+            dt.as_secs_f32(),
+            (PIECES as u64 * GAP_MS) as f32 / 1000.0
+        );
+    }
+
+    /* ★ 边收边吐带来的**新风险**,必须有门禁:重试时的字节续接。
+
+       改造前每次 attempt 都用一个全新的 buf,重试天然干净。改造后 buf 是「直播缓冲」,
+       上一轮收到的字节**可能已经吐给播放器了**,收不回来 —— 所以重试必须从断点续,
+       既不能重复追加(那是错帧),也不能从头重来(那是重复吐)。
+
+       这里的假上游对 chunk 0 的**第一次**请求只吐一半就断,之后正常。
+       反向注入(把 Live::feed 里的 skip 逻辑删掉,来的字节一律 extend)此测试必红:
+       第 2MB 之后会变成「第 0MB 起的内容又来一遍」—— 而错帧**不报错**,只是画面坏掉,
+       正是最难查的那一类。 */
+    #[tokio::test]
+    async fn retry_after_partial_body_resumes_instead_of_duplicating() {
+        const TOTAL: u64 = 40 * 1024 * 1024;
+        let byte_at = |i: u64| (i % 251) as u8;
+        let truncated = Arc::new(AtomicBool::new(false));
+
+        let up = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let up_port = up.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((mut c, _)) = up.accept().await {
+                let flag = truncated.clone();
+                tokio::spawn(async move {
+                    let (_m, rg) = match read_request(&mut c).await {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+                    let (s, e) = match rg {
+                        Some((s, e)) => (s, e.unwrap_or(TOTAL - 1).min(TOTAL - 1)),
+                        None => (0, TOTAL - 1),
+                    };
+                    let len = e - s + 1;
+                    let nl = String::from_utf8(vec![13, 10]).unwrap();
+                    let head = format!(
+                        "HTTP/1.1 206 Partial Content{nl}\
+                         Content-Range: bytes {s}-{e}/{TOTAL}{nl}\
+                         Content-Type: video/mp4{nl}\
+                         Content-Length: {len}{nl}{nl}"
+                    );
+                    if c.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    let body: Vec<u8> = (0..len).map(|k| byte_at(s + k)).collect();
+                    // 第 0 段的第一次请求:只吐一半就断(声明的长度不变 = 半截身子)。
+                    let cut = s == 0 && len > 1 && !flag.swap(true, Ordering::SeqCst);
+                    let n = if cut { body.len() / 2 } else { body.len() };
+                    let _ = c.write_all(&body[..n]).await;
+                });
+            }
+        });
+
+        let h = start(format!("http://127.0.0.1:{up_port}/f"), 2, 32 * 1024 * 1024, None)
+            .await
+            .expect("探测该成功");
+
+        let mut cli = TcpStream::connect(("127.0.0.1", url_port(&h.url))).await.unwrap();
+        cli.write_all(b"GET /play HTTP/1.1\r\nRange: bytes=0-\r\n\r\n")
+            .await
+            .unwrap();
+        let mut one = [0u8; 1];
+        let mut w = Vec::new();
+        loop {
+            cli.read_exact(&mut one).await.unwrap();
+            w.push(one[0]);
+            if w.len() >= 4 && &w[w.len() - 4..] == b"\r\n\r\n" {
+                break;
+            }
+        }
+        // 跨过被截断的那一段(4MB)再多读 2MB,确保续接点前后都验到。
+        let mut got = vec![0u8; 6 * 1024 * 1024];
+        tokio::time::timeout(Duration::from_secs(30), cli.read_exact(&mut got))
+            .await
+            .expect("半截身子后没能续上 = 卡死")
+            .expect("半截身子后没能续上 = 断流");
+        for (k, v) in got.iter().enumerate() {
+            assert_eq!(*v, byte_at(k as u64), "重试没有从断点续,字节错位 @{k}");
+        }
+    }
+
+    /* ★ seek 之后的白等(2026-08-02 第二刀)。
+
+       响应声明 Connection: close,所以播放器**每 seek 一次就是一条新连接**
+       (MKV 起播必跳尾部 cues,换集/拖进度条同理)。而连接起点几乎不可能正好落在
+       4MB 边界上:从边界开拉 = 在播放器要的第一个字节前面先白拉平均 2MB。
+       用户那条链 150KB/s → 每拖一次进度条画面 13 秒不动。
+
+       这里假上游**恒速**滴(128KB / 150ms ≈ 850KB/s),客户端从 3MB 处开读:
+       - 修好了:上游只被要 [3MB, 4MB),2 块就够吐出 256KB → 约 0.3 秒;
+       - 没修:上游被要 [0, 4MB),得先滴过 3MB(24 块 ≈ 3.6 秒)播放器才见到第一个字节。
+       断言分两条:上游**实际收到的 Range 起点**(确定性,不看机器负载)+ 端到端耗时。
+       反向注入(worker 里把 partial 判定改成恒 false)两条都红。 */
+    #[tokio::test]
+    async fn seek_does_not_wait_for_the_bytes_before_it() {
+        const TOTAL: u64 = 40 * 1024 * 1024;
+        const AT: u64 = 3 * 1024 * 1024; // 落在 chunk 0 的 3/4 处
+        let byte_at = |i: u64| (i % 251) as u8;
+        let seen: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let up = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let up_port = up.local_addr().unwrap().port();
+        let seen_srv = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut c, _)) = up.accept().await {
+                let seen = seen_srv.clone();
+                tokio::spawn(async move {
+                    let (_m, rg) = match read_request(&mut c).await {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+                    let (s, e) = match rg {
+                        Some((s, e)) => (s, e.unwrap_or(TOTAL - 1).min(TOTAL - 1)),
+                        None => (0, TOTAL - 1),
+                    };
+                    let len = e - s + 1;
+                    if len > 1 {
+                        seen.lock().await.push(s); // 探大小的 bytes=0-0 不计
+                    }
+                    let nl = String::from_utf8(vec![13, 10]).unwrap();
+                    let head = format!(
+                        "HTTP/1.1 206 Partial Content{nl}\
+                         Content-Range: bytes {s}-{e}/{TOTAL}{nl}\
+                         Content-Type: video/mp4{nl}\
+                         Content-Length: {len}{nl}{nl}"
+                    );
+                    if c.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    // 恒速:每块 128KB,块间 150ms —— 耗时正比于**字节数**,才测得出白等。
+                    let mut off = 0u64;
+                    while off < len {
+                        let n = (128 * 1024u64).min(len - off);
+                        let body: Vec<u8> = (0..n).map(|k| byte_at(s + off + k)).collect();
+                        if c.write_all(&body).await.is_err() {
+                            return;
+                        }
+                        off += n;
+                        if off < len {
+                            tokio::time::sleep(Duration::from_millis(150)).await;
+                        }
+                    }
+                });
+            }
+        });
+
+        let h = start(format!("http://127.0.0.1:{up_port}/f"), 2, 32 * 1024 * 1024, None)
+            .await
+            .expect("探测该成功");
+
+        let mut cli = TcpStream::connect(("127.0.0.1", url_port(&h.url))).await.unwrap();
+        let t0 = std::time::Instant::now();
+        cli.write_all(format!("GET /play HTTP/1.1\r\nRange: bytes={AT}-\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut one = [0u8; 1];
+        let mut w = Vec::new();
+        loop {
+            cli.read_exact(&mut one).await.unwrap();
+            w.push(one[0]);
+            if w.len() >= 4 && &w[w.len() - 4..] == b"\r\n\r\n" {
+                break;
+            }
+        }
+        let mut got = vec![0u8; 256 * 1024];
+        cli.read_exact(&mut got).await.expect("该读得到");
+        let dt = t0.elapsed();
+
+        for (k, v) in got.iter().enumerate() {
+            assert_eq!(*v, byte_at(AT + k as u64), "seek 后字节错位 @{}", AT + k as u64);
+        }
+        let starts = seen.lock().await.clone();
+        assert!(
+            starts.contains(&AT),
+            "上游从没被要过 {AT} 起的数据(实际:{starts:?}) —— \
+             说明首段还是从 4MB 边界开拉,播放器要的字节前面压着 3MB 白拉的量"
+        );
+        assert!(
+            dt < Duration::from_millis(2000),
+            "seek 后首批 256KB 花了 {:.1}s —— 白等了它前面那 3MB",
+            dt.as_secs_f32()
+        );
+    }
+
     fn origin_with(cb: Option<ResignFn>) -> Origin {
         Origin {
             upstream: Mutex::new(UpstreamState {
@@ -1454,6 +1921,7 @@ mod tests {
             closed: AtomicBool::new(false),
             client: crate::http::preload_client(),
             on_invalid: cb,
+            live: Default::default(),
             disk: DiskCache::create(100 * CHUNK_SIZE, 32 * 1024 * 1024, 2)
                 .expect("测试环境该建得出缓存文件"),
         }
