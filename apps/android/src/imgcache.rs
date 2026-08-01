@@ -27,6 +27,27 @@ use tauri::{Builder, Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
 pub const SCHEME: &str = "lpimg";
 
+/// 同时最多几张图在**回源**。
+///
+/// ★ 这是「整个 App 都很慢」的一个真因,不只是图慢。封面和 `item_detail` / `views` /
+///   `list_latest` 这些 JSON 走的是**同一个 reqwest 客户端、同一个连接池、同一台服务器**。
+///   首页一屏三十几张封面同时回源时,后面点进详情页要的那条 JSON 排在它们后头 ——
+///   用户看到的是「简介也加载得很慢」,而简介本身只有几 KB。
+///   反代(Nginx/CF)那边通常还有每 IP 并发上限,超了直接排队。
+/// ★ 6 是折中:比它小,首屏封面填得肉眼可见地慢;比它大,又开始和 API 抢。
+///   缓存命中的那条路**不占名额**(见 load:先查缓存,查到就直接返回)。
+const FETCH_SLOTS: usize = 6;
+static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+fn gate() -> &'static tokio::sync::Semaphore {
+    GATE.get_or_init(|| tokio::sync::Semaphore::new(FETCH_SLOTS))
+}
+
+/// 单张图回源的墙钟上限。
+///
+/// ★ 有闸就必须有超时:一条卡死的连接会把名额**永久**占住,
+///   六条卡死 = 整个应用再也加载不出任何一张图,而且一声不吭。
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// 挂到 builder 链上。
 pub fn register<R: Runtime>(builder: Builder<R>) -> Builder<R> {
     builder.register_asynchronous_uri_scheme_protocol(
@@ -52,6 +73,14 @@ pub fn register<R: Runtime>(builder: Builder<R>) -> Builder<R> {
                                `lpimg://` 非 http scheme 大概率不认 —— **没验证过,别指望它**。
                                承重的是磁盘缓存,这个头只是白捡的。 */
                             .header(header::CACHE_CONTROL, "public, max-age=604800")
+                            /* ★ 这一条是给**取主色**用的:详情页要把海报的主色调延伸成
+                               页面背景,那要把图画进 canvas 再 getImageData。
+                               `lpimg` 和页面不同源(`http://lpimg.localhost` vs
+                               `http://tauri.localhost`),没有这个头的话 canvas 被污染,
+                               getImageData 直接抛 SecurityError —— 表现是"渐变永远不出现",
+                               而且错误被 try 吞掉之后**一点痕迹都没有**。
+                               配套:调用点的 <img> 必须写 crossOrigin="anonymous"。 */
+                            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
                             .body(Cow::Owned(bytes))
                             .unwrap()
                     }
@@ -60,6 +89,7 @@ pub fn register<R: Runtime>(builder: Builder<R>) -> Builder<R> {
                     Err(e) => Response::builder()
                         .status(StatusCode::NOT_FOUND)
                         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
                         .body(Cow::Owned(e.into_bytes()))
                         .unwrap(),
                 };
@@ -150,17 +180,26 @@ async fn load<R: Runtime>(
        静态文件** /img/i/fanart/{id}.jpg。不跟跳只会拿到 79 字节的 HTML,
        然后被 sniff 判成 octet-stream —— 表现为「图不显示但也不报错」。
        别给这个 client 关掉 redirect。 */
-    let resp = state
-        .http
-        .get(&url)
-        .header("X-Emby-Token", &token)
-        .send()
-        .await
-        .map_err(|e| format!("取图失败: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("上游 HTTP {}", resp.status()));
-    }
-    let bytes = resp.bytes().await.map_err(|e| format!("读图失败: {e}"))?.to_vec();
+    /* ★ 到这里才占名额 —— 缓存命中的那条路在上面已经 return 了,不排队。
+       permit 活到本函数结束(包括读 body),所以它限的是**并发回源数**,
+       不是"发出去的请求数"。 */
+    let _permit = gate().acquire().await.map_err(|_| "取图闸关闭了".to_string())?;
+
+    let bytes = tokio::time::timeout(FETCH_TIMEOUT, async {
+        let resp = state
+            .http
+            .get(&url)
+            .header("X-Emby-Token", &token)
+            .send()
+            .await
+            .map_err(|e| format!("取图失败: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("上游 HTTP {}", resp.status()));
+        }
+        Ok(resp.bytes().await.map_err(|e| format!("读图失败: {e}"))?.to_vec())
+    })
+    .await
+    .map_err(|_| format!("取图超时({}s)", FETCH_TIMEOUT.as_secs()))??;
 
     // 写盘是同步 IO,挪出 async worker;顺带把 bytes 还回来免得多克隆一份。
     let bytes = tokio::task::spawn_blocking(move || {

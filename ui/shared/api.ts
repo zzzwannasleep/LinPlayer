@@ -730,6 +730,28 @@ export function clearItemCache() {
  *  实测(mecf.mebimmer.de):相似度靠谱,可能混 Series+Movie,单击照常进各自详情。 */
 export const similarItems = (itemId: string) => invoke<Item[]>("similar_items", { itemId });
 
+/** 演职员详情。★ `overview` 为空是**常态** —— 只有刮削器抓到 TMDB 人物页才有生平,
+ *  前端要为"没有生平"排一版,别留一块空白。 */
+export type PersonDetail = {
+  id: string;
+  name: string;
+  overview: string;
+  has_primary: boolean;
+  /** ISO 串,可能带时间部分 */
+  birthday: string | null;
+  /** 有值 = 已故 */
+  death_day: string | null;
+  birth_place: string | null;
+};
+export const personDetail = (personId: string) =>
+  memo(`person:${personId}`, () => invoke<PersonDetail>("person_detail", { personId }));
+
+/** 某人参演的电影 / 剧集(按首播倒序)。空数组合法 —— 有些人物条目底下一部作品都挂不上。 */
+export const personItems = (personId: string, limit = 60) =>
+  memo(`personItems:${personId}:${limit}`, () =>
+    invoke<Item[]>("person_items", { personId, limit }),
+  );
+
 /** 某剧的季列表。**返回空数组是合法的** —— 有些剧没分季（集直接挂在剧下），
  *  那种情况把 seriesId 当 parent 直接调 seasonEpisodes。
  *  不回落的表现是"点进去一集都没有"，而且不报错。 */

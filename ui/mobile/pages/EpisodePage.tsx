@@ -3,10 +3,8 @@ import {
   type Item,
   type ItemDetail,
   type MediaVersion,
+  defaultVersion,
   downloadEnqueue,
-  fmtBitrate,
-  fmtRes,
-  fmtSize,
   itemDetailLite,
   itemMedia,
   peekItemDetailLite,
@@ -17,19 +15,39 @@ import {
   thumbUrl,
 } from "@shared/api";
 import { useCtx } from "../app/ctx";
+import { dominantOf, washColor } from "../app/color";
 import { Icon } from "../app/icons";
 import { haptic, toast } from "../app/motion";
 import Page from "../components/Page";
 import Sheet from "../components/Sheet";
-import { Empty, Opt, OptGroup, usePress } from "../components/ui";
+import MediaCard from "../components/MediaCard";
+import { Empty, Opt, usePress } from "../components/ui";
+import { EpCard } from "./DetailPage";
 
-/* 单集详情页 —— **独立一页**,不是 bottom sheet。
-   调研结论一致(NN/g + Netflix/Prime/Plex 做法):用 sheet 会打断
-   "从第 5 集跳到第 10 集"这个真实存在的流程,而且长简介在 sheet 里堆不下。
+/* 单集详情页 —— **独立一页**,不是弹窗。
+   调研结论一致(NN/g + Netflix/Prime/Plex 做法):用弹窗会打断
+   "从第 5 集跳到第 10 集"这个真实存在的流程,而且长简介在弹窗里堆不下。
 
    ★ 上一集/下一集走 `replace` 不是 `go` —— 那是**同一层**的横向移动。
      用 go 的话连按 5 次「下一集」就要按 5 次返回才回得到剧详情页,
-     而用户心里的返回目标始终是那部剧。 */
+     而用户心里的返回目标始终是那部剧。
+
+   ═══ 2026-08-01 这一版改的四件事(用户逐条点名) ═══
+
+   ★ **阅读顺序改成 标题/标签 → 简介 → 播放按钮。**
+
+   ★ **「本季其它集」挪到播放按钮正下方**(原来在上一集/下一集之后)。
+
+   ★ **「本季其它集」的封面根本不显示** —— 真因不是网络也不是接口,是
+     `.card-a img` 在 CSS 里的初始状态就是 `opacity:0`,要靠 `onLoad` 加 `.ready`
+     才淡入。这一页当初是**手抄了一份卡片 DOM**,抄漏了那个 onLoad,
+     于是图下载完了、解码完了、就是永远透明。
+     这一版直接复用剧集页那个 `EpCard`,不再各写一份 —— "散着写必然长出两套"
+     在这里的具体后果就是一整栏封面全隐身。
+
+   ★ **媒体信息改成平铺的卡片放在最下面**,不再是"点右上角更多 → 弹面板"。
+     顺带解决了「右上角更多按钮点开的其实是媒体信息」这个名不副实的入口:
+     现在右上角就是真的「更多」(标记已看 / 下载 / 回到剧)。 */
 
 const fmtDur = (s: number) => {
   const m = Math.round(s / 60);
@@ -45,11 +63,12 @@ const WIN_SMALL = 3;
 const WIN_LARGE = 11;
 
 export default function EpisodePage({ itemId }: { itemId?: string; season?: number; ep?: number }) {
-  const { session, back, replace, play } = useCtx();
+  const { session, go, back, replace, play } = useCtx();
   const [d, setD] = useState<ItemDetail | null>(() => (itemId ? peekItemDetailLite(itemId) ?? null : null));
   const [err, setErr] = useState("");
   const [ver, setVer] = useState<MediaVersion | null>(null);
-  const [sheet, setSheet] = useState(false);
+  const [more, setMore] = useState(false);
+  const [wash, setWash] = useState<string | null>(null);
   /** 邻集 + 本季其它集。null = 还没探;[] = 探过了但没命中 */
   const [near, setNear] = useState<{ prev: Item | null; next: Item | null; siblings: Item[] } | null>(null);
 
@@ -58,11 +77,12 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
     let alive = true;
     setErr("");
     setNear(null);
+    setWash(null);
     itemDetailLite(itemId)
       .then((x) => alive && setD(x))
       .catch((e) => alive && setErr(String(e)));
     itemMedia(itemId)
-      .then((v) => alive && setVer(v[0] ?? null))
+      .then((v) => alive && setVer(defaultVersion(v)))
       .catch(() => {});
     return () => {
       alive = false;
@@ -91,7 +111,7 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
             siblings: page.items,
           });
           // 顺便再拉一屏当"本季其它集"
-          seasonEpisodes(parent, Math.max(0, pos - 5), 12)
+          seasonEpisodes(parent, Math.max(0, pos - 5), 14)
             .then((p) => alive && setNear((n) => (n ? { ...n, siblings: p.items } : n)))
             .catch(() => {});
           return;
@@ -150,18 +170,25 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
       sub={d.series_name ?? undefined}
       onBack={back}
       right={
-        <button type="button" ref={moreBtn} aria-label="更多" onClick={() => setSheet(true)}>
+        <button type="button" ref={moreBtn} aria-label="更多" onClick={() => setMore(true)}>
           <Icon n="more" size={21} />
         </button>
       }
       enterKey={d.id}
     >
-      <div className="detail epd">
+      <div
+        className={`detail epd${wash ? " washed" : ""}`}
+        style={wash ? ({ ["--wash" as string]: wash } as React.CSSProperties) : undefined}
+      >
+        {/* 单集的"封面"是这一集的**剧照**(16:9),不是剧的海报 ——
+            三种详情页各用各的图,这正是用户要求"三个页面分开设计"的落点。 */}
         <div className="ep-hero">
           <img
             src={thumbUrl(session, d.id, 900)}
             alt=""
             decoding="async"
+            crossOrigin="anonymous"
+            onLoad={(e) => setWash(washColor(dominantOf(e.currentTarget)))}
             onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0")}
           />
           <div className="dt-scrim" />
@@ -172,6 +199,7 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
           )}
         </div>
 
+        {/* ① 标题 / 标签 */}
         <div className="epd-head">
           <div className="epd-crumb">
             {d.series_name} · {se}
@@ -186,37 +214,10 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
               </>
             ) : null}
           </div>
-          <div className="dt-acts">
-            <PlayBtn
-              label={d.resume_secs ? "继续播放" : "播放"}
-              sub={d.resume_secs ? `剩余 ${Math.round((d.runtime_secs - d.resume_secs) / 60)} 分` : null}
-              onClick={() => {
-                haptic("tap");
-                void play(self);
-              }}
-            />
-            <IcoBtn
-              icon="check"
-              label="标记已看"
-              onClick={() => {
-                haptic("ok");
-                setPlayed(d.id, true).then(() => toast("已标为看完", "ok")).catch((e) => toast(String(e), "bad"));
-              }}
-            />
-            <IcoBtn
-              icon="download"
-              label="下载"
-              onClick={() => {
-                haptic("tap");
-                downloadEnqueue(d.id, d.type_, d.name, "mkv", posterUrl(session, d.id, 360))
-                  .then(() => toast("已加入下载队列"))
-                  .catch((e) => toast(String(e), "bad"));
-              }}
-            />
-          </div>
         </div>
 
-        {/* 单集页的简介**不截断** —— 进到这一页来的人就是要看这个 */}
+        {/* ② 简介 —— 在播放按钮**上面**(用户 2026-08-01 定)。
+            单集页的简介不截断:进到这一页来的人就是要看这个。 */}
         <div className="dt-intro">
           <div className={`dt-ov${d.overview ? "" : " dim"}`}>
             <div className="dt-ov-t">
@@ -225,27 +226,58 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
           </div>
         </div>
 
-        {ver && (
-          <div className="dt-rows">
-            <button type="button" className="dt-row" onClick={() => setSheet(true)}>
-              <span className="dt-row-l">
-                <Icon n="info" size={17} />
-                媒体信息
-              </span>
-              <span className="dt-row-v">
-                {[
-                  ver.streams?.find((s) => s.type_ === "Video")?.video_range_type,
-                  fmtSize(ver.size_bytes ?? 0),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-              <Icon n="chevR" size={16} />
-            </button>
-          </div>
+        {/* ③ 播放 */}
+        <div className="dt-acts">
+          <PlayBtn
+            label={d.resume_secs ? "继续播放" : "播放"}
+            sub={d.resume_secs ? `剩余 ${Math.round((d.runtime_secs - d.resume_secs) / 60)} 分` : null}
+            onClick={() => {
+              haptic("tap");
+              void play(self);
+            }}
+          />
+          <IcoBtn
+            icon="check"
+            label="标记已看"
+            onClick={() => {
+              haptic("ok");
+              setPlayed(d.id, true).then(() => toast("已标为看完", "ok")).catch((e) => toast(String(e), "bad"));
+            }}
+          />
+          <IcoBtn
+            icon="download"
+            label="下载"
+            onClick={() => {
+              haptic("tap");
+              downloadEnqueue(d.id, d.type_, d.name, "mkv", posterUrl(session, d.id, 360))
+                .then(() => toast("已加入下载队列"))
+                .catch((e) => toast(String(e), "bad"));
+            }}
+          />
+        </div>
+
+        {/* ④ 本季其它集 —— 紧跟播放按钮(用户 2026-08-01 定)。
+            卡片复用剧集页的 EpCard:上一版这里手抄了一份 DOM 却抄漏了 onLoad 里那句
+            `classList.add("ready")`,而 `.card-a img` 的初始状态就是 opacity:0 ——
+            于是整栏封面永远透明。别再各写一份。 */}
+        {near && near.siblings.length > 1 && (
+          <section className="dt-sec">
+            <div className="row-hd">
+              <h2>本季其它集</h2>
+              <button type="button" className="row-more" onClick={back}>
+                全部
+                <Icon n="chevR" size={15} />
+              </button>
+            </div>
+            <div className="ep-box as-rail">
+              {near.siblings.map((x, i) => (
+                <EpCard key={x.id} e={x} i={i} session={session} cur={x.id === d.id} onOpen={jump(x)} />
+              ))}
+            </div>
+          </section>
         )}
 
-        {/* 上一集 / 下一集 —— 调研里的标配,我们之前完全没有 */}
+        {/* ⑤ 上一集 / 下一集 */}
         <div className="epd-nav">
           {near === null ? (
             <div className="epd-nb off">正在找相邻的集…</div>
@@ -263,72 +295,55 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
           )}
         </div>
 
-        {near && near.siblings.length > 1 && (
-          <section className="dt-sec">
-            <div className="row-hd">
-              <h2>本季其它集</h2>
-              <button type="button" className="row-more" onClick={back}>
-                全部
-                <Icon n="chevR" size={15} />
-              </button>
-            </div>
-            <div className="row-scroll">
-              {near.siblings.map((x) => (
-                <div className={`card thumb${x.id === d.id ? " cur" : ""}`} key={x.id} onClick={jump(x)}>
-                  <div className="card-a ar-thumb">
-                    <img src={thumbUrl(session, x.id, 400)} alt="" loading="lazy" decoding="async" />
-                    {x.played && (
-                      <div className="ep-done">
-                        <Icon n="check" size={11} />
-                      </div>
-                    )}
-                  </div>
-                  <div className="card-cap">
-                    {x.episode_no != null ? `${x.episode_no}. ` : ""}
-                    {x.name}
-                  </div>
-                  <div className="card-sub">{fmtDur(x.runtime_secs)}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+        {/* ⑥ 媒体信息卡 —— **最下面**,平铺,不点击展开(用户 2026-08-01 定) */}
+        <section className="dt-sec">
+          <div className="row-hd">
+            <h2>媒体信息</h2>
+          </div>
+          <MediaCard ver={ver} />
+        </section>
+
         <div style={{ height: 28 }} />
       </div>
 
-      <Sheet open={sheet} onClose={() => setSheet(false)} title="媒体信息">
+      <Sheet open={more} onClose={() => setMore(false)} title={d.name}>
         <div className="opts">
-          {(["Video", "Audio", "Subtitle"] as const).map((t) => {
-            const xs = (ver?.streams ?? []).filter((s) => s.type_ === t);
-            if (!xs.length) return null;
-            return (
-              <div key={t}>
-                <OptGroup>{t === "Video" ? "视频" : t === "Audio" ? "音频" : "字幕"}</OptGroup>
-                {xs.map((s, i) => (
-                  <Opt
-                    key={s.index}
-                    i={i}
-                    label={s.display_title || s.codec}
-                    sub={[s.codec?.toUpperCase(), s.width && s.height ? `${s.width}×${s.height}` : null, fmtBitrate(s.bitrate)]
-                      .filter(Boolean)
-                      .join(" · ")}
-                    badge={s.is_default ? "默认" : undefined}
-                  />
-                ))}
-              </div>
-            );
-          })}
-          {!ver && <div className="mi-path">服务器没给这一集的媒体信息</div>}
-          {ver && (
-            <>
-              <OptGroup>文件</OptGroup>
-              <div className="mi-path">
-                {[ver.container?.toUpperCase(), fmtSize(ver.size_bytes ?? 0), fmtRes(ver.streams?.find((s) => s.type_ === "Video")?.height ?? null)]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </div>
-            </>
-          )}
+          <Opt
+            label="标为已看"
+            i={0}
+            onClick={() => {
+              setMore(false);
+              setPlayed(d.id, true).then(() => toast("已标为看完", "ok")).catch((e) => toast(String(e), "bad"));
+            }}
+          />
+          <Opt
+            label="标为未看"
+            i={1}
+            onClick={() => {
+              setMore(false);
+              setPlayed(d.id, false).then(() => toast("已标为未看", "ok")).catch((e) => toast(String(e), "bad"));
+            }}
+          />
+          <Opt
+            label="下载这一集"
+            i={2}
+            onClick={() => {
+              setMore(false);
+              downloadEnqueue(d.id, d.type_, d.name, "mkv", posterUrl(session, d.id, 360))
+                .then(() => toast("已加入下载队列"))
+                .catch((e) => toast(String(e), "bad"));
+            }}
+          />
+          {d.series_id ? (
+            <Opt
+              label="回到这部剧"
+              i={3}
+              onClick={() => {
+                setMore(false);
+                go({ page: "detail", itemId: d.series_id!, title: d.series_name ?? "" });
+              }}
+            />
+          ) : null}
         </div>
       </Sheet>
     </Page>

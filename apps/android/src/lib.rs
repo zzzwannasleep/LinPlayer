@@ -981,6 +981,27 @@ async fn similar_items(state: State<'_, AppState>, item_id: String) -> Result<Ve
     emby::similar(&state.http, &s, &item_id, 12).await
 }
 
+/// 演职员详情(生平/出生地/生卒)。生平为空是常态 —— 只有刮到 TMDB 人物页才有。
+#[tauri::command]
+async fn person_detail(
+    state: State<'_, AppState>,
+    person_id: String,
+) -> Result<emby::PersonDetail, String> {
+    let s = session_of(&state)?;
+    emby::person_detail(&state.http, &s, &person_id).await
+}
+
+/// 某人参演的电影 / 剧集(按首播倒序)。
+#[tauri::command]
+async fn person_items(
+    state: State<'_, AppState>,
+    person_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<Item>, String> {
+    let s = session_of(&state)?;
+    emby::person_items(&state.http, &s, &person_id, limit.unwrap_or(60)).await
+}
+
 /// 首页某库"最新更新"轨道。
 #[tauri::command]
 async fn list_latest(
@@ -4597,6 +4618,8 @@ pub fn run() {
             list_next_up,
             search,
             similar_items,
+            person_detail,
+            person_items,
             list_latest,
             list_resume,
             list_random,

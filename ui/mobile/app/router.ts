@@ -12,6 +12,9 @@ export type Route = {
   /** servers → 线路 / 图标 页用。**不能和 itemId 共用一个字段** ——
    *  「哪一台服务器」和「哪一个条目」是两个东西,混用的表现是进错页且不报错。 */
   serverId?: string;
+  /** person 页:人物 id。**不复用 itemId** —— 演员在 Emby 里虽然也是个 Item,
+   *  但「哪一个人」和「哪一个条目」是两条完全不同的取数路径,混用的表现是进错页且不报错。 */
+  personId?: string;
   /** 设置二级页分流:playback / danmaku / network / sync / storage / about */
   group?: string;
   /** 单集页:季号 + 集号 */

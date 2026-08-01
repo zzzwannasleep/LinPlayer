@@ -1279,6 +1279,85 @@ pub async fn similar(
     fetch_items(http, s, &url).await
 }
 
+/// 演职员详情页要的那点东西。
+///
+/// ★ 演员在 Emby 里就是一个 `Type=Person` 的 Item,和条目走同一条 `/Users/{uid}/Items/{id}`,
+///   所以头像直接复用 `lpimg` 的 Primary 通道 —— 不需要另开图片路径。
+/// ★ 生平(Overview)**经常是空的**:只有刮削器抓到 TMDB 人物页才有。空是常态不是错误,
+///   前端要为"没有生平"排一版,不能留一块空白。
+#[derive(Serialize)]
+pub struct PersonDetail {
+    pub id: String,
+    pub name: String,
+    /// 生平。空串 = 服务器上就没有。
+    pub overview: String,
+    pub has_primary: bool,
+    /// 出生日期 ISO 串(PremiereDate)。
+    pub birthday: Option<String>,
+    /// 卒年(EndDate)。有值 = 已故。
+    pub death_day: Option<String>,
+    /// 出生地(ProductionLocations[0])。
+    pub birth_place: Option<String>,
+}
+
+/// 演职员详情。
+pub async fn person_detail(
+    http: &reqwest::Client,
+    s: &Session,
+    person_id: &str,
+) -> Result<PersonDetail, String> {
+    let url = format!(
+        "{}/Users/{}/Items/{person_id}?Fields=Overview,PremiereDate,EndDate,ProductionLocations",
+        s.server, s.user_id
+    );
+    let resp = http
+        .get(&url)
+        .header("X-Emby-Token", &s.token)
+        .send()
+        .await
+        .map_err(|e| format!("网络错误: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("请求失败: HTTP {}", resp.status()));
+    }
+    let j: serde_json::Value = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
+    Ok(PersonDetail {
+        id: j["Id"].as_str().unwrap_or(person_id).to_string(),
+        name: j["Name"].as_str().unwrap_or_default().to_string(),
+        overview: j["Overview"].as_str().unwrap_or_default().to_string(),
+        has_primary: j.get("ImageTags").and_then(|v| v.get("Primary")).is_some(),
+        birthday: j["PremiereDate"].as_str().map(String::from),
+        death_day: j["EndDate"].as_str().map(String::from),
+        birth_place: j["ProductionLocations"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str())
+            .filter(|x| !x.is_empty())
+            .map(String::from),
+    })
+}
+
+/// 某人参演的电影 / 剧集。
+///
+/// ★ 用 `PersonIds` 而不是 `Person=<名字>`:同名演员在库里是两个人,按名字筛会把两个人的
+///   作品混在一起,而且**不报错**。
+/// ★ 按首播时间倒序 —— 演员页的通用口径是"最近的作品在前"。
+pub async fn person_items(
+    http: &reqwest::Client,
+    s: &Session,
+    person_id: &str,
+    limit: u32,
+) -> Result<Vec<Item>, String> {
+    let url = format!(
+        "{}/Users/{}/Items?PersonIds={person_id}&Recursive=true&IncludeItemTypes=Movie,Series\
+         &SortBy=PremiereDate&SortOrder=Descending&Limit={}\
+         &Fields=PrimaryImageAspectRatio,Genres,ProductionYear,CommunityRating",
+        s.server,
+        s.user_id,
+        limit.min(SERVER_PAGE_CAP)
+    );
+    fetch_items(http, s, &url).await
+}
+
 /// 取单条 Item(带跨服续播强匹配所需的全部 Fields)。
 /// 与 [`detail`] 的区别:detail 面向详情页(要 Overview/People/子集),这个面向观看记录 —— 只要匹配判据。
 pub async fn item_for_history(

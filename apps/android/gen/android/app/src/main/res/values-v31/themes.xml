@@ -7,7 +7,9 @@
         (见 drawable/splash_icon.xml 里的说明)。三条缺一不可:
           - windowSplashScreenBackground   开屏底色。不给的话跟 windowBackground 走,
                                            而我们那个是**透明** —— 开屏会是一块随机底色。
-          - windowSplashScreenAnimatedIcon 尺寸钉死的图标,治「巨大」。
+          - windowSplashScreenAnimatedIcon 自带透明边距的图标,治「巨大」。
+                                           (2026-08-01:边距要在 drawable **内部**留 —— 系统
+                                            会把整张图缩放到填满槽位,在外面钉尺寸没用。)
           - windowSplashScreenAnimationDuration 系统只把它当提示,但不给的话
                                            某些 ROM 会按默认值多停一会儿。
 
@@ -18,7 +20,11 @@
     -->
     <style name="Theme.linplayer_android" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:windowSplashScreenBackground">#0b0b0f</item>
+        <!-- ★ 和 index-mobile.html 的 #boot、mobile.css 的 bg token **逐位一致**。
+             三处底色差一个灰阶,在 OLED 上每次交接都能看见一记暗闪。
+             (这里不能写成 CSS 变量的原名 —— XML 注释里出现两个连字符,
+              aapt2 的 mergeResources 会直接 SAXParseException,整个包出不来。) -->
+        <item name="android:windowSplashScreenBackground">#0e0e13</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
         <item name="android:windowSplashScreenAnimationDuration">200</item>
     </style>

@@ -41,7 +41,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 async-trait = "0.1"
 # rt:imgcache 的 spawn_blocking(把同步写盘挪出 async worker)。
 # 别依赖「别的依赖恰好开了这个特性」—— 那种编过是巧合,哪天依赖树一变就红。
-tokio = { version = "1", features = ["sync", "rt"] }
+tokio = { version = "1", features = ["sync", "rt", "time"] }
 raw-window-handle = "0.6"
 # 崩溃上报 + 匿名活跃统计(见 src/telemetry.rs)。
 # rustls 而非默认的 native-tls:core 全链路已经是 rustls,混两套 TLS 会把 openssl 拖进来。

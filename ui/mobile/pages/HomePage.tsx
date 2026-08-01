@@ -13,7 +13,7 @@ import {
 } from "@shared/api";
 import { useCtx } from "../app/ctx";
 import { Icon } from "../app/icons";
-import { autoHideBars, choreograph, imgsIn, pullRefresh, toast } from "../app/motion";
+import { autoHideBars, choreograph, haptic, imgsIn, pullRefresh, toast } from "../app/motion";
 import { Empty, Row, usePress } from "../components/ui";
 
 /* 首页。
@@ -119,12 +119,42 @@ export default function HomePage() {
   }, [session?.server]);
 
   /* Hero 轮播。★ 页面被弹出栈之后要停掉 —— 这里靠 effect 的 cleanup,
-     草稿里那种"检查节点还在不在"的写法在 React 下不需要。 */
+     草稿里那种"检查节点还在不在"的写法在 React 下不需要。
+     ★ `heroHold` 一变就重开计时:用户刚手动拨过,应该从**这一刻**起重新数 5 秒,
+       而不是接着上一轮的余数 —— 否则拨完可能过半秒就自动翻页了。 */
+  const [heroHold, setHeroHold] = useState(0);
   useEffect(() => {
     if (hero.length < 2) return;
     const t = window.setInterval(() => setHeroIdx((i) => (i + 1) % hero.length), HERO_MS);
     return () => window.clearInterval(t);
-  }, [hero.length]);
+  }, [hero.length, heroHold]);
+
+  /* Hero 左右滑动换片(用户 2026-08-01:「随机推荐封面无法滑动」)。
+     ★ 只能用 pointer 事件自己算,不能靠 CSS scroll-snap —— 五张图是**叠着 crossfade**
+       的(见 .hero-layer),它们没有横向排布,压根没有可滚的内容。
+     ★ 判据是「横向位移 > 纵向 且 > 40px」:不加纵向比较的话,用户想上下滚页面时
+       手指的斜向抖动会被吃成翻页;不加 40px 下限的话,点一下也会算成滑。
+     ★ 滑动之后必须**吃掉那一次 click** —— 否则松手的同时进了详情页。 */
+  const heroDrag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const heroPan = {
+    onPointerDown: (e: React.PointerEvent) => {
+      heroDrag.current = { x: e.clientX, y: e.clientY, moved: false };
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const d = heroDrag.current;
+      if (!d || d.moved) return;
+      const dx = e.clientX - d.x;
+      const dy = e.clientY - d.y;
+      if (Math.abs(dx) < 40 || Math.abs(dx) <= Math.abs(dy)) return;
+      d.moved = true;
+      haptic("sel");
+      setHeroIdx((i) => (i + (dx < 0 ? 1 : hero.length - 1)) % hero.length);
+      setHeroHold((v) => v + 1);
+    },
+    onPointerCancel: () => {
+      heroDrag.current = null;
+    },
+  };
 
   /* 顶栏:Hero 滚出去之后才实体化。★ 用 Hero 的实际高度当阈值,不写死像素 ——
      横屏时 Hero 矮得多,写死的话顶栏会在还看得见 Hero 的时候就变实心。 */
@@ -267,7 +297,16 @@ export default function HomePage() {
           </div>
 
           {h && (
-            <div className="hero" ref={heroRef} onClick={() => openItem(h)}>
+            <div
+              className="hero"
+              ref={heroRef}
+              {...heroPan}
+              onPointerUp={() => {
+                const moved = heroDrag.current?.moved;
+                heroDrag.current = null;
+                if (!moved) openItem(h);
+              }}
+            >
               {hero.map((x, i) => (
                 <div key={x.id} className={`hero-layer${i === heroIdx ? " on" : ""}`}>
                   {/* 只画当前这张和下一张 —— 五张 1080 大图同时挂在 DOM 里,
@@ -307,7 +346,23 @@ export default function HomePage() {
               {hero.length > 1 && (
                 <div className="hero-dots">
                   {hero.map((x, i) => (
-                    <i key={x.id} className={i === heroIdx ? "on" : ""} />
+                    /* 点圆点也能跳 —— 圆点本身只有 6px,外面那个 button 把可点区撑到 22px,
+                       不然它是个"看得见但按不中"的东西。 */
+                    <button
+                      key={x.id}
+                      type="button"
+                      aria-label={`第 ${i + 1} 张`}
+                      className={i === heroIdx ? "on" : ""}
+                      onPointerUp={(e) => {
+                        e.stopPropagation();
+                        if (i === heroIdx) return;
+                        haptic("sel");
+                        setHeroIdx(i);
+                        setHeroHold((v) => v + 1);
+                      }}
+                    >
+                      <i />
+                    </button>
                   ))}
                 </div>
               )}

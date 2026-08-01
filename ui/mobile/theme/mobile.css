@@ -1197,11 +1197,21 @@ html.playing body {
 
 .row {
   margin-top: 26px;
-  /* ★ 屏幕外整条跳过渲染。contain-intrinsic-size 必须给,否则未渲染的行算 0 高,
-     滚动条长度一路乱跳。★ 入场动画的元素不能自己带 content-visibility
-     (会被跳过),所以它上在 .row 上、动画在 .card 上。 */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 216px;
+  /* ★ 这里**曾经**是 `content-visibility:auto; contain-intrinsic-size:auto 216px`,
+     它就是「首页加载完所有内容之后就滑不动、只能大退重开」的根因。
+
+     机制:216px 是猜的,海报轨道真高约 239px、剧照轨道约 166px —— 三种高度都对不上。
+     于是往下滑时,刚进视口的那条 .row 被"具现化"、高度从 216 变成真高,
+     滚动容器的内容变高;浏览器的**滚动锚定**(scroll anchoring)为了让锚点元素
+     待在原位,把 scrollTop 往回推;推回去之后那条 .row 又离开视口、退回 216px、
+     内容变矮……一来一回互相抵消,scrollTop 再也前进不了 —— 就是"卡死动不了"。
+     它在数据没到齐时不发作(骨架轨道高度一致),**恰好是"内容全加载完"那一刻开始**,
+     和用户描述逐字吻合。
+
+     为什么直接删而不是把 216 调准:一条 .row 有海报/剧照两种版式,一个常数服务不了两种;
+     而这一页的轨道总共十几条,图片本来就带 loading="lazy",跳过渲染省下的那点开销
+     远不值得再冒一次"整页卡死"的险。 */
+  overflow-anchor: none;
 }
 .row-hd {
   display: flex;
@@ -1469,9 +1479,22 @@ html.playing body {
   bottom: 7px;
   display: flex;
   justify-content: center;
-  gap: 5px;
+  gap: 0;
+}
+/* ★ 可点区 22px,画出来的圆点仍是 5px。
+   直接把圆点做大就毁了指示器的克制感,直接让 5px 可点又根本按不中 ——
+   所以按钮撑面积、里面的 <i> 管视觉。 */
+.hero-dots button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
 }
 .hero-dots i {
+  display: block;
   width: 5px;
   height: 5px;
   border-radius: 3px;
@@ -1480,7 +1503,7 @@ html.playing body {
     width var(--t5) var(--e-std),
     background-color var(--t5) var(--e-std);
 }
-.hero-dots i.on {
+.hero-dots button.on > i {
   width: 16px;
   background: #fff;
 }
@@ -1506,7 +1529,13 @@ html.playing body {
 }
 
 /* ============================================================
-   Bottom sheet
+   居中弹窗(2026-08-01 起全站唯一的模态形态,原 bottom sheet 已废)
+
+   ★ 为什么不再从底部升起:我们有一条**悬浮底栏**。它盖在页面栈之上,
+     sheet 底部那排「取消 / 确定」正好落在胶囊底下 —— 画得出来、按不到。
+     居中弹窗离底栏最远,而且不需要为「拖到哪一档」再发明一套手势。
+   ★ 类名一个都没改(.sheet / .sheet-title / .sheet-body / .sheet-acts),
+     二十几个调用点因此零改动。
    ============================================================ */
 
 .scrim {
@@ -1514,9 +1543,15 @@ html.playing body {
   inset: 0;
   z-index: 90;
   background: #000;
-  opacity: 0;
-  transition: opacity var(--t6) var(--e-std);
+  opacity: 0.55;
+  animation: scrim-fade var(--t4) var(--e-std) backwards;
 }
+@keyframes scrim-fade {
+  from {
+    opacity: 0;
+  }
+}
+/* 播放器 OSD 那边还在用 .scrim.on/.drag 这两个状态类,保留语义 */
 .scrim.on {
   opacity: 0.55;
 }
@@ -1526,53 +1561,73 @@ html.playing body {
 
 .sheet {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  /* 垂直方向**不居中,略微偏上**(46%):正中的弹窗在竖屏手机上视觉重心偏低,
+     而且键盘一弹起来就会被顶掉一半。偏上 4% 是两者都还舒服的位置。 */
+  top: 46%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   z-index: 100;
-  max-height: 88%;
+  width: min(420px, calc(100% - 36px));
+  /* 上限要同时避开顶部安全区和底栏 —— 弹窗**永远不该被底栏压住**,
+     那正是从 bottom sheet 换过来要解决的事。 */
+  max-height: calc(100% - var(--sa-top) - var(--sa-bottom) - 96px);
   display: flex;
   flex-direction: column;
   background: var(--s2);
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-  border-top: 1px solid var(--line-2);
-  transform: translateY(100%);
-  transition: transform var(--sp-t) var(--sp);
-  will-change: transform;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.72);
+  overflow: hidden;
+  animation: dlg-in var(--sp-t) var(--sp) backwards;
 }
-.sheet.on {
-  transform: translateY(0);
+/* 内容多的(筛选 / 超分档位 / 语言列表)放宽到几乎满屏 */
+.sheet.tall {
+  max-height: calc(100% - var(--sa-top) - var(--sa-bottom) - 56px);
 }
-/* 拖拽期间必须关掉 transition —— 不关的话跟手慢一帧,手感上就是「粘」 */
-.sheet.drag {
-  transition: none;
+@keyframes dlg-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
 }
-.sheet-grip {
-  padding: 12px var(--pad) 10px;
-  touch-action: none;
+
+.sheet-hd {
   flex: none;
-}
-.sheet-grip > i {
-  display: block;
-  width: 40px;
-  height: 4px;
-  margin: 0 auto 10px;
-  border-radius: 2px;
-  background: var(--line-2);
-  transition: transform var(--t4) var(--e-std);
-}
-.sheet.drag .sheet-grip > i {
-  transform: scaleX(1.25);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 10px 10px var(--pad);
+  border-bottom: 1px solid var(--line);
 }
 .sheet-title {
+  flex: 1;
+  min-width: 0;
   font-size: 16.5px;
   font-weight: 640;
-  text-align: center;
+  line-height: 1.3;
+  /* 标题可能是片名,长的要能换行,但最多两行 —— 三行以上就把内容挤没了 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.sheet-x {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--fg-2);
+}
+.sheet-x:active {
+  background: var(--s3);
 }
 .sheet-sub {
   font-size: 12px;
   color: var(--fg-3);
-  text-align: center;
   margin-top: 2px;
 }
 .sheet-body {
@@ -1580,18 +1635,24 @@ html.playing body {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px 0 calc(14px + var(--sa-bottom));
+  padding: 6px 0 8px;
 }
-/* sheet 内的项逐条进场 —— sheet 本身在动,项也在动,两层叠出"内容跟着容器一起来" */
-.sheet.on .sheet-body .opt {
+.sheet .opt {
   animation: enter var(--t6) var(--e-emph-decel) backwards;
-  animation-delay: calc(80ms * var(--mo) + var(--i, 0) * 26ms * var(--mo));
+  animation-delay: calc(60ms * var(--mo) + var(--i, 0) * 22ms * var(--mo));
 }
+/* ★ 动作条 sticky 在滚动区底部,不是跟着内容滚走。
+   调用点是把 `.sheet-acts` 写在 children 里的(见 LinesPage / ServersPage 等),
+   它落在 .sheet-body 内部 —— 不 sticky 的话长表单里「确定」要滑到底才看得到。 */
 .sheet-acts {
+  position: sticky;
+  bottom: -8px;
   display: flex;
   gap: 10px;
-  padding: 12px var(--pad) calc(12px + var(--sa-bottom));
+  padding: 12px var(--pad);
+  margin-bottom: -8px;
   border-top: 1px solid var(--line);
+  background: var(--s2);
   flex: none;
 }
 .sheet-acts .btn {
@@ -1851,244 +1912,6 @@ html.playing body {
 }
 .empty .btn {
   margin-top: 18px;
-}
-
-/* ============================================================
-   详情页
-   ============================================================ */
-
-.dt-hero {
-  position: relative;
-  aspect-ratio: 3 / 4;
-  max-height: 62vh;
-  overflow: hidden;
-  background: var(--s1);
-  /* 共享元素落点。FLIP 从卡片飞到这里。 */
-}
-.dt-hero img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.dt-scrim {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to top,
-    var(--bg) 1%,
-    rgba(8, 8, 12, 0.94) 14%,
-    rgba(8, 8, 12, 0.5) 40%,
-    rgba(8, 8, 12, 0.15) 66%,
-    rgba(8, 8, 12, 0.35) 100%
-  );
-  pointer-events: none;
-}
-.dt-cap {
-  position: absolute;
-  left: var(--pad);
-  right: var(--pad);
-  bottom: 12px;
-}
-.dt-title {
-  font-size: 26px;
-  font-weight: 720;
-  line-height: 1.14;
-  letter-spacing: -0.025em;
-  text-wrap: balance;
-}
-.dt-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-  font-size: 12.5px;
-  color: var(--fg-2);
-}
-.dt-acts {
-  display: flex;
-  gap: 10px;
-  padding: 16px var(--pad) 0;
-}
-.dt-play {
-  flex: 1;
-}
-.dt-ico {
-  width: var(--tap);
-  padding: 0;
-  flex: none;
-}
-.dt-ico.on {
-  color: var(--bad);
-  border-color: rgba(255, 95, 86, 0.5);
-  background: rgba(255, 95, 86, 0.1);
-}
-/* 收藏心跳:点下去弹一下。这是"我知道你点到了"最省事的表达。 */
-.dt-ico.beat > svg {
-  animation: beat var(--sp-bouncy-t) var(--sp-bouncy);
-}
-@keyframes beat {
-  from {
-    transform: scale(0.4);
-  }
-}
-
-.dt-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 54px;
-  margin-top: 16px;
-  padding: 0 var(--pad);
-  background: var(--s1);
-  border: 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  color: var(--fg);
-  font-size: 15px;
-  text-align: left;
-}
-/* ★ 版本名可以很长,标签必须 flex:none —— 否则「版本」两个字被压成竖排两行。
-   计算样式里一切正常,只有画出来才看得见。 */
-.dt-row > span:first-child {
-  flex: none;
-}
-.dt-row > span:last-child {
-  min-width: 0;
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg-2);
-}
-
-.dt-ov {
-  margin: 18px 0 0;
-  padding: 0 var(--pad);
-  color: var(--fg-2);
-  font-size: 14px;
-  line-height: 1.7;
-  position: relative;
-}
-.dt-ov.clamp .dt-ov-t {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.dt-ov-more {
-  background: none;
-  border: 0;
-  color: var(--acc);
-  font-size: 13.5px;
-  padding: 6px 0 0;
-}
-.dt-sec {
-  margin-top: 26px;
-}
-
-.eps {
-  display: flex;
-  flex-direction: column;
-}
-.ep {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  width: 100%;
-  padding: 11px var(--pad);
-  background: none;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  color: var(--fg);
-  text-align: left;
-  transition: background-color var(--t2) var(--e-std);
-}
-.ep:active {
-  background: var(--s1);
-}
-.ep-th {
-  position: relative;
-  width: 124px;
-  aspect-ratio: 16 / 9;
-  flex: none;
-  border-radius: var(--r-sm);
-  overflow: hidden;
-  background: var(--s2);
-}
-.ep-th img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-/* 悬停/按下时缩略图上浮出一个播放键 */
-.ep-play {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.45);
-  opacity: 0;
-  transition: opacity var(--t3) var(--e-std);
-}
-.ep:active .ep-play {
-  opacity: 1;
-}
-.ep-t {
-  min-width: 0;
-  flex: 1;
-}
-.ep-n {
-  font-size: 14.5px;
-  line-height: 1.35;
-  font-weight: 540;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.ep-m {
-  font-size: 12px;
-  color: var(--fg-3);
-  margin-top: 4px;
-}
-
-.person {
-  width: 80px;
-  flex: none;
-  text-align: center;
-  scroll-snap-align: start;
-}
-.person-av {
-  width: 68px;
-  height: 68px;
-  margin: 0 auto 8px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: var(--s2);
-  transition: transform var(--sp-snap-t) var(--sp-snap);
-}
-.person:active .person-av {
-  transform: scale(0.93);
-}
-.person-av img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.person-n {
-  font-size: 12px;
-  line-height: 1.3;
-}
-.person-r {
-  font-size: 11px;
-  color: var(--fg-3);
-  margin-top: 2px;
 }
 
 /* ============================================================
@@ -3187,166 +3010,205 @@ html.playing body {
 .rk-tt{font-size:14.5px;font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rk-ts{font-size:12px;color:var(--fg-3);margin-top:3px}
 
-/* ---------- 详情页 / 单集页(草稿 p-detail.js) ---------- */
-/* ── Hero ──
-   16:9(原来是 3:4 / 62vh)。390 宽的屏幕上 = 219px,加上下面的元信息条
-   刚好让通栏播放按钮落在首屏内 —— 这是这次改动最主要的收益。 */
-.dt-hero{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--s1)}
-.dt-hero>img{width:100%;height:100%;object-fit:cover;display:block}
-.dt-cap{position:absolute;left:var(--pad);right:var(--pad);bottom:10px;text-align:center}
-.dt-logo{display:block;margin:0 auto;max-width:66%;max-height:52px;object-fit:contain}
-.dt-logo-fb{font-size:24px;font-weight:720;letter-spacing:-.025em;line-height:1.14;
-  text-shadow:0 2px 18px rgba(0,0,0,.9)}
-.dt-name{font-size:13px;color:rgba(255,255,255,.72);margin-top:2px;
-  text-shadow:0 1px 10px rgba(0,0,0,.9)}
+/* ============================================================
+   详情页族(剧集 / 电影 / 单集 / 演职员)—— 2026-08-01 重做
 
-/* ── 元信息 ──
-   一行流式排,挤不下就换行。分隔符用细竖线,不用「·」——
-   「·」和片名里的间隔号长得一样,读起来会粘在一起。 */
-.dt-head{padding:12px var(--pad) 0}
-.dt-mi{display:flex;flex-wrap:wrap;align-items:center;gap:7px;
-  font-size:12.5px;color:var(--fg-2);line-height:1.5}
-.mi-d{width:1px;height:10px;background:var(--line);flex:none}
+   四张页面**版式各不相同**(用户点名要求分开设计),共用的只有下面这几层:
+     .detail        外壳,负责那层主色渐变
+     .dt-intro      简介
+     .dt-acts       播放 + 图标按钮
+     .dt-sec/.row-hd 分节标题
+     .mcard         媒体信息卡
+
+   ## 通透
+   上一版到处是 1px 实边 + 不透明底块(.dt-rows 的上下线、季药丸的实心底、
+   epd-nb 的边框),叠在一张大封面上就是"贴纸感"。这一版统一换成
+   rgba(255,255,255,.06~.10) 的玻璃面 + 不画边,只在必要处留极淡的一条。
+   ============================================================ */
+
+/* ── 主色渐变 ──
+   ★ 一层**绝对定位的伪元素**,不是给 .detail 上 background:
+     .detail 是页面滚动内容,给它上背景的话渐变会跟着内容一起滚,
+     而我们要的是"顶部这一段染色、往下自然褪掉"。
+   ★ opacity 过渡:主色是图加载完才算出来的,硬切会闪一下。 */
+.detail{position:relative}
+.detail::before{content:"";position:absolute;left:0;right:0;top:0;height:560px;z-index:0;
+  pointer-events:none;opacity:0;transition:opacity 520ms var(--e-std);
+  background:linear-gradient(180deg,var(--wash,transparent) 0%,
+    color-mix(in srgb,var(--wash,transparent) 55%,transparent) 30%,transparent 78%)}
+.detail.washed::before{opacity:1}
+/* 内容全部压在渐变之上 */
+.detail>*{position:relative;z-index:1}
+
+/* ── 剧 / 电影:大海报 ──
+   ★ object-fit:contain —— **不裁剪**(用户点名)。海报比例五花八门(2:3 为主,
+     偶有 1:1.4、甚至方图),cover 会把上下切掉;contain 顶多两边留一点底色。
+   ★ 宽度 58vw 上限 260:390 宽的屏幕上是 226×339,和上一版那张塞在卡片里的
+     111px 海报完全不是一个量级。 */
+.dt-top{display:flex;flex-direction:column;align-items:center;
+  padding:14px var(--pad) 0;text-align:center}
+.dt-poster{width:min(58vw,260px);aspect-ratio:2/3;border-radius:14px;overflow:hidden;
+  background:rgba(0,0,0,.28);box-shadow:0 22px 44px -14px rgba(0,0,0,.72)}
+.dt-poster>img{width:100%;height:100%;object-fit:contain;display:block}
+.dt-cap{margin-top:14px;width:100%}
+.dt-name{font-size:21px;font-weight:700;letter-spacing:-.02em;line-height:1.24;margin:0;
+  text-shadow:0 2px 14px rgba(0,0,0,.5)}
+.dt-gen{margin-top:6px;font-size:12px;color:var(--fg-3)}
+
+.dt-mi{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px;
+  margin-top:8px;font-size:12.5px;color:var(--fg-2)}
+.mi-d{width:1px;height:10px;background:rgba(255,255,255,.22);flex:none}
 .mi-star{display:inline-flex;align-items:center;gap:3px;color:var(--warn)}
-.mi-cert{border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px;
-  color:var(--fg-3)}
+.mi-cert{border:1px solid rgba(255,255,255,.28);border-radius:3px;padding:0 4px;font-size:11px;
+  line-height:1.5;color:var(--fg-2)}
 .mi-on{color:var(--ok)}
 
-/* ── 操作条 ── */
-.dt-acts{display:flex;gap:10px;padding:13px 0 0}
-.dt-play{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;min-width:0}
-.dt-play-t{font-weight:600}
-.dt-play-s{font-size:12px;opacity:.72;font-weight:400}
-.dt-ico{width:var(--tap);padding:0;flex:none}
-.dt-ico.on{color:var(--bad);border-color:rgba(255,95,86,.5);background:rgba(255,95,86,.1)}
-.dt-ico.beat>svg{animation:beat var(--sp-bouncy-t) var(--sp-bouncy)}
-@keyframes beat{from{transform:scale(1)}40%{transform:scale(1.28)}to{transform:scale(1)}}
-
-/* ── 标语 / 简介 ──
-   标语实测只有 34% 的条目有 —— 没有就整行不画。 */
-.dt-intro{padding:15px var(--pad) 0}
-.dt-tag{font-size:13px;font-style:italic;color:var(--fg-3);margin-bottom:7px}
+/* ── 简介 ── */
+.dt-intro{padding:16px var(--pad) 0}
+.dt-tag{font-size:13px;font-style:italic;color:var(--fg-2);margin-bottom:7px}
 .dt-ov{position:relative;color:var(--fg-2);font-size:14px;line-height:1.62}
 .dt-ov.dim{color:var(--fg-3)}
 .dt-ov.clamp .dt-ov-t{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;
   overflow:hidden}
-/* 「更多」浮在最后一行行尾:绝对定位 + 渐变把被压住的字化掉。
-   另起一行的话,3 行简介会平白多占一行高度。 */
-.dt-ov.clamp .dt-ov-more{position:absolute;right:0;bottom:0;padding-left:26px;
-  background:linear-gradient(90deg,transparent,var(--bg) 26px)}
-.dt-ov-more{background:none;border:0;color:var(--acc);font-size:13.5px;font-weight:560;
-  padding:0;margin-top:2px;cursor:pointer}
+/* 「更多」浮在最后一行**行尾**,不另起一行 —— 另起一行会在简介只有 3 行时平白多占一行。
+   ★ 上一版是用 `linear-gradient(90deg,transparent,var(--bg))` 把被压住的字淡掉。
+     那在纯 --bg 背景上成立,**在这一版不成立** —— 详情页顶部现在铺着海报主色的渐变,
+     背后是暗红/暗绿,盖一块 --bg 上去就是一块颜色对不上的补丁。
+     改成一枚半透明药丸:它不假装自己是背景,所以背景是什么色都不违和。 */
+.dt-ov.clamp .dt-ov-more{position:absolute;right:0;bottom:0}
+.dt-ov-more{border:0;color:var(--acc);font-size:12.5px;font-weight:600;
+  padding:1px 9px;border-radius:9px;background:rgba(255,255,255,.12)}
+@supports (backdrop-filter:blur(2px)){
+  .dt-ov-more{background:rgba(255,255,255,.1);backdrop-filter:blur(12px)}
+}
 
-/* ── 信息行(媒体信息 / 版本) ── */
-.dt-rows{margin-top:16px;border-top:1px solid var(--line)}
-.dt-row{display:flex;align-items:center;gap:10px;width:100%;min-height:46px;
-  padding:0 var(--pad);background:none;border:0;border-bottom:1px solid var(--line);
-  color:var(--fg);font-size:14px;text-align:left}
-.dt-row:active{background:var(--s1)}
-.dt-row-l{display:inline-flex;align-items:center;gap:8px;flex:none;color:var(--fg-2)}
-/* ★ 版本名可以很长("沙丘2.2024.2160p.WEB-DL.DV.HDR.DDP5.1.Atmos")。
-   值那一格必须 min-width:0 才会省略,否则把「媒体信息」四个字挤成竖排。
-   计算样式里一切正常,只有画出来才看得见。 */
-.dt-row-v{flex:1;min-width:0;text-align:right;color:var(--fg-3);font-size:12.5px;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mi-path{padding:6px var(--pad) 4px;font-size:11.5px;color:var(--fg-3);
-  word-break:break-all;font-family:var(--mono,ui-monospace,monospace)}
+/* ── 动作区 ──
+   ★ 这一排**没有「更多」**:顶栏右上角那个就是,两个一模一样的入口是冗余(用户点名)。 */
+.dt-acts{display:flex;gap:10px;padding:16px var(--pad) 0}
+.dt-play{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;min-width:0}
+.dt-play-t{font-weight:600}
+.dt-play-s{font-size:12px;opacity:.72;font-weight:400}
+/* 图标按钮走玻璃面,不画边 —— 这是"通透"的主要来源 */
+.dt-ico{width:var(--tap);padding:0;flex:none;border:0;background:rgba(255,255,255,.1)}
+@supports (backdrop-filter:blur(2px)){
+  .dt-ico{background:rgba(255,255,255,.08);backdrop-filter:blur(14px)}
+}
+.dt-ico.on{color:#ff8b84;background:rgba(255,95,86,.16)}
+.dt-ico.beat>svg{animation:beat var(--sp-bouncy-t) var(--sp-bouncy)}
+@keyframes beat{0%{transform:scale(1)}38%{transform:scale(1.3)}100%{transform:scale(1)}}
 
-.dt-sec{margin-top:24px}
+.dt-sec{margin-top:26px}
 
-/* ── 季 Tab 条 ──
-   ★ sticky。父链上任何一个 transform / filter / backdrop-filter 都会让它静默失效,
-     所以 .dt-eps **不参与** dt-enter 动画(见文件底部的排除)。 */
-/* ★ top 是 **0**,不是 topbar-h + sa-top。
-   顶栏是 .pg-body 的**兄弟**不在滚动容器里,滚动视口的上边缘已经在顶栏下面了 ——
-   再加一次顶栏高度就是算两遍(实测把季条钉在了 192px 而不是 96px)。
-   这种错不报错、也不"失效",只是钉错地方,只有量出来才知道。 */
-.season-bar{position:sticky;top:0;z-index:8;
-  background:var(--bg);padding:2px 0 8px}
+/* ── 剧集:横滑轨道(默认) / 矩形网格(可切)──
+   ★ 上一版是纵向长列表。实测这台服务器上 13.5% 的剧 ≥60 集,最长 2648 集 ——
+     纵向列表在那种剧上就是"一直往下滑"。横滑轨道一屏能扫 2.5 张,
+     想一次看全的人点右上角切网格。
+   ★ 两种形态**共用同一张卡**(.epx),只差外层容器,不许再各写一份。 */
+.ep-mode{width:34px;height:34px;display:grid;place-items:center;border:0;border-radius:50%;
+  background:rgba(255,255,255,.08);color:var(--fg-2)}
+.ep-mode:active{background:rgba(255,255,255,.16)}
+
+.ep-box.as-rail{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x proximity;
+  /* 右边不留白:卡片被屏幕边缘切开本身就是"还能往右滑"的暗示 */
+  padding:2px 0 6px var(--pad);scroll-padding-left:var(--pad);scrollbar-width:none}
+.ep-box.as-rail::-webkit-scrollbar{display:none}
+.ep-box.as-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 10px;
+  padding:2px var(--pad) 0}
+
+.epx{flex:none;scroll-snap-align:start;width:198px;padding:0;border:0;background:none;
+  color:var(--fg);text-align:left}
+.ep-box.as-grid .epx{width:100%}
+.epx.seen{opacity:.6}
+.epx-th{position:relative;width:100%;aspect-ratio:16/9;border-radius:10px;overflow:hidden;
+  background:var(--s2);box-shadow:0 10px 22px -10px rgba(0,0,0,.6)}
+.epx-th img{width:100%;height:100%;object-fit:cover;display:block;opacity:0;
+  transition:opacity var(--t6) var(--e-std)}
+/* ★ 和 .card-a img 同一条规矩:图**必须**靠 onLoad 加 .ready 才现身。
+   单集页当初手抄卡片 DOM 抄漏了这句,整栏封面就永远透明 —— 别再手抄。 */
+.epx-th img.ready{opacity:1}
+.epx.cur .epx-th{outline:2px solid var(--acc);outline-offset:1px}
+.epx-n{margin-top:8px;font-size:13.5px;line-height:1.32;font-weight:560;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.epx-n>b{color:var(--fg-3);font-weight:600;margin-right:6px}
+.epx-m{font-size:11px;color:var(--fg-3);margin-top:3px}
+.ep-done{position:absolute;top:5px;right:5px;width:19px;height:19px;border-radius:50%;
+  display:grid;place-items:center;background:var(--ok);color:#fff}
+
+/* 季选择条。sticky —— 所以 .dt-eps 的**任何祖先都不能带 transform**(会让 sticky 静默失效) */
+.season-bar{position:sticky;top:0;z-index:8;padding:2px 0 10px;
+  background:linear-gradient(180deg,var(--bg) 62%,transparent)}
 .season-bar[hidden]{display:none}
 .season-scroll{display:flex;gap:8px;overflow-x:auto;padding:0 var(--pad);
-  scroll-snap-type:x proximity;overscroll-behavior-x:contain;-ms-overflow-style:none;
-  scrollbar-width:none}
+  scroll-snap-type:x proximity;scrollbar-width:none}
 .season-scroll::-webkit-scrollbar{display:none}
 .season-t{flex:none;scroll-snap-align:start;display:flex;flex-direction:column;
-  align-items:flex-start;gap:1px;padding:6px 12px;border-radius:9px;border:1px solid var(--line);
-  background:var(--s1);color:var(--fg-2);font-size:13px;line-height:1.25;max-width:180px}
+  align-items:flex-start;gap:1px;padding:6px 12px;border-radius:10px;border:0;
+  background:rgba(255,255,255,.07);color:var(--fg-2);font-size:12.5px;max-width:150px}
 .season-t>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .season-t>i{font-size:10.5px;color:var(--fg-3);font-style:normal}
-.season-t.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.season-t.on{background:var(--acc);color:#fff}
 .season-t.on>i{color:rgba(255,255,255,.78)}
 
-.ep-mode{width:32px;height:32px;display:grid;place-items:center;background:none;border:0;
-  color:var(--fg-2)}
-
-/* ── 集:图文列表 ──
-   ★ content-visibility 让屏幕外的集不参与布局/绘制(WebView 88+)。
-     contain-intrinsic-size 必须给**真实高度**,给错会留白或滚不到底。 */
-.ep-box.as-list{display:flex;flex-direction:column}
-.ep{display:flex;gap:12px;align-items:flex-start;width:100%;padding:10px var(--pad);
-  background:none;border:0;text-align:left;color:var(--fg);
-  content-visibility:auto;contain-intrinsic-size:auto 104px}
-.ep:active{background:var(--s1)}
-.ep.seen{opacity:.62}
-.ep-th{position:relative;width:132px;aspect-ratio:16/9;flex:none;border-radius:8px;
-  overflow:hidden;background:var(--s2)}
-.ep-th img{width:100%;height:100%;object-fit:cover;display:block}
-.ep-done{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;
-  background:var(--ok);color:#04140b;display:grid;place-items:center}
-.ep-t{min-width:0;flex:1;padding-top:1px}
-.ep-n{font-size:14px;line-height:1.32;font-weight:560;display:-webkit-box;
-  -webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.ep-n>b{color:var(--fg-3);font-weight:600;margin-right:6px}
-.ep-m{font-size:11.5px;color:var(--fg-3);margin-top:3px}
-/* 分集简介实测缺 9.5% —— 缺了整行不画,所以这里不能设 min-height */
-.ep-o{font-size:12px;color:var(--fg-3);line-height:1.45;margin-top:4px;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-
-/* ── 集:集号网格 ──
-   >50 集自动切到这个。862 集单季的剧上,这是唯一走得通的形态。 */
-.ep-box.as-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;
-  padding:2px var(--pad) 0}
-.epc{position:relative;aspect-ratio:1;border-radius:9px;border:1px solid var(--line);
-  background:var(--s1);color:var(--fg-2);font-size:13px;display:grid;place-items:center;
-  overflow:hidden;content-visibility:auto;contain-intrinsic-size:auto 52px}
-.epc:active{background:var(--s2)}
-.epc.seen{color:var(--fg-3);background:var(--s2);border-color:transparent}
-.epc.part{border-color:var(--acc);color:var(--fg)}
-.epc>i{position:absolute;left:0;right:0;bottom:0;height:2.5px;background:var(--acc);
-  transform-origin:left}
-
 .ep-foot{padding:14px var(--pad) 0;display:flex;justify-content:center}
-.ep-more{width:100%;min-height:40px;border-radius:10px;border:1px solid var(--line);
-  background:var(--s1);color:var(--fg-2);font-size:13px}
-.ep-more:active{background:var(--s2)}
+.ep-more{width:100%;min-height:40px;border-radius:10px;border:0;
+  background:rgba(255,255,255,.07);color:var(--fg-2);font-size:13px}
+.ep-more:active{background:rgba(255,255,255,.14)}
 .ep-all{font-size:12px;color:var(--fg-3)}
 
 /* ── 演职员 ──
-   18.6% 没头像 —— .fb 是兜底,和有头像的一样大,不掉队。 */
-.person{width:78px;flex:none;text-align:center;scroll-snap-align:start}
-.person-av{width:64px;height:64px;margin:0 auto 7px;border-radius:50%;overflow:hidden;
+   ★ 矩形(2:3),不是圆(用户 2026-08-01):圆形把脸裁掉,而且我们不缺这点宽度。
+   ★ 实测 18.6% 的人没有头像 —— .fb 兜底和有图的一样大,不掉队。 */
+.person{width:98px;flex:none;scroll-snap-align:start;padding:0;border:0;background:none;
+  color:var(--fg);text-align:left}
+.person-av{width:98px;aspect-ratio:2/3;border-radius:10px;overflow:hidden;
   background:var(--s2);transition:transform var(--t3) var(--e-std)}
-.person-av.fb{display:grid;place-items:center;font-size:22px;font-weight:600;color:#fff}
-.person:active .person-av{transform:scale(.93)}
+.person-av.fb{display:grid;place-items:center;font-size:30px;font-weight:600;color:#fff}
+.person:active .person-av{transform:scale(.95)}
 .person-av img{width:100%;height:100%;object-fit:cover;display:block}
-.person-n{font-size:12px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;
-  white-space:nowrap}
+.person-n{font-size:12.5px;line-height:1.3;margin-top:7px;font-weight:540;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .person-r{font-size:11px;color:var(--fg-3);margin-top:2px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .row-scroll.crew{margin-top:12px}
 
-/* ── 单集详情页 ── */
+/* ── 媒体信息卡(Emby 官方客户端那种平铺表)──
+   ★ **不做点击展开**(用户点名)。它是纯只读信息,却是这一页唯一要二次点击的东西。 */
+.mcard{margin:0 var(--pad);border-radius:14px;padding:4px 14px 12px;
+  background:rgba(255,255,255,.05)}
+@supports (backdrop-filter:blur(2px)){
+  .mcard{backdrop-filter:blur(16px)}
+}
+.mcard-empty{padding:14px 0;font-size:12.5px;color:var(--fg-3)}
+.mcard-chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:12px 0 4px}
+.mcard-chips b{font-size:11px;font-weight:650;letter-spacing:.02em;padding:3px 7px;
+  border-radius:6px;background:rgba(255,255,255,.09);color:var(--fg-2)}
+.mcard-ver{margin-left:auto;font-size:11.5px;color:var(--acc);background:none;border:0;padding:3px 0}
+.mcard-sec{padding-top:10px}
+.mcard-sec h3{margin:0 0 4px;font-size:11.5px;font-weight:640;letter-spacing:.04em;
+  color:var(--fg-3)}
+.mkv{display:flex;align-items:baseline;gap:12px;padding:3.5px 0;font-size:12.5px}
+.mkv-k{flex:none;max-width:52%;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.mkv-v{flex:1;min-width:0;text-align:right;color:var(--fg-2);
+  font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ── 单集详情页 ──
+   单集的"封面"是这一集的**剧照**(16:9),不是剧的海报 —— 三张页面各用各的图。 */
 .ep-hero{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--s1)}
 .ep-hero>img{width:100%;height:100%;object-fit:cover;display:block}
+.dt-scrim{position:absolute;inset:0;
+  background:linear-gradient(to top,var(--bg) 1%,rgba(8,8,12,.45) 34%,transparent 68%)}
 .prog.big{position:absolute;left:0;right:0;bottom:0;height:3.5px;background:rgba(255,255,255,.2)}
 .prog.big>i{display:block;height:100%;background:var(--acc);transform-origin:left}
-.epd-head{padding:14px var(--pad) 0}
+.epd-head{padding:12px var(--pad) 0}
 .epd-crumb{font-size:12px;color:var(--acc);font-weight:560}
 .epd-title{font-size:20px;font-weight:680;letter-spacing:-.02em;line-height:1.25;
   margin:4px 0 8px}
-.epd-nav{display:flex;gap:10px;padding:18px var(--pad) 0}
-.epd-nb{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:9px 11px;
-  border-radius:11px;border:1px solid var(--line);background:var(--s1);color:var(--fg);
+/* 单集页的元信息靠左(它上面是靠左的标题),剧/电影页居中(上面是居中的大海报) */
+.epd .dt-mi{justify-content:flex-start}
+.epd-nav{display:flex;gap:10px;padding:20px var(--pad) 0}
+.epd-nb{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:10px 12px;
+  border-radius:12px;border:0;background:rgba(255,255,255,.06);color:var(--fg);
   text-align:left}
 .epd-nb.r{justify-content:flex-end;text-align:right}
 .epd-nb.off{color:var(--fg-3);font-size:12px;justify-content:center;background:none}
@@ -3356,6 +3218,17 @@ html.playing body {
   text-overflow:ellipsis;white-space:nowrap}
 .card.cur .card-a{outline:2px solid var(--acc);outline-offset:1px}
 
+/* ── 演职员详情页 ──
+   版式:**左上头像 / 右侧生平信息 / 下方参演作品**(用户 2026-08-01 描述的那一版)。 */
+.pdt-top{display:flex;gap:14px;align-items:flex-start;padding:14px var(--pad) 0}
+.pdt-av{width:118px;flex:none;aspect-ratio:2/3;border-radius:12px;overflow:hidden;
+  background:var(--s2);box-shadow:0 16px 32px -12px rgba(0,0,0,.7)}
+.pdt-av.fb{display:grid;place-items:center;font-size:40px;font-weight:600;color:#fff}
+.pdt-av img{width:100%;height:100%;object-fit:cover;display:block}
+.pdt-side{flex:1;min-width:0;padding-top:4px}
+.pdt-name{margin:0;font-size:21px;font-weight:700;letter-spacing:-.02em;line-height:1.22}
+.pdt-meta{margin-top:7px;font-size:12.5px;color:var(--fg-2);line-height:1.45}
+
 /* ── 进场 ──
    ★ .dt-eps **不在这个列表里**:它里面有 sticky 的季条,
      祖先带 transform 会让 sticky 静默失效。 */
@@ -3364,7 +3237,7 @@ html.playing body {
 @keyframes dt-enter{from{opacity:0;transform:translateY(16px)}}
 .dt-cap>*{animation:dt-enter var(--t8) var(--e-emph-decel) backwards;
   animation-delay:calc(160ms * var(--mo) + var(--i,0) * 55ms * var(--mo))}
-.ep-box .ep,.ep-box .epc{animation:enter var(--t6) var(--e-emph-decel) backwards;
+.ep-box .epx{animation:enter var(--t6) var(--e-emph-decel) backwards;
   animation-delay:calc(380ms * var(--mo) + var(--i,0) * 22ms * var(--mo))}
 
 /* ---------- 播放页 OSD(草稿 p-player.js) ---------- */
@@ -3807,24 +3680,32 @@ html.playing body {
 .src-it .src-n { font-size: 11.5px; font-weight: 560; text-align: center; line-height: 1.25; }
 .src-it.on { border-color: var(--acc); color: var(--acc); background: var(--acc-dim); }
 
-/* ── 线路管理 ── */
-.ln { display: flex; align-items: center; gap: 10px; padding: 11px var(--pad); border-bottom: 1px solid var(--line);
-      background: var(--bg); transition: background-color var(--t2) var(--e-std); }
+/* ── 线路管理 ──
+   长按拖拽排序:抬起来的那一行 .dragging(阴影 + 微微放大 + 压在别人上面),
+   其它行靠 transform 让位。**所有位移都只动 transform**,不动 top/margin。 */
+.ln-list { position: relative; }
+.ln { position: relative; display: flex; align-items: center; gap: 10px;
+      padding: 11px 4px 11px var(--pad); border-bottom: 1px solid var(--line);
+      background: var(--bg); transition: background-color var(--t2) var(--e-std);
+      /* 长按要拖,所以这一行不能让浏览器把纵向手势直接吃掉去滚页面。
+         pan-y 保留"手指按住直接滑 = 滚页面"(拖拽要先按住 420ms),两不冲突。 */
+      touch-action: pan-y; }
 .ln:active { background: var(--s1); }
 .ln.on { background: var(--acc-dim); }
-.ln.drag { background: var(--s2); box-shadow: 0 8px 24px rgba(0,0,0,.42); border-radius: var(--r); border-bottom-color: transparent; }
+.ln.dragging { z-index: 3; background: var(--s2); border-bottom-color: transparent;
+      border-radius: var(--r); box-shadow: 0 12px 30px rgba(0,0,0,.5); }
 .ln-t { flex: 1; min-width: 0; }
 .ln-n { font-size: 14px; font-weight: 560; display: flex; align-items: center; gap: 7px; }
 .ln-n b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: inherit; }
 .ln-u { font-size: 11.5px; color: var(--fg-3); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ln-ms { flex: none; font-size: 11.5px; font-weight: 640; font-variant-numeric: tabular-nums;
-         padding: 3px 7px; border-radius: 6px; background: var(--s1); color: var(--fg-3); }
-.ln-ms.fast { color: var(--ok); }
-.ln-ms.slow { color: var(--warn); }
-.ln-ms.dead { color: var(--bad); }
-.ln-grip { flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: var(--fg-3);
-           touch-action: none; margin-right: -10px; }
-.ln-ph { border-bottom: 1px dashed var(--acc); }
+.ln-more { flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+           border: 0; background: none; color: var(--fg-3); border-radius: 50%; }
+.ln-more:active { background: var(--s2); }
+.ln-hint { padding: 12px var(--pad); font-size: 12px; color: var(--fg-3); }
+/* 测速中:一个安静的转圈,和"不通"在视觉上分得开 */
+.ping-wait { display: block; width: 13px; height: 13px; border-radius: 50%;
+             border: 2px solid var(--line-2); border-top-color: var(--fg-3);
+             animation: spin calc(760ms * var(--mo)) linear infinite; }
 
 /* ── 图标选择 ── */
 .ico-prev { display: flex; align-items: center; gap: 14px; padding: 16px var(--pad); }

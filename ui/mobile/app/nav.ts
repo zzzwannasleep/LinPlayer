@@ -28,6 +28,7 @@ export type PageId =
   // —— 内容
   | "detail"
   | "episode"
+  | "person"
   | "player"
   // —— 聚合视界里的快捷入口
   | "resume";
@@ -102,6 +103,7 @@ export const PAGE_LABELS: Partial<Record<PageId, string>> = {
   plugins: "插件",
   anirss: "Ani-RSS 订阅",
   detail: "详情",
+  person: "演职员",
   aggregate: "聚合视界",
   resume: "继续观看",
 };

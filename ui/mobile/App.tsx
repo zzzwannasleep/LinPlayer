@@ -29,6 +29,7 @@ import RankingsPage from "./pages/RankingsPage";
 import CalendarPage from "./pages/CalendarPage";
 import DetailPage from "./pages/DetailPage";
 import EpisodePage from "./pages/EpisodePage";
+import PersonPage from "./pages/PersonPage";
 import PlayerPage from "./pages/PlayerPage";
 import SettingsPage, { SettingsSubPage } from "./pages/SettingsPage";
 import ServersPage from "./pages/ServersPage";
@@ -320,6 +321,8 @@ function Body({
       return <DetailPage itemId={r.itemId} onHero={onClaimFlip} />;
     case "episode":
       return <EpisodePage itemId={r.itemId} season={r.season} ep={r.ep} />;
+    case "person":
+      return <PersonPage personId={r.personId} />;
     case "player":
       return <PlayerPage title={r.title} item={playing} onStopped={onStopped} />;
     case "settings":
