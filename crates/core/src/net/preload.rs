@@ -1,17 +1,21 @@
 // 预加载(preload)—— 迁自 Dart `preload_service`。
 //
-// 进详情页就对**即将要播的那个流**发 Range 请求,预热「头 32MB + 尾 2MB」,fire-and-forget:
-// 字节读完就丢,不落盘。目的不是把数据搬到本地,而是把**这条路**先跑通、跑热:
-//   · TCP + TLS 握手、HTTP/2 连接已经建好(远程 Emby 一次往返 100~300ms,起播时省掉);
-//   · 服务端把文件页缓存拉进内存(机械盘/NAS 上这一项最值钱);
-//   · 中间有 CDN / CF 优选反代时,边缘节点把这两段收进缓存;
-//   · 尾部 2MB 是**为 MKV 准备的**:cues 索引在文件末尾,ffmpeg 打开容器的第一件事就是
-//     seek 到尾巴读索引。不预热尾巴,起播必然多一次冷 seek。
+// 进详情页就对**即将要播的那个流**发 Range 请求,预热「头 32MB + 尾 2MB」,fire-and-forget。
+// 两件事同时在办:
+//   1. **把字节留下来**(头部)。宿主把头部的 URL 指向本地预取代理,字节流经代理时
+//      顺手进它的环形缓存;起播时 mpv 连同一个代理,**预热了多少就当场吐多少**,
+//      没热完的部分接着拉(边收边吐)。这是用户 2026-08-02 定的口径 ——
+//      光把路跑热、把字节丢掉,在慢链路上等于白烧几分钟带宽,起播还得从头再下一遍。
+//   2. **把路跑热**(头尾都算):TCP + TLS 握手、HTTP/2 连接已建好(远程 Emby 一次往返
+//      100~300ms);服务端把文件页缓存拉进内存(机械盘/NAS 上这项最值钱);
+//      中间有 CDN / CF 优选反代时边缘节点把这两段收进缓存。
+//      尾部 2MB 是**为 MKV 准备的**:cues 索引在文件末尾,ffmpeg 打开容器的第一件事
+//      就是 seek 到尾巴读索引;不预热尾巴,起播必然多一次冷 seek。
 //
-// ★ 这和「多线程加载(net::prefetch)」是两码事,别合并:
-//     prefetch = 播放**中**在本地起代理,超前拉 Range 喂给 mpv,数据要落环形缓存;
-//     preload  = 播放**前**在详情页把路跑热,数据直接丢弃,不进任何缓存,也不改播放地址。
-//   一个管「喂得满」,一个管「起得快」。
+// ★ 这和「多线程加载(net::prefetch)」仍然是两个功能,别合并:
+//     prefetch = 播放**中**超前拉 Range 喂给 mpv,管「喂得满」;
+//     preload  = 播放**前**在详情页把头段搬到本地 + 把路跑热,管「起得快」。
+//   它们**共用**同一个本地代理和同一份环形缓存 —— 那正是预热能被起播直接吃到的原因。
 //
 // 同一时刻只预热一个条目:进了新详情页就把上一个掐掉(用户已经走了,再拉就是白费流量)。
 // 起播时也要掐 —— 那时候带宽该全给播放器。
@@ -74,24 +78,44 @@ impl Preloader {
         (cancel, got)
     }
 
-    /// 预热 `url` 的头 `head` 字节 + 尾 `tail` 字节。**读完即丢**,不落盘。
+    /// 预热头 `head` 字节 + 尾 `tail` 字节。本函数自己**读完即丢**;
+    /// 字节留不留得下来,取决于调用方把 `head_url` 指到哪儿(见下)。
+    ///
+    /// ## 头尾为什么可以是两个地址(2026-08-02)
+    /// 用户定的口径:**预加载了多少就吐多少出来,不需要等加载完才放**。
+    /// 光把路跑热、把字节丢掉是不够的 —— 慢链路上那是白烧几分钟带宽,
+    /// 起播时还得从头再下一遍。所以宿主把 `head_url` 指向**本地预取代理**:
+    /// 字节流经代理时顺手进它的环形缓存,起播时 mpv 连同一个代理,
+    /// 已经预热的部分**当场就吐**,没预热完的部分接着拉(边收边吐)。
+    ///
+    /// 尾部仍然打**直连地址**:代理的环形缓存按 `chunk % ring` 定位,
+    /// 尾部段号和头部段号模 ring 有约一半的概率同槽 —— 那样预热完尾巴正好把头顶掉。
+    /// 尾巴只有 2MB,重拉便宜;把路(CDN 边缘 / 服务端页缓存)跑热就够本了。
     ///
     /// 任何失败都只是「没热成」,不是错误 —— 服务器不支持 Range、网络抖、条目没权限,
     /// 统统按 0 字节收场,绝不能把详情页拦下来。
-    pub async fn warm(&self, item_id: &str, url: &str, head: u64, tail: u64) -> PreloadStats {
+    pub async fn warm(
+        &self,
+        item_id: &str,
+        head_url: &str,
+        head: u64,
+        tail_url: &str,
+        tail: u64,
+    ) -> PreloadStats {
         let (cancel, got) = self.begin(item_id);
         let client = crate::http::preload_client();
 
         let head_bytes = if head > 0 {
-            pull(&client, url, &format!("bytes=0-{}", head - 1), head, &cancel, &got).await
+            pull(&client, head_url, &format!("bytes=0-{}", head - 1), head, &cancel, &got).await
         } else {
             0
         };
         /* 尾部用**后缀 Range**(`bytes=-N`),不用先 HEAD 探总长度:少一次往返,
            而且对「不给 Content-Length 的分块响应」也成立。服务端不认后缀 Range 就拿不到
-           数据 —— 那正好,它多半也不支持 Range,预热本来就无从谈起。 */
+           数据 —— 那正好,它多半也不支持 Range,预热本来就无从谈起。
+           (我们自家的预取代理也不认后缀 Range,这正是尾部必须走直连的第二个理由。) */
         let tail_bytes = if tail > 0 && !cancel.load(Ordering::SeqCst) {
-            pull(&client, url, &format!("bytes=-{tail}"), tail, &cancel, &got).await
+            pull(&client, tail_url, &format!("bytes=-{tail}"), tail, &cancel, &got).await
         } else {
             0
         };
@@ -177,7 +201,8 @@ mod tests {
     async fn warms_both_head_and_tail() {
         let (port, seen) = range_echo_server(64).await;
         let p = Preloader::default();
-        let st = p.warm("it1", &format!("http://127.0.0.1:{port}/x.mkv"), 64, 32).await;
+        let u = format!("http://127.0.0.1:{port}/x.mkv");
+        let st = p.warm("it1", &u, 64, &u, 32).await;
 
         let ranges = seen.lock().unwrap().clone();
         assert_eq!(ranges.len(), 2, "该打两段(头 + 尾),实得:{ranges:?}");
@@ -194,7 +219,8 @@ mod tests {
         // 服务端不管你要多少,一律回 4096 字节。
         let (port, _) = range_echo_server(4096).await;
         let p = Preloader::default();
-        let st = p.warm("it2", &format!("http://127.0.0.1:{port}/x.mkv"), 128, 0).await;
+        let u = format!("http://127.0.0.1:{port}/x.mkv");
+        let st = p.warm("it2", &u, 128, &u, 0).await;
         assert!(
             st.head_bytes <= 128 + 4096,
             "没封顶:服务端无视 Range 时预热会把整片拉下来,实读 {}",

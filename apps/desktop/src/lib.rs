@@ -73,8 +73,12 @@ struct AppState {
     source_play_entry: Mutex<Option<(String, String)>>,
     // 连续 302 重签次数(防死循环:文件本身放不了时不无限重签),每次新播放清零
     resign_count: AtomicU32,
-    // 多线程加载:本地预取代理句柄(仅 Emby 直传流);Drop 即停服。None=直连。
-    prefetch: Mutex<Option<linplayer_core::net::prefetch::ProxyHandle>>,
+    /* 本地预取代理句柄(仅 Emby 直传流);Drop 即停服。None=直连。
+       ★ 一并存**上游地址**:代理不再只由 play() 起 —— 预加载在详情页就把它起起来并
+         往它的环形缓存里灌头部,起播时只要上游一致就**复用同一个句柄**(=复用那份缓存),
+         预热了多少当场吐多少。换成新起一个句柄,旧的 Drop 会把缓存文件删掉,
+         预热全白做。 */
+    prefetch: Mutex<Option<(String, linplayer_core::net::prefetch::ProxyHandle)>>,
     // CF 优选:server_id -> 本地钉 IP 反代句柄;移除即 Drop 停服。
     // 与 cf::runtime 的路由改写表一一对应(那边是纯改写,这边持句柄),开关必须两边同步。
     cf_proxy: Mutex<HashMap<String, linplayer_core::net::cf::CfProxyHandle>>,
@@ -1651,31 +1655,24 @@ async fn play(
             .is_some_and(|a| cfg.prefs.prefetch_servers.iter().any(|s| *s == a.server));
         (on, cfg.prefs.prefetch_threads, cfg.prefs.prefetch_cache_bytes)
     };
-    let play_url = if pf_on && target.play_method == "DirectStream" {
-        let resign: linplayer_core::net::prefetch::ResignFn = {
-            let http = state.http.clone();
-            let sess = s.clone();
-            let iid = item_id.clone();
-            // ★ 必须把 media_source_id 一起带上重签:不带的话 URL 过期重签会
-            //   悄悄退回默认版本 —— 用户选的 4K 播到一半变 1080p,且无任何提示。
-            let msid = target.media_source_id.clone();
-            Arc::new(move || {
-                let (http, sess, iid, msid) = (http.clone(), sess.clone(), iid.clone(), msid.clone());
-                Box::pin(async move {
-                    // 已经钉死 media_source_id 了,正则不参与(手动/既定选择永远优先)。
-                    emby::resolve_stream(&http, &sess, &iid, Some(&msid), "")
-                        .await
-                        .ok()
-                        .map(|t| t.url)
-                })
-            })
-        };
+    /* ★ 预加载已经把这条流的头部灌进某个代理的环形缓存里了 —— 那就必须走那个代理,
+         否则预热白做。判据是**上游地址一致**(同一条流),和「这台服开没开多线程加载」无关:
+         开关管的是播放中并发拉多凶,而不是「已经在本地的字节要不要用」。 */
+    let warm_hit = {
+        let g = state.prefetch.lock().unwrap();
+        g.as_ref().is_some_and(|(up, _)| up == &target.url)
+    };
+    let play_url = if (pf_on || warm_hit) && target.play_method == "DirectStream" {
+        let resign =
+            resign_fn(state.http.clone(), s.clone(), item_id.clone(), target.media_source_id.clone());
         // 线程数与读前缓冲上限来自设置页(prefetch::start 内部会把线程数 clamp 到 2~4)。
-        match linplayer_core::net::prefetch::start(target.url.clone(), pf_threads, pf_cache, Some(resign)).await {
-            Some(h) => {
-                let u = h.url.clone();
-                *state.prefetch.lock().unwrap() = Some(h);
-                poclog(&format!("prefetch 代理起服 {u}"));
+        // 命中预热则直接拿回同一个句柄,连同它已经装好的缓存。
+        match prefetch_proxy_for(&state, &target.url, pf_threads, pf_cache, Some(resign)).await {
+            Some(u) => {
+                poclog(&format!(
+                    "prefetch 代理{} {u}",
+                    if warm_hit { "复用(预热已就位)" } else { "起服" }
+                ));
                 u
             }
             None => {
@@ -4564,6 +4561,54 @@ async fn player_window_close(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 // ---------- 预加载命令 ----------
+/// 上游签名链失效时的重签回调:重走 PlaybackInfo 换新直传流地址。
+///
+/// media_source_id **必须带上**:不带的话 URL 过期重签会悄悄退回默认版本 ——
+/// 用户选的 4K 播到一半变 1080p,且无任何提示。
+fn resign_fn(
+    http: reqwest::Client,
+    sess: emby::Session,
+    item_id: String,
+    msid: String,
+) -> linplayer_core::net::prefetch::ResignFn {
+    Arc::new(move || {
+        let (http, sess, item_id, msid) = (http.clone(), sess.clone(), item_id.clone(), msid.clone());
+        Box::pin(async move {
+            // 已经钉死 media_source_id 了,正则不参与(手动/既定选择永远优先)。
+            emby::resolve_stream(&http, &sess, &item_id, Some(&msid), "").await.ok().map(|t| t.url)
+        })
+    })
+}
+
+/// 起(或**复用**)这条上游流的本地预取代理,返回给 mpv 用的本地地址。
+///
+/// ★ 复用是关键,不是优化:预加载在详情页就把代理起起来并往它的环形缓存里灌头部,
+///   起播时只要上游地址一致就必须拿回**同一个句柄** —— 换成新起一个,旧句柄 Drop
+///   会把缓存文件删掉,预热的那几十 MB 全白做,用户还得从头再下一遍。
+async fn prefetch_proxy_for(
+    state: &AppState,
+    upstream: &str,
+    threads: usize,
+    cache_bytes: u64,
+    resign: Option<linplayer_core::net::prefetch::ResignFn>,
+) -> Option<String> {
+    {
+        // ★ 显式作用域:这把锁绝不能活到下面的 await(见 [[prefetch-proxy-deadlock]])。
+        let g = state.prefetch.lock().unwrap();
+        if let Some((up, h)) = g.as_ref() {
+            if up == upstream {
+                return Some(h.url.clone());
+            }
+        }
+    }
+    let h =
+        linplayer_core::net::prefetch::start(upstream.to_string(), threads, cache_bytes, resign)
+            .await?;
+    let url = h.url.clone();
+    *state.prefetch.lock().unwrap() = Some((upstream.to_string(), h));
+    Some(url)
+}
+
 /// 预加载设置。和多线程加载**不是一回事**,见 config.rs 上 preload_enabled 的注释。
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PreloadSettings {
@@ -4602,13 +4647,26 @@ fn set_preload_settings(
 /// 任何失败都只是「没热成」,一律吞掉 —— 预热绝不能把详情页拦下来。
 #[tauri::command]
 async fn preload_item(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     item_id: String,
     media_source_id: Option<String>,
 ) -> Result<(), String> {
-    let (enabled, head_mb, version_regex) = {
+    let (enabled, head_mb, version_regex, pf_on, pf_threads, pf_cache) = {
         let cfg = state.config.lock().unwrap();
-        (cfg.prefs.preload_enabled, cfg.prefs.preload_head_mb, cfg.prefs.version_regex.clone())
+        // 多线程加载开着就按用户设的线程数;关着也仍然起代理(否则预热的字节留不下来),
+        // 但只用最低的 2 条连接 —— 那个开关管的是「播放中并发拉多凶」。
+        let on = cfg
+            .active_account()
+            .is_some_and(|a| cfg.prefs.prefetch_servers.iter().any(|s| *s == a.server));
+        (
+            cfg.prefs.preload_enabled,
+            cfg.prefs.preload_head_mb,
+            cfg.prefs.version_regex.clone(),
+            on,
+            cfg.prefs.prefetch_threads,
+            cfg.prefs.prefetch_cache_bytes,
+        )
     };
     if !enabled {
         return Ok(());
@@ -4629,16 +4687,38 @@ async fn preload_item(
         if target.play_method != "DirectStream" {
             return;
         }
+        let state = app.state::<AppState>();
+        /* ★ 头部打**本地代理**,不打直连:字节流经代理时进它的环形缓存,起播时
+             mpv 连同一个代理,预热了多少当场吐多少(见 net::preload 顶部)。
+             代理起不来(片子太小 / 探测失败)就退回直连 —— 至少还把路跑热了。
+           尾部固定打直连,理由见 warm() 的文档(环形缓存同槽会把头顶掉)。 */
+        let resign = resign_fn(
+            http.clone(),
+            s.clone(),
+            item_id.clone(),
+            target.media_source_id.clone(),
+        );
+        let head_url = prefetch_proxy_for(
+            &state,
+            &target.url,
+            if pf_on { pf_threads } else { 2 },
+            pf_cache,
+            Some(resign),
+        )
+        .await
+        .unwrap_or_else(|| target.url.clone());
+        let via_proxy = head_url != target.url;
         let st = pre
             .warm(
                 &item_id,
-                &target.url,
+                &head_url,
                 head_mb * 1024 * 1024,
+                &target.url,
                 linplayer_core::net::preload::DEFAULT_TAIL_BYTES,
             )
             .await;
         poclog(&format!(
-            "preload item={item_id} head={} tail={} canceled={}",
+            "preload item={item_id} head={} tail={} canceled={} 落缓存={via_proxy}",
             st.head_bytes, st.tail_bytes, st.canceled
         ));
     });

@@ -303,6 +303,28 @@ struct DiskCache {
     path: std::path::PathBuf,
 }
 
+/// 清掉**别的进程**留下的分段缓存文件。
+///
+/// 缓存文件靠 `ProxyHandle` 的 Drop 删除,而进程被杀/崩溃时 Drop 根本不跑 ——
+/// 实测用户机器上躺着一周前的 33MB 残留。以前起代理只发生在起播那一刻,漏得慢;
+/// 2026-08-02 预加载改成在**详情页**就起代理之后,逛一圈详情页就能攒一堆,必须堵。
+///
+/// 只删文件名前缀不是本进程 pid 的 —— 本进程自己那些正在用。
+/// 并发的第二个实例:Windows 上文件被它开着,`remove_file` 直接失败(无害);
+/// Linux 上 unlink 成功但对方的 fd 照样能读写,只是提前失去文件名。
+/// 删不掉一律忽略:这是打扫,不是关键路径。
+fn sweep_orphans(dir: &std::path::Path) {
+    let me = format!("s{}_", std::process::id());
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name();
+        let Some(n) = name.to_str() else { continue };
+        if n.ends_with(".part") && !n.starts_with(&me) {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 impl DiskCache {
     /// `cache_bytes` = 用户设的缓存上限,决定环形槽位数(磁盘占用封顶就是它)。
     /// 槽位至少要比并发 worker 多,否则 worker 之间会互相覆盖对方刚写的段。
@@ -319,6 +341,7 @@ impl DiskCache {
            这就是 CI 上 `concurrent_connections_do_not_starve_each_other` 偶发红的真凶:
            cargo test 是同进程多线程并行,几个预取测试的 TOTAL 都是 40MB,互相 truncate。
            (孤立跑 30 次全绿、全量并行约 1/5 翻车,差别正是「有没有别的会话同时在」。) */
+        sweep_orphans(&dir);
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = dir.join(format!("s{}_{}_{}.part", std::process::id(), total, seq));
@@ -1904,6 +1927,145 @@ mod tests {
             "seek 后首批 256KB 花了 {:.1}s —— 白等了它前面那 3MB",
             dt.as_secs_f32()
         );
+    }
+
+    /* ★ 预加载能被起播吃到,全靠这条契约:**一条连接拉过的字节,下一条连接白拿**。
+
+       宿主侧的做法(2026-08-02,用户定的口径「预加载了多少就吐多少出来」):
+       详情页就把代理起起来,让预热的头部流经它进环形缓存;起播时 mpv 连**同一个**代理,
+       已经预热的部分当场就吐。缓存要是变成每连接一份,预热就静默白做 ——
+       编译绿、单测绿、界面也没任何异样,只有用户觉得「还是慢」。所以钉在这儿。
+
+       反向注入(把 next_bytes 里的 disk.has/disk.get 那段删掉)本测试必红:
+       上游会被同一段要两次,第二条连接也不再是秒回。 */
+    #[tokio::test]
+    async fn bytes_pulled_by_one_connection_are_free_for_the_next() {
+        const TOTAL: u64 = 40 * 1024 * 1024;
+        const WARM: usize = 8 * 1024 * 1024; // 「预热」这么多
+        let byte_at = |i: u64| (i % 251) as u8;
+        let seen: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let up = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let up_port = up.local_addr().unwrap().port();
+        let seen_srv = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut c, _)) = up.accept().await {
+                let seen = seen_srv.clone();
+                tokio::spawn(async move {
+                    let (_m, rg) = match read_request(&mut c).await {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+                    let (s, e) = match rg {
+                        Some((s, e)) => (s, e.unwrap_or(TOTAL - 1).min(TOTAL - 1)),
+                        None => (0, TOTAL - 1),
+                    };
+                    let len = e - s + 1;
+                    if len > 1 {
+                        seen.lock().await.push(s);
+                    }
+                    let nl = String::from_utf8(vec![13, 10]).unwrap();
+                    let head = format!(
+                        "HTTP/1.1 206 Partial Content{nl}\
+                         Content-Range: bytes {s}-{e}/{TOTAL}{nl}\
+                         Content-Type: video/mp4{nl}\
+                         Content-Length: {len}{nl}{nl}"
+                    );
+                    if c.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    // 慢上游:没缓存的话第二条连接不可能秒回。
+                    let mut off = 0u64;
+                    while off < len {
+                        let n = (256 * 1024u64).min(len - off);
+                        let body: Vec<u8> = (0..n).map(|k| byte_at(s + off + k)).collect();
+                        if c.write_all(&body).await.is_err() {
+                            return;
+                        }
+                        off += n;
+                        if off < len {
+                            tokio::time::sleep(Duration::from_millis(60)).await;
+                        }
+                    }
+                });
+            }
+        });
+
+        // 缓存放到 64MB(16 槽),预热的 8MB = 2 段绝不会被自己挤掉。
+        let h = start(format!("http://127.0.0.1:{up_port}/f"), 2, 64 * 1024 * 1024, None)
+            .await
+            .expect("探测该成功");
+        let local = url_port(&h.url);
+
+        async fn read_n(port: u16, n: usize, range: &str) -> Vec<u8> {
+            let mut c = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            c.write_all(format!("GET /p HTTP/1.1\r\nRange: {range}\r\n\r\n").as_bytes())
+                .await
+                .unwrap();
+            let (mut one, mut w) = ([0u8; 1], Vec::new());
+            loop {
+                c.read_exact(&mut one).await.unwrap();
+                w.push(one[0]);
+                if w.len() >= 4 && &w[w.len() - 4..] == b"\r\n\r\n" {
+                    break;
+                }
+            }
+            let mut got = vec![0u8; n];
+            /* 超时包在读上,不靠外面 cargo 的整体超时:缓存一失效,供给端会陷入
+               「查不到 → 重拉 → 还是查不到」的空转,`read_exact` 就此永远挂着。
+               挂死的测试等于没测试 —— 它不告诉你哪儿坏了,只是让 CI 变慢。 */
+            tokio::time::timeout(Duration::from_secs(20), c.read_exact(&mut got))
+                .await
+                .expect("读不出来(挂死了)—— 缓存链路断了")
+                .expect("该读得到");
+            got
+        }
+
+        // 第一条 = 预热:把头 8MB 过一遍(字节读完即丢,留下的是缓存)。
+        read_n(local, WARM, "bytes=0-").await;
+        let warmed = seen.lock().await.len();
+
+        // 第二条 = 起播:同样的头 8MB,必须**秒回**且不再惊动上游。
+        let t0 = std::time::Instant::now();
+        let got = read_n(local, WARM, "bytes=0-").await;
+        let dt = t0.elapsed();
+
+        for (k, v) in got.iter().enumerate() {
+            assert_eq!(*v, byte_at(k as u64), "起播读到的字节和上游对不上 @{k}");
+        }
+        let after = seen.lock().await.clone();
+        let refetched = after[warmed..].iter().filter(|s| **s < WARM as u64).count();
+        assert_eq!(
+            refetched, 0,
+            "预热过的段又去问了一次上游({:?}) —— 预热白做,用户的流量白烧",
+            &after[warmed..]
+        );
+        assert!(
+            dt < Duration::from_millis(1500),
+            "起播读预热过的 8MB 花了 {:.1}s —— 没走缓存",
+            dt.as_secs_f32()
+        );
+    }
+
+    /* 缓存文件靠 Drop 删,而进程被杀时 Drop 不跑 —— 实测用户机器上躺着一周前的 33MB 残留。
+       预加载改成在详情页就起代理之后,逛一圈详情页就能攒一堆,所以起代理时顺手打扫。
+       反向验证:把 create() 里的 sweep_orphans 那行删掉,本测试立刻红。 */
+    #[test]
+    fn stale_cache_files_from_dead_processes_are_swept() {
+        let dir = crate::paths::cache_dir("prefetch");
+        std::fs::create_dir_all(&dir).unwrap();
+        // 别的进程的残留(pid 取一个绝不会是自己的值)+ 一个不该动的无关文件。
+        let orphan = dir.join(format!("s{}_999_0.part", u32::MAX));
+        let bystander = dir.join("notes.txt");
+        std::fs::write(&orphan, b"stale").unwrap();
+        std::fs::write(&bystander, b"keep").unwrap();
+
+        let c = DiskCache::create(100 * CHUNK_SIZE, 32 * 1024 * 1024, 2).unwrap();
+
+        assert!(!orphan.exists(), "别的进程留下的 .part 没被清掉 —— 用户硬盘上会越攒越多");
+        assert!(bystander.exists(), "把不相干的文件也删了");
+        assert!(c.path.exists(), "把自己刚建的缓存文件也扫掉了");
+        let _ = std::fs::remove_file(&bystander);
     }
 
     fn origin_with(cb: Option<ResignFn>) -> Origin {
