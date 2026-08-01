@@ -407,7 +407,9 @@ function LnRow({
             </b>
           )}
         </div>
-        <div className="ln-u">{l.url}</div>
+        {/* ★ 这一行原来画的是 `l.url`。地址一律不显示(用户 2026-08-02),
+            第二行改成**备注** —— 那才是用户自己写的、用来认它的东西。
+            没有备注就整行不画,不拿地址来凑。 */}
         {l.remark ? <div className="ln-u">{l.remark}</div> : null}
       </div>
       {/* 延迟:数字之外再给一个能扫的颜色。

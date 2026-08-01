@@ -48,13 +48,6 @@ export const SOURCE_KINDS: SrcKindDef[] = [
   { id: "qrsync", name: "扫码搬配置", desc: "从另一台设备搬过来", sec: "批量" },
 ];
 
-const SRC_IC: Record<string, string> = {
-  emby: "server", feiniu: "server", stremio: "plugin", anirss: "rss",
-  openlist: "cloud", aliyundrive: "cloud", quark: "cloud", baidu: "cloud",
-  pan115: "cloud", pan189: "cloud", pan139: "cloud",
-  batch: "list", qrsync: "qr",
-};
-
 /* ============================================================
    必填字段
    ★ 校验统一读 `[data-req]`,别在每个页面各写一套"哪个框不能空"。
@@ -127,49 +120,76 @@ export function checkRequired(root: HTMLElement | null): boolean {
 }
 
 /* ============================================================
-   源类型选择器 —— 按 sec 分组铺网格,首屏一眼看完 13 种。
-   ★ 不用横滑 chip:13 个 chip 要滑三屏,滑到一半根本不知道后面还有没有。
+   源类型选择 —— **两步**(2026-08-02 用户点名)。
+   ★ 上一版是一屏铺完 13 种(SrcPicker,已删):在 390px 的屏上是三排格子,
+     选完还要往下滚一屏才看得见第一个输入框,而那些格子全程占着版面。
    ============================================================ */
 
-export function SrcPicker({
-  cur,
-  onPick,
-  exclude = [],
-}: {
-  cur: string;
-  onPick: (id: string) => void;
-  exclude?: string[];
-}) {
-  const secs: { name: string; items: SrcKindDef[] }[] = [];
-  for (const k of SOURCE_KINDS) {
-    if (exclude.includes(k.id)) continue;
-    const s = secs.find((x) => x.name === k.sec) ?? (secs.push({ name: k.sec, items: [] }), secs[secs.length - 1]);
-    s.items.push(k);
-  }
+/** 第一步能选的大类。★ 顺序 = 用户点开这一页时的命中率排序。
+ *  「批量」不在里面 —— 它是**工具**不是源类型,收进右上角(用户 2026-08-02)。 */
+export const SOURCE_SECS: { sec: string; icon: string; desc: string }[] = [
+  { sec: "媒体服务器", icon: "server", desc: "Emby / Jellyfin / 飞牛 —— 有刮削好的海报、简介和观看进度" },
+  { sec: "网盘 / 文件源", icon: "cloud", desc: "阿里 / 夸克 / 百度 / 115 / 天翼 / 移动 / OpenList —— 按文件夹浏览" },
+  { sec: "插件协议", icon: "plugin", desc: "Stremio Addon —— 一条 manifest 地址接进来" },
+];
+
+/** 一个大类下面有哪几种源 */
+export const kindsOf = (sec: string) => SOURCE_KINDS.filter((k) => k.sec === sec);
+
+/* ============================================================
+   第一步:选大类。
+   ★ 为什么不是直接铺 13 个格子(上一版就是):在 390px 的屏上那是三排格子,
+     选完还要往下滚一屏才看得见第一个输入框,而那 13 个格子会一直占着版面。
+     绝大多数人只需要认出"我要加的是 Emby 还是网盘",细分留给第二步。
+   ============================================================ */
+export function SrcCats({ onPick }: { onPick: (sec: string) => void }) {
   return (
-    <div>
-      {secs.map((s) => (
-        <div key={s.name}>
-          <div className="src-sec">{s.name}</div>
-          <div className="src-grid">
-            {s.items.map((k) => (
-              <button
-                key={k.id}
-                type="button"
-                className={`src-it${k.id === cur ? " on" : ""}`}
-                data-kind={k.id}
-                onClick={() => {
-                  if (k.id === cur) return;
-                  haptic("sel");
-                  onPick(k.id);
-                }}
-              >
-                <Icon n={SRC_IC[k.id] || "server"} size={20} />
-                <div className="src-n">{k.name}</div>
-              </button>
-            ))}
-          </div>
-        </div>
+    <div className="stp-cats">
+      {SOURCE_SECS.map((s) => (
+        <button
+          key={s.sec}
+          type="button"
+          className="stp-cat"
+          data-sec={s.sec}
+          onClick={() => {
+            haptic("sel");
+            onPick(s.sec);
+          }}
+        >
+          <span className="stp-ic">
+            <Icon n={s.icon} size={22} />
+          </span>
+          <span className="stp-t">
+            <b>{s.sec}</b>
+            <span>{s.desc}</span>
+          </span>
+          <Icon n="chevR" size={18} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** 第二步头上的那排 chip:这个大类里的具体源。只有一种时**不画**。 */
+export function SrcKinds({ sec, cur, onPick }: { sec: string; cur: string; onPick: (id: string) => void }) {
+  const list = kindsOf(sec);
+  if (list.length < 2) return null;
+  return (
+    <div className="stp-kinds">
+      {list.map((k) => (
+        <button
+          key={k.id}
+          type="button"
+          className={`chip${k.id === cur ? " on" : ""}`}
+          data-kind={k.id}
+          onClick={() => {
+            if (k.id === cur) return;
+            haptic("sel");
+            onPick(k.id);
+          }}
+        >
+          {k.name}
+        </button>
       ))}
     </div>
   );
@@ -468,7 +488,11 @@ function BatchPane() {
                   <b>{b.lines[0]?.name || b.lines[0]?.url || `第 ${i + 1} 台`}</b>
                 </div>
                 <div className="lit-s">
-                  {b.lines[0]?.url} · {b.username || "(没解析出账号)"}
+                  {/* ★ 不回显地址(用户 2026-08-02)。核对靠**条数 + 账号 + 线路名**,
+                      这三样已经足够看出"贴对了没有";地址一旦画出来,
+                      截图/录屏/投屏就会把它连同账号一起带出去。 */}
+                  {b.lines.length > 1 ? `${b.lines.length} 条线路 · ` : ""}
+                  {b.username || "(没解析出账号)"}
                 </div>
               </span>
             </div>

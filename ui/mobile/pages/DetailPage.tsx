@@ -6,9 +6,7 @@ import {
   type SeasonInfo,
   defaultVersion,
   downloadEnqueue,
-  fmtBitrate,
   fmtRes,
-  fmtSize,
   itemDetailLite,
   itemMedia,
   peekItemDetailLite,
@@ -28,6 +26,7 @@ import { choreograph, haptic, toast } from "../app/motion";
 import Page from "../components/Page";
 import Sheet from "../components/Sheet";
 import MediaCard from "../components/MediaCard";
+import PlaySetup from "../components/PlaySetup";
 import { Empty, Opt, Row, usePress } from "../components/ui";
 
 /* 详情页 —— 剧集 / 电影共用这一页,靠 type 判分支。单集详情是**另一页**(EpisodePage)。
@@ -59,6 +58,21 @@ import { Empty, Opt, Row, usePress } from "../components/ui";
 
 const PAGE = 30;
 
+/* ── 集列表的三种形态 ──
+   ★ 一个按钮轮换三档,不是三个并排的按钮:这一行右边只有 34px,
+     摆三个图标会把「剧集」两个字挤没。轮换的代价是"想直接跳到第三档要点两下",
+     而三档里真正常用的是前两档,第三档是给几百集的剧用的。 */
+type EpMode = "rail" | "grid" | "num";
+const EP_MODE_NEXT: Record<EpMode, EpMode> = { rail: "grid", grid: "num", num: "rail" };
+/* 图标画的是**当前**这一档,不是下一档 —— 上一版画下一档,于是用户看到网格图标
+   却身处轨道形态,一按还以为按反了。要看下一档去读 aria-label / 长按提示。 */
+const EP_MODE_ICON: Record<EpMode, string> = { rail: "list", grid: "grid", num: "sort" };
+const EP_MODE_LABEL: Record<EpMode, string> = {
+  rail: "横滑轨道",
+  grid: "网格平铺",
+  num: "只看集号",
+};
+
 /** 状态字段来自真接口的 `Status`,实测值:Continuing / Ended / Unreleased */
 const STATUS_TEXT: Record<string, string> = {
   Continuing: "连载中",
@@ -73,27 +87,15 @@ const fmtDur = (s: number) => {
   return m >= 60 ? `${Math.floor(m / 60)} 小时 ${m % 60} 分` : `${m} 分钟`;
 };
 
-export default function DetailPage({
-  itemId,
-  onHero,
-}: {
-  itemId?: string;
-  /** FLIP 落点。★ 详情页海报挂好后交给 App,由它把卡片那张封面飞过来。 */
-  onHero: (el: HTMLElement | null) => void;
-}) {
+export default function DetailPage({ itemId }: { itemId?: string }) {
   const { session, go, back, openItem, play } = useCtx();
   const [d, setD] = useState<ItemDetail | null>(() => (itemId ? peekItemDetailLite(itemId) ?? null : null));
   const [err, setErr] = useState("");
-  const [versions, setVersions] = useState<MediaVersion[]>([]);
   const [ver, setVer] = useState<MediaVersion | null>(null);
-  /* ★ 用户**动过**版本选择器没有。`ver` 一进页面就被填成正则选中的那条(要给媒体信息卡显示),
-     所以它不能当「选过了」的判据 —— 起播时无脑把它的 id 传给核层,
-     resolve_stream 就走「手动指定版本」分支,版本筛选正则整个被跳过。 */
-  const [verPicked, setVerPicked] = useState(false);
   const [similar, setSimilar] = useState<Item[]>([]);
   const [fav, setFav] = useState(false);
   const [busy, setBusy] = useState("");
-  const [sheet, setSheet] = useState<null | "ver" | "more">(null);
+  const [sheet, setSheet] = useState<null | "more">(null);
   const [ovOpen, setOvOpen] = useState(false);
   /** 海报主色算出来的背景色。null = 还没算出来 / 这张海报是灰的 → 不画渐变 */
   const [wash, setWash] = useState<string | null>(null);
@@ -103,10 +105,18 @@ export default function DetailPage({
   const [seasonIdx, setSeasonIdx] = useState(0);
   const [eps, setEps] = useState<Item[]>([]);
   const [epTotal, setEpTotal] = useState(0);
-  /** rail = 横滑轨道(默认);grid = 矩形网格平铺 */
-  const [mode, setMode] = useState<"rail" | "grid">("rail");
+  /* 三种集列表形态,右上角那个按钮依次轮换(用户 2026-08-02 点名要把 num 这一档拿回来):
+       rail = 横滑轨道(带剧照,默认)
+       grid = 矩形网格平铺(带剧照,一次看全)
+       num  = **只有矩形、没有封面**的横向条 —— 集数极多时唯一能快速定位的形态,
+              一屏能扫十几格,而带图的形态一屏只有 2.5 张 */
+  const [mode, setMode] = useState<EpMode>("rail");
+  /** 用户挑的版本(PlaySetup 给);null = 没挑过 → 交给核层的版本筛选正则。
+   *  ★ setter 必须是稳定引用:PlaySetup 内部拿它当 effect 依赖,
+   *    每次 render 都换一个新函数的话那个 effect 会无限重跑。
+   *    useState 的 setter 本身就是稳定的,所以直接传它,别再包一层箭头函数。 */
+  const [pickedVer, setPickedVer] = useState<string | null>(null);
 
-  const heroRef = useRef<HTMLDivElement>(null);
   const epBoxRef = useRef<HTMLDivElement>(null);
 
   const isSeries = d?.type_ === "Series";
@@ -127,10 +137,8 @@ export default function DetailPage({
     itemMedia(itemId)
       .then((v) => {
         if (!alive) return;
-        setVersions(v);
         // 显示正则会挑中的那条(= 核层起播会挑的那条),不是列表第一条。
         setVer(defaultVersion(v));
-        setVerPicked(false);
       })
       .catch(() => {});
     similarItems(itemId).then((s) => alive && setSimilar(s)).catch(() => {});
@@ -187,13 +195,6 @@ export default function DetailPage({
   useEffect(() => {
     choreograph(epBoxRef.current);
   }, [eps.length, mode]);
-
-  /* 海报一挂好就把 FLIP 交出去。★ 必须在**图片元素存在之后** —— 交早了
-     flipTo 拿到的 rect 是 0 宽高,会直接 return,共享元素静默退化成"直接出现"。 */
-  useEffect(() => {
-    if (d && heroRef.current) onHero(heroRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [d?.id]);
 
   /* 「播放」按到哪一集:剧集找第一个有进度的、否则第一个没看完的、否则第一集。 */
   const target: Item | null = useMemo(() => {
@@ -255,28 +256,32 @@ export default function DetailPage({
         </button>
       }
       enterKey={d.id}
+      /* ★ 顶栏浮在海报之上、不占布局高度(用户 2026-08-02:「顶栏必须做成透明的」)。
+         常规顶栏是 flex 流里的一格,它自己透明也没用 —— 背后露出的是 .pg 的不透明底色,
+         看着仍然是一条深色横带压在海报上。 */
+      floatBar
     >
       <div
         className={`detail${wash ? " washed" : ""}`}
         style={wash ? ({ ["--wash" as string]: wash } as React.CSSProperties) : undefined}
       >
-        {/* ── 大海报 + 主色渐变 ──
-            ★ `.dt-poster` 是 FLIP 的落点。改类名要同步改 App.tsx 里交接的那一处,
-              否则共享元素静默退化成"直接出现"(不报错,只是没了)。 */}
-        <div className="dt-top">
-          <div className="dt-poster" ref={heroRef}>
-            <img
-              src={posterUrl(session, d.id, 900)}
-              alt={d.name}
-              decoding="async"
-              /* ★ 这一对(crossOrigin + 后端的 Access-Control-Allow-Origin)是取主色的前提。
-                 少任何一半 canvas 就被污染,getImageData 抛 SecurityError 被 catch 吞掉 ——
-                 表现是"渐变永远不出现",一点报错都没有。 */
-              crossOrigin="anonymous"
-              onLoad={(e) => setWash(washColor(dominantOf(e.currentTarget)))}
-              onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0")}
-            />
-          </div>
+        {/* ── 海报**当底图**,通栏铺到屏幕最顶,主色向下渐变收进主题色 ──
+            用户 2026-08-02:「现在的封面效果很丑,不是直接贴一张海报上去就完事了。
+            海报应该作为一个背景底图往下延伸,主色调自然地渐变过渡到黑色」。
+            上一版是屏幕中间摆一张 260px 宽、带圆角和投影的卡片 —— 那是"贴了一张海报"。
+            渐变的四段停在 mobile.css 的 `.dt-hero::after`,理由写在那里。 */}
+        <div className="dt-hero">
+          <img
+            src={posterUrl(session, d.id, 900)}
+            alt={d.name}
+            decoding="async"
+            /* ★ 这一对(crossOrigin + 后端的 Access-Control-Allow-Origin)是取主色的前提。
+               少任何一半 canvas 就被污染,getImageData 抛 SecurityError 被 catch 吞掉 ——
+               表现是"渐变永远不出现",一点报错都没有。 */
+            crossOrigin="anonymous"
+            onLoad={(e) => setWash(washColor(dominantOf(e.currentTarget)))}
+            onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0")}
+          />
           <div className="dt-cap">
             <h1 className="dt-name">{d.name}</h1>
             {/* 年份 · 分级 · 状态 · 评分 · 季集数/时长 · 类型 */}
@@ -333,7 +338,7 @@ export default function DetailPage({
             onClick={() => {
               if (!target) return;
               haptic("tap");
-              void play(target, isSeries || !verPicked ? null : ver?.id ?? null);
+              void play(target, isSeries ? null : pickedVer);
             }}
           />
           <IcoBtn
@@ -368,6 +373,12 @@ export default function DetailPage({
           />
         </div>
 
+        {/* ── 播放前的四件事:版本 / 线路 / 音频 / 字幕 ──
+            ★ 只在**电影**页画。剧集页真正要播的是某一集,它的流表挂在那一集上,
+              所以那四个选择器长在**单集页**(见 EpisodePage) —— 在剧这一层选
+              "第几条音轨"是没有意义的,不同集的轨表可以完全不同。 */}
+        {!isSeries && <PlaySetup itemId={d.id} onVersion={setPickedVer} />}
+
         {isSeries && (
           /* ★ `.dt-eps` 不参与进场动画 —— 它里面是 sticky 的季条,祖先一旦带 transform
              sticky 会**静默失效**,进场那 400ms 季条会跟着一起滚走。 */
@@ -377,13 +388,14 @@ export default function DetailPage({
               <button
                 type="button"
                 className="ep-mode"
-                aria-label={mode === "grid" ? "切成横滑轨道" : "切成网格平铺"}
+                aria-label={`集列表:${EP_MODE_LABEL[mode]}(点一下换下一种)`}
+                title={EP_MODE_LABEL[mode]}
                 onClick={() => {
                   haptic("sel");
-                  setMode((m) => (m === "grid" ? "rail" : "grid"));
+                  setMode((m) => EP_MODE_NEXT[m]);
                 }}
               >
-                <Icon n={mode === "grid" ? "list" : "grid"} size={18} />
+                <Icon n={EP_MODE_ICON[mode]} size={18} />
               </button>
             </div>
 
@@ -411,7 +423,7 @@ export default function DetailPage({
               </div>
             )}
 
-            <div className={`ep-box ${mode === "grid" ? "as-grid" : "as-rail"}`} ref={epBoxRef}>
+            <div className={`ep-box as-${mode}`} ref={epBoxRef}>
               {eps.map((e, i) => (
                 <EpCard key={e.id} e={e} i={i % PAGE} session={session} onOpen={() => goEp(e)} />
               ))}
@@ -475,65 +487,34 @@ export default function DetailPage({
           </section>
         )}
 
+        {/* ── 相似 ──
+            ★ 剧集页**这里就是最后一节**:媒体信息整块拿掉(用户 2026-08-02:
+              「剧集详情页下方不应该直接展示媒体信息,这部分内容应该用『更多相似剧集』代替」)。
+              道理站得住:剧本身没有媒体流,那张卡显示的其实是"会播的那一集"的规格 ——
+              一个既不属于这一页、又要多打一趟请求的东西。电影页则保留(它自己就是一个文件)。 */}
         {similar.length > 0 && (
           <section className="dt-sec">
             <Row
-              title={isSeries ? "相似剧集" : "相似影片"}
+              title={isSeries ? "更多相似剧集" : "更多相似影片"}
               items={similar}
               session={session}
-              onOpen={(x, el) => openItem(x, el ? flipOf(el) : null)}
+              onOpen={(x) => openItem(x)}
             />
           </section>
         )}
 
-        {/* ── 媒体信息:平铺在最下面,不做点击展开(用户 2026-08-01 点名)──
-            ★ 剧集页面显示的是"播放按钮会播的那一集"的规格,而不是剧本身 ——
-              剧没有媒体流,拿剧的 id 去 item_media 只会得到空表。 */}
-        <section className="dt-sec">
-          <div className="row-hd">
-            <h2>媒体信息</h2>
-          </div>
-          {isSeries ? (
-            <EpMediaCard epId={target?.id ?? null} />
-          ) : (
-            <MediaCard
-              ver={ver}
-              versionCount={versions.length}
-              onPickVersion={() => setSheet("ver")}
-            />
-          )}
-        </section>
+        {!isSeries && (
+          /* 电影的媒体信息:平铺在最下面,不做点击展开(用户 2026-08-01 点名) */
+          <section className="dt-sec">
+            <div className="row-hd">
+              <h2>媒体信息</h2>
+            </div>
+            <MediaCard ver={ver} />
+          </section>
+        )}
 
         <div style={{ height: 28 }} />
       </div>
-
-      {/* ── 版本选择 ── */}
-      <Sheet open={sheet === "ver"} onClose={() => setSheet(null)} title="选择版本">
-        <div className="opts">
-          {versions.map((v, i) => (
-            <Opt
-              key={v.id}
-              i={i}
-              on={v.id === ver?.id}
-              label={v.name}
-              sub={[
-                fmtRes(v.streams?.find((s) => s.type_ === "Video")?.height ?? null),
-                fmtSize(v.size_bytes ?? 0),
-                v.container?.toUpperCase(),
-                fmtBitrate(v.bitrate),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-              onClick={() => {
-                setVer(v);
-                setVerPicked(true);
-                haptic("sel");
-                setSheet(null);
-              }}
-            />
-          ))}
-        </div>
-      </Sheet>
 
       {/* ── 更多 ── */}
       <Sheet open={sheet === "more"} onClose={() => setSheet(null)} title={d.name}>
@@ -597,26 +578,6 @@ export default function DetailPage({
 }
 
 /* ---------- 小件 ---------- */
-
-/** 剧集页底部的媒体信息:拉「会播的那一集」的流。
- *  ★ 单独一个组件是为了让它自己管请求 —— 集是随 `eps` 到位才确定的,
- *    塞进父组件的 effect 里会跟着一堆无关的 state 一起重跑。 */
-function EpMediaCard({ epId }: { epId: string | null }) {
-  const [ver, setVer] = useState<MediaVersion | null>(null);
-  useEffect(() => {
-    if (!epId) return;
-    let alive = true;
-    setVer(null);
-    itemMedia(epId)
-      .then((v) => alive && setVer(defaultVersion(v)))
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [epId]);
-  if (!epId) return <div className="mcard"><div className="mcard-empty">还没确定播哪一集。</div></div>;
-  return <MediaCard ver={ver} />;
-}
 
 function PlayBtn({
   label,
@@ -748,11 +709,3 @@ export function hueOf(id: string) {
   return `hsl(${h % 360} 32% 26%)`;
 }
 
-function flipOf(el: HTMLElement) {
-  const img = el.querySelector("img");
-  return {
-    rect: el.getBoundingClientRect(),
-    src: img?.currentSrc || img?.src || "",
-    radius: getComputedStyle(el).borderRadius,
-  };
-}

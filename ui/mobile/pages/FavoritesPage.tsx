@@ -114,7 +114,7 @@ export default function FavoritesPage() {
         <>
           <div className="lp-total">共 {sorted.length} 项</div>
           {view === "grid" ? (
-            session && <Grid items={sorted} session={session} onOpen={(it, el) => openItem(it, el ? flipOf(el) : null)} />
+            session && <Grid items={sorted} session={session} onOpen={(it) => openItem(it)} />
           ) : (
             <div>
               {sorted.map((it, i) => (
@@ -181,11 +181,3 @@ function Chip({ on, label, icon, onClick }: { on?: boolean; label: string; icon?
   );
 }
 
-function flipOf(el: HTMLElement) {
-  const img = el.querySelector("img");
-  return {
-    rect: el.getBoundingClientRect(),
-    src: img?.currentSrc || img?.src || "",
-    radius: getComputedStyle(el).borderRadius,
-  };
-}

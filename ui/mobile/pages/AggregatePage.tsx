@@ -41,7 +41,7 @@ const QUICK = [
 const fmtNum = (n: number) => n.toLocaleString("en-US");
 
 export default function AggregatePage() {
-  const { session, go, openItem, play } = useCtx();
+  const { session, go, openItem } = useCtx();
   const [srcs, setSrcs] = useState<SourceOverview[] | null>(null);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<ServerGroup[] | null>(null);
@@ -182,7 +182,7 @@ export default function AggregatePage() {
                           session={session}
                           variant="thumb"
                           index={i}
-                          onOpen={(x) => void play(x)}
+                          onOpen={(x) => openItem(x)}
                         />
                       ))}
                     </div>
@@ -303,7 +303,7 @@ function SearchResults({
      那本身就是"还能往右滑"的暗示。
    ============================================================ */
 export function ResumePage() {
-  const { session, back, play } = useCtx();
+  const { session, back, openItem } = useCtx();
   const [srcs, setSrcs] = useState<SourceOverview[] | null>(null);
   useEffect(() => {
     aggregateOverview().then(setSrcs).catch(() => setSrcs([]));
@@ -347,7 +347,7 @@ export function ResumePage() {
                       session={session}
                       variant="thumb"
                       index={i}
-                      onOpen={(x) => void play(x)}
+                      onOpen={(x) => openItem(x)}
                     />
                   ))}
                 </div>

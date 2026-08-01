@@ -151,7 +151,7 @@ export default function PersonPage({ personId }: { personId?: string }) {
             <Grid
               items={works}
               session={session}
-              onOpen={(x, el) => openItem(x, el ? flipOf(el) : null)}
+              onOpen={(x) => openItem(x)}
             />
           )}
         </section>
@@ -161,11 +161,3 @@ export default function PersonPage({ personId }: { personId?: string }) {
   );
 }
 
-function flipOf(el: HTMLElement) {
-  const img = el.querySelector("img");
-  return {
-    rect: el.getBoundingClientRect(),
-    src: img?.currentSrc || img?.src || "",
-    radius: getComputedStyle(el).borderRadius,
-  };
-}

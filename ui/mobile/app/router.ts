@@ -109,9 +109,26 @@ export function useNav(): Nav {
     [tab],
   );
 
+  /* ★ 换到**同一种页面**时,帧的 key **原样保留**(2026-08-02)。
+     用户原话:「点进第二集,整个页面感觉像被重新构建了一样,会发生跳动 ——
+     我在哪个位置点击,页面就应该停留在哪个位置」。
+     根因就在这里:原来每次 replace 都发一个新 key,React 据此判定是**另一个组件**,
+     于是旧的 `.pg-body` 连同它的 scrollTop 一起被卸载,新的从头挂载 ——
+     滚动位置归零、进场动画重放一遍,那就是"跳动"。
+     key 不变则组件保持挂载、DOM 节点复用,只是 props 变了:滚动位置天然还在,
+     页面自己按新的 itemId 重新取数即可(见 EpisodePage 的 effect)。
+     ★ 只有页面**种类**变了才换 key —— 那种情况下复用 DOM 才是错的
+       (两套完全不同的子树,React 会做一堆无意义的 diff,状态还会串)。 */
   const replace = useCallback(
     (r: Route | PageId) => {
-      setStacks((s) => ({ ...s, [tab]: [...s[tab].slice(0, -1), mk(r, seq.current++)] }));
+      setStacks((s) => {
+        const cur = s[tab];
+        const top = cur[cur.length - 1];
+        const next = typeof r === "string" ? { page: r } : r;
+        const frame: Frame =
+          top && top.route.page === next.page ? { key: top.key, route: next } : mk(next, seq.current++);
+        return { ...s, [tab]: [...cur.slice(0, -1), frame] };
+      });
     },
     [tab],
   );

@@ -21,6 +21,7 @@ import { haptic, toast } from "../app/motion";
 import Page from "../components/Page";
 import Sheet from "../components/Sheet";
 import MediaCard from "../components/MediaCard";
+import PlaySetup from "../components/PlaySetup";
 import { Empty, Opt, usePress } from "../components/ui";
 import { EpCard } from "./DetailPage";
 
@@ -47,7 +48,28 @@ import { EpCard } from "./DetailPage";
 
    ★ **媒体信息改成平铺的卡片放在最下面**,不再是"点右上角更多 → 弹面板"。
      顺带解决了「右上角更多按钮点开的其实是媒体信息」这个名不副实的入口:
-     现在右上角就是真的「更多」(标记已看 / 下载 / 回到剧)。 */
+     现在右上角就是真的「更多」(标记已看 / 下载 / 回到剧)。
+
+   ═══ 2026-08-02 这一版(用户逐条点名) ═══
+
+   ★ **顶栏浮起来、不占布局高度**(`floatBar`)。剧照于是从屏幕最顶开始画,
+     顶栏在首屏是真透明的,滚过一点才上玻璃底。
+
+   ★ **换集不再重建这一页。** 用户原话:「点进第二集,整个页面感觉像被重新构建了一样,
+     会发生跳动 —— 我在哪个位置点击,页面就应该停留在哪个位置」。
+     根因在 app/router.ts 的 `replace`(它每次都发新 key,React 据此卸载重挂),
+     已在那边修成"同种页面复用 key"。这边配套做两件事:
+       1. 新数据没到之前**继续显示旧的**,不要塌成一行「加载中…」——
+          页面一塌,scrollTop 会被浏览器截断到新的内容高度,那本身就是一次跳动;
+       2. 用 `ready`(d.id === itemId)守住播放/下载这类写操作,
+          否则那个窗口里点播放会播上一集。
+
+   ★ **「上一集 / 下一集」整块删掉**(用户:「在这里没有任何用处」)——
+     上面那条「本季其它集」轨道里就有相邻的集,而且能一次跨好几集。
+
+   ★ **剧照做出播放器的样子**:玻璃播放键 + 剩余时长胶囊 + 进度条(见 mobile.css)。
+
+   ★ **补上播放前的四件事**(版本 / 线路 / 音频 / 字幕,见 components/PlaySetup)。 */
 
 const fmtDur = (s: number) => {
   const m = Math.round(s / 60);
@@ -68,6 +90,8 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
   const [err, setErr] = useState("");
   const [ver, setVer] = useState<MediaVersion | null>(null);
   const [more, setMore] = useState(false);
+  /** 用户在 PlaySetup 里挑的版本;null = 没挑过 → 交给核层的版本筛选正则 */
+  const [pickedVer, setPickedVer] = useState<string | null>(null);
   const [wash, setWash] = useState<string | null>(null);
   /** 邻集 + 本季其它集。null = 还没探;[] = 探过了但没命中 */
   const [near, setNear] = useState<{ prev: Item | null; next: Item | null; siblings: Item[] } | null>(null);
@@ -78,6 +102,14 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
     setErr("");
     setNear(null);
     setWash(null);
+    setPickedVer(null);
+    /* ★ **不清 `d`。** 换集时清掉的话这一页会先塌成一行「加载中…」,
+       浏览器把 scrollTop 截到新的(极矮的)内容高度,等新数据回来再撑开 ——
+       那一下就是用户说的"跳回最顶部"。留着旧的,新的到了原地替换。
+       期间用 `ready` 守住写操作(见下面)。
+       ★ 有缓存就先用缓存,那是零成本的即时替换。 */
+    const cached = peekItemDetailLite(itemId);
+    if (cached) setD(cached);
     itemDetailLite(itemId)
       .then((x) => alive && setD(x))
       .catch((e) => alive && setErr(String(e)));
@@ -163,6 +195,10 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
   };
 
   const se = `S${d.season_no ?? 1}E${d.episode_no ?? 1}`;
+  /* 显示中的这一集,是不是路由要的那一集。换集的空窗里它是 false ——
+     那时画的是**上一集**的内容,任何写操作(播放/标记/下载)都必须先停住。 */
+  const ready = d.id === itemId;
+  const left = Math.max(0, d.runtime_secs - d.resume_secs);
 
   return (
     <Page
@@ -175,6 +211,7 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
         </button>
       }
       enterKey={d.id}
+      floatBar
     >
       <div
         className={`detail epd${wash ? " washed" : ""}`}
@@ -192,6 +229,27 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
             onError={(e) => ((e.target as HTMLImageElement).style.opacity = "0")}
           />
           <div className="dt-scrim" />
+          {/* ★ 玻璃播放键 —— 用户 2026-08-02:「单集封面缺乏播放器的高级感」。
+              一张 16:9 图配一条渐变,和列表里的缩略图除了尺寸没有任何区别,
+              它没有说出"这是一块可以按下去的屏幕"。 */}
+          <button
+            type="button"
+            className="ep-play"
+            aria-label="播放"
+            disabled={!ready}
+            onClick={() => {
+              if (!ready) return;
+              haptic("tap");
+              void play(self, pickedVer);
+            }}
+          >
+            <Icon n="play" size={26} />
+          </button>
+          {d.runtime_secs > 0 && (
+            <div className="ep-left">
+              {d.resume_secs > 0 ? `剩余 ${Math.round(left / 60)} 分` : fmtDur(d.runtime_secs)}
+            </div>
+          )}
           {d.resume_secs > 0 && d.runtime_secs > 0 && (
             <div className="prog big">
               <i style={{ transform: `scaleX(${Math.min(1, d.resume_secs / d.runtime_secs)})` }} />
@@ -226,19 +284,27 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
           </div>
         </div>
 
-        {/* ③ 播放 */}
+        {/* ③ 播放前的四件事 —— 版本 / 线路 / 音频 / 字幕。
+            ★ 放在播放按钮**上面**:用户 2026-08-02 原话是「有些片子字幕很多,
+              用户需要先选好字幕再点击播放;线路和版本同理」。
+              放下面的话阅读顺序就成了"先播了再说"。 */}
+        <PlaySetup itemId={ready ? d.id : null} onVersion={setPickedVer} />
+
+        {/* ④ 播放 */}
         <div className="dt-acts">
           <PlayBtn
             label={d.resume_secs ? "继续播放" : "播放"}
-            sub={d.resume_secs ? `剩余 ${Math.round((d.runtime_secs - d.resume_secs) / 60)} 分` : null}
+            sub={d.resume_secs ? `剩余 ${Math.round(left / 60)} 分` : null}
+            disabled={!ready}
             onClick={() => {
               haptic("tap");
-              void play(self);
+              void play(self, pickedVer);
             }}
           />
           <IcoBtn
             icon="check"
             label="标记已看"
+            disabled={!ready}
             onClick={() => {
               haptic("ok");
               setPlayed(d.id, true).then(() => toast("已标为看完", "ok")).catch((e) => toast(String(e), "bad"));
@@ -247,6 +313,7 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
           <IcoBtn
             icon="download"
             label="下载"
+            disabled={!ready}
             onClick={() => {
               haptic("tap");
               downloadEnqueue(d.id, d.type_, d.name, "mkv", posterUrl(session, d.id, 360))
@@ -256,7 +323,7 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
           />
         </div>
 
-        {/* ④ 本季其它集 —— 紧跟播放按钮(用户 2026-08-01 定)。
+        {/* ⑤ 本季其它集 —— 紧跟播放按钮(用户 2026-08-01 定)。
             卡片复用剧集页的 EpCard:上一版这里手抄了一份 DOM 却抄漏了 onLoad 里那句
             `classList.add("ready")`,而 `.card-a img` 的初始状态就是 opacity:0 ——
             于是整栏封面永远透明。别再各写一份。 */}
@@ -276,24 +343,6 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
             </div>
           </section>
         )}
-
-        {/* ⑤ 上一集 / 下一集 */}
-        <div className="epd-nav">
-          {near === null ? (
-            <div className="epd-nb off">正在找相邻的集…</div>
-          ) : near.prev ? (
-            <NavBtn dir="prev" label="上一集" ep={near.prev} onClick={jump(near.prev)} />
-          ) : (
-            <div className="epd-nb off">已是第一集</div>
-          )}
-          {near === null ? (
-            <div className="epd-nb off" />
-          ) : near.next ? (
-            <NavBtn dir="next" label="下一集" ep={near.next} onClick={jump(near.next)} />
-          ) : (
-            <div className="epd-nb off">已是最后一集</div>
-          )}
-        </div>
 
         {/* ⑥ 媒体信息卡 —— **最下面**,平铺,不点击展开(用户 2026-08-01 定) */}
         <section className="dt-sec">
@@ -350,40 +399,20 @@ export default function EpisodePage({ itemId }: { itemId?: string; season?: numb
   );
 }
 
-function NavBtn({
-  dir,
+function PlayBtn({
   label,
-  ep,
+  sub,
+  disabled,
   onClick,
 }: {
-  dir: "prev" | "next";
   label: string;
-  ep: Item;
+  sub: string | null;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   const ref = usePress<HTMLButtonElement>();
-  const text = (
-    <div>
-      <i>{label}</i>
-      <b>
-        {ep.episode_no != null ? `${ep.episode_no}. ` : ""}
-        {ep.name}
-      </b>
-    </div>
-  );
   return (
-    <button type="button" className={`epd-nb${dir === "next" ? " r" : ""}`} ref={ref} onClick={onClick}>
-      {dir === "prev" ? <Icon n="back" size={18} /> : null}
-      {text}
-      {dir === "next" ? <Icon n="chevR" size={18} /> : null}
-    </button>
-  );
-}
-
-function PlayBtn({ label, sub, onClick }: { label: string; sub: string | null; onClick: () => void }) {
-  const ref = usePress<HTMLButtonElement>();
-  return (
-    <button type="button" className="btn primary dt-play" ref={ref} onClick={onClick}>
+    <button type="button" className="btn primary dt-play" ref={ref} disabled={disabled} onClick={onClick}>
       <Icon n="play" size={19} />
       <span className="dt-play-t">{label}</span>
       {sub ? <span className="dt-play-s">{sub}</span> : null}
@@ -391,10 +420,27 @@ function PlayBtn({ label, sub, onClick }: { label: string; sub: string | null; o
   );
 }
 
-function IcoBtn({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+function IcoBtn({
+  icon,
+  label,
+  disabled,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
   const ref = usePress<HTMLButtonElement>();
   return (
-    <button type="button" className="btn dt-ico" aria-label={label} ref={ref} onClick={onClick}>
+    <button
+      type="button"
+      className="btn dt-ico"
+      aria-label={label}
+      ref={ref}
+      disabled={disabled}
+      onClick={onClick}
+    >
       <Icon n={icon} size={19} />
     </button>
   );

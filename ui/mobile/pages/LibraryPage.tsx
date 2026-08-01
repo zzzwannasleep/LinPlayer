@@ -208,7 +208,7 @@ export default function LibraryPage({ parentId, title }: { parentId?: string; ti
             action={nFilter ? { label: "清空筛选", on: () => setF({ genres: [], tags: [], years: [] }) } : undefined}
           />
         ) : (
-          session && <Grid items={items} session={session} onOpen={(it, el) => openItem(it, el ? flipOf(el) : null)} />
+          session && <Grid items={items} session={session} onOpen={(it) => openItem(it)} />
         )}
       </div>
 
@@ -329,11 +329,3 @@ function Group({ label, opts, sel, on }: { label: string; opts: string[]; sel: s
   );
 }
 
-function flipOf(el: HTMLElement) {
-  const img = el.querySelector("img");
-  return {
-    rect: el.getBoundingClientRect(),
-    src: img?.currentSrc || img?.src || "",
-    radius: getComputedStyle(el).borderRadius,
-  };
-}

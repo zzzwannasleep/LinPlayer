@@ -53,13 +53,30 @@ export default function IconPage({ serverId }: { serverId?: string }) {
       .catch((e) => toast(String(e), "bad"));
   }, [serverId]);
 
+  /* 图标库索引:**进页面就开始拉**,不等切到「图标库」那一页签。
+     ★ 用户 2026-08-02:「点进图标库时整个页面会直接灰掉,必须第二次点击才能加载出图标」。
+       那块"灰"就是 20 个骨架格,而它之所以停留那么久,是因为上一版**要等用户
+       点了页签才开始联网拉那 1468 条索引** —— 也就是说等待时间 100% 落在
+       用户点下去之后。挪到挂载时起跑,用户看完预览、点两下页签的这几百毫秒
+       是白赚的;真等到了,拿到的多半已经是数据而不是骨架。
+     ★ 失败要能重试:上一版失败时 `setLib([])`,而 `[]` 是**真值**,
+       于是那句 `if (lib) return` 会挡住之后每一次重试 —— 点一百遍页签也不会再拉。
+       这里把失败单独记成 `libErr`,并留一个明确的重试入口。 */
+  const [libErr, setLibErr] = useState("");
+  const pullLib = () => {
+    setLib(null);
+    setLibErr("");
+    iconLibrary()
+      .then(setLib)
+      .catch((e) => {
+        setLib([]);
+        setLibErr(String(e));
+      });
+  };
   useEffect(() => {
-    if (tab !== "lib" || lib) return;
-    iconLibrary().then(setLib).catch((e) => {
-      setLib([]);
-      toast(`图标库拉不下来:${e}`, "bad");
-    });
-  }, [tab, lib]);
+    pullLib();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const hits = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -175,16 +192,21 @@ export default function IconPage({ serverId }: { serverId?: string }) {
             </div>
           </div>
           {lib === null ? (
-            /* ★ 骨架格,不是一行「正在拉图标库…」。索引要联网拉一次(1468 项),
-               这几百毫秒里给一行小字 = 版面先塌一次、数据到了再撑回来。
-               骨架把最终版式**提前占住**,内容到位时是"填进去"而不是"弹出来"。 */
-            <div className="ico-grid" aria-busy="true">
-              {Array.from({ length: 20 }, (_, i) => (
-                <div key={i} className="ico-it">
-                  <div className="skel" style={{ width: "100%", height: "100%" }} />
-                </div>
-              ))}
+            /* ★ 不再铺 20 个骨架格。骨架的道理是"把最终版式提前占住",
+               但这一格里的最终内容是**图标本身**,骨架格画出来就是一屏整齐的灰方块 ——
+               用户 2026-08-02 的原话正是「整个页面会直接灰掉」。
+               一行会转的小字反而说清楚了"在等网络"这件事,而且它不占一屏。 */
+            <div className="lp-more" aria-busy="true">
+              <Icon n="refresh" size={15} className="spin-ic" />
+              正在拉图标库索引(约 1400 个)…
             </div>
+          ) : libErr ? (
+            <Empty
+              icon="image"
+              title="图标库拉不下来"
+              desc={libErr}
+              action={{ label: "重试", on: pullLib }}
+            />
           ) : !hits.length ? (
             <Empty
               icon="image"

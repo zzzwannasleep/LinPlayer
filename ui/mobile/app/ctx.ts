@@ -1,6 +1,5 @@
 import { createContext, useContext } from "react";
 import type { Item, LoginResult } from "@shared/api";
-import type { FlipSource } from "./motion";
 import type { PageId } from "./nav";
 import type { Route } from "./router";
 
@@ -24,8 +23,9 @@ export type Ctx = {
   /** 原地换页(上一集/下一集),栈深不变 */
   replace: (r: Route | PageId) => void;
   back: () => void;
-  /** 打开条目详情。第二个参数是 FLIP 起点(卡片那张图),给了就做共享元素转场 */
-  openItem: (it: Item, from?: FlipSource | null) => void;
+  /** 打开条目详情。★ 分集会被送到**单集页**,其余送详情页 —— 判断在 App.tsx 里做一次,
+   *  调用点一律只管"打开这个条目"。 */
+  openItem: (it: Item) => void;
   /** 起播。★ 先 await play() 成功才导航 —— 反过来的话起播失败会停在一个空的
    *  播放页上,用户只看到黑屏。 */
   play: (it: Item, mediaSourceId?: string | null) => void | Promise<void>;

@@ -190,34 +190,47 @@ must(shell.scrollW === shell.innerW, `没有横向溢出(scrollWidth ${shell.scr
 
 console.log("\n── 首启闸口 ──");
 /* 没有 Tauri 就没有会话 → 应该落到首启闸口(LoginPage),而不是白屏。 */
-const login = await ev(`(() => {
-  const l = document.querySelector(".login");
-  return {
-    isLogin: !!l,
-    brand: document.querySelector(".lg-brand")?.textContent ?? "",
-    srcItems: [...document.querySelectorAll(".src-it")].map(b => b.dataset.kind),
-    secs: [...document.querySelectorAll(".src-sec")].map(s => s.textContent),
-    firstField: document.querySelector(".lg-pane .field span")?.textContent ?? "",
-    reqStars: document.querySelectorAll(".lg-pane .req-star").length,
-    connect: document.querySelector(".lg-acts .btn")?.textContent ?? "",
-  };
-})()`);
-console.log("   " + JSON.stringify(login));
+/* ★ 2026-08-02 起首启闸口是**两步**的(用户点名:「先选服务器类型,选完再切到
+   下一个页面填字段」)。所以第一屏上没有 `.src-it`,只有三张大类卡 `.stp-cat`;
+   具体的源类型是进到大类之后那排 `.chip[data-kind]`。
+   这个门禁跟着改 —— 断言旧结构会**长期红**,而长期红的门禁等于没有门禁。 */
+const step1 = await ev(`(() => ({
+  isLogin: !!document.querySelector(".login"),
+  brand: document.querySelector(".lg-brand")?.textContent ?? "",
+  cats: [...document.querySelectorAll(".stp-cat")].map(b => b.dataset.sec),
+  hasForm: !!document.querySelector(".lg-pane .field"),
+  acts: document.querySelectorAll(".lg-acts .btn").length,
+}))()`);
+console.log("   " + JSON.stringify(step1));
 
-must(login.isLogin, "一台源都没有 → 落首启闸口,不是白屏");
+must(step1.isLogin, "一台源都没有 → 落首启闸口,不是白屏");
+must(() => step1.cats.length === 3, `第一步是三张大类卡:${step1.cats.join(" / ")}`);
+must(() => step1.cats.includes("媒体服务器"), "大类里有「媒体服务器」");
+must(() => step1.cats.includes("网盘 / 文件源"), "大类里有「网盘 / 文件源」");
+/* ★ 分步的意义就在这一条:第一屏**不该**同时铺着表单。
+   上一版一屏到底,选完还要往下滚一屏才看得见第一个输入框。 */
+must(() => !step1.hasForm, "第一步不铺表单(那正是用户说的「往下浏览布局很糟糕」)");
+must(() => step1.acts === 0, "第一步不画「添加并进入」(还没选类型,按了没有意义)");
+
+console.log("\n── 第二步:网盘 / 文件源 ──");
+await ev(`[...document.querySelectorAll(".stp-cat")].find(b => b.dataset.sec === "网盘 / 文件源")?.click()`);
+await sleep(320);
+const disk = await ev(`(() => ({
+  kinds: [...document.querySelectorAll(".stp-kinds .chip")].map(b => b.dataset.kind),
+  back: !!document.querySelector(".lg-top .tb-back"),
+  firstField: document.querySelector(".lg-pane .field span")?.textContent ?? "",
+}))()`);
+console.log("   " + JSON.stringify(disk));
 /* SourceKind 是 Rust 的封闭集,全小写。写错**不报错**,只是登录送错值。 */
-const WANT_KINDS = ["emby", "feiniu", "openlist", "aliyundrive", "quark", "baidu", "pan115", "pan189", "pan139", "anirss", "stremio", "qrsync"];
-for (const k of WANT_KINDS) must(() => login.srcItems.includes(k), `源类型有 ${k}`);
+for (const k of ["openlist", "aliyundrive", "quark", "baidu", "pan115", "pan189", "pan139", "anirss"])
+  must(() => disk.kinds.includes(k), `网盘大类里有 ${k}`);
 for (const bad of ["aliyun", "p115", "tianyi", "mobile139", "jellyfin", "Emby"])
-  must(() => !login.srcItems.includes(bad), `没有用错的 id「${bad}」(比较会恒 false 且不报错)`);
-must(() => !login.srcItems.includes("batch"), "首启闸口排除了「批量粘贴导入」(第一次装没有那个场景)");
-must(() => login.secs.length >= 3, `源类型按 sec 分了组:${login.secs.join(" / ")}`);
-/* ★ 服务器名称必填、且**排第一行** —— 扫码型的用户扫完就跳走,放后面等于没有 */
-must(() => login.firstField.startsWith("服务器名称"), `表单第一个字段是「服务器名称」(实际:${login.firstField})`);
-must(login.reqStars >= 1, "名称带必填星号");
+  must(() => !disk.kinds.includes(bad), `没有用错的 id「${bad}」(比较会恒 false 且不报错)`);
+must(() => !disk.kinds.includes("batch"), "首启闸口不出现「批量粘贴导入」(第一次装没有那个场景)");
+must(disk.back, "第二步画了返回上一步的箭头");
 
 console.log("\n── 切源类型:扫码型不画「连接」按钮 ──");
-await ev(`document.querySelector('.src-it[data-kind="aliyundrive"]')?.click()`);
+await ev(`document.querySelector('.stp-kinds .chip[data-kind="aliyundrive"]')?.click()`);
 await sleep(300);
 const qr = await ev(`(() => ({
   firstField: document.querySelector(".lg-pane .field span")?.textContent ?? "",
@@ -228,6 +241,27 @@ console.log("   " + JSON.stringify(qr));
 must(() => qr.firstField.startsWith("服务器名称"), "扫码型也把名称放在二维码**上面**");
 must(qr.hasQr, "扫码型画了二维码位");
 must(() => qr.acts === 0, "扫码型不画「连接」按钮(扫完就生效,画出来只会让人乱点)");
+
+console.log("\n── 回第一步 → 媒体服务器 ──");
+await ev(`document.querySelector(".lg-top .tb-back")?.click()`);
+await sleep(320);
+await ev(`[...document.querySelectorAll(".stp-cat")].find(b => b.dataset.sec === "媒体服务器")?.click()`);
+await sleep(320);
+const emby = await ev(`(() => ({
+  kinds: [...document.querySelectorAll(".stp-kinds .chip")].map(b => b.dataset.kind),
+  fields: [...document.querySelectorAll(".lg-pane .field span")].map(s => s.textContent.replace(" *", "")),
+  reqStars: document.querySelectorAll(".lg-pane .req-star").length,
+  connect: document.querySelector(".lg-acts .btn")?.textContent ?? "",
+}))()`);
+console.log("   " + JSON.stringify(emby));
+must(() => emby.kinds.includes("emby") && emby.kinds.includes("feiniu"), "媒体服务器大类里是 emby + feiniu");
+/* ★ 服务器名称必填、且**排第一行** —— 扫码型的用户扫完就跳走,放后面等于没有 */
+must(() => emby.fields[0] === "服务器名称", `表单第一个字段是「服务器名称」(实际:${emby.fields[0]})`);
+/* 用户点名的那四项:名称 / 地址 / 用户名 / 密码,一步填完 */
+for (const want of ["服务器名称", "服务器地址", "用户名", "密码"])
+  must(() => emby.fields.includes(want), `第二步就能填「${want}」`);
+must(emby.reqStars >= 1, "名称带必填星号");
+must(() => emby.connect.length > 0, "第二步画了提交按钮");
 
 
 console.log("\n── 带 Tab 的外壳(注入假 invoke)──");

@@ -168,6 +168,50 @@ export function Card({ item, session, variant = "poster", onOpen, onLongPress, i
 
 /* ---------- 横滑轨道 ---------- */
 
+/** 这个元素进过视口附近没有。**只朝一个方向翻**:一旦为真就永远为真 ——
+ *  轨道滚出去再滚回来时不该把已经加载好的封面重新拆掉。
+ *
+ *  ★ 这是用户 2026-08-02 那条「卡片式的渐进加载,能加载出来的先展示」的落点。
+ *    在此之前首页是**一次性把所有轨道的所有卡片全渲染出来**:8 个库 × 20 张 =
+ *    160 个 `<img>` 同一帧全部发出请求。`loading="lazy"` 挡不住多少 —— 它的
+ *    触发距离在 Chrome 上是按网络状况算的,4G 下能到 1250px 开外,横滑轨道里
+ *    整条都在那个范围内。而 Rust 侧的取图闸只有 6 个名额且是**先到先服务**,
+ *    于是第八个库的封面和第一屏的封面在同一个队列里抢 —— 首屏那几张要排到
+ *    第一百多位之后才轮到。用户看到的就是"整体加载极慢"。
+ *    先只挂近视口的轨道,请求顺序就和阅读顺序一致了。
+ *
+ *  ★ rootMargin 给 700px(约一屏):滚到之前就开始拉,不是滚到了才开始 ——
+ *    后者的表现是"每往下滑一屏都要等一下"。
+ *  ★ 不用 `content-visibility:auto` 做这件事:那条路 2026-08-01 试过,
+ *    它和浏览器的**滚动锚定**打架,首页滚到一半就再也滚不动了(见 mobile.css 的
+ *    `.row` 注释)。IntersectionObserver 不改变任何元素的高度,没有那个副作用 ——
+ *    前提是骨架卡和真卡**一样高**,这一点由下面的骨架分支保证。 */
+function useNearViewport<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || near) return;
+    /* 兜底:没有 IntersectionObserver 就直接放行。宁可全部加载,也不能一张都不显示。 */
+    if (typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (es) => {
+        if (es.some((e) => e.isIntersecting)) {
+          setNear(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "700px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
+  return [ref, near] as const;
+}
+
 export function Row({
   title,
   items,
@@ -191,8 +235,13 @@ export function Row({
   noCap?: boolean;
 }) {
   const moreRef = usePress<HTMLButtonElement>();
+  const [rowRef, near] = useNearViewport<HTMLDivElement>();
+  /* 数据到了但轨道还没滚到附近 → 仍然画骨架。★ 骨架和真卡**同宽同高同数量比例**,
+     所以它变成真卡的那一刻不产生任何布局位移(这正是不能用 content-visibility 的地方)。 */
+  const holding = !skeleton && !near && !!items?.length;
+  const drawSkeleton = skeleton || holding;
   return (
-    <div className="row">
+    <div className="row" ref={rowRef}>
       <div className="row-hd">
         {/* ★ 标题**先立住**,只有连标题都还不知道时才画灰条。
             库名是一次 `views()` 就拿到的,而每个库的条目要各自再打一趟 ——
@@ -210,7 +259,7 @@ export function Row({
         ) : null}
       </div>
       <div className="row-scroll">
-        {skeleton
+        {drawSkeleton
           ? Array.from({ length: 4 }, (_, i) => (
               <div className={`card${variant === "thumb" ? " thumb" : ""}`} key={i}>
                 <div className={`card-a ${variant === "thumb" ? "ar-thumb" : "ar-poster"}`}>

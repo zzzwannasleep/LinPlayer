@@ -46,6 +46,15 @@ const ST: Record<string, { cls: string; text: string }> = {
  *  ★ **别在手机端另发明一个 iconType 字段** —— 判据抄 PC 那份。 */
 export const isGlyph = (s: string | null) => !!s && s.length <= 2 && !/[\\/:.]/.test(s);
 
+/** 源类型的中文名。★ 服务器列表第二行没有备注时显示它,**不显示地址**
+ *  (用户 2026-08-02:「服务器名称下面跟的应该是备注,而不是线路名称或线路地址」)。
+ *  认不出的 kind(插件源形如 `plugin:<id>/<src>`)回落成「插件源」。 */
+const KIND_NAME: Record<string, string> = {
+  emby: "Emby / Jellyfin", feiniu: "飞牛影视", stremio: "Stremio 插件", anirss: "Ani-RSS",
+  openlist: "OpenList", aliyundrive: "阿里云盘", quark: "夸克网盘", baidu: "百度网盘",
+  pan115: "115 网盘", pan189: "天翼云盘", pan139: "移动云盘",
+};
+
 const KIND_IC: Record<string, string> = {
   emby: "server", feiniu: "server", stremio: "plugin", anirss: "rss",
   openlist: "cloud", aliyundrive: "cloud", quark: "cloud", baidu: "cloud",
@@ -316,7 +325,10 @@ function SrvRow({
           )}
         </div>
         <div className="lit-s">
-          {sv.remark || sv.line_url || sv.server}
+          {/* ★ 备注优先,没有备注就写源类型 —— **绝不回落到地址**。
+              上一版是 `sv.remark || sv.line_url || sv.server`,于是没写备注的人
+              一屏全是域名。地址是凭据的一部分,截图/投屏/录屏都会把它带出去。 */}
+          {sv.remark || KIND_NAME[sv.source_kind] || ((sv.source_kind ?? "").startsWith("plugin:") ? "插件源" : "服务器")}
           {sv.lines.length > 1 ? ` · ${sv.lines.length} 条线路` : ""}
         </div>
       </span>
@@ -471,7 +483,7 @@ function RemarkSheet({ sv, onClose, onDone }: { sv: AccountInfo; onClose: () => 
     <Sheet open onClose={onClose} title="修改备注">
       <div className="pad">
         <Field label="备注" placeholder="比如「群晖上那台,只有内网能连」" value={v} onChange={setV} />
-        <p className="f-note">备注显示在列表第二行。留空就显示地址。</p>
+        <p className="f-note">备注显示在列表第二行。留空就显示源的类型 —— 地址在任何列表里都不显示。</p>
       </div>
       <div className="sheet-acts">
         <button type="button" className="btn ghost" onClick={onClose}>

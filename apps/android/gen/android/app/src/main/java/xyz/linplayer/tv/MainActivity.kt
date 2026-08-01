@@ -75,6 +75,35 @@ class MainActivity : TauriActivity() {
   /** 返回键交给前端处理(见 onKeyDown),不要 WryActivity 默认那套 webView.goBack()。 */
   override val handleBackNavigation: Boolean = false
 
+  /**
+   * 暴露给前端的宿主能力(`window.LPHost`)。
+   *
+   * ★ 为什么走 `addJavascriptInterface` 而不是 Tauri 命令:
+   *   这里要动的是 **Activity 自己的属性**(`requestedOrientation`),Rust 侧碰不到。
+   *   走命令的话链条是 JS → Rust → JNI 回调进 Activity,为了一行 setter
+   *   要自己攒 JavaVM 引用和线程切换。
+   * ★ 安全:接口只在**我们自己打包的本地页面**上下文里可达(WebView 只加载
+   *   asset 协议下的 index-mobile.html),而且这里只有一个不带返回值的枚举 setter,
+   *   参数被 `when` 收敛成三个常量 —— 拿不到任何反射面。
+   * ★ 前端拿不到它时静默降级(见 ui/mobile/app/host.ts),桌面端跑同一份代码。
+   */
+  inner class HostBridge {
+    @android.webkit.JavascriptInterface
+    fun setOrientation(mode: String) {
+      val want = when (mode) {
+        "landscape" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        "portrait" -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        /* auto = 交回系统。★ 用 UNSPECIFIED 而不是 SENSOR:后者会**强制**跟随
+           传感器,把用户在系统里开的"竖屏锁定"也一起顶掉 —— 那是在替用户
+           推翻他自己的设置。UNSPECIFIED 才是"我不表态"。 */
+        else -> android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+      }
+      /* JS 桥的回调跑在 WebView 的 JavaBridge 线程上,动窗口必须回 UI 线程。
+         不切的表现是偶发地什么都没发生(而不是崩),最难查的那一种。 */
+      runOnUiThread { requestedOrientation = want }
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     /* ★ 不能用无参的 enableEdgeToEdge()。它的默认导航栏样式是
        `SystemBarStyle.auto(DefaultLightScrim, DefaultDarkScrim)`,而
@@ -98,6 +127,19 @@ class MainActivity : TauriActivity() {
     WindowCompat.getInsetsController(window, window.decorView).apply {
       systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
       if (isTelevision) hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    /* ── 系统开屏的收场动画:直接撤,不做那个放大淡出 ──
+       ★ 用户 2026-08-02:「点进软件后,会有零点几秒的时间先看到图标放大显示,
+         然后加载动画才显示出来」。那个"放大"就是 Android 12+ 开屏的**默认退场**:
+         系统把图标放大并淡出。它和我们自己那块 #boot 是两段互不相干的动画,
+         接缝处必然看得见一次跳变。
+       ★ 这里把退场接管过来、立刻 remove:开屏底色(#0e0e13)和 #boot 的底色
+         逐位一致,于是"系统开屏 → 我们的加载动画"这一步在视觉上完全没有交接。
+       ★ 只有 API 31+ 有 SplashScreen;更低版本走的是 windowBackground,本来就没有
+         这个退场动画。 */
+    if (android.os.Build.VERSION.SDK_INT >= 31) {
+      splashScreen.setOnExitAnimationListener { view -> view.remove() }
     }
   }
 
@@ -125,6 +167,10 @@ class MainActivity : TauriActivity() {
          配置里已经补上 "transparent": true(那才是根治),这一行是保险 ——
          这条链上任何一环失手都是**静默黑屏**,不值得只留一道防线。 */
       webView.setBackgroundColor(Color.TRANSPARENT)
+      /* 宿主能力桥。★ 必须在这里挂而不是上面那次:`addJavascriptInterface` 的注入
+         发生在**下一次导航**时,而这个 post 已经在 Wry 建完 WebView 之后、
+         首次 loadUrl 之前 —— 挂晚一帧的表现是 window.LPHost 在首屏是 undefined。 */
+      webView.addJavascriptInterface(HostBridge(), "LPHost")
       val parent = webView.parent as? ViewGroup ?: run {
         Logger.error("WebView 没有父容器,无法插入视频面")
         return@post

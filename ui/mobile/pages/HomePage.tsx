@@ -64,7 +64,7 @@ function ambientOf(id: string) {
 const fmtNum = (n: number) => n.toLocaleString("en-US");
 
 export default function HomePage() {
-  const { session, go, openItem, play } = useCtx();
+  const { session, go, openItem } = useCtx();
   const [libs, setLibs] = useState<Item[]>([]);
   const [byLib, setByLib] = useState<Record<string, Item[]>>({});
   /** 「继续观看」和「接下来看」合并成一条(用户 2026-07-28 定)。
@@ -383,7 +383,7 @@ export default function HomePage() {
                     items={keepWatching}
                     variant="thumb"
                     session={session}
-                    onOpen={(it) => void play(it)}
+                    onOpen={(it) => openItem(it)}
                   />
                 )}
                 {libs.map((v) => (
@@ -397,7 +397,7 @@ export default function HomePage() {
                        各库各自到、各自换,不等最慢的那一个。 */
                     skeleton={byLib[v.id] ? 0 : 1}
                     session={session}
-                    onOpen={(it, el) => openItem(it, el ? flipOf(el) : null)}
+                    onOpen={(it) => openItem(it)}
                     onMore={() => go({ page: "library", parentId: v.id, title: v.name })}
                   />
                 ))}
@@ -437,12 +437,3 @@ function metaRow(it: Item) {
   return parts.flatMap((p, i) => (i ? [<i className="sep" key={`s${i}`} />, <span key={p}>{p}</span>] : [<span key={p}>{p}</span>]));
 }
 
-/** 从卡片元素取 FLIP 起点。放在这儿而不是 ui.tsx,是为了让 Card 保持"不知道有转场这回事"。 */
-function flipOf(el: HTMLElement) {
-  const img = el.querySelector("img");
-  return {
-    rect: el.getBoundingClientRect(),
-    src: img?.currentSrc || img?.src || "",
-    radius: getComputedStyle(el).borderRadius,
-  };
-}

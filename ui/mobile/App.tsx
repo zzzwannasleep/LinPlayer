@@ -11,7 +11,7 @@ import {
 import { consumeBack, onShellKey } from "./app/backkey";
 import { PageCtx, type Ctx } from "./app/ctx";
 import { FULLSCREEN_PAGES, TABS, type PageId, type TabId } from "./app/nav";
-import { flipTo, toast, wait, type FlipSource } from "./app/motion";
+import { toast } from "./app/motion";
 import PageStack from "./app/PageStack";
 import PageBoundary from "./app/PageBoundary";
 import Tabs from "./app/Tabs";
@@ -98,29 +98,31 @@ export default function App() {
     [pop, tab, goTab],
   );
 
-  /* ── FLIP 共享元素 ──
-     卡片 → 详情页 Hero。起点在点卡片的那一刻记下来(此时卡片还在屏幕上),
-     终点由详情页挂载后自己认领。★ 起点必须**当场**取,等 push 之后卡片已经
-     跟着旧页滑走了,getBoundingClientRect 拿到的是滑到一半的位置。 */
-  const flip = useRef<FlipSource | null>(null);
-
+  /* ── 打开一个条目 ──
+     ★ **FLIP 共享元素整条删掉**(2026-08-02)。用户原话:「从首页点击进入剧集详情页的
+       动画效果贼丑,直接做一个普通的页面进入效果就行了,不需要封面往上回弹的效果」。
+       页面栈自己那套横向推入(见 PageStack)本来就够了,再叠一张封面飞过去
+       会和它抢同一段时间,两个不同的运动曲线同时跑 —— 那就是"回弹"的来源。
+     ★ 分集直接进**单集页**,不是剧详情页(用户 2026-08-02:「在『继续观看』栏里
+       点击观看记录后,应该先跳转到集详情页,由用户手动点击播放」)。
+       判断放在这里而不是各个调用点:首页、聚合视界、收藏、搜索都会点到分集,
+       散着写必然漏掉其中一两处,而漏掉的表现是"同样一张卡在不同页面行为不一样"。 */
   const openItem = useCallback(
-    (it: Item, from?: FlipSource | null) => {
-      flip.current = from ?? null;
+    (it: Item) => {
+      if (it.type_ === "Episode") {
+        push({
+          page: "episode",
+          itemId: it.id,
+          title: it.name,
+          season: it.season_no ?? undefined,
+          ep: it.episode_no ?? undefined,
+        });
+        return;
+      }
       push({ page: "detail", itemId: it.id, title: it.name });
     },
     [push],
   );
-
-  /** 详情页 Hero 挂好后调它,把卡片那张图飞过来。 */
-  const claimFlip = useCallback(async (el: HTMLElement | null) => {
-    const from = flip.current;
-    flip.current = null;
-    if (!from || !el) return;
-    /* 等一帧让新页排好版 —— 立刻量的话 Hero 还没拿到最终尺寸,飞过去会错位。 */
-    await wait(16);
-    await flipTo(from, el);
-  }, []);
 
   /* 起播。★ 与 TV 端同一条路:先 await play(),成功了才导航 ——
      反过来的话起播失败会停在一个空的播放页上,用户只看到黑屏。 */
@@ -250,12 +252,7 @@ export default function App() {
                 canSwipe={(f) => !FULLSCREEN_PAGES.has(f.route.page)}
                 render={(f) => (
                   <PageBoundary resetKey={f.key}>
-                    <Body
-                      frame={f}
-                      playing={playing}
-                      onClaimFlip={claimFlip}
-                      onStopped={() => setPlaying(null)}
-                    />
+                    <Body frame={f} playing={playing} onStopped={() => setPlaying(null)} />
                   </PageBoundary>
                 )}
               />
@@ -288,13 +285,11 @@ export default function App() {
 function Body({
   frame,
   playing,
-  onClaimFlip,
   onStopped,
 }: {
   frame: Frame;
   /** 正在播的条目。播放页拿它给弹幕自动匹配喂剧名/集号(route.title 是拼好的串,搜不到)。 */
   playing: Item | null;
-  onClaimFlip: (el: HTMLElement | null) => void;
   onStopped: () => void;
 }) {
   const r: Route = frame.route;
@@ -318,7 +313,7 @@ function Body({
     case "calendar":
       return <CalendarPage />;
     case "detail":
-      return <DetailPage itemId={r.itemId} onHero={onClaimFlip} />;
+      return <DetailPage itemId={r.itemId} />;
     case "episode":
       return <EpisodePage itemId={r.itemId} season={r.season} ep={r.ep} />;
     case "person":

@@ -42,6 +42,8 @@ import { pollTracks } from "@shared/track-poll";
 import { DanmakuLayer, type TimeSync } from "@shared/Danmaku";
 import { useCtx } from "../app/ctx";
 import { onShellKey, pushBackHandler } from "../app/backkey";
+import { setOrientation } from "../app/host";
+import { takePrePick } from "../app/prepick";
 import { Icon } from "../app/icons";
 import { haptic, longPress, playerGestures, toast } from "../app/motion";
 import { Opt, OptGroup } from "../components/ui";
@@ -159,6 +161,24 @@ export default function PlayerPage({
     document.documentElement.classList.add("playing");
     return () => document.documentElement.classList.remove("playing");
   }, []);
+
+  /* ── 按画面比例自动横竖屏(用户 2026-08-02:「播放页没有根据视频的比例自动切换」)──
+     ★ 判据用 mpv 报上来的**真实解码尺寸**(Status.video),不是条目元数据 ——
+       元数据上的分辨率经常是错的(转码版本、竖屏短剧被标成 16:9),
+       而 VideoDiag 里的 width/height 是这一帧实际画出来多大。
+     ★ 只在拿到尺寸之后才下达:起播前就锁横屏的话,竖屏短片会先被硬掰过去再掰回来。
+     ★ 离开播放页必须交回系统(auto)。不交的表现是列表页也被钉死在横屏,
+       而用户完全不知道该去哪儿解开。
+     ★ 纯音频(has_video_track=false)不动方向 —— 那是听歌,横过来毫无意义。 */
+  const wantLandscape =
+    st?.video && st.video.has_video_track && st.video.width > 0 && st.video.height > 0
+      ? st.video.width >= st.video.height
+      : null;
+  useEffect(() => {
+    if (wantLandscape == null) return;
+    setOrientation(wantLandscape ? "landscape" : "portrait");
+  }, [wantLandscape]);
+  useEffect(() => () => void setOrientation("auto"), []);
 
   useEffect(() => {
     void setNowPlaying(title ?? null);
@@ -293,7 +313,39 @@ export default function PlayerPage({
 
   /* 轨道要**探到稳定**:外挂字幕要等核层收到 mpv 的 FILE_LOADED 才挂得上,
      慢服务器上是起播后好几秒的事。三端共用一份逻辑。 */
-  useEffect(() => pollTracks(setTrk), []);
+  /* 轨表轮询。★ 顺手把**详情页起播前挑好的音轨/字幕**落实到 mpv 上。
+     为什么必须在这里做:详情页看到的是 Emby 的 MediaStreams,而能操作的是
+     mpv 的 track-list —— 后者要等 demux 完才有(网络流上是起播后几百毫秒到几秒,
+     外挂字幕更晚)。所以"选"和"生效"天然分处两个时刻,中间靠 app/prepick.ts 交接。
+     ★ 只在**第一次拿到非空轨表**时执行一次(`applied`),之后用户在 OSD 里手动切的
+       优先级更高,不能被这条反复顶掉。
+     ★ take 之后就清空:它描述的是"这一次起播",不是持久偏好。 */
+  const prePick = useRef(takePrePick());
+  const preApplied = useRef(false);
+  useEffect(
+    () =>
+      pollTracks((t) => {
+        setTrk(t);
+        const p = prePick.current;
+        if (!p || preApplied.current || !t.length) return;
+        const auds = t.filter((x) => x.kind === "audio");
+        const subs = t.filter((x) => x.kind === "sub");
+        /* 字幕的两种"选过了"要分开:-1 是**明确关闭**,>=0 是挑了第几条。
+           合成一个值的表现是用户关了字幕、起播后又被 apply_prefs 打开。 */
+        if (p.sub === -1) {
+          preApplied.current = true;
+          void setTrack("sub", "no");
+        } else if (p.sub != null && subs[p.sub]) {
+          preApplied.current = true;
+          void setTrack("sub", subs[p.sub].id);
+        }
+        if (p.audio != null && auds[p.audio]) {
+          preApplied.current = true;
+          void setTrack("audio", auds[p.audio].id);
+        }
+      }),
+    [],
+  );
 
   const bump = useCallback(() => {
     setOsd(true);
@@ -986,8 +1038,11 @@ export default function PlayerPage({
                   key={l.url}
                   i={i}
                   on={l.i === activeLine}
-                  label={l.name || l.url}
-                  sub={l.url}
+                  /* ★ 只写名称和延迟,**不写地址**(用户 2026-08-02:
+                     「在任何地方都不要展示具体的线路地址」)。
+                     没起名字的线路回落成「线路 N」,不是回落成 URL —— 那正是要避开的。 */
+                  label={l.name || `线路 ${l.i + 1}`}
+                  sub={l.ms == null ? (l.ms === null ? "连不上" : "还没测") : `延迟 ${l.ms} ms`}
                   badge={l.ms == null ? (l.ms === null ? "不通" : "—") : `${l.ms}ms`}
                   onClick={() => {
                     haptic("sel");

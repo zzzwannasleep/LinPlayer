@@ -183,9 +183,19 @@ body {
   overflow: hidden;
 }
 
-/* 播放时 WebView 要透出底下的 mpv SurfaceView */
+/* 播放时 WebView 要透出底下的 mpv SurfaceView。
+   ★ **`.pg` 这一条不能漏**(2026-08-02 补):手机端的播放页是页面栈里的一格,
+     而 `.pg` 自己写着 `background: var(--bg)` —— 一块不透明的底,正正盖在
+     SurfaceView 上面。html / body 清干净了也没用,用户看到的是
+     **有声音、没画面**,而且这条链上一个字的日志都不会有。
+     ui/tv 那边清的是 `.tv-app`,同一件事;两端的容器名不同,所以两边都得写。
+   ★ 顺带清 `.pg-body`:它现在没有底色,但将来谁给它加一个,故障会以同样的
+     形态回来 —— 提前钉住比事后再查一次便宜。 */
 html.playing,
-html.playing body {
+html.playing body,
+html.playing .app,
+html.playing .pg,
+html.playing .pg-body {
   background: transparent;
 }
 
@@ -393,10 +403,17 @@ html.playing body {
   position: absolute;
   inset: 0;
   background: rgba(14, 14, 19, 0.62);
-  backdrop-filter: blur(20px) saturate(170%);
   opacity: 0;
   transition: opacity var(--t4) var(--e-std);
   pointer-events: none;
+}
+/* ★ `backdrop-filter` **只在真正要显示的时候才挂上**,不靠 opacity:0 藏着。
+   一个常驻的 backdrop-filter 元素即便完全透明,在合成器上仍然是一个
+   "backdrop root" —— 无头 Edge(--disable-gpu)下实测会把底栏那条胶囊的内容
+   采样到顶栏位置画一份幽灵出来。真机上不一定复现,但这层保险零成本:
+   opacity 为 0 时本来就没有任何东西可看,挂着它纯属白给合成器加活。 */
+.topbar.solid::before {
+  backdrop-filter: blur(20px) saturate(170%);
 }
 .topbar::after {
   content: "";
@@ -423,6 +440,39 @@ html.playing body {
 }
 .topbar > * {
   position: relative;
+}
+
+/* ── 浮在内容之上的顶栏(详情页族用)──
+   ★ 用户 2026-08-02:「剧集/单集/电影详情页顶栏都必须做成透明的」。
+     常规顶栏是 flex 流里的一格(`flex:none`),它**占布局高度** ——
+     那条 52px 的带子背后露出的是 `.pg` 的 --bg,所以哪怕顶栏自己透明,
+     看到的仍然是"一条不透明的深色横带压在海报上面"。
+     真正的透明只有一种做法:把它从布局里摘出去,让海报从屏幕最顶端开始画。
+   ★ `.solid` 仍然照常工作(topbarOnScroll 在滚过 12px 时加上),
+     所以往下滚之后标题依旧读得清 —— 透明只是**首屏**的状态,不是一直没底。
+   ★ 返回箭头在没有 .solid 时压在图上,给一层描影兜底:
+     浅色海报上纯白图标会糊掉。 */
+.topbar.float {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 30;
+}
+.topbar.float:not(.solid) .tb-back,
+.topbar.float:not(.solid) .tb-r > button {
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.75));
+}
+.topbar.float:not(.solid) .tb-title,
+.topbar.float:not(.solid) .tb-sub {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.topbar.float .tb-title,
+.topbar.float .tb-sub {
+  transition:
+    opacity var(--t4) var(--e-std),
+    transform var(--t4) var(--e-std);
 }
 
 .tb-back,
@@ -1311,6 +1361,16 @@ html.playing body {
   max-height: 60vh;
   overflow: hidden;
   background: var(--s1);
+  /* ★ 「随机推荐滑不动」的真因就是这一行缺失(2026-08-02)。
+     五张图是**叠着 crossfade** 的,没有可横向滚动的内容,所以换片只能靠
+     pointermove 自己算位移。而在一个纵向滚动的容器里,Android WebView 认定
+     手势归自己(滚页)之后会**直接发 pointercancel、不再发 pointermove** ——
+     JS 侧那段横滑判定于是一次都跑不到。`pan-y` 是把"横向归我"这件事
+     告诉合成器的唯一办法(同 `.ln` 的拖拽排序)。
+     ★ 配套 user-select:none —— 不然横拖会选中片名文字,拖出一片蓝。 */
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .hero-layer {
   position: absolute;
@@ -3040,19 +3100,38 @@ html.playing body {
 /* 内容全部压在渐变之上 */
 .detail>*{position:relative;z-index:1}
 
-/* ── 剧 / 电影:大海报 ──
-   ★ object-fit:contain —— **不裁剪**(用户点名)。海报比例五花八门(2:3 为主,
-     偶有 1:1.4、甚至方图),cover 会把上下切掉;contain 顶多两边留一点底色。
-   ★ 宽度 58vw 上限 260:390 宽的屏幕上是 226×339,和上一版那张塞在卡片里的
-     111px 海报完全不是一个量级。 */
-.dt-top{display:flex;flex-direction:column;align-items:center;
-  padding:14px var(--pad) 0;text-align:center}
-.dt-poster{width:min(58vw,260px);aspect-ratio:2/3;border-radius:14px;overflow:hidden;
-  background:rgba(0,0,0,.28);box-shadow:0 22px 44px -14px rgba(0,0,0,.72)}
-.dt-poster>img{width:100%;height:100%;object-fit:contain;display:block}
-.dt-cap{margin-top:14px;width:100%}
-.dt-name{font-size:21px;font-weight:700;letter-spacing:-.02em;line-height:1.24;margin:0;
-  text-shadow:0 2px 14px rgba(0,0,0,.5)}
+/* ── 剧 / 电影:海报**当底图**,通栏铺到屏幕最顶,向下渐变收进主题色 ──
+
+   ★ 用户 2026-08-02 推翻了上一版:「不是直接贴一张海报上去就完事了。
+     海报应该作为一个背景底图往下延伸,并且其主色调要自然地渐变过渡到黑色」。
+     上一版是屏幕中间摆一张 260px 宽、带圆角和投影的**卡片**,四周是页面底色 ——
+     那是"贴了一张海报",不是"这一页被这部片子占领了"。
+   ★ 所以这里:通栏 + `object-fit:cover` + `object-position:center top`
+     (海报的构图重心在上半部,cover 要裁只能裁下面)。
+     它从 y=0 开始画 —— 顶栏此时是 `.topbar.float`,不占布局高度,
+     两件事必须**成对**改,只改一个就是"海报上面顶着一条深色带子"。
+   ★ 渐变四段,顺序不能乱:
+       顶上一层浅黑  → 让浮在上面的返回箭头在任何海报上都读得出来
+       马上转透明     → 海报的脸不能被糊住
+       中段上主色     → 这就是"主色向下延伸"
+       落到 --bg      → 和下面的正文无缝接上,没有一条能看见的界线
+   ★ 没算出主色时 `--wash` 缺省,color-mix 的两处会退化成透明,
+     渐变自然退成"黑色遮罩",不会露出一块怪色。 */
+.dt-hero{position:relative;width:100%;aspect-ratio:2/2.55;max-height:74vh;overflow:hidden}
+.dt-hero>img{width:100%;height:100%;object-fit:cover;object-position:center top;display:block}
+.dt-hero::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(180deg,
+    rgba(0,0,0,.46) 0%,
+    rgba(0,0,0,.06) 15%,
+    transparent 34%,
+    color-mix(in srgb,var(--wash,#0e0e13) 34%,transparent) 62%,
+    color-mix(in srgb,var(--wash,#0e0e13) 78%,var(--bg)) 84%,
+    var(--bg) 100%)}
+/* 片名压在海报底部那一段渐变上 —— 那里已经是主色,文字不会和画面打架 */
+.dt-cap{position:absolute;left:0;right:0;bottom:0;z-index:2;
+  padding:0 var(--pad) 14px;text-align:center}
+.dt-name{font-size:23px;font-weight:700;letter-spacing:-.02em;line-height:1.22;margin:0;
+  text-shadow:0 2px 16px rgba(0,0,0,.62)}
 .dt-gen{margin-top:6px;font-size:12px;color:var(--fg-3)}
 
 .dt-mi{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:7px;
@@ -3068,8 +3147,16 @@ html.playing body {
 .dt-tag{font-size:13px;font-style:italic;color:var(--fg-2);margin-bottom:7px}
 .dt-ov{position:relative;color:var(--fg-2);font-size:14px;line-height:1.62}
 .dt-ov.dim{color:var(--fg-3)}
+/* ★ 展开/收起要有过渡(用户 2026-08-02:「点『更多』时没有任何动画效果」)。
+   -webkit-line-clamp **不是可动画属性**,单靠切它就是一记硬跳。
+   加一条 max-height 过渡:收起时压到正好三行,展开时放到一个够用的上限。
+   上限取 620px 而不是 9999px —— 过渡的速度是按"声明的距离"算的,
+   写 9999 的话真实内容早就展完了,后面那大半段时间是**看不见的空等**,
+   表现就是"点完之后卡了一下才反应"。 */
+.dt-ov-t{max-height:620px;overflow:hidden;
+  transition:max-height var(--t8) var(--e-emph-decel)}
 .dt-ov.clamp .dt-ov-t{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;
-  overflow:hidden}
+  overflow:hidden;max-height:calc(14px * 1.62 * 3)}
 /* 「更多」浮在最后一行**行尾**,不另起一行 —— 另起一行会在简介只有 3 行时平白多占一行。
    ★ 上一版是用 `linear-gradient(90deg,transparent,var(--bg))` 把被压住的字淡掉。
      那在纯 --bg 背景上成立,**在这一版不成立** —— 详情页顶部现在铺着海报主色的渐变,
@@ -3114,6 +3201,26 @@ html.playing body {
 .ep-box.as-rail::-webkit-scrollbar{display:none}
 .ep-box.as-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px 10px;
   padding:2px var(--pad) 0}
+/* ★ 第三形态:**只有矩形、没有封面**的横向条(用户 2026-08-02 点名要回来)。
+   它的用处和前两种不一样 —— 前两种是"挑一集看",这一种是"我知道要第几集,
+   直接点过去"。60 集以上时一屏能扫十几格,是这一页唯一能快速定位的东西。
+   卡片仍然是同一个 `.epx` 组件,只是这一层容器把缩略图整块收掉。 */
+.ep-box.as-num{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;
+  padding:2px 0 6px var(--pad);scroll-padding-left:var(--pad);scrollbar-width:none}
+.ep-box.as-num::-webkit-scrollbar{display:none}
+.ep-box.as-num .epx{width:auto;min-width:56px;padding:9px 12px;border-radius:10px;
+  background:rgba(255,255,255,.07);text-align:center}
+.ep-box.as-num .epx-th,
+.ep-box.as-num .epx-m{display:none}
+.ep-box.as-num .epx-n{margin-top:0;font-size:15px;font-weight:640;-webkit-line-clamp:1;
+  display:block;white-space:nowrap}
+/* 这一形态只显示集号,片名在这个尺度上读不出信息量 */
+.ep-box.as-num .epx-n{font-size:0}
+.ep-box.as-num .epx-n>b{font-size:15px;color:var(--fg);margin:0}
+.ep-box.as-num .epx.seen{opacity:1;color:var(--fg-3)}
+.ep-box.as-num .epx.seen .epx-n>b{color:var(--fg-3)}
+.ep-box.as-num .epx.cur{background:var(--acc)}
+.ep-box.as-num .epx.cur .epx-n>b{color:#fff}
 
 .epx{flex:none;scroll-snap-align:start;width:198px;padding:0;border:0;background:none;
   color:var(--fg);text-align:left}
@@ -3165,11 +3272,18 @@ html.playing body {
 .person-av.fb{display:grid;place-items:center;font-size:30px;font-weight:600;color:#fff}
 .person:active .person-av{transform:scale(.95)}
 .person-av img{width:100%;height:100%;object-fit:cover;display:block}
+/* ★ 姓名/角色两行都**钉死行高**(用户 2026-08-02:「演职人员板块要统一高度,
+   不要因为某个演员没有英文名就把排版居中,没有的地方直接留空」)。
+   上一版 `.person-n` 是 line-clamp:2 —— 名字一行的人卡片矮一截,而
+   `.row-scroll` 默认 `align-items:stretch`/基线对齐,于是一整排头像**高低不齐**;
+   没有角色名的人更是整块往上缩。两行都给固定高度、容器顶部对齐,一次治两个。
+   ★ 用 min-height 不用 height:字号跟随系统缩放时(rem 会变)还能撑开。 */
 .person-n{font-size:12.5px;line-height:1.3;margin-top:7px;font-weight:540;
+  min-height:calc(12.5px * 1.3 * 2);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.person-r{font-size:11px;color:var(--fg-3);margin-top:2px;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.row-scroll.crew{margin-top:12px}
+.person-r{font-size:11px;color:var(--fg-3);margin-top:2px;min-height:calc(11px * 1.4);
+  line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-scroll.crew{margin-top:12px;align-items:flex-start}
 
 /* ── 媒体信息卡(Emby 官方客户端那种平铺表)──
    ★ **不做点击展开**(用户点名)。它是纯只读信息,却是这一页唯一要二次点击的东西。 */
@@ -3194,11 +3308,40 @@ html.playing body {
 
 /* ── 单集详情页 ──
    单集的"封面"是这一集的**剧照**(16:9),不是剧的海报 —— 三张页面各用各的图。 */
-.ep-hero{position:relative;aspect-ratio:16/9;overflow:hidden;background:var(--s1)}
+/* ★ 「缺乏播放器的高级感」(用户 2026-08-02)。上一版就是一张 16:9 图 + 一条渐变,
+   和列表里的缩略图除了大小没有任何区别 —— 它没有告诉人"这是一块可以按下去的屏幕"。
+   这一版补的三件事,都是各家播放器封面的通用语汇:
+     1. **玻璃播放键**压在正中偏下 —— 一眼认出这是入口,而不是配图;
+     2. 底部一条**进度 + 剩余时长胶囊** —— 把"看到哪了"直接画在画面上;
+     3. 四周一圈内阴影 + 顶部一道浅黑 —— 让画面像是嵌进屏幕里的,
+        而不是平贴上去的一张贴纸(顺带让浮在上面的返回箭头读得清)。
+   ★ 底部渐变收到 var(--bg),和 `.dt-hero` 同一条道理:和正文无缝接上。 */
+.ep-hero{position:relative;aspect-ratio:16/9;overflow:hidden;background:#000}
 .ep-hero>img{width:100%;height:100%;object-fit:cover;display:block}
-.dt-scrim{position:absolute;inset:0;
-  background:linear-gradient(to top,var(--bg) 1%,rgba(8,8,12,.45) 34%,transparent 68%)}
-.prog.big{position:absolute;left:0;right:0;bottom:0;height:3.5px;background:rgba(255,255,255,.2)}
+.dt-scrim{position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(to top,var(--bg) 1%,rgba(8,8,12,.5) 30%,transparent 62%,
+    rgba(0,0,0,.34) 100%);
+  box-shadow:inset 0 0 60px rgba(0,0,0,.45)}
+.ep-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-58%);z-index:2;
+  width:62px;height:62px;border-radius:50%;border:1px solid rgba(255,255,255,.34);
+  display:grid;place-items:center;color:#fff;background:rgba(20,20,26,.4);
+  box-shadow:0 10px 30px -8px rgba(0,0,0,.8);
+  transition:transform var(--sp-snap-t) var(--sp-snap),background-color var(--t3) var(--e-std)}
+@supports (backdrop-filter:blur(2px)){
+  .ep-play{background:rgba(255,255,255,.14);backdrop-filter:blur(18px) saturate(150%)}
+}
+.ep-play:active{transform:translate(-50%,-58%) scale(.9);background:rgba(255,255,255,.24)}
+.ep-play>svg{margin-left:3px}
+/* 剩余时长胶囊。★ 写"剩余"不写总时长:总时长在下面的媒体信息里,
+   而站在这里的人想知道的是"还要花多久"。 */
+.ep-left{position:absolute;right:var(--pad);bottom:14px;z-index:2;
+  font-size:11.5px;font-weight:560;color:#fff;padding:3px 9px;border-radius:8px;
+  background:rgba(0,0,0,.46);letter-spacing:.02em}
+@supports (backdrop-filter:blur(2px)){
+  .ep-left{background:rgba(255,255,255,.16);backdrop-filter:blur(14px)}
+}
+.prog.big{position:absolute;left:0;right:0;bottom:0;z-index:2;height:3.5px;
+  background:rgba(255,255,255,.2)}
 .prog.big>i{display:block;height:100%;background:var(--acc);transform-origin:left}
 .epd-head{padding:12px var(--pad) 0}
 .epd-crumb{font-size:12px;color:var(--acc);font-weight:560}
@@ -3206,17 +3349,34 @@ html.playing body {
   margin:4px 0 8px}
 /* 单集页的元信息靠左(它上面是靠左的标题),剧/电影页居中(上面是居中的大海报) */
 .epd .dt-mi{justify-content:flex-start}
-.epd-nav{display:flex;gap:10px;padding:20px var(--pad) 0}
-.epd-nb{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:10px 12px;
-  border-radius:12px;border:0;background:rgba(255,255,255,.06);color:var(--fg);
-  text-align:left}
-.epd-nb.r{justify-content:flex-end;text-align:right}
-.epd-nb.off{color:var(--fg-3);font-size:12px;justify-content:center;background:none}
-.epd-nb>div{min-width:0}
-.epd-nb i{display:block;font-size:10.5px;color:var(--fg-3);font-style:normal}
-.epd-nb b{display:block;font-size:12.5px;font-weight:520;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
+/* ★ 「上一集 / 下一集」两个按钮**整块删掉**(用户 2026-08-02:「在这里没有任何用处」)。
+   它们本来就和上面那条「本季其它集」重复 —— 那条横滑轨道里就有相邻的集,
+   而且能一次跨好几集。相关的 .epd-nav / .epd-nb 样式一并删,不留死代码。 */
 .card.cur .card-a{outline:2px solid var(--acc);outline-offset:1px}
+
+/* ── 播放前的四件事:版本 / 线路 / 音频 / 字幕 ──
+   ★ 用户 2026-08-02:「这些都是用户播放前必须要选的」。
+     以前它们只在**播放页的 OSD 面板**里 —— 那意味着必须先播错一次、
+     再进面板改、再等一次起播。字幕多的片子尤其难受。
+   ★ 版式是一排可横滑的胶囊,每颗写「标签 · 当前值」:
+     不占竖向空间(它在播放按钮正下方,那里寸土寸金),
+     而且**不点开也能看见现在会用哪一条** —— 这才是它存在的主要价值。
+   ★ 拿不到候选(比如只有一条线路 / 这个源没有多版本)的胶囊**不画**,
+     不做成灰着点不动的样子。 */
+.ps-bar{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;
+  padding:12px var(--pad) 0;scroll-padding-left:var(--pad)}
+.ps-bar::-webkit-scrollbar{display:none}
+.ps-chip{flex:none;display:flex;align-items:center;gap:6px;max-width:62vw;
+  padding:7px 12px;border-radius:11px;border:0;color:var(--fg-2);font-size:12.5px;
+  background:rgba(255,255,255,.08)}
+@supports (backdrop-filter:blur(2px)){
+  .ps-chip{background:rgba(255,255,255,.07);backdrop-filter:blur(14px)}
+}
+.ps-chip:active{background:rgba(255,255,255,.16)}
+.ps-chip>i{font-style:normal;color:var(--fg-3);flex:none}
+.ps-chip>b{font-weight:560;color:var(--fg);min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.ps-chip.off>b{color:var(--fg-3);font-weight:400}
 
 /* ── 演职员详情页 ──
    版式:**左上头像 / 右侧生平信息 / 下方参演作品**(用户 2026-08-01 描述的那一版)。 */
@@ -3668,17 +3828,30 @@ html.playing body {
 .srv-gly { font-size: 20px; line-height: 1; color: var(--fg-2); }
 .lit-rm { font-size: 12px; color: var(--fg-2); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ── 源类型选择:分组网格。12+ 种横滑 chip 要滑三屏还看不到全貌 ── */
-.src-sec { font-size: 12px; font-weight: 640; color: var(--fg-3); padding: 14px var(--pad) 8px; letter-spacing: .02em; }
-.src-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 0 var(--pad); }
-.src-it {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  min-height: 78px; padding: 10px 6px; border-radius: var(--r);
-  background: var(--s1); border: 1.5px solid transparent; color: var(--fg-2);
-  transition: border-color var(--t3) var(--e-std), color var(--t3) var(--e-std);
-}
-.src-it .src-n { font-size: 11.5px; font-weight: 560; text-align: center; line-height: 1.25; }
-.src-it.on { border-color: var(--acc); color: var(--acc); background: var(--acc-dim); }
+/* ── 分步添加(2026-08-02)──
+   ★ 用户原话:「往下浏览布局很糟糕。应该改为分步引导:先选服务器类型
+     (媒体服务器 / 网盘·文件源),选完再切到下一页填名称地址账号密码」。
+     上一版是**一屏到底**:13 个源类型的网格 + 底下跟着表单,
+     手机屏上那意味着选完还要往下滚一屏才看得见第一个输入框,
+     而且那 13 个格子一直占着,填字段的时候完全是干扰。
+   ★ 第一步给的是**大类**(三张大卡),不是 13 个小格 ——
+     绝大多数人只需要认得出"我要加的是 Emby 还是网盘"。 */
+.stp-h { padding: 18px var(--pad) 4px; }
+.stp-h h2 { margin: 0; font-size: 19px; font-weight: 680; letter-spacing: -.02em; }
+.stp-h p { margin: 6px 0 0; font-size: 12.5px; color: var(--fg-3); line-height: 1.5; }
+.stp-cats { display: flex; flex-direction: column; gap: 10px; padding: 14px var(--pad) 0; }
+.stp-cat { display: flex; align-items: center; gap: 13px; text-align: left;
+           padding: 15px 14px; border-radius: var(--r-lg); border: 0; color: var(--fg);
+           background: rgba(255, 255, 255, .06); }
+.stp-cat:active { background: rgba(255, 255, 255, .13); }
+.stp-cat .stp-ic { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid;
+                   place-items: center; background: rgba(255, 255, 255, .08); color: var(--fg-2); }
+.stp-cat .stp-t { flex: 1; min-width: 0; }
+.stp-cat .stp-t b { display: block; font-size: 15px; font-weight: 620; }
+.stp-cat .stp-t span { display: block; font-size: 12px; color: var(--fg-3); margin-top: 3px;
+                       line-height: 1.4; }
+/* 第二步:大类里的具体源仍用 chip 横排(一类里最多 7 个,一屏放得下) */
+.stp-kinds { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px var(--pad) 0; }
 
 /* ── 线路管理 ──
    长按拖拽排序:抬起来的那一行 .dragging(阴影 + 微微放大 + 压在别人上面),
@@ -3711,18 +3884,28 @@ html.playing body {
 .ico-prev { display: flex; align-items: center; gap: 14px; padding: 16px var(--pad); }
 .ico-prev .pv { width: 64px; height: 64px; border-radius: 16px; flex: none; display: grid; place-items: center;
                 background: var(--s2); border: 1px solid var(--line); font-size: 30px; color: var(--fg-2); overflow: hidden; }
-.ico-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 4px var(--pad) 16px; }
-.ico-it { aspect-ratio: 1; border-radius: var(--r); background: var(--s1); border: 1.5px solid transparent;
-          display: grid; place-items: center; font-size: 22px; color: var(--fg-2); overflow: hidden;
-          transition: border-color var(--t3) var(--e-std); }
+/* ★ 用户 2026-08-02:「图标不要做得那么小,适当放大;不要带框的背景设计
+   (被铁栏杆/方框限制住),可以给图标固定一个显示范围,但不要带框」。
+   所以:5 列 → **4 列**(390px 屏上每格从 60px 涨到 78px),
+   底色和那圈 1.5px 边框整块拿掉,只留一个固定的方形显示范围。
+   选中态改成"图标下方一枚小圆点 + 提亮",不再靠画一个框——
+   框是这一屏里唯一的直角元素,一屏铺 60 个就是用户说的铁栏杆。 */
+.ico-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 6px; padding: 4px var(--pad) 16px; }
+.ico-it { position: relative; aspect-ratio: 1; border-radius: var(--r); background: none; border: 0;
+          display: grid; place-items: center; font-size: 26px; color: var(--fg-2); overflow: hidden;
+          transition: transform var(--t3) var(--e-std), opacity var(--t3) var(--e-std); }
+.ico-it:active { transform: scale(0.92); }
+/* 选中:一枚圆点顶在右上,不画框 */
+.ico-it.on::after { content: ""; position: absolute; right: 6px; top: 6px; width: 7px; height: 7px;
+                    border-radius: 50%; background: var(--acc); }
 /* ★ 图标库里的图**必须自己收进格子**。
    少了这一条,`<img>` 按**天然尺寸**渲染(图标库里普遍是 256~512px),
    而 `.ico-it` 只有 60 来 px 且 `overflow:hidden` —— 于是每一格只露出那张图的
    **左上角一小块**,60 格看下来像 60 块随机色斑,根本认不出是什么图标。
    这类错不报错、控制台干净,只有量 img 的 getBoundingClientRect 才看得见。
    contain 不是 cover:图标是有留白构图的,cover 会把边缘裁掉。 */
-.ico-it img { width: 100%; height: 100%; object-fit: contain; display: block; padding: 9px; }
-.ico-it.on { border-color: var(--acc); background: var(--acc-dim); color: var(--acc); }
+.ico-it img { width: 100%; height: 100%; object-fit: contain; display: block; padding: 4px; }
+.ico-it.on { color: var(--acc); }
 .ico-it .lbl { font-size: 9px; line-height: 1.1; text-align: center; padding: 0 3px; color: var(--fg-3);
                overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ico-it .sq { width: 26px; height: 26px; border-radius: 7px; margin-bottom: 3px; }

@@ -4869,7 +4869,7 @@ mod tests {
     /// 反向验证:把 values/themes.xml 里的 windowBackground 那行删掉 → 本测试立刻红。
     #[test]
     fn video_transparency_chain_is_intact() {
-        let cases: [(&str, &str, &str); 5] = [
+        let cases: [(&str, &str, &str); 8] = [
             (
                 "Activity 窗口(浅色)",
                 include_str!("../gen/android/app/src/main/res/values/themes.xml"),
@@ -4879,6 +4879,28 @@ mod tests {
                 "Activity 窗口(深色)",
                 include_str!("../gen/android/app/src/main/res/values-night/themes.xml"),
                 "@android:color/transparent",
+            ),
+            /* ★ API 31+ 的两份是**整条替换**不是叠加,windowBackground 必须各写一遍。
+               而且限定符优先级里 -night 排在 -vXX 前面,所以「深色 + Android 12 以上」
+               命中的是 values-night-v31 —— 那一份漏了就是安卓 12 以上深色模式黑屏。 */
+            (
+                "Activity 窗口(浅色 / API31+)",
+                include_str!("../gen/android/app/src/main/res/values-v31/themes.xml"),
+                "@android:color/transparent",
+            ),
+            (
+                "Activity 窗口(深色 / API31+)",
+                include_str!("../gen/android/app/src/main/res/values-night-v31/themes.xml"),
+                "@android:color/transparent",
+            ),
+            /* ★ 手机端的页面栈容器 `.pg` 自己写着 `background: var(--bg)` ——
+               一块不透明的底,正正盖在 SurfaceView 上。html/body 清干净了也没用。
+               2026-08-02 用户报的「播放页只有声音没有画面」就是这一层,
+               而上一版这个测试只看 tv.css,手机端整条链一个字都没检。 */
+            (
+                "前端渲染链(手机端页面栈)",
+                include_str!("../../../ui/mobile/theme/mobile.css"),
+                "html.playing .pg,",
             ),
             (
                 "Tauri 窗口配置",
@@ -4891,7 +4913,7 @@ mod tests {
                 "setBackgroundColor(Color.TRANSPARENT)",
             ),
             (
-                "前端渲染链",
+                "前端渲染链(TV)",
                 include_str!("../../../ui/tv/theme/tv.css"),
                 "html.playing",
             ),
@@ -4901,6 +4923,53 @@ mod tests {
                 src.contains(needle),
                 "视频透出链断了一层「{layer}」:找不到 {needle:?}。\
                  少这一层的表现是有声音没画面,而且一句日志都没有。"
+            );
+        }
+    }
+
+    /// 四份主题文件的开屏配置必须一致。
+    ///
+    /// ★ 挡的是 2026-08-02 那个「点开软件先看见一个被放大的图标」:
+    ///   安卓的资源限定符优先级里 **-night 排在 -vXX 前面**,所以
+    ///   「Android 12 以上 + 系统深色模式」命中的是 `values-night-v31`。
+    ///   2026-08-01 只建了 `values-v31`,于是这条修复对**默认深色的手机一台都没生效**,
+    ///   而浅色模式下一切正常 —— 最典型的"我这儿是好的"。
+    ///   开屏配置本身是 API 31+ 才有的属性,所以只校验带 v31 的那两份。
+    /// 反向验证:删掉 `values-night-v31/themes.xml` 里任意一行 → 本测试立刻红。
+    #[test]
+    fn splash_config_covers_both_ui_modes() {
+        /* ★ 连 `<item name="android:` 一起匹配,**不能只搜属性名** ——
+           这两个文件里的长注释本身就把三个属性名逐个写了一遍,
+           光搜名字的话把 `<item>` 整行删掉测试照样绿。
+           (第一次写这条测试就是这么假绿的,反向注入才照出来。) */
+        let keys = [
+            "<item name=\"android:windowSplashScreenBackground\">",
+            "<item name=\"android:windowSplashScreenAnimatedIcon\">",
+            "<item name=\"android:windowSplashScreenAnimationDuration\">",
+        ];
+        let files = [
+            (
+                "values-v31(浅色)",
+                include_str!("../gen/android/app/src/main/res/values-v31/themes.xml"),
+            ),
+            (
+                "values-night-v31(深色)",
+                include_str!("../gen/android/app/src/main/res/values-night-v31/themes.xml"),
+            ),
+        ];
+        for (name, src) in files {
+            for k in keys {
+                assert!(
+                    src.contains(k),
+                    "{name} 缺 {k}。少了它,那个 UI 模式下开屏会回落到系统默认 —— \
+                     图标被放大铺满图标槽、底色跟着透明的 windowBackground 走,\
+                     和随后的 #boot 交接时看得见一次跳变。"
+                );
+            }
+            assert!(
+                src.contains("#0e0e13"),
+                "{name} 的开屏底色必须和 index-mobile.html 的 #boot、mobile.css 的 --bg \
+                 逐位一致,差一个灰阶在 OLED 上就是一记暗闪。"
             );
         }
     }

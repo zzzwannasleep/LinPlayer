@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      API 31+ 且**深色模式**的开屏。
+
+      ★★ 这个文件为什么必须存在(2026-08-02 的真因)
+
+        安卓挑资源目录时,限定符是有**优先级次序**的,而「夜间模式(-night)」
+        排在「平台版本(-vXX)」**前面**。所以在 Android 12 以上 + 系统深色模式下,
+        胜出的是 `values-night/themes.xml` —— 那份里只有 windowBackground,
+        **一条开屏配置都没有**。表现:
+          - windowSplashScreenAnimatedIcon 没生效 → 系统拿 @mipmap/ic_launcher
+            按默认尺寸铺进图标槽,也就是用户看到的「图标被放大得很大」;
+          - windowSplashScreenBackground 没生效 → 开屏底色回落到 windowBackground,
+            而我们那个是**透明**,于是底色是随机的(多半是壁纸或纯黑),
+            和随后 #boot 的 #0e0e13 一交接就是一记闪。
+        2026-08-01 那次只建了 `values-v31`,在**浅色模式**下确实修好了 ——
+        而手机默认深色的用户一个都没修到。这就是用户说"加载动画没有完全覆盖"的那半秒。
+
+      ★ 三份文件的内容必须**逐条一致**,少一条就是一种具体故障:
+          values/themes.xml        —— 浅色 / API < 31
+          values-night/themes.xml  —— 深色 / API < 31
+          values-v31/themes.xml    —— 浅色 / API >= 31
+          这一份                    —— 深色 / API >= 31
+        (windowBackground 的透明是四份都要写的,漏了就是「有声音没画面」。)
+
+      ★ 注意 XML 注释里不能出现两个连字符,aapt2 的 mergeResources 会 SAXParseException,
+        整个 APK 出不来。
+    -->
+    <style name="Theme.linplayer_android" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">#0e0e13</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <item name="android:windowSplashScreenAnimationDuration">200</item>
+    </style>
+</resources>
