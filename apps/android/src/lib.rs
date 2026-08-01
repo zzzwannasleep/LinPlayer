@@ -503,22 +503,35 @@ async fn mark_bangumi_watched(acc: &linplayer_core::sync::SyncAccount, info: &em
         )
         .await
     };
-    let Some(r) = matched else {
-        log::info!("[Bangumi] 反查不到条目,跳过: {}", info.title);
-        return;
+    // 反查失败要说清楚是**哪一步**失败:搜不到 / 相似度不够 / 分集表里没这集。
+    let r = match matched {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("[Bangumi] 反查失败,跳过标记({}):{e}", info.title);
+            return;
+        }
     };
+    // 失败必须把原因打出来:上一版只打 true/false,一个 404 端点藏了几个月。
+    fn say(what: &str, r: Result<(), String>) {
+        match r {
+            Ok(()) => log::info!("[Bangumi] {what} OK"),
+            Err(e) => log::warn!("[Bangumi] {what} 失败: {e}"),
+        }
+    }
     if info.media_type == "movie" {
-        let ok = bangumi::set_collection_type(acc, r.subject_id, 2).await;
-        log::info!("[Bangumi] 电影标记看过 -> {ok}");
+        say("电影标记看过", bangumi::set_collection_type(acc, r.subject_id, 2).await);
         return;
     }
-    let ok = bangumi::set_collection_type(acc, r.subject_id, 3).await;
-    log::info!("[Bangumi] 收藏为在看 subject={} -> {ok}", r.subject_id);
-    let ok = bangumi::update_episode_status(acc, r.subject_id, r.episode_id, 2).await;
-    log::info!("[Bangumi] 单集标看过 ep={} -> {ok}", r.episode_id);
+    say(
+        &format!("收藏为在看 subject={}", r.subject_id),
+        bangumi::set_collection_type(acc, r.subject_id, 3).await,
+    );
+    say(
+        &format!("单集标看过 ep={}", r.episode_id),
+        bangumi::update_episode_status(acc, r.subject_id, r.episode_id, 2).await,
+    );
     if r.is_last_episode {
-        let ok = bangumi::set_collection_type(acc, r.subject_id, 2).await;
-        log::info!("[Bangumi] 最后一集,整部标看过 -> {ok}");
+        say("最后一集,整部标看过", bangumi::set_collection_type(acc, r.subject_id, 2).await);
     }
 }
 
@@ -949,10 +962,28 @@ async fn get_filters(state: State<'_, AppState>, parent_id: String) -> Result<em
 }
 
 /// 标记已看/未看。
+///
+/// ★ 手动标「看过」也要同步 Bangumi:在这之前只有播到 80% 走 sync_on_stop 那条路才会同步,
+/// 用户在详情页/卡片上手点「标为看完」Bangumi 那边毫无反应。
+/// 反查要打好几次 Bangumi API(搜条目 + 拉分集表),放后台跑,别让 UI 的勾等它。
+/// 取消已看不回滚 Bangumi —— 那是另一个语义(撤销收藏),用户没要。
 #[tauri::command]
 async fn set_played(state: State<'_, AppState>, item_id: String, played: bool) -> Result<(), String> {
     let s = session_of(&state)?;
-    emby::set_played(&state.http, &s, &item_id, played).await
+    emby::set_played(&state.http, &s, &item_id, played).await?;
+    let acc = state.config.lock().unwrap().sync_bangumi.clone();
+    if let (true, Some(acc)) = (played, acc) {
+        let http = state.http.clone();
+        tauri::async_runtime::spawn(async move {
+            // 非 Movie/Episode(整季、整剧)拿不到 info,静默跳过。
+            let Some(info) = emby::fetch_scrobble_info(&http, &s, &item_id).await else { return };
+            if info.title.is_empty() {
+                return;
+            }
+            mark_bangumi_watched(&acc, &info).await;
+        });
+    }
+    Ok(())
 }
 
 /// 接下来播放。
@@ -4264,7 +4295,13 @@ async fn bangumi_set_collection(
 ) -> Result<bool, String> {
     let acc = state.config.lock().unwrap().sync_bangumi.clone();
     let Some(acc) = acc else { return Ok(false) };
-    Ok(bangumi::set_collection_type(&acc, subject_id, type_).await)
+    match bangumi::set_collection_type(&acc, subject_id, type_).await {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            log::warn!("[Bangumi] 设置收藏失败: {e}");
+            Ok(false)
+        }
+    }
 }
 
 /// 更新单集观看状态(type:2看过)。
@@ -4277,7 +4314,13 @@ async fn bangumi_update_episode(
 ) -> Result<bool, String> {
     let acc = state.config.lock().unwrap().sync_bangumi.clone();
     let Some(acc) = acc else { return Ok(false) };
-    Ok(bangumi::update_episode_status(&acc, subject_id, episode_id, type_.unwrap_or(2)).await)
+    match bangumi::update_episode_status(&acc, subject_id, episode_id, type_.unwrap_or(2)).await {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            log::warn!("[Bangumi] 更新单集失败: {e}");
+            Ok(false)
+        }
+    }
 }
 
 /// 单部番的简介(Bangumi)。**按需**拉,聚焦视图只对当前那条调。

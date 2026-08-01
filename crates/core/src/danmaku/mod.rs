@@ -1135,7 +1135,7 @@ fn cjk_number(s: &str) -> Option<i64> {
 ///   A. 一部剧一个条目、季在里面 → series_name="孤独摇滚",season_no=2
 ///   B. 每季各一个条目          → series_name="孤独摇滚 第二季",season_no=1
 /// 只认 season_no 的话,B 这种摆法会把正确的「第二季」候选判成错季直接压死。
-fn season_term(input: &MatchInput, candidate_title: &str) -> f64 {
+pub(crate) fn season_term(input: &MatchInput, candidate_title: &str) -> f64 {
     let Some(want) = season_of(&input.title).or(input.season_no) else {
         return 0.0; // 不知道要第几季 → 这一路不表态
     };
@@ -1152,7 +1152,7 @@ fn season_term(input: &MatchInput, candidate_title: &str) -> f64 {
 ///
 /// 长标题会把弹弹Play 的全文检索呛住:带季号、带破折号副标题的整串搜出来常常是 0 条,
 /// 而只搜主名就有。参考实现(matcher_http.c 的 core-name recall pass)也是这么干的。
-fn core_name(title: &str) -> String {
+pub(crate) fn core_name(title: &str) -> String {
     static SUB: OnceLock<Regex> = OnceLock::new();
     let sub = SUB.get_or_init(|| {
         // -副标题- / ～副标题～ / (副标题) /(副标题)/ [副标题] / :副标题 / :副标题
@@ -1169,7 +1169,7 @@ fn core_name(title: &str) -> String {
 /// 这是 bangumi2anibt README 里那句「数据库本身就是平行语料」的镜像 ——
 /// 弹弹Play 的条目只有一个标题(没有别名表),平行语料在**我们这边**:
 /// 媒体库同时握着中文名、原名和发布文件名。谁都可能是能对上的那一个,所以全试。
-fn title_score(input: &MatchInput, candidate: &str) -> f64 {
+pub(crate) fn title_score(input: &MatchInput, candidate: &str) -> f64 {
     std::iter::once(input.title.as_str())
         .chain(input.alt_titles.iter().map(String::as_str))
         .filter(|s| !s.trim().is_empty())

@@ -283,40 +283,68 @@ async fn fetch_profile(access: &str) -> Option<(Option<String>, Option<String>)>
     Some((name, j["id"].as_str().map(String::from).or_else(|| j["id"].as_i64().map(|n| n.to_string()))))
 }
 
+/// 条目收藏端点(POST 新增/覆盖)。
+fn collection_endpoint(subject_id: i64) -> String {
+    format!("{API_BASE}/v0/users/-/collections/{subject_id}")
+}
+
+/// 章节收藏**批量**端点(PATCH)。
+/// ★ 2026-08-01:原来「点格子」打的是 `/v0/users/-/collections/{subject_id}/episodes/{episode_id}`
+/// —— 这个路径在 Bangumi **根本不存在**(官方 openapi 实证):单集写入是
+/// `PUT /v0/users/-/collections/-/episodes/{episode_id}`(subject 位是字面 `-`),
+/// 带 subject_id 的只有批量的 `PATCH .../{subject_id}/episodes`。
+/// 于是那一发永远 404、`is_success()` 恒 false,还被 `-> bool` 吞掉了原因 ——
+/// 这就是「只有『在看』能成、点格子返回 false」的直接根因(在看走的是上面那个正确端点)。
+/// 选批量 PATCH 而不是单集 PUT:两个参数都用得上,且官方明确它会**重算条目完成度**
+/// (单集 PUT 没这句),用户要的「Bangumi 那边标记看过」包含进度跟着走。
+fn episodes_endpoint(subject_id: i64) -> String {
+    format!("{API_BASE}/v0/users/-/collections/{subject_id}/episodes")
+}
+
+/// 把响应折成 Result:成功 Ok,失败带上状态码和响应体前 200 字。
+/// ★ 别再返回裸 bool —— 上一版就是因为 false 不带原因,一个 404 路径活了几个月没人看见。
+async fn check(resp: reqwest::Result<reqwest::Response>, what: &str) -> Result<(), String> {
+    let resp = resp.map_err(|e| format!("{what}: 请求失败 {e}"))?;
+    let code = resp.status();
+    if code.is_success() {
+        return Ok(());
+    }
+    let body: String = resp.text().await.unwrap_or_default().chars().take(200).collect();
+    Err(format!("{what}: HTTP {} {}", code.as_u16(), body.trim()))
+}
+
 /// 设置条目收藏状态(type: 1=想看 2=看过 3=在看 4=搁置 5=抛弃)。
 /// 更新单集进度前必须先确保条目已收藏,否则未收藏的番更新单集会失败。
-pub async fn set_collection_type(account: &SyncAccount, subject_id: i64, type_: i32) -> bool {
-    let Some(valid) = ensure_valid(account).await else {
-        return false;
-    };
-    crate::http::client()
-        .post(format!("{API_BASE}/v0/users/-/collections/{subject_id}"))
+pub async fn set_collection_type(
+    account: &SyncAccount,
+    subject_id: i64,
+    type_: i32,
+) -> Result<(), String> {
+    let valid = ensure_valid(account).await.ok_or("Bangumi 令牌已过期且刷新失败")?;
+    let resp = crate::http::client()
+        .post(collection_endpoint(subject_id))
         .header("Authorization", format!("Bearer {}", valid.access_token))
         .json(&serde_json::json!({ "type": type_ }))
         .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+        .await;
+    check(resp, "设置收藏状态").await
 }
 
-/// 更新单集观看状态(type: 2=看过)。
+/// 更新单集观看状态(type: 0=撤销 1=想看 2=看过 3=抛弃)。
 pub async fn update_episode_status(
     account: &SyncAccount,
     subject_id: i64,
     episode_id: i64,
     type_: i32,
-) -> bool {
-    let Some(valid) = ensure_valid(account).await else {
-        return false;
-    };
-    crate::http::client()
-        .put(format!("{API_BASE}/v0/users/-/collections/{subject_id}/episodes/{episode_id}"))
+) -> Result<(), String> {
+    let valid = ensure_valid(account).await.ok_or("Bangumi 令牌已过期且刷新失败")?;
+    let resp = crate::http::client()
+        .patch(episodes_endpoint(subject_id))
         .header("Authorization", format!("Bearer {}", valid.access_token))
-        .json(&serde_json::json!({ "type": type_ }))
+        .json(&serde_json::json!({ "episode_id": [episode_id], "type": type_ }))
         .send()
-        .await
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+        .await;
+    check(resp, "标记单集看过").await
 }
 
 /// 单个 subject 的简介。**按需拉**,不在放送表里做。
@@ -468,6 +496,20 @@ mod tests {
         assert_eq!(broadcast_start("2026-07-06T14:30:00.000Z"), None);
         assert_eq!(broadcast_start("R/"), None);
         assert_eq!(broadcast_start(""), None);
+    }
+
+    /// 端点拼接钉死在官方 openapi 的形状上。
+    /// 上一版把单集写成 `.../collections/{subject_id}/episodes/{episode_id}` —— 该路径不存在,
+    /// 永远 404。这条断言就是那个 bug 的复现闸门:改回旧形状它立刻红。
+    #[test]
+    fn endpoints_match_official_openapi() {
+        assert_eq!(collection_endpoint(303864), "https://api.bgm.tv/v0/users/-/collections/303864");
+        assert_eq!(
+            episodes_endpoint(303864),
+            "https://api.bgm.tv/v0/users/-/collections/303864/episodes"
+        );
+        // 单集 id 绝不能出现在路径里(它只能进 PATCH 的 body)。
+        assert!(!episodes_endpoint(303864).contains("/episodes/"));
     }
 
     /// 图片改写:官方 /calendar 实测回的是 **http://** 的 lain 地址(不是 https),

@@ -8,6 +8,8 @@ use serde_json::Value;
 
 use super::calendar::parse_date_to_days;
 use super::BANGUMI_API_OFFICIAL;
+// 标题评分直接借弹幕那套(编辑距离 + 包含下限 + 季号硬信号 + 平行语料),别造第二套。
+use crate::danmaku::{core_name, season_term, title_score, MatchInput};
 
 // ★ 2026-07-21:原来这里挂的是 BANGUMI_API_MIRROR(bgmapi.anibt.net)。
 // 那个反代过不了 CF —— 四个查询全部 `.ok()?` 静默返回 None,resolve_episode 永远失败,
@@ -37,21 +39,25 @@ fn client() -> reqwest::Client {
     crate::http::client()
 }
 
-/// 解析剧集 → (subject_id, episode_id)。失败 None(静默跳过)。
+/// 解析剧集 → (subject_id, episode_id)。Err 带失败原因(宿主会打日志)。
 pub async fn resolve_episode(
     title: &str,
     original_title: Option<&str>,
     air_date: Option<&str>,
     season: i64,
     episode: i64,
-) -> Option<BangumiEpisodeRef> {
+) -> Result<BangumiEpisodeRef, String> {
     let m = search_subject(title, original_title, air_date, season).await?;
     let mut subject_id = m.subject_id;
     if season > 1 && !m.season_matched {
-        subject_id = resolve_season_subject_id(m.subject_id, season).await?;
+        subject_id = resolve_season_subject_id(m.subject_id, season)
+            .await
+            .ok_or_else(|| format!("条目 {} 的续集链走不到第 {season} 季", m.subject_id))?;
     }
-    let (episode_id, is_last_episode) = find_episode_id_by_sort(subject_id, episode).await?;
-    Some(BangumiEpisodeRef { subject_id, episode_id, is_last_episode })
+    let (episode_id, is_last_episode) = find_episode_id_by_sort(subject_id, episode)
+        .await
+        .ok_or_else(|| format!("条目 {subject_id} 的分集表里没有第 {episode} 集"))?;
+    Ok(BangumiEpisodeRef { subject_id, episode_id, is_last_episode })
 }
 
 /// 解析电影 → (subject_id, 主章节 episode_id)。
@@ -59,79 +65,125 @@ pub async fn resolve_movie(
     title: &str,
     original_title: Option<&str>,
     air_date: Option<&str>,
-) -> Option<BangumiEpisodeRef> {
+) -> Result<BangumiEpisodeRef, String> {
     let m = search_subject(title, original_title, air_date, 1).await?;
-    let (episode_id, _) = find_episode_id_by_sort(m.subject_id, 1).await?;
+    let (episode_id, _) = find_episode_id_by_sort(m.subject_id, 1)
+        .await
+        .ok_or_else(|| format!("条目 {} 没有可标记的章节", m.subject_id))?;
     // 电影只有一「集」,看完即完结。
-    Some(BangumiEpisodeRef { subject_id: m.subject_id, episode_id, is_last_episode: true })
+    Ok(BangumiEpisodeRef { subject_id: m.subject_id, episode_id, is_last_episode: true })
 }
 
-// ============ 标题搜索 → subject ============
+/* ============ 标题搜索 → subject ============
+
+   ★ 2026-08-01 重写。旧实现挑候选的规则是:开播日期能对上就用日期最近的,
+   **对不上就无条件拿 results[0]** —— 标题相似度一路信号都没有。后果两头都差:
+     - 搜「孤独摇滚」回来一堆同名衍生/OVA/广播剧,第一条经常不是本体 → 标到别的条目上;
+     - 库里是中文名而 Bangumi 收的是日文原名时,搜索本身就回不了东西 → 整条静默跳过。
+   弹幕那边为这件事已经写过一套评分(编辑距离 + 包含下限 + 季号硬信号 + 平行语料 alt_titles,
+   见 danmaku::title_score/season_term),那套是照 bangumi2anibt 重写并有测试钉住的。
+   这里直接复用它,不再造第二套:MatchInput 本来就是 pub 的,装好就能用。 */
+
+/// 标题相似度门槛。低于它就判「没匹配上」而不是硬塞一个 ——
+/// 标错条目比不标更坏:那是往用户的 Bangumi 账号里写别人的番。
+const MIN_TITLE_SCORE: f64 = 0.45;
+
+/// 单个候选的评分,返回 (总分, 标题相似度, 开播日期是否吻合)。
+///
+/// 后两项是**两条独立的准入证据**,任一成立即可(见 search_subject 的 eligible)——
+/// Bangumi 有些条目 name_cn 是空的,库里又是中文名,这时标题一路必然 0 分,
+/// 但开播日期对得上仍是很硬的证据。只认标题会把这类本来能对上的条目误杀。
+fn candidate_score(input: &MatchInput, air_days: Option<i64>, c: &Value) -> (f64, f64, bool) {
+    let jp = c["name"].as_str().unwrap_or("");
+    let cn = c["name_cn"].as_str().unwrap_or("");
+    let title_s = title_score(input, jp).max(title_score(input, cn));
+    // 季号判定用带季信息的那个写法(name_cn 常带「第二季」,name 常不带)。
+    let season_s = season_term(input, cn).max(season_term(input, jp));
+    // 开播日期:Bangumi 的 date 是这一**季/部**的首播日,和 Emby 的 PremiereDate 同口径。
+    // 对得上是强证据,对不上是强反证 —— 但缺日期时不表态(新番/冷门条目常常没有)。
+    let date_ok = matches!(
+        (air_days, c["date"].as_str().and_then(parse_date_to_days)),
+        (Some(a), Some(b)) if (a - b).abs() <= DATE_TOLERANCE_DAYS
+    );
+    let date_s = match (air_days, c["date"].as_str().and_then(parse_date_to_days)) {
+        (Some(_), Some(_)) if date_ok => 0.3,
+        (Some(_), Some(_)) => -0.3,
+        _ => 0.0,
+    };
+    (title_s + season_s + date_s, title_s, date_ok)
+}
+
 async fn search_subject(
     title: &str,
     original_title: Option<&str>,
     air_date: Option<&str>,
     season: i64,
-) -> Option<SubjectMatch> {
-    // 去重保序的候选查询:多季先去季度后缀,再原名,再外文名。
-    let mut queries: Vec<String> = Vec::new();
-    let mut push = |s: String| {
-        let t = s.trim().to_string();
-        if !t.is_empty() && !queries.contains(&t) {
-            queries.push(t);
-        }
+) -> Result<SubjectMatch, String> {
+    // 平行语料:中文名 / 原名 / 剥掉季号和副标题的主名。哪个能对上事先不知道,全给评分器。
+    let input = MatchInput {
+        title: title.to_string(),
+        alt_titles: [original_title.unwrap_or("").to_string(), core_name(title)]
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .collect(),
+        season_no: Some(season.max(1)),
+        ..Default::default()
     };
-    if season > 1 {
-        push(strip_season_suffix(title));
-    } else {
-        push(title.to_string());
-    }
-    push(title.to_string());
-    if let Some(o) = original_title {
-        push(o.to_string());
+
+    // 召回查询:逐层放宽(与弹幕那边同序),命中即停 —— 后面几层只是救命稻草。
+    let mut queries: Vec<String> = Vec::new();
+    for q in [title.to_string(), strip_season_suffix(title), core_name(title)]
+        .into_iter()
+        .chain(original_title.map(str::to_string))
+    {
+        let q = q.trim().to_string();
+        if !q.is_empty() && !queries.iter().any(|e| e.eq_ignore_ascii_case(&q)) {
+            queries.push(q);
+        }
     }
 
     let air_days = air_date.and_then(parse_date_to_days);
+    // 门槛先筛、再按总分排:反过来(先按总分挑再看门槛)会让一个日期碰巧对上的
+    // 无关条目把真本体挤掉,然后整条判失败 —— 明明本体就在候选里。
+    let mut best: Option<(f64, i64, String)> = None; // 合格候选中总分最高
+    let mut closest: Option<(f64, i64, String)> = None; // 全体中最像的,只用来解释失败原因
     for q in &queries {
-        let results = search_bgm(q).await;
-        if results.is_empty() {
-            continue;
-        }
-        // 按开播日期择优。
-        let mut best: Option<&Value> = None;
-        let mut best_diff = i64::MAX;
-        if let Some(ad) = air_days {
-            for r in &results {
-                if r["id"].as_i64().is_none() {
-                    continue;
+        for r in &search_bgm(q).await {
+            let Some(id) = r["id"].as_i64() else { continue };
+            let (total, title_s, date_ok) = candidate_score(&input, air_days, r);
+            // 两个名字都留着:季号可能只写在其中一个上(name_cn 常带「第二季」,name 常不带)。
+            let names = format!(
+                "{} {}",
+                r["name_cn"].as_str().unwrap_or(""),
+                r["name"].as_str().unwrap_or("")
+            );
+            let names = names.trim().to_string();
+            // 标题够像 **或** 开播日期对得上,任一成立就算合格候选。
+            if title_s >= MIN_TITLE_SCORE || date_ok {
+                if best.as_ref().map_or(true, |(b, ..)| total > *b) {
+                    best = Some((total, id, names));
                 }
-                if let Some(days) = r["date"].as_str().and_then(parse_date_to_days) {
-                    let diff = (days - ad).abs();
-                    if diff < best_diff {
-                        best_diff = diff;
-                        best = Some(r);
-                    }
-                }
+            } else if closest.as_ref().map_or(true, |(t, ..)| title_s > *t) {
+                closest = Some((title_s, id, names));
             }
         }
-        if let Some(b) = best {
-            if best_diff <= DATE_TOLERANCE_DAYS {
-                // 日期高度吻合:基本可断定就是这一季本体,不再走续集链。
-                return Some(SubjectMatch { subject_id: b["id"].as_i64().unwrap(), season_matched: true });
-            }
+        // 这一层已经捞出够像的了就不再往下打接口(每层都是一次 Bangumi 请求)。
+        if best.is_some() {
+            break;
         }
-        // 日期对不上/无日期:退回第一个结果。标题含季度信息则视为季本体。
-        let first = &results[0];
-        let id = first["id"].as_i64()?;
-        let name = format!(
-            "{} {}",
-            first["name"].as_str().unwrap_or(""),
-            first["name_cn"].as_str().unwrap_or("")
-        );
-        let season_matched = season <= 1 || title_has_season_info(&name, season);
-        return Some(SubjectMatch { subject_id: id, season_matched });
     }
-    None
+
+    let Some((_total, id, name)) = best else {
+        return Err(match closest {
+            Some((t, cid, cname)) => format!(
+                "最像的候选是「{cname}」(#{cid}),标题相似度只有 {t:.2}(门槛 {MIN_TITLE_SCORE}),开播日期也对不上 —— 判为没匹配上,不乱标"
+            ),
+            None => format!("搜「{title}」在 Bangumi 一条结果都没有"),
+        });
+    };
+    // 候选标题自带「第 N 季」且正是要的那季 → 它本身就是季本体,不必再走续集链。
+    let season_matched = season <= 1 || title_has_season_info(&name, season);
+    Ok(SubjectMatch { subject_id: id, season_matched })
 }
 
 /// 调 Bangumi 搜索,返回候选(含 id/name/name_cn/date)。v0 POST 优先,回退旧 GET。
@@ -314,6 +366,62 @@ mod tests {
         assert!(title_has_season_info("Re:Zero Season 2", 2));
         assert!(title_has_season_info("某番 S3", 3));
         assert!(!title_has_season_info("进击的巨人", 2));
+    }
+
+    fn input(title: &str, season: i64) -> MatchInput {
+        MatchInput {
+            title: title.into(),
+            alt_titles: vec![core_name(title)],
+            season_no: Some(season),
+            ..Default::default()
+        }
+    }
+
+    fn cand(cn: &str, jp: &str, date: &str) -> Value {
+        serde_json::json!({ "id": 1, "name": jp, "name_cn": cn, "date": date })
+    }
+
+    /* 旧实现在日期对不上时**无条件拿 results[0]** —— 搜索回来的第一条经常是同名衍生/OVA。
+       这两条断言就是那个行为的闸门:把 candidate_score 换回「谁先来谁赢」它立刻红。 */
+    #[test]
+    fn scoring_separates_the_real_subject_from_noise() {
+        let want = input("孤独摇滚!", 1);
+        let real = candidate_score(&want, parse_date_to_days("2022-10-08"), &cand("孤独摇滚!", "ぼっち・ざ・ろっく!", "2022-10-08"));
+        let noise = candidate_score(&want, parse_date_to_days("2022-10-08"), &cand("派对浪客诸葛孔明", "パリピ孔明", "2022-04-05"));
+        assert!(real.1 >= MIN_TITLE_SCORE, "本体标题分 {:.2} 该过门槛", real.1);
+        assert!(noise.1 < MIN_TITLE_SCORE, "无关条目标题分 {:.2} 不该过门槛", noise.1);
+        assert!(real.0 > noise.0);
+    }
+
+    /// 季号是硬信号:剥掉季号后两季标题一模一样,只有这一路能把它们分开。
+    /// 旧实现连标题都不比,自然更分不开。
+    #[test]
+    fn season_beats_identical_titles() {
+        let want = input("孤独摇滚!", 2);
+        let s1 = candidate_score(&want, None, &cand("孤独摇滚!", "", ""));
+        let s2 = candidate_score(&want, None, &cand("孤独摇滚! 第二季", "", ""));
+        assert!(s2.0 > s1.0, "第二季 {:.2} 应当压过第一季 {:.2}", s2.0, s1.0);
+    }
+
+    /// 原名(日文)是平行语料:库里是中文名而 Bangumi 只收了日文名时,靠它才对得上。
+    /// 去掉 MatchInput.alt_titles 这一路本测试红。
+    #[test]
+    fn original_title_carries_cross_language_match() {
+        let mut want = input("孤独摇滚!", 1);
+        want.alt_titles.push("ぼっち・ざ・ろっく!".into());
+        let only_jp = candidate_score(&want, None, &cand("", "ぼっち・ざ・ろっく!", ""));
+        assert!(only_jp.1 >= MIN_TITLE_SCORE, "只有日文名的候选拿到 {:.2}", only_jp.1);
+    }
+
+    /// 开播日期是第二条准入证据。Bangumi 有些条目 name_cn 为空、只有日文原名,
+    /// 库里又只有中文名 —— 标题一路必然 0 分。只认标题会把这类误杀成「没匹配上」。
+    #[test]
+    fn air_date_alone_keeps_a_candidate_eligible() {
+        let want = input("孤独摇滚!", 1);
+        let (_, title_s, date_ok) =
+            candidate_score(&want, parse_date_to_days("2022-10-08"), &cand("", "ぼっち・ざ・ろっく!", "2022-10-08"));
+        assert!(title_s < MIN_TITLE_SCORE, "这条本来就该标题分低,实际 {title_s:.2}");
+        assert!(date_ok, "日期同一天却判不吻合");
     }
 
     #[test]
