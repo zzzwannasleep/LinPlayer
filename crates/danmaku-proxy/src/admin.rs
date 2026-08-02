@@ -1,7 +1,7 @@
 //! 管理界面。单页,HTML 内嵌在二进制里 —— 部署就是一个文件,没有静态资源目录要挂载。
 //!
 //! 鉴权是**会话 cookie**,不是 Basic:Basic 会让浏览器把密码缓存到关窗为止,
-//! 而这个界面能改出站闸门和封禁名单,不该那么容易一直开着。
+//! 而这个界面能改出站闸门、清空整个弹幕库,不该那么容易一直开着。
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
@@ -12,7 +12,7 @@ use serde_json::json;
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 
-use crate::{clients, config, upstream, Shared};
+use crate::{config, upstream, Shared};
 
 /// 有效会话。放模块静态而不是 App 里:它纯粹是这一层的实现细节,
 /// 重启即清空正是我们想要的(没有"永久登录")。
@@ -27,8 +27,9 @@ pub fn routes() -> Router<Shared> {
         .route("/admin/api/login", post(login))
         .route("/admin/api/state", get(state))
         .route("/admin/api/config", post(save_config))
-        .route("/admin/api/client", post(client_action))
         .route("/admin/api/cache/clear", post(clear_cache))
+        .route("/admin/api/store/clear", post(clear_store))
+        .route("/admin/api/sources/reset", post(reset_sources))
 }
 
 /// 定长比较,别用 `==` —— 密码比较的用时差理论上可被测出来。代价是 5 行。
@@ -70,7 +71,7 @@ async fn login(State(app): State<Shared>, Json(req): Json<LoginReq>) -> Response
     if !eq_ct(&req.password, &app.admin_password) {
         return (StatusCode::UNAUTHORIZED, Json(json!({"error": "密码不对"}))).into_response();
     }
-    let tok = clients::new_token();
+    let tok = new_session_token();
     sessions().lock().unwrap().insert(tok.clone());
     /* HttpOnly + SameSite=Strict:界面和接口同源,不需要跨站带 cookie。
        不设 Secure —— TLS 在反代那一层终结,本进程看到的是明文 HTTP,
@@ -89,20 +90,17 @@ async fn state(State(app): State<Shared>, h: HeaderMap) -> Response {
     if !authed(&h) {
         return need_auth();
     }
-    let c = app.cfg.get();
-    let g = app.gov.stats();
-    let cs = app.cache.stats();
-    let list = app.clients.list();
     let now = upstream::now_secs();
-    let active_24h = list.iter().filter(|x| now - x.last_seen < 86400).count();
+    let top = app.sources.top(50);
+    let c = app.cfg.get();
     Json(json!({
         "config": c,
-        "governor": g,
-        "cache": cs,
-        "clients": list,
+        "governor": app.gov.stats(),
+        "cache": app.cache.stats(),
+        "store": app.store.stats(now, c.refresh_min_secs, c.refresh_max_secs),
+        "sources": top,
         "summary": {
-            "clients_total": list.len(),
-            "clients_active_24h": active_24h,
+            "sources_total": app.sources.len(),
             "uptime_secs": now - app.started,
             "app_id_tail": tail(&app.creds.app_id),
         }
@@ -132,32 +130,13 @@ async fn save_config(
     c.upstream_per_minute = c.upstream_per_minute.max(1);
     c.upstream_per_day = c.upstream_per_day.max(1);
     c.client_per_minute = c.client_per_minute.max(1);
-    c.client_upstream_per_day = c.client_upstream_per_day.max(1);
+    /* 下限必须 <= 上限,否则自适应间隔在 clamp 里会被翻转成一个谁也没想要的值。
+       底线取 5 秒而不是 0:0 等于每次请求都去上游,而**真正兜底的是出站闸门**
+       (它对谁都一样管),所以这里不用设得很保守 —— 设太高反而让端到端自检
+       没法在合理时间内验「过期 → 回存量」那条路。 */
+    c.refresh_min_secs = c.refresh_min_secs.max(5);
+    c.refresh_max_secs = c.refresh_max_secs.max(c.refresh_min_secs);
     app.cfg.set(c);
-    Json(json!({"ok": true})).into_response()
-}
-
-#[derive(serde::Deserialize)]
-struct ClientReq {
-    id: String,
-    action: String,
-}
-
-async fn client_action(
-    State(app): State<Shared>,
-    h: HeaderMap,
-    Json(r): Json<ClientReq>,
-) -> Response {
-    if !authed(&h) {
-        return need_auth();
-    }
-    match r.action.as_str() {
-        "ban" => app.clients.set_banned(&r.id, true),
-        "unban" => app.clients.set_banned(&r.id, false),
-        "remove" => app.clients.remove(&r.id),
-        _ => return (StatusCode::BAD_REQUEST, "unknown action").into_response(),
-    }
-    app.clients.flush();
     Json(json!({"ok": true})).into_response()
 }
 
@@ -167,6 +146,32 @@ async fn clear_cache(State(app): State<Shared>, h: HeaderMap) -> Response {
     }
     app.cache.clear();
     Json(json!({"ok": true})).into_response()
+}
+
+/// 清空**弹幕库**。和清缓存完全不是一回事 —— 这是把自己存的那份弹幕全删了,
+/// 之后每一集都要重新从上游拉。界面上单独一个按钮并二次确认。
+async fn clear_store(State(app): State<Shared>, h: HeaderMap) -> Response {
+    if !authed(&h) {
+        return need_auth();
+    }
+    app.store.clear();
+    Json(json!({"ok": true})).into_response()
+}
+
+async fn reset_sources(State(app): State<Shared>, h: HeaderMap) -> Response {
+    if !authed(&h) {
+        return need_auth();
+    }
+    app.sources.reset();
+    Json(json!({"ok": true})).into_response()
+}
+
+/// 会话令牌。32 字节 CSPRNG —— 可猜等于管理界面敞开。
+fn new_session_token() -> String {
+    use rand::RngCore;
+    let mut b = [0u8; 32];
+    rand::rng().fill_bytes(&mut b);
+    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 const PAGE: &str = include_str!("admin.html");

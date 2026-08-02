@@ -83,26 +83,45 @@
           按 UTC 00:00 重置(不是本地时区)。</div>
       </div>
       <div>
-        <label>单客户端:每分钟请求数</label>
+        <label>单来源 IP:每分钟请求数</label>
         <input id="client_per_minute" type="number" min="1">
-        <div class="hint">含缓存命中,防单机把本服务打满。</div>
-      </div>
-      <div>
-        <label>单客户端:每天穿透上游次数</label>
-        <input id="client_upstream_per_day" type="number" min="1">
-        <div class="hint">缓存命中不计 —— 命中不花配额,计了会误伤正常追番的人。</div>
+        <div class="hint">最后一层自我保护。真正拦人交给 Cloudflare 的速率规则 ——
+          它在流量到源站之前就挡掉了,比这里划算。</div>
       </div>
     </div>
   </div>
 
   <div class="card">
-    <h2>缓存</h2>
+    <h2>弹幕库(自己存的那份)</h2>
     <div class="grid">
       <div>
-        <label>弹幕正文 TTL(秒)</label>
-        <input id="ttl_comment_secs" type="number" min="0">
-        <div class="hint">弹幕会持续增加,但少了最近几条没人看得出来。调大 = 更省配额。</div>
+        <label>刷新间隔下限(秒)</label>
+        <input id="refresh_min_secs" type="number" min="5" oninput="showDur()">
+        <div class="hint"><b id="d_min"></b> · 默认 6 小时。<b>在播的番</b>会稳定停在这个值上。</div>
       </div>
+      <div>
+        <label>刷新间隔上限(秒)</label>
+        <input id="refresh_max_secs" type="number" min="5" oninput="showDur()">
+        <div class="hint"><b id="d_max"></b> · 默认 7 天。不再长弹幕的老番会滑到这个值。</div>
+      </div>
+      <div>
+        <label>弹幕库磁盘上限(MB)</label>
+        <input id="store_max_mb" type="number" min="1">
+        <div class="hint">超了按「最久没人看」淘汰。</div>
+      </div>
+      <div>
+        <div class="hint" style="margin-top:22px">两个值之间怎么走是<b>自适应</b>的:
+          一次刷新长了新弹幕就压回下限,一条没长就翻倍。所以不用去查「哪部是当季新番」,
+          而且老番翻红也跟得上。拉取是<b>惰性</b>的 —— 只在有人真的要这一集时才发生。</div>
+      </div>
+    </div>
+    <div class="row"><button class="danger" onclick="clearStore()">清空弹幕库</button>
+      <span class="hint" style="margin:0">★ 这是把自己存的弹幕<b>全删</b>,不是清缓存。删完每一集都要重新从上游拉。</span></div>
+  </div>
+
+  <div class="card">
+    <h2>短期缓存(搜索 / 集表 / 排行榜)</h2>
+    <div class="grid">
       <div>
         <label>搜索/集表 TTL(秒)</label>
         <input id="ttl_search_secs" type="number" min="0">
@@ -112,50 +131,40 @@
         <input id="ttl_trending_secs" type="number" min="0">
       </div>
       <div>
-        <label>磁盘上限(MB)</label>
+        <label>缓存磁盘上限(MB)</label>
         <input id="cache_max_mb" type="number" min="1">
-        <div class="hint">超了按最久未用淘汰。改这一项要重启才生效。</div>
+        <div class="hint">改这一项要重启才生效。</div>
       </div>
     </div>
     <div class="row"><button class="danger" onclick="clearCache()">清空缓存</button>
-      <span class="hint" style="margin:0">清完会有一波请求穿透到上游,别在配额紧张时点。</span></div>
+      <span class="hint" style="margin:0">只清搜索/集表/排行榜,不动弹幕库。</span></div>
   </div>
 
   <div class="card">
-    <h2>注册</h2>
+    <h2>总开关</h2>
     <div class="grid">
       <div>
-        <label>注册模式</label>
-        <select id="register_mode">
-          <option value="open">开放(任何人可注册)</option>
-          <option value="invite">邀请码</option>
-          <option value="closed">关闭(存量客户端不受影响)</option>
-        </select>
-        <div class="hint">被刷时切到「邀请码」或「关闭」是最快的止血手段。</div>
-      </div>
-      <div>
-        <label>邀请码</label>
-        <input id="invite_code" type="text" placeholder="仅邀请码模式生效">
-      </div>
-      <div>
-        <label>同一 IP 每天可注册数</label>
-        <input id="register_per_ip_per_day" type="number" min="1">
-      </div>
-      <div>
-        <label>服务总开关</label>
+        <label>服务状态</label>
         <select id="enabled"><option value="true">开启</option><option value="false">关闭(全部返回维护中)</option></select>
+        <div class="hint">关掉之后连库里已有的弹幕也不发 —— 只在要下线维护时用。</div>
       </div>
     </div>
     <div class="row"><button class="primary" onclick="saveConfig()">保存配置</button>
-      <span class="hint" style="margin:0">保存后立刻生效,无需重启(磁盘上限除外)。</span></div>
+      <span class="hint" style="margin:0">保存后立刻生效,无需重启(缓存磁盘上限除外)。</span></div>
   </div>
 
   <div class="card">
-    <h2>客户端 <span id="cn" class="hint" style="margin:0"></span></h2>
+    <h2>用量最高的来源 <span id="cn" class="hint" style="margin:0"></span></h2>
+    <div class="hint" style="margin:-8px 0 12px">
+      按<b>真正花掉的上游次数</b>排序,不是按请求数 —— 一直命中弹幕库的重度用户一次配额都没花,
+      要抓的是穿透上游的那个。看见谁不对劲,去 Cloudflare 上封;这里不做封禁。
+      <br>注:被 Cloudflare 挡掉的请求<b>不会</b>出现在这张表里(它们根本没到源站),那部分看 CF 的分析面板。
+    </div>
     <div class="tw"><table id="tbl">
-      <thead><tr><th>编号</th><th>名称</th><th>最近活跃</th><th>请求</th><th>上游</th><th>IP</th><th>状态</th><th></th></tr></thead>
+      <thead><tr><th>来源 IP</th><th>请求</th><th>穿透上游</th><th>首次出现</th><th>最近活跃</th></tr></thead>
       <tbody></tbody>
     </table></div>
+    <div class="row"><button onclick="resetSources()">清空统计</button></div>
   </div>
 </div>
 
@@ -193,63 +202,76 @@ function kpi(n,l,pct){
     `</div>`;
 }
 
+const NUM_FIELDS = ["upstream_per_minute","upstream_per_day","client_per_minute",
+  "refresh_min_secs","refresh_max_secs","store_max_mb",
+  "ttl_search_secs","ttl_trending_secs","cache_max_mb"];
+
+const num = (n) => n.toLocaleString("zh-CN");
+/* 秒数旁边实时显示成人话。604800 少写一位是 60480(16.8 小时)—— 纯看数字发现不了,
+   而后果是老番的刷新频率悄悄变成 10 倍。 */
+const humanDur = (s) => !Number.isFinite(s) || s<=0 ? "—"
+  : s<60 ? `${s} 秒` : s<3600 ? `${(s/60).toFixed(s%60?1:0)} 分钟`
+  : s<86400 ? `${(s/3600).toFixed(s%3600?1:0)} 小时` : `${(s/86400).toFixed(s%86400?1:0)} 天`;
+function showDur(){
+  $("d_min").textContent = humanDur(parseInt($("refresh_min_secs").value,10));
+  $("d_max").textContent = humanDur(parseInt($("refresh_max_secs").value,10));
+}
+
 async function refresh(){
   const s = await api("state");
-  const c=s.config, g=s.governor, ca=s.cache;
+  const c=s.config, g=s.governor, ca=s.cache, st=s.store;
   const total = ca.hits+ca.misses;
   const rate = total ? (ca.hits*100/total) : 0;
-  $("sub").textContent = `AppId ${s.summary.app_id_tail} · 已运行 ${dur(s.summary.uptime_secs).replace("前","")} · 客户端 ${s.summary.clients_total}(24 小时内活跃 ${s.summary.clients_active_24h})`;
+  $("sub").textContent = `AppId ${s.summary.app_id_tail} · 已运行 ${dur(s.summary.uptime_secs).replace("前","")} · 见过 ${s.summary.sources_total} 个来源`;
   $("kpis").innerHTML =
-    kpi(`${g.day_used} / ${c.upstream_per_day}`, `今日上游调用(${Math.floor(g.day_resets_in/3600)} 小时后重置)`, g.day_used*100/c.upstream_per_day) +
+    kpi(num(st.episodes), `已存弹幕集数(其中 ${num(st.fresh)} 集还新鲜,请求它们一次上游都不发)`) +
+    kpi(num(st.comments), "弹幕总条数") +
+    kpi(mb(st.bytes), `弹幕库占用(上限 ${num(c.store_max_mb)} MB)`, st.bytes*100/(c.store_max_mb*1048576)) +
+    kpi(`${num(g.day_used)} / ${num(c.upstream_per_day)}`, `今日上游调用(${Math.floor(g.day_resets_in/3600)} 小时后重置)`, g.day_used*100/c.upstream_per_day) +
     kpi(`${g.minute_used} / ${c.upstream_per_minute}`, "本分钟上游调用", g.minute_used*100/c.upstream_per_minute) +
-    kpi(rate.toFixed(1)+"%", `缓存命中率(命中 ${ca.hits} / 未命中 ${ca.misses})`, rate) +
-    kpi(mb(ca.bytes), `缓存占用(${ca.entries} 条,上限 ${c.cache_max_mb} MB)`, ca.bytes*100/(c.cache_max_mb*1048576)) +
-    kpi(g.total_denied, "累计被闸门拦下");
+    kpi(rate.toFixed(1)+"%", `短期缓存命中率(命中 ${num(ca.hits)} / 未命中 ${num(ca.misses)})`, rate) +
+    kpi(mb(ca.bytes), `短期缓存占用(${num(ca.entries)} 条)`, ca.bytes*100/(c.cache_max_mb*1048576)) +
+    kpi(num(g.total_denied), "被出站闸门拦下(不含 CF 挡掉的)");
 
   // 输入框正在被编辑时别覆盖,否则打一半的数字会被 5 秒一次的刷新抹掉。
-  for(const k of ["upstream_per_minute","upstream_per_day","client_per_minute","client_upstream_per_day",
-                  "ttl_comment_secs","ttl_search_secs","ttl_trending_secs","cache_max_mb",
-                  "invite_code","register_per_ip_per_day"]){
+  for(const k of NUM_FIELDS){
     if(document.activeElement!==$(k)) $(k).value = c[k];
   }
-  if(document.activeElement!==$("register_mode")) $("register_mode").value = c.register_mode;
   if(document.activeElement!==$("enabled")) $("enabled").value = String(c.enabled);
+  showDur();
 
   const now = Math.floor(Date.now()/1000);
-  $("cn").textContent = `共 ${s.clients.length} 台`;
-  $("tbl").tBodies[0].innerHTML = s.clients.map(x=>`<tr>
-    <td class="mono">${x.hint}…</td>
-    <td>${esc(x.label)||"—"}</td>
-    <td>${dur(now-x.last_seen)}</td>
-    <td>${x.requests}</td>
-    <td>${x.upstream}</td>
+  $("cn").textContent = `前 ${s.sources.length} 名 / 共 ${s.summary.sources_total} 个`;
+  $("tbl").tBodies[0].innerHTML = s.sources.map(x=>`<tr>
     <td class="mono">${esc(x.ip)}</td>
-    <td>${x.banned?'<span class="tag bad">已封禁</span>':'<span class="tag ok">正常</span>'}</td>
-    <td><button onclick="act('${x.id}','${x.banned?"unban":"ban"}')">${x.banned?"解封":"封禁"}</button>
-        <button class="danger" onclick="act('${x.id}','remove')">删除</button></td>
-  </tr>`).join("") || `<tr><td colspan="8" class="hint">还没有客户端注册过。</td></tr>`;
+    <td>${num(x.requests)}</td>
+    <td>${num(x.upstream)}</td>
+    <td>${dur(now-x.first_seen)}</td>
+    <td>${dur(now-x.last_seen)}</td>
+  </tr>`).join("") || `<tr><td colspan="5" class="hint">还没有请求进来。</td></tr>`;
 }
 const esc = (s) => String(s??"").replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 
 async function saveConfig(){
-  const num = (k)=>parseInt($(k).value,10);
-  await api("config", {
-    upstream_per_minute:num("upstream_per_minute"), upstream_per_day:num("upstream_per_day"),
-    client_per_minute:num("client_per_minute"), client_upstream_per_day:num("client_upstream_per_day"),
-    ttl_comment_secs:num("ttl_comment_secs"), ttl_search_secs:num("ttl_search_secs"),
-    ttl_trending_secs:num("ttl_trending_secs"), cache_max_mb:num("cache_max_mb"),
-    register_mode:$("register_mode").value, invite_code:$("invite_code").value,
-    register_per_ip_per_day:num("register_per_ip_per_day"), enabled:$("enabled").value==="true",
-  });
+  const body = { enabled: $("enabled").value==="true" };
+  for(const k of NUM_FIELDS) body[k] = parseInt($(k).value,10);
+  if(body.refresh_min_secs > body.refresh_max_secs){
+    toast("刷新间隔下限不能大于上限"); return;
+  }
+  await api("config", body);
   toast("已保存"); refresh();
 }
-async function act(id, action){
-  if(action==="remove" && !confirm("删除后这台设备的令牌立刻失效,它需要重新注册。继续?")) return;
-  await api("client",{id,action}); refresh();
-}
 async function clearCache(){
-  if(!confirm("清空缓存会让接下来一波请求全部穿透到上游。继续?")) return;
+  if(!confirm("清空短期缓存(搜索/集表/排行榜),弹幕库不受影响。继续?")) return;
   await api("cache/clear",{}); toast("已清空"); refresh();
+}
+async function clearStore(){
+  if(!confirm("★ 这会删掉自己存的全部弹幕,之后每一集都要重新从上游拉。确定?")) return;
+  if(!confirm("再确认一次:弹幕库将被清空,这个操作不可撤销。")) return;
+  await api("store/clear",{}); toast("弹幕库已清空"); refresh();
+}
+async function resetSources(){
+  await api("sources/reset",{}); toast("统计已清空"); refresh();
 }
 
 $("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });

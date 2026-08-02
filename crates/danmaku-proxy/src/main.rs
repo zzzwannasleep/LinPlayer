@@ -1,30 +1,35 @@
-//! LinPlayer 弹幕代理 —— 把弹弹Play 的签名从客户端挪到服务器。
+//! LinPlayer 弹幕代理 —— 把弹弹Play 的签名从客户端挪到服务器,顺带自己存一份弹幕。
 //!
 //! ## 它解决什么
 //! 客户端里的 AppSecret 无论怎么加密都是**可提取**的(解密口令必须和密文一起发出去)。
-//! 谁拿到安装包都能用我们的配额,客户端限流拦不住外人。把签名挪到服务端之后:
+//! 谁拿到安装包都能用我们的配额。挪到服务端之后:
 //!   * 密钥只在这台机器的环境变量里,客户端一个字节都拿不到;
 //!   * **出站闸门**把「收到多少」和「转发多少」解耦 —— 被刷爆的后果退化成
 //!     「这段时间弹幕慢」,而配额一个不掉;
-//!   * **共享缓存**把上游调用量从「播放次数」塌成「不同集数 × TTL 窗口」,
-//!     这一条省下来的比限流多一个数量级。
+//!   * **自托管弹幕库**([`store`])按 cid 求并集长期留着,过期只是「去看看有没有新的」。
+//!     由此换来:闸门关着的时候仍然有弹幕可发,而不是回一个错误。
+//!
+//! ## 不做鉴权
+//! 没有客户端令牌、没有注册流程 —— 用户 2026-08-02 定的。理由成立:真正保住配额的是
+//! 出站闸门,它对谁来的都一样管用;拦人是 Cloudflare 的活,在这儿再写一套只会更差。
+//! 令牌唯一独有的能力是归因,由 [`sources`] 按来源 IP 统计补回来。
 //!
 //! ## 部署形态
 //! 只监听回环地址,前面挂用户自己的反代(OpenResty/nginx)+ Cloudflare 橙云。
-//! 本进程**不做** TLS、不做 IP 封禁、不做 DDoS 防护 —— 那三件事反代和 CF 做得比我好,
-//! 在这里再写一遍只会写出一个更差的版本。
+//! 本进程**不做** TLS、不做 IP 封禁、不做 DDoS 防护。
 
 mod admin;
 mod cache;
-mod clients;
 mod config;
+mod sources;
+mod store;
 mod upstream;
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post};
+use axum::routing::{any, get};
 use axum::Router;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -34,8 +39,11 @@ use std::sync::Arc;
 pub struct App {
     pub creds: upstream::Creds,
     pub cfg: config::Store,
+    /// 搜索/集表/排行榜的短期响应缓存(过期即丢)。
     pub cache: cache::Cache,
-    pub clients: clients::Registry,
+    /// 弹幕库(长期持有,过期只代表"该看看有没有新的")。
+    pub store: store::Store,
+    pub sources: sources::Sources,
     pub gov: upstream::Governor,
     pub http: reqwest::Client,
     pub admin_password: String,
@@ -46,8 +54,7 @@ pub type Shared = Arc<App>;
 
 #[tokio::main]
 async fn main() {
-    let data_dir: PathBuf =
-        std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".into()).into();
+    let data_dir: PathBuf = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".into()).into();
     let port: u16 = std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(8787);
     /* 只绑回环。★ 默认不对外 —— 忘了配反代的后果应该是「外面连不上」,
        而不是「一个没有 TLS、没有防护的服务直接裸奔在公网上」。
@@ -64,7 +71,7 @@ async fn main() {
     };
     let admin_password = std::env::var("ADMIN_PASSWORD").unwrap_or_default();
     if admin_password.len() < 8 {
-        // 不给默认密码:管理界面能改出站上限和封禁,弱口令等于把闸门交出去。
+        // 不给默认密码:管理界面能改出站上限,弱口令等于把闸门交出去。
         eprintln!("[致命] 需要 ADMIN_PASSWORD 环境变量(至少 8 位)");
         std::process::exit(2);
     }
@@ -74,7 +81,8 @@ async fn main() {
     let app = Arc::new(App {
         creds,
         cache: cache::Cache::open(data_dir.join("cache"), c0.cache_max_mb),
-        clients: clients::Registry::load(&data_dir),
+        store: store::Store::open(data_dir.join("danmaku")),
+        sources: sources::Sources::new(),
         cfg,
         gov: upstream::Governor::new(),
         http: reqwest::Client::builder()
@@ -87,32 +95,33 @@ async fn main() {
         started: upstream::now_secs(),
     });
 
-    // 计数器是热路,不能每次请求都写文件;定期落盘 + 退出时再落一次。
+    // 弹幕库容量维护。放后台定时而不是每次写入都算:淘汰要遍历全表,不该挂在热路上。
     {
         let a = app.clone();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                a.clients.flush();
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                let n = a.store.evict(a.cfg.get().store_max_mb.saturating_mul(1024 * 1024));
+                if n > 0 {
+                    println!("弹幕库超容量,淘汰了 {n} 集(最久没人看的)");
+                }
             }
         });
     }
 
     let router = Router::new()
         .route("/healthz", get(|| async { "ok" }))
-        .route("/api/register", post(register))
         .route("/api/v2/{*rest}", any(forward))
         .merge(admin::routes())
-        .with_state(app.clone());
+        .with_state(app);
 
     let addr: SocketAddr = format!("{bind}:{port}").parse().expect("BIND/PORT 不合法");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("监听失败");
     println!("弹幕代理已启动:http://{addr}  (管理界面 /admin)");
     axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
+        .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
-            app.clients.flush();
-            println!("已保存状态,退出。");
+            println!("退出。");
         })
         .await
         .expect("服务异常退出");
@@ -122,9 +131,10 @@ async fn main() {
 
 /// 取真实客户端 IP。
 ///
-/// ★ 这些头**任何人都能伪造** —— 只有在「本服务不直接暴露、前面一定有反代」的
-///   前提下才可信。所以默认只绑回环(见 main)。顺序照实际链路:
-///   Cloudflare 橙云会写 CF-Connecting-IP,反代写 X-Real-IP,都没有就退回 socket。
+/// ★ 这些头**任何人都能伪造** —— 只在「本服务不直接暴露、前面一定有反代」的前提下
+///   才有意义。所以默认只绑回环(见 main)。而且这个值**不用于鉴权**,只用于统计和
+///   自我保护,伪造它也就骗过一张本来就不拦人的表。顺序照实际链路:
+///   Cloudflare 橙云写 CF-Connecting-IP,反代写 X-Real-IP,都没有就退回 socket。
 fn client_ip(h: &HeaderMap, fallback: &str) -> String {
     for k in ["cf-connecting-ip", "x-real-ip"] {
         if let Some(v) = h.get(k).and_then(|v| v.to_str().ok()) {
@@ -163,62 +173,24 @@ pub const E_QUOTA: i64 = 1003;
 pub const E_UPSTREAM: i64 = 1004;
 pub const E_PATH: i64 = 1005;
 
-// ---------- 注册 ----------
-
-#[derive(serde::Deserialize, Default)]
-#[serde(default)]
-struct RegisterReq {
-    label: String,
-    invite: String,
-}
-
-async fn register(
-    State(app): State<Shared>,
-    headers: HeaderMap,
-    body: Option<axum::Json<RegisterReq>>,
-) -> Response {
-    let req = body.map(|b| b.0).unwrap_or_default();
-    let c = app.cfg.get();
-    match c.register_mode {
-        config::RegisterMode::Closed => {
-            return biz_err(E_DISABLED, "暂不接受新设备注册")
-        }
-        config::RegisterMode::Invite => {
-            if c.invite_code.is_empty() || req.invite.trim() != c.invite_code {
-                return biz_err(E_DISABLED, "需要邀请码");
-            }
-        }
-        config::RegisterMode::Open => {}
-    }
-    let ip = client_ip(&headers, "unknown");
-    match app.clients.register(&req.label, &ip, upstream::now_secs(), c.register_per_ip_per_day) {
-        Ok(token) => axum::Json(serde_json::json!({ "token": token })).into_response(),
-        Err(e) => biz_err(E_RATE, &e),
-    }
-}
-
 // ---------- 转发 ----------
 
 /// 只放行客户端真正会用的那几条路径。不做通配转发 —— 那等于给全世界开了一个
 /// 带我们签名的弹弹Play 免费代理,配额照样是我们的。
 fn allowed(path: &str) -> bool {
-    const OK: [&str; 6] = [
-        "search/anime",
-        "search/episodes",
-        "bangumi/",
-        "comment/",
-        "match",
-        "trending/",
-    ];
+    const OK: [&str; 6] =
+        ["search/anime", "search/episodes", "bangumi/", "comment/", "match", "trending/"];
     OK.iter().any(|p| path == *p || path.starts_with(p))
 }
 
-/// 按数据的新鲜度要求选 TTL。弹幕会持续增加,但少了最近几条没人看得出来;
-/// 搜索结果几乎不变;排行榜每天变一次。
+/// `comment/{episodeId}` → episodeId。只有这一类走弹幕库,其余走普通响应缓存。
+fn episode_of(path: &str) -> Option<&str> {
+    path.strip_prefix("comment/").map(|s| s.split('/').next().unwrap_or(s)).filter(|s| !s.is_empty())
+}
+
+/// 按数据的新鲜度要求选缓存 TTL(弹幕不走这里,它有自己的自适应间隔)。
 fn ttl_for(path: &str, c: &config::Config) -> u64 {
-    if path.starts_with("comment/") {
-        c.ttl_comment_secs
-    } else if path.starts_with("trending/") {
+    if path.starts_with("trending/") {
         c.ttl_trending_secs
     } else {
         c.ttl_search_secs
@@ -240,42 +212,77 @@ async fn forward(
     if !allowed(&rest) {
         return biz_err(E_PATH, "不支持的接口");
     }
-    let Some(token) = headers.get("x-lp-token").and_then(|v| v.to_str().ok()).map(str::trim) else {
-        return (StatusCode::UNAUTHORIZED, "missing token").into_response();
-    };
     let ip = client_ip(&headers, "unknown");
     let now = upstream::now_secs();
 
     // 参数已由 BTreeMap 排过序 —— 缓存键和实际发出去的 query 用同一份,不会漂。
     let query: String =
         q.iter().map(|(k, v)| format!("{}={}", enc(k), enc(v))).collect::<Vec<_>>().join("&");
-    let ckey = cache::key(method.as_str(), &rest, &query, &body);
 
-    // 先查缓存。命中的话既不占出站名额,也不计客户端的上游额度。
-    let hit = app.cache.get(&ckey, now);
-    if let Err(e) = app.clients.check(
-        token,
-        &ip,
-        now,
-        c.client_per_minute,
-        c.client_upstream_per_day,
-        hit.is_none(),
-    ) {
-        return if e.contains("令牌") || e.contains("封禁") {
-            // 401 = 客户端应当清掉本地令牌重新注册;业务码做不到这件事。
-            (StatusCode::UNAUTHORIZED, e).into_response()
-        } else {
-            biz_err(E_RATE, &e)
+    // ---- 弹幕:走自托管的库 ----
+    if let Some(ep) = episode_of(&rest) {
+        let ep = ep.to_string();
+        let taken = app.store.take(&ep, now, c.refresh_min_secs, c.refresh_max_secs);
+        let need_upstream = !matches!(taken, store::Take::Fresh(_));
+        if let Err(e) = app.sources.hit(&ip, now, c.client_per_minute, need_upstream) {
+            return biz_err(E_RATE, &e);
+        }
+        if let store::Take::Fresh(b) = taken {
+            return json_response(b, "FRESH");
+        }
+        // 过期或没有 → 去上游看看。★ 拿不到就退回存量,而不是报错:
+        // 「自己存」最实在的收益就是配额烧光时仍然有弹幕可发。
+        let stale = match taken {
+            store::Take::Stale(b) => Some(b),
+            _ => None,
         };
+        match fetch_upstream(&app, &c, &rest, &q, &query, &method, &body).await {
+            Ok(bytes) => {
+                let (merged, added) =
+                    app.store.merge(&ep, &bytes, now, c.refresh_min_secs, c.refresh_max_secs);
+                json_response(merged, if added > 0 { "UPDATED" } else { "NOCHANGE" })
+            }
+            Err(e) => match stale {
+                Some(b) => json_response(b, "STALE"),
+                None => e,
+            },
+        }
+    } else {
+        // ---- 其余:普通响应缓存 ----
+        let ckey = cache::key(method.as_str(), &rest, &query, &body);
+        let hit = app.cache.get(&ckey, now);
+        if let Err(e) = app.sources.hit(&ip, now, c.client_per_minute, hit.is_none()) {
+            return biz_err(E_RATE, &e);
+        }
+        if let Some(b) = hit {
+            return json_response(b, "HIT");
+        }
+        match fetch_upstream(&app, &c, &rest, &q, &query, &method, &body).await {
+            Ok(bytes) => {
+                app.cache.put(&ckey, &bytes, ttl_for(&rest, &c), now);
+                json_response(bytes.to_vec(), "MISS")
+            }
+            Err(e) => e,
+        }
     }
-    if let Some(cached) = hit {
-        return json_response(cached, true);
-    }
+}
 
+/// 过闸门 → 签名 → 发。Err 里已经是可直接返回给客户端的响应。
+///
+/// ★ 上游用 HTTP 200 + errorCode 报错(它从不用状态码)。带 errorCode 的响应
+///   一律当失败返回 —— 存下来等于在 TTL 内把这个错误钉死,配额恢复了客户端还在看旧错。
+async fn fetch_upstream(
+    app: &Shared,
+    c: &config::Config,
+    rest: &str,
+    q: &BTreeMap<String, String>,
+    query: &str,
+    method: &axum::http::Method,
+    body: &Bytes,
+) -> Result<Vec<u8>, Response> {
     if let Err(e) = app.gov.acquire(c.upstream_per_minute, c.upstream_per_day) {
-        return biz_err(E_QUOTA, &e);
+        return Err(biz_err(E_QUOTA, &e));
     }
-
     let api_path = format!("/api/v2/{rest}");
     let url = format!("{}{api_path}", upstream::official_base());
     let mut req = if method == axum::http::Method::POST {
@@ -291,24 +298,19 @@ async fn forward(
     for (k, v) in app.creds.headers(&api_path) {
         req = req.header(k, v);
     }
-
     match req.send().await {
         Ok(r) => {
             let ok = r.status().is_success();
             let bytes = r.bytes().await.unwrap_or_default();
-            /* 只缓存**成功且不含 errorCode** 的响应。
-               把 429「配额已用完」缓存下来,等于在 TTL 内把这个错误钉死 ——
-               配额恢复了客户端还在看旧错误,而且没人查得出来为什么。 */
-            if ok && !looks_like_error(&bytes) {
-                app.cache.put(&ckey, &bytes, ttl_for(&rest, &c), now);
+            if !ok || looks_like_error(&bytes) {
+                return Err(json_response(bytes.to_vec(), "UPSTREAM-ERR"));
             }
-            json_response(bytes.to_vec(), false)
+            Ok(bytes.to_vec())
         }
-        Err(e) => biz_err(E_UPSTREAM, &format!("上游请求失败:{e}")),
+        Err(e) => Err(biz_err(E_UPSTREAM, &format!("上游请求失败:{e}"))),
     }
 }
 
-/// 上游用 HTTP 200 + errorCode 报错(它从不用状态码)。缓存前必须看这个字段。
 fn looks_like_error(body: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(body)
         .ok()
@@ -316,12 +318,14 @@ fn looks_like_error(body: &[u8]) -> bool {
         .is_some_and(|c| c != 0)
 }
 
-fn json_response(body: Vec<u8>, from_cache: bool) -> Response {
+/// `X-LP-Cache` 只为线上自查存在(客户端不看它):
+/// FRESH=库里还新鲜 / UPDATED=去上游拿到了新弹幕 / NOCHANGE=拉了但一条没长 /
+/// STALE=上游拿不到,回的是存量 / HIT|MISS=普通响应缓存。
+fn json_response(body: Vec<u8>, tag: &str) -> Response {
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json; charset=utf-8")
-        // 便于线上自查命中率(客户端不看它)。
-        .header("X-LP-Cache", if from_cache { "HIT" } else { "MISS" })
+        .header("X-LP-Cache", tag)
         .body(axum::body::Body::from(body))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
@@ -345,7 +349,9 @@ mod tests {
        ★ 反向验证:把 allowed() 改成恒 true,本测试立刻红。 */
     #[test]
     fn only_the_endpoints_clients_actually_use_are_forwarded() {
-        for p in ["search/anime", "search/episodes", "bangumi/123", "comment/456", "match", "trending/anime"] {
+        for p in
+            ["search/anime", "search/episodes", "bangumi/123", "comment/456", "match", "trending/all/hot/week"]
+        {
             assert!(allowed(p), "{p} 是客户端要用的,不该被挡");
         }
         for p in ["", "login", "user/profile", "../admin", "v2/search/anime"] {
@@ -353,11 +359,22 @@ mod tests {
         }
     }
 
-    /* 把上游的错误缓存下来 = 在 TTL 内把这个错误钉死,配额恢复了客户端还在看旧错误。
+    /* 只有 /comment/ 该走弹幕库。判错的后果很脏:把搜索结果并进弹幕库,
+       或者把弹幕当成短期缓存过期就丢(那就白存了)。 */
+    #[test]
+    fn only_comment_requests_go_to_the_danmaku_store() {
+        assert_eq!(episode_of("comment/183170001"), Some("183170001"));
+        assert_eq!(episode_of("comment/183170001/extra"), Some("183170001"), "多余路径段不能混进 id");
+        assert_eq!(episode_of("comment/"), None, "空 id 不能当成一集");
+        assert_eq!(episode_of("search/anime"), None);
+        assert_eq!(episode_of("trending/all/hot/week"), None);
+    }
+
+    /* 把上游的错误存下来 = 在 TTL 内把这个错误钉死,配额恢复了客户端还在看旧错误。
        ★ 反向验证:让 looks_like_error 恒返回 false,本测试立刻红。 */
     #[test]
-    fn upstream_errors_are_never_cached() {
-        // 真实响应体是 UTF-8 中文,这里用 .as_bytes() 而不是 br#""# (裸字节串只收 ASCII)。
+    fn upstream_errors_are_never_stored() {
+        // 真实响应体是 UTF-8 中文,用 .as_bytes() 而不是 br#""#(裸字节串只收 ASCII)。
         assert!(looks_like_error(
             r#"{"errorCode":429,"errorMessage":"已达到接口调用配额上限"}"#.as_bytes()
         ));
@@ -370,8 +387,7 @@ mod tests {
     #[test]
     fn ttl_is_picked_per_endpoint_class() {
         let c = config::Config::default();
-        assert_eq!(ttl_for("comment/123", &c), c.ttl_comment_secs);
-        assert_eq!(ttl_for("trending/anime", &c), c.ttl_trending_secs);
+        assert_eq!(ttl_for("trending/all/hot/week", &c), c.ttl_trending_secs);
         assert_eq!(ttl_for("search/anime", &c), c.ttl_search_secs);
     }
 
