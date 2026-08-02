@@ -5,7 +5,6 @@ import {
   type AccountInfo,
   type DanmakuAnime,
   type DanmakuEpisode,
-  type DanmakuMatchCandidate,
   type DanmakuMatchInput,
   type DanmakuSourceGroup,
   type DownloadItem,
@@ -23,8 +22,6 @@ import {
   danmakuAutoLoad,
   danmakuEpisodes,
   danmakuLoad,
-  danmakuMatch,
-  danmakuMinAutoScore,
   danmakuSearch,
   defaultDanmakuFilter,
   fmtBitrate,
@@ -527,19 +524,20 @@ export default function App() {
       file_name: fileName,
       file_size: it.size_bytes,
       duration_secs: it.runtime_secs > 0 ? it.runtime_secs : null,
+      /* 只用来判「官方源要不要参与」。非动漫内容弹弹Play 一条都不收录,
+         打过去纯烧配额(2026-08-02 用户报配额老被刷完,这是我们自己贡献的一份)。 */
+      genres: it.genres ?? [],
     };
     try {
       const auto = await danmakuAutoLoad(input, defaultDanmakuFilter(), null, it.series_id ?? null);
       if (auto) { setDmComments(auto); return; } // 够可信 → 静默挂上,不打扰(开不开由持久化的开关说了算)
-      // null = 核层认为没有够格自动挂的匹配。再看一眼候选:够门槛就挂,不够就把面板留给用户。
-      const cands = await danmakuMatch(input);
-      const top = cands.reduce<DanmakuMatchCandidate | null>((a, b) => (!a || b.score > a.score ? b : a), null);
-      if (top && top.score >= (await danmakuMinAutoScore())) {
-        setDmComments(await danmakuLoad(top.episode_id, top.source_id));
-        say(`弹幕已自动匹配 · ${top.source_name} · ${top.anime_title}`);
-        return;
-      }
-      say(cands.length ? "弹幕候选可信度不足,请在弹幕面板手动挑选" : "未找到匹配的弹幕,可在弹幕面板手动搜索");
+      /* ★ 这里以前紧跟着又调一次 danmakuMatch(input) —— **同样的入参、同样的判据**,
+         而 danmaku_auto_load 内部刚跑完 match_all 并且已经用 MIN_AUTO_SCORE 筛过一遍。
+         也就是说那一轮里的 `top.score >= danmakuMinAutoScore()` 恒为 false,
+         结果永远是那句「可信度不足」,却实打实又发了一整轮
+         /match + 最多 4 次 /search/episodes。每一次没匹配上的起播 = 双倍配额,零收益。
+         (2026-08-02 查「弹弹配额被刷完」时发现,删掉后行为一字未变。) */
+      say("未找到够可信的弹幕匹配,可在弹幕面板手动搜索");
     } catch (e) {
       /* ★「搜不到」和「搜不了」是两件事。核层现在会把弹弹Play 回的 errorCode 原样抛上来
          (最常见的是 429「已达到接口调用配额上限」——2026-08-01 实测官方源整天都在回它),

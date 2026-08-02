@@ -2652,6 +2652,15 @@ fn require_danmaku_sources(state: &State<'_, AppState>) -> Result<Vec<DanmakuSou
     Ok(v)
 }
 
+/// 主动搜索限流:只在这次请求会打到**官方**源时才拦(自建源是用户自己的服务器,无配额)。
+/// 桌面端同款,见 apps/desktop/src/lib.rs::danmaku_search_gate。
+fn danmaku_search_gate(sources: &[DanmakuSourceConfig]) -> Result<(), String> {
+    if sources.iter().any(|s| s.official) {
+        danmaku::search_gate()?;
+    }
+    Ok(())
+}
+
 // ---------- 夸克 TV 扫码登录 ----------
 #[derive(serde::Serialize)]
 struct QuarkScan {
@@ -3467,6 +3476,7 @@ async fn danmaku_search(
     keyword: String,
 ) -> Result<Vec<danmaku::DanmakuSourceGroup>, String> {
     let sources = require_danmaku_sources(&state)?;
+    danmaku_search_gate(&sources)?;
     Ok(danmaku::search_all_grouped(&state.http, &sources, &keyword).await)
 }
 
@@ -3492,7 +3502,9 @@ async fn danmaku_match(
     state: State<'_, AppState>,
     input: danmaku::MatchInput,
 ) -> Result<Vec<danmaku::DanmakuMatchCandidate>, String> {
+    // 手动重新匹配也走一整轮 /match + /search/episodes,和搜索一样烧配额,一样要限流。
     let sources = require_danmaku_sources(&state)?;
+    danmaku_search_gate(&sources)?;
     // 匹配打不通(配额用尽/签名错/源挂了)时这里是 Err —— 别吞成空表,
     // 否则界面只会说「未找到匹配的弹幕」,而那不是真相。桌面端同款口径。
     danmaku::match_all(&state.http, &sources, &input).await
@@ -3541,7 +3553,17 @@ async fn danmaku_auto_load(
     ch_convert: Option<i32>,
     anchor_key: Option<String>,
 ) -> Result<Option<Vec<DanmakuComment>>, String> {
-    let sources = require_danmaku_sources(&state)?;
+    /* ★ 官方源只在「可能是番」时才带上 —— 判据和取舍见桌面端同名命令的长注释。
+       一句话:非动漫内容往官方接口打一整轮是纯烧配额,而元数据为空时必须放行。 */
+    let allow_official = danmaku::allow_official_for(&input.genres);
+    let sources = danmaku_sources(&state, allow_official);
+    if sources.is_empty() {
+        return if allow_official {
+            Err("未配置弹幕服务器(且无官方弹弹Play凭据)".into())
+        } else {
+            Ok(None) // 非动漫 + 无自建源 = 这片本来就不该有弹幕,不是错误
+        };
+    }
     let ch = ch_convert.unwrap_or(0);
     let finish = |raw: Vec<DanmakuComment>| danmaku::apply_filter_and_dedup(raw, &options);
 
@@ -5202,6 +5224,28 @@ mod tests {
                 "「{k}」已经有人处理了,把它从 KNOWN_UNHANDLED 里删掉"
             );
         }
+    }
+
+    /* ★ 官方弹幕配额的护栏,与桌面端 `auto_match_actually_gates_the_official_danmaku_source`
+       同款、同理由(核层 `is_anime` 写了却从没被任何宿主调用过,非动漫内容照样烧配额)。
+       两端**各钉一份**:合并成一条的话删掉其中一端的调用不会红。
+       反向验证:把 allow_official_for 改回 true,本测试立刻红。 */
+    #[test]
+    fn auto_match_actually_gates_the_official_danmaku_source() {
+        let me = include_str!("lib.rs");
+        let auto = me
+            .split_once("async fn danmaku_auto_load(")
+            .expect("找不到 danmaku_auto_load")
+            .1;
+        let body = &auto[..auto.len().min(2000)];
+        assert!(
+            body.contains("danmaku::allow_official_for(&input.genres)"),
+            "danmaku_auto_load 必须用 allow_official_for 判官方源参不参与"
+        );
+        assert!(
+            !body.contains("require_danmaku_sources(&state)"),
+            "别退回无条件取全部源(那个函数恒带官方源)"
+        );
     }
 
     /// 手机前端 `ui/mobile` 会调的命令,一个都不能漏注册 —— 与 TV 那条同形态,

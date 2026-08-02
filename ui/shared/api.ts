@@ -544,6 +544,10 @@ export type DanmakuMatchInput = {
   file_hash?: string | null;
   file_size?: number | null;
   duration_secs?: number | null;
+  /** 条目的类型/标签(Item.genres)。**只决定官方弹弹Play 源参不参与自动匹配**,不参与评分。
+   *  确信不是番(有分类且没有动漫类)就不打官方接口 —— 它根本不收录这些内容,打了纯烧配额。
+   *  ★ 空数组 = 元数据没刮到 = 不知道 → 核层按「允许」处理,别在这里自作主张填个假值。 */
+  genres?: string[];
 };
 
 export type DanmakuFilterOptions = {

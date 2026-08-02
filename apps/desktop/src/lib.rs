@@ -3198,11 +3198,32 @@ fn danmaku_sources(state: &State<'_, AppState>, allow_official: bool) -> Vec<Dan
 }
 
 fn require_danmaku_sources(state: &State<'_, AppState>) -> Result<Vec<DanmakuSourceConfig>, String> {
-    let v = danmaku_sources(state, true);
+    require_danmaku_sources_for(state, true)
+}
+
+/// 同上,但由调用方决定官方源参不参与(自动匹配用 [`danmaku::allow_official_for`] 判)。
+fn require_danmaku_sources_for(
+    state: &State<'_, AppState>,
+    allow_official: bool,
+) -> Result<Vec<DanmakuSourceConfig>, String> {
+    let v = danmaku_sources(state, allow_official);
     if v.is_empty() {
-        return Err("未配置弹幕服务器(且无官方弹弹Play凭据)".into());
+        return Err(if allow_official {
+            "未配置弹幕服务器(且无官方弹弹Play凭据)".into()
+        } else {
+            // 非动漫内容 + 没有自建源 = 无源可用。这不是错误,是"这片本来就不该有弹幕"。
+            "未配置弹幕服务器".to_string()
+        });
     }
     Ok(v)
+}
+
+/// 主动搜索限流:只在这次请求会打到**官方**源时才拦(自建源是用户自己的服务器,无配额)。
+fn danmaku_search_gate(sources: &[DanmakuSourceConfig]) -> Result<(), String> {
+    if sources.iter().any(|s| s.official) {
+        danmaku::search_gate()?;
+    }
+    Ok(())
 }
 
 /// 自建弹幕源列表(设置页增删改查)。
@@ -3260,6 +3281,7 @@ async fn danmaku_search(
     keyword: String,
 ) -> Result<Vec<danmaku::DanmakuSourceGroup>, String> {
     let sources = require_danmaku_sources(&state)?;
+    danmaku_search_gate(&sources)?;
     Ok(danmaku::search_all_grouped(&state.http, &sources, &keyword).await)
 }
 
@@ -3285,7 +3307,9 @@ async fn danmaku_match(
     state: State<'_, AppState>,
     input: danmaku::MatchInput,
 ) -> Result<Vec<danmaku::DanmakuMatchCandidate>, String> {
+    // 手动重新匹配也走一整轮 /match + /search/episodes,和搜索一样烧配额,一样要限流。
     let sources = require_danmaku_sources(&state)?;
+    danmaku_search_gate(&sources)?;
     // 一条候选都没有且源报了错(配额用尽/签名错/源挂了)时这里是 Err —— 别再吞成空表,
     // 吞掉的话前端只会说「未找到匹配的弹幕」,而那不是真相。
     danmaku::match_all(&state.http, &sources, &input).await
@@ -3334,7 +3358,23 @@ async fn danmaku_auto_load(
     ch_convert: Option<i32>,
     anchor_key: Option<String>,
 ) -> Result<Option<Vec<DanmakuComment>>, String> {
-    let sources = require_danmaku_sources(&state)?;
+    /* ★ 官方源只在「可能是番」时才带上。2026-08-02 之前这里恒为 true,
+       播一部欧美剧/综艺/纪录片也照样往官方接口打一整轮(/match + 最多 4 次
+       /search/episodes),而那些内容弹弹Play 一条都不收录 —— 纯烧配额。
+       判据见 danmaku::allow_official_for(元数据为空时**放行**,不知道不等于不是)。 */
+    let allow_official = danmaku::allow_official_for(&input.genres);
+    let sources = danmaku_sources(&state, allow_official);
+    if sources.is_empty() {
+        /* 空表有两种成因,报法完全不同:
+           - 排除了官方源(非动漫)且没有自建源 → 这片本来就不该有弹幕,静默返回 None;
+           - 官方源在候选里却仍然空 → 是真的「一个源都没配」,必须如实报,
+             吞掉的话用户只会看见弹幕莫名其妙不出来(这是弹幕最常见的失败)。 */
+        return if allow_official {
+            Err("未配置弹幕服务器(且无官方弹弹Play凭据)".into())
+        } else {
+            Ok(None)
+        };
+    }
     let ch = ch_convert.unwrap_or(0);
     let finish = |raw: Vec<DanmakuComment>| danmaku::apply_filter_and_dedup(raw, &options);
 
@@ -6044,6 +6084,34 @@ fn strip_android_only(src: &str) -> String {
 
 #[cfg(test)]
 mod api_contract_tests {
+    /* ★ 官方弹幕配额的护栏。核层有 `is_anime`、写得好好的、还配了单测 ——
+       但从落地到 2026-08-02 **没有任何宿主调用过它**,`danmaku_sources(state, true)`
+       三处调用点全是写死的 true。后果:播欧美剧/综艺/纪录片一样往官方接口打一整轮,
+       而弹弹Play 根本不收录这些,一条候选都不可能有。用户看到的是「配额老被刷完」。
+
+       纯逻辑单测照不到这种「函数写了没人调」的烂法(core 那条 allow_official_for
+       测试当时就是绿的)。所以在**宿主自己的源码**里钉一次调用点,
+       同 [[stale-waijie-lies]] 的教训:后端有、前端没接,编译期一声不吭。
+
+       反向验证:把 danmaku_auto_load 里的 allow_official_for 调用改回 `true`,本测试立刻红。 */
+    #[test]
+    fn auto_match_actually_gates_the_official_danmaku_source() {
+        let me = include_str!("lib.rs");
+        let auto = me
+            .split_once("async fn danmaku_auto_load(")
+            .expect("找不到 danmaku_auto_load")
+            .1;
+        let body = &auto[..auto.len().min(2000)];
+        assert!(
+            body.contains("danmaku::allow_official_for(&input.genres)"),
+            "danmaku_auto_load 必须用 allow_official_for 判官方源参不参与 ——                  写死 true 就是每次起播都往弹弹Play 烧一轮配额,而且非动漫内容颗粒无收"
+        );
+        assert!(
+            !body.contains("require_danmaku_sources(&state)"),
+            "别退回无条件取全部源(那个函数恒带官方源)"
+        );
+    }
+
     /// 前端 src/lib/api.ts 里 ACCOUNT_MUTATIONS 这个集合决定「改完账号表要不要广播给侧栏」。
     /// **名字写错 = 永远不广播 = 侧栏永远不刷新,而且不报任何错**(第一版我就写了个
     /// 根本不存在的 `add_source_server`,真名是 `source_login`,它还恰好是添加网盘的入口)。

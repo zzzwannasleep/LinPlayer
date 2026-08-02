@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -708,6 +708,10 @@ pub struct MatchInput {
     pub file_size: Option<i64>,
     /// 视频时长(秒)。
     pub duration_secs: Option<f64>,
+    /// 条目的类型/标签(Emby Genres + Tags)。**只用来决定官方源参不参与**,
+    /// 不参与评分 —— 见 [`allow_official_for`]。空表 = 不知道,按"允许"处理。
+    #[serde(default)]
+    pub genres: Vec<String>,
 }
 
 /// 自动加载可信度阈值:低于此分不该自动上屏。对齐 Dart DanmakuAutoLoader._minScore。
@@ -751,6 +755,58 @@ pub fn is_anime(genres_and_tags: &[String]) -> bool {
         let l = g.to_lowercase();
         KW.iter().any(|k| l.contains(k))
     })
+}
+
+/// 这次**自动**匹配该不该带上官方弹弹Play 源。
+///
+/// ★ 背景(2026-08-02,用户报「配额老是被刷完」):`is_anime` 从落地起就**没有任何宿主调用过**
+///   —— `danmaku_sources(state, allow_official)` 三处调用点全是写死的 `true`。
+///   后果是播好莱坞电影、国产剧、综艺、纪录片……一样往官方接口打一整轮
+///   (`/match` + 最多 4 次 `/search/episodes`),而这些内容弹弹Play 根本不收录,
+///   一条候选都不可能有。**纯烧配额,零收益**,而且是每次起播都烧。
+///
+/// ★ 判据是「确信不是番」才排除,不是「确信是番」才放行:
+///   `genres` 为空 = 元数据没刮到 / 网盘源没有分类信息 = **不知道** → 照常允许。
+///   反过来写(空表就排除)会让所有没刮削的库弹幕直接死掉,而且是静默的
+///   —— 用户只会看见「弹幕突然不出来了」,查都没处查。
+///
+/// 手动搜索(`/search/anime`)和手动挑源**不**过这一关:那是用户明确要求的,
+/// 他说这是番就是番,轮不到我们替他判。
+pub fn allow_official_for(genres_and_tags: &[String]) -> bool {
+    genres_and_tags.is_empty() || is_anime(genres_and_tags)
+}
+
+// ---------- 主动搜索限流 ----------
+
+/// 两次**用户主动**搜索之间的最小间隔。用户 2026-08-02:「比如5秒内最多搜索1次」。
+pub const SEARCH_MIN_INTERVAL: Duration = Duration::from_secs(5);
+
+fn last_search() -> &'static Mutex<Option<Instant>> {
+    static L: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    L.get_or_init(|| Mutex::new(None))
+}
+
+/// 内部实现,时钟由调用方给 —— 不然这条护栏只能靠 sleep 5 秒去测。
+fn try_search_at(now: Instant) -> Result<(), f64> {
+    let mut slot = last_search().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(prev) = *slot {
+        let elapsed = now.saturating_duration_since(prev);
+        if elapsed < SEARCH_MIN_INTERVAL {
+            return Err((SEARCH_MIN_INTERVAL - elapsed).as_secs_f64());
+        }
+    }
+    *slot = Some(now);
+    Ok(())
+}
+
+/// 主动搜索闸门。**只在这次请求会打到官方源时**调用 —— 自建源是用户自己的服务器,
+/// 没有配额可烧,给它限速纯属添堵。
+///
+/// 选择「拒绝」而不是「排队等待」:排队的话用户按一下搜索键要盯着转圈五秒,
+/// 而且连按五下就排出 25 秒的队,比报错难受得多。报错至少说清了还要等几秒。
+pub fn search_gate() -> Result<(), String> {
+    try_search_at(Instant::now())
+        .map_err(|left| format!("搜得太快了,请 {:.0} 秒后再试(官方弹幕接口有调用配额)", left.ceil()))
 }
 
 /// 并行向所有传入源做智能匹配,返回按可信度降序的候选。对齐 Dart DanmakuMatcher.matchAll。
@@ -802,10 +858,7 @@ async fn match_one(
         search_candidates(http, cfg, input),
         match_by_file_candidates(http, cfg, input),
     );
-    let err = match (&by_search, &by_file) {
-        (Err(a), Err(_)) => Some(format!("{}: {a}", cfg.name)),
-        _ => None,
-    };
+    let path_err = by_search.as_ref().err().or(by_file.as_ref().err()).cloned();
     let mut by_ep: HashMap<String, DanmakuMatchCandidate> = HashMap::new();
     for c in by_search.unwrap_or_default().into_iter().chain(by_file.unwrap_or_default()) {
         let key = format!("{}|{}", c.source_id, c.episode_id);
@@ -816,6 +869,18 @@ async fn match_one(
             }
         }
     }
+    /* ★ 判据是「一条候选都没有 **且** 有一路是失败的」,不是「两路都失败」。
+       旧版写的是 `(Err, Err)` 才报错,于是最常见的那种半失败被整个吞掉:
+       `/search/episodes` 回 429 配额用尽(Err),而 `/match` 正常返回空表(Ok)——
+       两者配额是分开的,这是**实测的常态**不是理论情况(2026-08-02 真机抓到)。
+       结果 err=None、候选空,一路传到界面变成「未找到匹配的弹幕」。
+       那正是 2026-08-01 那轮修复要杀掉的那句谎话,只是从另一条岔路又长回来了。
+       反过来,只要**有**候选就不该报错 —— 一路通就还有结果可用,那才是双路并跑的意义。 */
+    let err = if by_ep.is_empty() {
+        path_err.map(|e| format!("{}: {e}", cfg.name))
+    } else {
+        None
+    };
     (by_ep.into_values().collect(), err)
 }
 
@@ -1551,6 +1616,109 @@ fn dedup(mut items: Vec<DanmakuComment>, window_seconds: f64) -> Vec<DanmakuComm
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* 官方源参不参与自动匹配。
+       ★ 这条护栏钉的是 2026-08-02 那个「配额老被刷完」的真因之一:
+         `is_anime` 写了但**没人调**,非动漫内容照样烧官方配额。
+       ★ 「不知道」必须放行 —— 反过来写(genres 空就排除)会让所有没刮削元数据的库
+         弹幕静默死掉,那是比烧配额严重得多的回归。 */
+    #[test]
+    fn official_source_skipped_only_when_we_know_it_is_not_anime() {
+        let g = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(allow_official_for(&g(&["动画", "奇幻"])), "是番 → 带官方源");
+        assert!(allow_official_for(&g(&["Animation"])), "英文分类也要认");
+        assert!(!allow_official_for(&g(&["动作", "科幻"])), "确信不是番 → 不烧官方配额");
+        assert!(!allow_official_for(&g(&["Drama", "Crime"])), "欧美剧同理");
+        assert!(allow_official_for(&[]), "★ 没刮到元数据 = 不知道,必须放行(否则弹幕静默死掉)");
+    }
+
+    /* 主动搜索限流。用户 2026-08-02:「比如5秒内最多搜索1次」。
+       用注入时钟测,不 sleep —— 睡 5 秒的测试没人会留着。
+       ★ 反向验证:把 try_search_at 里的 `if elapsed < SEARCH_MIN_INTERVAL` 去掉,本测试立刻红。 */
+    #[test]
+    fn search_gate_enforces_min_interval() {
+        let t0 = Instant::now();
+        // 前一条用例可能刚打过闸门(同进程共享 static),先把状态推到"很久以前"。
+        *last_search().lock().unwrap() = None;
+
+        assert!(try_search_at(t0).is_ok(), "第一次搜索必须放行");
+        let left = try_search_at(t0 + Duration::from_secs(1)).expect_err("1 秒后再搜必须被挡");
+        assert!((3.9..=4.1).contains(&left), "要如实告诉用户还剩几秒,实得 {left}");
+        assert!(
+            try_search_at(t0 + Duration::from_secs(4)).is_err(),
+            "4 秒仍在窗口内(边界:< 5 秒一律挡)"
+        );
+        assert!(try_search_at(t0 + SEARCH_MIN_INTERVAL).is_ok(), "满 5 秒必须放行");
+        assert!(
+            try_search_at(t0 + SEARCH_MIN_INTERVAL + Duration::from_secs(1)).is_err(),
+            "★ 放行后要重新计时,否则限流只在第一个窗口有效"
+        );
+        *last_search().lock().unwrap() = None;
+    }
+
+    /* 半失败必须如实报,不能吞成「没搜到」。
+       弹弹Play 的 /search 和 /match 配额是**分开**的,最常见的形态就是
+       一路 429、另一路正常回空 —— 2026-08-02 真机实测到的就是这个
+       (同一入参连打四次,第四次静默变 null,而候选表其实是空的)。
+       旧判据是「两路都失败才报错」,于是这种半失败一路传到界面变成
+       「未找到匹配的弹幕」—— 又是那句谎话,只是从另一条岔路长回来的。
+
+       走**真 HTTP**:这条测的是 match_one 里两个 Result 怎么合并,
+       而那正是纯逻辑测不到的地方(要真有一路 Err 一路 Ok 才复现得出来)。
+       ★ 反向验证:把 `if by_ep.is_empty()` 改回 `(Err, Err)` 双失败判据,本测试立刻红。 */
+    #[tokio::test]
+    async fn one_failed_path_with_no_candidates_is_reported_not_swallowed() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut c, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let n = c.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    // /search/episodes → 配额用尽(HTTP 200 + errorCode,弹弹Play 的一贯口径)
+                    // /match           → 正常返回,但一条都没匹配上
+                    let body = if req.contains("/search/episodes") {
+                        r#"{"errorCode":429,"errorMessage":"已达到接口调用配额上限"}"#
+                    } else {
+                        r#"{"errorCode":0,"isMatched":false,"matches":[]}"#
+                    };
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    );
+                    let _ = c.write_all(head.as_bytes()).await;
+                    let _ = c.write_all(body.as_bytes()).await;
+                    let _ = c.flush().await;
+                });
+            }
+        });
+
+        let cfg = DanmakuSourceConfig {
+            id: "fake".into(),
+            name: "假源".into(),
+            api_url: format!("http://127.0.0.1:{port}"),
+            official: false,
+            auth_type: Some(DanmakuAuthType::None),
+            ..Default::default()
+        };
+        let input = MatchInput {
+            title: "某部番".into(),
+            episode_no: Some(1),
+            file_name: "某部番.S01E01.mkv".into(),
+            ..Default::default()
+        };
+        let got = match_all(&reqwest::Client::new(), &[cfg], &input).await;
+        let err = got.expect_err("一路 429 + 零候选,必须报错 —— 吞成空表就等于对用户说「这集没有弹幕」");
+        assert!(
+            err.contains("配额") || err.contains("429"),
+            "报错要带上游给的真实原因,实得:{err}"
+        );
+    }
 
     /* 鉴权推导:用户只填「名称 + 链接」,鉴权方式由链接推出来。
        用例是两个主流自建端 README/源码里的**原样地址**,不是我编的:

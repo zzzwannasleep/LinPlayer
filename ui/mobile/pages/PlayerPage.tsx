@@ -269,6 +269,9 @@ export default function PlayerPage({
         file_name: fileName,
         file_size: item.size_bytes,
         duration_secs: item.runtime_secs > 0 ? item.runtime_secs : null,
+        /* 只用来判「官方弹弹Play 源要不要参与」。非动漫内容它一条都不收录,
+           打过去纯烧配额。空数组=没刮到元数据,核层按「允许」处理。 */
+        genres: item.genres ?? [],
       };
       const c = await danmakuAutoLoad(input, defaultDanmakuFilter(), null, item.series_id ?? null);
       if (alive && c) setDmComments(c);
