@@ -128,6 +128,13 @@ fn name_hit(blocked_name: &str, candidate: Option<&str>) -> bool {
     !blocked_name.is_empty() && candidate.is_some_and(|c| c.eq_ignore_ascii_case(blocked_name))
 }
 
+/// 这个 id 在名单里吗。**给媒体库用** —— 库(CollectionFolder)没有 series_id
+/// 也不参与跨服名字比对,只按 id 判就够,而且不能按名字判:
+/// 两台服务器上都叫「电影」的库是两个不同的库,按名字会一屏两台一起屏蔽。
+pub fn is_blocked_id(id: &str) -> bool {
+    !id.is_empty() && list().iter().any(|b| b.id == id)
+}
+
 /// 观看记录用:按标题判。记录是跨服的,没有可靠的 item id 可比。
 pub fn is_blocked_title(title: &str, series_title: Option<&str>) -> bool {
     let list = list();
@@ -206,6 +213,17 @@ mod tests {
         let _g = guard(vec![BlockedItem { id: "x".into(), name: "".into(), at: 1 }]);
         assert!(!is_blocked(&item("y", "", None, Some(""))));
         assert!(!is_blocked_title("", Some("")));
+    }
+
+    /* 媒体库只能按 id 判,**不能**按名字。
+       两台服务器上都有一个叫「电影」的库,按名字判 = 屏蔽了 A 服的,B 服的也一起没了,
+       而且用户完全不知道为什么。这条钉住 is_blocked_id 不许退化成名字比较。 */
+    #[test]
+    fn library_matches_by_id_only_never_by_name() {
+        let _g = guard(vec![BlockedItem { id: "A-lib".into(), name: "电影".into(), at: 1 }]);
+        assert!(is_blocked_id("A-lib"));
+        assert!(!is_blocked_id("B-lib"), "另一台服务器上的同名库不该跟着被屏蔽");
+        assert!(!is_blocked_id(""), "空 id 永不命中");
     }
 
     #[test]

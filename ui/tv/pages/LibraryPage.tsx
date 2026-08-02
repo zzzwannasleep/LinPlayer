@@ -35,7 +35,9 @@ export default function LibraryPage({
 }) {
   /* 从导航轨进来是 undefined(先选库);从首页「查看全部」带 parentId 进来则直接进那个库。 */
   const [libId, setLibId] = useState<string | null>(parentId ?? null);
-  const libs = useAsync(() => views(), []);
+  /* ★ true = 要**全量**(含已屏蔽的库)。这一页是唯一能把库找回来解除屏蔽的地方,
+     跟首页一样滤掉的话,屏蔽就成了单向门。 */
+  const libs = useAsync(() => views(true), []);
 
   if (!libId) {
     return <Picker libs={libs.data} session={session} onPick={setLibId} />;
@@ -69,6 +71,9 @@ function Picker({
   session: LoginResult;
   onPick: (id: string) => void;
 }) {
+  /* 长按 OK = 屏蔽整个媒体库(用户 2026-08-02 在 PC 上点名的那条,TV 对应长按)。
+     library:true —— 反显按 id 判、文案也不同,见 BlockDialog。 */
+  const block = useBlockDialog({ library: true });
   return (
     <FocusColumn focusKey="LIB_PICK">
       <div className="ptitle">媒体库</div>
@@ -87,12 +92,14 @@ function Picker({
             {libs.map((lib, i) => (
               <FocusItem
                 key={lib.id}
-                className="cell fx"
+                className={`cell fx${block.blockedIds.has(lib.id) ? " blocked" : ""}`}
                 autoFocus={i === 0}
                 onEnter={() => onPick(lib.id)}
+                onLongEnter={() => block.openFor(lib)}
               >
                 <div className="th">
                   {lib.has_primary && <img src={thumbUrl(session, lib.id, 640)} alt="" />}
+                  {block.blockedIds.has(lib.id) && <div className="blk">已屏蔽</div>}
                 </div>
                 <div className="nm">{lib.name}</div>
               </FocusItem>
@@ -100,6 +107,7 @@ function Picker({
           </div>
         )
       )}
+      {block.dialog}
     </FocusColumn>
   );
 }

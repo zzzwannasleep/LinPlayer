@@ -22,16 +22,27 @@ import Sheet from "./Sheet";
 export function useBlockCard(opts?: {
   /** 屏蔽落地后。页面据此把这张卡从自己手里那份副本里移走 / 整页重拉。 */
   onChanged?: (it: Item, blocked: boolean) => void;
+  /** 屏蔽的是**媒体库**而不是条目。
+   *  ★ 反显要按 **id** 判,不能按名字:两台服务器上都叫「电影」的库是两个不同的库,
+   *    按名字会显示成"另一台那个也已屏蔽"。核层对应 `blocklist::is_blocked_id`。
+   *  ★ 文案也不一样(屏蔽一个库 ≠ 屏蔽一部剧),见下面的弹窗。 */
+  library?: boolean;
 }) {
+  const lib = !!opts?.library;
   const [target, setTarget] = useState<Item | null>(null);
   const [names, setNames] = useState<Set<string>>(new Set());
+  const [ids, setIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
 
   /* 名单是**跨服务器**的(核层按名字对齐),所以只拉一次,不跟着换服重拉。 */
   useEffect(() => {
     let alive = true;
     blockedList()
-      .then((b) => alive && setNames(new Set(b.map((x) => x.name))))
+      .then((b) => {
+        if (!alive) return;
+        setNames(new Set(b.map((x) => x.name)));
+        setIds(new Set(b.map((x) => x.id)));
+      })
       .catch(() => {});
     return () => {
       alive = false;
@@ -48,12 +59,14 @@ export function useBlockCard(opts?: {
     const name = blockName(it);
     try {
       await setBlocked(it.id, name, next);
-      setNames((s) => {
+      const put = <T,>(s: Set<T>, v: T) => {
         const n = new Set(s);
-        if (next) n.add(name);
-        else n.delete(name);
+        if (next) n.add(v);
+        else n.delete(v);
         return n;
-      });
+      };
+      setNames((s) => put(s, name));
+      setIds((s) => put(s, it.id));
       setTarget(null);
       opts?.onChanged?.(it, next);
       toast(next ? `已屏蔽《${name}》` : `已解除屏蔽《${name}》`, "ok");
@@ -64,14 +77,20 @@ export function useBlockCard(opts?: {
     }
   };
 
-  const on = target ? names.has(blockName(target)) : false;
+  const on = target ? (lib ? ids.has(target.id) : names.has(blockName(target))) : false;
   const dialog = (
     <Sheet open={!!target} onClose={() => setTarget(null)} title={target ? blockName(target) : ""}>
       <div className="pad">
         <p className="blk-desc">
-          {on
-            ? "解除屏蔽后,它会重新出现在首页、搜索和播放记录里。"
-            : "屏蔽后不在首页显示,不出现在搜索结果和播放记录里。媒体库里仍能找到它,随时可以解除。"}
+          {lib
+            ? on
+              ? "解除屏蔽后,这个媒体库会重新出现在首页。"
+              : /* 说清楚能力边界:屏蔽库**不会**自动屏蔽库里的片子。
+                   不写的话用户会以为"继续观看里还有"是 bug。 */
+                "屏蔽后这个媒体库不在首页出现。库里的片子如果也不想看见,要对片子本身单独屏蔽。本页仍然列出它,随时可以解除。"
+            : on
+              ? "解除屏蔽后,它会重新出现在首页、搜索和播放记录里。"
+              : "屏蔽后不在首页显示,不出现在搜索结果和播放记录里。媒体库里仍能找到它,随时可以解除。"}
         </p>
       </div>
       <div className="sheet-acts">
@@ -84,11 +103,11 @@ export function useBlockCard(opts?: {
           disabled={busy}
           onClick={() => target && void apply(target, !on)}
         >
-          {on ? "解除屏蔽" : "屏蔽"}
+          {on ? "解除屏蔽" : lib ? "屏蔽此媒体库" : "屏蔽"}
         </button>
       </div>
     </Sheet>
   );
 
-  return { onLongPress, dialog, blockedNames: names };
+  return { onLongPress, dialog, blockedNames: names, blockedIds: ids };
 }

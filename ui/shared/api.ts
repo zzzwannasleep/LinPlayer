@@ -599,8 +599,16 @@ export const relogin = (serverId: string, username: string, password: string) =>
 export const login = (server: string, username: string, password: string) =>
   invoke<LoginResult>("login", { server, username, password });
 
-/** 媒体库列表。几乎不变,走缓存 —— 首页/媒体库/侧栏三处都要它,每次 mount 各打一遍太亏。 */
-export const views = () => memo("views", () => invoke<Item[]>("views"));
+/** 媒体库列表。几乎不变,走缓存 —— 首页/媒体库/侧栏三处都要它,每次 mount 各打一遍太亏。
+ *
+ *  `includeBlocked`:缺省**滤掉已屏蔽的库**。只有「媒体库」页那份列表传 true ——
+ *  它是唯一能把库找回来解除屏蔽的地方,滤掉就成了单向门。
+ *  两份用**不同的缓存键**:共用一个键的话,先进媒体库页(全量)再回首页就会拿到
+ *  带屏蔽项的那份,表现是"屏蔽了但回首页又出来了,再刷新才没"。 */
+export const views = (includeBlocked = false) =>
+  memo(includeBlocked ? "views:all" : "views", () =>
+    invoke<Item[]>("views", { includeBlocked }),
+  );
 
 export const listItems = (parentId: string) =>
   invoke<Item[]>("list_items", { parentId });
@@ -1464,7 +1472,13 @@ export const blockedList = () => invoke<BlockedItem[]>("blocked_list");
 /** 屏蔽 / 解除屏蔽。★ `name` 传**剧名**:分集卡传 series_name,不是「第 35 集」——
  *  传错了不报错,只是播放记录那条比对永远命中不了(静默漏网)。 */
 export const setBlocked = (itemId: string, name: string, blocked: boolean) =>
-  invoke<void>("set_blocked", { itemId, name, blocked });
+  invoke<void>("set_blocked", { itemId, name, blocked }).then(() => {
+    /* 屏蔽的是**媒体库**时,首页那份 views 缓存里还留着它 —— 不清的话
+       "屏蔽了,回首页它还在,再刷新才没"。两个键都要清(见 views 的注释)。
+       条目级屏蔽清一次也无害,不值得为区分两种情况再传一个参数。 */
+    listMemo.delete("views");
+    listMemo.delete("views:all");
+  });
 
 // ---------- 字幕翻译 ----------
 export type TranslationSettings = Record<string, unknown>;

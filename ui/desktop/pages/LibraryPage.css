@@ -56,6 +56,19 @@
 .lib-card:hover .lib-name { color: var(--accent); }
 .lib-skel { animation-duration: 1.3s; }
 
+/* 已屏蔽的媒体库。★ 这一页**故意仍然列出它** —— 首页那份 views 已经滤掉了,
+   这里是唯一能把它找回来解除的地方,滤掉屏蔽就成了单向门。所以只打标不隐藏。
+   .lib-card 是 position:static 的按钮,角标要定位就得给它一个包含块。 */
+.lib-card { position: relative; }
+.lib-card.blocked .lib-cover { filter: grayscale(1) brightness(0.55); }
+.lib-card.blocked .lib-name { color: var(--ink-3); }
+.lib-blk {
+  position: absolute; left: 8px; top: 8px; z-index: 2;
+  padding: 2px 8px; border-radius: 9px;
+  background: rgba(10, 12, 16, 0.82); border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+}
+
 /* ---------- 顶栏锚定下拉(排序/筛选,复用全局 .dd/.li) ---------- */
 /* z-index 要压过背板(见 .lib-ddscrim):两者现在同在 .cbar 这个层叠上下文里。
    整条按钮组一起抬,不然「排序」下拉开着时旁边的升降序/视图切换要点两下(第一下被背板吃掉)。 */

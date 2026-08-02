@@ -14,6 +14,7 @@ import {
   views,
 } from "@shared/api";
 import { useCardActions } from "../lib/cardActions";
+import { useLibBlockMenu } from "../lib/libBlock";
 import Poster from "../components/Poster";
 import { PluginSlot } from "../components/PluginHost";
 import {
@@ -171,6 +172,15 @@ export default function HomePage({
        核层已经不再吐被屏蔽的条目,重拉一次就是**唯一真相**。屏蔽是低频动作,
        而首页加载本来就是骨架先出 + 各块并发(见下面那段),重拉不肉疼。 */
     onBlockChanged: onRefresh,
+  });
+
+  /* 右键**媒体库入口**(那条「媒体库」轨里的卡)→ 屏蔽整个库。
+     用户 2026-08-02:「我在首页的媒体库栏也没有」。条目卡那套走 useCardActions,
+     库卡不是条目(没有已看/收藏可言),所以另起一个只有一项的菜单。 */
+  const libCtx = useLibBlockMenu(() => {
+    /* 屏蔽库之后首页要重拉:库列表和它那条「最新」行都得跟着消失。
+       核层的 views 已经不吐它了(见 api.ts 的 views(includeBlocked)),重拉即真相。 */
+    onRefresh();
   });
 
   /** 首屏是否还在等第一批数据 —— 控制骨架。null=加载中,[]/有值=到了。 */
@@ -467,6 +477,9 @@ export default function HomePage({
                     key={v.id}
                     title={v.name}
                     onClick={() => onOpenLibrary(v)}
+                    /* 右键屏蔽整个媒体库(用户 2026-08-02:「我在首页的媒体库栏也没有」)。
+                       库不是条目(没有已看/收藏可言),所以走 useLibBlockMenu 那份只有一项的菜单。 */
+                    onContextMenu={(e) => libCtx.open(e, v)}
                   >
                     <div className="hm-libimg">
                       {v.has_primary ? (
@@ -548,6 +561,8 @@ export default function HomePage({
       {/* 右键菜单(标记已/未播放 + 收藏 + 管理员项)与 toast 都由 useCardActions 出 ——
           现在四处网格(首页/媒体库/收藏/搜索)共用同一套,不再是首页独有。 */}
       {menu}
+      {libCtx.menu}
+      {libCtx.toastNode}
       {toastNode}
     </>
   );

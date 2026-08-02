@@ -12,10 +12,12 @@ import {
 } from "@shared/api";
 import { AdminMenuItems, useIsAdmin } from "../lib/admin";
 import { useCardActions } from "../lib/cardActions";
+import { useLibBlockMenu } from "../lib/libBlock";
 import Poster from "../components/Poster";
 import {
   IconChevronDown,
   IconChevronRight,
+  IconEyeOff,
   IconLibrary,
   IconPlay,
   IconRefresh,
@@ -103,17 +105,23 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
   const [fYears, setFYears] = useState<number[]>([]);
   const [fRating, setFRating] = useState<number | null>(null);
 
+  /* 库的屏蔽态和切换动作走公共 hook(首页那条媒体库轨用的是同一个)——
+     两份实现迟早各改一半。这一页只借它的状态和动作,菜单自己画(要和管理员项拼一起)。 */
+  const libBlk = useLibBlockMenu();
+
+
   const [openDD, setOpenDD] = useState<null | "sort" | "filter">(null);
   const [layout, setLayout] = useState<"grid" | "list">("grid");
   const [toast, setToast] = useState("");
 
-  /* 右键菜单。这页原本**一个右键菜单都没有**(库卡片和网格卡都没挂),
-     管理员三项是它的第一批菜单项 —— 所以非管理员右键这里仍然什么都不弹,
-     不画一个只有标题的空菜单。 */
+  /* 右键**媒体库卡片**的菜单(和网格里条目卡的那套是两回事,条目卡走 useCardActions)。
+     ★ 原来它是 admin-only 的:`if (!admin) return`,菜单里也只有管理员三项。
+       于是用户 2026-08-02 报的「右键媒体库根本没有屏蔽」—— 非管理员连菜单都不弹,
+       管理员弹出来也只有刷新/扫描。屏蔽是**所有人**都该有的,所以这里改成:
+       屏蔽项常在,管理员项照旧只对管理员出。 */
   const admin = useIsAdmin(session.server);
   const [ctx, setCtx] = useState<{ x: number; y: number; id: string; name: string } | null>(null);
   const openCtx = (e: ReactMouseEvent, it: Item) => {
-    if (!admin) return; // 目前菜单里只有管理员项,没权限就别拦浏览器右键
     e.preventDefault();
     setCtx({ x: e.clientX, y: e.clientY, id: it.id, name: it.name });
   };
@@ -162,7 +170,9 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
     let alive = true;
     setErr("");
     setLibs(null);
-    views()
+    /* ★ true = 要**全量**(含已屏蔽的)。这一页是唯一能把库找回来解除屏蔽的地方,
+       跟首页一样滤掉的话,屏蔽就成了单向门。 */
+    views(true)
       .then((vs) => alive && setLibs(vs))
       .catch((e) => alive && setErr(String(e)));
     return () => {
@@ -257,14 +267,20 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
   /** 右键菜单本体。库列表和库内两个 return 都要画,提出来免得两份各改一半。 */
   const ctxMenu = ctx && (
     <div className="ctxmenu" style={{ left: ctx.x, top: ctx.y }} onClick={(e) => e.stopPropagation()}>
-      <AdminMenuItems
-        itemId={ctx.id}
-        divider={false}
-        onDone={(m) => {
-          setToast(m);
-          setCtx(null);
-        }}
-      />
+      {/* 屏蔽整个媒体库。屏蔽后这个库不在首页出现(媒体库轨 + 它那条「最新」行都没了),
+          但**留在本页**并打上「已屏蔽」—— 这一页是唯一能把它找回来解除的地方。 */}
+      <div className="mi" onClick={() => void libBlk.toggle({ id: ctx.id, name: ctx.name } as Item)}>
+        <IconEyeOff size={15} /> {libBlk.blockedIds.has(ctx.id) ? "解除屏蔽" : "屏蔽此媒体库"}
+      </div>
+      {admin && (
+        <AdminMenuItems
+          itemId={ctx.id}
+          onDone={(m) => {
+            setToast(m);
+            setCtx(null);
+          }}
+        />
+      )}
     </div>
   );
 
@@ -308,7 +324,7 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
                     /* 不挂 enter+阶梯延迟:`.enter` 是 380ms 且 fill-mode:both(延迟期间
                        完全看不见),叠上 300ms 阶梯 = 最后一张卡 680ms 才出来。
                        和 Poster 同一个病,见那边的长注释。内容出现不能被动效挡着。 */
-                    className="lib-card"
+                    className={`lib-card${libBlk.blockedIds.has(lib.id) ? " blocked" : ""}`}
                     onClick={() => onPickView(lib)}
                     onContextMenu={(e) => openCtx(e, lib)}
                   >
@@ -319,6 +335,7 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
                         <IconLibrary size={38} />
                       )}
                     </div>
+                    {libBlk.blockedIds.has(lib.id) && <div className="lib-blk">已屏蔽</div>}
                     <div className="lib-name">{lib.name}</div>
                   </button>
                 ))}

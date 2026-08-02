@@ -339,12 +339,13 @@ await cmd("Page.addScriptToEvaluateOnNewDocument", { source: stub("main") });
 await cmd("Page.navigate", { url: `http://127.0.0.1:${PORT_HTTP}/index.html` });
 await sleep(3000);
 
-const rightClickCard = async () => ev(`(() => {
-  const c = document.querySelector('.pitem');
+const rightClick = async (sel) => ev(`(() => {
+  const c = document.querySelector(${JSON.stringify(sel)});
   if (!c) return false;
   c.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 }));
   return true;
 })()`);
+const rightClickCard = () => rightClick('.pitem');
 must(await rightClickCard(), "首页上有卡片可以右键");
 await sleep(500);
 const menuText = await ev(`document.querySelector('.ctxmenu')?.innerText || ''`);
@@ -362,6 +363,39 @@ console.log("   set_blocked 参数:" + JSON.stringify(arg));
    传成集名的话观看记录那条按名字的跨服比对永远命中不了,而且一声不吭。 */
 must(arg && arg.blocked === true, "点「屏蔽」要真的发 set_blocked(只改 React state 的话刷新就没了)");
 must(arg && arg.name === "某剧", `屏蔽记的必须是剧名「某剧」,实际「${arg?.name}」—— 记成集名 = 播放记录永远滤不掉`);
+
+/* ---------- 媒体库本身 ---------- */
+/* 用户 2026-08-02:「媒体库里面右键媒体库弹出的选项根本就没有屏蔽媒体库,
+   我在首页的媒体库栏也没有」。
+   ★ 这两条是我上一轮**漏测**的:只右键了条目卡(.pitem),没右键库卡。
+     库卡走的是另一套菜单(媒体库页那套原来还是 admin-only),条目卡绿不代表它绿。 */
+console.log("\n── 屏蔽整个媒体库 ──");
+must(await rightClick('.hm-lib'), "首页「媒体库」轨里的库卡片能右键");
+await sleep(500);
+const libMenuHome = await ev(`document.querySelector('.ctxmenu')?.innerText || ''`);
+must(/屏蔽此媒体库/.test(libMenuHome), `首页库卡右键菜单里有「屏蔽此媒体库」,实际「${libMenuHome.replace(/\n/g, " / ")}」`);
+
+await ev(`window.__CALLS = []`);
+await ev(`(() => {
+  const mi = [...document.querySelectorAll('.ctxmenu .mi')].find(x => /屏蔽此媒体库/.test(x.innerText));
+  mi && mi.click();
+})()`);
+await sleep(800);
+const libArg = await lastCall("set_blocked");
+console.log("   set_blocked(库) 参数:" + JSON.stringify(libArg));
+must(libArg && libArg.itemId === "v1" && libArg.blocked === true, "点了要真的发 set_blocked,且带的是**库**的 id");
+
+/* 媒体库页的库卡:菜单里同样要有,而且**不能是 admin-only** —— 假后端的 is_admin=false,
+   原来那套 `if (!admin) return` 会让右键什么都不弹(这正是用户撞到的)。 */
+await ev(`(() => { const b = [...document.querySelectorAll('.side-nav button, .nav button, button')].find(x => x.innerText.trim() === '媒体库'); b && b.click(); return !!b; })()`);
+await sleep(1500);
+must(await rightClick('.lib-card'), "媒体库页里列出的库卡片能右键(非管理员也要能)");
+await sleep(500);
+const libMenuPage = await ev(`document.querySelector('.ctxmenu')?.innerText || ''`);
+must(
+  /屏蔽/.test(libMenuPage),
+  `媒体库页的库卡右键菜单里有屏蔽项,实际「${libMenuPage.replace(/\n/g, " / ")}」`,
+);
 
 console.log(fail === 0 ? "\n全绿 ✅" : `\n${fail} 条红 ❌`);
 ws.close();

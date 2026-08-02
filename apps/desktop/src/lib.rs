@@ -653,9 +653,19 @@ fn set_active_server(state: State<'_, AppState>, server_id: String) -> Result<()
 }
 
 #[tauri::command]
-async fn views(state: State<'_, AppState>) -> Result<Vec<Item>, String> {
+async fn views(state: State<'_, AppState>, include_blocked: Option<bool>) -> Result<Vec<Item>, String> {
     let s = session_of(&state)?;
-    emby::views(&state.http, &s).await
+    let mut v = emby::views(&state.http, &s).await?;
+    /* 屏蔽掉的媒体库不出现在**列表里**(首页的媒体库轨、各库「最新」行、侧栏)。
+       ★ 缺省过滤,`include_blocked=true` 才给全量 —— 只有媒体库页那份列表要全量:
+         它是唯一能把库找回来解除屏蔽的地方,滤掉就成了单向门。
+       ★ 这里不走 blocklist::filter(那条按 series_id/名字比,是给条目用的):
+         库没有 series_id,而"名字对得上"在库上是错的判据 —— 两台服务器上都叫
+         「电影」的库是两个不同的库,按名字判会一屏两台一起屏蔽。 */
+    if !include_blocked.unwrap_or(false) {
+        v.retain(|x| !linplayer_core::blocklist::is_blocked_id(&x.id));
+    }
+    Ok(v)
 }
 
 #[tauri::command]

@@ -55,6 +55,10 @@ export default function LibraryPage({ parentId, title }: { parentId?: string; ti
   /* 长按屏蔽。★ 不传 onChanged:这一页**不移除**卡片(它是唯一能解除屏蔽的入口),
      只让 blockedNames 变一下让角标翻过来。 */
   const block = useBlockCard();
+  /* 长按**媒体库**(这一页 parentId 为空时列的那些)→ 屏蔽整个库。
+     和条目那份是两个实例:反显判据不同(库按 id、条目按名字),文案也不同。
+     用户 2026-08-02 点名 PC 端右键媒体库没有屏蔽 —— 手机端对应的就是长按。 */
+  const libBlock = useBlockCard({ library: true });
 
   const nFilter = f.genres.length + f.tags.length + f.years.length;
   const sortDef = SORTS.find((s) => s.id === sort)!;
@@ -74,7 +78,9 @@ export default function LibraryPage({ parentId, title }: { parentId?: string; ti
 
   useEffect(() => {
     if (parentId) return;
-    views().then(setLibs).catch((e) => setErr(String(e)));
+    /* ★ true = 要**全量**(含已屏蔽的库)。这一页是唯一能把库找回来解除屏蔽的地方,
+       跟首页一样滤掉的话,屏蔽就成了单向门。 */
+    views(true).then(setLibs).catch((e) => setErr(String(e)));
   }, [parentId]);
 
   useEffect(() => {
@@ -145,11 +151,14 @@ export default function LibraryPage({ parentId, title }: { parentId?: string; ti
                 key={v.id}
                 icon="grid"
                 label={v.name}
+                sub={libBlock.blockedIds.has(v.id) ? "已屏蔽 · 不在首页显示" : undefined}
                 onClick={() => go({ page: "library", parentId: v.id, title: v.name })}
+                onLongPress={() => libBlock.onLongPress(v)}
               />
             ))}
           </div>
         )}
+        {libBlock.dialog}
       </Page>
     );
   }
