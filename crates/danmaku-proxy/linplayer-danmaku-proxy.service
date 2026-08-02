@@ -1,0 +1,41 @@
+# 不用 Docker 时的 systemd 单元。
+#   1. 把 target/release/linplayer-danmaku-proxy 放到 /usr/local/bin/
+#   2. 凭据写进 /etc/linplayer-danmaku-proxy.env(chmod 600,内容见下)
+#   3. cp 本文件到 /etc/systemd/system/ && systemctl enable --now linplayer-danmaku-proxy
+#
+# /etc/linplayer-danmaku-proxy.env 的内容(★ 这个文件绝不能进版本控制):
+#   DANDANPLAY_APP_ID=...
+#   DANDANPLAY_APP_SECRET=...
+#   ADMIN_PASSWORD=...
+#   PORT=8787
+
+[Unit]
+Description=LinPlayer 弹幕代理
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=danmaku
+Group=danmaku
+# 凭据走 EnvironmentFile 而不是 Environment= —— 后者会出现在 `systemctl show`
+# 和 journal 里,等于把密钥摊给每一个能读日志的人。
+EnvironmentFile=/etc/linplayer-danmaku-proxy.env
+Environment=DATA_DIR=/var/lib/linplayer-danmaku-proxy
+StateDirectory=linplayer-danmaku-proxy
+ExecStart=/usr/local/bin/linplayer-danmaku-proxy
+Restart=always
+RestartSec=3
+
+# 收紧权限:这个进程只需要读配置、写自己的数据目录、连出网。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

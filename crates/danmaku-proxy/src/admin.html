@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LinPlayer 弹幕代理 · 管理</title>
+<style>
+  /* 全部内联:部署就是一个二进制,没有静态资源目录要挂载,也不依赖任何 CDN。 */
+  :root{--bg:#f6f7f9;--panel:#fff;--line:#e3e6ea;--ink:#1a1d21;--ink2:#5b6470;--ink3:#8b95a1;
+        --accent:#3b82f6;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;--r:10px}
+  @media (prefers-color-scheme:dark){
+    :root{--bg:#0f1216;--panel:#171b21;--line:#262c34;--ink:#e8ecf1;--ink2:#a2acb8;--ink3:#6b7683}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 system-ui,-apple-system,"Segoe UI",
+       "PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 16px 60px}
+  h1{font-size:19px;margin:0 0 4px}
+  .sub{color:var(--ink3);font-size:12.5px;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;margin-bottom:16px}
+  .card h2{font-size:14px;margin:0 0 14px;color:var(--ink2);font-weight:600;letter-spacing:.02em}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+  .kpi .n{font-size:22px;font-weight:650;letter-spacing:-.01em}
+  .kpi .l{font-size:12px;color:var(--ink3);margin-top:2px}
+  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:8px}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 18px}
+  label{display:block;font-size:12.5px;color:var(--ink2);margin-bottom:4px}
+  .hint{font-size:11.5px;color:var(--ink3);margin-top:3px;line-height:1.5}
+  input,select{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+       background:var(--bg);color:var(--ink);font:inherit;font-size:13px}
+  input:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  button{padding:7px 14px;border:1px solid var(--line);border-radius:7px;background:var(--panel);
+       color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--ink3)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:var(--bad);border-color:var(--bad)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--ink3);font-weight:600;font-size:12px}
+  .tw{overflow-x:auto}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:20px;font-size:11px;border:1px solid var(--line)}
+  .tag.bad{color:var(--bad);border-color:var(--bad)}
+  .tag.ok{color:var(--ok);border-color:var(--ok)}
+  #msg{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+       padding:9px 16px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+  #msg.on{opacity:1}
+  #login{max-width:340px;margin:12vh auto}
+  .hide{display:none}
+</style>
+</head>
+<body>
+
+<div id="login" class="card hide">
+  <h2>管理登录</h2>
+  <label for="pw">管理密码</label>
+  <input id="pw" type="password" autocomplete="current-password">
+  <div class="hint">密码由服务端环境变量 <span class="mono">ADMIN_PASSWORD</span> 设定,改密码要重启进程。</div>
+  <div class="row"><button class="primary" onclick="doLogin()">登录</button></div>
+</div>
+
+<div class="wrap hide" id="app">
+  <h1>LinPlayer 弹幕代理</h1>
+  <div class="sub" id="sub"></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>闸门与限额</h2>
+    <div class="grid">
+      <div>
+        <label>出站:每分钟上限</label>
+        <input id="upstream_per_minute" type="number" min="1">
+        <div class="hint">向弹弹Play 发的总量,和有多少客户端无关。</div>
+      </div>
+      <div>
+        <label>出站:每天上限</label>
+        <input id="upstream_per_day" type="number" min="1">
+        <div class="hint">★ 全服最重要的一个数。按你在弹弹那边的实际配额留两成余量填。
+          按 UTC 00:00 重置(不是本地时区)。</div>
+      </div>
+      <div>
+        <label>单客户端:每分钟请求数</label>
+        <input id="client_per_minute" type="number" min="1">
+        <div class="hint">含缓存命中,防单机把本服务打满。</div>
+      </div>
+      <div>
+        <label>单客户端:每天穿透上游次数</label>
+        <input id="client_upstream_per_day" type="number" min="1">
+        <div class="hint">缓存命中不计 —— 命中不花配额,计了会误伤正常追番的人。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>缓存</h2>
+    <div class="grid">
+      <div>
+        <label>弹幕正文 TTL(秒)</label>
+        <input id="ttl_comment_secs" type="number" min="0">
+        <div class="hint">弹幕会持续增加,但少了最近几条没人看得出来。调大 = 更省配额。</div>
+      </div>
+      <div>
+        <label>搜索/集表 TTL(秒)</label>
+        <input id="ttl_search_secs" type="number" min="0">
+      </div>
+      <div>
+        <label>排行榜 TTL(秒)</label>
+        <input id="ttl_trending_secs" type="number" min="0">
+      </div>
+      <div>
+        <label>磁盘上限(MB)</label>
+        <input id="cache_max_mb" type="number" min="1">
+        <div class="hint">超了按最久未用淘汰。改这一项要重启才生效。</div>
+      </div>
+    </div>
+    <div class="row"><button class="danger" onclick="clearCache()">清空缓存</button>
+      <span class="hint" style="margin:0">清完会有一波请求穿透到上游,别在配额紧张时点。</span></div>
+  </div>
+
+  <div class="card">
+    <h2>注册</h2>
+    <div class="grid">
+      <div>
+        <label>注册模式</label>
+        <select id="register_mode">
+          <option value="open">开放(任何人可注册)</option>
+          <option value="invite">邀请码</option>
+          <option value="closed">关闭(存量客户端不受影响)</option>
+        </select>
+        <div class="hint">被刷时切到「邀请码」或「关闭」是最快的止血手段。</div>
+      </div>
+      <div>
+        <label>邀请码</label>
+        <input id="invite_code" type="text" placeholder="仅邀请码模式生效">
+      </div>
+      <div>
+        <label>同一 IP 每天可注册数</label>
+        <input id="register_per_ip_per_day" type="number" min="1">
+      </div>
+      <div>
+        <label>服务总开关</label>
+        <select id="enabled"><option value="true">开启</option><option value="false">关闭(全部返回维护中)</option></select>
+      </div>
+    </div>
+    <div class="row"><button class="primary" onclick="saveConfig()">保存配置</button>
+      <span class="hint" style="margin:0">保存后立刻生效,无需重启(磁盘上限除外)。</span></div>
+  </div>
+
+  <div class="card">
+    <h2>客户端 <span id="cn" class="hint" style="margin:0"></span></h2>
+    <div class="tw"><table id="tbl">
+      <thead><tr><th>编号</th><th>名称</th><th>最近活跃</th><th>请求</th><th>上游</th><th>IP</th><th>状态</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+</div>
+
+<div id="msg"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let TIMER = null;
+
+function toast(t){ const m=$("msg"); m.textContent=t; m.classList.add("on"); setTimeout(()=>m.classList.remove("on"),2200); }
+
+async function api(path, body){
+  const r = await fetch("/admin/api/"+path, body===undefined ? {} :
+    {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+  if(r.status===401){ showLogin(); throw new Error("未登录"); }
+  return r.json();
+}
+function showLogin(){ $("login").classList.remove("hide"); $("app").classList.add("hide");
+  if(TIMER){clearInterval(TIMER);TIMER=null;} }
+
+async function doLogin(){
+  const r = await fetch("/admin/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({password:$("pw").value})});
+  if(!r.ok){ toast("密码不对"); return; }
+  $("login").classList.add("hide"); $("app").classList.remove("hide");
+  await refresh(); TIMER = setInterval(refresh, 5000);
+}
+
+const dur = (s) => s<60?`${s|0} 秒前` : s<3600?`${s/60|0} 分钟前` : s<86400?`${s/3600|0} 小时前` : `${s/86400|0} 天前`;
+const mb = (b) => (b/1048576).toFixed(1)+" MB";
+
+function kpi(n,l,pct){
+  return `<div class="kpi"><div class="n">${n}</div><div class="l">${l}</div>` +
+    (pct===undefined?"":`<div class="bar"><i style="width:${Math.min(100,pct)}%;${pct>85?"background:var(--bad)":pct>60?"background:var(--warn)":""}"></i></div>`) +
+    `</div>`;
+}
+
+async function refresh(){
+  const s = await api("state");
+  const c=s.config, g=s.governor, ca=s.cache;
+  const total = ca.hits+ca.misses;
+  const rate = total ? (ca.hits*100/total) : 0;
+  $("sub").textContent = `AppId ${s.summary.app_id_tail} · 已运行 ${dur(s.summary.uptime_secs).replace("前","")} · 客户端 ${s.summary.clients_total}(24 小时内活跃 ${s.summary.clients_active_24h})`;
+  $("kpis").innerHTML =
+    kpi(`${g.day_used} / ${c.upstream_per_day}`, `今日上游调用(${Math.floor(g.day_resets_in/3600)} 小时后重置)`, g.day_used*100/c.upstream_per_day) +
+    kpi(`${g.minute_used} / ${c.upstream_per_minute}`, "本分钟上游调用", g.minute_used*100/c.upstream_per_minute) +
+    kpi(rate.toFixed(1)+"%", `缓存命中率(命中 ${ca.hits} / 未命中 ${ca.misses})`, rate) +
+    kpi(mb(ca.bytes), `缓存占用(${ca.entries} 条,上限 ${c.cache_max_mb} MB)`, ca.bytes*100/(c.cache_max_mb*1048576)) +
+    kpi(g.total_denied, "累计被闸门拦下");
+
+  // 输入框正在被编辑时别覆盖,否则打一半的数字会被 5 秒一次的刷新抹掉。
+  for(const k of ["upstream_per_minute","upstream_per_day","client_per_minute","client_upstream_per_day",
+                  "ttl_comment_secs","ttl_search_secs","ttl_trending_secs","cache_max_mb",
+                  "invite_code","register_per_ip_per_day"]){
+    if(document.activeElement!==$(k)) $(k).value = c[k];
+  }
+  if(document.activeElement!==$("register_mode")) $("register_mode").value = c.register_mode;
+  if(document.activeElement!==$("enabled")) $("enabled").value = String(c.enabled);
+
+  const now = Math.floor(Date.now()/1000);
+  $("cn").textContent = `共 ${s.clients.length} 台`;
+  $("tbl").tBodies[0].innerHTML = s.clients.map(x=>`<tr>
+    <td class="mono">${x.hint}…</td>
+    <td>${esc(x.label)||"—"}</td>
+    <td>${dur(now-x.last_seen)}</td>
+    <td>${x.requests}</td>
+    <td>${x.upstream}</td>
+    <td class="mono">${esc(x.ip)}</td>
+    <td>${x.banned?'<span class="tag bad">已封禁</span>':'<span class="tag ok">正常</span>'}</td>
+    <td><button onclick="act('${x.id}','${x.banned?"unban":"ban"}')">${x.banned?"解封":"封禁"}</button>
+        <button class="danger" onclick="act('${x.id}','remove')">删除</button></td>
+  </tr>`).join("") || `<tr><td colspan="8" class="hint">还没有客户端注册过。</td></tr>`;
+}
+const esc = (s) => String(s??"").replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+
+async function saveConfig(){
+  const num = (k)=>parseInt($(k).value,10);
+  await api("config", {
+    upstream_per_minute:num("upstream_per_minute"), upstream_per_day:num("upstream_per_day"),
+    client_per_minute:num("client_per_minute"), client_upstream_per_day:num("client_upstream_per_day"),
+    ttl_comment_secs:num("ttl_comment_secs"), ttl_search_secs:num("ttl_search_secs"),
+    ttl_trending_secs:num("ttl_trending_secs"), cache_max_mb:num("cache_max_mb"),
+    register_mode:$("register_mode").value, invite_code:$("invite_code").value,
+    register_per_ip_per_day:num("register_per_ip_per_day"), enabled:$("enabled").value==="true",
+  });
+  toast("已保存"); refresh();
+}
+async function act(id, action){
+  if(action==="remove" && !confirm("删除后这台设备的令牌立刻失效,它需要重新注册。继续?")) return;
+  await api("client",{id,action}); refresh();
+}
+async function clearCache(){
+  if(!confirm("清空缓存会让接下来一波请求全部穿透到上游。继续?")) return;
+  await api("cache/clear",{}); toast("已清空"); refresh();
+}
+
+$("pw").addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
+// 先试一次:已有有效会话就直接进,没有就落到登录页。
+refresh().then(()=>{ $("app").classList.remove("hide"); TIMER=setInterval(refresh,5000); })
+         .catch(()=>showLogin());
+</script>
+</body>
+</html>
