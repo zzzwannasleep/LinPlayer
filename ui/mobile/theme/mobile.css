@@ -1209,6 +1209,26 @@ html.playing .pg-body {
    海报本身就带片名,再写一遍是冗余,而两行标题 + 一行副标题会把视觉重心
    从封面抢走,一屏全是字。这里的取舍:媒体库轨道不写(海报有名),
    「继续观看 / 接下来看」写一行(需要知道是第几集)。 */
+/* 「已屏蔽」标 —— 只出现在媒体库网格(别处核层已经滤掉了,见 emby::fetch_items)。
+   左下角:右上被已看勾/未看数占着。整卡压暗去色,一眼能从网格里认出来。 */
+.blk-ind {
+  position: absolute;
+  left: 5px;
+  bottom: 5px;
+  z-index: 2;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(10, 12, 16, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+.card.blocked .card-a img { filter: grayscale(1) brightness(0.55); }
+.card.blocked .card-cap { color: var(--ink-3); }
+/* 屏蔽确认弹窗里的说明段。 */
+.blk-desc { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+
 .card-cap {
   margin-top: 8px;
   font-size: 12.5px;
@@ -2768,6 +2788,31 @@ html.playing .pg-body {
   border: 3px solid rgba(255, 255, 255, 0.18);
   border-top-color: #fff;
   animation: spin calc(1000ms * var(--mo)) linear infinite;
+}
+/* 起播前的缓冲速度,压在转圈下方。父级是 grid+place-items:center,两个子元素叠在同一格,
+   用位移推开而不是改成 flex-column —— 改布局会把转圈本身的居中位置也带偏。 */
+.pl-speed-big {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.72);
+  transform: translateY(46px);
+}
+/* 出画后的缓冲速度:集标题右侧。等宽数字 —— 速度每秒变一次,比例字体下整行会左右抽。 */
+.pl-speed {
+  flex: none; /* 与标题的间距由 .pl-top 的 gap 出,不再自带 margin */
+  padding: 2px 7px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.78);
+}
+/* mpv 真的卡在等缓存(paused-for-cache):点亮,把"卡了"这件事说出来。 */
+.pl-speed.wait {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* 播放器面板的样式**整块搬到了 p-player.js**(v2 起有 drawer / pop 两种形态)。

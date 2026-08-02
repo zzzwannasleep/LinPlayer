@@ -166,6 +166,11 @@ export default function HomePage({
   const { cardProps, menu, toastNode } = useCardActions(session, {
     onPlay,
     onChanged: () => void listResume(12).then(setResume).catch(() => {}),
+    /* 屏蔽后整页重拉。首页手里有六份互不相干的 items 副本(继续观看/接下来看/各媒体库/
+       合集/Hero),挨个过滤等于把核层那条过滤规则在前端再抄一遍 —— 抄错了还不报错。
+       核层已经不再吐被屏蔽的条目,重拉一次就是**唯一真相**。屏蔽是低频动作,
+       而首页加载本来就是骨架先出 + 各块并发(见下面那段),重拉不肉疼。 */
+    onBlockChanged: onRefresh,
   });
 
   /** 首屏是否还在等第一批数据 —— 控制骨架。null=加载中,[]/有值=到了。 */

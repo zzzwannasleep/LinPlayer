@@ -47,6 +47,16 @@
   0%, 18% { transform: translateX(0); }
   82%, 100% { transform: translateX(var(--p-marq-x, 0)); }
 }
+/* 缓冲速度(集标题右侧)。等宽数字:速度每 250ms 变一次,比例字体下整行会左右抽。
+   .wait = mpv 真的卡在等缓存(paused-for-cache),点成强调色让"卡了"这件事说出来。 */
+.p-speed {
+  flex: none; font-size: 12px; font-variant-numeric: tabular-nums;
+  padding: 2px 7px; border-radius: 7px; white-space: nowrap;
+  background: rgba(0, 0, 0, 0.38); border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.78);
+}
+.p-speed.wait { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
 /* 拖动区:标题与右侧按钮之间的弹性空白。它顶掉了 .p-top-r 原来的 margin-left:auto。 */
 .p-drag { flex: 1; align-self: stretch; min-width: 0; }
 .p-top-r { display: flex; align-items: center; gap: 4px; }
@@ -300,6 +310,13 @@
   width: 40px; height: 40px; border-radius: 50%;
   border: 3px solid rgba(255, 255, 255, 0.18); border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
+}
+/* 起播前的缓冲速度,压在转圈下面(用户 2026-08-02「视频没播放前都显示在画面中间」)。
+   .p-loading 是 grid + place-items:center,两个子元素会叠在同一格 —— 用 translateY 推开,
+   而不是改成 flex-column:改布局会让转圈本身的居中位置也跟着偏。 */
+.p-speed-big {
+  font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.72); transform: translateY(42px);
 }
 
 /* 音量/亮度竖条(点击弹出,草稿 21)。left 由 JS 按按钮中心定,故这里只钉 bottom。 */

@@ -97,6 +97,9 @@ export const IconList = ({ size = 20, className }: P) =>
 /** 侧栏折叠汉堡(草稿:「侧栏可折叠为窄图标条(顶栏汉堡切换)」)。 */
 export const IconMenu = ({ size = 20, className }: P) =>
   svg(size, className, <path d="M4 7h16M4 12h16M4 17h16" />);
+/** 屏蔽(划掉的眼睛)。右键菜单的「屏蔽此内容」。 */
+export const IconEyeOff = ({ size = 20, className }: P) =>
+  svg(size, className, <><path d="M10.6 6.2A9.6 9.6 0 0 1 12 6c5 0 9 4.5 9 6 0 .7-.9 2.1-2.4 3.4" /><path d="M6.3 8.3C4.1 9.8 3 11.4 3 12c0 1.5 4 6 9 6 1.4 0 2.6-.3 3.7-.8" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="m3.5 3.5 17 17" /></>);
 /** 已看/未看勾(海报右键菜单的「标记已看」)。 */
 export const IconCheck = ({ size = 20, className }: P) =>
   svg(size, className, <path d="m4 12.5 5 5L20 6.5" />);

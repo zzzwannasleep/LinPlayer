@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  fmtNetSpeed,
   fmtTime,
   reportProgress,
   seek,
@@ -44,6 +45,10 @@ export default function PlayerPage({
      软件还活着**,用户只会以为应用卡死了。而且 TV 播放器进来亮一下控制条本来就是
      通行做法(用户能立刻知道有哪些键可按),不是我们特有的补丁。 */
   const [osd, setOsd] = useState(true);
+  /* 已经出画了吗。缓冲速度按用户 2026-08-02 的口径分两处显示:
+     没出画之前在**画面正中**,出画之后挪到**集标题右侧**。判据见轮询里的注释。 */
+  const [started, setStarted] = useState(false);
+  const startPos = useRef<number | null>(null);
   const hideAt = useRef(0);
   /* ★ eof 收尾只许跑一次。轮询每秒一发,而 eof 一旦为 true 就**一直**为 true
      (mpv keep-open=yes 停在最后一帧),不加锁就是每秒一发 stop_playback ——
@@ -76,6 +81,11 @@ export default function PlayerPage({
         const s = await getStatus();
         if (!alive) return;
         setSt(s);
+        /* 首帧判定(缓冲速度显示在哪儿要看它)。判据是「时间**真的往前走了**」,
+           不是 `s.time > 0` —— 续播时核层一 loadfile 就把位置记账成续播点
+           (见 crates/mpv 的 load_inner),第一拍读到的就已经 >0。 */
+        if (startPos.current == null) startPos.current = s.time;
+        if (s.time > startPos.current + 0.05) setStarted(true);
 
         /* ★ 正常播完自动收尾。走的是和按返回键**完全同一条路**(stopPlayback + onBack),
            只是位置传 `duration` 而不是 `time`:
@@ -226,11 +236,27 @@ export default function PlayerPage({
         </div>
       )}
 
+      {/* 起播前:缓冲速度居中(用户 2026-08-02「视频没播放前都显示在画面中间」)。
+          ★ **不跟着 OSD 收起** —— OSD 5 秒自动隐藏,而缓冲可能要等更久;
+            收起之后整屏纯黑没有任何东西证明软件还活着,那正是本页开头那段注释在防的事。 */}
+      {!started && (
+        <div className="osd-boot">
+          <div className="sp" />
+          {st?.cache_speed ? <div className="sd">{fmtNetSpeed(st.cache_speed)}</div> : null}
+        </div>
+      )}
+
       {/* 顶栏:全透明,标题块自带不透明底 */}
       {osd && (
         <div className="osd-top">
           <div className="tt">
-            <div className="t">{title ?? "正在播放"}</div>
+            <div className="t">
+              {title ?? "正在播放"}
+              {/* 出画后的缓冲速度:紧跟集标题右侧(用户 2026-08-02)。 */}
+              {started && st?.cache_speed ? (
+                <span className={`sd${st.buffering ? " wait" : ""}`}>{fmtNetSpeed(st.cache_speed)}</span>
+              ) : null}
+            </div>
           </div>
         </div>
       )}

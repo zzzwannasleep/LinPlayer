@@ -213,6 +213,12 @@ export type Status = {
   duration: number;
   paused: boolean;
   buffered: number;
+  /** 缓冲速度(字节/秒,mpv `cache-speed`)。0 = 没在取数(本地文件/缓存已喂饱)。
+   *  可选:各端还有几处「播放器没起来」的空状态字面量,它们没有速度可言。 */
+  cache_speed?: number;
+  /** mpv 正卡在等缓存(`paused-for-cache`)。和 `paused` 是两件事:
+   *  用户按的暂停和网速跟不上,pause 属性读数一模一样。 */
+  buffering?: boolean;
   /** 本片已正常播放到结尾(mpv keep-open=yes,画面停最后一帧、时间不再走)。
    *  ★ 播放器页必须监听它:不监听 = 看完不退出 = stop_playback 永远不触发 =
    *  Trakt/Bangumi 的「看完」一次都不会上报(用户报的正是这个)。 */
@@ -904,6 +910,14 @@ export function fmtSize(bytes: number | null): string {
   return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 }
 
+/** 缓冲速度(字节/秒)→ 「3.2 MB/s」。三端播放页共用一套口径。
+ *  0/负数返回空串 —— 没在取数就**什么都不画**,别显示一个假的「0 KB/s」
+ *  让人以为卡住了(本地文件、缓存喂饱时 mpv 的 cache-speed 本来就是 0)。 */
+export function fmtNetSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return "";
+  return `${fmtSize(bytesPerSec)}/s`;
+}
+
 /** 码率 bps → 「45.0M」/「256k」(草稿媒体信息卡的写法)。 */
 export function fmtBitrate(bps: number | null): string {
   if (!bps || bps <= 0) return "";
@@ -1436,6 +1450,21 @@ export const watchHistoryList = (currentOnly: boolean) =>
 export const watchHistoryDelete = (recordId: string) =>
   invoke<void>("watch_history_delete", { recordId });
 export const watchHistoryClear = () => invoke<void>("watch_history_clear");
+
+// ---------- 媒体库屏蔽 ----------
+/** 一条屏蔽记录。名单是**跨服务器**的:核层同时按 id 和名字比对
+ *  (同一部剧在两台服务器上 id 不同,观看记录也只有名字对得上)。 */
+export type BlockedItem = { id: string; name: string; at: number };
+/** 屏蔽用哪个名字。**分集记剧名**,不是「第 35 集」。
+ *  三端共用一份:核层的观看记录按名字跨服比对(见 crates/core/src/blocklist.rs),
+ *  记成集名不报错、只是那条比对永远命中不了 —— 各端各写一份迟早有一份写错。 */
+export const blockName = (it: { name: string; series_name?: string | null }) =>
+  it.series_name || it.name;
+export const blockedList = () => invoke<BlockedItem[]>("blocked_list");
+/** 屏蔽 / 解除屏蔽。★ `name` 传**剧名**:分集卡传 series_name,不是「第 35 集」——
+ *  传错了不报错,只是播放记录那条比对永远命中不了(静默漏网)。 */
+export const setBlocked = (itemId: string, name: string, blocked: boolean) =>
+  invoke<void>("set_blocked", { itemId, name, blocked });
 
 // ---------- 字幕翻译 ----------
 export type TranslationSettings = Record<string, unknown>;

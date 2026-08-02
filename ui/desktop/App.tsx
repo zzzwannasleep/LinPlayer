@@ -30,6 +30,7 @@ import {
   fmtBitrate,
   fmtRes,
   fmtSize,
+  fmtNetSpeed,
   fmtTime,
   getPrefs,
   itemDetail,
@@ -273,6 +274,14 @@ export default function App() {
   /* 视频出第一帧前:黑屏 + 加载动画,不露上一段残帧(用户 2026-07-16)。
      出画信号取「时间开始走(st.time>0)」,兜底 4s 强制放行(暂停起播/静态首帧)。 */
   const [ready, setReady] = useState(false);
+  /** 本次起播的起点(续播位置)。撤黑屏要看「时间比它前进了」,不是「时间 > 0」。 */
+  const startPos = useRef(0);
+  /** 4s 兜底已到点。到点≠放行 —— 还在等缓冲就继续黑着(见轮询里的判据)。 */
+  const fallbackDue = useRef(false);
+  /** 正在起播下一片(play() 还没返回)。★ 这一段里**上一片的轮询还在跑**,
+   *  它每 250ms 就把 ready 拍回 true —— 光在 playItem 开头 setReady(false) 会被它当场盖掉,
+   *  表现就是"黑屏根本没出现"。轮询看这面旗子决定闭嘴。 */
+  const starting = useRef(false);
   const timer = useRef<number | null>(null);
   const tick = useRef(0);
   /// status 轮询连续失败的拍数。见轮询里的 catch —— 用来把「一直读不到」说出来。
@@ -675,6 +684,19 @@ export default function App() {
       默认版本,且**不报错** —— TS 上少参函数可赋给多参形参,编译期抓不到。 */
   async function playItem(it: Item, mediaSourceId?: string | null) {
     try {
+      /* ★ 起播的第一件事:把黑屏放回来。**必须在任何 await 之前**。
+
+         用户 2026-08-02:「播放过一个视频后再播放第二个视频,缓冲出来之前的背景不是黑色,
+         是之前的视频的画面做背景」。根因不是"没人复位 ready"(afterStart 里一直有一句),
+         而是**那一句太晚了**:它排在 getPlaybackPrefs() 和 play() 两个 await 后面,而
+         play() 要走 PlaybackInfo → 取流地址 → 起预取代理,慢服务器上是**好几秒**。
+         那几秒里 playing 还是上一集、ready 还是 true → 黑屏层不渲染,而 mpv 那边
+         keep-open=yes 让上一集停在最后一帧没卸载 —— 用户看到的就是上一个视频的画面。
+         复位提到第一行,那几秒立刻变成黑幕 + 转圈 + 缓冲速度。
+         (核层那边同时补了换片前 `stop`,见 crates/mpv 的 load_inner:那一道管 mpv
+          自己的画布,这一道管我们的遮罩。两道都要,因为它们盖的是不同的时间段。) */
+      starting.current = true;
+      setReady(false);
       /* 外部播放器:设了就整条交出去,不进内置播放页。
          ★ 必须在 play() **之前**判 —— play() 会真的让内置 mpv 起播,
            之后再拉外部播放器就是两个播放器同时出声(本项目在
@@ -712,6 +734,9 @@ export default function App() {
          起播失败本就该继续留在原页面重试,弹个必须点确定的系统框只是添堵。
          走自家 .toast(和其它所有失败提示同一条口径,见 fail()) */
       say(`播放失败:${e}`);
+    } finally {
+      // 失败/提前返回也要落旗:不落的话轮询被永久闭麦 = 黑屏再也撤不掉。
+      starting.current = false;
     }
   }
 
@@ -720,6 +745,8 @@ export default function App() {
       .app-root.hidden 才让它露出来 —— 页面自己调 playLocal 只会有声音没画面。 */
   async function playDownload(d: DownloadItem) {
     try {
+      starting.current = true;
+      setReady(false); // 同 playItem:黑屏必须在 await 之前放回来
       if (!IS_PLAYER_WINDOW) {
         await playerWindowOpen({ kind: "local", download: d });
         return;
@@ -738,11 +765,15 @@ export default function App() {
       afterStart(synth);
     } catch (e) {
       say(`播放下载文件失败:${e}`);
+    } finally {
+      starting.current = false;
     }
   }
 
   async function playSource(entry: SourceEntry) {
     try {
+      starting.current = true;
+      setReady(false); // 同 playItem:黑屏必须在 await 之前放回来
       if (!IS_PLAYER_WINDOW) {
         await playerWindowOpen({ kind: "source", entry });
         return;
@@ -756,6 +787,8 @@ export default function App() {
       afterStart(synth);
     } catch (e) {
       say(`播放失败:${e}`);
+    } finally {
+      starting.current = false;
     }
   }
 
@@ -952,8 +985,15 @@ export default function App() {
     tick.current = 0;
     statusFail.current = 0;
     ended.current = false; // 换片必须解锁,否则第二部片播完不会自动收尾
-    // 兜底:4s 后无论如何放行黑屏(暂停起播 st.time 不动,不能永远黑着)。
-    const readyFallback = window.setTimeout(() => setReady(true), 4000);
+    /* 兜底再放一次黑屏。真正管用的那一次在 playItem 的**第一行**(见那里的注释):
+       这里已经是 play() 返回之后了,而露残帧发生在 play() 返回**之前**。 */
+    setReady(false);
+    startPos.current = statusRef.current.time;
+    fallbackDue.current = false;
+    /* 兜底:4s 后放行黑屏(暂停起播 / 静止首帧时 time 不会走,不能永远黑着)。
+       ★ 只是"到点了",不等于"可以放行" —— 真在等缓冲时放行就是把残帧亮出来,
+         正是这次要修的那个现象。放行的判据在轮询里(见 fallbackDue 的用处)。 */
+    const readyFallback = window.setTimeout(() => { fallbackDue.current = true; }, 4000);
     timer.current = window.setInterval(async () => {
       try {
         const st = await statusApi();
@@ -966,7 +1006,13 @@ export default function App() {
         const fixed = st.duration > 0 ? st : { ...st, duration: statusRef.current.duration };
         statusRef.current = fixed;
         setStatus(fixed);
-        if (st.time > 0) setReady(true); // 时间开始走 = 已出画,撤黑屏
+        /* 撤黑屏的判据:**时间真的往前走了**,而不是 `st.time > 0`。
+           续播时核层一 loadfile 就把位置记账成 start_secs(见 crates/mpv load_inner),
+           第一拍读到的就已经 > 0 —— 旧判据在续播路径上等于"起播即放行",
+           缓冲还没出画就把上一片的残帧亮了出来。
+           起播暂停/静态首帧这类时间不走的情况由 4s 兜底放行,但**必须先不在等缓冲**。 */
+        if (!starting.current && (st.time > startPos.current + 0.05 || (fallbackDue.current && !st.buffering)))
+          setReady(true);
         /* 跳转卡死。★ 播放器**修不了**这件事(根因是服务器不认 HTTP Range,ffmpeg 只能
            从当前位置顺读丢弃到目标字节),但让用户对着一个不动的进度条干等是我们的错。
            一次 seek 只说一次;mpv 跳完了就复位,下一次卡住还会再说。 */
@@ -1529,12 +1575,22 @@ export default function App() {
   const epTag = playing && playing.season_no != null && playing.episode_no != null
     ? `S${playing.season_no}E${playing.episode_no}` : null;
   const title = playing ? [playing.series_name, epTag, playing.name].filter(Boolean).join(" · ") : "";
+  /* 播放窗常驻标题栏时,底下这几层都要从标题栏下方开始。
+     0 而不是 undefined:CSS 里 .player-layer/.p-loading 是 inset:0,给 0 等于不动。 */
+  const chromeTop = IS_PLAYER_WINDOW && !fs ? "var(--titlebar-h)" : 0;
 
   return (
     <>
-      {/* 自绘标题栏:播放时不渲染(让 mpv 全屏铺满,且不与播放器顶栏冲突)。
-          播放窗压根没有浏览界面,任何时候都不渲染它。 */}
-      {!playing && !IS_PLAYER_WINDOW && <Titlebar />}
+      {/* 自绘标题栏。
+          - 主窗:播放时不渲染(主窗根本不起播,这条只是历史兜底)。
+          - 播放窗:**只要不全屏就常驻**。用户 2026-08-02:「单开的播放页要有标题栏,
+            不然我拖动不了播放窗口,也点不到别的地方的选项」。
+            原来只有 OSD 顶栏里那条 .p-drag 能拖 —— 而 OSD 静止 3 秒就淡出,淡出后
+            整个窗口没有一个可拖的像素;起播前(还没拿到待播条目)连 OSD 都不渲染,
+            那时窗口是一块盖住主窗、拖不动也关不掉的黑板。这不是"少个装饰",是真的卡死。
+          - 让位:核层把 mpv 视频窗顶部让出同样 36px(见 lib.rs 的 video_top_inset),
+            所以标题栏不压画面。全屏时两边都归零。 */}
+      {((!playing && !IS_PLAYER_WINDOW) || (IS_PLAYER_WINDOW && !fs)) && <Titlebar />}
       {/* 浏览界面只在主窗。播放窗里 session 可能还没拉回来,渲染 Shell 会当场空引用崩掉
           (见 [[transparent-window-crash-looks-like-blackscreen]]:窗口透明 + React 抛错 = 一片黑)。 */}
       {!IS_PLAYER_WINDOW && (
@@ -1558,9 +1614,15 @@ export default function App() {
       )}
 
       {/* 出第一帧前的黑屏 + 加载动画:盖住 mpv 独立窗口,不露上一段残帧(用户 2026-07-16)。
-          播放窗在还没拿到待播条目时也要盖着 —— 否则窗口是透明的,会直接看穿到桌面。 */}
+          播放窗在还没拿到待播条目时也要盖着 —— 否则窗口是透明的,会直接看穿到桌面。
+          top:标题栏常驻时从它下面开始,别把标题栏盖掉(盖掉了又拖不动窗口了)。 */}
       {(playing ? !ready : IS_PLAYER_WINDOW) && (
-        <div className="p-loading"><div className="sp" /></div>
+        <div className="p-loading" style={{ top: chromeTop }}>
+          <div className="sp" />
+          {/* 缓冲速度:起播前显示在画面正中(用户 2026-08-02)。
+              0 = 还没开始取数,不画一个假的「0 KB/s」。 */}
+          {status.cache_speed ? <div className="p-speed-big">{fmtNetSpeed(status.cache_speed)}</div> : null}
+        </div>
       )}
 
       {/* 亮度遮罩:核层没有亮度命令,但 mpv 画面在网页层下面,盖一层黑就是真调光。
@@ -1592,6 +1654,7 @@ export default function App() {
            所以给了独立的 class,别合并:idle 要 0.4s 淡,这里要立刻消失。 */
         <div
           className={`player-layer${idle && !panel && !vbar && !ctx ? " idle" : ""}${fsBusy ? " fs-busy" : ""}`}
+          style={{ top: chromeTop }}
         >
           {/* 画面区:接右键菜单(草稿 L1152)+ 鼠标手势,点空白收起弹出层 */}
           <div
@@ -1611,6 +1674,14 @@ export default function App() {
             <span className={`p-title${marquee ? " run" : ""}`} ref={titleRef} title={title}>
               <b>{title}</b>
             </span>
+            {/* 缓冲速度:起播后挪到集标题右侧(用户 2026-08-02)。
+                ★ 放在 .p-title **外面** —— 它内部有跑马灯动画(translateX),
+                  塞进去会跟着一起划走。 */}
+            {status.cache_speed ? (
+              <span className={`p-speed${status.buffering ? " wait" : ""}`} title={status.buffering ? "正在等缓冲" : "缓冲速度"}>
+                {fmtNetSpeed(status.cache_speed)}
+              </span>
+            ) : null}
             {/* 拖动区:窗口化播放时,<Titlebar/> 不在 = 没有任何地方能拖窗口 ——
                 给了「窗口化」却挪不动那个窗口,等于没给。这条弹性空白就是播放页的标题栏。 */}
             <div className="p-drag" data-tauri-drag-region />
@@ -1620,16 +1691,22 @@ export default function App() {
               {pb("◈", "版本", panel === "version", togglePanel("version"))}
               {pb("⋯", "更多", panel === "more", togglePanel("more"))}
               <span className="p-sep" />
-              {/* 自绘窗口控制:播放时 <Titlebar/> 不渲染,这三个动作在播放页只能自己长出来。
-                  纯图标(顶栏已经四个带字按钮了,再加三个字满得没法看),动作靠 title 说明。
+              {/* 自绘窗口控制。
+                  ★ 最小化/窗口化**只在全屏时**留在这里:不全屏时上方常驻的 <Titlebar/>
+                    已经有这三个按钮了(2026-08-02 加的),再画一份就是同一排里两套窗口控制。
+                    全屏下标题栏不渲染,退出全屏之外的动作没有别的入口,所以这两个得补上。
                   没有「关闭」—— 播放页的返回键在左上角,这里再放个 × 只会让人误关整个 app。 */}
               <span className="p-win">
-                <button className="p-wb" title="最小化" onClick={() => void getCurrentWindow().minimize()}>
-                  <IconMinimize size={15} />
-                </button>
-                <button className="p-wb" title={fs ? "窗口化" : maxed ? "还原" : "最大化"} onClick={windowMode}>
-                  {maxed && !fs ? <IconRestore size={14} /> : <IconWindow size={14} />}
-                </button>
+                {fs && (
+                  <>
+                    <button className="p-wb" title="最小化" onClick={() => void getCurrentWindow().minimize()}>
+                      <IconMinimize size={15} />
+                    </button>
+                    <button className="p-wb" title="窗口化" onClick={windowMode}>
+                      {maxed ? <IconRestore size={14} /> : <IconWindow size={14} />}
+                    </button>
+                  </>
+                )}
                 <button className="p-wb hot" title={fs ? "退出全屏" : "全屏"} onClick={toggleFullscreen}>
                   {fs ? <IconFullscreenExit size={15} /> : <IconFullscreen size={15} />}
                 </button>

@@ -21,6 +21,10 @@ type Props = {
   onToggleFav?: (it: Item) => void;
   /** 右下 ✓:切换已看/未看(hook 内部按 item.played 决定翻向)。不传 = 不出该钮。 */
   onToggleWatched?: (it: Item) => void;
+  /** 已屏蔽 —— 只有**媒体库网格**会传 true。
+   *  屏蔽的条目在首页/搜索/播放记录里核层就滤掉了,媒体库故意不滤(见 emby::fetch_items 注释),
+   *  所以这里要有个看得见的记号,否则那一页里"屏蔽了没有"完全看不出来。 */
+  blocked?: boolean;
 };
 
 /* 海报卡:全端共用(首页轨道 / 媒体库网格 / 收藏网格 / 搜索浮层结果)。
@@ -41,6 +45,7 @@ export default function Poster({
   favActive,
   onToggleFav,
   onToggleWatched,
+  blocked,
 }: Props) {
   const thumb = variant === "thumb";
   /* 图片就位前先摆骨架(用户 2026-07-16:「先加载骨架出来,名字这种文字先出来,
@@ -56,7 +61,7 @@ export default function Poster({
 
   return (
     <div
-      className="pitem"
+      className={`pitem${blocked ? " blocked" : ""}`}
       // 不传 onContextMenu 就不拦右键(保留浏览器默认菜单)。
       onContextMenu={onContextMenu ? (e) => onContextMenu(e, item) : undefined}
     >
@@ -116,6 +121,7 @@ export default function Poster({
             </div>
           )
         )}
+        {blocked && <div className="blocked-ind" title="已屏蔽:不在首页/搜索/播放记录里出现">已屏蔽</div>}
         {progress > 0 && (
           <div className="progress">
             <i style={{ width: `${progress}%` }} />

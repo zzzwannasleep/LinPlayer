@@ -55,7 +55,12 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
   /* 右键菜单(标记已看/收藏)只给**本服**结果 —— 聚合结果属别的服务器,
      不先切服务器就右键会写到当前服上(错服)。所以聚合分组仍只「点=进详情」,
      由宿主 openFromSearch 负责先切服再开。悬停播放同理不给(搜索页 2026-07-15 定不起播)。 */
-  const card = useCardActions(session);
+  const card = useCardActions(session, {
+    /* 屏蔽后这一屏立刻少一张。核层的 search 已经不再吐它,但结果是本组件手里的副本。
+       只动本服那一份:聚合分组来自别的服务器,右键菜单本来就不给它们(见上面那段)。 */
+    onBlockChanged: (it, blocked) =>
+      blocked && setLocal((cur) => (cur ? cur.filter((x) => x.id !== it.id) : cur)),
+  });
 
   /** 拨开关:只改「下一次搜用哪个模式」,**不搜**。当前结果原样留着。 */
   const toggleAggregate = () => {

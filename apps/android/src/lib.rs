@@ -3063,14 +3063,30 @@ async fn probe_lines(state: State<'_, AppState>, server_id: String) -> Result<Ve
 /// 观看记录列表。scope=None 取全部(跨服务器);否则只取当前服务器。
 #[tauri::command]
 fn watch_history_list(state: State<'_, AppState>, current_only: bool) -> Vec<wh::Record> {
-    if current_only {
+    let mut v = if current_only {
         match session_of(&state) {
             Ok(s) => state.watch_history.load_scope(&scope_of(&s)),
             Err(_) => Vec::new(),
         }
     } else {
         state.watch_history.load_all()
-    }
+    };
+    // 只滤展示;理由见桌面端同名命令的注释(不动 Store,别把屏蔽做成丢进度)。
+    v.retain(|r| !linplayer_core::blocklist::is_blocked_title(&r.title, r.series_title.as_deref()));
+    v
+}
+
+// ---------- 媒体库屏蔽 ----------
+/// 当前屏蔽名单。桌面端同名命令,行为一致。
+#[tauri::command]
+fn blocked_list() -> Vec<linplayer_core::blocklist::BlockedItem> {
+    linplayer_core::blocklist::list()
+}
+
+/// 屏蔽 / 解除屏蔽。`name` 传剧名(分集卡传 series_name),观看记录靠它跨服对齐。
+#[tauri::command]
+fn set_blocked(item_id: String, name: String, blocked: bool) {
+    linplayer_core::blocklist::set(&item_id, &name, blocked);
 }
 
 #[tauri::command]
@@ -4906,6 +4922,8 @@ pub fn run() {
             chapter_info,
             play_external,
             watch_history_list,
+            blocked_list,
+            set_blocked,
             watch_history_scan_restore,
             watch_history_restore_candidate,
             get_writeback_settings,

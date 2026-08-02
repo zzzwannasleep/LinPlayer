@@ -3,6 +3,7 @@ import {
   type Filters,
   type Item,
   type LoginResult,
+  blockName,
   getFilters,
   listItemsPage,
   posterUrl,
@@ -487,7 +488,16 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
           <div className="dense-grid">
             {/* 卡片:点=进详情;悬停=▶/✓/♥;右键=标记已看/收藏/管理员项(2026-07-24 用户定,四网格统一)。 */}
             {items.map((it) => (
-              <Poster key={it.id} item={it} session={session} onOpen={onOpenItem} {...card.cardProps(it)} />
+              <Poster
+                key={it.id}
+                item={it}
+                session={session}
+                onOpen={onOpenItem}
+                /* 媒体库故意**不过滤**屏蔽项(核层只滤首页/搜索/推荐/播放记录),
+                   这一页是唯一能把它找回来解除的地方 —— 所以只打标,不隐藏。 */
+                blocked={card.blockedNames.has(blockName(it))}
+                {...card.cardProps(it)}
+              />
             ))}
           </div>
         ) : (

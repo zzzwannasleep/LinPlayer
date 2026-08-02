@@ -541,6 +541,30 @@ body {
 .grid.wide .cell .th {
   aspect-ratio: 16/9;
 }
+/* 「已屏蔽」标 —— 只出现在媒体库网格(别处核层已经滤掉了,见 emby::fetch_items)。
+   三米外要认得出,所以字比手机端大一号,并且整卡去色压暗。 */
+.th .blk {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: rgba(10, 12, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.blocked .th img { filter: grayscale(1) brightness(0.5); }
+.blocked .nm { color: var(--tv-ink-3); }
+/* 屏蔽确认面板里的说明段(.panel 复用,只多这一条)。 */
+.panel .blk-desc {
+  padding: 0 28px 18px;
+  font-size: 17px;
+  line-height: 1.65;
+  color: var(--tv-ink-2);
+}
+
 .grid .cell .nm {
   font-size: 17px;
   margin-top: 11px;
@@ -730,6 +754,47 @@ body {
   font-size: 18px;
   color: var(--tv-ink-2);
   margin-top: 4px;
+}
+/* 缓冲速度:出画后跟在集标题右边。等宽数字 —— 速度每秒变一次,比例字体下标题会左右抽。
+   .wait = mpv 真卡在等缓存(paused-for-cache),点亮把"卡了"这件事说出来。 */
+.osd-top .sd {
+  margin-left: 16px;
+  font-size: 20px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--tv-ink-2);
+  white-space: nowrap;
+}
+.osd-top .sd.wait { color: var(--accent); }
+
+/* 起播前的转圈 + 缓冲速度,屏幕正中。★ 不跟着 OSD 收起(见 PlayerPage 那段注释)。
+   pointer-events:none —— 焦点库靠按键走位,这一层不该出现在任何命中测试里。 */
+.osd-boot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 22px;
+  pointer-events: none;
+  z-index: 3;
+}
+.osd-boot .sp {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.18);
+  border-top-color: #fff;
+  animation: spin 1s linear infinite;
+}
+/* tv.css 里此前没有 spin —— 不自带的话转圈是**静止**的圆环,看着像卡死。 */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.osd-boot .sd {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  color: var(--tv-ink-2);
 }
 .osd-bot {
   position: absolute;

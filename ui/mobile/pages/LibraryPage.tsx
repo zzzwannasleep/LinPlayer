@@ -6,6 +6,7 @@ import { choreograph, haptic } from "../app/motion";
 import Page from "../components/Page";
 import Sheet from "../components/Sheet";
 import { Cell, Empty, Grid, usePress } from "../components/ui";
+import { useBlockCard } from "../components/BlockCard";
 
 /* 媒体库。顶部 chip 行做排序/筛选,下面网格,滚到底续拉。
 
@@ -51,6 +52,9 @@ export default function LibraryPage({ parentId, title }: { parentId?: string; ti
   const [f, setF] = useState<F>({ genres: [], tags: [], years: [] });
   const gridRef = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
+  /* 长按屏蔽。★ 不传 onChanged:这一页**不移除**卡片(它是唯一能解除屏蔽的入口),
+     只让 blockedNames 变一下让角标翻过来。 */
+  const block = useBlockCard();
 
   const nFilter = f.genres.length + f.tags.length + f.years.length;
   const sortDef = SORTS.find((s) => s.id === sort)!;
@@ -208,9 +212,20 @@ export default function LibraryPage({ parentId, title }: { parentId?: string; ti
             action={nFilter ? { label: "清空筛选", on: () => setF({ genres: [], tags: [], years: [] }) } : undefined}
           />
         ) : (
-          session && <Grid items={items} session={session} onOpen={(it) => openItem(it)} />
+          session && (
+            <Grid
+              items={items}
+              session={session}
+              onOpen={(it) => openItem(it)}
+              /* 长按 = 屏蔽/解除屏蔽。媒体库**不过滤**屏蔽项(核层只滤首页/搜索/推荐/
+                 播放记录),这一页是唯一能把它找回来解除的地方 —— 所以只打标不隐藏。 */
+              onLongPress={block.onLongPress}
+              blockedNames={block.blockedNames}
+            />
+          )
         )}
       </div>
+      {block.dialog}
 
       {items !== null && items.length > 0 && (
         <div className="lp-more" ref={sentinel}>

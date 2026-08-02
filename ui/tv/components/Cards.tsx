@@ -52,15 +52,23 @@ export function CardPoster({
   it,
   session,
   onEnter,
+  onLongEnter,
+  blocked,
 }: {
   it: Item;
   session: LoginResult;
   onEnter?: () => void;
+  /** 长按 OK:屏蔽/解除屏蔽(用户 2026-08-02)。传了它,onEnter 改成松手才触发。 */
+  onLongEnter?: () => void;
+  /** 已屏蔽 —— 只有**媒体库网格**会传。别处核层已经把它滤掉了
+   *  (见 crates/core/src/emby.rs 的 fetch_items),媒体库故意不滤,所以要打标。 */
+  blocked?: boolean;
 }) {
   return (
-    <FocusItem className="card23 fx" onEnter={onEnter}>
+    <FocusItem className={`card23 fx${blocked ? " blocked" : ""}`} onEnter={onEnter} onLongEnter={onLongEnter}>
       <div className="th">
         {it.has_primary && <img src={posterUrl(session, it.id, 480)} alt="" loading="lazy" />}
+        {blocked && <div className="blk">已屏蔽</div>}
         {/* 未看集数角标。UserData.UnplayedItemCount 走的是 Item 上的字段,
             这里只在剧集上有意义。 */}
       </div>

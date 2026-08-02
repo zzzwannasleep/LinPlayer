@@ -449,6 +449,16 @@ textarea.field { height: auto; padding: 10px 12px; resize: vertical; font-family
 }
 .pcard .played-ind { width: 20px; padding: 0; border-radius: 50%; background: #37b24d; }
 .pcard .count-ind { border-radius: 10px; background: #2f88ff; }
+/* 「已屏蔽」标(只出现在媒体库网格 —— 别处核层已经滤掉了,见 emby::fetch_items)。
+   放**左下**:右上被勾/未看数占着,左上是评分。整卡压暗 + 降饱和,一眼能从网格里认出来。 */
+.pcard .blocked-ind {
+  position: absolute; left: 6px; bottom: 6px; z-index: 2;
+  padding: 2px 7px; border-radius: 9px;
+  background: rgba(10, 12, 16, 0.82); border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+}
+.pitem.blocked .pcard img { filter: grayscale(1) brightness(0.55); }
+.pitem.blocked .pcap { color: var(--ink-3); }
 .pcap { font-size: 12.5px; color: var(--ink); font-weight: 500; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pcap .sub { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; }
 

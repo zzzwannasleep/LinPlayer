@@ -422,9 +422,12 @@ mod overlay {
         } else {
             None
         };
-        if let Some((x, y, w, h)) =
-            align_target((rc.right - rc.left, rc.bottom - rc.top), (org.x, org.y), cur)
-        {
+        if let Some((x, y, w, h)) = align_target(
+            (rc.right - rc.left, rc.bottom - rc.top),
+            (org.x, org.y),
+            cur,
+            super::overlay_top_inset(),
+        ) {
             SetWindowPos(v, std::ptr::null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
         }
     }
@@ -437,16 +440,22 @@ mod overlay {
     ///     而它之后再也长不回来(mpv 的视口跟着塌了),表现是「最小化再恢复就没画面」。
     ///   · 已经对上了 → 不动。我们跑在 WM_WINDOWPOSCHANGED 回调里,
     ///     SetWindowPos 哪怕没改任何东西也会再发一条消息,白白多绕一圈重入闸。
+    ///   · 顶部让位(播放窗自绘标题栏)必须在**这里**也减掉。这条路是
+    ///     WM_WINDOWPOSCHANGED 钩子专用的,它不看调用方算过什么 —— 只在
+    ///     `sync()` 那边减的话,Alt-Tab 回来就被还原成满客户区、画面顶到标题栏底下。
     fn align_target(
         client: (i32, i32),
         org: (i32, i32),
         cur: Option<(i32, i32, i32, i32)>,
+        top_inset: i32,
     ) -> Option<(i32, i32, i32, i32)> {
         let (w, h) = client;
         if w <= 0 || h <= 0 {
             return None;
         }
-        let want = (org.0, org.1, w, h);
+        // 0×0 的守则先跑完再让位 —— 顺序反了的话最小化时 h 会被 max(1) 兜成 1,守则就失效了。
+        let inset = top_inset.clamp(0, h - 1);
+        let want = (org.0, org.1 + inset, w, h - inset);
         if cur == Some(want) {
             return None;
         }
@@ -461,32 +470,53 @@ mod overlay {
         fn align_target_moves_only_when_it_must() {
             // 窗口化 1180x720 @(210,204) —— 2026-08-01 从真进程量到的实际值。
             let windowed = (210, 204, 1180, 720);
-            assert_eq!(align_target((1180, 720), (210, 204), Some(windowed)), None, "对上了就别动");
+            assert_eq!(align_target((1180, 720), (210, 204), Some(windowed), 0), None, "对上了就别动");
 
             // 全屏:主窗客户区变成整块屏幕,而视频窗还停在窗口化的矩形上 —— 那一圈没被盖住的
             // 就是用户看到的白边。这一条红了就说明白边修没了。
             assert_eq!(
-                align_target((2560, 1440), (0, 0), Some(windowed)),
+                align_target((2560, 1440), (0, 0), Some(windowed), 0),
                 Some((0, 0, 2560, 1440)),
                 "主窗铺满了,视频窗必须跟上"
             );
             // 只挪位置不改尺寸(拖动窗口)也要跟。
             assert_eq!(
-                align_target((1180, 720), (500, 300), Some(windowed)),
+                align_target((1180, 720), (500, 300), Some(windowed), 0),
                 Some((500, 300, 1180, 720))
             );
             // 量不到视频窗当前矩形 → 照摆一次,不要因为「不知道」就不动。
-            assert_eq!(align_target((1180, 720), (210, 204), None), Some(windowed));
+            assert_eq!(align_target((1180, 720), (210, 204), None, 0), Some(windowed));
             // 主窗最小化时客户区是 0×0:必须原地不动,否则视频窗被缩成 0 再也长不回来。
-            assert_eq!(align_target((0, 0), (0, 0), Some(windowed)), None);
-            assert_eq!(align_target((1180, 0), (0, 0), Some(windowed)), None);
-            assert_eq!(align_target((-1, -1), (0, 0), None), None);
+            assert_eq!(align_target((0, 0), (0, 0), Some(windowed), 0), None);
+            assert_eq!(align_target((1180, 0), (0, 0), Some(windowed), 0), None);
+            assert_eq!(align_target((-1, -1), (0, 0), None, 0), None);
+        }
+
+        /* ★ 这条钉的是「Alt-Tab 回来标题栏就把画面盖住了」。
+           播放窗自绘标题栏占顶上 36px,视频窗必须往下让同样多、并矮 36px。
+           这条路(WM_WINDOWPOSCHANGED 钩子)和 sync() 是**两个**几何入口,
+           只在 sync() 里减的话本用例立刻红 —— 那正是它存在的理由。 */
+        #[test]
+        fn top_inset_leaves_room_for_the_player_titlebar() {
+            assert_eq!(
+                align_target((1180, 720), (210, 204), None, 36),
+                Some((210, 240, 1180, 684)),
+                "让出 36px 给标题栏:y 往下 36,高度少 36"
+            );
+            // 已经让好了就别再动(重入闸:钩子里 SetWindowPos 会再发一条消息)。
+            assert_eq!(align_target((1180, 720), (210, 204), Some((210, 240, 1180, 684)), 36), None);
+            // 最小化的守则**先于**让位:客户区 0×0 一律不动。
+            assert_eq!(align_target((0, 0), (0, 0), None, 36), None);
+            // 窗口被拖到比标题栏还矮:至少留 1px,不能把视频窗压成 0 高(压了就再也长不回来)。
+            assert_eq!(align_target((1180, 20), (0, 0), None, 36), Some((0, 19, 1180, 1)));
         }
     }
 
     pub fn sync(video: isize, tauri: isize, x: i32, y: i32, w: i32, h: i32) {
         unsafe {
             let (v, t) = (video as HWND, tauri as HWND);
+            // 顶部让位(播放窗的自绘标题栏)。和钩子那条路共用同一份算术,见 apply_top_inset。
+            let (y, h) = super::apply_top_inset(y, h);
             // 几何先摆好(不动 z 序),藏着的时候也摆 —— 这样恢复显示时不会闪一下旧位置。
             SetWindowPos(v, std::ptr::null_mut(), x, y, w, h, SWP_NOACTIVATE | SWP_NOZORDER);
             if apply_visibility(v, t) {
@@ -784,6 +814,9 @@ mod overlay {
             if !host_ok {
                 return;
             }
+            // 顶部让位(播放窗自绘标题栏)。★ 必须在 host_ok 判完之后 ——
+            // 先让位会把最小化时那个「塌成 0」的守则绕过去。
+            let (y_, h) = super::apply_top_inset(y_, h);
             // 宽高为 0 在 X11 上是 BadValue(Win32 只是忽略),这里先夹住。
             (x.lib.XMoveResizeWindow)(x.dpy, video, x_, y_, w.max(1) as c_uint, h.max(1) as c_uint);
             let sibling = toplevel_frame(x, tauri as xlib::Window).unwrap_or(tauri as xlib::Window);
@@ -950,6 +983,44 @@ mod overlay {
 /// 建一个独立顶层无边框窗口(不进任务栏/不抢焦点),给 mpv 当渲染面。
 fn create_overlay() -> isize {
     overlay::create()
+}
+
+/* 视频窗顶部要让出的物理像素 —— 播放窗自绘标题栏占的那一条(见 apps/desktop 的
+   video_top_inset)。0 = 不让(主窗 / 全屏)。
+
+   ## 为什么存在这里,而不是让调用方把 y/h 算好再传进来
+   几何有**两个**入口:宿主窗的 Tauri 事件走 `sync_overlay`,而 Alt-Tab / 点任务栏 /
+   DPI 变化只发 WM_WINDOWPOSCHANGED —— 那条路由子类化钩子里的 `align_to_host` 处理,
+   它自己 GetClientRect 重新算,**根本看不到调用方算过什么**。
+   只在调用方减那 36px 的话:窗口一被 Alt-Tab 回来,钩子就把画面还原成满客户区、
+   顶回到标题栏底下 —— 而且只在特定操作后才复现。同一个坑的镜像版本记在
+   [[fullscreen-white-edge-geometry]]:缺的从来不是计算,是**触发**。
+   放成一个进程级的值,两条路径读同一个数,不可能只改一半。
+
+   ## 为什么在 cfg 之外
+   `mod overlay` 有四个 cfg 变体(Windows / X11 / Android / 兜底桩)。做成每个变体
+   各一份 `set_top_inset`,就是 [[desktop-check-misses-android]] 那次连红三个提交的形状
+   —— 桌面绿、别的变体忘了补。一份定义,只有需要的变体去读它。 */
+static OVERLAY_TOP_INSET: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// 设视频窗顶部让位(物理像素)。宿主换窗/进出全屏时由宿主更新。
+pub fn set_overlay_top_inset(px: i32) {
+    OVERLAY_TOP_INSET.store(px.max(0), Ordering::Relaxed);
+}
+
+#[allow(dead_code)] // 只有桌面两个变体读它;安卓/兜底桩用不到
+fn overlay_top_inset() -> i32 {
+    OVERLAY_TOP_INSET.load(Ordering::Relaxed)
+}
+
+/// 把 (y, h) 按当前顶部让位切一刀。**两条几何路径共用这一份算术**。
+///
+/// `h` 恒留至少 1px:窗口被拖到只剩标题栏那么高时,让位不能把视频窗压成 0 高 ——
+/// 那之后它再也长不回来(mpv 的视口跟着塌了),表现是「拖小一次就没画面了」。
+#[allow(dead_code)]
+fn apply_top_inset(y: i32, h: i32) -> (i32, i32) {
+    let inset = overlay_top_inset().clamp(0, (h - 1).max(0));
+    (y + inset, h - inset)
 }
 
 /// 把视频窗口对齐到 Tauri 窗口客户区(屏幕坐标 x,y,w,h),并置于 Tauri 窗口正下方。
@@ -1199,6 +1270,11 @@ impl Player {
             }
             set("keep-open", "yes");
             set("force-window", "yes");
+            /* ★ 显式 idle=yes。libmpv 本来就默认开着,但 load_inner 里换片前会发一次
+               `stop`(清掉上一片停在画面上的最后一帧,见那里的注释);idle=no 时
+               `stop` 会让核心直接退出 —— 那是"播第二个视频整个播放器没了"。
+               不靠"默认应该是对的"过日子,一行钉死。 */
+            set("idle", "yes");
             set("osc", "no");
             set("terminal", "no");
             set("input-default-bindings", "no");
@@ -1475,6 +1551,14 @@ impl Player {
         header_fields: &str,
         user_agent: Option<&str>,
     ) -> Result<(), String> {
+        /* ★ 换片先 `stop`,把上一片**留在画面上的最后一帧**清掉。
+           我们开着 keep-open=yes:上一片播完/退出时 mpv 不卸载文件,画面就冻在最后一帧。
+           视频窗是独立顶层窗口(只是被藏起来),下一次起播它一露脸、而新片还在缓冲的
+           那几秒里,用户看到的就是**上一部片的画面当背景**(用户 2026-08-02 报的)。
+           `stop` 卸载文件 → force-window 下 mpv 自己画黑底,缓冲期间就是干净的黑。
+           必须在下面那堆记账**之前**发:stop 是异步命令,但 mpv 按序处理,
+           它和紧跟的 loadfile 之间不会插进别的播放。 */
+        let _ = self.cmd(&["stop"]);
         // 换片先清 eof —— 否则上一集播完的标志会被下一集的第一次轮询读到,
         // 刚起播就被判成「已看完」。
         self.eof.store(false, Ordering::Relaxed);
@@ -1597,6 +1681,14 @@ impl Player {
                (那是 demuxer-cache-duration)。界面按 buffered/duration 画缓冲条,
                口径正是绝对位置,别顺手改成 duration 版。 */
             buffered: self.sticky_f64("demuxer-cache-time", &self.last_buf),
+            /* 缓冲速度(字节/秒)。mpv 的 `cache-speed` 是**读进解复用缓存的速率**,
+               不是解码码率 —— 正是用户要看的"现在下得多快"。
+               本地文件/缓存喂饱时它是 0,界面据此不显示,不画一个假的 0 KB/s。
+               ★ 不走 sticky_f64:速度就该跟着实况抖,粘住旧值等于骗人。 */
+            cache_speed: self.get_str("cache-speed").and_then(|s| s.parse().ok()).unwrap_or(0.0),
+            /* mpv 正因为缓存不够而卡住(`paused-for-cache`)。界面拿它区分
+               "在缓冲"和"真的暂停了" —— 两者的 pause 属性读数是一样的。 */
+            buffering: self.get_str("paused-for-cache").as_deref() == Some("yes"),
             /* ★ 用 `eof-reached` 属性判播完,**不能**只靠 END_FILE 事件:
                我们开着 keep-open=yes,mpv 到结尾时是「暂停在最后一帧」而**不卸载文件**,
                这种情况下 END_FILE 压根不发 —— 只监听事件就是个永远不触发的死分支。
@@ -1872,6 +1964,11 @@ pub struct Status {
     pub duration: f64,
     pub paused: bool,
     pub buffered: f64,
+    /// 缓冲速度(字节/秒,mpv `cache-speed`)。0 = 没在取数(本地文件/缓存已喂饱)。
+    pub cache_speed: f64,
+    /// mpv 正卡在等缓存(`paused-for-cache`)。和 `paused` 分开:用户按的暂停和
+    /// 网速跟不上是两件事,读数却都是 pause=yes。
+    pub buffering: bool,
     /// 本片是否已正常播放到结尾(keep-open=yes 时画面停在最后一帧,时间不再前进)。
     pub eof: bool,
     /// mpv 已经在这一次 seek 上卡了很久(见 [`SEEK_STALL_TIMEOUT`])。

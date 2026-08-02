@@ -45,6 +45,10 @@ export default function FavoritesPage({ session, onOpenItem, onPlay }: Props) {
       setItems((cur) => (cur ? cur.map((x) => (x.id === it.id ? { ...x, played } : x)) : cur)),
     onFavChanged: (it, faved) =>
       !faved && setItems((cur) => (cur ? cur.filter((x) => x.id !== it.id) : cur)),
+    /* 屏蔽 = 这页立刻少一张。核层的 favorites 已经不再吐它了,但这一屏是本页手里的副本
+       (见 memory: frontend-state-copies-need-broadcast),不自己删就要等下次切页才消失。 */
+    onBlockChanged: (it, blocked) =>
+      blocked && setItems((cur) => (cur ? cur.filter((x) => x.id !== it.id) : cur)),
   });
   // 初值写成函数,否则每次渲染都读一遍 localStorage。
   const [view, setView] = useState<View>(loadView);

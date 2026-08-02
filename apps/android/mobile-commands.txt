@@ -12,6 +12,7 @@ bangumi_calendar
 bangumi_login_token
 batch_add_servers
 batch_parse
+blocked_list
 cache_size
 check_update
 clear_account_icon
@@ -82,6 +83,7 @@ set_active_line
 set_active_server
 set_aspect_ratio
 set_audio_delay
+set_blocked
 set_cross_server_resume
 set_danmaku_config
 set_favorite

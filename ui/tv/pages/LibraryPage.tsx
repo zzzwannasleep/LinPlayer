@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import {
+  blockName,
   getFilters,
   listItemsPage,
   posterUrl,
@@ -13,6 +14,7 @@ import type { Route } from "../App";
 import { onTvKey } from "../app/focus";
 import { Icon } from "../app/icons";
 import { FocusBoundary, FocusColumn, FocusItem } from "../components/Focus";
+import { useBlockDialog } from "../components/BlockDialog";
 import { useAsync } from "../lib/useAsync";
 
 /** 媒体库(草稿 02)。先选库,再看该库的海报网格。
@@ -235,6 +237,10 @@ function Grid({
     [open, onBack],
   );
 
+  /* 长按屏蔽。★ 不传 onChanged:这一页不移除卡片(它是唯一能解除屏蔽的入口),
+     只让 blockedNames 变一下让角标翻过来。 */
+  const block = useBlockDialog();
+
   const cond = [
     SORTS[sort].label,
     genre ?? "全部类型",
@@ -285,13 +291,17 @@ function Grid({
               {items.map((it) => (
                 <FocusItem
                   key={it.id}
-                  className="cell fx"
+                  /* 长按 OK = 屏蔽/解除屏蔽。媒体库**不过滤**屏蔽项(核层只滤首页/搜索/
+                     推荐/播放记录),这一页是唯一能找回来解除的地方 —— 只打标不隐藏。 */
+                  className={`cell fx${block.blockedNames.has(blockName(it)) ? " blocked" : ""}`}
                   onEnter={() => go({ page: "detail", itemId: it.id })}
+                  onLongEnter={() => block.openFor(it)}
                 >
                   <div className="th">
                     {it.has_primary && (
                       <img src={posterUrl(session, it.id, 480)} alt="" loading="lazy" />
                     )}
+                    {block.blockedNames.has(blockName(it)) && <div className="blk">已屏蔽</div>}
                   </div>
                   <div className="nm">{it.name}</div>
                   <div className="sub">{it.year ?? ""}</div>
@@ -331,6 +341,9 @@ function Grid({
           </div>
         </FocusBoundary>
       )}
+
+      {/* 屏蔽确认面板。和筛选面板互不相干,各自有自己的焦点边界和返回键处理。 */}
+      {block.dialog}
     </>
   );
 }

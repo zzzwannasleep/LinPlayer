@@ -188,11 +188,38 @@ fn poclog(msg: &str) {
     }
 }
 
+/// 自绘标题栏高度(CSS px)。**必须和 ui/shared/tokens.css 的 `--titlebar-h` 一致** ——
+/// 对不上的表现是画面顶端被标题栏压掉一条,或标题栏下方露出一条底色。
+const TITLEBAR_CSS_H: f64 = 36.0;
+
+/* 播放窗顶部要让出多少物理像素给标题栏。
+   0 = 不让(主窗 / 播放窗全屏时)。
+
+   ★ 为什么让出来、而不是把标题栏浮在画面上:
+     用户 2026-08-02:「单开的播放页要有标题栏,不然我拖动不了播放窗口」。标题栏是**常驻**的
+     (OSD 会自动淡出,淡出后就没有任何地方可拖 —— 那正是这条反馈的成因),常驻的东西压在
+     画面上就是永久裁掉一条画面。视频窗是我们自己摆的独立顶层窗口,少给它 36px 就行,
+     一分钱代价都没有。
+   ★ 全屏时归零:全屏下标题栏不渲染(见 App.tsx),再让位就是上方一条黑边。 */
+fn video_top_inset(window: &tauri::WebviewWindow) -> i32 {
+    if window.label() != PLAYER_LABEL || window.is_fullscreen().unwrap_or(false) {
+        return 0;
+    }
+    // 缩放系数取不到就按 1.0:宁可 125% DPI 下差几像素,也不能整条不让位。
+    (TITLEBAR_CSS_H * window.scale_factor().unwrap_or(1.0)).round() as i32
+}
+
 /// 把 mpv 视频窗口对齐到 Tauri 窗口客户区(并压在它正下方)。
 /// 主窗最小化/隐藏时 sync_overlay 会转而把视频窗藏起来。
 fn sync_video(window: &tauri::WebviewWindow, parent: isize, state: &AppState) {
     let video = state.player.lock().unwrap().as_ref().map(|p| p.video_hwnd);
     if let Some(v) = video {
+        /* ★ 让位是**报给 mpv 层的一个状态**,不是在这里把 y/h 算好。
+           几何有两个入口:这条(Tauri 事件)和 WM_WINDOWPOSCHANGED 钩子里的
+           align_to_host —— 后者自己重新量客户区,看不到我们算过什么。
+           在这里减 36px 的话,Alt-Tab 回来钩子就把画面还原成满客户区、顶到标题栏底下。
+           详见 crates/mpv 的 OVERLAY_TOP_INSET 那段。 */
+        mpv::set_overlay_top_inset(video_top_inset(window));
         if let (Ok(pos), Ok(size)) = (window.inner_position(), window.inner_size()) {
             mpv::sync_overlay(v, parent, pos.x, pos.y, size.width as i32, size.height as i32);
         }
@@ -1875,14 +1902,33 @@ fn capture_history(state: &State<'_, AppState>, pos: f64, force: bool) {
 /// 观看记录列表。scope=None 取全部(跨服务器);否则只取当前服务器。
 #[tauri::command]
 fn watch_history_list(state: State<'_, AppState>, current_only: bool) -> Vec<wh::Record> {
-    if current_only {
+    let mut v = if current_only {
         match session_of(&state) {
             Ok(s) => state.watch_history.load_scope(&scope_of(&s)),
             Err(_) => Vec::new(),
         }
     } else {
         state.watch_history.load_all()
-    }
+    };
+    /* 屏蔽名单。★ 只滤**展示**这一条路,不动 Store 里的记录,也不动
+       load_scope/load_all 本身 —— 跨服续播的匹配也读它们,在那儿滤会把
+       「屏蔽」悄悄变成「顺便把进度也弄丢」。屏蔽是"别让我看见",不是"删掉"。 */
+    v.retain(|r| !linplayer_core::blocklist::is_blocked_title(&r.title, r.series_title.as_deref()));
+    v
+}
+
+// ---------- 媒体库屏蔽 ----------
+/// 当前屏蔽名单(设置页/卡片菜单反显用)。
+#[tauri::command]
+fn blocked_list() -> Vec<linplayer_core::blocklist::BlockedItem> {
+    linplayer_core::blocklist::list()
+}
+
+/// 屏蔽 / 解除屏蔽一个条目。`name` 传剧名(分集卡要传 series_name)——
+/// 观看记录是跨服的,只有名字对得上,见 blocklist 模块顶部注释。
+#[tauri::command]
+fn set_blocked(item_id: String, name: String, blocked: bool) {
+    linplayer_core::blocklist::set(&item_id, &name, blocked);
 }
 
 #[tauri::command]
@@ -5891,6 +5937,8 @@ pub fn run() {
             play_external,
             play_local,
             watch_history_list,
+            blocked_list,
+            set_blocked,
             watch_history_scan_restore,
             watch_history_restore_candidate,
             get_writeback_settings,

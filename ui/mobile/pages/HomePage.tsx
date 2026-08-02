@@ -15,6 +15,7 @@ import { useCtx } from "../app/ctx";
 import { Icon } from "../app/icons";
 import { autoHideBars, choreograph, haptic, imgsIn, pullRefresh, toast } from "../app/motion";
 import { Empty, Row, usePress } from "../components/ui";
+import { useBlockCard } from "../components/BlockCard";
 
 /* 首页。
    ★ 这一页的动效有四层,少一层就回到"平的":
@@ -76,6 +77,10 @@ export default function HomePage() {
   const [overview, setOverview] = useState<SourceOverview[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  /* 长按卡片 = 屏蔽(和 PC 端右键同一件事)。屏蔽落地后整页重拉:
+     首页手里有好几份互不相干的 items 副本(继续观看/各媒体库/Hero),挨个过滤等于
+     把核层那条规则在前端再抄一遍,抄错还不报错。核层已经不再吐它了,重拉就是唯一真相。 */
+  const block = useBlockCard({ onChanged: () => void load() });
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLElement>(null);
@@ -384,6 +389,7 @@ export default function HomePage() {
                     variant="thumb"
                     session={session}
                     onOpen={(it) => openItem(it)}
+                    onLongPress={block.onLongPress}
                   />
                 )}
                 {libs.map((v) => (
@@ -398,6 +404,7 @@ export default function HomePage() {
                     skeleton={byLib[v.id] ? 0 : 1}
                     session={session}
                     onOpen={(it) => openItem(it)}
+                    onLongPress={block.onLongPress}
                     onMore={() => go({ page: "library", parentId: v.id, title: v.name })}
                   />
                 ))}
@@ -413,6 +420,7 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+      {block.dialog}
     </>
   );
 }

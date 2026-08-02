@@ -13,6 +13,7 @@ import {
   fmtBitrate,
   fmtRes,
   fmtSize,
+  fmtNetSpeed,
   fmtTime,
   itemMedia,
   listAccounts,
@@ -120,6 +121,13 @@ export default function PlayerPage({
   const [dragging, setDragging] = useState(false);
   const [seekPos, setSeekPos] = useState<number | null>(null);
   const [showRemain, setShowRemain] = useState(false);
+  /* 「已经在放了吗」。缓冲速度按用户 2026-08-02 的口径分两处显示:
+     没出画之前在**画面正中**,出画之后挪到**集标题右侧**。
+     ★ 判据是「时间真的往前走了」,不是 `st.time > 0` —— 续播时核层一 loadfile
+       就把位置记账成续播点(见 crates/mpv load_inner),第一拍读到的就已经 >0,
+       用 >0 判等于"起播即算已播",中间那段缓冲一秒都显示不到。 */
+  const [started, setStarted] = useState(false);
+  const startPos = useRef<number | null>(null);
 
   /* 面板数据。各自到、各自渲染,不绑成一个屏障。 */
   const [versions, setVersions] = useState<MediaVersion[]>([]);
@@ -278,6 +286,9 @@ export default function PlayerPage({
         const s = await getStatus();
         if (!alive) return;
         setSt(s);
+        // 首帧判定:第一拍的位置当基准,越过它就是真出画了(理由见 started 的声明处)。
+        if (startPos.current == null) startPos.current = s.time;
+        if (s.time > startPos.current + 0.05) setStarted(true);
         /* 跳转卡死。播放器**修不了**(根因是服务器不认 HTTP Range,ffmpeg 只能从当前
            位置顺读丢弃到目标字节),但不能让用户对着不动的进度条干等。一次 seek 只说一次。 */
         if (s.seek_stalled) {
@@ -690,6 +701,16 @@ export default function PlayerPage({
       {dim > 0 && <div className="pl-dim" style={{ opacity: dim }} />}
       {flash && <div className="pl-flash" onAnimationEnd={() => setFlash(false)} />}
 
+      {/* 起播前:转圈 + 缓冲速度,居中(用户 2026-08-02)。
+          出画就整块撤掉,速度改到标题右边那个 .pl-speed 上。
+          ★ 不画黑底 —— 手机端 mpv 起播前本来就是黑的,再盖一层只是多一层合成。 */}
+      {!started && (
+        <div className="pl-buffering">
+          <div className="pl-spin" />
+          {st?.cache_speed ? <div className="pl-speed-big">{fmtNetSpeed(st.cache_speed)}</div> : null}
+        </div>
+      )}
+
       {hud && (
         <div className="pl-hud">
           <div className="pl-hud-k">{hud.kind}</div>
@@ -745,6 +766,11 @@ export default function PlayerPage({
               )}
             </span>
           </div>
+          {/* 出画后的缓冲速度:集标题右侧(用户 2026-08-02)。放在 .pl-title **外面** ——
+              它内部有跑马灯动画,塞进去会跟着一起划走。 */}
+          {started && st?.cache_speed ? (
+            <span className={`pl-speed${st.buffering ? " wait" : ""}`}>{fmtNetSpeed(st.cache_speed)}</span>
+          ) : null}
           <div className="pl-acts">
             <TopAct id="ver" icon="version" label="版本" on={panel === "source" && srcTab === "ver"} onClick={(e) => { setSrcTab("ver"); open("source", e); }} />
             <TopAct id="line" icon="line" label="线路" on={panel === "source" && srcTab === "line"} onClick={(e) => { setSrcTab("line"); open("source", e); }} />

@@ -45,6 +45,12 @@ type ItemProps = {
   /** 焦点类名。默认 `foc`,对应 tv.css 里全站唯一那套焦点态。 */
   focusClass?: string;
   onEnter?: () => void;
+  /** **长按**确认键(遥控器上的 OK 按住不放)。给「长按卡片选择是否屏蔽」用
+   *  (用户 2026-08-02:「移动端和TV端都是长按卡片选择是否屏蔽」)。
+   *
+   *  ★ 传了它,`onEnter` 就改成**松手才触发** —— 不然长按会先开详情页再弹屏蔽框。
+   *    没传的行为一个字节都不变(按下即触发),全站其余几十个 FocusItem 不受影响。 */
+  onLongEnter?: () => void;
   /** 本项获得焦点时。给「焦点走到倒数第二行就预取下一页」这类无限加载用 ——
    *  没有它就只能拿 IntersectionObserver + 一个量出来的魔数当近似。 */
   onFocus?: () => void;
@@ -61,11 +67,17 @@ type ItemProps = {
   autoFocus?: boolean;
 };
 
+/** 长按判定阈值(毫秒)。500 太容易误触(遥控器 OK 键行程长,手指会多停一下),
+ *  800 又要按到心里发毛。600 是 Android 的 ViewConfiguration.getLongPressTimeout()
+ *  默认值 500 往上加一档 —— 沙发上按遥控器比手指点屏幕慢。 */
+const LONG_PRESS_MS = 600;
+
 export function FocusItem({
   children,
   className = "",
   focusClass = "foc",
   onEnter,
+  onLongEnter,
   onFocus,
   onBlur,
   focusKey,
@@ -80,10 +92,45 @@ export function FocusItem({
   const blurRef = useRef(onBlur);
   blurRef.current = onBlur;
 
+  /* ── 长按确认键 ──
+     norigin 的 onEnterPress 在**按键自动重复**时会一直发(它把重复次数记在
+     pressedKeys 里),onEnterRelease 只在松手时发一次。所以:
+       第一次按下 → 起 600ms 定时器;定时器到 → 长按动作,并标记「这一次已经处理过」;
+       松手     → 撤定时器;没被长按吃掉的话才当短按。
+     ★ 定时器句柄必须放 ref:放 state 的话重渲染就丢了句柄,到点没人清。 */
+  const enterRef = useRef(onEnter);
+  enterRef.current = onEnter;
+  const longRef = useRef(onLongEnter);
+  longRef.current = onLongEnter;
+  const holdTimer = useRef<number | null>(null);
+  const handled = useRef(false);
+  useEffect(() => () => { if (holdTimer.current) window.clearTimeout(holdTimer.current); }, []);
+
+  const pressHandlers = onLongEnter
+    ? {
+        onEnterPress: () => {
+          if (holdTimer.current) return; // 自动重复的那几发,不重复起表
+          handled.current = false;
+          holdTimer.current = window.setTimeout(() => {
+            holdTimer.current = null;
+            handled.current = true;
+            longRef.current?.();
+          }, LONG_PRESS_MS);
+        },
+        onEnterRelease: () => {
+          if (holdTimer.current) {
+            window.clearTimeout(holdTimer.current);
+            holdTimer.current = null;
+          }
+          if (!handled.current) enterRef.current?.();
+        },
+      }
+    : { onEnterPress: onEnter };
+
   const { ref, focused, focusSelf } = useFocusable<object, HTMLDivElement>({
     focusable: !disabled,
     focusKey,
-    onEnterPress: onEnter,
+    ...pressHandlers,
     onBlur: () => blurRef.current?.(),
     onFocus: (layout: FocusableComponentLayout) => {
       notify?.(layout.node as HTMLElement);

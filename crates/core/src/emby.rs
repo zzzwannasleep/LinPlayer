@@ -136,7 +136,8 @@ struct UserData {
     unplayed_item_count: Option<i64>,
 }
 
-#[derive(Serialize)]
+// Default 只为测试能捏出一个空条目(见 blocklist 的单测);运行期永远走 From<RawItem>。
+#[derive(Serialize, Default)]
 pub struct Item {
     pub id: String,
     pub name: String,
@@ -705,7 +706,11 @@ pub async fn latest(
         return Err(format!("请求失败: HTTP {}", resp.status()));
     }
     let items: Vec<RawItem> = resp.json().await.map_err(|e| format!("解析失败: {e}"))?;
-    Ok(items.into_iter().map(Item::from).collect())
+    // Latest 端点吐的是裸数组,不走 fetch_items —— 屏蔽过滤得自己补一句,
+    // 漏了的表现就是「首页别的行都干净了,唯独『最新更新』里还挂着」。
+    let mut items: Vec<Item> = items.into_iter().map(Item::from).collect();
+    crate::blocklist::filter(&mut items);
+    Ok(items)
 }
 
 /// 演职人员(草稿页 03「演职人员」圆头像轨道)。
@@ -1670,8 +1675,15 @@ async fn fetch_page(http: &reqwest::Client, s: &Session, url: &str) -> Result<It
 }
 
 /// 只要条目、不关心总数的调用点(继续观看/收藏/剧集…)。
+/* ★ 屏蔽名单在**这里**生效,不在各端页面里。
+   走这条路的是:继续观看 / 接下来看 / 随机推荐 / 收藏 / 合集 / 搜索 / 相似推荐 /
+   演员参演 / 分集 —— 也就是「首页 + 搜索 + 推荐」的全部来源。三端共用,一处顶十几处。
+   ★ **媒体库网格不走这里**(它直接调 fetch_page):屏蔽的卡片必须留在媒体库里,
+     否则用户点错一次就再也找不到那部剧去解除屏蔽了。 */
 async fn fetch_items(http: &reqwest::Client, s: &Session, url: &str) -> Result<Vec<Item>, String> {
-    Ok(fetch_page(http, s, url).await?.items)
+    let mut items = fetch_page(http, s, url).await?.items;
+    crate::blocklist::filter(&mut items);
+    Ok(items)
 }
 
 #[derive(Deserialize)]

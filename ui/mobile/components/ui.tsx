@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { type Item, type LoginResult, itemLabel, posterUrl, thumbUrl } from "@shared/api";
+import { type Item, type LoginResult, blockName, itemLabel, posterUrl, thumbUrl } from "@shared/api";
 import { Icon } from "../app/icons";
 import { haptic, longPress, press } from "../app/motion";
 
@@ -96,9 +96,13 @@ export type CardProps = {
   noCap?: boolean;
   /** 第二行文字。给了就用它,否则:剧集写 SxxExx、其它写年份 */
   sub?: string;
+  /** 已屏蔽 —— 只有**媒体库网格**会传 true。
+   *  屏蔽的条目在首页/搜索/播放记录里核层就滤掉了,媒体库故意不滤
+   *  (见 crates/core/src/emby.rs 的 fetch_items 注释),所以这一页要有个看得见的记号。 */
+  blocked?: boolean;
 };
 
-export function Card({ item, session, variant = "poster", onOpen, onLongPress, index = 0, noCap, sub }: CardProps) {
+export function Card({ item, session, variant = "poster", onOpen, onLongPress, index = 0, noCap, sub, blocked }: CardProps) {
   const isThumb = variant === "thumb";
   const [loaded, setLoaded] = useState(false);
   const aRef = useCardGestures<HTMLDivElement>(onLongPress ? (e) => onLongPress(item, e) : undefined);
@@ -118,7 +122,7 @@ export function Card({ item, session, variant = "poster", onOpen, onLongPress, i
         : "");
 
   return (
-    <div className={`card${isThumb ? " thumb" : ""}`} style={{ ["--i" as string]: index }}>
+    <div className={`card${isThumb ? " thumb" : ""}${blocked ? " blocked" : ""}`} style={{ ["--i" as string]: index }}>
       <div
         className={`card-a ${isThumb ? "ar-thumb" : "ar-poster"}`}
         ref={aRef}
@@ -153,6 +157,7 @@ export function Card({ item, session, variant = "poster", onOpen, onLongPress, i
         )}
 
         <Badge it={item} />
+        {blocked && <div className="blk-ind">已屏蔽</div>}
 
         {progress > 0 && (
           <div className="prog">
@@ -219,6 +224,7 @@ export function Row({
   variant = "poster",
   onOpen,
   onLongPress,
+  blockedNames,
   onMore,
   skeleton = 0,
   noCap,
@@ -229,6 +235,8 @@ export function Row({
   variant?: "poster" | "thumb";
   onOpen: (it: Item, el: HTMLElement | null) => void;
   onLongPress?: (it: Item, e: PointerEvent) => void;
+  /** 已屏蔽的名字集合(见 BlockCard)。只有媒体库网格传 —— 别处核层已经滤掉了。 */
+  blockedNames?: Set<string>;
   onMore?: () => void;
   /** >0 = 画骨架轨道(数据还没到)。**不要画成空轨道** —— 空的看着像"这个库是空的" */
   skeleton?: number;
@@ -277,6 +285,7 @@ export function Row({
                 index={i}
                 onOpen={onOpen}
                 onLongPress={onLongPress}
+                blocked={blockedNames?.has(blockName(it))}
                 noCap={noCap}
               />
             ))}
@@ -294,12 +303,15 @@ export function Grid({
   variant = "poster",
   onOpen,
   onLongPress,
+  blockedNames,
 }: {
   items: Item[];
   session: LoginResult;
   variant?: "poster" | "thumb";
   onOpen: (it: Item, el: HTMLElement | null) => void;
   onLongPress?: (it: Item, e: PointerEvent) => void;
+  /** 已屏蔽的名字集合(见 BlockCard)。只有媒体库网格传。 */
+  blockedNames?: Set<string>;
 }) {
   return (
     <div className="grid">
@@ -312,6 +324,7 @@ export function Grid({
           index={i}
           onOpen={onOpen}
           onLongPress={onLongPress}
+          blocked={blockedNames?.has(blockName(it))}
         />
       ))}
     </div>
