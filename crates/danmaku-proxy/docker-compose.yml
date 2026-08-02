@@ -1,0 +1,53 @@
+# LinPlayer 弹幕代理 —— 直接复制到服务器上用。
+#
+# 三步:
+#   1. 把本文件和 .env.example 放进同一个目录(比如 /srv/danmaku-proxy/)
+#   2. cp .env.example .env  然后填三个值(chmod 600 .env)
+#   3. docker compose up -d
+#
+# 镜像由 GitHub Actions 自动构建推到 GHCR(见 .github/workflows/danmaku-proxy.yml)。
+# 仓库是私有的话,拉之前先登录一次:
+#   echo <你的-GitHub-PAT> | docker login ghcr.io -u <你的用户名> --password-stdin
+# (PAT 需要 read:packages 权限。或者把这个 package 在 GitHub 上改成 Public。)
+
+services:
+  danmaku-proxy:
+    image: ghcr.io/zzzwannasleep/linplayer-danmaku-proxy:latest
+    container_name: danmaku-proxy
+    restart: unless-stopped
+
+    # 凭据只从这里来,绝不写进本文件 —— 本文件是要进版本控制的。
+    env_file:
+      - .env
+
+    ports:
+      # ★ 前面的 127.0.0.1 不要去掉。去掉 = 一个没有 TLS、没有防护的服务
+      #   直接挂在公网上,而且很多云厂商的安全组默认放行 docker 发布的端口。
+      #   外网访问一律走你自己的 OpenResty/nginx 反代(配置见 README)。
+      - "127.0.0.1:8787:8787"
+
+    volumes:
+      # 弹幕库在这里,**必须持久化**。它会长到几个 G(上限在管理界面里调)。
+      # 删了它不会坏,只是所有弹幕都要重新从上游拉一遍 —— 那是一大笔配额。
+      - ./data:/data
+
+    # 日志不封顶的话,几个月后 json 日志能把盘吃掉,而且和服务本身毫无关系。
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 弹幕库合并是内存里做的,单集几 MB 级;512M 够用且能兜住异常增长。
+    # 真被 OOM 杀了会自动重启(restart: unless-stopped),不会静默变哑。
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/healthz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3

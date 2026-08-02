@@ -18,29 +18,45 @@
 服务只监听回环地址,前面挂你自己的反代 + Cloudflare。它**不做** TLS、不做 IP 封禁、
 不做 DDoS 防护 —— 那三件事反代和 CF 做得更好。
 
-### Docker(推荐,服务器上不用装 Rust)
+### Docker Compose(推荐,直接复制过去用)
 
-在**仓库根目录**执行:
+镜像由 GitHub Actions 自动构建推到 GHCR,服务器上**不用装 Rust、不用拉源码**。
 
 ```bash
-docker build -f crates/danmaku-proxy/Dockerfile -t linplayer-danmaku-proxy .
-
-docker run -d --name danmaku-proxy --restart unless-stopped \
-  -p 127.0.0.1:8787:8787 \
-  -v /srv/danmaku-proxy:/data \
-  -e DANDANPLAY_APP_ID='你的AppId' \
-  -e DANDANPLAY_APP_SECRET='你的AppSecret' \
-  -e ADMIN_PASSWORD='一个够长的管理密码' \
-  linplayer-danmaku-proxy
+mkdir -p /srv/danmaku-proxy && cd /srv/danmaku-proxy
+# 把仓库里这两个文件放进来:
+#   crates/danmaku-proxy/docker-compose.yml
+#   crates/danmaku-proxy/.env.example
+cp .env.example .env && chmod 600 .env
+vi .env                     # 填 AppId / AppSecret / 管理密码
+docker compose up -d
 ```
 
-`-p 127.0.0.1:8787:8787` 里的 `127.0.0.1:` **不要去掉** —— 去掉就等于把一个没有 TLS
-的服务直接挂到公网上。
+以后升级:
 
-`/data` 里装着弹幕库,**必须持久化**。它会长到几个 G(上限在管理界面里调)。
+```bash
+docker compose pull && docker compose up -d
+```
 
-> 凭据别写进 `docker-compose.yml` 再提交 —— 用 `--env-file`(文件加进 `.gitignore`)
-> 或 docker secret。这份 README 里也一个真值都没有,照着填。
+> 仓库是私有的话,拉镜像前先登录一次(PAT 需要 `read:packages`):
+> `echo <PAT> | docker login ghcr.io -u <你的用户名> --password-stdin`
+> 或者把这个 package 在 GitHub 上改成 Public。
+
+compose 里有两处**别改**:
+
+- `ports` 写的是 `127.0.0.1:8787:8787`。去掉前面的 `127.0.0.1:` 就等于把一个没有 TLS、
+  没有防护的服务直接挂到公网,而且不少云厂商的安全组默认放行 docker 发布的端口。
+- `volumes` 的 `./data:/data` —— 弹幕库在里面,**必须持久化**。删了不会坏,
+  只是所有弹幕要重新从上游拉一遍,那是一大笔配额。
+
+### 自己构建镜像
+
+```bash
+# 在**仓库根目录**(需要根 Cargo.toml/Cargo.lock)
+docker build -f crates/danmaku-proxy/Dockerfile -t linplayer-danmaku-proxy .
+```
+
+只出 amd64 的官方镜像。arm 机器自己 build 一次即可 —— Dockerfile 里没有架构假设。
 
 ### 不用 Docker
 

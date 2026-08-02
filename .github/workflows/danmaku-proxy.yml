@@ -1,0 +1,163 @@
+# 弹幕代理:单测 + 端到端 → 构建镜像推到 GHCR。
+#
+# 和 build.yml(全端 App 构建)完全分开:这是个**独立部署件**,跑在用户自己的
+# 服务器上,和三端客户端没有代码依赖。改它不该烧一个 windows runner。
+# (build.yml 的 paths 里已经把 crates/danmaku-proxy/** 排除掉了。)
+#
+# ★ 测试**先跑、跑不过就不推镜像**。推一个坏镜像的代价不是"CI 红了",
+#   而是服务器上 `docker compose pull && up -d` 之后弹幕整个哑掉。
+name: Danmaku Proxy
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'crates/danmaku-proxy/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.dockerignore'
+      - '.github/workflows/danmaku-proxy.yml'
+  pull_request:
+    paths:
+      - 'crates/danmaku-proxy/**'
+      - '.github/workflows/danmaku-proxy.yml'
+  workflow_dispatch:
+
+# 同一分支上后推的提交把前一个还没跑完的顶掉 —— 镜像只认最后一版。
+concurrency:
+  group: danmaku-proxy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    name: 单测 + 端到端
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # 只缓存这个 crate 相关的依赖;key 跟着 Cargo.lock 走。
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: danmaku-proxy
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: cargo test
+        run: cargo test -p linplayer-danmaku-proxy
+
+      - name: 端到端(自带假上游,不碰真配额)
+        # ★ 这里**没有**也不该有 DANDANPLAY_* —— e2e 自己起一个假的弹弹Play。
+        #   真上游打一次就是真烧一次配额,而这个服务存在的全部理由就是省配额。
+        #   假上游会校验签名头,所以"代理有没有真签名"照样测得到。
+        run: |
+          set -euo pipefail
+          cargo build -p linplayer-danmaku-proxy
+          node crates/danmaku-proxy/e2e.mjs
+
+  image:
+    name: 构建并推送镜像
+    needs: test
+    # PR 只跑测试,不推镜像(PR 来源的 token 也没有 packages:write)。
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # ★ 必须全小写 —— GHCR 拒绝大写的仓库名,而 github.repository 保留原样大小写
+          #   (本仓库叫 LinPlayer)。这里显式拼小写的 owner + 固定的镜像名。
+          images: ghcr.io/${{ github.repository_owner }}/linplayer-danmaku-proxy
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=LinPlayer 弹幕代理
+            org.opencontainers.image.description=把弹弹Play 的签名挪到服务端,自托管弹幕库
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/danmaku-proxy/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 只出 amd64。arm64 要么靠 QEMU(Rust 编译慢到 40 分钟以上),
+          # 要么要 arm runner —— 服务器基本都是 amd64,先不付这个成本。
+          # 真要 arm:在自己机器上 `docker build` 一次就行,Dockerfile 本身没有架构假设。
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 拉回来跑一遍(证明推上去的这个镜像真的能起)
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/linplayer-danmaku-proxy:latest
+        run: |
+          set -euo pipefail
+          # ★ 只有 default 分支才会打 latest;别的分支跳过这一步。
+          if [ "${{ github.ref_name }}" != "${{ github.event.repository.default_branch }}" ]; then
+            echo "非默认分支,没有 latest 标签,跳过。"
+            exit 0
+          fi
+          IMG="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
+          docker pull "$IMG"
+
+          # 缺凭据必须**拒绝启动**而不是带着空密钥跑起来 —— 那样的服务看着是活的,
+          # 每个请求都 403,而没有任何地方说得出为什么。
+          # ★ 必须先把输出收进变量再 grep。写成 `docker run … | grep -q` 的话,
+          #   set -o pipefail 会把 docker 的退出码 2(正是我们期望的"拒绝启动")
+          #   当成管道失败 —— 正确的行为被报成失败,而且看起来像镜像坏了。
+          OUT="$(docker run --rm "$IMG" 2>&1 || true)"
+          if printf '%s' "$OUT" | grep -q '致命'; then
+            echo "OK: 缺环境变量时如实拒绝启动"
+          else
+            echo "!! 缺凭据居然起来了 —— 这会让线上静默变哑"
+            echo "$OUT"
+            exit 1
+          fi
+
+          docker run -d --name smoke -p 127.0.0.1:8787:8787 \
+            -e DANDANPLAY_APP_ID=ci-smoke \
+            -e DANDANPLAY_APP_SECRET=ci-smoke \
+            -e ADMIN_PASSWORD=ci-smoke-password \
+            "$IMG"
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/healthz >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          echo "healthz: $(curl -fsS http://127.0.0.1:8787/healthz)"
+          # 同上,先收进变量再判 —— 管道里判断 + pipefail 是这个文件里已经踩过的坑。
+          ADMIN="$(curl -fsS http://127.0.0.1:8787/admin)"
+          if echo "$ADMIN" | grep -q 'LinPlayer 弹幕代理'; then
+            echo "OK: 管理界面出得来"
+          else
+            echo "!! /admin 没返回管理页"; docker logs smoke; docker rm -f smoke; exit 1
+          fi
+          docker logs smoke
+          docker rm -f smoke
+
+      - name: 用法
+        run: |
+          echo "镜像:ghcr.io/${{ github.repository_owner }}/linplayer-danmaku-proxy:latest"
+          echo "服务器上:docker compose pull && docker compose up -d"
+          echo "compose 文件见 crates/danmaku-proxy/docker-compose.yml"

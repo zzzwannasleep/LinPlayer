@@ -1,0 +1,58 @@
+# 弹幕代理镜像的构建上下文过滤(crates/danmaku-proxy/Dockerfile 用)。
+#
+# ★ 写成「先全部排除、再逐条放行」,不是「列出要排除的东西」。
+#   反面教材就在 2026-08-02:第一版写的是 `target/`,而 .dockerignore 的
+#   `target/` **只匹配上下文根目录那一个** —— `apps/desktop/target/` 原封不动地
+#   进了上下文,4.3G。而且这种错**不会报错**,只是 docker build 卡在
+#   "Sending build context" 好几分钟,谁也不知道为什么。
+#   白名单式的另一个好处:以后仓库里多出任何大目录,默认就是排除的。
+#
+# 需要放行的东西只有两类:
+#   1. 根 Cargo.toml / Cargo.lock —— 用**真实的锁文件**,镜像里的依赖版本必须和
+#      本地 `cargo test` 跑过的那套一致,否则"本地全绿线上炸"没法查;
+#   2. 全部 workspace 成员的源码 —— cargo 解析 workspace 时会加载每个成员的清单,
+#      而清单要求 src/lib.rs 或 src/main.rs **存在**(实测:只拷 Cargo.toml 会报
+#      "no targets specified in the manifest")。但它们只是被解析,不会被编译。
+
+# 先全部排除
+*
+
+# 再放行 cargo 需要的
+!Cargo.toml
+!Cargo.lock
+!crates
+!apps
+
+# 放行之后,把这两棵树里的重物剔掉(它们对解析 workspace 毫无用处)
+**/target
+**/node_modules
+**/gen
+**/build
+
+# 预编译的原生库(crates/mpv 里的 libmpv 等,走 Git LFS,上百 MB)
+**/*.so
+**/*.so.*
+**/*.dll
+**/*.dylib
+**/*.a
+**/*.lib
+**/*.pdb
+**/*.exe
+
+# 安卓/打包产物与素材
+**/*.apk
+**/*.apks
+**/*.aar
+**/*.jar
+**/*.keystore
+**/*.png
+**/*.jpg
+**/*.jpeg
+**/*.webp
+**/*.ico
+**/*.ttf
+**/*.otf
+
+# 本地环境,绝不进镜像
+**/.env
+**/*.local
