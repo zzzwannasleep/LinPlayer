@@ -507,9 +507,18 @@ pub async fn login(
     Ok((session, result))
 }
 
+/// 媒体库列表。
+///
+/// ★★ **绝对不能走 `fetch_items`** —— 那条路会套用屏蔽名单,而屏蔽名单里就装着
+/// 被屏蔽的**媒体库 id**。走了的话「屏蔽一个库」会连**媒体库页自己那份列表**一起滤掉,
+/// 用户当场被锁在门外:库不在首页了,也不在媒体库页了,**再也没有任何地方能解除**。
+/// 2026-08-02 真发生过(用户屏蔽完两个库来问"那我怎么恢复呢"),别再改回去。
+///
+/// 该不该滤是**命令层**的决定(见两端 lib.rs 的 `views(include_blocked)`):
+/// 首页要滤,媒体库页不滤。这里只负责如实返回服务器给的全部库。
 pub async fn views(http: &reqwest::Client, s: &Session) -> Result<Vec<Item>, String> {
     let url = format!("{}/Users/{}/Views", s.server, s.user_id);
-    fetch_items(http, s, &url).await
+    Ok(fetch_page(http, s, &url).await?.items)
 }
 
 /// 媒体库规模统计。手机端首页顶栏那三个数字(电影 / 集 / 总计)和聚合视界每个源
@@ -2741,5 +2750,62 @@ mod tests {
         assert_eq!(years.first(), Some(&2026));
         assert_eq!(years.last(), Some(&1922));
         assert_eq!(years.len(), 105);
+    }
+
+    /* ★★ 「屏蔽了一个媒体库,然后再也解除不了」的护栏。
+
+       2026-08-02 真发生过:`views()` 当时走的是 `fetch_items`,而那条路会套用屏蔽名单 ——
+       名单里装的正是被屏蔽的**库 id**。于是屏蔽一个库之后,连**媒体库页自己那份列表**
+       都把它滤掉了,用户当场被锁在门外(原话:「我在首页屏蔽完了,媒体库的也不见了,
+       那我怎么恢复呢?」)。命令层新加的 `include_blocked` 参数完全是个摆设 ——
+       东西在更下面一层就已经没了。
+
+       这条测试**必须走真 HTTP**:纯逻辑测不到"views 用了哪个取数函数"这件事,
+       而那正是出问题的地方。起一个本地服务器扮演 /Users/{id}/Views,断言
+       `emby::views` 把两个库**原样**吐出来(该不该滤是命令层的事)。
+       反向验证:把 views 改回 `fetch_items(...)`,本测试立刻红(已实测)。 */
+    #[tokio::test]
+    async fn views_never_applies_the_blocklist() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        // 名单里放一个库 id —— 就是它当初把自己滤没了的。
+        crate::blocklist::set("lib-A", "华语电影", true);
+
+        let body = r#"{"Items":[
+            {"Id":"lib-A","Name":"华语电影","Type":"CollectionFolder","IsFolder":true},
+            {"Id":"lib-B","Name":"综艺节目","Type":"CollectionFolder","IsFolder":true}
+        ],"TotalRecordCount":2}"#;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            if let Ok((mut c, _)) = listener.accept().await {
+                let mut buf = [0u8; 2048];
+                let _ = c.read(&mut buf).await;
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
+                );
+                let _ = c.write_all(head.as_bytes()).await;
+                let _ = c.write_all(body.as_bytes()).await;
+                let _ = c.flush().await;
+            }
+        });
+
+        let s = Session {
+            server: format!("http://127.0.0.1:{port}"),
+            token: "t".into(),
+            user_id: "u".into(),
+            device_id: "d".into(),
+        };
+        let got = views(&reqwest::Client::new(), &s).await.expect("views 失败");
+        crate::blocklist::set("lib-A", "华语电影", false); // 别把状态漏给别的用例
+
+        let names: Vec<&str> = got.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["华语电影", "综艺节目"],
+            "views() 必须原样返回全部媒体库 —— 在这里滤掉被屏蔽的库 = 媒体库页也看不见它 = 用户再也解除不了"
+        );
     }
 }

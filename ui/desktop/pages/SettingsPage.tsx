@@ -19,6 +19,9 @@ import {
   setTrackRegexes,
   validateTrackRegex,
   setDetailBlur,
+  blockedList,
+  setBlocked,
+  type BlockedItem,
   getProxy,
   setProxy,
   getDanmakuConfig,
@@ -96,6 +99,7 @@ import {
   IconSun,
   IconPlay,
   IconLibrary,
+  IconEyeOff,
   IconFile,
   IconCloud,
   IconDownload,
@@ -2425,6 +2429,58 @@ function AccountPane() {
    重构前数据散在 6 个根(Roaming/Local/identifier 目录/%TEMP% 散文件/exe 同级),
    而 UI 里一个字都没提过 —— 路径不摆出来,再干净的目录结构用户也不知道。
    ============================================================ */
+/* 已屏蔽的内容 —— **唯一一个能一次看全并逐条解除的地方**。
+
+   为什么必须有它:屏蔽的东西按设计会从首页/搜索/播放记录里消失,能解除它的地方
+   只剩「原来那张卡片」。库被屏蔽后要去媒体库页找,条目被屏蔽后要去它所在的库里翻——
+   用户 2026-08-02 屏蔽完两个媒体库后直接问「那我怎么恢复呢?」,那一问就是答案:
+   一个不在这儿的清单,等于没有退路。 */
+function BlockedPane() {
+  const [list, setList] = useState<BlockedItem[] | null>(null);
+  const [busy, setBusy] = useState("");
+
+  const load = () => blockedList().then(setList).catch(() => setList([]));
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const unblock = async (b: BlockedItem) => {
+    setBusy(b.id);
+    try {
+      await setBlocked(b.id, b.name, false);
+      setList((cur) => (cur ? cur.filter((x) => x.id !== b.id) : cur));
+    } catch {
+      /* 失败就把列表重拉一次,别留个假的"已解除" */
+      void load();
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="mdpane">
+      <h4>已屏蔽的内容</h4>
+      <p className="hint">
+        屏蔽的条目不在首页显示,也不出现在搜索结果和播放记录里;屏蔽的媒体库不在首页显示。
+        媒体库页仍然列出它们(打「已屏蔽」标)可以右键解除 —— 这里是一次看全、逐条解除的地方。
+      </p>
+      {list === null ? (
+        <p className="hint">加载中…</p>
+      ) : list.length === 0 ? (
+        <p className="hint">还没有屏蔽任何内容。在首页或媒体库右键一张卡片(手机/TV 长按)即可屏蔽。</p>
+      ) : (
+        list.map((b) => (
+          <Row key={b.id} t={b.name} d={b.at ? new Date(b.at).toLocaleString("zh-CN") : ""}>
+            <button className="btn" disabled={busy === b.id} onClick={() => void unblock(b)}>
+              解除屏蔽
+            </button>
+          </Row>
+        ))
+      )}
+    </div>
+  );
+}
+
 function StoragePane() {
   const f = useFlash();
   const [p, setP] = useState<DataPaths | null>(null);
@@ -2899,6 +2955,7 @@ const SECTIONS: { sec: string; items: ItemDef[] }[] = [
   {
     sec: "其它",
     items: [
+      { id: "blocked", label: "已屏蔽的内容", icon: <IconEyeOff size={16} /> },
       { id: "storage", label: "存储与数据目录", icon: <IconFile size={16} /> },
       { id: "about", label: "更新 · 备份 · 关于", icon: <IconInfo size={16} /> },
     ],
@@ -2983,6 +3040,7 @@ export default function SettingsPage({ theme, setTheme }: Props) {
             {active === "proxy" && <ProxyPane />}
             {active === "sync" && <SyncPane />}
             {active === "account" && <AccountPane />}
+            {active === "blocked" && <BlockedPane />}
             {active === "storage" && <StoragePane />}
             {active === "about" && <AboutPane />}
           </div>

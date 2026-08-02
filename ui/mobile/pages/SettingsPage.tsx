@@ -33,6 +33,9 @@ import {
   setWritebackSettings,
   shaderLevels,
   traktAccount,
+  blockedList,
+  setBlocked,
+  type BlockedItem,
 } from "@shared/api";
 import { useCtx } from "../app/ctx";
 import { Icon, iconNode } from "../app/icons";
@@ -63,6 +66,7 @@ const SUB_META = {
   danmaku: { title: "弹幕", icon: "danmaku" },
   network: { title: "网络", icon: "globe" },
   sync: { title: "同步与账号", icon: "sync" },
+  blocked: { title: "已屏蔽的内容", icon: "eyeoff" },
   storage: { title: "存储与数据", icon: "folder" },
   about: { title: "关于", icon: "info" },
 } as const;
@@ -82,6 +86,7 @@ export default function SettingsPage() {
   const [trakt, setTrakt] = useState<SyncAccount | null>(null);
   const [bgm, setBgm] = useState<SyncAccount | null>(null);
   const [cache, setCache] = useState<number | null>(null);
+  const [nBlocked, setNBlocked] = useState(0);
   const [upd, setUpd] = useState<UpdateSettings | null>(null);
 
   useEffect(() => {
@@ -97,6 +102,7 @@ export default function SettingsPage() {
     bangumiAccount().then(setBgm).catch(() => {});
     cacheSize().then(setCache).catch(() => {});
     getUpdateSettings().then(setUpd).catch(() => {});
+    blockedList().then((b) => setNBlocked(b.length)).catch(() => {});
   }, []);
 
   const now: Record<SubId, string> = {
@@ -104,6 +110,7 @@ export default function SettingsPage() {
     danmaku: dmSrc ? `${dmSrc.filter((s) => s.enabled).length} 个源在用` : "",
     network: pf ? `${pf.threads} 线程 · 缓存 ${fmtSize(pf.cache_bytes)}` : "",
     sync: [trakt && "Trakt", bgm && "Bangumi"].filter(Boolean).join(" / ") || "未连接第三方账号",
+    blocked: nBlocked ? `${nBlocked} 项` : "",
     storage: cache != null ? `缓存 ${fmtSize(cache)}` : "",
     about: upd?.current_version ? `v${upd.current_version}` : "",
   };
@@ -139,6 +146,7 @@ export default function SettingsPage() {
         {subCell("danmaku")}
         {subCell("network")}
         {subCell("sync")}
+        {subCell("blocked")}
       </Group>
 
       {/* 外观只有一项,为它单开一页不值 —— 进去发现就一行是很扫兴的。
@@ -176,10 +184,61 @@ export function SettingsSubPage({ group }: { group?: string }) {
       {id === "danmaku" && <DanmakuSub />}
       {id === "network" && <NetworkSub />}
       {id === "sync" && <SyncSub />}
+      {id === "blocked" && <BlockedSub />}
       {id === "storage" && <StorageSub />}
       {id === "about" && <AboutSub />}
       <div style={{ height: 24 }} />
     </Page>
+  );
+}
+
+/* ---------- 已屏蔽的内容 ---------- */
+/* 唯一一个能一次看全并逐条解除的地方。屏蔽的东西按设计会从首页/搜索/播放记录里消失,
+   能解除它的地方就只剩「原来那张卡片」—— 用户 2026-08-02 屏蔽完两个媒体库后直接问
+   「那我怎么恢复呢?」。没有这个清单 = 没有退路。 */
+function BlockedSub() {
+  const [list, setList] = useState<BlockedItem[] | null>(null);
+  const load = () => blockedList().then(setList).catch(() => setList([]));
+  useEffect(() => {
+    void load();
+  }, []);
+  return (
+    <>
+      <Group
+        title="已屏蔽"
+        note="屏蔽的条目不在首页显示,也不出现在搜索结果和播放记录里;屏蔽的媒体库不在首页显示。媒体库页仍然列出它们(长按可解除)。"
+      >
+        {list === null ? (
+          <Cell icon="eyeoff" label="加载中…" arrow={false} />
+        ) : !list.length ? (
+          <Cell icon="eyeoff" label="还没有屏蔽任何内容" sub="在首页或媒体库长按一张卡片即可屏蔽" arrow={false} />
+        ) : (
+          list.map((b) => (
+            <Cell
+              key={b.id}
+              icon="eyeoff"
+              label={b.name}
+              sub={b.at ? new Date(b.at).toLocaleString("zh-CN") : undefined}
+              value="解除"
+              arrow={false}
+              onClick={() => {
+                haptic("ok");
+                setBlocked(b.id, b.name, false)
+                  .then(() => {
+                    setList((cur) => (cur ? cur.filter((x) => x.id !== b.id) : cur));
+                    toast(`已解除屏蔽《${b.name}》`, "ok");
+                  })
+                  /* 失败就把列表重拉一次,别留个假的"已解除" */
+                  .catch((e) => {
+                    toast(`解除失败:${e}`, "bad");
+                    void load();
+                  });
+              }}
+            />
+          ))
+        )}
+      </Group>
+    </>
   );
 }
 
