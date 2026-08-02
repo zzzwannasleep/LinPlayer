@@ -344,15 +344,37 @@ mod tests {
         );
     }
 
-    /// episodeId 来自 URL,不能原样当文件名。
+    /* episodeId 来自 URL 路径,不能原样当文件名。
+       ★ 断言必须只看**自己造的沙箱**,不能去探测 `/etc` 这种真实路径:
+         第一版写的是 `assert!(!temp_dir/../../etc.exists())` —— Windows 上恒绿,
+         而 Linux 上 `/etc` 本来就存在,CI 一跑就恒红。2026-08-02 实测,
+         那不是代码问题,是这条测试在拿环境当断言。
+       所以:把库套进三层目录,`../..` 也跑不出沙箱;然后断言
+       ①产出的文件名里没有任何分隔符 ②沙箱的上层目录一个多余条目都没有。 */
     #[test]
     fn episode_id_never_escapes_the_store_directory() {
-        let dir = tmp("path");
+        let root = tmp("path");
+        let dir = root.join("a").join("b").join("store");
         let s = Store::open(dir.clone());
         s.merge("../../etc/passwd", &body(&[1]), 1000, 60, 600);
-        let escaped = dir.parent().unwrap().parent().unwrap().join("etc");
-        assert!(!escaped.exists(), "路径穿越:写到库目录外面去了");
-        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "应当只有 index.json + 一个净化过的文件名");
+        s.merge("..\\..\\Windows\\x", &body(&[1]), 1000, 60, 600);
+
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            names.iter().all(|n| !n.contains('/') && !n.contains('\\') && !n.contains("..")),
+            "文件名里还留着路径分隔符:{names:?}"
+        );
+        assert_eq!(names.len(), 3, "应当是 index.json + 两个净化过的文件名,实得 {names:?}");
+        assert_eq!(
+            std::fs::read_dir(root.join("a").join("b")).unwrap().count(),
+            1,
+            "库目录的上一层多出了东西 —— 路径穿越"
+        );
+        assert_eq!(std::fs::read_dir(root.join("a")).unwrap().count(), 1, "再上一层也不能多出东西");
     }
 
     #[test]
