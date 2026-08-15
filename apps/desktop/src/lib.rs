@@ -3770,6 +3770,12 @@ async fn source_play(
             p.add_subtitle(&sub.url, sub.title.as_deref().unwrap_or("字幕"));
         }
     }
+    /* ★ 露出视频窗。**必须在上面那把播放器锁之外**(show_video 自己要拿这把锁)。
+       这一句从 4f72060c 引入 show_video 起就漏在这条路上:play / play_local 都补了,
+       source_play 没有 —— 视频窗平时是藏着的,于是网盘/资源站插件起播后
+       mpv 在放、有声音,画面窗口却从来不露面。下面 every_play_command_reveals_the_video_window
+       那条测试就是钉这个的:再加起播命令别再漏。 */
+    show_video(&state, true);
     *state.playback.lock().unwrap() = None; // 网盘源不走 Emby 上报
     *state.source_play_entry.lock().unwrap() = Some((entry.id.clone(), entry.name.clone()));
     state.resign_count.store(0, Ordering::Relaxed);
@@ -4564,6 +4570,11 @@ fn set_prefetch_settings(
    播放窗做成主窗的子窗口会把它拖进主窗的裁剪区,合成缝那套就不成立了。 */
 const PLAYER_LABEL: &str = "player";
 
+/// 窗口首开尺寸(**逻辑**像素)。主窗和播放窗共用同一个数 —— 用户 2026-08-16:
+/// 「播放窗做的像我们第一次打开软件那么大就行了,然后用户自己选择全屏」。
+/// 共用常量是为了别哪天改了主窗、播放窗还留在旧数上。
+const WIN_DEFAULT: (f64, f64) = (1180.0, 720.0);
+
 /// 打开/复用播放窗并把待播条目交给它。主窗的「播放」按钮走这条。
 #[tauri::command]
 async fn player_window_open(
@@ -4586,34 +4597,52 @@ async fn player_window_open(
 
     /* 属性对齐主窗:透明 + 无边框(播放页自绘顶栏),否则 mpv 那块黑会被系统边框框住。
 
-       ★ 位置/尺寸**照抄主窗**,不 maximize。
-         照抄 = 播放窗正好盖在用户刚才那个窗口上,视觉上就是「原地展开成播放器」,
-         而且 OSD 的所有布局假设(它一直是按主窗客户区排的)一字不用改。
-         maximize 会引入一条全新的几何路径(无边框窗最大化在 Windows 上四周溢出 8px,
-         见 [[windows-maximize-overhang]]),没必要为了开个窗把那个坑再踩一遍。 */
-    let (pos, size) = match app.get_webview_window("main") {
-        Some(m) => (m.outer_position().ok(), m.inner_size().ok()),
-        None => (None, None),
-    };
-    let mut b = tauri::WebviewWindowBuilder::new(
+       ★ 尺寸**固定用主窗首开那个尺寸**(WIN_DEFAULT),既不照抄主窗当下的尺寸也不 maximize。
+         「照抄主窗当下尺寸」是老写法,用户 2026-08-16 报的两条其实是它同一个根因:
+           1) 「播放窗默认尺寸很大」—— 主窗最大化着开播放窗,抄回来的就是整块屏幕;
+           2) 「先点外面那个框的最大化,再点播放窗里的最大化就不管用」—— 播放窗一建出来
+              就已经是最大化后的那个矩形了(实测 2586x1626,点完变 2582x1622),
+              按钮确实翻了窗口态,可几何几乎没动,看起来就是坏的;
+              把主窗还原了再开播放窗,它才"又好了"。
+         固定尺寸 + 居中到主窗,这两条一起消失。要铺满屏幕由用户自己按最大化/全屏。 */
+    let main = app.get_webview_window("main");
+    let (dw, dh) = WIN_DEFAULT;
+    let b = tauri::WebviewWindowBuilder::new(
         &app,
         PLAYER_LABEL,
         tauri::WebviewUrl::App("index.html#player".into()),
     )
     .title("LinPlayer")
+    .inner_size(dw, dh)
     .min_inner_size(640.0, 400.0)
     .transparent(true)
     .decorations(false)
     .data_directory(linplayer_core::paths::webview_dir());
-    if let Some(s) = size {
-        b = b.inner_size(s.width as f64, s.height as f64);
-    } else {
-        b = b.inner_size(1180.0, 720.0);
+    /* 先隐身建出来,摆好位置再 show —— 见下面为什么位置必须建完才算得出来。 */
+    let w = b.center().visible(false).build().map_err(|e| format!("播放窗创建失败: {e}"))?;
+
+    /* 居中到**主窗**(不是 .center() 的"居中到显示器":多显示器下主窗在哪块屏,
+       播放窗就该在哪块屏)。
+
+       ★ 必须建完再摆,而且**全程用物理像素**:
+         · builder 的 position 吃的是**逻辑**像素,而 outer_position/outer_size 返回**物理**
+           像素 —— 老代码把物理值直接喂进了 position,150% 缩放的机器上位置整体偏 1.5 倍
+           (本机就是 150%,实测播放窗被顶到 0,0);
+         · 更麻烦的是无边框窗在 Windows 上外框比可见区域每边宽出一圈(实测 150% 下 11px,
+           GetWindowRect/outer_size 都算它)。这一圈建之前量不到,按 inner 尺寸算出来的位置
+           必然偏一个边框宽。建完拿真 outer_size 一减,两边的边框自动抵消。 */
+    if let (Some(m), Ok(ps)) = (main.as_ref(), w.outer_size()) {
+        if let (Ok(mp), Ok(ms)) = (m.outer_position(), m.outer_size()) {
+            // 主窗最小化时 outer_position 是 (-32000,-32000) 那个哨兵值,照它算会把播放窗扔到屏幕外
+            if mp.x > -30000 && mp.y > -30000 {
+                let _ = w.set_position(tauri::PhysicalPosition::new(
+                    mp.x + (ms.width as i32 - ps.width as i32) / 2,
+                    mp.y + (ms.height as i32 - ps.height as i32) / 2,
+                ));
+            }
+        }
     }
-    if let Some(p) = pos {
-        b = b.position(p.x as f64, p.y as f64);
-    }
-    let w = b.build().map_err(|e| format!("播放窗创建失败: {e}"))?;
+    let _ = w.show();
 
     /* Alt+F4 / 任务栏关闭:**不能让它真关掉**。窗口一销毁,前端的 closePlayer 就再也
        跑不了 —— mpv 还在放(有声音没窗口 = 孤儿播放器,本项目在
@@ -5727,7 +5756,7 @@ pub fn run() {
                 tauri::WebviewUrl::default(),
             )
             .title("LinPlayer")
-            .inner_size(1180.0, 720.0)
+            .inner_size(WIN_DEFAULT.0, WIN_DEFAULT.1)
             .min_inner_size(900.0, 560.0)
             .transparent(true)
             .decorations(false)
@@ -6542,4 +6571,186 @@ mod api_contract_tests {
              用户点到就报 command not found:{missing:?}"
         );
     }
+
+    /// 视频窗**平时是藏着的**(它是独立顶层窗口,常驻可见的话主窗一最小化就有块黑留在桌面,
+    /// 见 `show_video` 的注释)。所以「起播」不只是把 URL 塞给 mpv,还得自己把窗露出来。
+    ///
+    /// 2026-08-16 用户报「VOD 插件播放不显示画面窗口」,根因就在这:`show_video` 是
+    /// 4f72060c 引入的,当时给 `play`(Emby)和 `play_local`(下载文件)都补上了,
+    /// **漏了 `source_play`** —— 网盘 / 资源站插件 / Stremio 全走那一条。表现是 mpv 在放、
+    /// 有声音、进度也在走,画面窗口从头到尾没露过面。编译期一声不吭,单测也照不到
+    /// (那是个 Win32 窗口的显隐,没有返回值可断言)。
+    ///
+    /// 于是在源码上钉:凡是把新文件塞给 mpv 的命令,必须自己开这一下。
+    /// 反向验证:删掉 source_play 里那句 show_video,本测试立刻红。
+    #[test]
+    fn every_play_command_reveals_the_video_window() {
+        let me = include_str!("lib.rs");
+        /* 拼出来而不是写字面量 —— 这个文件把自己 include 进来了,写字面量会匹配到本测试自己。 */
+        let needles = [concat!("p.load_", "at("), concat!("p.load_with_", "headers(")];
+        /* 唯一豁免:302 重签是**播放中**换直链,窗早就开着。新增豁免必须写在这儿,
+           别在被测函数里加注释了事。 */
+        let not_a_start = ["source_watchdog"];
+
+        let mut seen = Vec::new();
+        for needle in needles {
+            for (i, _) in me.match_indices(needle) {
+                // 往回找它所在的那个顶层 fn
+                let head = me[..i].rfind("
+fn ").into_iter().chain(me[..i].rfind("
+async fn ")).max();
+                let head = head.expect("load 调用不在任何 fn 里?解析坏了");
+                let name = me[head..].split("fn ").nth(1).unwrap();
+                let name = &name[..name.find('(').expect("fn 后面没有参数表")];
+                // 函数体 = 从 fn 头到下一个顶层收尾的 `}`(rustfmt 保证它在第 0 列)
+                let body = &me[head..head + me[head..].find("
+}
+").expect("找不到函数结尾")];
+                seen.push(name.to_string());
+                if not_a_start.contains(&name) {
+                    continue;
+                }
+                assert!(
+                    body.contains("show_video(&state, true)"),
+                    "命令 `{name}` 把新文件塞给了 mpv,却没有 show_video(&state, true) —— 视频窗平时藏着,漏这一句的表现是「有声音、没有画面窗口」,而且什么都不报错"
+                );
+            }
+        }
+        assert!(
+            seen.len() >= 4,
+            "只找到 {} 处起播调用({seen:?}),解析多半坏了 —— 这条测试就形同虚设了",
+            seen.len()
+        );
+    }
+
+    /// 起播那条路**不止 invoke 一次 source_play**:桌面端要先 `playerWindowOpen` 把独立
+    /// 播放窗拉起来(视频窗焊在它背面、播放 OSD 也在那个窗里)。App.tsx 的 `playSource`
+    /// 是唯一的入口,页面必须经它。
+    ///
+    /// 2026-08-16 抓到:`VodPage`(资源站插件的页面)自己 `invoke("source_play")` 了 ——
+    /// 同一层的 `NetdiskPage` 拿的是 `onPlay`,而 `SourceBrowsePage` 只把 `onPlay` 传给了
+    /// NetdiskPage。后果:播放窗根本没开,用户点了「播放」什么也没出现。
+    /// 两个页面版式不同,起播是同一条路,这条测试把它钉住。
+    #[test]
+    fn source_pages_start_playback_through_the_app() {
+        for (path, src) in [
+            ("VodPage.tsx", include_str!("../../../ui/desktop/pages/VodPage.tsx")),
+            ("NetdiskPage.tsx", include_str!("../../../ui/desktop/pages/NetdiskPage.tsx")),
+        ] {
+            assert!(
+                !src.contains("sourcePlay(") && !src.contains("episodeEntry(ep")
+                    || src.contains("onPlay("),
+                "{path} 自己起播了 —— 必须调 props 的 onPlay(= App.tsx 的 playSource),否则独立播放窗不开,点了没有画面"
+            );
+            assert!(
+                !src.contains("invoke(\"source_play\""),
+                "{path} 直接 invoke 了 source_play,绕开了 playerWindowOpen"
+            );
+        }
+        /* 手机端是同一根因的另一半:那边没有独立播放窗,画面走的是 webview **底下**那层
+           SurfaceView —— 页面不导航到播放页的话,不透明的目录页/详情卡就一直盖着它,
+           同样是「有声音、没画面」。上一版两个页面都是 invoke 完 back() 就完事。
+           (放在桌面这套测试里,因为它是每次 `cargo test` 真会跑的那一套;
+            安卓那个 crate 在本机连编都要 NDK。) */
+        let m_app = include_str!("../../../ui/mobile/App.tsx");
+        let m_play = m_app
+            .split_once("const playSource = useCallback(")
+            .expect("ui/mobile/App.tsx 里找不到 playSource —— 改名了就同步这条测试")
+            .1;
+        let m_play = &m_play[..m_play.find("
+  );").expect("playSource 没有结尾")];
+        assert!(
+            m_play.contains("push({ page: \"player\""),
+            "手机端 playSource 起播后没导航到播放页 —— 目录页盖着底下那层视频,只剩声音"
+        );
+        for (path, src) in [
+            ("mobile/VodPage.tsx", include_str!("../../../ui/mobile/pages/VodPage.tsx")),
+            ("mobile/NetdiskPage.tsx", include_str!("../../../ui/mobile/pages/NetdiskPage.tsx")),
+        ] {
+            assert!(
+                src.contains("playSource"),
+                "{path} 没走 ctx 的 playSource"
+            );
+            assert!(
+                !src.contains("sourcePlay("),
+                "{path} 自己 invoke 了 sourcePlay —— 起播后不会导航到播放页,点了没画面"
+            );
+        }
+
+        let browse = include_str!("../../../ui/desktop/pages/SourceBrowsePage.tsx");
+        for tag in ["<VodPage", "<NetdiskPage"] {
+            let rest = browse.split_once(tag).unwrap_or_else(|| panic!("SourceBrowsePage 里找不到 {tag}")).1;
+            let props = &rest[..rest.find("/>").expect("标签没闭合")];
+            assert!(
+                props.contains("onPlay={onPlay}"),
+                "SourceBrowsePage 没把 onPlay 传给 {tag} —— 那个页面就只能自己 invoke 了,表现是播放窗不开、点了没画面"
+            );
+        }
+    }
+
+    /// 播放窗的尺寸必须是**常量**,不能照抄主窗当下的几何。
+    ///
+    /// 2026-08-16 用户报的两条 ——「播放窗默认尺寸很大」和「先点外面那个框的最大化、
+    /// 再点播放窗里的最大化就不管用」—— 是同一个根因:老代码拿
+    /// `main.inner_size()` 当播放窗尺寸,主窗最大化时抄回来的就是整块屏幕,
+    /// 播放窗一建出来就已经落在最大化后的那个矩形上,再按最大化自然"看着没反应"。
+    ///
+    /// 这类失败编译绿、单测绿、tsc 也绿,只有挂真 exe 量 Win32 窗口矩形才现形
+    /// (ui/shared/player-window-geometry.check.mjs)—— 那条要打包要 60 秒,
+    /// 所以在这儿留一道便宜的门禁,让它进不了 CI。
+    #[test]
+    fn player_window_never_copies_the_main_window_size() {
+        // 拼出来:这个文件把自己 include 进来了,写字面量会匹配到本测试自己。
+        let me = include_str!("lib.rs");
+        let head = me
+            .find(concat!("async fn player_window_", "open("))
+            .expect("找不到 player_window_open —— 解析坏了,这条测试就形同虚设");
+        let body = &me[head..head + me[head..].find("
+}
+").expect("找不到函数结尾")];
+        assert!(
+            body.contains("inner_size(dw, dh)"),
+            "player_window_open 必须用 WIN_DEFAULT 建窗"
+        );
+        assert!(
+            !body.contains(".inner_size()") && !body.contains(".outer_size()
+"),
+            "player_window_open 又去读主窗尺寸了 —— 主窗最大化时那就是整块屏幕,             播放窗会一上来就铺满,而且它自己的最大化按钮看着像坏了"
+        );
+        assert!(
+            me.contains(concat!("inner_size(WIN_", "DEFAULT.0, WIN_", "DEFAULT.1)")),
+            "主窗没用同一个 WIN_DEFAULT —— 两处各写各的数,迟早对不上"
+        );
+    }
+
+
+    /// 进全屏前必须先退出最大化 —— Windows 上的硬规矩,不是风格问题。
+    ///
+    /// 2026-08-16 用户第二次报:「窗口最大化之后,点里面的全屏化按钮无效,依旧还是窗口最大化」。
+    /// 挂真 exe 量出来的:最大化态下 `setFullscreen(true)` 会把 is_fullscreen 翻成 true,
+    /// 而窗口客户区**一个像素都不动**(2560x1599 原样)—— 标志位说全屏了,几何还是最大化,
+    /// 于是标题栏还在、画面还让着 36px,用户看到的就是"按钮没用"。
+    /// 所有全屏调用必须走 App.tsx 的 applyFullscreen(先 unmaximize,退出时再 maximize 回去)。
+    #[test]
+    fn fullscreen_never_starts_from_a_maximized_window() {
+        let app = include_str!("../../../ui/desktop/App.tsx");
+        let n = app.matches(concat!("setFull", "screen(")).count();
+        assert_eq!(
+            n, 2,
+            "App.tsx 里有 {n} 处 setFullscreen —— 只该有 applyFullscreen 里的那两处(true/false)。多出来的那处是直接切全屏,最大化态下它只会翻标志位、几何不动"
+        );
+        assert!(
+            app.contains("unmaximize()") && app.contains("preFsMaxed"),
+            "applyFullscreen 没有「先退最大化、退出全屏再还回去」那一对动作"
+        );
+        // 写了不放行 = 运行时静默失败(见 [[pc-standalone-player-window]])
+        let caps = include_str!("../capabilities/default.json");
+        for p in ["allow-maximize", "allow-unmaximize"] {
+            assert!(
+                caps.contains(p),
+                "capabilities 没放行 core:window:{p} —— 前端调了会被 ACL 挡掉,而且不报错"
+            );
+        }
+    }
+
 }

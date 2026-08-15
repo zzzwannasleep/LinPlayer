@@ -931,12 +931,35 @@ export default function App() {
     window.setTimeout(() => window.removeEventListener("resize", settle), 1200);
   }
 
+  /* 进全屏前**必须先退出最大化**,这是 Windows 上的硬规矩。
+
+     用户 2026-08-16:「窗口最大化之后,点里面的全屏化按钮无效,依旧还是窗口最大化」。
+     实测(ui/shared/player-window-geometry.check.mjs 量的真窗口):
+       不最大化 → 切全屏 → 客户区 1770x1080 变 2560x1600 ✓
+       最大化   → 切全屏 → is_fullscreen 翻成 true,客户区**纹丝不动** 2560x1599 ✗
+     标志位翻了、几何没动 —— 于是标题栏还在、画面还让着那 36px,看着就是"全屏按钮没用"。
+     退出全屏时再把最大化态还回去,否则用户会从全屏掉回 1180x720 的小窗。 */
+  const preFsMaxed = useRef(false);
+  async function applyFullscreen(w: ReturnType<typeof getCurrentWindow>, on: boolean) {
+    if (on) {
+      preFsMaxed.current = await w.isMaximized().catch(() => false);
+      if (preFsMaxed.current) await w.unmaximize();
+      await w.setFullscreen(true);
+      return;
+    }
+    await w.setFullscreen(false);
+    if (preFsMaxed.current) {
+      preFsMaxed.current = false;
+      await w.maximize();
+    }
+  }
+
   async function toggleFullscreen() {
-    await withFsHidden(async (w) => w.setFullscreen(!(await w.isFullscreen())));
+    await withFsHidden(async (w) => applyFullscreen(w, !(await w.isFullscreen())));
   }
   async function exitFullscreen() {
     await withFsHidden(async (w) => {
-      if (await w.isFullscreen()) await w.setFullscreen(false);
+      if (await w.isFullscreen()) await applyFullscreen(w, false);
     });
   }
 

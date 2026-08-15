@@ -3,10 +3,12 @@ import {
   type AccountInfo,
   type Item,
   type LoginResult,
+  type SourceEntry,
   currentSession,
   currentSource,
   onAccountsChanged,
   play,
+  sourcePlay,
 } from "@shared/api";
 import { consumeBack, onShellKey } from "./app/backkey";
 import { PageCtx, type Ctx } from "./app/ctx";
@@ -139,6 +141,32 @@ export default function App() {
     [push],
   );
 
+  /* 起播一个源条目(网盘文件 / 资源站的一集)。★ 和 playItem 走同一套收尾:
+     起播成功 → 记下正在播的东西 → **导航到播放页**。
+     少了最后一步就是用户报的「点了没画面」:mpv 确实在放,但画面走的是
+     webview 底下那层 SurfaceView,而我们还停在一个不透明的目录页上,
+     等于拿一张纸盖着屏幕 —— 只剩声音。上一版这里只 back() 了。 */
+  const playSource = useCallback(
+    async (entry: SourceEntry) => {
+      try {
+        await sourcePlay(entry, 0);
+        // 源条目不是 Emby 条目:剧集号/规格字段一律给空,播放页对 item 的字段都是可选读。
+        const synth: Item = {
+          id: entry.id, name: entry.name, type_: "Video", is_folder: false, has_primary: false,
+          runtime_secs: 0, resume_secs: 0, series_name: null, episode_no: null, season_no: null,
+          video_height: null, bitrate: null, size_bytes: entry.size, played: false,
+          unplayed_item_count: 0, genres: [], year: null, rating: null, provider_ids: {},
+          presentation_unique_key: null, path: null, series_id: null, date_updated: null, sort_name: null,
+        };
+        setPlaying(synth);
+        push({ page: "player", itemId: entry.id, title: entry.name });
+      } catch (e) {
+        toast(`播放失败:${e}`, "bad");
+      }
+    },
+    [push],
+  );
+
   const ctx = useMemo<Ctx>(
     () => ({
       session: session ?? null,
@@ -148,9 +176,10 @@ export default function App() {
       back: () => void pop(),
       openItem,
       play: playItem,
+      playSource,
       reloadGate: () => void loadGate(),
     }),
-    [session, route, push, replace, pop, openItem, playItem, loadGate],
+    [session, route, push, replace, pop, openItem, playItem, playSource, loadGate],
   );
 
   /* ── 切 Tab 的 fade-through ──

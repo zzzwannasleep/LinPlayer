@@ -1104,12 +1104,22 @@ export const sourceCatalog = (categoryId: string | null, keyword: string | null,
 
 export const sourceMediaDetail = (id: string) => invoke<MediaDetail>("source_media_detail", { id });
 
-/** 把一集包成播放链路认识的形状 —— 播放那条路一行都不用改。 */
-export const playEpisode = (ep: MediaEpisode, title: string, resumeSecs = 0) =>
-  sourcePlay(
-    { id: ep.id, name: title, is_dir: false, is_video: true, size: null, thumb_url: null, raw: ep.raw },
-    resumeSecs,
-  );
+/** 把一集包成播放链路认识的形状。
+ *
+ *  ★ 只造壳,**不自己起播**。上一版这里直接调 sourcePlay,结果是「点了有声音、没有画面窗口」:
+ *    起播不只是 invoke 一次 source_play —— 桌面端要先 playerWindowOpen 把独立播放窗拉起来
+ *    (视频窗焊在它背面),手机端要导航到播放页(不然 webview 盖着底下的 SurfaceView)。
+ *    那条路各端 App 各有一份(desktop 的 playSource / mobile ctx 的 playSource),
+ *    页面一律走它,别再从页面里直接 invoke。 */
+export const episodeEntry = (ep: MediaEpisode, title: string): SourceEntry => ({
+  id: ep.id,
+  name: title,
+  is_dir: false,
+  is_video: true,
+  size: null,
+  thumb_url: null,
+  raw: ep.raw,
+});
 
 export const sourcePlay = (entry: SourceEntry, resumeSecs: number) =>
   invoke<number>("source_play", {

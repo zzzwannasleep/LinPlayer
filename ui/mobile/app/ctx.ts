@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { Item, LoginResult } from "@shared/api";
+import type { Item, LoginResult, SourceEntry } from "@shared/api";
 import type { PageId } from "./nav";
 import type { Route } from "./router";
 
@@ -29,6 +29,10 @@ export type Ctx = {
   /** 起播。★ 先 await play() 成功才导航 —— 反过来的话起播失败会停在一个空的
    *  播放页上,用户只看到黑屏。 */
   play: (it: Item, mediaSourceId?: string | null) => void | Promise<void>;
+  /** 起播一个源条目(网盘文件 / 资源站的一集)。★ 页面别自己 invoke source_play ——
+   *  起播成功后**必须导航到播放页**,否则不透明的目录页盖着底下那层视频 SurfaceView,
+   *  用户看到的是「有声音、没画面」。 */
+  playSource: (entry: SourceEntry) => void | Promise<void>;
   /** 账号有变(加/删/切服务器、重新登录)时喊一声,重新问闸口 */
   reloadGate: () => void;
 };

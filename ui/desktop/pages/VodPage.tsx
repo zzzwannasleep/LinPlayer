@@ -3,7 +3,8 @@ import {
   type MediaCategory,
   type MediaCard,
   type MediaDetail,
-  playEpisode,
+  type SourceEntry,
+  episodeEntry,
   sourceCatalog,
   sourceMediaDetail,
 } from "@shared/api";
@@ -31,12 +32,15 @@ type Props = {
   categories: MediaCategory[];
   onBack: () => void;
   title: string;
+  /** 起播。**必须走 App 的 playSource**(它先把独立播放窗拉起来,视频窗焊在那个窗背面);
+   *  页面自己 invoke source_play 的话 mpv 是在放,但视频窗还藏着 —— 只有声音没有画面。 */
+  onPlay: (entry: SourceEntry) => void | Promise<void>;
 };
 
 /** 一次请求 20 条,首屏铺不满一屏就会没有滚动条 → 触发不了续拉。所以首次多抓几页。 */
 const PREFILL_PAGES = 2;
 
-export default function VodPage({ categories, onBack, title }: Props) {
+export default function VodPage({ categories, onBack, title, onPlay }: Props) {
   // 选中的分类。null = 最新(不带 t 参数)。二级选中时 top 仍指向它的父级,好让横条保持展开。
   const [top, setTop] = useState<MediaCategory | null>(null);
   const [pick, setPick] = useState<MediaCategory | null>(null);
@@ -214,7 +218,9 @@ export default function VodPage({ categories, onBack, title }: Props) {
         </div>
       </div>
 
-      {detail && <Detail id={detail.id} card={detail.card} onClose={() => setDetail(null)} />}
+      {detail && (
+        <Detail id={detail.id} card={detail.card} onPlay={onPlay} onClose={() => setDetail(null)} />
+      )}
     </>
   );
 }
@@ -248,7 +254,17 @@ function Card({ m, onOpen }: { m: MediaCard; onOpen: () => void }) {
 
 /* ── 详情:盖在同一页上 ────────────────────────────────────────────── */
 
-function Detail({ id, card, onClose }: { id: string; card: MediaCard; onClose: () => void }) {
+function Detail({
+  id,
+  card,
+  onPlay,
+  onClose,
+}: {
+  id: string;
+  card: MediaCard;
+  onPlay: (entry: SourceEntry) => void | Promise<void>;
+  onClose: () => void;
+}) {
   const [d, setD] = useState<MediaDetail | null>(null);
   const [err, setErr] = useState("");
   const [line, setLine] = useState(0);
@@ -284,7 +300,7 @@ function Detail({ id, card, onClose }: { id: string; card: MediaCard; onClose: (
     const ep = cur.episodes[epIdx];
     setPlaying(ep.id);
     try {
-      await playEpisode(ep, `${d?.title ?? card.title} · ${ep.name}`);
+      await onPlay(episodeEntry(ep, `${d?.title ?? card.title} · ${ep.name}`));
     } catch (e) {
       setErr(String(e));
     } finally {

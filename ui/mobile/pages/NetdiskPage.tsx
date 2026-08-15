@@ -1,5 +1,5 @@
 import { type CSSProperties, type SyntheticEvent, useEffect, useMemo, useState } from "react";
-import { type SourceEntry, sourceListDir, sourcePlay, sourceSearch } from "@shared/api";
+import { type SourceEntry, sourceListDir, sourceSearch } from "@shared/api";
 import { Icon } from "../app/icons";
 import { useCtx } from "../app/ctx";
 import Page from "../components/Page";
@@ -24,9 +24,7 @@ import Page from "../components/Page";
    条目顺序**原样照抄源给的顺序**,不排序:策展型的源(「最新在前」)一排就毁了。 */
 
 export default function NetdiskPage() {
-  const { back } = useCtx();
-  /* 播放本地/网盘文件后退回上一页 —— mpv 已经在放了，继续堆在文件列表上没意义。 */
-  const onPlaySource = back;
+  const { back, playSource } = useCtx();
   /** 目录栈。栈底是根(null)。**不用路由栈** —— 理由见文件头。 */
   const [stack, setStack] = useState<{ id: string | null; name: string }[]>([{ id: null, name: "根目录" }]);
   const [entries, setEntries] = useState<SourceEntry[] | null>(null);
@@ -81,9 +79,10 @@ export default function NetdiskPage() {
   const open = (e: SourceEntry) => {
     if (e.is_dir) return setStack((s) => [...s, { id: e.id, name: e.name }]);
     if (!e.is_video) return; // 非视频文件点了不做事(也不假装能播)
-    /* 起播成功后退回上一页 —— 播放层由 App 挂着,这一页不该留在栈顶,
-       否则用户从播放页返回会落回网盘目录而不是他来的地方。 */
-    void sourcePlay(e, 0).then(onPlaySource);
+    /* ★ 交给 App 的 playSource:它起播成功后会导航到播放页。
+       这一页曾经自己 invoke 完就 back(),于是画面(webview 底下的 SurfaceView)
+       一直被这张不透明的文件表盖着 —— 只有声音。 */
+    void playSource(e);
   };
 
   /** 第一张图加载完就把真实宽高比记下来,后面所有卡片跟着它。 */

@@ -3,7 +3,7 @@ import {
   type MediaCard,
   type MediaCategory,
   type MediaDetail,
-  playEpisode,
+  episodeEntry,
   sourceCatalog,
   sourceMediaDetail,
 } from "@shared/api";
@@ -211,7 +211,7 @@ function Sheet({ card, onClose }: { card: MediaCard; onClose: () => void }) {
   const [line, setLine] = useState(0);
   const [expand, setExpand] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const { back } = useCtx();
+  const { playSource } = useCtx();
 
   useEffect(() => {
     let alive = true;
@@ -231,9 +231,10 @@ function Sheet({ card, onClose }: { card: MediaCard; onClose: () => void }) {
     const ep = cur.episodes[i];
     setBusy(ep.id);
     try {
-      await playEpisode(ep, `${d?.title ?? card.title} · ${ep.name}`);
-      // 起播后退回上一页:播放层由 App 挂着,这一页不该留在栈顶。
-      back();
+      /* ★ 交给 App 的 playSource:它起播成功后会导航到播放页。
+         这一页曾经自己 invoke 完就 back(),画面在 webview 底下的 SurfaceView 上,
+         被这张不透明的详情卡整个盖住 —— 用户看到的就是「没画面」。 */
+      await playSource(episodeEntry(ep, `${d?.title ?? card.title} · ${ep.name}`));
     } catch (e) {
       setErr(String(e));
     } finally {

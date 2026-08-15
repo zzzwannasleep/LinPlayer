@@ -91,8 +91,11 @@ export default function SourceBrowsePage({ onPlay, onBack, title }: Props) {
     );
   }
 
+  /* onPlay 两条路都要传:资源站和网盘只是版式不同,起播是同一条路
+     (App 的 playSource → 开独立播放窗 → 那个窗里才 invoke source_play)。
+     VodPage 这里曾经漏传,页面就自己 invoke 了 —— 有声音没画面。 */
   return mode.t === "vod" ? (
-    <VodPage categories={mode.cats} onBack={onBack} title={title} />
+    <VodPage categories={mode.cats} onBack={onBack} title={title} onPlay={onPlay} />
   ) : (
     <NetdiskPage onPlay={onPlay} onBack={onBack} />
   );
