@@ -44,7 +44,7 @@ pub struct Account {
     /// 仅对本服务器主机放行,不影响更新下载/WebDAV/其它主机。
     #[serde(default)]
     pub allow_insecure_tls: bool,
-    /// 源类型:emby(默认)/ openlist / quark / anirss / feiniu / stremio,
+    /// 源类型:emby(默认)/ openlist / quark / anirss / feiniu / smb / webdav / ftp,
     /// 或插件贡献的 `plugin:<插件id>/<源id>`。是**开放键**,见 `source::SourceKind`。
     /// `SourceKind::default()` 就是 emby,故直接 `#[serde(default)]` 即可。
     #[serde(default)]

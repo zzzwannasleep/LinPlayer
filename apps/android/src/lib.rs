@@ -45,8 +45,11 @@ use linplayer_core::source::openlist::OpenListBackend;
 use linplayer_core::source::pan115::Pan115Backend;
 use linplayer_core::source::pan139::{self, Pan139Backend};
 use linplayer_core::source::pan189::{self, Pan189Backend};
+use linplayer_core::source::ftp::FtpBackend;
+use linplayer_core::source::local::LocalBackend;
 use linplayer_core::source::quark::QuarkBackend;
-use linplayer_core::source::stremio::StremioBackend;
+use linplayer_core::source::smb::SmbBackend;
+use linplayer_core::source::webdav::WebdavBackend;
 use linplayer_core::source::{
     MediaSourceBackend, QrPoll, QrStart, SourceEntry, SourceKind, SourceServer,
 };
@@ -314,7 +317,7 @@ async fn source_play(
         is_video: true,
         size: None,
         thumb_url: None,
-        raw, // 透传源原始数据(Stremio 的 stream 对象、ani-rss 外挂字幕等靠它)
+        raw, // 透传源原始数据(ani-rss 外挂字幕等靠它)
     };
     let resolved = backend
         .resolve_play(&state.http, &server, &entry, None)
@@ -1525,9 +1528,9 @@ async fn companion_call(
             Ok(json!({ "ok": true, "name": r.user_name }))
         }
 
-        /* 加浏览型源(目前手机页只开了 Stremio 一种)。
-           ★ 电视上加源只能走这条路:遥控器打一行 URL 已经很痛,Stremio 还是**多行**配置。
-             TV 的 OnboardingPage 明确把「打字」判成非主路径,不给它开表单。 */
+        /* 加浏览型源。★ 电视上加源只能走这条路:遥控器打字太痛,
+             TV 的 OnboardingPage 明确把「打字」判成非主路径,不给它开表单。
+             手机遥控网页现在开的是 SMB / WebDAV / FTP —— 电视接的多半就是家里那台 NAS。 */
         "source_login" => {
             let kind: SourceKind = serde_json::from_value(json!(s("kind")))
                 .map_err(|_| format!("不认识的源类型: {}", s("kind")))?;
@@ -1538,7 +1541,7 @@ async fn companion_call(
                 s("user"),
                 s("pass"),
                 Some(s("cookie")),
-                // 遥控网页这条路目前只加 Stremio,不需要令牌覆盖。
+                // 遥控网页这条路只加地址+账密型的局域网源,不需要令牌覆盖。
                 None,
             )
             .await?;
@@ -4661,7 +4664,13 @@ pub fn run() {
             source_backends.insert(SourceKind::feiniu(), Arc::new(FeiniuBackend::new()));
             source_backends.insert(SourceKind::quark(), Arc::new(QuarkBackend::new()));
             // 与 apps/desktop/src/lib.rs 的同名表必须逐条对齐,漏一条那一端就静默不可用。
-            source_backends.insert(SourceKind::stremio(), Arc::new(StremioBackend::new()));
+            // 局域网文件源(SMB 走本地 HTTP 桥,WebDAV/FTP 地址直给 mpv)。
+            source_backends.insert(SourceKind::smb(), Arc::new(SmbBackend::new()));
+            source_backends.insert(SourceKind::webdav(), Arc::new(WebdavBackend::new()));
+            source_backends.insert(SourceKind::ftp(), Arc::new(FtpBackend::new()));
+            // 本机文件夹(「本地播放」挑的那个目录)。挑目录的选择器只有桌面有,
+            // 但后端两端都注册 —— 配置能同步过去,安卓上路径可读时照样能用。
+            source_backends.insert(SourceKind::local(), Arc::new(LocalBackend::new()));
             // 国内网盘(扫码/Cookie 登录,不依赖任何在线令牌中继 —— oplist 已作废)。
             source_backends
                 .insert(SourceKind::aliyundrive(), Arc::new(AliyunDriveBackend::new()));

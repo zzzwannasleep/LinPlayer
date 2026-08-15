@@ -50,15 +50,17 @@ export const isGlyph = (s: string | null) => !!s && s.length <= 2 && !/[\\/:.]/.
  *  (用户 2026-08-02:「服务器名称下面跟的应该是备注,而不是线路名称或线路地址」)。
  *  认不出的 kind(插件源形如 `plugin:<id>/<src>`)回落成「插件源」。 */
 const KIND_NAME: Record<string, string> = {
-  emby: "Emby / Jellyfin", feiniu: "飞牛影视", stremio: "Stremio 插件", anirss: "Ani-RSS",
+  emby: "Emby / Jellyfin", feiniu: "飞牛影视", anirss: "Ani-RSS",
   openlist: "OpenList", aliyundrive: "阿里云盘", quark: "夸克网盘", baidu: "百度网盘",
   pan115: "115 网盘", pan189: "天翼云盘", pan139: "移动云盘",
+  smb: "SMB 共享", webdav: "WebDAV", ftp: "FTP", local: "本机文件夹",
 };
 
 const KIND_IC: Record<string, string> = {
-  emby: "server", feiniu: "server", stremio: "plugin", anirss: "rss",
+  emby: "server", feiniu: "server", anirss: "rss",
   openlist: "cloud", aliyundrive: "cloud", quark: "cloud", baidu: "cloud",
   pan115: "cloud", pan189: "cloud", pan139: "cloud",
+  smb: "server", webdav: "server", ftp: "server", local: "folder",
 };
 
 /** 这个源该进哪个浏览页;Emby 没有"它自己的浏览页"(内容摊在首页/媒体库),返回 null。

@@ -369,12 +369,15 @@ export type SourceKind =
   | "quark"
   | "anirss"
   | "feiniu"
-  | "stremio"
   | "aliyundrive"
   | "baidu"
   | "pan115"
   | "pan189"
   | "pan139"
+  | "smb"
+  | "webdav"
+  | "ftp"
+  | "local"
   | (string & {});
 
 /** 连通状态三态。unknown = 还没探过(按灰显示),与 down「探过确实不通」同色不同义。 */
@@ -584,7 +587,7 @@ export type TraktPollResult = {
 export const currentSession = () =>
   invoke<LoginResult | null>("current_session");
 
-/** 当前活跃的**文件浏览型**源(夸克/OpenList/飞牛/Ani-RSS/Stremio/插件源)。
+/** 当前活跃的**文件浏览型**源(夸克/OpenList/飞牛/Ani-RSS/SMB/WebDAV/FTP/插件源)。
  *
  *  ★ 必须和 currentSession 一起看:`current_session` 在核层是
  *    `.filter(|a| !a.is_file_browse())` —— 只连了网盘的用户在那边**永远返回 null**。
@@ -1316,6 +1319,13 @@ export const downloadClearCompleted = () => invoke<number>("download_clear_compl
 /** 播放已下载完成的本地文件(下载页 ▶)。传任务 id,不是路径。返回续播位置。 */
 export const playLocal = (id: string, resumeSecs = 0) =>
   invoke<number>("play_local", { id, resumeSecs });
+
+/** 「本地播放」:弹系统文件夹选择器,返回用户挑的目录路径。
+ *
+ *  ★ 用户点了取消 → 返回 **null**,这时**什么都别做**。把它当失败弹一句
+ *    「添加失败」是在骂用户按了取消。
+ *  ★ 只有桌面有这个命令(挑目录要系统对话框)。手机端调它会 command not found。 */
+export const pickLocalFolder = () => invoke<string | null>("pick_local_folder");
 
 // ---------- CF 优选加速 ----------
 export type CfTestResult = {

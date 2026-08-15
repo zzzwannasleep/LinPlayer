@@ -24,12 +24,30 @@ import { usePress } from "./ui";
    登录送错值,**两边都不报错**。下面这些字面量必须和 crates/core 的 SourceKind 一致。
    Jellyfin **不是**独立 kind(和 emby 共用一套接口)。 */
 
-export const KIND_UP = new Set<string>(["emby", "feiniu", "openlist", "anirss"]);
+export const KIND_UP = new Set<string>([
+  "emby", "feiniu", "openlist", "anirss",
+  // 局域网文件源:同样是地址 + 账号密码,共用这一套表单和提交路径。
+  "smb", "webdav", "ftp",
+]);
 export const KIND_QR = new Set<string>(["aliyundrive", "quark", "baidu"]);
 export const KIND_COOKIE = new Set<string>(["pan115"]);
 export const KIND_PHONE = new Set<string>(["pan189", "pan139"]);
 
 export type SrcKindDef = { id: string; name: string; desc: string; sec: string };
+
+/** 地址框的占位符。**不能所有源共用一个** —— 在 SMB 的框里摆 https:// 会把人带沟里。 */
+export const ADDR_PLACEHOLDER: Record<string, string> = {
+  smb: "\\\\192.168.1.10",
+  webdav: "https://nas.example.com/dav",
+  ftp: "ftp://192.168.1.10:21",
+};
+
+/** 局域网源在地址框下面补一句,省得用户对着空表单猜。 */
+export const LAN_HINT: Record<string, string> = {
+  smb: "填到主机就行,共享文件夹会自己列出来;账号密码留空按来宾连接。",
+  webdav: "要填 WebDAV 的根路径(群晖一般是 :5006,Nextcloud 是 /remote.php/dav/files/用户名/)。",
+  ftp: "账号密码留空按 anonymous 匿名登录;暂不支持 FTPS。",
+};
 
 /** 源类型清单。**新增源只改这一处**(添加页和首登闸口共用)。 */
 export const SOURCE_KINDS: SrcKindDef[] = [
@@ -43,7 +61,9 @@ export const SOURCE_KINDS: SrcKindDef[] = [
   { id: "pan189", name: "天翼云盘", desc: "短信 / 密码", sec: "网盘 / 文件源" },
   { id: "pan139", name: "移动云盘", desc: "短信 / 密码", sec: "网盘 / 文件源" },
   { id: "anirss", name: "Ani-RSS", desc: "地址 + 账号密码", sec: "网盘 / 文件源" },
-  { id: "stremio", name: "Stremio", desc: "Addon manifest 地址", sec: "插件协议" },
+  { id: "smb", name: "SMB / 共享文件夹", desc: "主机地址 + 账号密码", sec: "局域网 / 本地" },
+  { id: "webdav", name: "WebDAV", desc: "地址 + 账号密码", sec: "局域网 / 本地" },
+  { id: "ftp", name: "FTP", desc: "地址 + 账号密码(可匿名)", sec: "局域网 / 本地" },
   { id: "batch", name: "批量粘贴导入", desc: "一次贴多台", sec: "批量" },
   { id: "qrsync", name: "扫码搬配置", desc: "从另一台设备搬过来", sec: "批量" },
 ];
@@ -130,7 +150,7 @@ export function checkRequired(root: HTMLElement | null): boolean {
 export const SOURCE_SECS: { sec: string; icon: string; desc: string }[] = [
   { sec: "媒体服务器", icon: "server", desc: "Emby / Jellyfin / 飞牛 —— 有刮削好的海报、简介和观看进度" },
   { sec: "网盘 / 文件源", icon: "cloud", desc: "阿里 / 夸克 / 百度 / 115 / 天翼 / 移动 / OpenList —— 按文件夹浏览" },
-  { sec: "插件协议", icon: "plugin", desc: "Stremio Addon —— 一条 manifest 地址接进来" },
+  { sec: "局域网 / 本地", icon: "server", desc: "SMB / WebDAV / FTP —— 家里的 NAS、路由器硬盘、另一台电脑的共享文件夹" },
 ];
 
 /** 一个大类下面有哪几种源 */
@@ -241,7 +261,16 @@ export function SourceForm({
     return (
       <div>
         {nameField}
-        <Field label="服务器地址" type="url" placeholder="https://example.com:8920" value={f.url} onChange={(v) => set({ url: v })} required reqKey="url" />
+        <Field
+          label="服务器地址"
+          type={kind === "smb" ? "text" : "url"}
+          placeholder={ADDR_PLACEHOLDER[kind] ?? "https://example.com:8920"}
+          value={f.url}
+          onChange={(v) => set({ url: v })}
+          required
+          reqKey="url"
+        />
+        {LAN_HINT[kind] && <p className="fld-hint">{LAN_HINT[kind]}</p>}
         <Field label="用户名" placeholder="账号" value={f.user} onChange={(v) => set({ user: v })} />
         <Field label="密码" type="password" placeholder="密码" value={f.pass} onChange={(v) => set({ pass: v })} />
         {children}
@@ -283,7 +312,7 @@ export function SourceForm({
   if (kind === "batch") return <BatchPane />;
   if (kind === "qrsync") return <QrSyncPane />;
 
-  // stremio 及将来新源类型的兜底:名称 + 一个地址
+  // 将来新源类型的兜底:名称 + 一个地址
   return (
     <div>
       {nameField}
@@ -613,7 +642,7 @@ export async function submitSource(kind: string, f: FormState): Promise<void> {
     // 扫码型在 QrPane 里自己完成了 —— 这里点「连接」不该再发一次
     throw new Error("扫码登录请直接用上面的二维码");
   }
-  // stremio 及兜底
+  // 兜底
   await sourceLogin(kind as SourceKind, f.url.trim(), "", "", null, null);
   await nameIt(f.name);
 }

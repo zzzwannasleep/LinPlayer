@@ -54,6 +54,17 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # tokio 已由 reqwest 传递引入,这里直连是为了自持本地预取代理的 TcpListener/worker,不增体积。
 tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "time", "macros", "fs"] }
 
+# ── 局域网文件源(SMB / WebDAV / FTP)────────────────────────────────
+# smb2:纯 Rust SMB2/3,无 build.rs 无 C 依赖(安卓交叉编译安全)。
+#   选它的关键是 FileReader::read_at(offset,len) + size() —— 视频要 seek,
+#   只能顺读的实现等于不能用。libsmbclient 系(pavao)是 C FFI,安卓上直接出局。
+smb2 = "0.18"
+# FTP 只用来**列目录**:mpv 自带 ftp 协议,播放直接把 ftp:// 交给它。
+# 不开任何 TLS feature —— mpv 的协议表里没有 ftps,列得出来也播不了,白背一套 TLS 栈。
+suppaftp = { version = "10", default-features = false, features = ["tokio"] }
+# WebDAV 的 PROPFIND 响应是 XML。quick-xml 本就在依赖树里(传递引入),提成直接依赖不增体积。
+quick-xml = "0.41"
+
 # 安卓无预生成 FFI bindings,构建期用 libclang 现生成(cargo-ndk 会喂 sysroot)。桌面走预生成不需 libclang。
 [target.'cfg(target_os = "android")'.dependencies]
 rquickjs = { version = "0.10", features = ["bindgen"] }

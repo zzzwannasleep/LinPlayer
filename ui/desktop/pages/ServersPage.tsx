@@ -52,12 +52,15 @@ const KIND_LABEL: Record<string, string> = {
   quark: "夸克",
   anirss: "RSS",
   feiniu: "飞牛",
-  stremio: "Stremio",
   aliyundrive: "阿里云盘",
   baidu: "百度",
   pan115: "115",
   pan189: "天翼云盘",
   pan139: "移动云盘",
+  smb: "SMB",
+  webdav: "WebDAV",
+  ftp: "FTP",
+  local: "本机文件夹",
 };
 
 /** 插件贡献的源是 `plugin:<插件id>/<源id>`,不在上表里 —— 统一打「插件」。 */

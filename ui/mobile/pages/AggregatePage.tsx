@@ -23,9 +23,10 @@ import { Card, Empty, usePress } from "../components/ui";
 /** key 必须是 Rust 侧 SourceKind 的字面值(全小写)。
  *  写错**不报错**,只是永远回落成 server 图标 —— 见 [[sourcekind-wire-is-lowercase]]。 */
 const KIND_IC: Record<string, string> = {
-  emby: "server", feiniu: "server", stremio: "plugin",
+  emby: "server", feiniu: "server",
   aliyundrive: "cloud", quark: "cloud", baidu: "cloud", pan115: "cloud",
   pan189: "cloud", pan139: "cloud", openlist: "cloud", anirss: "rss",
+  smb: "server", webdav: "server", ftp: "server", local: "folder",
 };
 
 /* 四个快捷入口。★ 这一行是首页那条 chip 行的去处 ——

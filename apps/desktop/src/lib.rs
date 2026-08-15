@@ -41,9 +41,12 @@ use linplayer_core::source::openlist::OpenListBackend;
 use linplayer_core::source::pan115::Pan115Backend;
 use linplayer_core::source::pan139::{self, Pan139Backend};
 use linplayer_core::source::pan189::{self, Pan189Backend};
+use linplayer_core::source::ftp::FtpBackend;
+use linplayer_core::source::local::LocalBackend;
 use linplayer_core::source::quark::QuarkBackend;
+use linplayer_core::source::smb::SmbBackend;
+use linplayer_core::source::webdav::WebdavBackend;
 use linplayer_core::source::quark_tv;
-use linplayer_core::source::stremio::StremioBackend;
 use linplayer_core::source::plugin_source::PluginSourceBackend;
 use linplayer_core::source::{
     MediaSourceBackend, QrPoll, QrStart, SourceEntry, SourceKind, SourceServer,
@@ -5567,6 +5570,28 @@ async fn plugin_pick_dev_dir(
         .map(Some)
 }
 
+/// 「本地播放」:弹系统文件夹选择器,把用户挑的目录**当成一个源**加进来。
+///
+/// 走 Rust 侧的 `tauri_plugin_dialog`(和 plugin_pick_dev_dir 同一套),
+/// **不加 `@tauri-apps/plugin-dialog` 前端依赖** —— 这是本仓一贯的做法。
+/// 返回挑中的路径;返回 None 表示用户取消了(前端据此**什么都不做**,
+/// 不该弹一句「添加失败」——取消不是失败)。
+///
+/// 只落盘不验证:目录是用户从选择器里挑的,它必然存在;真读不动的时候
+/// 浏览页会报「读不了这个文件夹」,那时的报错比这里准确。
+#[tauri::command]
+async fn pick_local_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    let picked = rx.await.map_err(|_| "目录选择器未返回".to_string())?;
+    let Some(path) = picked else { return Ok(None) };
+    let path = path.into_path().map_err(|e| format!("路径无效: {e}"))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// 重载一个插件(禁用 -> 重读 manifest -> 重新启用)。
 #[tauri::command]
 async fn plugin_reload(state: State<'_, AppState>, id: String) -> Result<(), String> {
@@ -5677,9 +5702,16 @@ pub fn run() {
     source_backends.insert(SourceKind::anirss(), anirss.clone());
     source_backends.insert(SourceKind::feiniu(), Arc::new(FeiniuBackend::new()));
     source_backends.insert(SourceKind::quark(), Arc::new(QuarkBackend::new()));
-    // ★ 这张表安卓侧(apps/android/src/lib.rs)有一份**独立的拷贝**。只加这边,
-    //   安卓上的表现是「源加得进去、点进去报『该源类型暂未接入』」,而且编译全绿。
-    source_backends.insert(SourceKind::stremio(), Arc::new(StremioBackend::new()));
+    /* 局域网文件源。SMB 那条要靠本地 HTTP 桥转发(mpv 没编进 smb 协议),
+       WebDAV/FTP 则是把地址直接交给 mpv,详见各自模块顶部。
+       ★ 这张表安卓侧(apps/android/src/lib.rs)有一份**独立的拷贝**。只加这边,
+         安卓上的表现是「源加得进去、点进去报『该源类型暂未接入』」,而且编译全绿。 */
+    source_backends.insert(SourceKind::smb(), Arc::new(SmbBackend::new()));
+    source_backends.insert(SourceKind::webdav(), Arc::new(WebdavBackend::new()));
+    source_backends.insert(SourceKind::ftp(), Arc::new(FtpBackend::new()));
+    // 本机文件夹(「本地播放」挑的那个目录)。挑目录的选择器只有桌面有,
+    // 但后端两端都注册 —— 配置能同步过去,安卓上路径可读时照样能用。
+    source_backends.insert(SourceKind::local(), Arc::new(LocalBackend::new()));
     // 国内网盘(全部扫码/Cookie 登录,不依赖任何在线令牌中继 —— oplist 已作废):
     //   阿里=扫码→网页版 API + secp256k1 签名;百度=扫码→BDUSS Cookie;
     //   115=Cookie + 私有编解码;天翼189=扫码→会话签名;移动云139=粘贴 Authorization + mcloud-sign。
@@ -6074,6 +6106,7 @@ pub fn run() {
             plugin_sources,
             plugin_pick_install,
             plugin_pick_dev_dir,
+            pick_local_folder,
             plugin_reload,
             plugin_dev_poll,
             plugin_permission_catalog,
@@ -6577,7 +6610,7 @@ mod api_contract_tests {
     ///
     /// 2026-08-16 用户报「VOD 插件播放不显示画面窗口」,根因就在这:`show_video` 是
     /// 4f72060c 引入的,当时给 `play`(Emby)和 `play_local`(下载文件)都补上了,
-    /// **漏了 `source_play`** —— 网盘 / 资源站插件 / Stremio 全走那一条。表现是 mpv 在放、
+    /// **漏了 `source_play`** —— 网盘 / 资源站插件 / 局域网源全走那一条。表现是 mpv 在放、
     /// 有声音、进度也在走,画面窗口从头到尾没露过面。编译期一声不吭,单测也照不到
     /// (那是个 Win32 窗口的显隐,没有返回值可断言)。
     ///

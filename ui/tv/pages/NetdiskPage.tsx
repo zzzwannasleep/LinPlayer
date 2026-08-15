@@ -105,7 +105,7 @@ export default function NetdiskPage({ go }: { session: LoginResult; go: (r: Rout
                 disabled={!e.is_dir && !e.is_video}
                 onEnter={() => void enter(e)}
               >
-                {/* 有封面就画封面。网盘源基本不给 thumb_url,但 Stremio 这类元数据源
+                {/* 有封面就画封面。网盘和局域网源基本不给 thumb_url,但插件类元数据源
                     每一行都是一部片 —— 全靠片名认片在电视上太费眼。 */}
                 {e.thumb_url ? (
                   <img

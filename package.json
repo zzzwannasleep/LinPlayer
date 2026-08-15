@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "check:telemetry": "node ui/desktop/telemetry.check.ts",
     "check:shortcuts": "node --experimental-strip-types ui/desktop/lib/shortcuts.check.mjs",
+    "check:lan": "node ui/shared/lan-sources.check.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "pack": "powershell -ExecutionPolicy Bypass -File scripts/pack-portable.ps1",

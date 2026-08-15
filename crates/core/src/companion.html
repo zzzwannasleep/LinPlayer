@@ -177,15 +177,23 @@ button.pri:disabled{opacity:.5}
     <button class="pri" id="a-go">添加并登录</button>
     <div class="err" id="a-err"></div>
 
-    <h2>添加 Stremio</h2>
-    <label>每行一个 addon 的 manifest.json 地址。第一行当账号标识，建议放元数据 addon。</label>
-    <textarea id="st-cfg" rows="5" placeholder="https://v3-cinemeta.strem.io/manifest.json"
-      autocapitalize="off" autocomplete="off" spellcheck="false"></textarea>
-    <label>只有元数据 addon 是出不了播放源的，要能播必须再加至少一个 stream 类 addon。
-      自建了 Stremio 流媒体服务器就单起一行填 <code>server=http://地址:11470</code>，
-      种子源才播得了；没填的会在列表里置灰并注明原因。</label>
-    <button class="pri" id="st-go">添加 Stremio</button>
-    <div class="err" id="st-err"></div>
+    <h2>添加局域网共享（NAS）</h2>
+    <label>类型</label>
+    <select id="ln-kind">
+      <option value="smb">SMB / 共享文件夹</option>
+      <option value="webdav">WebDAV</option>
+      <option value="ftp">FTP</option>
+    </select>
+    <label>地址</label>
+    <input id="ln-server" placeholder="\\192.168.1.10" inputmode="url"
+      autocapitalize="off" autocomplete="off" spellcheck="false">
+    <label id="ln-tip">填到主机就行，共享文件夹会自己列出来；账号密码留空按来宾连接。</label>
+    <label>用户名（可留空）</label>
+    <input id="ln-user" autocapitalize="off" autocomplete="off">
+    <label>密码（可留空）</label>
+    <input id="ln-pass" type="password" autocomplete="off">
+    <button class="pri" id="ln-go">添加</button>
+    <div class="err" id="ln-err"></div>
   </section>
 
   <!-- ============ 设置 ============ -->
@@ -433,31 +441,40 @@ $("a-go").onclick = async () => {
   }
 };
 
-/* Stremio 一个账号 = 一组 addon(元数据来自一个、播放源来自另一个)。
-   拆分逻辑与 PC 端 AddServerPage 保持一致:第一个非 server= 行当 base_url(账号 id),
-   其余整块原样交给核层再拆(见 crates/core/src/source/stremio.rs 顶部注释)。 */
-$("st-go").onclick = async () => {
-  const b = $("st-go");
-  $("st-err").textContent = "";
-  const lines = $("st-cfg").value.split("\n").map(s => s.trim())
-    .filter(s => s && !s.startsWith("#"));
-  const addons = lines.filter(l => !/^server\s*=/i.test(l));
-  if (!addons.length) { $("st-err").textContent = "至少要填一个 addon 的 manifest 地址"; return; }
-  const primary = addons[0];
+/* 局域网源(SMB / WebDAV / FTP)。三种都是「地址 + 账号密码」,
+   走的是和 PC/手机端同一个 source_login,核层那边零特判。
+   ★ 电视上加源只能走这条路:遥控器打字太痛,TV 端不给表单。 */
+const LN_TIP = {
+  smb: ["\\\\192.168.1.10", "填到主机就行，共享文件夹会自己列出来；账号密码留空按来宾连接。"],
+  webdav: ["https://nas.example.com/dav", "要填 WebDAV 的根路径（群晖一般是 :5006，Nextcloud 是 /remote.php/dav/files/用户名/）。"],
+  ftp: ["ftp://192.168.1.10:21", "账号密码留空按 anonymous 匿名登录；暂不支持 FTPS。"],
+};
+$("ln-kind").onchange = () => {
+  const [ph, tip] = LN_TIP[$("ln-kind").value];
+  $("ln-server").placeholder = ph;
+  $("ln-tip").textContent = tip;
+};
+$("ln-go").onclick = async () => {
+  const b = $("ln-go");
+  $("ln-err").textContent = "";
+  const kind = $("ln-kind").value;
+  const addr = $("ln-server").value.trim();
+  if (!addr) { $("ln-err").textContent = "地址不能空"; return; }
   b.disabled = true; b.textContent = "连接中…";
   try {
     await api("source_login", {
-      kind: "stremio",
-      base_url: primary,
-      cookie: lines.filter(l => l !== primary).join("\n"),
+      kind,
+      base_url: addr,
+      user: $("ln-user").value.trim(),
+      pass: $("ln-pass").value,
     });
-    $("st-cfg").value = "";
-    toast("已添加 Stremio");
+    $("ln-server").value = $("ln-user").value = $("ln-pass").value = "";
+    toast("已添加");
     loadAccounts();
   } catch (e) {
-    $("st-err").textContent = String(e.message);
+    $("ln-err").textContent = String(e.message);
   } finally {
-    b.disabled = false; b.textContent = "添加 Stremio";
+    b.disabled = false; b.textContent = "添加";
   }
 };
 

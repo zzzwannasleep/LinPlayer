@@ -7,6 +7,8 @@ pub mod aliyundrive;
 pub mod anirss;
 pub mod baidu;
 pub mod feiniu;
+pub mod ftp;
+pub mod local;
 pub mod openlist;
 pub mod pan115;
 pub mod pan115_crypto;
@@ -15,7 +17,8 @@ pub mod pan189;
 pub mod plugin_source;
 pub mod quark;
 pub mod quark_tv;
-pub mod stremio;
+pub mod smb;
+pub mod webdav;
 
 /// 源类型标识。**开放键**:内置源是固定小写字面量,插件贡献的源是 `plugin:<插件id>/<源id>`。
 ///
@@ -41,12 +44,18 @@ impl SourceKind {
     pub const QUARK: &'static str = "quark";
     pub const ANIRSS: &'static str = "anirss";
     pub const FEINIU: &'static str = "feiniu";
-    pub const STREMIO: &'static str = "stremio";
     pub const ALIYUNDRIVE: &'static str = "aliyundrive";
     pub const BAIDU: &'static str = "baidu";
     pub const PAN115: &'static str = "pan115";
     pub const PAN189: &'static str = "pan189";
     pub const PAN139: &'static str = "pan139";
+    /// 局域网/自建文件源。这三个**不是网盘**:没有厂商 API、没有账号体系,
+    /// 只有一个地址加一对账号密码,连的是用户自己那台 NAS 或路由器上的硬盘。
+    pub const SMB: &'static str = "smb";
+    pub const WEBDAV: &'static str = "webdav";
+    pub const FTP: &'static str = "ftp";
+    /// 本机文件夹(用户用系统选择器挑的那个目录)。
+    pub const LOCAL: &'static str = "local";
 
     /// 插件源键前缀。插件贡献的源统一形如 `plugin:com.example.foo/mysrc`。
     const PLUGIN_PREFIX: &'static str = "plugin:";
@@ -54,9 +63,10 @@ impl SourceKind {
     /// 全部内置源。**顺序即枚举顺序**,给需要穷举的地方(跨语言契约测试)用。
     pub const BUILTIN: &'static [&'static str] = &[
         Self::EMBY, Self::OPENLIST, Self::QUARK,
-        Self::ANIRSS, Self::FEINIU, Self::STREMIO,
+        Self::ANIRSS, Self::FEINIU,
         Self::ALIYUNDRIVE, Self::BAIDU, Self::PAN115,
         Self::PAN189, Self::PAN139,
+        Self::SMB, Self::WEBDAV, Self::FTP, Self::LOCAL,
     ];
 
     pub fn is_builtin(&self) -> bool {
@@ -85,9 +95,6 @@ impl SourceKind {
     pub fn feiniu() -> Self {
         Self::new(Self::FEINIU)
     }
-    pub fn stremio() -> Self {
-        Self::new(Self::STREMIO)
-    }
     pub fn aliyundrive() -> Self {
         Self::new(Self::ALIYUNDRIVE)
     }
@@ -102,6 +109,18 @@ impl SourceKind {
     }
     pub fn pan139() -> Self {
         Self::new(Self::PAN139)
+    }
+    pub fn smb() -> Self {
+        Self::new(Self::SMB)
+    }
+    pub fn webdav() -> Self {
+        Self::new(Self::WEBDAV)
+    }
+    pub fn ftp() -> Self {
+        Self::new(Self::FTP)
+    }
+    pub fn local() -> Self {
+        Self::new(Self::LOCAL)
     }
 
     /// Emby 是唯一的非「文件浏览型」源,全仓多处靠它分叉。
@@ -577,12 +596,15 @@ mod tests {
             (SourceKind::quark(), "quark"),
             (SourceKind::anirss(), "anirss"),
             (SourceKind::feiniu(), "feiniu"),
-            (SourceKind::stremio(), "stremio"),
             (SourceKind::aliyundrive(), "aliyundrive"),
             (SourceKind::baidu(), "baidu"),
             (SourceKind::pan115(), "pan115"),
             (SourceKind::pan189(), "pan189"),
             (SourceKind::pan139(), "pan139"),
+            (SourceKind::smb(), "smb"),
+            (SourceKind::webdav(), "webdav"),
+            (SourceKind::ftp(), "ftp"),
+            (SourceKind::local(), "local"),
         ];
         // 这张表必须与 BUILTIN 一一对应 —— 新增源只加常量不补这里,
         // 下面的逐条断言就完全跑不到它,等于没有守卫。
@@ -653,7 +675,6 @@ mod tests {
             (SourceKind::quark(), "Quark"),
             (SourceKind::anirss(), "Anirss"),
             (SourceKind::feiniu(), "Feiniu"),
-            (SourceKind::stremio(), "Stremio"),
             // 下面几个没有"老 enum"可兼容,但它们同样靠这个标签当**账号 id**
             // (base_url 为空的源),所以一旦发版就同样不能再改。
             (SourceKind::aliyundrive(), "Aliyundrive"),
@@ -661,6 +682,10 @@ mod tests {
             (SourceKind::pan115(), "Pan115"),
             (SourceKind::pan189(), "Pan189"),
             (SourceKind::pan139(), "Pan139"),
+            (SourceKind::smb(), "Smb"),
+            (SourceKind::webdav(), "Webdav"),
+            (SourceKind::ftp(), "Ftp"),
+            (SourceKind::local(), "Local"),
         ];
         assert_eq!(expected.len(), SourceKind::BUILTIN.len(), "新增源未补进本表");
         for (k, old_debug) in expected {

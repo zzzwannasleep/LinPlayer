@@ -13,6 +13,7 @@ import {
   currentSource,
   login,
   parseDeepLink,
+  pickLocalFolder,
   pluginDataSources,
   quarkScanPoll,
   quarkScanStart,
@@ -48,22 +49,20 @@ export type SourceId =
   | "quark"
   | "feiniu"
   | "anirss"
-  | "stremio"
   | "aliyundrive"
   | "baidu"
   | "pan115"
   | "pan189"
   | "pan139"
+  | "smb"
+  | "webdav"
+  | "ftp"
+  | "local"
   | "batch"
   | "qrsync"
   /** 插件贡献的源:`plugin:<插件id>/<源id>`,直接就是 SourceKind。 */
   | (string & {});
 
-
-/* Stremio 配置框的默认内容。预填官方 Cinemeta —— 它是免费的元数据 addon,
-   不填任何东西根目录就是空的,新用户会以为源坏了。用户想换随时删掉重写。
-   ★ 只预填元数据 addon,不预置任何播放源 addon —— 装什么播放源是用户自己的事。 */
-const STREMIO_DEFAULT = "https://v3-cinemeta.strem.io/manifest.json\n";
 
 /* ★ api.ts 里的 ParsedServerBlock 类型与 Rust 侧 server_batch::ParsedServerBlock **对不上**
    (那边写的是 name/urls/remark,核层实际是 username/password/lines/danmaku_lines)。
@@ -114,7 +113,10 @@ export const BUILTIN_SOURCES: SourceMeta[] = [
   { id: "pan115", label: "115 网盘", sec: "网盘 / 文件源", icon: () => <IconCloud size={16} /> },
   { id: "pan189", label: "天翼云盘", sec: "网盘 / 文件源", icon: () => <IconCloud size={16} /> },
   { id: "pan139", label: "移动云盘", sec: "网盘 / 文件源", icon: () => <IconCloud size={16} /> },
-  { id: "stremio", label: "Stremio", sec: "插件协议", icon: () => <IconServer size={16} /> },
+  { id: "local", label: "本地播放", sec: "局域网 / 本地", icon: () => <IconFile size={16} /> },
+  { id: "smb", label: "SMB / 共享文件夹", sec: "局域网 / 本地", icon: () => <IconServer size={16} /> },
+  { id: "webdav", label: "WebDAV", sec: "局域网 / 本地", icon: () => <IconServer size={16} /> },
+  { id: "ftp", label: "FTP", sec: "局域网 / 本地", icon: () => <IconServer size={16} /> },
   { id: "batch", label: "批量粘贴导入", sec: "批量", icon: () => <IconFile size={16} /> },
   { id: "qrsync", label: "扫码搬配置", sec: "批量", icon: () => <IconQr size={16} /> },
 ];
@@ -192,7 +194,6 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [cookie, setCookie] = useState("");
-  const [stremio, setStremio] = useState(STREMIO_DEFAULT);
   // 百度双路线:扫码 / Cookie。默认扫码。
   const [baiduWay, setBaiduWay] = useState<"scan" | "cookie">("scan");
   // 天翼189 两路线:扫码 / 账密(手机号+密码)。默认扫码。
@@ -364,31 +365,33 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
     } catch { /* 改名失败不影响已经加成功的源 */ }
   }
 
-  const submitSource = (kind: "openlist" | "feiniu" | "anirss") =>
+  /* 「本地播放」挑中的文件夹。挑完先显示出来让用户核对一眼再点添加 ——
+     直接挑完就加的话,挑错了目录只能进服务器页删掉重来。 */
+  const [localDir, setLocalDir] = useState("");
+
+  /** 弹系统文件夹选择器。**用户按取消 → 什么都不做**,取消不是错误。 */
+  const pickLocal = () =>
+    run(async () => {
+      const dir = await pickLocalFolder();
+      if (dir) setLocalDir(dir);
+    });
+
+  /* 文件夹本身就是这个源的全部配置:没有地址、没有账号密码。
+     base_url 存的就是路径,核层 LocalBackend 拿它当根目录(并且只在这个根里活动)。 */
+  const submitLocal = () =>
+    run(async () => {
+      const dir = localDir.trim();
+      if (!dir) throw new Error("先选一个文件夹");
+      await sourceLogin("local", dir, "", "", null);
+      await nameActiveSource();
+      onDone("netdisk");
+    });
+
+  const submitSource = (kind: "openlist" | "feiniu" | "anirss" | "smb" | "webdav" | "ftp") =>
     run(async () => {
       await sourceLogin(kind, server.trim(), username, password, null);
       await nameActiveSource();
       onDone(kind === "anirss" ? "anirss" : "netdisk");
-    });
-
-  /* Stremio 一个账号 = 一组 addon(catalog 来自元数据 addon、播放源来自另一个,
-     Stremio 本来就是这么组合的),所以是多行输入而不是单个地址。
-     核层约定(见 crates/core/src/source/stremio.rs 顶部注释):
-       base_url = 第一个 addon(同时当账号 id,所以要挑稳定的)
-       cookie   = 其余行原样带过去,核层再拆 `server=` 与追加 addon。 */
-  const submitStremio = () =>
-    run(async () => {
-      const lines = stremio
-        .split("\n")
-        .map((s) => s.trim())
-        .filter((s) => s && !s.startsWith("#"));
-      const addons = lines.filter((l) => !/^server\s*=/i.test(l));
-      if (addons.length === 0) throw new Error("至少要填一个 addon 的 manifest 地址");
-      const primary = addons[0];
-      const rest = lines.filter((l) => l !== primary);
-      await sourceLogin("stremio", primary, "", "", rest.join("\n") || null);
-      await nameActiveSource();
-      onDone("netdisk");
     });
 
   // ---------- 夸克:扫码 / Cookie 两种方式 ----------
@@ -561,8 +564,8 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
      真实地址,截个图发出去就把自己的服务器暴露了;事后想改还得专门跑一趟服务器页。
      放第一行是因为它答的是"这台叫什么",逻辑上先于"它在哪"。
 
-     ★ 每一种会建账号的源都要有它,不只是有地址的那几种:Stremio 的账号标识是第一个
-       addon 的 URL、插件源是 base_url,同样会把地址摆到界面上。 */
+     ★ 每一种会建账号的源都要有它,不只是有地址的那几种:插件源的账号标识是 base_url、
+       SMB 是主机地址,同样会把地址摆到界面上。 */
   const nameField = (placeholder = "家里的 Emby") => (
     <div className="fld">
       <label>服务器名称（可选，不填就显示地址）</label>
@@ -576,14 +579,14 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
   );
 
   // 名称 + 地址 + 用户名 + 密码(Emby 与网盘登录型共用)。
-  const creds = (optional = false) => (
+  const creds = (optional = false, addrPlaceholder = "https://host:port") => (
     <>
       {nameField()}
       <div className="fld">
         <label>服务器地址</label>
         <input
           className="field"
-          placeholder="https://host:port"
+          placeholder={addrPlaceholder}
           value={server}
           onChange={(e) => {
             setServer(e.target.value);
@@ -654,13 +657,10 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
         "移动云盘",
         <>用<b>移动云盘 App</b> 扫码登录；也可用手机号 + 密码，或手动粘贴 Authorization。</>,
       ],
-      stremio: [
-        "Stremio",
-        <>
-          每行一个 addon 的 <b>manifest.json</b> 地址。第一行会作为这个账号的标识，
-          建议放元数据 addon（如已预填的 Cinemeta）。
-        </>,
-      ],
+      local: ["本地播放", <>播放<b>这台电脑上</b>的影片:挑一个文件夹,里面的片子就能直接看。</>],
+      smb: ["SMB / 共享文件夹", <>连家里的 NAS 或另一台电脑的<b>共享文件夹</b>,填主机地址就行。</>],
+      webdav: ["WebDAV", <>群晖 / Nextcloud / OpenList 等都能开 WebDAV,填根路径 + 账号密码。</>],
+      ftp: ["FTP", <>老牌文件共享,路由器和 NAS 基本都带,支持匿名登录。</>],
       batch: [
         "批量粘贴导入",
         <>
@@ -893,31 +893,62 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
           </>
         );
 
-      case "stremio":
+      /* 本地播放:整个表单只有一个「选择文件夹」。
+         没有地址框也没有账号密码 —— 硬摆一个路径输入框是让用户手打路径,
+         而他刚刚才在选择器里点过那个文件夹。 */
+      case "local":
         return (
           <>
-            {nameField("我的 Stremio")}
+            {nameField("我的影片文件夹")}
             <div className="fld">
-              <label>Addon 列表</label>
-              <textarea
-                className="field"
-                rows={7}
-                spellCheck={false}
-                placeholder={
-                  "https://v3-cinemeta.strem.io/manifest.json\n" +
-                  "https://opensubtitles-v3.strem.io/manifest.json\n" +
-                  "server=http://192.168.1.10:11470"
-                }
-                value={stremio}
-                onChange={(e) => setStremio(e.target.value)}
-              />
+              <label>文件夹</label>
+              <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={pickLocal}>
+                {localDir ? "重新选择…" : "选择文件夹…"}
+              </button>
+              {localDir && (
+                <p className="hint" style={{ marginTop: 8, wordBreak: "break-all" }}>
+                  已选:<code>{localDir}</code>
+                </p>
+              )}
             </div>
             <p className="hint">
-              只提供元数据的 addon（Cinemeta 等）不出播放源，要能播必须再加至少一个
-              <b> stream 类 addon</b>。<br />
-              返回 <b>直链</b> 的播放源可直接播；返回 <b>种子（infoHash）</b>的需要一台
-              Stremio 流媒体服务器 —— 自建了就单起一行填
-              <code> server=http://地址:11470</code>，没填的种子源会在列表里置灰并注明原因，不会静默消失。
+              选中的文件夹会作为一个来源留在服务器列表里,下次打开直接进,不用再选一遍。
+              浏览和播放**只在这个文件夹里**进行。
+            </p>
+          </>
+        );
+
+      /* 局域网三兄弟共用「地址 + 账号密码」那套表单,只是地址长得差太远,
+         所以各给各的占位符 —— 在 SMB 的框里摆个 https:// 只会把人带沟里。
+         账号密码可留空(来宾/匿名),家里的共享十有八九就是这么开的。 */
+      case "smb":
+        return (
+          <>
+            {creds(true, "\\\\192.168.1.10   或   smb://192.168.1.10")}
+            <p className="hint">
+              填到<b>主机</b>就行,共享文件夹会自己列出来。域账号写成
+              <code> 域\用户名</code>。账号密码留空按<b>来宾</b>连接。
+            </p>
+          </>
+        );
+      case "webdav":
+        return (
+          <>
+            {creds(true, "https://nas.example.com/dav")}
+            <p className="hint">
+              地址要填到 WebDAV 的<b>根路径</b>:群晖一般是
+              <code> https://地址:5006/</code>,Nextcloud 是
+              <code> /remote.php/dav/files/用户名/</code>。
+            </p>
+          </>
+        );
+      case "ftp":
+        return (
+          <>
+            {creds(true, "ftp://192.168.1.10:21")}
+            <p className="hint">
+              账号密码留空按 <b>anonymous</b> 匿名登录。
+              暂不支持 FTPS —— 播放器内核没编进 ftps 协议,列得出来也播不了。
             </p>
           </>
         );
@@ -1085,14 +1116,25 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
             {spin(label)}
           </button>
         );
+      case "local":
+        return (
+          <button className="btn primary big" disabled={busy || !localDir} onClick={submitLocal}>
+            {spin(label)}
+          </button>
+        );
       case "openlist":
       case "feiniu":
       case "anirss":
+      case "smb":
+      case "webdav":
+      case "ftp":
         return (
           <button
             className="btn primary big"
             disabled={busy}
-            onClick={() => submitSource(sel as "openlist" | "feiniu" | "anirss")}
+            onClick={() =>
+              submitSource(sel as "openlist" | "feiniu" | "anirss" | "smb" | "webdav" | "ftp")
+            }
           >
             {spin(label)}
           </button>
@@ -1143,12 +1185,6 @@ export function useSourceForms({ onDone, exclude = [] }: Options) {
             {spin(label)}
           </button>
         ) : null;
-      case "stremio":
-        return (
-          <button className="btn primary big" disabled={busy || !stremio.trim()} onClick={submitStremio}>
-            {spin(label)}
-          </button>
-        );
       case "quark":
         // 扫码那一路的按钮长在二维码旁边(见 fields),这里只有 Cookie 一路需要提交。
         return quarkWay === "cookie" ? (

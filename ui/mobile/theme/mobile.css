@@ -4246,3 +4246,13 @@ html.playing .pg-body {
   gap: 8px;
   align-items: center;
 }
+
+/* 局域网源(SMB/WebDAV/FTP)地址框下面那句提示。
+   跟着 .field 的间距走:提示是**属于上面那个框**的,所以要贴着它,
+   下外边距补足 .field 原本的 15px,免得和下一个框挤在一起。 */
+.fld-hint {
+  margin: -9px 0 15px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--fg-3, var(--fg-2));
+}

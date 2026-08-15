@@ -243,7 +243,7 @@ const IS_PLAYER_WINDOW = typeof location !== "undefined" && location.hash === "#
 export default function App() {
   const [booted, setBooted] = useState(false);
   const [session, setSession] = useState<LoginResult | null>(null);
-  /** 活跃的文件浏览型源(网盘/Stremio/插件源)。见下面 reloadEntry 的注释。 */
+  /** 活跃的文件浏览型源(网盘/局域网/插件源)。见下面 reloadEntry 的注释。 */
   const [srcAcc, setSrcAcc] = useState<AccountInfo | null>(null);
   /** 刚从登录闸口进来 —— 给主界面挂一次入场动画(见 ui.css 的 .app-root.entering)。 */
   const [entering, setEntering] = useState(false);
@@ -1536,7 +1536,7 @@ export default function App() {
 
   if (!booted) return null;
   /* ★ 进不进得了门,看的是「有没有活跃账号」,不是「有没有 Emby 会话」。
-     核层的 current_session 会 `.filter(|a| !a.is_file_browse())` —— 只连了网盘/Stremio/
+     核层的 current_session 会 `.filter(|a| !a.is_file_browse())` —— 只连了网盘/局域网源/
      插件源的用户在那边**永远返回 null**。老登录页只能连 Emby,所以这条一直没暴露;
      新的登录闸口把六类源全摆出来了,再只判 session 就会出现「加成功了还是回登录页,
      加一次挡一次」。 */
@@ -1617,7 +1617,7 @@ export default function App() {
       {!IS_PLAYER_WINDOW && (
         <div className={`app-root${playing ? " hidden" : ""}${entering ? " entering" : ""}`}>
           <Shell
-            /* 只连了网盘/Stremio/插件源时没有 Emby 会话 —— 用活跃源顶一个上去。
+            /* 只连了网盘/局域网源/插件源时没有 Emby 会话 —— 用活跃源顶一个上去。
                Shell 只拿 session.server 当「当前服务器」的标识(侧栏高亮 + 切换判断),
                token/user_id 那两条路对文件浏览型源本来就走不到(它们不打 Emby API)。 */
             session={session ?? { server: srcAcc!.server, token: "", user_id: "", user_name: srcAcc!.name }}

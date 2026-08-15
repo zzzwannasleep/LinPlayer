@@ -4,5 +4,6 @@
 //   prefetch(多线程加载)= 播放中起本地代理超前拉流喂 mpv,数据落环形缓存,改播放地址;
 //   preload (预加载)    = 播放前在详情页把头/尾两段跑热,数据读完即丢,不改任何地址。
 pub mod cf;
+pub mod localserve;
 pub mod prefetch;
 pub mod preload;

@@ -1073,7 +1073,7 @@ impl Stream {
 }
 
 /// 读 HTTP 请求头至 \r\n\r\n,返回 (method, range)。mpv 客户端行为可控,只解析所需。
-async fn read_request(stream: &mut TcpStream) -> std::io::Result<(String, Option<(u64, Option<u64>)>)> {
+pub(crate) async fn read_request(stream: &mut TcpStream) -> std::io::Result<(String, Option<(u64, Option<u64>)>)> {
     let mut buf = Vec::with_capacity(512);
     let mut byte = [0u8; 1];
     // 逐字节读到头尾(请求头很小),避免误吞后续连接数据。
