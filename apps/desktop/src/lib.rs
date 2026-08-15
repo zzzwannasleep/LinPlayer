@@ -6158,7 +6158,13 @@ mod api_contract_tests {
        反向验证:把 danmaku_auto_load 里的 allow_official_for 调用改回 `true`,本测试立刻红。 */
     #[test]
     fn auto_match_actually_gates_the_official_danmaku_source() {
-        let me = include_str!("lib.rs");
+        // ★ 必须先把换行归一成 LF。这些测试是**按 `\n}\n` 这类字面量解析源码**的,
+        //   而 Windows 上 git 的 autocrlf 会把工作区的这个文件整份变成 CRLF
+        //   (实测 6789 个 CRLF、0 个裸 LF)—— 于是 `include_str!` 拿到的是 CRLF,
+        //   所有换行相关的 needle 全部落空,测试要么 panic「找不到函数结尾」、
+        //   要么更糟:静默匹配到 0 处而断言恒真。
+        //   表现是 Linux CI 全绿、**Windows CI 恒红**,而本地 cargo check 一声不吭。
+        let me = &include_str!("lib.rs").replace("\r\n", "\n");
         let auto = me
             .split_once("async fn danmaku_auto_load(")
             .expect("找不到 danmaku_auto_load")
@@ -6473,7 +6479,13 @@ mod api_contract_tests {
     #[test]
     fn frontend_account_mutation_list_names_only_real_commands() {
         let api_ts = include_str!("../../../ui/shared/api.ts");
-        let me = include_str!("lib.rs");
+        // ★ 必须先把换行归一成 LF。这些测试是**按 `\n}\n` 这类字面量解析源码**的,
+        //   而 Windows 上 git 的 autocrlf 会把工作区的这个文件整份变成 CRLF
+        //   (实测 6789 个 CRLF、0 个裸 LF)—— 于是 `include_str!` 拿到的是 CRLF,
+        //   所有换行相关的 needle 全部落空,测试要么 panic「找不到函数结尾」、
+        //   要么更糟:静默匹配到 0 处而断言恒真。
+        //   表现是 Linux CI 全绿、**Windows CI 恒红**,而本地 cargo check 一声不吭。
+        let me = &include_str!("lib.rs").replace("\r\n", "\n");
 
         // 抠出 ACCOUNT_MUTATIONS = new Set([...]) 里的字符串字面量
         let block = api_ts
@@ -6526,7 +6538,13 @@ mod api_contract_tests {
            apps/android 里有一条对称的测试**只查**这个区块。
            两条测试合起来才覆盖全 api.ts,谁也别单独放宽。 */
         let api_ts = &crate::strip_android_only(include_str!("../../../ui/shared/api.ts"));
-        let me = include_str!("lib.rs");
+        // ★ 必须先把换行归一成 LF。这些测试是**按 `\n}\n` 这类字面量解析源码**的,
+        //   而 Windows 上 git 的 autocrlf 会把工作区的这个文件整份变成 CRLF
+        //   (实测 6789 个 CRLF、0 个裸 LF)—— 于是 `include_str!` 拿到的是 CRLF,
+        //   所有换行相关的 needle 全部落空,测试要么 panic「找不到函数结尾」、
+        //   要么更糟:静默匹配到 0 处而断言恒真。
+        //   表现是 Linux CI 全绿、**Windows CI 恒红**,而本地 cargo check 一声不吭。
+        let me = &include_str!("lib.rs").replace("\r\n", "\n");
 
         let handlers = me
             .split_once("generate_handler![")
@@ -6618,7 +6636,13 @@ mod api_contract_tests {
     /// 反向验证:删掉 source_play 里那句 show_video,本测试立刻红。
     #[test]
     fn every_play_command_reveals_the_video_window() {
-        let me = include_str!("lib.rs");
+        // ★ 必须先把换行归一成 LF。这些测试是**按 `\n}\n` 这类字面量解析源码**的,
+        //   而 Windows 上 git 的 autocrlf 会把工作区的这个文件整份变成 CRLF
+        //   (实测 6789 个 CRLF、0 个裸 LF)—— 于是 `include_str!` 拿到的是 CRLF,
+        //   所有换行相关的 needle 全部落空,测试要么 panic「找不到函数结尾」、
+        //   要么更糟:静默匹配到 0 处而断言恒真。
+        //   表现是 Linux CI 全绿、**Windows CI 恒红**,而本地 cargo check 一声不吭。
+        let me = &include_str!("lib.rs").replace("\r\n", "\n");
         /* 拼出来而不是写字面量 —— 这个文件把自己 include 进来了,写字面量会匹配到本测试自己。 */
         let needles = [concat!("p.load_", "at("), concat!("p.load_with_", "headers(")];
         /* 唯一豁免:302 重签是**播放中**换直链,窗早就开着。新增豁免必须写在这儿,
@@ -6734,7 +6758,13 @@ async fn ")).max();
     #[test]
     fn player_window_never_copies_the_main_window_size() {
         // 拼出来:这个文件把自己 include 进来了,写字面量会匹配到本测试自己。
-        let me = include_str!("lib.rs");
+        // ★ 必须先把换行归一成 LF。这些测试是**按 `\n}\n` 这类字面量解析源码**的,
+        //   而 Windows 上 git 的 autocrlf 会把工作区的这个文件整份变成 CRLF
+        //   (实测 6789 个 CRLF、0 个裸 LF)—— 于是 `include_str!` 拿到的是 CRLF,
+        //   所有换行相关的 needle 全部落空,测试要么 panic「找不到函数结尾」、
+        //   要么更糟:静默匹配到 0 处而断言恒真。
+        //   表现是 Linux CI 全绿、**Windows CI 恒红**,而本地 cargo check 一声不吭。
+        let me = &include_str!("lib.rs").replace("\r\n", "\n");
         let head = me
             .find(concat!("async fn player_window_", "open("))
             .expect("找不到 player_window_open —— 解析坏了,这条测试就形同虚设");
