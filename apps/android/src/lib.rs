@@ -735,6 +735,7 @@ struct ServerGroup {
 async fn aggregate_search(
     state: State<'_, AppState>,
     query: String,
+    include_episodes: Option<bool>,
 ) -> Result<Vec<ServerGroup>, String> {
     let (accounts, device_id) = {
         let cfg = state.config.lock().unwrap();
@@ -743,6 +744,8 @@ async fn aggregate_search(
     if query.trim().is_empty() || accounts.is_empty() {
         return Ok(vec![]);
     }
+    // 搜索浮层的「包括集」开关,不传 = 关(桌面端同款,api.ts 是三端共用的)。
+    let include_episodes = include_episodes.unwrap_or(false);
     let mut handles = Vec::new();
     for a in accounts {
         let http = state.http.clone();
@@ -758,8 +761,11 @@ async fn aggregate_search(
                 device_id,
             };
             // 跨服只出剧/电影,不出「集」(emby::search 传 None 默认会带 Episode)。
-            let types = ["Movie".to_string(), "Series".to_string()];
-            let items = emby::search(&http, &s, &query, Some(&types), None)
+            let mut types = vec!["Movie".to_string(), "Series".to_string()];
+            if include_episodes {
+                types.push("Episode".to_string());
+            }
+            let items = emby::search(&http, &s, &query, Some(&types), None, None)
                 .await
                 .unwrap_or_default();
             ServerGroup {
@@ -1013,9 +1019,11 @@ async fn search(
     query: String,
     types: Option<Vec<String>>,
     limit: Option<u32>,
+    parent_id: Option<String>,
 ) -> Result<Vec<Item>, String> {
     let s = session_of(&state)?;
-    emby::search(&state.http, &s, &query, types.as_deref(), limit).await
+    // parent_id = 库内搜索的范围。给了就只在那个库里找,见 emby::search_url 的 ParentId 注释。
+    emby::search(&state.http, &s, &query, types.as_deref(), limit, parent_id.as_deref()).await
 }
 
 /// 相似推荐。空结果不是错误 —— 有些条目就是没有相似项,前端整段不渲染。
@@ -1556,7 +1564,7 @@ async fn companion_call(
             if q.is_empty() {
                 return Ok(json!({ "items": [] }));
             }
-            let groups = aggregate_search(app.state::<AppState>(), q).await?;
+            let groups = aggregate_search(app.state::<AppState>(), q, None).await?;
             let mut items = Vec::new();
             for g in groups {
                 for it in g.items.into_iter().take(20) {

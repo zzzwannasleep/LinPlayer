@@ -40,6 +40,8 @@ type Props = {
   onOpenLibrary: (view: Item) => void;
   onOpenItem: (it: Item) => void;
   onPlay: (it: Item) => void;
+  /** 全局搜索。**必须 `() => onSearch()` 地调**,别 `onClick={onSearch}` ——
+      那会把 React 的点击事件当第一个参数灌进去(库内搜索那边它就是「搜索范围」)。 */
   onSearch: () => void;
   onRefresh: () => void;
   reloadKey: number;
@@ -275,7 +277,7 @@ export default function HomePage({
           <b>首页</b>
         </span>
         <span className="push">
-          <button className="searchbox" onClick={onSearch}>
+          <button className="searchbox" onClick={() => onSearch()}>
             <IconSearch size={14} /> 搜索 / 聚合… <span className="kbd">Ctrl K</span>
           </button>
           <button className="ibtn" title="刷新" onClick={onRefresh}>

@@ -434,10 +434,21 @@ function PlaybackPane() {
     };
   }, []);
 
-  /* 原生文件选择器。取消(返回 null)不是错误,别弹提示。 */
+  /* 原生文件选择器。取消(返回 null)不是错误,别弹提示。
+
+     ★ 后缀过滤**只能给 Windows 用**。Linux 上的可执行文件(/usr/bin/mpv)根本没有后缀,
+       挂一条 `*.exe` 过滤 = 对话框一个文件都列不出来,看着像选择器坏了
+       (用户报的「Linux 选外部 MPV 时不列出可执行文件」)。不给过滤 = 列全部,
+       这在 Linux 上就是正解:pick_file 只有两个参数都给才会 add_filter。 */
   async function pickExternal() {
     try {
-      const p = await pickFile(lp?.external_player, "可执行文件", ["exe"]);
+      const win = navigator.userAgent.includes("Windows");
+      const p = await pickFile(
+        // Linux 上没设过时定位到 /usr/bin —— mpv 十有八九在那儿,省得从家目录往上翻。
+        lp?.external_player || (win ? undefined : "/usr/bin/mpv"),
+        win ? "可执行文件" : undefined,
+        win ? ["exe"] : undefined,
+      );
       if (p) await patchLp({ external_player: p });
     } catch (e) {
       f.err(e);

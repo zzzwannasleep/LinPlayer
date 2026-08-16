@@ -68,3 +68,13 @@
 .ovl-chip { padding-right: 6px; }
 .ovl-chip-t { cursor: pointer; }
 .ovl-chip:hover { border-color: var(--ink-3); color: var(--ink); }
+
+/* 分集结果网格:16:9 剧照,格子要比海报宽。和 .dense-grid 分开而不是复用 ——
+   那个是 minmax(150px) 的竖海报格,把横版塞进去会矮成一条。
+   浮层内宽 min(760px,92vw) → 200px 这档在窄屏出 2 列、宽屏出 3 列,都排得满。 */
+.ovl-epgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+  padding: 4px 0 8px;
+}

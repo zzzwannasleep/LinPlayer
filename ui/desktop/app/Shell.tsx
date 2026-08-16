@@ -114,6 +114,19 @@ export default function Shell({
   /* 主界面的快捷键。实现挂这儿(reloadKey / detailStack / page 都是 Shell 的状态),
      键位和分发在 lib/shortcuts.ts —— 用户可在 设置 › 快捷键 改键。
      搜索浮层开着时整组不接管:那时 F5/翻页都该归浮层。 */
+  /* 搜索范围。null = 全局(首页那个入口 / Ctrl K),非 null = 库内搜索。
+     放 Shell 不放 App:libTarget 就在这儿,App 只管浮层开不开。
+     ★ 关浮层必须一起清 —— 否则下次 Ctrl K 会静默沿用上一次的库范围。 */
+  const [searchScope, setSearchScope] = useState<Item | null>(null);
+  const openSearch = (scope?: Item | null) => {
+    setSearchScope(scope ?? null);
+    onSearch();
+  };
+  const closeSearch = () => {
+    setSearchScope(null);
+    onCloseSearch();
+  };
+
   const live = !searchOpen;
   useCommand("refresh", () => setReloadKey((k) => k + 1), live);
   useCommand("back", () => { if (detailStack.length > 0) backDetail(); }, live);
@@ -132,7 +145,7 @@ export default function Shell({
    * serverId 为空(本服结果)时不切,省一次往返。
    */
   async function openFromSearch(it: Item, serverId?: string) {
-    onCloseSearch();
+    closeSearch();
     if (serverId && serverId !== session.server) {
       try {
         await setActiveServer(serverId);
@@ -157,7 +170,7 @@ export default function Shell({
             onOpenLibrary={openLibrary}
             onOpenItem={openDetail}
             onPlay={onPlay}
-            onSearch={onSearch}
+            onSearch={openSearch}
             onRefresh={() => setReloadKey((k) => k + 1)}
             reloadKey={reloadKey}
           />
@@ -171,7 +184,7 @@ export default function Shell({
             onBack={() => setLibTarget(null)}
             onOpenItem={openDetail}
             onPlay={onPlay}
-            onSearch={onSearch}
+            onSearch={openSearch}
           />
         );
       case "favorites":
@@ -290,7 +303,12 @@ export default function Shell({
 
       {/* 搜索浮层挂在 Shell 而非 App:它要用 openDetail(点结果进详情,不是直接开播)和切服务器。 */}
       {searchOpen && (
-        <SearchOverlay session={session} onClose={onCloseSearch} onOpenItem={openFromSearch} />
+        <SearchOverlay
+          session={session}
+          onClose={closeSearch}
+          onOpenItem={openFromSearch}
+          scope={searchScope}
+        />
       )}
     </div>
   );

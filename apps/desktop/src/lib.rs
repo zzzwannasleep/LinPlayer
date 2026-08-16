@@ -54,7 +54,7 @@ use linplayer_core::source::{
 use mpv::{Player, Status};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Manager, State, WindowEvent};
 use tokio::sync::oneshot;
@@ -490,6 +490,7 @@ struct ServerGroup {
 async fn aggregate_search(
     state: State<'_, AppState>,
     query: String,
+    include_episodes: Option<bool>,
 ) -> Result<Vec<ServerGroup>, String> {
     let (accounts, device_id) = {
         let cfg = state.config.lock().unwrap();
@@ -498,6 +499,9 @@ async fn aggregate_search(
     if query.trim().is_empty() || accounts.is_empty() {
         return Ok(vec![]);
     }
+    // 搜索浮层的「包括集」开关。**不传 = 关**,所以跨服 SourcePicker 那条路
+    // (它不传这个参数)行为一字未变,下面那条 2026-07-16 的口径没被推翻。
+    let include_episodes = include_episodes.unwrap_or(false);
     let mut handles = Vec::new();
     for a in accounts {
         let http = state.http.clone();
@@ -517,8 +521,11 @@ async fn aggregate_search(
                这种条目 —— 这是不一样的」。emby::search 传 None 时默认 IncludeItemTypes=
                Movie,Series,Episode → 分集混进结果。这里显式收敛成 Movie,Series。
                跨服 SourcePicker 与聚合搜索共用本命令,一处收敛两处生效。 */
-            let types = ["Movie".to_string(), "Series".to_string()];
-            let items = emby::search(&http, &s, &query, Some(&types), None)
+            let mut types = vec!["Movie".to_string(), "Series".to_string()];
+            if include_episodes {
+                types.push("Episode".to_string());
+            }
+            let items = emby::search(&http, &s, &query, Some(&types), None, None)
                 .await
                 .unwrap_or_default();
             /* ★ 这里曾拼成 `账户名 @ 地址`。用户 2026-07-15:「聚合搜索的时候
@@ -773,9 +780,11 @@ async fn search(
     query: String,
     types: Option<Vec<String>>,
     limit: Option<u32>,
+    parent_id: Option<String>,
 ) -> Result<Vec<Item>, String> {
     let s = session_of(&state)?;
-    emby::search(&state.http, &s, &query, types.as_deref(), limit).await
+    // parent_id = 库内搜索的范围。给了就只在那个库里找,见 emby::search_url 的 ParentId 注释。
+    emby::search(&state.http, &s, &query, types.as_deref(), limit, parent_id.as_deref()).await
 }
 
 /// 相似推荐(剧集/电影详情页底部)。空结果不是错误 —— 有些条目没有相似项,前端整段不渲染。
@@ -4573,6 +4582,10 @@ fn set_prefetch_settings(
    播放窗做成主窗的子窗口会把它拖进主窗的裁剪区,合成缝那套就不成立了。 */
 const PLAYER_LABEL: &str = "player";
 
+/// 「主窗已经点了关闭,就等播放窗把进度落完」。进程级一次性标志,不进 AppState ——
+/// 它和登录/播放状态无关,只是两个窗口事件之间的一根接力棒。
+static QUIT_AFTER_PLAYER: AtomicBool = AtomicBool::new(false);
+
 /// 窗口首开尺寸(**逻辑**像素)。主窗和播放窗共用同一个数 —— 用户 2026-08-16:
 /// 「播放窗做的像我们第一次打开软件那么大就行了,然后用户自己选择全屏」。
 /// 共用常量是为了别哪天改了主窗、播放窗还留在旧数上。
@@ -4684,6 +4697,10 @@ async fn player_window_close(app: tauri::AppHandle) -> Result<(), String> {
         let _ = main.show();
         let _ = main.set_focus();
         attach_video_host(&main, &app.state::<AppState>());
+    }
+    // 主窗在播放中被点了关闭:进度已经落完,这会儿才是真正能退的时刻。
+    if QUIT_AFTER_PLAYER.swap(false, Ordering::SeqCst) {
+        app.exit(0);
     }
     Ok(())
 }
@@ -5837,6 +5854,43 @@ pub fn run() {
 
             install_video_host_events(app.handle(), &window);
 
+            /* 主窗关掉 = 整个 App 退出。**必须显式退出**:播放窗是「藏起来不销毁」的
+               (见 player_window_close 上的注释),所以主窗销毁后进程里还剩一个窗口,
+               tao 永远等不到「最后一个窗口关闭」那一刻 —— 进程连同 mpv/预取代理一起
+               留在后台,任务管理器里能看见(用户报的「关闭程序后仍有残留进程」)。
+
+               还在播的时候不能直接 exit:那一段观看进度(每 5s 才回传一次)会丢,
+               和 Alt+F4 关播放窗是同一个坑。所以先拦下来,广播播放窗那条正规退出流程
+               (stopPlayback 落库 → player_window_close),它关完再退。 */
+            {
+                use tauri::Emitter;
+                let ah = app.handle().clone();
+                window.on_window_event(move |ev| {
+                    if let WindowEvent::CloseRequested { api, .. } = ev {
+                        let playing = ah
+                            .get_webview_window(PLAYER_LABEL)
+                            .and_then(|w| w.is_visible().ok())
+                            .unwrap_or(false);
+                        if !playing {
+                            ah.exit(0);
+                            return;
+                        }
+                        api.prevent_close();
+                        QUIT_AFTER_PLAYER.store(true, Ordering::SeqCst);
+                        let _ = ah.emit("lp://player-close", ());
+                        /* 兜底:播放窗前端要是没接住(白屏/崩了),窗口按下去没反应比
+                           丢几秒进度糟得多。给它 3 秒走完正规流程,超时就硬退。 */
+                        let ah2 = ah.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_secs(3));
+                            if QUIT_AFTER_PLAYER.load(Ordering::SeqCst) {
+                                ah2.exit(0);
+                            }
+                        });
+                    }
+                });
+            }
+
             /* 插件系统:host 持 AppHandle 落平台能力。
                基目录**不再用 app_config_dir()** —— 那是由 tauri.conf.json 的 identifier 推出来的
                (com.linplayer.poc),等于在 %APPDATA% 下又开了一个跟 LinPlayer 无关的根,
@@ -6169,7 +6223,10 @@ mod api_contract_tests {
             .split_once("async fn danmaku_auto_load(")
             .expect("找不到 danmaku_auto_load")
             .1;
-        let body = &auto[..auto.len().min(2000)];
+        // 按**字符**截:按字节切会切在半个汉字上当场 panic(2026-08-17 在新加的
+        // closing_the_main_window_must_exit_the_process 上真踩了一次)。
+        let body: String = auto.chars().take(1200).collect();
+        let body = body.as_str();
         assert!(
             body.contains("danmaku::allow_official_for(&input.genres)"),
             "danmaku_auto_load 必须用 allow_official_for 判官方源参不参与 ——                  写死 true 就是每次起播都往弹弹Play 烧一轮配额,而且非动漫内容颗粒无收"
@@ -6816,4 +6873,106 @@ async fn ")).max();
         }
     }
 
+    /* 「关掉程序,任务管理器里还留着一个 LinPlayer」的护栏。
+
+       播放窗是**藏起来不销毁**的(见 player_window_close 上的注释),所以主窗被销毁后
+       进程里还剩一个窗口 —— tao 永远等不到「最后一个窗口关闭」,默认的退出路径根本
+       不会触发。表现:UI 全没了,进程和 mpv 还在后台跑,而且**一声不吭**。
+       用户 2026-08-17 报的「关闭程序后仍有残留进程」。
+
+       这类东西没法用单测跑(要真起 GUI),就按本模块既有的做法钉源码。
+       反向验证:把主窗那段 on_window_event 删掉,本测试立刻红。 */
+    #[test]
+    fn closing_the_main_window_must_exit_the_process() {
+        // 同上:必须先归一换行,Windows 工作区是 CRLF(见本模块第一条测试的长注释)。
+        let me = &include_str!("lib.rs").replace("
+", "
+");
+        let setup = me
+            .split_once("install_video_host_events(app.handle(), &window);")
+            .expect("找不到主窗 setup 段 —— 挪代码了就同步改这条测试")
+            .1;
+        // 按**字符**截,不按字节 —— 注释里全是中文,字节切片会切在半个汉字上直接 panic。
+        let seg: String = setup.chars().take(1500).collect();
+        let seg = seg.as_str();
+        assert!(
+            seg.contains("WindowEvent::CloseRequested"),
+            "主窗必须装 CloseRequested —— 不装就只销毁窗口,进程连同 mpv 留在后台"
+        );
+        assert!(
+            seg.contains("ah.exit(0)"),
+            "主窗关闭必须显式退出进程(藏着的播放窗会替它把进程吊住)"
+        );
+        assert!(
+            seg.contains("QUIT_AFTER_PLAYER"),
+            "还在播就直接 exit 会丢这一段进度(每 5s 才回传一次)——                  必须先让播放窗走 stopPlayback 那条正规退出"
+        );
+        // 兜底超时:播放窗前端接不住时,按下去没反应比丢几秒进度糟得多。
+        assert!(
+            seg.contains("from_secs(3)"),
+            "等播放窗落库要有兜底超时,否则前端一崩关闭按钮就是死的"
+        );
+        // 接力棒必须有人放下,否则下次关窗时那个兜底线程会立刻把进程打掉。
+        assert!(
+            me.contains("QUIT_AFTER_PLAYER.swap(false, Ordering::SeqCst)"),
+            "player_window_close 必须 swap 掉标志(load 而不清 = 下次开播就被兜底线程秒杀)"
+        );
+    }
+
+    /* 「包括集」开关的护栏(2026-08-17 用户加的:默认关,只搜剧/电影)。
+
+       它的失败形态是**开关在那儿摆着但恒为开**:`search(kw, undefined, …)` 时核层默认
+       `IncludeItemTypes=Movie,Series,Episode`,分集照样进来 —— 关了没反应,而且不报错。
+       同理聚合那条:`aggregateSearch(kw)` 不带第二个参数就永远只出剧/电影,
+       开了也不出分集。两条都属于 [[stale-waijie-lies]] 那一类:后端接好了、前端没跟上。
+       反向验证:把 types 改回 undefined(或把 aggregateSearch 的第二个参数删掉),本测试立刻红。 */
+    #[test]
+    fn include_episodes_switch_must_reach_both_search_paths() {
+        let ts = &include_str!("../../../ui/desktop/components/SearchOverlay.tsx").replace("
+", "
+");
+        assert!(
+            ts.contains("const [withEp, setWithEp] = useState(false)"),
+            "「包括集」必须**默认关**(用户 2026-08-17 定)"
+        );
+        assert!(
+            !ts.contains("search(kw, undefined,"),
+            "单服搜索必须显式传类型 —— 传 undefined 时核层默认带 Episode,开关等于恒开"
+        );
+        assert!(
+            ts.contains("aggregateSearch(kw, withEp)"),
+            "聚合那条也要把开关带上,否则开了它照样不出分集"
+        );
+        assert!(
+            ts.contains("variant=\"thumb\""),
+            "分集要用横版剧照显示(用户 2026-08-17:「以横着的集封面显示出来」)"
+        );
+    }
+
+    /* 「Linux 上选外部播放器,对话框一个文件都不列」的护栏。
+
+       Linux 的可执行文件(/usr/bin/mpv)没有后缀,挂一条 `*.exe` 过滤 = 列不出任何东西,
+       看着就是选择器坏了。这是**只有真跑 Linux 才现形**的一类:Windows 上开发、
+       Windows 上自测,永远复现不出来,cargo check 也一声不吭。
+       反向验证:把 pickExternal 里的平台判断去掉、改回写死 ["exe"],本测试立刻红。 */
+    #[test]
+    fn external_player_picker_must_not_filter_exe_off_windows() {
+        let ts = &include_str!("../../../ui/desktop/pages/SettingsPage.tsx").replace("
+", "
+");
+        let f = ts
+            .split_once("async function pickExternal(")
+            .expect("SettingsPage 里找不到 pickExternal —— 改名了就同步改这条测试")
+            .1;
+        let body: String = f.chars().take(600).collect();
+        let body = body.as_str();
+        assert!(
+            body.contains("navigator.userAgent.includes(\"Windows\")"),
+            "选可执行文件的后缀过滤必须按平台给 —— Linux 上 *.exe 会把列表滤空"
+        );
+        assert!(
+            !body.contains("\"可执行文件\", [\"exe\"]"),
+            "别再无条件传 exe 过滤"
+        );
+    }
 }

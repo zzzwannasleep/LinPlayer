@@ -32,7 +32,9 @@ type Props = {
   onBack: () => void;
   onOpenItem: (it: Item) => void;
   onPlay: (it: Item) => void;
-  onSearch: () => void;
+  /** 搜索。库列表页不带参 = 全局;库内带上当前库 = 只搜这个库。
+      ★ 别写成 `onClick={onSearch}`:React 会把点击事件当成 scope 灌进去。 */
+  onSearch: (scope?: Item | null) => void;
 };
 
 /* 排序档位。by/order 是 Emby 的真值,直接透传给 list_items_page 让**服务端**排 ——
@@ -300,7 +302,7 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
             <b>媒体库</b>
           </span>
           <span className="push">
-            <button className="searchbox" onClick={onSearch}>
+            <button className="searchbox" onClick={() => onSearch()}>
               <IconSearch size={14} /> 搜索 / 聚合…
             </button>
             <button className="ibtn" title="刷新" onClick={() => setReload((k) => k + 1)}>
@@ -389,7 +391,10 @@ export default function LibraryPage({ session, view, onPickView, onBack, onOpenI
           {items != null && <span className="count">· {total.toLocaleString()}</span>}
         </span>
         <span className="push">
-          <button className="searchbox" onClick={onSearch}>
+          {/* 库内搜索:**必须把 view 传下去**。原来这里和首页共用一个无参 onSearch,
+              点开的就是全局浮层 —— 在「电影」库里搜出别的库的剧集,按钮名字在骗人
+              (用户 2026-08-17 报的)。范围最终落到 emby 的 ParentId 上。 */}
+          <button className="searchbox" onClick={() => onSearch(view)}>
             <IconSearch size={14} /> 库内搜索…
           </button>
 

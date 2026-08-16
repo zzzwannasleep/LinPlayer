@@ -388,7 +388,7 @@ async fn resolve_candidate(
 
     // 2) 搜索。emby::search 的 URL 自带 HISTORY_FIELDS,搜出来的候选也有强匹配判据。
     let query = restore_search_query(record)?;
-    let items = match emby::search(http, s, query, None, None).await {
+    let items = match emby::search(http, s, query, None, None, None).await {
         Ok(v) => v,
         Err(e) => {
             errors.push(format!("搜索「{query}」失败: {e}"));

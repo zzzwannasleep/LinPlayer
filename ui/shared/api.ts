@@ -654,9 +654,15 @@ export const listItemsPage = (
 export const getFilters = (parentId: string) =>
   invoke<Filters>("get_filters", { parentId });
 
-/** 服务端搜索(带类型过滤+条数上限)。别再用「拉全库再本地 includes」代替。 */
-export const search = (query: string, types?: string[], limit?: number) =>
-  invoke<Item[]>("search", { query, types: types ?? null, limit: limit ?? null });
+/** 服务端搜索(带类型过滤+条数上限)。别再用「拉全库再本地 includes」代替。
+ *  `parentId` = 库内搜索:只在这个媒体库里找。不传 = 全服务器。 */
+export const search = (query: string, types?: string[], limit?: number, parentId?: string) =>
+  invoke<Item[]>("search", {
+    query,
+    types: types ?? null,
+    limit: limit ?? null,
+    parentId: parentId ?? null,
+  });
 
 export const listCollections = () =>
   memo("collections", () => invoke<Item[]>("list_collections"));
@@ -945,8 +951,11 @@ export function fmtRes(height: number | null): string {
   return height && height > 0 ? `${height}p` : "";
 }
 
-export const aggregateSearch = (query: string) =>
-  invoke<ServerGroup[]>("aggregate_search", { query });
+/** 跨全部已登录服务器搜索,按服分组。
+ *  `includeEpisodes`:搜索浮层的「包括集」开关。**不传 = 只出剧/电影**
+ *  (用户 2026-07-16 定的口径,跨服 SourcePicker 靠的就是这个默认值)。 */
+export const aggregateSearch = (query: string, includeEpisodes = false) =>
+  invoke<ServerGroup[]>("aggregate_search", { query, includeEpisodes });
 
 /** 一台源的规模 + 最近观看记录。手机端首页顶栏统计和聚合视界都用它。 */
 export type SourceOverview = {

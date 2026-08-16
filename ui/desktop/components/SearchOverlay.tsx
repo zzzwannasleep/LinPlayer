@@ -11,6 +11,10 @@ type Props = {
   /** serverId:该结果所属服务器(聚合搜可能跨服),宿主据此先切服务器再开详情。
       ★ 搜索结果只有这一个操作:点 = 进详情。不从这里起播(用户 2026-07-15 定)。 */
   onOpenItem: (it: Item, serverId?: string) => void;
+  /** 库内搜索:只在这个媒体库里找。不给 = 全服务器搜(首页那个入口)。
+      ★ 和聚合互斥 —— 聚合是「跨全部服务器」,和「只在本服的这个库里」是反义词,
+        所以有 scope 时聚合开关整个不出现,别让用户拨一个必然会打破范围的开关。 */
+  scope?: { id: string; name: string } | null;
 };
 
 /* 搜索历史(标注 34)。localStorage 存,封顶 8 条 —— 就一个字符串数组,不值得进核层配置。 */
@@ -35,16 +39,22 @@ function writeHist(next: string[]): string[] {
   return next;
 }
 
-/** 全局搜索浮层(草稿 PAGE 9):Ctrl K 唤起、Esc 收起,聚合开关按服务器分组。 */
-export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
+/** 搜索浮层(草稿 PAGE 9):Ctrl K 唤起、Esc 收起,聚合开关按服务器分组。
+ *  传了 `scope` 就变成库内搜索(媒体库顶栏那个入口)。 */
+export default function SearchOverlay({ session, onClose, onOpenItem, scope }: Props) {
   const [q, setQ] = useState("");
-  const [aggregate, setAggregate] = useState(true);
+  const [aggregate, setAggregate] = useState(!scope);
+  /* 「包括集」。**默认关**:搜「凡人」应该先看到那部剧,而不是被 200 集分集淹掉。
+     ★ 和聚合开关**故意不同**:这个进 effect 依赖 = 一拨就重搜。
+       聚合不重搜是因为它一次要打 N 台服务器(用户 2026-07-15 报的);
+       这个只多打一次当前服,而用户拨它就是为了立刻看到分集 —— 不重搜才是坏的。 */
+  const [withEp, setWithEp] = useState(false);
   /* ★ 开关的**当前值**要给防抖里的异步闭包读,但它**不能进 effect 依赖** ——
      进了依赖 = 一拨开关就重跑 effect、重发一轮搜索。用户 2026-07-15:
      「聚合搜索 我点开又关闭 会自行搜索 这是不对的」,而且聚合一次要打 N 台服务器,
      手一抖来回拨两下就是 2N 个请求。
      ref 是这里唯一能「读到最新值又不触发重跑」的办法(state 做不到:它一变就重渲染+重跑)。 */
-  const aggRef = useRef(true);
+  const aggRef = useRef(!scope);
   const [groups, setGroups] = useState<ServerGroup[] | null>(null);
   const [local, setLocal] = useState<Item[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -91,14 +101,19 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
     const t = window.setTimeout(async () => {
       setErr("");
       try {
+        /* 类型**必须显式传**:不传时核层默认 Movie,Series,Episode —— 那就是「永远包括集」。
+           核层拿到显式类型后还会自己滤一遍(有的服务端带 SearchTerm 时忽略
+           IncludeItemTypes,见 emby::filter_types),所以这个开关在哪台服上都是真的。 */
+        const types = withEp ? ["Movie", "Series", "Episode"] : ["Movie", "Series"];
         if (aggRef.current) {
-          setGroups(await aggregateSearch(kw));
+          setGroups(await aggregateSearch(kw, withEp));
           setLocal(null);
         } else {
           /* 单服务器:走服务端 search。
              ★ 这里原来是「views() → 逐个 listItems(v.id) 全量拉 → 本地 .includes 过滤」,
                每敲一次键就把整个库拉一遍(N 个库 = N 次全量请求)。search 命令一直都在。 */
-          setLocal(await search(kw, undefined, 40));
+          // scope?.id = 库内搜索的范围;不传就是全服务器(首页入口)。
+          setLocal(await search(kw, types, 40, scope?.id));
           setGroups(null);
         }
       } catch (e) {
@@ -113,8 +128,10 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
     }, 320);
     return () => window.clearTimeout(t);
     /* 依赖只有 q:**别把 aggregate 加回来**(见 aggRef 上的注释)。
-       eslint 会说 aggRef 不用进依赖(ref 本来就不用),这里也确实不需要。 */
-  }, [q]);
+       scope 也别加 —— 浮层是「开一次建一次」,它在整个生命周期内不变,
+       而它是个字面量对象,每次渲染都是新引用,进了依赖就是每帧重搜。 */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, withEp]);
 
   /* 只在用户真的点开了某个结果时才记历史 —— 跟着防抖记的话,
      打「阿凡达」会把「阿」「阿凡」「阿凡达」全记进去。 */
@@ -127,6 +144,30 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
     onOpenItem(it, serverId); // 关浮层交给宿主(它可能要先切服务器)
   };
 
+  /* 分集和剧/电影**分栏画**:一个是 16:9 剧照、一个是 2:3 海报,
+     混在同一个网格里必然一行高矮不齐(而且分集数量常常压倒剧本身)。 */
+  const isEp = (it: Item) => it.type_ === "Episode";
+  const epGrid = (items: Item[], serverId?: string) => (
+    <>
+      <div className="ovl-grouplab">分集</div>
+      <div className="ovl-epgrid">
+        {items.map((it, i) => (
+          <Poster
+            key={it.id}
+            item={it}
+            session={session}
+            variant="thumb"
+            index={i}
+            onOpen={(x) => pick(x, serverId)}
+            /* 右键只给本服结果 —— 同上面 useCardActions 那段的理由(跨服会写错服务器)。 */
+            onContextMenu={serverId ? undefined : card.openCtx}
+          />
+        ))}
+      </div>
+    </>
+  );
+
+
   return (
     <div className="ovl-scrim" onClick={onClose}>
       <div className="ovl" onClick={(e) => e.stopPropagation()}>
@@ -137,15 +178,32 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
               ref={inputRef}
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="搜索片名 / 聚合…"
+              placeholder={scope ? `在「${scope.name}」中搜索…` : "搜索片名 / 聚合…"}
             />
           </div>
-          <button className={`pill${aggregate ? " on-pill" : ""}`} onClick={toggleAggregate}>
-            聚合搜索
-            <span className={`sw${aggregate ? " on" : ""}`} style={{ marginLeft: 4 }}>
+          <button
+            className={`pill${withEp ? " on-pill" : ""}`}
+            onClick={() => setWithEp((v) => !v)}
+            title="关:只搜剧和电影;开:分集也搜,单独一栏用横版剧照显示"
+          >
+            包括集
+            <span className={`sw${withEp ? " on" : ""}`} style={{ marginLeft: 4 }}>
               <i />
             </span>
           </button>
+          {scope ? (
+            // 范围徽标:不写清楚「只在这个库里」,搜不到东西时用户会以为搜索坏了。
+            <span className="pill on-pill" title={`只搜索媒体库「${scope.name}」`}>
+              库内：{scope.name}
+            </span>
+          ) : (
+            <button className={`pill${aggregate ? " on-pill" : ""}`} onClick={toggleAggregate}>
+              聚合搜索
+              <span className={`sw${aggregate ? " on" : ""}`} style={{ marginLeft: 4 }}>
+                <i />
+              </span>
+            </button>
+          )}
           <span className="kbd">Esc</span>
         </div>
 
@@ -185,7 +243,7 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
                 </>
               )}
               <div className="empty" style={{ padding: "18px 4px" }}>
-                输入片名开始搜索。聚合模式跨全部服务器。
+                {scope ? `输入片名,只在「${scope.name}」里搜。` : "输入片名开始搜索。聚合模式跨全部服务器。"}
               </div>
             </>
           )}
@@ -194,7 +252,7 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
             <section key={g.server_id}>
               <div className="ovl-grouplab">{g.server_name}</div>
               <div className="rail">
-                {g.items.map((it) => (
+                {g.items.filter((it) => !isEp(it)).map((it) => (
                   <div className="r-poster" key={it.id}>
                     <Poster
                       item={it}
@@ -204,18 +262,38 @@ export default function SearchOverlay({ session, onClose, onOpenItem }: Props) {
                   </div>
                 ))}
               </div>
+              {/* 分集走横版剧照,和上面那条竖海报轨道分开(混一条里高矮不齐)。 */}
+              {g.items.some(isEp) && (
+                <div className="rail">
+                  {g.items.filter(isEp).map((it) => (
+                    <div className="r-wide" key={it.id}>
+                      <Poster
+                        item={it}
+                        session={session}
+                        variant="thumb"
+                        onOpen={(x) => pick(x, g.server_id)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           ))}
           {groups && groups.length === 0 && !err && <div className="empty">没有找到结果</div>}
 
-          {local && local.length > 0 && (
+          {local && local.some((it) => !isEp(it)) && (
             <div className="dense-grid" style={{ padding: "4px 0 8px" }}>
-              {local.map((it) => (
+              {local.filter((it) => !isEp(it)).map((it) => (
                 <Poster key={it.id} item={it} session={session} onOpen={pick} onContextMenu={card.openCtx} />
               ))}
             </div>
           )}
-          {local && local.length === 0 && !err && <div className="empty">没有找到结果</div>}
+          {local && local.some(isEp) && epGrid(local.filter(isEp))}
+          {local && local.length === 0 && !err && (
+            <div className="empty">
+              没有找到结果{!withEp && "。分集不在搜索范围内 —— 打开「包括集」再试一次。"}
+            </div>
+          )}
         </div>
       </div>
       {card.menu}

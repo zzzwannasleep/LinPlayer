@@ -1233,19 +1233,44 @@ pub async fn fetch_scrobble_info(
 /// ★ 实测提醒:smart.uhdnow.com(Emby 4.9.3)在带 SearchTerm 时**忽略 IncludeItemTypes**
 /// (传 Episode 照样只回 Series/Movie),且分集名("星海飞驰27")根本搜不出来。
 /// 参数照发是为标准 Emby/Jellyfin 服务;这台服务器上搜不到分集是服务端行为,客户端改不动。
+/// `parent_id` = 只在这个媒体库里搜(库内搜索)。None = 全服务器。
 pub async fn search(
     http: &reqwest::Client,
     s: &Session,
     query: &str,
     types: Option<&[String]>,
     limit: Option<u32>,
+    parent_id: Option<&str>,
 ) -> Result<Vec<Item>, String> {
-    let url = search_url(s, query, types, limit);
-    fetch_items(http, s, &url).await
+    let url = search_url(s, query, types, limit, parent_id);
+    let items = fetch_items(http, s, &url).await?;
+    Ok(filter_types(items, types))
+}
+
+/// 显式点了名的类型,**再自己滤一遍**。
+///
+/// 为什么不能只信 `IncludeItemTypes`:v1/smart.uhdnow.com 那个 fork **带 SearchTerm 时
+/// 把筛选参数一起忽略**(2026-08-17 curl 实测,ParentId/Ids/NameContains 一并中招)。
+/// 搜索浮层的「包括集」开关关着的时候,靠服务端过滤 = 那台上关了也照样出分集,
+/// 开关是个摆设而且不报错 —— 正是本项目最讨厌的那类静默失效。
+/// 标准 Emby 上服务端已经滤过,这一遍是 no-op(零成本,不多打一次请求)。
+///
+/// `types` 为 None(没点名)时原样返回 —— 那是「默认全要」,不是「一个都不要」。
+fn filter_types(items: Vec<Item>, types: Option<&[String]>) -> Vec<Item> {
+    match types.filter(|t| !t.is_empty()) {
+        Some(t) => items.into_iter().filter(|i| t.iter().any(|x| x == &i.type_)).collect(),
+        None => items,
+    }
 }
 
 /// 拆出来只为可测 —— 见 tests::search_term_must_be_capitalized。
-fn search_url(s: &Session, query: &str, types: Option<&[String]>, limit: Option<u32>) -> String {
+fn search_url(
+    s: &Session,
+    query: &str,
+    types: Option<&[String]>,
+    limit: Option<u32>,
+    parent_id: Option<&str>,
+) -> String {
     let types = match types.filter(|t| !t.is_empty()) {
         Some(t) => t.iter().map(|x| enc(x)).collect::<Vec<_>>().join(","),
         None => "Movie,Series,Episode".to_string(),
@@ -1256,12 +1281,33 @@ fn search_url(s: &Session, query: &str, types: Option<&[String]>, limit: Option<
     // Emby 的 query 参数大小写敏感,别再改回小写。
     // ProviderIds/PresentationUniqueKey/Path:跨服务器续播恢复扫描要靠它们做强匹配 ——
     // 搜索是恢复扫描的入口,这里不要就只能靠剧名猜(静默匹配不上,不报错)。
+    /* 库内搜索:ParentId + Recursive=true = 只在这棵库树里递归找。
+       没有它,顶栏那个「库内搜索…」和首页的全局搜索打的是同一条 URL ——
+       在「电影」库里搜也能搜出别的库的剧集(用户 2026-08-17 报的)。
+       空串当没传:前端传 "" 比传 null 更常见,拼上去会变成「在 id 为空的库里搜」= 零结果。
+
+       ★ 2026-08-17 curl 实测,两台服务器结论**相反**,别拿一台的结果给另一台签字:
+         · mecf.mebimmer.de(4.9.5,接近原版):ParentId 完全生效 —— 同一个关键词
+           「的」在 12 个库里搜,回来的集合两两零重叠(华语电影 1 条、华语剧集 4 条…)。
+         · v1.uhdnow.com(fork):**带 SearchTerm 时把所有筛选参数一起忽略** ——
+           ParentId / AncestorIds / Ids / NameStartsWith / NameContains 全无效,
+           连 /Search/Hints?ParentId= 也一样,12 个库回的是同一堆。
+           (不带 SearchTerm 时 ParentId 是好的,所以不是权限或 id 的问题。)
+           和上面那条「带 SearchTerm 时忽略 IncludeItemTypes」是同一个毛病。
+           **这台上库内搜索做不到**:没有任何服务端参数能收窄,客户端要么全量拉库
+           (每敲一键拉一遍整个库,正是这段代码当初废掉的写法),要么就是搜不准。
+           参数照发是给标准 Emby/Jellyfin 用的,不为一台 fork 把架构改回去。 */
+    let parent = match parent_id.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => format!("&ParentId={}", enc(p)),
+        None => String::new(),
+    };
     format!(
-        "{}/Users/{}/Items?SearchTerm={}&IncludeItemTypes={}&Recursive=true&Fields=PrimaryImageAspectRatio,Genres,ProductionYear,CommunityRating,{HISTORY_FIELDS}&Limit={}",
+        "{}/Users/{}/Items?SearchTerm={}&IncludeItemTypes={}&Recursive=true{}&Fields=PrimaryImageAspectRatio,Genres,ProductionYear,CommunityRating,{HISTORY_FIELDS}&Limit={}",
         s.server,
         s.user_id,
         enc(query),
         types,
+        parent,
         limit.unwrap_or(50).min(SERVER_PAGE_CAP)
     )
 }
@@ -2731,16 +2777,82 @@ mod tests {
             user_id: "u".into(),
             device_id: "d".into(),
         };
-        let url = search_url(&s, "凡人", None, None);
+        let url = search_url(&s, "凡人", None, None, None);
         assert!(url.contains("SearchTerm="), "关键词参数必须大写 SearchTerm: {url}");
         assert!(!url.contains("searchTerm="), "小写 searchTerm 会被服务端忽略并返回全库");
         // 默认类型集要含 Episode(旧实现写死 Movie,Series 搜不到分集)。
         assert!(url.contains("IncludeItemTypes=Movie,Series,Episode"));
         assert!(url.contains("Limit=50"));
+        // 不传库 id 就不能拼 ParentId —— 拼个空的等于「在 id 为空的库里搜」,恒零结果。
+        assert!(!url.contains("ParentId"), "全局搜索不该带 ParentId: {url}");
         // 显式传类型/条数时照传,且条数夹到服务端上限。
-        let url2 = search_url(&s, "x", Some(&["Movie".to_string()]), Some(9999));
+        let url2 = search_url(&s, "x", Some(&["Movie".to_string()]), Some(9999), None);
         assert!(url2.contains("IncludeItemTypes=Movie&"));
         assert!(url2.contains("Limit=200"));
+    }
+
+    /* 「包括集」开关必须在**任何**服务器上都是真的。
+
+       搜索浮层 2026-08-17 加的这个开关,关着的时候只该出剧/电影。光靠
+       `IncludeItemTypes` 不够:v1.uhdnow.com 那个 fork 带 SearchTerm 时把筛选参数
+       整片忽略(同批实测里 ParentId/Ids/NameContains 一起中招),那台上开关会变成
+       一个**点了没反应还不报错**的摆设。所以显式点了类型就自己再滤一遍。
+       反向验证:把 emby::search 里的 filter_types 调用去掉,本测试立刻红。 */
+    #[test]
+    fn explicit_types_are_enforced_client_side_too() {
+        let it = |id: &str, t: &str| Item {
+            id: id.into(),
+            name: id.into(),
+            type_: t.into(),
+            ..Default::default()
+        };
+        // Item 没有 Clone(生产类型,不为一条测试给它加 derive)—— 每次现捏一份。
+        let mk = || vec![it("m1", "Movie"), it("e1", "Episode"), it("s1", "Series")];
+        let only = |t: &[&str]| {
+            let t: Vec<String> = t.iter().map(|x| x.to_string()).collect();
+            filter_types(mk(), Some(&t)).into_iter().map(|i| i.id).collect::<Vec<_>>()
+        };
+        assert_eq!(only(&["Movie", "Series"]), vec!["m1", "s1"], "关着「包括集」时分集必须被滤掉");
+        assert_eq!(only(&["Movie", "Series", "Episode"]), vec!["m1", "e1", "s1"], "开着时分集要留下");
+        // 没点名 = 「默认全要」,不是「一个都不要」—— 滤成空集会让 watch_history_sync 静默失灵。
+        assert_eq!(filter_types(mk(), None).len(), 3);
+        assert_eq!(filter_types(mk(), Some(&[])).len(), 3, "空类型表也当没点名");
+
+        /* ★ 光测 filter_types 本身是**假绿**:把 search 里那句调用删掉,上面几条照样过。
+           调用点必须一起钉住(见 [[test-must-fail-first]] 的「注入不忠实」那一类)。 */
+        let me = include_str!("emby.rs").replace("
+", "
+");
+        let f = me.split_once("pub async fn search(").expect("找不到 search").1;
+        let body: String = f.chars().take(400).collect();
+        assert!(
+            body.contains("filter_types(items, types)"),
+            "search 必须把结果过一遍 filter_types —— 不过就等于「包括集」开关只在守规矩的服务器上有效"
+        );
+    }
+
+    /// 库内搜索必须真的把范围钉在那个库上。
+    ///
+    /// 2026-08-17 用户报:媒体库顶栏那个「库内搜索…」点开的是全局搜索浮层,
+    /// 在「电影」库里能搜出别的库的剧集 —— 前端根本没往下传库 id,后端也没这个参数。
+    /// 反向验证:把 search_url 里拼 ParentId 那段删掉,本测试立刻红。
+    #[test]
+    fn library_scoped_search_pins_parent_id() {
+        let s = Session {
+            server: "https://x".into(),
+            token: "t".into(),
+            user_id: "u".into(),
+            device_id: "d".into(),
+        };
+        let url = search_url(&s, "凡人", None, None, Some("lib42"));
+        assert!(url.contains("ParentId=lib42"), "库内搜索必须带 ParentId: {url}");
+        // Recursive 不能丢:库下面还有季/分集,不递归就只看得到第一层。
+        assert!(url.contains("Recursive=true"), "库内搜索仍要递归: {url}");
+        // 空串/空白当没传(前端传 "" 比传 null 常见)。
+        for blank in ["", "   "] {
+            let u = search_url(&s, "凡人", None, None, Some(blank));
+            assert!(!u.contains("ParentId"), "空库 id 不该拼进 URL: {u}");
+        }
     }
 
     /// 年份区间探针:最早 1922 最晚 2026(实测华语电影库),铺成倒序区间。
