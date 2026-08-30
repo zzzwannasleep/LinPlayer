@@ -1,0 +1,476 @@
+# PC 端 UI
+
+**这个领域最容易踩的坑:**
+1. **「点了没反应」的第一嫌疑是层叠上下文**:关下拉的背板盖住整条顶栏、祖先带 transform 关键帧永久成为 fixed 包含块。查法是 `elementFromPoint`,不是读 CSS。
+2. **窗口透明 ⇒ React 一崩就是一片黑**,先怀疑 JS 渲染崩溃,别先查 mpv。
+3. **Tauri v2 的窗口写操作要在 capabilities 里逐个放行**,漏了就被权限拦截并被 `catch{}` 吞成静默失效。
+4. **前端零 store,各页各持 useState 副本** —— 改数据必须在 `api.ts` 的 invoke 层广播,别靠调用点自觉。
+5. **「慢」先查加载编排**(Promise.all 屏障 + 串行 await),别拿动画当替罪羊。
+
+> 本文件共 **13** 条。每条都标了它的原记忆文件名与类型;正文按原样搬运,未做压缩或改写。
+
+## 本页条目
+
+- 对着桌面草稿做 — `follow-the-desktop-drafts.md`
+- 卡片看完打勾/悬停/角标 — `card-watched-indicators-and-hover.md`
+- 「不秒加载」是加载结构不是动画 — `perceived-slowness-is-animation.md`
+- 前端副本要靠广播 — `frontend-state-copies-need-broadcast.md`
+- 正则筛选前端接线 — `regex-filters-frontend-wiring.md`
+- 界面在撒谎:当前版本 — `ui-lies-about-current-version.md`
+- flex 挂错层 + auto-fill 陷阱 — `css-flex-child-autofill-trap.md`
+- 顶栏下拉点不动 — `cbar-dropdown-scrim-stacking.md`
+- transform 关键帧毁 fixed 定位 — `transform-keyframe-breaks-fixed.md`
+- 「黑屏」多半是 JS 崩了 — `transparent-window-crash-looks-like-blackscreen.md`
+- PC 窗口 chrome — `pc-tauri-window-chrome.md`
+- Win最大化控制栏消失 — `windows-maximize-overhang.md`
+- PC 快捷键 + mpv.conf — `pc-shortcuts-and-mpvconf.md`
+
+---
+
+### 对着桌面草稿做
+
+> 原记忆:`follow-the-desktop-drafts.md` · 类型:`feedback`
+>
+> ⚠️ 本条含 Flutter 时代 / `native-poc/` 时代的路径。2026-07-19 仓库重构后这些路径已作废(换算表见 [仓库结构(2026-07重构后)](build-release.md))。**原文按要求原样保留,未做改写。**
+
+PC 端 React UI 有一份**用户精心评审过的 14 页草稿**,现已入库:`native-poc/docs/desktop-drafts.html`(每页含布局 + 橙色编号标注「移动端做法→桌面做法」)。我第一轮把草稿当"丢了"没打开,凭空造了一套完全不同的设计,被用户两次痛批「根本不是按草稿做」「草稿设计那么多东西就是要你全用上」。
+
+**Why:** 用户花大量时间和我逐页讨论、定稿这份草稿,就是要照着实现;我不看草稿自己发挥 = 把他的设计投入全部作废,是最严重的失职。
+
+**How to apply:** 做/改任何 PC 页面前,**先打开 `docs/desktop-drafts.html` 找到对应页**,照它的布局与交互实现。派 subagent 做页面时,把该页的草稿 HTML 片段 + 组件词汇一起给它。草稿的核心桌面交互语言(务必全用上):
+- **cbar**:每页内容区自带顶栏——面包屑/页名在左,操作(搜索/刷新/排序/筛选/视图切换/主按钮)在右,**都在内容区内**,不是浮在角落的图标钮。
+- 侧栏导航固定序:首页/媒体库/收藏/下载/排行榜,底部 服务器/设置;**没有「网盘」项**(网盘=点非Emby服务器卡进入的文件浏览)。服务器切换器常驻侧栏顶。
+- 右键菜单(非底部弹窗)、悬停显现按钮、键盘快捷键、锚定下拉浮层、右侧滑出面板、主从两栏、居中模态弹窗——这套取代移动端做法。
+- 配色 accent `#5B8DEF`,mono 字体用于 eyebrow/标签/数值/编号;深色沉浸 + 用户另要的米黄浅色双主题。
+文件找不到时:草稿源在 scratchpad `linplayer-desktop-drafts.html`,已 cp 到 docs/。跟 [做完所有再交付](methodology.md)、[别过度解读需求](methodology.md) 一脉:用户定了的东西照做,别自作主张。
+
+**每个橙色标注(编号 1-44)都是一条需求**,不是配图说明 —— 逐条核。**用户口头指令 > 草稿**:已知覆盖有「继续观看封面**横向**」(草稿画的竖版,但那是剧集,16:9 才对)、「媒体库封面**不裁剪**」。
+
+##### 三类反复犯的错(2026-07-15 第三轮痛批后全项目审计实锤)
+
+**① 摆了控件不接线 = 死按钮。** 播放器 24 条草稿要求只落 9 条,4 个 `onClick={() => {}}` 空函数(音量/亮度/上一集/下一集/选集),`.p-vbar` 竖条 CSS 写好了**全项目零引用**;收藏页排序 pill 和视图切换**根本没 onClick**,是装饰品。**「点了没反应」比「没做」更伤信任。** 要么真做、要么诚实 toast、要么按草稿删 —— **不许留空函数**。
+
+**② 用注释把「有后端」说成「没后端」(最恶劣)。** 实锤:日历点卡写「聚合搜索待接」但 `aggregate_search` 早就存在且 SearchOverlay 在用;播放器版本面板写「暂未接入」但 `item_media` 存在且 DetailPage 在用;夸克扫码写「待接」但 `quark_scan_start/poll` 已注册。**写「待接」前必须先 grep `#[tauri::command]` 全表**(现 80+ 个)。
+
+**③ 留白 = 用户最刺眼的投诉。** 根因常常**不是 CSS bug 而是整段没做**(详情页 7 段只做 3 段 → 集详情页 Hero 底下就剩一段 78ch 简介,右半当然空)。次因:全项目只有 Home/Detail 封了宽度。**已修**:`tokens.css` 加 `--content-max:1560px`,ui.css 给 `.cbar`/`.cbody`/`.dense-grid`/`.empty` 统一封顶居中 → 顶栏与正文左右边缘对齐(用户原话「不会做对称布局吗」)。⚠️ **Hero 类全宽出血元素必须留在封顶容器外**(详情页靠 `.detail .cbody{max-width:none}` 逃生),否则 2560px 下 Hero 缩到 1560 露黑边 = 更丑。
+
+##### 技术坑
+- 草稿的 `--line-2` 在本项目叫 **`--line-strong`** —— 照抄会静默失效(var 不存在 → 边框变 currentColor)。
+- 草稿 `.mi` = 媒体信息卡,但 ui.css 的 `.mi` 已经是**右键菜单项** → 撞名必须改名(用了 `.dt-mi`)。
+- **`tsc` 看不到 CSS**。CSS 注释里写个 `*/` 能静默吃掉半个文件,**只有 `npm run build` 会报** → 两个门禁都要跑。
+- **subagent 的汇报不是证据**:自己复跑门禁 + grep 抽查关键声明(有 agent 自查用 `git diff` 查违规,而新文件全是 untracked,diff 根本看不见 → 自查恒过,假的)。
+
+---
+
+### 卡片看完打勾/悬停/角标
+
+> 原记忆:`card-watched-indicators-and-hover.md` · 类型:`feedback`
+
+2026-07-24 对标 Emby 官方客户端补卡片细节（Haiku 子 agent 调研后落码）：
+
+- **看完打勾**：`item.played`（emby::Item 早就透传）→ 海报右上角**绿勾**；分集缩略图同款。电影/剧集「全看完」Emby 都把 Played=true 打在条目上。
+- **未看集数角标**：`UserData.UnplayedItemCount` 过去**真缺**（Poster 注释「核层没这字段」半真半假）→ 已给 `emby::UserData`/`Item` + `api.ts` 补 `unplayed_item_count`（默认就在 UserData 里，不需任何 Fields）。剧集卡右上角**蓝数字**，`played` 时必为 0 → 勾优先。
+- **配色**：用户定 **绿勾+蓝数字**（红绿灯语义），故意避开官方 Jellyfin「蓝勾配蓝数字」分不清（issue #706）。固定色不跟主题 accent。评分角标从右上挪到**左上**给状态让位。
+
+**Why（重点）**：**用户 2026-07-24 主动推翻了 2026-07-15「卡片悬停只浮起、不出任何按钮」的旧决策**。现在悬停 = 中央 ▶（仅非文件夹可播条目）+ 右下 ✓ 标记已看/♥ 收藏；右键菜单（标记已/未看+收藏+管理员项）从「只有首页」**扩到库/收藏/搜索全部网格**。Poster.tsx 里那条「别照草稿改回来」的注释已删——别再拿旧决策或 desktop-drafts 把按钮改没。见 [别过度解读需求](methodology.md) [对着桌面草稿做](ui-desktop.md) [「待接」多半是谎](methodology.md)。
+
+**How to apply**：卡片动作全走 `ui/desktop/lib/cardActions.tsx` 的 `useCardActions(session, {onPlay,onChanged,onFavChanged})`——收藏态/标记/右键菜单/toast 一处出，四页共用，别再各写一份（见 [前端副本要靠广播](ui-desktop.md)：标记后靠 onChanged 回调让持有页更新自己那份 items）。**搜索页只给本服结果右键**：聚合结果跨服，右键会写错服务器，故仍只「点=进详情」由 openFromSearch 先切服。Next Up（/Shows/NextUp，命令一直在）也顺手接进首页「接下来观看」栏。
+
+---
+
+### 「不秒加载」是加载结构不是动画
+
+> 原记忆:`perceived-slowness-is-animation.md` · 类型:`feedback`
+
+2026-07-15,用户三轮反馈,我错了两次,第三次他当面把我点醒。
+
+##### 我的两次错判
+1. 第一反应查**缓存** —— 缓存无辜,实测磁盘 124 张/35.9MB 好好的。
+2. 第二次怪**动画**(`.enter` 380ms + 按 index 阶梯延迟最多 288ms = 668ms),把动画砍了。
+   **这是拿掉表象。** 用户原话纠正:「其实不秒加载并不是你的动画问题
+   你完全可以先出现骨架 然后再不断加载图片……这样有动画 加载看起来也会快」——
+   即:动画根本不该背锅,砍它反而错了。
+
+##### 真正的根因:加载结构(HomePage.tsx)
+两个屏障叠起来是**秒级**的,668ms 动画只是零头:
+```
+1) 五个请求 await Promise.all(views/resume/random/favorites/collections)
+   → 最慢的那个(收藏/合集)没回来,Hero 就跟着干等
+2) for (const v of vs) { await listLatest(v) }
+   → 八个媒体库 = 八次**串行**往返
+```
+E2E 实测(node 模拟 8 个库各自延迟):串行 1706ms(之和) vs 并发 310ms(最慢那个)= **5.5×**。
+
+##### 正解(用户口径)
+**骨架先出 → 每块数据各自 .then 里 set,谁先回谁先画 → 媒体库 Promise.all 并发。**
+- Hero/媒体库行/最新轨道在 loading 时都垫 `.skeleton`(自带 shimmer 流光,`ui.css`)。
+- 图片淡入用 `@keyframes img-fade`(只动 img 的 opacity),**卡片框和骨架第一帧就在,不藏内容**。
+- **别再用 `.enter` + `fill-mode:both` + 按 index 阶梯延迟** —— 那会把整张卡藏在延迟里。
+
+##### Why / How to apply
+- 用户报「慢」→ 别停在第一个看到的原因。慢分层:字节到达 / **加载编排(串行 vs 并发/屏障)** /
+  解码 / 动画 / 布局。**加载编排最常见也最贵**,先量它:`grep "await Promise.all"` 找屏障、
+  `for...of` 里 `await` 找串行循环。
+- 我上一轮验收只验「字节有没有落盘」全绿,但那不是用户的标准(「我眼睛看着快不快」)。
+  **测试全绿 + 用户说慢 = 我的验收标准错了。** 定标准先问:这标准和用户体感是同一件事吗?
+- 「有动画反而显得快」:动效要**衬托**内容出现(骨架→淡入),不能**挡着**内容出现。
+- 见 [别过度解读需求](methodology.md)、[测试必须先红](methodology.md)。
+
+---
+
+### 前端副本要靠广播
+
+> 原记忆:`frontend-state-copies-need-broadcast.md` · 类型:`project`
+>
+> ⚠️ 本条含 Flutter 时代 / `native-poc/` 时代的路径。2026-07-19 仓库重构后这些路径已作废(换算表见 [仓库结构(2026-07重构后)](build-release.md))。**原文按要求原样保留,未做改写。**
+
+`native-poc/src/` **没有任何 store / context / 事件总线**(zustand/redux/jotai/emit 全零命中)。
+真源在 Rust,Sidebar 和 ServersPage 各持一份 `useState<AccountInfo[]>` 副本,互不知情。
+Sidebar 还在 Shell 的 `key` 容器**之外** → 翻页不重挂载,陈旧 state 能活到关程序。
+
+修法(2026-07-15,commit 396c4473):在 `api.ts` 的 `invoke` 包装层拦截 ——
+`ACCOUNT_MUTATIONS` / `ITEM_MUTATIONS` 里的命令**成功后**自动广播
+`lp:accounts-changed`(window CustomEvent)+ 清详情缓存;订阅用 `onAccountsChanged`。
+
+**Why:** 原来的 bug 就是「靠调用点自觉」造成的 —— ServersPage 改名称/备注/图标/密码走
+`onDone(false)`,压根不通知外层,侧栏永远显示旧名字。**让「改数据」这个动作本身成为信号,
+谁都忘不掉。** api.ts 本来就是「前端调核层的唯一入口」,天然是收口点。
+
+**How to apply:**
+- 新增会改账号表的命令 → 名字加进 `ACCOUNT_MUTATIONS`。**漏加 = 侧栏不刷新且不报错。**
+- 名字必须和 `generate_handler!` 里注册的一致。`src-tauri/src/lib.rs` 的
+  `api_contract_tests` 会跨语言比对(我就写错过一次:`add_source_server` 不存在,真名 `source_login`)。
+- 详情缓存**整体清**,别按 itemId 定点清:标记分集已看变的是**剧集**的 `children[].played`;
+  `report_progress` 压根没有 itemId 参数。见 [「待接」多半是谎](methodology.md)。
+
+---
+
+### 正则筛选前端接线
+
+> 原记忆:`regex-filters-frontend-wiring.md` · 类型:`project`
+
+2026-07-30 修。用户报「按官网 /wiki/regex-filters 写好了却匹配不了」,PC + 手机都不行。
+**核层 crates/core/src/media.rs 一直是对的**(431 条 Rust 测试全绿),断的是三根前端线:
+
+1. **版本正则从上线起一次都没跑过**(PC/手机/TV)。三个详情页的版本选择器初值是
+   `versions[0]`,起播时无脑把它的 id 传下去 → 核层 `resolve_stream` 见
+   `media_source_id=Some(..)` 就走「手动指定」分支,正则整段跳过。
+   前端从来没给过「用户没手动选」这个状态。**修法:没挑过传 null,显示仍回落第一条**
+   (desktop `verIdx: number|null`;mobile 加 `verPicked`;TV 用 `picks.ver` 而非 `cur`)。
+2. **字幕/音频正则匹配了个空表**。`apply_prefs` 拿的是**当时的** mpv track-list;
+   桌面只在起播后 1.2s 打一枪(网络流那会儿内封轨还没 demux),手机/TV 一次都不调。
+   修法放进 `ui/shared/track-poll.ts` —— 轨表每变一次就 applyPrefs,稳定即停,**一处修三端**。
+3. **手机端「高级筛选规则」根本没落库**:保存只 `setPr` 改 React state,从没调
+   `setTrackRegexes`,关掉面板就没了且不报错(同 [effect 依赖 vs DOM 时序](ui-mobile.md) 里
+   「手机端表单的服务器名称从来没落库」一个模式)。
+
+##### 教训
+- 「核层有单测 + 文档写得对」≠ 功能能用。这类 bug 的落点是**发给核层的 invoke 参数**,
+  只有真渲染 + 真点击 + 记录 invoke 才照得到。测试:`ui/shared/regex-filters.check.mjs`
+  (CDP 驱动 dist,假后端记录 `window.__CALLS`),`ui/shared/track-poll.test.mjs`(npx tsx)。
+- CDP 驱动两端时踩的两个**测试自身**的坑:桌面壳缺
+  `__TAURI_INTERNALS__.metadata.currentWindow` 会整页白板(所有断言以「找不到元素」形式红,
+  像是被测功能坏了);React 的 `onBlur` 挂的是 **focusout**,派 `blur` 不冒泡进不了 React。
+  手机端是真页面栈不是 history,`history.back()` 退不回去 —— 每个场景重新 navigate 最省事。
+- 见 [「待接」多半是谎](methodology.md) [测试必须先红](methodology.md) [挂真机 CDP 调试](methodology.md)
+
+---
+
+### 界面在撒谎:当前版本
+
+> 原记忆:`ui-lies-about-current-version.md` · 类型:`project`
+
+2026-07-30。修完 [正则筛选前端接线](ui-desktop.md) 后用户仍报「根本不行」。
+挂 CDP 连他真服(105°)实测发现:**起播其实早就对了**(版本正则 `喵萌` → mpv 真的在放
+mediasource_28909),但界面上**每一处**都在说在放第一条:
+
+1. 详情页「版本 · xxx」= `versions[0]`
+2. 播放器版本面板高亮 = `setCurMsId(id => id ?? vs[0]?.id)`,连「更多 · 播放信息」
+   的分辨率/码率/大小也全是第一条的
+3. 面板每行只画「1080p · MP4 · 3.6M」——那个库四条版本分辨率一模一样、差的是字幕组,
+   **就算高亮对了也分辨不出来**
+
+##### 解法
+核层直接标结论,别让前端自己猜:`MediaVersion.preferred: bool`,由 `media_versions()`
+用**和 `resolve_stream` 同一个 PlaybackInfo 响应 + 同一套 `source_match_text` + 同一个
+`pick_index`** 算出来 → 「显示哪条」和「播哪条」结构上不可能分叉。
+前端唯一算法 `defaultVersion(vs)`(ui/shared/api.ts),三端详情页/播放器面板共用。
+
+##### 教训
+- **「功能没生效」有两类根因:功能真没跑,和功能跑了但界面在撒谎。** 第二类先看不出来,
+  因为所有单测和 e2e 断言的都是「发出去的命令对不对」,没人断言「界面显示的和实际在放的一致」。
+- 用户的判据永远是屏幕,不是 invoke 参数。凡是「核层自动挑了什么」的功能,
+  UI 必须显示核层挑的结果,**不能自己回落 `[0]`**。
+- 查法:CDP 连真机 → `mpv_get('path')` 里的 `MediaSourceId` 是唯一真相,拿它和界面比。
+  见 [挂真机 CDP 调试](methodology.md)。
+- 同一次还揪出第四处版本旁路(TV 集详情页 `play(..., curVer?.id ?? null)`)——
+  同类问题要 grep 干净,见 [正则筛选前端接线](ui-desktop.md)。
+
+---
+
+### flex 挂错层 + auto-fill 陷阱
+
+> 原记忆:`css-flex-child-autofill-trap.md` · 类型:`feedback`
+
+排行榜「每行只有一个图 而且图巨大」(用户 2026-07-16 骂「0 分」)的**真因不是审美,是布局 bug**:
+
+```html
+<div class="rkwrap">        <!-- display:flex -->
+  <div class="rkrail">…</div>
+  <div>                      <!-- 裸 div ← 真正的 flex 子元素 -->
+    <div class="rankgrid">…  <!-- flex:1;min-width:0 写在这 → 无效 -->
+```
+
+两条规律,PC 端排版出怪状先查这两个:
+1. **`flex:1`/`min-width:0` 只对 flex 容器的直接子元素生效**。中间夹一层没 class 的 wrapper,这两条就是死的 —— 且**不报错**,只是布局静默变形。
+2. **`repeat(auto-fill, minmax(Npx,1fr))` 在不定宽(shrink-to-fit / max-content)下按规范只解析出 1 列**,`1fr` 再摊成 max-content = 原图尺寸。于是症状恰好是「一行一张 + 巨大」。看到这个症状 = 网格没拿到确定宽度。
+
+**Why**:这类 bug 长得像「样式没调好」,会被误当审美问题去改 gap/尺寸,越改越歪。
+**How to apply**:给 flex 子元素一个真 class(`.rk-main{flex:1;min-width:0}`),网格自己只管 `grid-template-columns`。另:给 `<img>` 加 `position:relative;z-index:1` 做淡入后,同卡片内的角标必须显式 `z-index:2`,否则被图盖住(`.cal-time` 早就踩过)。
+
+同类:[别过度解读需求](methodology.md)(写死的 aspect-ratio + max-height 双向锁)、[「不秒加载」是加载结构不是动画](ui-desktop.md)(症状归因归错层)
+
+---
+
+### 顶栏下拉点不动
+
+> 原记忆:`cbar-dropdown-scrim-stacking.md` · 类型:`project`
+
+**PC 顶栏(.cbar)里的下拉菜单点不动 / 按钮要点两下** —— 不是事件没绑，是被透明背板盖了。
+
+`.cbar { position: relative; z-index: 2 }` 开了个**层叠上下文**：里面的 `.dd { z-index: 30 }`
+对外只等于 2。关下拉用的 `.lib-ddscrim` 原来是 `.cbar` 的**兄弟节点**、`z-index: 29`，
+在根层叠上下文里 → 29 > 2，背板盖住整条顶栏，下拉项和右侧所有按钮点下去命中的全是背板。
+
+**修法**（2026-07-19，LibraryPage.css + Library/FavoritesPage.tsx）：
+背板**渲染进 `.cbar` 内部**，`z-index: 1`；`.cbar .push, .lib-ddwrap` 抬到 `z-index: 2`。
+同一个上下文里比较才有意义：控件在上、背板在下、顶栏之外仍由背板接管关闭。
+
+**查法（关键，别靠肉眼)**：无头 Edge 加载真实构建产物 CSS + 一段最小 DOM，用
+`document.elementFromPoint(元素中心)` 报出「点下去命中的到底是谁」：
+```
+msedge --headless=new --disable-gpu --dump-dom --virtual-time-budget=3000 file:///.../probe.html
+# 把结果写进 document.title 再 grep <title>
+```
+修之前全是 `"scrim"`，修之后全是 `"SELF"` —— 先红后绿，见 [测试必须先红](methodology.md)。
+同类症状（右键菜单/toast 偏位）另有一因，见 [transform 关键帧毁 fixed 定位](ui-desktop.md)。
+
+---
+
+### transform 关键帧毁 fixed 定位
+
+> 原记忆:`transform-keyframe-breaks-fixed.md` · 类型:`project`
+
+2026-07-19:右键菜单飘到隔壁条目、`.toast` 的 `left:50%` 不在屏幕中间 —— 根因不是 `clientX/Y` 算错,
+是 `.page` 上的 `animation: enter ... both`,而 `@keyframes enter` 里有 `transform: translateY(8px)`。
+
+**带 transform 关键帧的动画会让元素成为 `position:fixed` 的包含块,Chromium 在动画播完后依然保持。**
+实测(headless Edge,fixed 元素 `left:100px`,侧栏 200px):
+
+| 祖先动画 | fixed 子元素实际 left |
+|---|---|
+| 无动画 | 100 ✓ |
+| 只有 opacity 的关键帧 | 100 ✓ |
+| 含 transform + `both` | 300 ✗ |
+| 含 transform + `backwards` | 300 ✗ |
+
+**`fill-mode` 换成 `backwards` 不管用**(我第一版就是这么改的,靠上表才发现是错的)。
+唯一解:页面级容器的入场动画只用 `opacity`(现为 `@keyframes page-enter`),位移留给卡片
+(`.enter`,卡片里不放 fixed 浮层所以不咬人)。守卫测试
+`page_entrance_animation_must_not_use_transform`(src-tauri/src/lib.rs)钉住这条。
+
+`.page` 自己肉眼毫无异常(transform 终值 `none`),只有 fixed 后代遭殃 —— 所以这类 bug
+一定要用真浏览器量 `getBoundingClientRect`,别靠读 CSS 推理。见 [本周看板定案+PC视觉自检](methodology.md)。
+DetailPage 早就 `createPortal` 到 body,所以它一直是对的 —— 同一份 `.ctxmenu` 有的准有的不准,
+这个反差本身就是线索。
+
+---
+
+##### 变体:`will-change: transform` 同样建包含块,而且能把滚动层压成 0 高(TV 播放页,2026-07-22)
+
+用户报「播放页上下底栏根本没出现,更不用说选项卡」。真凶是 `ui/tv/pages/PlayerPage.tsx` 的嵌套:
+
+```
+.osd (absolute, inset:0)
+  └ FocusColumn → .vscroll → .inner   ← `.vscroll > .inner { will-change: transform }` + 内联 translateY
+        └ .osd-bot (position:absolute; bottom:56px)   ← 唯一子元素,而且是 out-of-flow
+```
+
+两件事叠起来才炸:
+1. **`will-change: transform` 让 `.inner` 成为绝对定位后代的包含块**(和上面那条动画的机制同源 ——
+   不是只有真的 transform 值才建包含块,`will-change` 声明了就算)。
+2. `.inner` 唯一的子元素是 out-of-flow 的 → **`.inner` 高度塌成 0**。
+
+于是 `bottom:56px` 是对着一个 0 高、位于 y=32 的盒子解析的 → `top:-232px`。
+实测(无头 Edge 量真 DOM):`.osd-bot` rect = `y −200, h 176`,**整条底栏在视口上方 200px 外**。
+`.osd-top` 同页却完全正常 —— 因为它没被包进 FocusColumn。
+
+**A/B 铁证是 `offsetParent`**:原样 = `inner`;把 `.inner` 的 `will-change/transform` 去掉后 = `osd`,
+rect 立刻变成 `top 848 / bottom 1024`。**光看 rect 只知道位置不对,看 offsetParent 才知道错在谁身上。**
+
+**修法不是加 `!important` 去压内联 transform**(那是和 `Focus.tsx` 写的内联样式打架),
+而是**把嵌套摆正**:`.osd-bot` 提到 `FocusColumn` 外面当外层,焦点列放进它里面。
+这样 `.osd-bot` 直接对着 `.osd` 定位,顺带也躲开 `.vscroll` 那对 `padding:0 32px / margin:0 -32px`
+横向外扩。**全站只有这一处**是「绝对定位元素直接挂在 `.inner` 下」,不用泛化。
+
+教训:滚动容器(`.vscroll > .inner` 这类带 will-change 的位移层)里**不要放绝对定位的元素** ——
+它既改了参照系又可能塌成 0 高,两个错误互相掩护,读代码完全看不出来。
+排查过程的教训见 [本周看板定案+PC视觉自检](methodology.md) 末段(我先往 Android 合成层猜了两轮)。
+
+---
+
+### 「黑屏」多半是 JS 崩了
+
+> 原记忆:`transparent-window-crash-looks-like-blackscreen.md` · 类型:`project`
+
+native-poc(PC)的 Tauri 窗口是**透明的**(为了露出垫在下面的独立 mpv 顶层窗口)。后果:
+
+**React 任何一处渲染期抛错 → 整棵树卸载 → 屏幕上就是一片黑,零信息** —— 和「视频没出画」「合成出问题」长得一模一样。用户只会报「黑屏」。
+
+→ **看到「某页黑屏/打不开」,先怀疑 JS 渲染崩溃,别先去查 mpv/合成。** F12 Console 有真堆栈。
+→ 已加 `src/app/PageBoundary.tsx`(class 组件,React 至今无 hooks 版错误边界),包在 Shell 的 `.page` 里,`resetKey={pageKey}` 换页重置。现在一页崩只崩一页,侧栏还在,错误原文写在脸上。它只吃**渲染期**抛错;事件/异步里的错仍要各自 try/catch。
+
+##### 实际案例(2026-07-16,追剧日历)
+`groupByWeek(entries, week)` 的 weekday 分支是 `cols[e.weekday - 1].push(...)` —— 按**绝对星期几**索引,**写死 7 列**。我做「本日」视图时图省事传了 `[theDay]`(长度 1)→ weekday≥2 的条目全 `cols[undefined].push` → TypeError → 黑屏。
+教训:**复用一个函数前要读它,别信自己「它是通用的」的直觉**。我当时还跟用户吹「归组规则一份,不写第二套」——那句话本身就是 bug。
+现在:`week.length !== 7` 当场抛断言;日视图 = 跑 theDay 所在**整周**再取 `weekdayIndex(theDay)` 那一列。
+
+##### 前端纯逻辑可以真测,别再抄副本
+纯逻辑拆到 `src/pages/calendar-grouping.ts`,`scripts/check-calendar-grouping.mjs` 用 **Node 24 原生剥类型直接 import 真模块**(`node scripts/check-calendar-grouping.mjs`,零新依赖,前端没有 vitest)。
+反向注入验证过会红(去掉断言→复现出真实的 `Cannot read properties of undefined (reading 'push')`)。
+⚠️ 注入过一次**没生效**:源码是 `"￿"` 双引号,我 python 里写单引号,replace 静默没匹配 → 测试"通过"了。**注入后必须 assert 替换串真的匹配上**,见 [测试必须先红](methodology.md)。
+
+相关:[测试必须先红](methodology.md)、[重构决策(已定+PoC已验)](decisions.md)(透明窗口垫 mpv 的合成方案)、[预取代理死锁(已修)](network.md)(另一类「黑屏」:真的是流的问题)
+
+---
+
+### PC 窗口 chrome
+
+> 原记忆:`pc-tauri-window-chrome.md` · 类型:`project`
+
+PC 端(native-poc,Tauri v2 + React)的窗口 chrome:
+
+- **全屏按钮「点了没用」的真因**:`capabilities/default.json` 只有 `core:default`,其中 `core:window:default` **只含 getter**,不含 `allow-set-fullscreen`。JS 调 `getCurrentWindow().setFullscreen()` 被权限拦截抛错,又被 `withFsHidden` 的 `catch{}` 吞掉 = 静默失效。**任何 window 写操作都要在 capabilities 里逐个放行**。
+- **自绘标题栏**:`tauri.conf.json` 设 `decorations:false`,组件 `src/app/Titlebar.tsx`(fixed 顶栏,`data-tauri-drag-region` 拖动,minimize/toggleMaximize/close 按钮)。需权限:`allow-minimize / allow-toggle-maximize / allow-is-maximized / allow-close / allow-start-dragging / allow-set-fullscreen`。内容整体下移 `var(--titlebar-h)`(在 `.app-surface`/`.login-wrap` 加 padding-top)。**播放时不渲染标题栏**(`{!playing && <Titlebar/>}`),让 mpv 全屏且不与播放器顶栏冲突。
+- **内封音轨/字幕枚举**:mpv 的 `tracks()` 本身对,但网络流起播 1.2s 内还没 demux 完 track-list 为空 → 只拉一枪必然空。App.tsx 用 `[playing]` effect 每 700ms 轮询。**★ 2026-07-16 关键修:不能「拿到第一次非空就停」** —— 音轨常先于字幕 demux 出来,停在只有音轨那帧,内封**字幕永远进不了面板**(用户两轮都报字幕不显示,根因在此)。改成每轮都 `setTracks`,直到轨数**连续两次不变**(demux 稳定)或 ~14s 兜底才停。切轨后重拉刷新 selected 高亮(chooseTrack)。若改完仍无字幕 = Emby 直传流没内封字幕(它把字幕当独立 stream 发),要另做「拉 Emby 字幕 URL → sub-add」才行。
+- **播放页面板浅/深色**:OSD 上下栏(`.p-top/.p-bot`)压在视频上,固定深底不随主题;但右侧滑出**面板**(`.p-slide` 及子元素)2026-07-16 改走主题 token(`--panel/--ink/--line`),跟随浅/深色。别把两者混为一谈。
+- **视频未出画面**:mpv 独立窗口在网页层下,起播到第一帧之间盖 `.p-loading`(纯黑+spinner),`ready` 由「status.time>0」置真、4s 兜底,免得露上一段残帧。
+- **全屏退出**:mpv 独立窗口靠 `sync_video`(WindowEvent::Resized/Moved/Focused)对齐;全屏进/出连发多个 Resized,**末帧几何要 settle 才准** → lib.rs 加了「代际防抖 + 220ms 延时补一发 run_on_main_thread 重同步」,否则退全屏后 mpv 窗口停在全屏尺寸压在上面像没退出。
+
+见 [「待接」多半是谎](methodology.md)(后端领先前端)、[「不秒加载」是加载结构不是动画](ui-desktop.md)。
+
+---
+
+### Win最大化控制栏消失
+
+> 原记忆:`windows-maximize-overhang.md` · 类型:`project`
+>
+> ⚠️ 本条含 Flutter 时代 / `native-poc/` 时代的路径。2026-07-19 仓库重构后这些路径已作废(换算表见 [仓库结构(2026-07重构后)](build-release.md))。**原文按要求原样保留,未做改写。**
+
+Windows 自绘标题栏(TitleBarStyle.hidden)窗口最大化时,系统默认把窗口四周各外扩约 8px
+(缩放边溢出),自绘的最小化/还原/关闭按钮被顶出屏幕 → 用户「最大化后控制栏没了」。
+
+原本只靠 window_manager 的 WM_NCCALCSIZE(adjustNCCALCSIZE 按 rcWork 内缩)补偿,跨机器不稳。
+
+**根治:** `windows/runner/win32_window.cpp` 的 `WM_GETMINMAXINFO` 里把最大化尺寸钉到显示器
+**工作区** rcWork(ptMaxSize/ptMaxPosition),从根上消掉溢出。只钉 ptMaxSize/ptMaxPosition,
+`ptMaxTrackSize` 保持默认(虚拟屏),否则会卡住原生全屏那条 `SetWindowPos(rcMonitor)` 铺满整屏
+(见 [Windows 无画无声"加载不出来"](player-mpv.md) 邻近的全屏 NCCALCSIZE 逻辑)。
+
+排查踩坑:用 PowerShell 截图验证时,PS 进程默认 DPI-unaware,CopyFromScreen 坐标被虚拟化 →
+截出来内容偏移/按钮"消失"是假象。必须先 SetProcessDpiAwarenessContext(-4) 再截图才准。
+
+无关但同批:媒体库「更新时间」排序 key 从 DateCreated 改 DateLastContentAdded(剧集最新一集
+入库时间,DateCreated 只是首次入库≈首播);三端 library_filter_bar / tv_library_screen。
+
+---
+
+### PC 快捷键 + mpv.conf
+
+> 原记忆:`pc-shortcuts-and-mpvconf.md` · 类型:`project`
+
+**2026-07-27 落地(commit eb5c4526)。** 都在 PC 端(`ui/desktop`)。
+
+##### 自定义 mpv 配置
+
+**libmpv 默认 `config=no` —— 一个配置文件都不读**,这是它和 mpv 命令行最大的行为差异。
+所以不用自己写 ini 解析器:在 `mpv_initialize` **之前**设 `config=yes` + `config-dir=<目录>`,
+mpv 会自己解析 `<目录>/mpv.conf`(连 `input.conf`、`scripts/` 一起)。
+
+- 目录:`<数据根>/data/mpv/`,helper 在 `crates/mpv/src/lib.rs`(`user_config_dir` / `read_user_conf` / `write_user_conf`)
+- 命令:`get_mpv_conf` / `set_mpv_conf`,UI 在 设置 › 播放器 底部
+- **配置文件在 initialize 阶段解析,晚于我们那串 set_option → 用户写的同名项会覆盖默认值**。
+  写坏了 `mpv_initialize` 直接失败,错误串里必须点名 mpv.conf(否则没人想得到是自己刚写的)
+- 生效点是 `Player::new`,而播放器是**进程启动时建一次** → 改完必须重启应用
+- 验证手法:conf 写 `volume=42`,重启后 `player_opts` 回读 42(别只看文件写没写进去)
+
+##### 快捷键
+
+`ui/desktop/lib/shortcuts.ts`:按键 → combo 字符串 → 命令 id → 谁注册谁执行,**全 app 只有一条 keydown**。
+`useCommand(id, fn, enabled)` 注册(内部用 ref 包一层,否则播放页 250ms 轮询会把几十条命令反复卸载重装)。
+`setScope("app"|"player")` 隔离作用域。改键存 localStorage `shortcuts:v1`,**只存改过的那几条**
+(全存的话以后加命令,老存档会把新命令覆盖成「没有键」且不报错)。
+
+**「所有能点的按钮都要能用快捷键」是靠两层满足的,别试图逐个起名**:
+扫下来 160+ 个动作,而且每加一个按钮就得有人记得回来补表,漏了不报错。
+第二层 = `components/HintOverlay.tsx`,按 `;` 现场扫当前屏幕的可点元素发字母标签(Vimium 式)。
+两个坑,都只有挂真机才现形:
+
+1. **可见性必须沿祖先链查**。海报卡上的播放/已看/收藏钮装在 `.overlay` 里(悬停才 opacity 0→1),
+   按钮**自己**的 opacity 一直是 1 —— 只看自己的话,首页 35 个标签全是看不见的悬停钮,
+   一个都打不开条目。
+2. **不能「有子候选就丢父」**。卡片里塞着几个小动作钮,无条件留子会让整张卡点不开。
+   规则改成:子候选面积 ≥ 父的 90% 才算「父只是个壳」。
+3. **新起的全局 CSS 类名必须先 grep**。第一版把提示标签叫 `.hint` ——
+   而这仓库里 `.hint` 早就是设置页/添加服务器页所有说明文字的类名(66 处),
+   全 app 的描述当场变成 `position:absolute` 的黄底浮空块。
+   **tsc / vite / cargo test 全绿**,CSS 类名撞车没有任何工具会报;
+   我只截了提示层自己的图,没回头看设置页 —— 改了全局样式表就必须逐页过眼
+   (见 [本周看板定案+PC视觉自检](methodology.md))。现叫 `.hintkey`。
+
+##### 进度条在服务器上乱跳的根因(已修,有单测)
+
+`apply_seek_latch` 原来吃的是 `sticky_f64("time-pos")`(读不到就沿用上次),
+而**粘性值在 seek 期间恰好等于闩的目标位**(`latched_time` 每拍把目标写回 `last_pos`)——
+一比就相等,闩在第一次 time-pos 读不到时当场自解除,下一拍 mpv 报的还是旧位置。
+
+- 本地文件 seek 一拍就完事、time-pos 从不缺席 → **完全看不出问题**;网络流上 time-pos 频繁不可用 → 乱跳
+- 修法:闩只吃**这一拍真读到的** `try_f64`;并引入 mpv 的 `seeking` 属性 ——
+  见过 yes 再回到 no 才算落地,且 **seek 进行中不计超时**
+  (慢服务器 seek 要 5 秒,2.5 秒超时一到就放行旧值 = 「画面回退、进度反而前进」的另一半)
+- 前端配套:松手后 `await seekApi` 再放开 `seeking`,不留「已经不拖了但闩还没建」的空窗
+- 真服实测:seek 2400s,服务端 **5.1 秒**才落地,期间读数稳在 2400.00 不抖
+
+##### 弹幕:只剩网页 Canvas 一条路(mpv/ASS 已整条删除)
+
+mpv 那条路占 `secondary-sid`,和双语字幕抢同一个位子 —— 一个设置项换来两个功能互斥。
+当初换 mpv 是为了治「倍速下弹幕卡」,而真因是网页层插值漏了倍速因子(早已修好)。
+**2026-07-27 用户拍板全删**:`danmaku/ass.rs`、mpv crate 的 `set_danmaku_sub` 一族、
+两个壳的 `danmaku_attach/detach/visible`、api.ts 的三个导出,全部不在了。别再去找。
+
+组件在 **`ui/shared/Danmaku.tsx`**(PC + 手机共用)。手机播放页原先只有一个调
+`danmakuVisible` 的按钮而**从来没人加载过弹幕** —— 那开关切的是 mpv 次字幕可见性,
+点了要么没反应要么关掉用户的双语字幕;现已真接 `danmaku_auto_load`。
+接这一层必须补 `TimeSync` 且**带 speed**(轮询之间靠墙钟外推),
+倍速面板 / 长按 2× 都要同步那个 ref,漏了就是「倍速下弹幕一直被拽回去」。
+
+**脚本批量删代码的教训**:按注释锚点定位(往前找最近的 `/*`)跑飞了,一刀砍掉 android
+978 行不相干命令(git checkout 回滚重做)。批量替换后必须回读校验 + 对删除区间下断言。
+
+**Why:** 用户 2026-07-27 一次提的六件事;其中进度条那条是「本地跟手、服务器上必现」的典型
+——「只在一种环境下现形」几乎总意味着有个判据在另一种环境下恒真。
+**How to apply:** 见 [挂真机 CDP 调试](methodology.md)(本次全部结论都是挂真 exe 用 CDP 打出来的)、
+[测试必须先红](methodology.md)(两条 seek 闩单测都做过反向注入验证)、[每次都要出可测 exe](methodology.md)。
+
+---
+
+## 跨域交叉引用
+
+这些条目和本领域强相关,但正文放在别的文件里(一条经验只存一份正文):
+
+- [PC 播放页独立窗口](player-mpv.md) — 播放页已拆成独立 Tauri 窗口
+- [播放窗标题栏 + 换片黑屏](player-mpv.md) — 播放窗常驻标题栏与换片黑屏
+- [本周看板定案+PC视觉自检](methodology.md) — 无头 Edge 渲染真 DOM 的视觉自检法
+- [挂真机 CDP 调试](methodology.md) — 挂真实 exe 用 CDP 验证,别拿合成 DOM 当证据
+- [首登闸口+源表单共用](sources.md) — 首登闸口与数据源表单共用一份实现
+- [PC 绿色包单一数据根](build-release.md) — PC 是绿色包,落盘路径唯一出口是 paths.rs
