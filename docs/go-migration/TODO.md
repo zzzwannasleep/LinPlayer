@@ -236,10 +236,18 @@
 
 最大的架构风险。见 `SPEC.md` §7.3。
 
-- [ ] **S1.1** 搭最小 Avalonia 工程 + libmpv,走路径 A(`--wid` 子 HWND)
-  - 判据:窗口里出画面;**并明确记录 Avalonia 内容能否盖在视频上**(预期:不能)
-- [ ] **S1.2** 走路径 B:mpv render API(OpenGL)→ 纹理 → Avalonia 合成面
-  - 判据:视频与一个半透明的 Avalonia 矩形同屏,矩形在视频**之上**
+- [x] **S1.1** 路径 A(`--wid` 子 HWND)是否可用 ✅ **已裁决:不做**
+  - 原生子窗口永远画在 UI 内容之上(airspace),拿不到「UI 盖在视频上」;
+    唯一出路是用 mpv 自己的 Lua OSD —— **已被明确否决**。见 `SPEC.md` §7.3
+- [ ] **S1.2** 🔴 **Avalonia 侧接上路径 B**(mpv 侧已验通过,剩这一半)
+  - 已知:mpv 渲进自建纹理 FBO **已实测通过**(SPIKE-1a/1b),含 PGS 字幕与硬解
+  - 判据:用 `OpenGlControlBase`,`OnOpenGlRender` 里按 `SPEC.md` §7.2 通道 B 的三步调
+    (`lp_gl_wants_redraw` → `lp_gl_render` → `lp_gl_swapped`),窗口里出画面
+  - 判据:**一个半透明的 Avalonia 控件叠在视频上,可见且不闪** —— 这是路径 B 的全部意义
+  - 判据 🔴:**`lp_gl_swapped` 不许省**。反向验证:注释掉它,断言 4K60 帧率明显掉
+    (漏了它实测从满帧掉到 18fps,且表现得像"架构性能不行")
+  - 判据:在真 Avalonia 控件里复量 CPU —— **不要拿本项目裸 ctypes harness 的数替代**
+    (Avalonia 在 Windows 上默认走 ANGLE,harness 里 ANGLE 比 WGL 高一档)
 - [x] **S1.2a** 路径 B:图形字幕(PGS/SUP)能不能合成 ✅ **已结题 2026-08-30**
   - 结论:**能**。渲进自建纹理 FBO 也一样,6 个用例噪声基线全 0、字幕信号 2.2~2.8 万像素
   - 「纹理导致 PGS 不显示」这条**归因不成立**,B 未被 PGS 排除

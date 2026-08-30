@@ -17,7 +17,7 @@
 | §5.1–5.3 | 导出函数签名、调用协议、内存所有权 | 「偶发崩溃、复现不了」 |
 | §5.10 | panic 边界 | 进程整个消失,三端的 catch 都拦不住 |
 | §5.11 | 事件队列与背压 | 要么 OOM,要么某个命令永远没有回音 |
-| §7.2 | 视频通道的 surface 交接 | use-after-free |
+| §7.2 | 视频通道(两条:surface 句柄 / GL 渲染) | use-after-free;漏 `lp_gl_swapped` 会伪装成「架构性能不行」 |
 
 其余部分都可以边做边改。
 
@@ -35,7 +35,7 @@
 |---|---|---|
 | G1 | 业务逻辑写一次,五端共用 | 三端 UI 代码里 0 行 Emby / 网盘 / 弹幕 / 插件协议代码 |
 | G2 | 每个平台的 UI 都是该平台的最优解 | Android 用 Compose,Apple 用 SwiftUI,Windows 用 XAML 生态 |
-| G3 | 视频与 UI 在**同一个顶层窗口内**合成 | 不存在"两个顶层窗口手动对齐几何"这种东西。**代价已量化**:Windows 上换掉零拷贝硬解,4K24 核显 CPU 3%→~12%(§7.3) |
+| G3 | 视频与 UI 在**同一个顶层窗口内**合成 | **已定走 §7.3 路径 B**。不存在"两个顶层窗口手动对齐几何"这种东西;代价是 Windows 上换掉零拷贝硬解,4K24 核显 CPU 3%→~12% |
 | G4 | Android TV 遥控器焦点由框架提供 | 不再自己实现空间导航算法 |
 | G5 | 插件生态零改动存活 | 现有插件包不重新打包即可运行 |
 
@@ -235,9 +235,12 @@ UI 启动 --> lp_abi_version()
 
 ### 5.1 导出函数表
 
-**全部导出函数只有 8 个。** 少即是对 —— 每多一个导出,三端就多一份绑定要写、要测、要对齐。
+**13 个导出,分三组。** 少即是对 —— 每多一个导出,三端就多一份绑定要写、要测、要对齐。
+之所以是 13 而不是 8:**视频通道有两条**(§7.2),桌面端走 GL 渲染那条要 5 个。
+每一个都有理由,理由写在注释里;删任何一个之前先读那条理由。
 
 ```c
+/* ============ 第 1 组:控制通道(7 个)============ */
 // ABI 版本。**必须在 lp_init 之前调**,不匹配就不要 init。见 §5.0。
 int32_t  lp_abi_version(void);
 
@@ -260,12 +263,43 @@ char*    lp_next_event(int32_t timeout_ms);
 // 释放 lp_next_event 返回的指针。
 void     lp_free(char* ptr);
 
-// 把一个平台 surface 句柄交给播放器。见 §7.2。
-// kind: 0=none(解绑) 1=ANativeWindow* 2=HWND 3=X11 Window 4=CAMetalLayer*
-int32_t  lp_set_surface(int32_t kind, int64_t handle, int32_t width, int32_t height);
-
 // 关停。之后所有调用返回 E_SHUTDOWN。阻塞直到落盘完成。
 void     lp_shutdown(void);
+
+
+/* ============ 第 2 组:视频通道 A · surface 句柄(1 个)============
+   给原生合成能把 UI 画在视频上的平台用:Android(SurfaceView)、Apple(CAMetalLayer)。
+   桌面端不用这条,见第 3 组。 */
+
+// kind: 0=none(解绑) 1=ANativeWindow* 4=CAMetalLayer*
+// 解绑(kind=0)**必须阻塞到 mpv 真的不再往里画**,否则是 use-after-free。
+int32_t  lp_set_surface(int32_t kind, int64_t handle, int32_t width, int32_t height);
+
+
+/* ============ 第 3 组:视频通道 B · GL 渲染(5 个)============
+   Windows / Linux 用。UI 持有 GL 上下文,核心层把画面渲进 UI 给的 FBO。
+   ★ 下面 5 个函数**全部**必须在「持有该 GL 上下文、且上下文已 current」的那一个线程上调用。
+     和事件线程(lp_next_event)必须是不同线程。 */
+
+// 绑定 GL 上下文,建 mpv render context。
+// get_proc_address 签名:void* (*)(void* ctx, const char* name)
+// ★ 这是 §5.3「禁止传函数指针」的**唯一显式例外**,理由见 §5.3。
+int32_t  lp_gl_init(void* get_proc_address, void* get_proc_address_ctx);
+
+// 有没有新帧要画。非 0 = 该重绘。对应 mpv_render_context_update。
+// UI 的每帧回调里先问这个,再决定要不要 lp_gl_render —— 暂停时它一直返回 0,不白烧 GPU。
+int32_t  lp_gl_wants_redraw(void);
+
+// 渲一帧到宿主给的 FBO。fbo=0 表示默认帧缓冲。
+int32_t  lp_gl_render(uint32_t fbo, int32_t width, int32_t height, int32_t flip_y);
+
+// 报告「上一帧真的上屏了」。**渲完并 present 之后必须调**。
+// ★ 漏了它 mpv 的帧率控制是瞎的 —— 实测 4K60 从满帧掉到 18fps,
+//   而且表现得像「架构性能不行」。见 spikes/SPIKE-1b-zero-copy.md §7 第 3 条。
+void     lp_gl_swapped(void);
+
+// 解绑并销毁 render context。**必须在销毁 GL 上下文之前调,且阻塞返回。**
+void     lp_gl_uninit(void);
 ```
 
 **没有 `lp_call_sync`。** 同步与异步两套路径 = 两倍的错误模式。全异步,一条路。
@@ -316,6 +350,16 @@ C# `TaskCompletionSource`、Swift `withCheckedContinuation`)。
 - 传进 Go 的 `const char*`(cmd / args_json / config_json)在调用返回后即失效,
   Go 侧必须在 `lp_call` 内**立刻**拷贝成 Go string,不许把指针带进 goroutine。
 - **禁止**任何方向传结构体指针、回调函数指针、Go 指针。
+
+  > **唯一例外:`lp_gl_init` 的 `get_proc_address`。**
+  > mpv 的 render API 强制要求一个「按名字解析 GL 函数」的回调,没有替代方案 ——
+  > 宿主自己解析完再传一张表也不行,因为要解析哪些函数只有 mpv 知道。
+  >
+  > 这个例外的边界必须卡死:
+  > · 只有这一个函数指针,由**宿主提供、宿主拥有**,核心层只在 `lp_gl_init`
+  >   与其后的渲染调用中使用,**不存进任何长生命周期结构**
+  > · 它必须在 `lp_gl_uninit` 返回后立刻失效,宿主可以随后卸载 GL 库
+  > · 回调里**不许调用任何 `lp_*` 函数**(重入 = 死锁)
 
 > 违反这三条中任何一条,表现都是"偶发崩溃、复现不了"。
 > 这是本文档里唯一必须写进三端 code review checklist 的一节。
@@ -627,36 +671,86 @@ ASS 字幕的字号要用 `sub-scale` 而不是 `sub-font-size`;seek 闩不能�
 双显卡要靠导出符号钉独显;302 跳转流要删 `multiple_requests=1`……
 这些知识写一遍就够了。放到 UI 层 = 写三遍 = 错三遍。
 
-### 7.2 【一次做对】surface 交接
+### 7.2 【一次做对】视频通道:两条,按平台分
+
+**没有一条通吃的路。** 平台的原生合成能力决定了走哪条:
+
+| 平台 | 通道 | 为什么 |
+|---|---|---|
+| **Android** | **A · surface 句柄** | `SurfaceView` 是**独立合成层**,系统天然把 View 树画在它上面。零 overdraw,零拷贝,不需要任何 GL 互操作 |
+| **Apple**(后置) | **A · surface 句柄** | `CAMetalLayer` 同理 |
+| **Windows / Linux** | **B · GL 渲染** | 原生子窗口永远画在 UI 内容之上(airspace),拿不到「UI 盖在视频上」。只能让核心层把画面渲进 UI 的 GL 场景。**代价见 §7.3** |
+
+#### 通道 A · surface 句柄(Android / Apple)
 
 ```
 UI 层                                 核心层
-  │                                     │
-  │ 创建 surface(见下表)                 │
-  │── lp_set_surface(kind,handle,w,h) ──►│ 绑定到 mpv
-  │                                     │
-  │ surface 尺寸变了                      │
+  │ 创建 surface                        │
+  │── lp_set_surface(kind,handle,w,h) ──►│ 绑定到 mpv(--wid)
+  │ 尺寸变了                             │
   │── lp_set_surface(kind,handle,w',h')─►│ 重设尺寸
-  │                                     │
   │ surface 即将销毁                      │
-  │── lp_set_surface(0,0,0,0) ──────────►│ 解绑(**必须在销毁前**,阻塞返回)
+  │── lp_set_surface(0,0,0,0) ──────────►│ 解绑(阻塞返回)
   │◄─ 返回后才可以销毁 ───────────────────│
 ```
 
-| 平台 | kind | 句柄来源 | mpv 侧 |
-|---|:---:|---|---|
-| Android | 1 | `SurfaceView.holder.surface` → `ANativeWindow_fromSurface` | `--wid` = ANativeWindow |
-| Windows | 2 | Avalonia `NativeControlHost` 的子 HWND(v1)/ 共享纹理(v2) | `--wid` / render API |
-| Linux (X11) | 3 | 同上,XID | 同上 |
-| Linux (Wayland) | 5 | `wl_surface`(**待定,见 §15.2**) | render API |
-| Apple | 4 | `CAMetalLayer` | render API |
+| kind | 句柄 |
+|:---:|---|
+| 1 | `SurfaceView.holder.surface` → `ANativeWindow_fromSurface` |
+| 4 | `CAMetalLayer*` |
+| 0 | 解绑 |
 
 **解绑必须是同步阻塞的。** Android 的 `surfaceDestroyed` 回调返回后 Surface 立即失效,
 mpv 还在往里画就是 use-after-free。这是安卓端最容易漏的一条。
 
-### 7.3 【P0 风险】Windows / Linux 的合成方案
+#### 通道 B · GL 渲染(Windows / Linux)
 
-这是**整个计划里唯一可能推翻选型的技术风险**,必须先打通再谈别的。
+UI 持有 GL 上下文,每帧把一个 FBO 交给核心层。**核心层不拥有窗口,只画。**
+
+```
+UI 的渲染线程(GL 上下文 current)          核心层
+  │                                          │
+  │── lp_gl_init(get_proc_address, ctx) ────►│ 建 mpv render context
+  │                                          │
+  │  每帧:                                   │
+  │── lp_gl_wants_redraw() ─────────────────►│ 0 = 没新帧,这帧不用画
+  │── lp_gl_render(fbo, w, h, flip_y) ──────►│ 画进 fbo
+  │   ...宿主 present / 交给合成器...          │
+  │── lp_gl_swapped() ──────────────────────►│ 上报上屏时刻(★ 漏了帧率控制就瞎)
+  │                                          │
+  │── lp_gl_uninit() ───────────────────────►│ 销毁 render context(阻塞返回)
+  │◄─ 返回后才可以销毁 GL 上下文 ──────────────│
+```
+
+**五条硬约束,每条都有实测出处**(见 [`spikes/SPIKE-1b-zero-copy.md`](spikes/SPIKE-1b-zero-copy.md) §7):
+
+1. **`lp_gl_*` 五个函数必须在同一个线程调用**,且调用时 GL 上下文必须是 current 的。
+   这个线程**不能**是事件线程(`lp_next_event` 那条)。
+2. **`lp_gl_swapped()` 不许省。** 漏了它 mpv 不知道帧何时上屏,帧率控制整个失效 ——
+   实测 4K60 从满帧掉到 18 fps,而且**表现得像"架构性能不行"**,极难反查。
+3. **`lp_gl_uninit()` 必须阻塞**,返回后宿主才能销毁 GL 上下文。理由同通道 A 的解绑。
+4. **一个进程内只能有一条 GL 通道。** 实测:同一进程里连开多个 GL 上下文 + 多个 mpv render
+   context 会卡死(400 秒不返回)。主窗与播放窗**共用同一条**。
+5. **`flip_y`**:GL 的原点在左下,多数 UI 框架在左上。传 1 让核心层翻,别在宿主侧再翻一次。
+
+#### Avalonia 侧怎么接
+
+Avalonia 11 的 `OpenGlControlBase` 每帧把一个 FBO 交给你,签名与本契约天然对齐:
+
+| Avalonia 回调 | 调什么 |
+|---|---|
+| `OnOpenGlInit` | `lp_gl_init` |
+| `OnOpenGlRender(gl, fb)` | `lp_gl_wants_redraw` → `lp_gl_render(fb, …)` → `lp_gl_swapped` |
+| `OnOpenGlDeinit` | `lp_gl_uninit` |
+
+**【待验证】** Avalonia 在 Windows 上的 GL 默认走 ANGLE。本项目实测 ANGLE 能满帧
+(4K24 满帧 / 1080p60 满帧),但 CPU 比原生 WGL 高一档。
+**S1.2 要在真正的 Avalonia 控件里复量一次**,不要拿本项目的裸 ctypes harness 的数替代。
+
+### 7.3 【已定】Windows / Linux 走路径 B
+
+> **2026-08-31 已裁决:走 B。** 下面保留候选表与实测数据,是为了让后来的人知道
+> 这个决定的代价是什么、什么条件下该退回 A2 —— 不是还在选。
 
 问题:Windows / Linux 上要让 **libmpv 的画面成为 UI 场景里的一层**,
 且 OSD / 弹幕 / 进度条画在它上面。Android(SurfaceView)和 Apple(CAMetalLayer)
@@ -710,12 +804,21 @@ mpv 还在往里画就是 use-after-free。这是安卓端最容易漏的一条�
 #### 裁决
 
 ```
-默认 B  —— 单窗口 + 自绘 OSD,代价是 CPU(4K24 核显 3% -> ~12%)
-保底 A2 —— 双顶层窗口,零拷贝完整,代价是几何对齐的一整类 bug
-不做 A1 —— 逼你用 mpv 的 Lua OSD,已否决
-不做 C  —— 每帧全画面 CPU 回读
-不做 D  —— libmpv 给不出可被外部合成的 swapchain
+【已定】B  —— 单窗口 + 自绘 OSD,代价是 CPU(4K24 核显 3% -> ~12%)
+【保底】A2 —— 双顶层窗口,零拷贝完整,代价是几何对齐的一整类 bug
+不做 A1    —— 逼你用 mpv 的 Lua OSD,已否决
+不做 C     —— 每帧全画面 CPU 回读
+不做 D     —— libmpv 给不出可被外部合成的 swapchain
 ```
+
+**选 B 的理由(不是因为它更快,它更慢):**
+
+| | |
+|---|---|
+| 它消灭的 | 几何对齐的**一整类** bug —— 全屏白边、z 序漂移、wndproc 重入、DPI 错位。现有实现里这是约 1500 行窗口管理代码,也是历史故障的高发区 |
+| 它的代价 | 每帧一次 copy-back 的 CPU。4K24 核显 3% → 约 12% |
+| 可用性 | **不受影响**:核显上 1080p60 满帧、4K24 满帧(实测) |
+| 退路 | A2 与 UI 框架无关,随时可退,坑全部记录在 `docs/lessons/` |
 
 **退 A2 的判据要用真机定:** 低端机型(四核无风扇迷你主机)在 4K24 下 CPU 余量不够 → 退 A2。
 **阶段 1 出口前必须真机验一次,不许靠估计。**
@@ -1206,7 +1309,7 @@ Rust 版是**黄金实现**。Go 版每个模块完成后,用同一份输入喂�
 
 | # | 风险 | 影响 | 缓解 | 状态 |
 |---|---|---|---|---|
-| R1 | Windows / Linux 纹理互操作走不通 | 推翻 Avalonia 选型 | SPIKE-1 先做;备选 WinUI3 + SwapChainPanel | 🔴 未验证 |
+| R1 | Windows / Linux 纹理互操作走不通 | 推翻 Avalonia 选型 | **已实测:mpv 侧渲进自建纹理 FBO 通过**(SPIKE-1a/1b)。剩余未验的是 **Avalonia 侧能否显示这张纹理**(S1.2) | 🟡 mpv 侧已通,Avalonia 侧待验 |
 | R2 | cgo + NDK 交叉编译链路复杂 | 拖慢一切 | SPIKE-2 先跑通并固化进 CI | 🔴 未验证 |
 | R3 | quickjs-go 跑不了现有插件 | 插件生态断代 | SPIKE-3 拿现存全部插件当验收语料 | 🔴 未验证 |
 | R4 | Compose TV 焦点不如预期 | TV 端要自己写空间导航 | SPIKE-4 用最复杂的页面(EpisodePage)验证 | 🔴 未验证 |
@@ -1442,6 +1545,8 @@ Linux abstract socket 或 XDG / Android 的 `launchMode`):
 | `lp_init` 本身 | ≤ 150 ms | 不许在里面做网络 I/O |
 | 单条 `lp_call` 的分派开销 | ≤ 1 ms | 不含业务耗时 |
 | 空闲内存占用(核心层) | ≤ 120 MB | 不含预取缓存与 mpv |
+| 播放中 CPU(1080p60,硬解,核显) | ≤ **20%** 单核 | 实测基线:render API + `d3d11va-copy` = 14% |
+| 播放中 CPU(4K24,硬解,核显) | ≤ **25%** 单核 | 实测基线:mpv 自有 GL VO 同解码路径 = 12%;路径 B 的真实值 **S1.10 真机验** |
 | 播放中 CPU(1080p,硬解) | 与 Rust 版同量级(± 20%) | 差分对账时一并量 |
 | `lpcore` 二进制体积 | ≤ 25 MB / ABI | `-ldflags "-s -w"` 后 |
 | APK 总体积 | ≤ 60 MB | 含 4 ABI 的 libmpv |
@@ -1631,7 +1736,7 @@ SPIKE-1 在 Linux 上必须同时跑 X11 与 Wayland 两条:
 
 | 平台 | 默认 | 说明 |
 |---|---|---|
-| Windows | `d3d11va` | 零拷贝,是 Win 上的最佳档。`dxva2-egl` 的 EGL 报错是**无害红鲱鱼**(渲染器名正常),别为它改配置 |
+| Windows | **`auto`** → 实得 `d3d11va-copy` | **路径 B 下零拷贝拿不到**(§7.3),不要显式写 `d3d11va` —— 显式要它会**起不来并回落软解**(实测)。`dxva2-egl` 的 EGL 报错是**无害红鲱鱼**(渲染器名正常),别为它改配置 |
 
 > ⚠️ **「零拷贝」这条结论属于路径 A(mpv 自己拥有窗口、自己建 D3D11 设备)。**
 > 实测:走路径 B 且 GL 上下文是桌面 WGL 时,显式 `d3d11va` **起不来**,`auto` 只到 `d3d11va-copy`。
