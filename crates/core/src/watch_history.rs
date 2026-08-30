@@ -1370,7 +1370,7 @@ mod tests {
     /// scopeKey 里的 server 是 URL,自带冒号 —— 必须按最后一个冒号切。
     #[test]
     fn server_from_scope_handles_url_colons() {
-        assert_eq!(server_from_scope("https://smart.uhdnow.com:8096:user1"), "https://smart.uhdnow.com:8096");
+        assert_eq!(server_from_scope("https://服务端A:8096:user1"), "https://服务端A:8096");
         assert_eq!(server_from_scope("https://a.com:u1"), "https://a.com");
         assert_eq!(server_from_scope("noscope"), "noscope");
     }

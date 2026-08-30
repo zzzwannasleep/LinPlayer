@@ -1561,7 +1561,7 @@ async fn probe_line(
 #[tauri::command]
 async fn remove_account(state: State<'_, AppState>, server_id: String) -> Result<(), String> {
     // ★ 先尽力登出:服务端不可达/端点不存在也必须能删账号。
-    // 实测 smart.uhdnow.com 的 /Sessions/Logout 直接 404,所以这里只能忽略结果 ——
+    // 实测 服务端A 的 /Sessions/Logout 直接 404,所以这里只能忽略结果 ——
     // 认这个端点的服务器上 token 会被吊销,不认的照旧本地删。
     {
         let sess = {

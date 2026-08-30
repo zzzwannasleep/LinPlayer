@@ -1,1 +1,4 @@
-# 原生库直接以普通 Git 对象存放在仓库内（不再走 Git LFS，避免 LFS 配额限制）。
+# 原生库(libmpv.so 等)**不进版本控制**,也不走 Git LFS。
+# 2026-08-30 核对:git ls-files 里没有任何 .so/.dll;实际的 libmpv.so 只存在于
+# apps/android/gen/android/app/build/ 下的构建产物里,由构建脚本准备。
+# (此前这里写的是「以普通 Git 对象存放在仓库内」—— 与事实不符,已更正。)

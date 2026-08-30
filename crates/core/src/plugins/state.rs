@@ -312,25 +312,25 @@ mod tests {
 
     #[test]
     fn empty_whitelist_denies_everything() {
-        assert!(!host_allowed(&[], "www.uhdnow.com")); // fail-closed,空 != 放行
+        assert!(!host_allowed(&[], "www.example.com")); // fail-closed,空 != 放行
     }
 
     #[test]
     fn exact_and_case_insensitive() {
-        let w = list(&["www.uhdnow.com"]);
-        assert!(host_allowed(&w, "www.uhdnow.com"));
-        assert!(host_allowed(&w, "WWW.UHDNOW.COM"));
-        assert!(!host_allowed(&w, "uhdnow.com"));
+        let w = list(&["www.example.com"]);
+        assert!(host_allowed(&w, "www.example.com"));
+        assert!(host_allowed(&w, "WWW.EXAMPLE.COM"));
+        assert!(!host_allowed(&w, "example.com"));
     }
 
     #[test]
     fn wildcard_matches_subdomains_only() {
-        let w = list(&["*.uhdnow.com"]);
-        assert!(host_allowed(&w, "china-vod4.uhdnow.com"));
-        assert!(host_allowed(&w, "a.b.uhdnow.com")); // 多级子域也算
-        assert!(!host_allowed(&w, "uhdnow.com")); // 裸主域要单独列
-        assert!(!host_allowed(&w, "evil-uhdnow.com")); // 点分隔,防前缀拼接
-        assert!(!host_allowed(&w, "uhdnow.com.evil.net")); // 只看后缀,不看包含
+        let w = list(&["*.example.com"]);
+        assert!(host_allowed(&w, "china-vod4.example.com"));
+        assert!(host_allowed(&w, "a.b.example.com")); // 多级子域也算
+        assert!(!host_allowed(&w, "example.com")); // 裸主域要单独列
+        assert!(!host_allowed(&w, "evil-example.com")); // 点分隔,防前缀拼接
+        assert!(!host_allowed(&w, "example.com.evil.net")); // 只看后缀,不看包含
     }
 
     #[test]

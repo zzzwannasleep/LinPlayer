@@ -754,7 +754,7 @@ export function clearItemCache() {
 }
 
 /** 相似推荐(剧集/电影详情页底部)。空数组不是错误 —— 有些条目没有相似项,前端整段不渲染。
- *  实测(mecf.mebimmer.de):相似度靠谱,可能混 Series+Movie,单击照常进各自详情。 */
+ *  实测(服务端B):相似度靠谱,可能混 Series+Movie,单击照常进各自详情。 */
 export const similarItems = (itemId: string) => invoke<Item[]>("similar_items", { itemId });
 
 /** 演职员详情。★ `overview` 为空是**常态** —— 只有刮削器抓到 TMDB 人物页才有生平,
@@ -1145,7 +1145,7 @@ export const sourceWatchdog = (pos: number) =>
   invoke<boolean>("source_watchdog", { pos }).catch(() => false);
 
 // ---------- 收藏 ----------
-/** 收藏列表。**排序在前端本地做** —— 服务端 SortBy 在 UHD fork 上是死的(见 emby.rs favorites 注释)。 */
+/** 收藏列表。**排序在前端本地做** —— 服务端 SortBy 在 服务端A(UHD fork) 上是死的(见 emby.rs favorites 注释)。 */
 export const listFavorites = () => invoke<Item[]>("list_favorites");
 export const setFavorite = (itemId: string, fav: boolean) =>
   invoke<void>("set_favorite", { itemId, fav });

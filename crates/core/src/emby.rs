@@ -1,3 +1,14 @@
+//! ## 测试服务端代号说明
+//!
+//! 本文件注释里大量出现「服务端A」「服务端B」—— 它们是两台**真实测试服务器**的代号:
+//!   · 服务端A = 某 Emby fork(4.9.3,"UHD"),行为与原版差异大,本文件多数「绕法」为它而写
+//!   · 服务端B = 接近原版的 Emby(4.9.5),用来做对照组
+//!
+//! **用代号而不是真实地址,是仓库红线:任何非自有的域名不得进版本控制。**
+//! 代号与真实地址的对照表放在不进版本控制的本地文件里。
+//!
+//! 「别拿一台的结论替另一台签字」—— 这两台行为在多处相反,见下文各处实测记录。
+
 // Emby 客户端:登录、取媒体库(Views)、列条目、解析直连播放地址。
 use crate::http::{device_name, APP_VERSION, CLIENT_NAME};
 use serde::{Deserialize, Serialize};
@@ -58,7 +69,7 @@ struct ItemsResponse {
     total_record_count: Option<i64>,
 }
 
-/// 一页条目 + 总数。★ 必须带 total:Emby 单次请求最多吐 200 条(实测 smart.uhdnow.com
+/// 一页条目 + 总数。★ 必须带 total:Emby 单次请求最多吐 200 条(实测 服务端A
 /// Limit=1000 仍只返 200),3276 条的库只能靠 StartIndex 翻页,没有总数前端就不知道翻到哪。
 #[derive(Serialize)]
 pub struct ItemPage {
@@ -114,7 +125,7 @@ struct RawItem {
     #[serde(rename = "SeriesId")]
     series_id: Option<String>,
     /// 以下两项要 Fields=DateCreated,SortName —— 收藏页本地排序用。
-    /// DateLastMediaAdded 只有部分服务端给(实测 uhdnow fork 恒为 null),取不到就回落 DateCreated。
+    /// DateLastMediaAdded 只有部分服务端给(实测 服务端A(服务端A(UHD fork)) 恒为 null),取不到就回落 DateCreated。
     #[serde(rename = "DateCreated")]
     date_created: Option<String>,
     #[serde(rename = "DateLastMediaAdded")]
@@ -534,7 +545,7 @@ pub struct Counts {
 /// `GET /Items/Counts?UserId=` —— **一次调用**拿到全库规模,不要自己翻页数条目。
 ///
 /// ★ `UserId` 必须带。不带的话服务端把**该用户看不到的库**也算进去。
-///   2026-07-28 在 mecf.mebimmer.de 上实测的差值:
+///   2026-07-28 在 服务端B 上实测的差值:
 ///     带 UserId  → Movie 1579 / Series 2393 / Episode 98476
 ///     不带       → Movie 1618 / Series 2652 / Episode 99346
 ///   差 39 部电影、259 部剧、870 集 —— 数字看着都"像那么回事",所以漏了不会有人发现。
@@ -568,7 +579,7 @@ pub async fn counts(http: &reqwest::Client, s: &Session) -> Result<Counts, Strin
 pub struct ItemQuery {
     pub start_index: Option<u32>,
     /// None → 用 SERVER_PAGE_CAP(200)。★ 不能"省略 Limit 表示不限":
-    /// 实测 smart.uhdnow.com(Emby 4.9.3)省略 Limit 只返 20 条,Limit=0 也是 20,
+    /// 实测 服务端A(Emby 4.9.3)省略 Limit 只返 20 条,Limit=0 也是 20,
     /// 而 Limit=1000 被硬顶到 200。所以"不限"在单次请求里根本不存在,
     /// 超过 200 条的库只能靠 start_index 翻页(total 已随 ItemPage 返回)。
     pub limit: Option<u32>,
@@ -626,7 +637,7 @@ impl ItemQuery {
 
 /// 媒体库浏览。返回 ItemPage(带 total)以支持翻页。
 ///
-/// ★ 服务端过滤在部分 Emby 上是**假的**:实测 smart.uhdnow.com(Emby 4.9.3 "UHD")
+/// ★ 服务端过滤在部分 Emby 上是**假的**:实测 服务端A(Emby 4.9.3 "UHD")
 /// 对 Genres/GenreIds/Years/MinCommunityRating 一律忽略 —— 传 Genres=喜剧 返回的
 /// TotalRecordCount 与不传完全一致(3276),头几条根本没有喜剧标签。
 /// 所以参数照发(标准 Emby/Jellyfin 认,服务端过滤能少传数据),同时在客户端按同样条件
@@ -778,7 +789,7 @@ pub async fn detail(
     item_id: &str,
     with_children: bool,
 ) -> Result<ItemDetail, String> {
-    /* Taglines / OfficialRating / Status 是 2026-07-28 加的,在 mecf.mebimmer.de 上实测有值:
+    /* Taglines / OfficialRating / Status 是 2026-07-28 加的,在 服务端B 上实测有值:
          Status="Continuing"  OfficialRating="TV-14"  Taglines=["在演艺圈（这个世界）中，谎言就是武器"]
        "这剧完结没有" 是选片时真会问的问题，比画质标签有用得多。
        ★ 电影没有 Status，Taglines 常为空数组 —— 两者都是 Option，前端没值就**整行不画**，
@@ -897,10 +908,10 @@ async fn fetch_all_paged(
 
 /// 收藏列表(IsFavorite 过滤,跨库递归)。
 /// 原来写 `Limit=300` —— 服务端夹到 200,收藏超过 200 条就静默丢,用户看不到也无从察觉。改翻页。
-/// ★ 排序**不走服务端**。2026-07-19 在用户的真实服务器(v1.uhdnow.com,UHD fork)上实测:
+/// ★ 排序**不走服务端**。2026-07-19 在用户的真实服务器(服务端A,服务端A(UHD fork))上实测:
 ///   `SortBy=SortName&SortOrder=Ascending` 与 `SortBy=CommunityRating&SortOrder=Descending`
 ///   返回**完全相同**的顺序(恒为 DateCreated 降序)—— 这台 fork 在 `Filters=IsFavorite`
-///   查询上直接无视 SortBy/SortOrder。原版 Emby(mebimmer)是认的,**别拿原版的结论替 fork 签字**。
+///   查询上直接无视 SortBy/SortOrder。原版 Emby(服务端B)是认的,**别拿原版的结论替 fork 签字**。
 ///   所以这里只负责把 Fields 要全,排序交给前端本地做(收藏封顶 2000 条,本地排毫无压力)。
 ///   要改回服务端排序,先用日志里的 `[TRACE favorites url]` 手法在**目标服务器**上验证。
 pub async fn favorites(http: &reqwest::Client, s: &Session) -> Result<Vec<Item>, String> {
@@ -1029,7 +1040,7 @@ pub struct SeasonInfo {
 }
 
 /// 某剧的季列表。`/Users/{u}/Items?ParentId={seriesId}` —— 实测返回 Type=Season,
-/// 带 ChildCount 和 UserData.UnplayedItemCount(2026-07-28 于 mecf.mebimmer.de 实测)。
+/// 带 ChildCount 和 UserData.UnplayedItemCount(2026-07-28 于 服务端B 实测)。
 ///
 /// ★ 有些剧**没有季**(单季番剧直接挂集)。那种情况这里返回空 Vec,
 ///   调用方要回落到「拿 seriesId 当 parent 直接分页拉集」——
@@ -1230,7 +1241,7 @@ pub async fn fetch_scrobble_info(
 
 /// 搜索。types=None 时用默认类型集(含 Episode —— 旧实现写死 Movie,Series 搜不到分集)。
 ///
-/// ★ 实测提醒:smart.uhdnow.com(Emby 4.9.3)在带 SearchTerm 时**忽略 IncludeItemTypes**
+/// ★ 实测提醒:服务端A(Emby 4.9.3)在带 SearchTerm 时**忽略 IncludeItemTypes**
 /// (传 Episode 照样只回 Series/Movie),且分集名("星海飞驰27")根本搜不出来。
 /// 参数照发是为标准 Emby/Jellyfin 服务;这台服务器上搜不到分集是服务端行为,客户端改不动。
 /// `parent_id` = 只在这个媒体库里搜(库内搜索)。None = 全服务器。
@@ -1249,7 +1260,7 @@ pub async fn search(
 
 /// 显式点了名的类型,**再自己滤一遍**。
 ///
-/// 为什么不能只信 `IncludeItemTypes`:v1/smart.uhdnow.com 那个 fork **带 SearchTerm 时
+/// 为什么不能只信 `IncludeItemTypes`:v1/服务端A 那个 fork **带 SearchTerm 时
 /// 把筛选参数一起忽略**(2026-08-17 curl 实测,ParentId/Ids/NameContains 一并中招)。
 /// 搜索浮层的「包括集」开关关着的时候,靠服务端过滤 = 那台上关了也照样出分集,
 /// 开关是个摆设而且不报错 —— 正是本项目最讨厌的那类静默失效。
@@ -1287,9 +1298,9 @@ fn search_url(
        空串当没传:前端传 "" 比传 null 更常见,拼上去会变成「在 id 为空的库里搜」= 零结果。
 
        ★ 2026-08-17 curl 实测,两台服务器结论**相反**,别拿一台的结果给另一台签字:
-         · mecf.mebimmer.de(4.9.5,接近原版):ParentId 完全生效 —— 同一个关键词
+         · 服务端B(4.9.5,接近原版):ParentId 完全生效 —— 同一个关键词
            「的」在 12 个库里搜,回来的集合两两零重叠(华语电影 1 条、华语剧集 4 条…)。
-         · v1.uhdnow.com(fork):**带 SearchTerm 时把所有筛选参数一起忽略** ——
+         · 服务端A(fork):**带 SearchTerm 时把所有筛选参数一起忽略** ——
            ParentId / AncestorIds / Ids / NameStartsWith / NameContains 全无效,
            连 /Search/Hints?ParentId= 也一样,12 个库回的是同一堆。
            (不带 SearchTerm 时 ParentId 是好的,所以不是权限或 id 的问题。)
@@ -1317,7 +1328,7 @@ pub const HISTORY_FIELDS: &str = "ProviderIds,PresentationUniqueKey,Path,SeriesI
 
 /// 相似推荐(详情页底部)。
 ///
-/// 2026-07-15 在 mecf.mebimmer.de 实测(见 [[emby-test-server-2-mebimmer]]):
+/// 2026-07-15 在 服务端B 实测(见 [[emby-test-server-2]]):
 /// `GET /Items/{id}/Similar?UserId=..&Limit=12` → `{"Items":[...],"TotalRecordCount":N}`,
 /// 相似度靠谱(同题材),Limit 生效,条目带 Primary/Backdrop。可能混 Series+Movie。
 /// 旧 Flutter 栈既定口径一致(`getSimilarItems`)。
@@ -1491,7 +1502,7 @@ pub async fn set_played(
     Ok(())
 }
 
-/// 服务端登出。★ 尽力而为:实测 smart.uhdnow.com 该端点 404 且 token 登出后仍可用,
+/// 服务端登出。★ 尽力而为:实测 服务端A 该端点 404 且 token 登出后仍可用,
 /// 所以**不能**让它的失败挡住本地删账号 —— 调用方忽略返回值即可。
 pub async fn logout(http: &reqwest::Client, s: &Session) -> Result<(), String> {
     let resp = http
@@ -1634,7 +1645,7 @@ pub struct Filters {
 
 /// 取某库的筛选分面。
 ///
-/// ★ 端点可用性是实测出来的,不是照文档抄的(smart.uhdnow.com / Emby 4.9.3):
+/// ★ 端点可用性是实测出来的,不是照文档抄的(服务端A / Emby 4.9.3):
 ///   /Items/Filters、/Users/{u}/Items/Filters2 → 404(旧 Dart 注释里记的坑,复现了)
 ///   /Genres、/Studios                          → 200 ✅
 ///   /Years、/Tags、/OfficialRatings            → 404 ❌(旧 Dart 也在拉这三个并吞错,
@@ -2483,7 +2494,7 @@ mod tests {
 
     /// 外挂字幕兜底路径必须和 Emby 自己发的 DeliveryUrl 字节一致。
     ///
-    /// 期望值不是我编的,是 2026-07-21 在 mecf.mebimmer.de(接近原版的 Emby)实测抓到的:
+    /// 期望值不是我编的,是 2026-07-21 在 服务端B(接近原版的 Emby)实测抓到的:
     /// 带 `SubtitleProfiles:[{Format:"ass",Method:"External"}]` 的 PlaybackInfo 返回
     /// `DeliveryUrl=/Videos/50257/mediasource_50257/Subtitles/37/0/Stream.ass?api_key=...`;
     /// 而 `SubtitleProfiles:[]`(改之前的写法)返回 `DeliveryMethod=Encode, DeliveryUrl=null`
@@ -2605,7 +2616,7 @@ mod tests {
         assert_eq!(list[1].start.unwrap() as f64 / 1e7, 90.0);
     }
 
-    /// 真实载荷回归:smart.uhdnow.com 的 /Items/Resume 原样返回(2026-07-15 实抓)。
+    /// 真实载荷回归:服务端A 的 /Items/Resume 原样返回(2026-07-15 实抓)。
     /// Episode.Name 只有「第 35 集」,剧名单独在 SeriesName —— 丢了它列表就没法认剧。
     #[test]
     fn episode_carries_series_name() {
@@ -2633,7 +2644,7 @@ mod tests {
         assert_eq!(it.series_name, None);
     }
 
-    /// 真实载荷回归:smart.uhdnow.com 的 /Users/{u}/Items 分页响应(2026-07-15 实抓)。
+    /// 真实载荷回归:服务端A 的 /Users/{u}/Items 分页响应(2026-07-15 实抓)。
     /// TotalRecordCount=3276 但本页只有 200 条 —— 总数必须独立于 items.len() 解析出来,
     /// 否则前端按 200 算页数,3000 多条内容静默消失。
     #[test]
@@ -2794,7 +2805,7 @@ mod tests {
     /* 「包括集」开关必须在**任何**服务器上都是真的。
 
        搜索浮层 2026-08-17 加的这个开关,关着的时候只该出剧/电影。光靠
-       `IncludeItemTypes` 不够:v1.uhdnow.com 那个 fork 带 SearchTerm 时把筛选参数
+       `IncludeItemTypes` 不够:服务端A 那个 fork 带 SearchTerm 时把筛选参数
        整片忽略(同批实测里 ParentId/Ids/NameContains 一起中招),那台上开关会变成
        一个**点了没反应还不报错**的摆设。所以显式点了类型就自己再滤一遍。
        反向验证:把 emby::search 里的 filter_types 调用去掉,本测试立刻红。 */

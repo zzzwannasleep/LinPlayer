@@ -11,7 +11,7 @@ import { Empty, Grid, Opt, usePress } from "../components/ui";
 /* 收藏。
 
    ★ 排序**在本地做**,不传 SortBy 给服务端 —— 不是偷懒:
-     实测 v1.uhdnow.com(Emby 的一个 fork)在 `Filters=IsFavorite` 上**不认 SortBy**
+     实测 服务端A(Emby 的一个 fork)在 `Filters=IsFavorite` 上**不认 SortBy**
      (同一台服务器的媒体库接口却认)。传了不报错,只是顺序纹丝不动。
      排序逻辑三端共用 @shared/favorites-sort —— 连"空值沉底"这种细节都在那儿,别再抄一份。
 

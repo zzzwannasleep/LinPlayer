@@ -8,19 +8,24 @@
 // 本文件是**平台无关纯逻辑**:不碰 AppConfig 存盘、不发网络请求、不弹确认框。
 // 登录(逐线路试)/落盘/用户确认/Windows 协议注册全归宿主(src-tauri)编排。
 //
-// 机场/Emby 分享出来的开通信息通常长这样(可能一次包含多个账号块):
+// 机场/Emby 分享出来的开通信息通常长这样(可能一次包含多个账号块)。
+//
+// ⚠️ 下面这段样例与测试夹具里的值**全部是编造的占位符**,不是真实账号。
+//    仓库红线:任何真实域名/账号/密码都不许进版本控制 —— 包括"只是个测试夹具"。
+//    改这段时保持**结构**不变即可(CJK 用户名 / 两个不同的密码字段 / 括号备注 /
+//    带端口的 URL / 带路径的弹幕 URL),值随便编。
 //
 //     ▎创建用户成功🎉
-//     · 用户名称 | 南屿
-//     · 用户密码 | PKq0Bgca
-//     · 安全密码 | 8898(仅发送一次)
+//     · 用户名称 | 示例用户
+//     · 用户密码 | Ab3xKp9Q
+//     · 安全密码 | 1234(仅发送一次)
 //     · 到期时间 | 2026-06-30 23:34:28
 //     主线路(可尝试直连)
-//     https://iris.niceduck.lol:443
+//     https://line1.example.com:443
 //     海外备用(国际优化 CDN)
-//     https://cdn.irisnb.com:443
+//     https://cdn.example.net:443
 //     弹幕 API
-//     https://justdanmu.irisnb.com/iris-danmu
+//     https://danmu.example.org/api-danmu
 
 use crate::config::{DanmakuServer, ServerLine};
 use regex::Regex;
@@ -245,7 +250,7 @@ fn matches_any(key: &str, keys: &[&str]) -> bool {
     keys.iter().any(|k| key.contains(&k.to_lowercase()))
 }
 
-/// 去掉值里的括号备注,如 "8898(仅发送一次)" → "8898","南屿 " → "南屿"。
+/// 去掉值里的括号备注,如 "1234(仅发送一次)" → "1234","示例用户 " → "示例用户"。
 fn strip_note(value: &str) -> String {
     re_paren_note().replace(value.trim(), "").trim().to_string()
 }
@@ -447,36 +452,36 @@ mod tests {
     #[test]
     fn parses_real_world_share_text() {
         let text = "▎创建用户成功🎉\n\
-                    · 用户名称 | 南屿\n\
-                    · 用户密码 | PKq0Bgca\n\
-                    · 安全密码 | 8898（仅发送一次）\n\
+                    · 用户名称 | 示例用户\n\
+                    · 用户密码 | Ab3xKp9Q\n\
+                    · 安全密码 | 1234（仅发送一次）\n\
                     · 到期时间 | 2026-06-30 23:34:28\n\
                     主线路（可尝试直连）\n\
-                    https://iris.niceduck.lol:443\n\
+                    https://line1.example.com:443\n\
                     海外备用（国际优化 CDN）\n\
-                    https://cdn.irisnb.com:443\n\
+                    https://cdn.example.net:443\n\
                     弹幕 API\n\
-                    https://justdanmu.irisnb.com/iris-danmu\n";
+                    https://danmu.example.org/api-danmu\n";
         let blocks = parse_share_text(text);
         assert_eq!(blocks.len(), 1, "整段是一个账号块");
         let b = &blocks[0];
-        assert_eq!(b.username.as_deref(), Some("南屿"));
+        assert_eq!(b.username.as_deref(), Some("示例用户"));
         assert_eq!(
             b.password.as_deref(),
-            Some("PKq0Bgca"),
+            Some("Ab3xKp9Q"),
             "「安全密码」不是登录凭据,不能顶掉「用户密码」"
         );
         assert_eq!(
             pairs(&b.lines),
             [
-                ("主线路", "https://iris.niceduck.lol:443"),
-                ("海外备用", "https://cdn.irisnb.com:443"),
+                ("主线路", "https://line1.example.com:443"),
+                ("海外备用", "https://cdn.example.net:443"),
             ],
             "标签在上一行;括号备注要剥掉;端口要留着"
         );
         assert_eq!(
             pairs(&b.danmaku_lines),
-            [("弹幕 API", "https://justdanmu.irisnb.com/iris-danmu")],
+            [("弹幕 API", "https://danmu.example.org/api-danmu")],
             "含「弹幕」/danmu 的必须进弹幕线路而不是服务器线路"
         );
     }

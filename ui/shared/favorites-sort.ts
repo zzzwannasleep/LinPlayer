@@ -1,9 +1,9 @@
 import type { Item } from "@shared/api";
 
-/* ★ 收藏排序**必须本地做**。2026-07-19 在真实服务器(v1.uhdnow.com,UHD fork)上实测:
+/* ★ 收藏排序**必须本地做**。2026-07-19 在真实服务器(服务端A,服务端A(UHD fork))上实测:
    不管发 SortBy=SortName 还是 SortBy=CommunityRating,服务端返回的顺序**一模一样**
    (恒为 DateCreated 降序)—— 这台 fork 直接无视 Filters=IsFavorite 查询上的 SortBy。
-   原版 Emby(mebimmer)是认的,但**别拿原版的结论替 fork 签字**。
+   原版 Emby(服务端B)是认的,但**别拿原版的结论替 fork 签字**。
    收藏封顶 2000 条,本地排零压力且在任何服上都成立。 */
 export const SORTS = [
   { id: "name", label: "名称" },

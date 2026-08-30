@@ -337,7 +337,7 @@ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9223"   ./target/
 | 命令 | 干什么 | 为什么非加不可 |
 |---|---|---|
 | `aggregate_overview` | 每个源的规模 + 最近观看记录,一次拿齐 | 首页顶栏统计和聚合视界要的是同一批数据(N 台 × 2 个请求)。拆两条命令的话前端要发 2N 次 invoke,而且两批数据到达时间不同,页面会先画出"有数字没内容"再补上 |
-| `emby::counts` | `/Items/Counts?UserId=` | **必须带 UserId**。2026-07-28 在 mecf.mebimmer.de 实测:带 vs 不带差 39 部电影 / 259 部剧 / 870 集 —— 数字都"像那么回事",漏了不会有人发现 |
+| `emby::counts` | `/Items/Counts?UserId=` | **必须带 UserId**。2026-07-28 在 服务端B 实测:带 vs 不带差 39 部电影 / 259 部剧 / 870 集 —— 数字都"像那么回事",漏了不会有人发现 |
 | `series_seasons` | 季列表(带服务器给的季名和 ChildCount) | 季名要用**服务器返回的 Name**,实测真名是 "全 1 季" / "果宝特攻2",自己拼「第 N 季」在真机上对不上 |
 | `season_episodes` | 分集**分页** | 实测最长的剧 2648 集,全量拉 1813.9KB / 1841ms;分页 30 条 20.0KB / 435ms。`content-visibility` 只省渲染,省不掉这 1.8MB 的下载 |
 | `item_detail(withChildren)` | 详情不带全部分集 | 同上。桌面/TV 不传这个参数,行为不变 |
