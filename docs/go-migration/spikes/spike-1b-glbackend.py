@@ -11,8 +11,8 @@
 """
 import ctypes as C, ctypes.wintypes as W, os, sys, time
 
-DLL   = r"D:\LinPlayer\crates\mpv\libmpv\libmpv-2.dll"
-ANGLE = r"C:\Program Files\Tabby"
+DLL   = os.environ.get("LP_MPV_DLL", os.path.join("crates","mpv","libmpv","libmpv-2.dll"))
+ANGLE = os.environ.get("LP_ANGLE_DIR", "")   # 任何自带 ANGLE 的 Electron/CEF 应用目录;留空则只能跑 wgl
 CLIP  = os.path.join(os.path.dirname(os.path.abspath(__file__)), sys.argv[1] if len(sys.argv)>1 else "clip4k.mp4")
 OW,OH = (int(sys.argv[2]),int(sys.argv[3])) if len(sys.argv)>3 else (1920,1080)
 RUN_S = 12.0

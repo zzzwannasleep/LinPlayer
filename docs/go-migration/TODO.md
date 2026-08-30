@@ -251,12 +251,16 @@
   - **核显实测**:4K60 路径 B 追不上实时(0.862 / 0.924),60fps 源只渲出 12~14 fps;
     1080p60 跑得住但 CPU 是路径 A 的 4.4 倍
   - 报告:`spikes/SPIKE-1b-zero-copy.md`
-- [ ] **S1.7** 🔴 **方案 D:DirectComposition 视觉合成**(新增,优先级高于 B)
-  - 思路:mpv 用 `gpu-api=d3d11` 渲自己的 swapchain(零拷贝完整),
-    Avalonia 走 `WinUIComposition`,两个 visual 放进同一棵 DComp 树
-  - 判据:**单窗口 + UI 盖在视频上 + `hwdec-current=d3d11va`,三样同时成立**
-  - 判据:核显上 4K60 推进比 ≥ 0.98
-  - 这是**唯一可能三样全有**的方案。不通就退 A2(双顶层窗口,已在产验证)
+- [x] **S1.7** 方案 D(DirectComposition)✅ **已排除 2026-08-31**
+  - libmpv 公开 API 给不出可被外部合成的 swapchain:render API 只有 OPENGL/SW 两种类型,
+    `vo=gpu` 系列自己拥有 HWND 自己呈现;`--d3d11-composition` 探测返回 option not found
+  - 澄清:Avalonia 的 `WinUIComposition` **不是 WinUI**,是 Win32 后端的呈现模式
+    (底层 `Windows.UI.Composition`,操作系统合成器 API)。**选 B 或 A2 都不需要碰 WinUI**
+- [ ] **S1.10** 🔴 **低端真机验证:路径 B 的 CPU 余量够不够**(决定要不要退 A2)
+  - 判据:四核无风扇迷你主机 / 只有核显的轻薄本上,**4K24 满帧且 CPU 有余量**
+  - 判据:**必须真机,不许靠估计** —— 本次测出的 30% 含测试台开销(Python 忙轮询 + 无垂直同步),
+    同解码路径下 mpv 自有 VO 只要 12%,真实实现的期望值**未验证**
+  - 不达标 → 退 A2(双顶层窗口,已在产验证,坑记录在 `docs/lessons/`)
 - [ ] **S1.8** 独显对照:同一套矩阵钉到独显再跑一遍
   - 判据:先确认真的跑在独显上(回读 GPU 名),否则量的还是核显(R10 现场)
 - [ ] **S1.9** 核显矩阵补 **HEVC 10-bit / HDR** 语料
