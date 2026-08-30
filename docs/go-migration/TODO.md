@@ -244,11 +244,23 @@
   - 结论:**能**。渲进自建纹理 FBO 也一样,6 个用例噪声基线全 0、字幕信号 2.2~2.8 万像素
   - 「纹理导致 PGS 不显示」这条**归因不成立**,B 未被 PGS 排除
   - 报告:`spikes/SPIKE-1a-PGS-render-api.md`(含实验设计、正负对照、5 个自己踩的坑)
-- [ ] **S1.2b** 🔴 路径 B:能不能拿到 `d3d11va` **零拷贝**
-  - 已知:桌面 WGL 下**拿不到** —— 显式 `d3d11va` 起不来,`auto` 只到 `d3d11va-copy`(实测)
-  - 判据:换 **ANGLE(EGL over D3D11)** 后回读 `hwdec-current`,看能否变成 `d3d11va`
-  - 判据:若拿不到,量 `d3d11va-copy` 在 **4K60 HDR** 下的 CPU / 带宽代价,给出可接受与否的结论
-  - 这条改变 B 的成本估计,**不许跳过**
+- [x] **S1.2b** 路径 B 拿不到 `d3d11va` 零拷贝 ✅ **已结题 2026-08-31 —— 结论是拿不到**
+  - WGL 与 **ANGLE(EGL over D3D11)** 都拿不到;判别器:同一 libmpv 走路径 A 能拿到 `d3d11va`
+  - 根因:这个 mpv 里 `d3d11egl` 与 `EGL_ANGLE_d3d_texture_client_buffer` **都是 0 次命中**
+    (现代 mpv 移除了 ANGLE),且 render API **只有 OpenGL / SW 两种类型,没有 D3D11 类型**
+  - **核显实测**:4K60 路径 B 追不上实时(0.862 / 0.924),60fps 源只渲出 12~14 fps;
+    1080p60 跑得住但 CPU 是路径 A 的 4.4 倍
+  - 报告:`spikes/SPIKE-1b-zero-copy.md`
+- [ ] **S1.7** 🔴 **方案 D:DirectComposition 视觉合成**(新增,优先级高于 B)
+  - 思路:mpv 用 `gpu-api=d3d11` 渲自己的 swapchain(零拷贝完整),
+    Avalonia 走 `WinUIComposition`,两个 visual 放进同一棵 DComp 树
+  - 判据:**单窗口 + UI 盖在视频上 + `hwdec-current=d3d11va`,三样同时成立**
+  - 判据:核显上 4K60 推进比 ≥ 0.98
+  - 这是**唯一可能三样全有**的方案。不通就退 A2(双顶层窗口,已在产验证)
+- [ ] **S1.8** 独显对照:同一套矩阵钉到独显再跑一遍
+  - 判据:先确认真的跑在独显上(回读 GPU 名),否则量的还是核显(R10 现场)
+- [ ] **S1.9** 核显矩阵补 **HEVC 10-bit / HDR** 语料
+  - 理由:本次是 H.264 8-bit;P010 每帧约 24 MB,往返字节更多,路径 B 只会更差
 - [ ] **S1.3** 路径 B 性能实测
   - 判据:1080p60 与 4K60 各连续播 10 分钟;记录掉帧率、CPU%、GPU%、显存
   - 通过线:掉帧率 < 1%,CPU 占用与现有 Tauri 方案同量级(±20%)
