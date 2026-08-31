@@ -24,6 +24,7 @@ import (
 
 	"linplayer/core/bus"
 	"linplayer/core/config"
+	"linplayer/core/emby"
 	"linplayer/core/paths"
 	"linplayer/core/player"
 	"linplayer/core/system"
@@ -104,6 +105,7 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 		bus.Init()
 		system.RegisterCommands()
 		player.RegisterCommands()
+		emby.RegisterCommands(system.Version)
 
 		if err := paths.EnsureDirs(); err != nil {
 			bus.Logf("error", "建数据目录失败: %v", err)

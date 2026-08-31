@@ -1,0 +1,26 @@
+{
+  "name": "emby.views · 被屏蔽的库必须原样返回",
+  "note": "屏蔽名单在 fetch_items 那条路上生效,媒体库网格不走那条。views 里把它滤掉 = 用户点错一次就再也找不到那部剧去解除屏蔽了。",
+  "provenance": "crates/core/src/emby.rs:2895 的测试语料与断言(黄金实现自己的用例,手工搬运;D1 做完后改成自动生成)",
+  "upstream": [
+    {
+      "path": "/Users/u/Views",
+      "status": 200,
+      "body": "{\"Items\":[{\"Id\":\"lib-A\",\"Name\":\"华语电影\",\"Type\":\"CollectionFolder\",\"IsFolder\":true},{\"Id\":\"lib-B\",\"Name\":\"综艺节目\",\"Type\":\"CollectionFolder\",\"IsFolder\":true}],\"TotalRecordCount\":2}"
+    }
+  ],
+  "command": "emby.views",
+  "args": {},
+  "expect": [
+    {"id":"lib-A","name":"华语电影","type_":"CollectionFolder","is_folder":true,"has_primary":false,
+     "runtime_secs":0,"resume_secs":0,"series_name":null,"episode_no":null,"season_no":null,
+     "video_height":null,"bitrate":null,"size_bytes":null,"played":false,"unplayed_item_count":0,
+     "genres":[],"year":null,"rating":null,"provider_ids":{},"presentation_unique_key":null,
+     "path":null,"series_id":null,"date_updated":null,"sort_name":null},
+    {"id":"lib-B","name":"综艺节目","type_":"CollectionFolder","is_folder":true,"has_primary":false,
+     "runtime_secs":0,"resume_secs":0,"series_name":null,"episode_no":null,"season_no":null,
+     "video_height":null,"bitrate":null,"size_bytes":null,"played":false,"unplayed_item_count":0,
+     "genres":[],"year":null,"rating":null,"provider_ids":{},"presentation_unique_key":null,
+     "path":null,"series_id":null,"date_updated":null,"sort_name":null}
+  ]
+}

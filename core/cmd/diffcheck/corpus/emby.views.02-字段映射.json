@@ -1,0 +1,23 @@
+{
+  "name": "emby.views · 字段映射(ticks 换秒 / 空串折 null / MediaSources)",
+  "note": "这条专门盯那些「少做一处就会在 UI 上显示一个空标签」的细节。特别是 date_updated:Rust 写的是 date_last_media_added.or(date_created).filter(非空) —— Some(\"\") 会让 .or() 直接短路,**不回退到 DateCreated**。",
+  "provenance": "crates/core/src/emby.rs:191 的 impl From<RawItem> for Item,逐行读出来的行为",
+  "upstream": [
+    {
+      "path": "/Users/u/Views",
+      "status": 200,
+      "body": "{\"Items\":[{\"Id\":\"ep1\",\"Name\":\"第 35 集\",\"Type\":\"Episode\",\"IsFolder\":false,\"ImageTags\":{\"Primary\":\"abc\"},\"RunTimeTicks\":14400000000,\"UserData\":{\"PlaybackPositionTicks\":6000000000,\"Played\":false,\"UnplayedItemCount\":0},\"SeriesName\":\"某剧\",\"IndexNumber\":35,\"ParentIndexNumber\":2,\"MediaSources\":[{\"Size\":19825792614,\"Bitrate\":45000000,\"MediaStreams\":[{\"Type\":\"Audio\"},{\"Type\":\"Video\",\"Height\":2160}]}],\"Genres\":[\"剧情\"],\"ProductionYear\":2024,\"CommunityRating\":8.5,\"ProviderIds\":{\"Tmdb\":\"123\"},\"PresentationUniqueKey\":\"\",\"Path\":\"\",\"SeriesId\":\"srv-1\",\"DateCreated\":\"2024-01-01T00:00:00Z\",\"DateLastMediaAdded\":\"\",\"SortName\":\"mou ju\"}],\"TotalRecordCount\":1}"
+    }
+  ],
+  "command": "emby.views",
+  "args": {},
+  "expect": [
+    {"id":"ep1","name":"第 35 集","type_":"Episode","is_folder":false,"has_primary":true,
+     "runtime_secs":1440,"resume_secs":600,"series_name":"某剧","episode_no":35,"season_no":2,
+     "video_height":2160,"bitrate":45000000,"size_bytes":19825792614,
+     "played":false,"unplayed_item_count":0,
+     "genres":["剧情"],"year":2024,"rating":8.5,"provider_ids":{"Tmdb":"123"},
+     "presentation_unique_key":null,"path":null,"series_id":"srv-1",
+     "date_updated":null,"sort_name":"mou ju"}
+  ]
+}
