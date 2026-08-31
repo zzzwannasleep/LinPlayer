@@ -32,9 +32,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
-	"strings"
 )
 
 // clip 起播时真正吐出去的文件。空 = 播放自检跳过。
@@ -244,6 +244,38 @@ func main() {
 					},
 				}},
 			})
+
+		/* 下载:/Items/{id}/Download。支持 Range,回可预测内容(第 i 字节 = i%251)。
+		   ★ 真 Emby 这条路由由**服务端按下载权限**放行,客户端不预判。
+		     所以假服务器也照放 —— 要验「没权限」那条,用 -reject。 */
+		case len(parts) >= 3 && parts[2] == "Download":
+			const size = 3 * 1024 * 1024
+			if *reject {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			start, end := int64(0), int64(size-1)
+			w.Header().Set("Accept-Ranges", "bytes")
+			if rg := r.Header.Get("Range"); strings.HasPrefix(rg, "bytes=") {
+				p := strings.SplitN(strings.TrimPrefix(rg, "bytes="), "-", 2)
+				start, _ = strconv.ParseInt(p[0], 10, 64)
+				if len(p) > 1 && p[1] != "" {
+					end, _ = strconv.ParseInt(p[1], 10, 64)
+				}
+				if end > size-1 {
+					end = size - 1
+				}
+				w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, size))
+				w.Header().Set("Content-Length", strconv.FormatInt(end-start+1, 10))
+				w.WriteHeader(http.StatusPartialContent)
+			} else {
+				w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			}
+			buf := make([]byte, end-start+1)
+			for i := range buf {
+				buf[i] = byte((start + int64(i)) % 251)
+			}
+			_, _ = w.Write(buf)
 
 		// 详情:/Items/{id} 直接位(不带 /Users/ 前缀的那条 UI 不走,留着兜底)
 		default:

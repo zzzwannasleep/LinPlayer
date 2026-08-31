@@ -16,6 +16,7 @@ package commands
 import (
 	"linplayer/core/account"
 	"linplayer/core/aggregate"
+	"linplayer/core/download"
 	"linplayer/core/emby"
 	"linplayer/core/history"
 	"linplayer/core/player"
@@ -39,4 +40,5 @@ func RegisterAll(version string) {
 	aggregate.RegisterCommands(version)
 	ranking.RegisterCommands()
 	sourcecmd.RegisterCommands()
+	download.RegisterCommands()
 }

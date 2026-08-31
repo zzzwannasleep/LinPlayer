@@ -55,6 +55,8 @@ public partial class MainWindow : Window
         //   套 Emby() 的话,网盘用户和没登录的人会被挡在 NoSessionPage 上,
         //   而那页说的是「请先登录服务器」—— 和这一页的实际前提对不上。
         this.FindControl<RadioButton>("NavRanking")!.Checked += (_, _) => Nav.Root(new RankingPage(_core!));
+        // 下载页不要求 Emby 会话:列表读的是本地索引,网盘用户也看得到自己的历史任务
+        this.FindControl<RadioButton>("NavDownload")!.Checked += (_, _) => Nav.Root(new DownloadPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
         /* ★★ 自检模式下把窗口置顶。
@@ -79,6 +81,15 @@ public partial class MainWindow : Window
     /// <para>★ 截图工具点不了按钮。没有这个钩子的话「除首页以外的每一页」
     /// 都只能靠编译通过来证明 —— 而本仓库栽过的渲染 bug **一个都不会在编译期现形**。</para>
     /// </summary>
+    /// <summary>自检:在详情页点一下「下载」,然后落到下载页。</summary>
+    private async Task SelfCheckDownload()
+    {
+        await Task.Delay(1500); // 等详情页把按钮画出来
+        if (Nav.Current is DetailPage dp) dp.SelfCheckDownload();
+        await Task.Delay(1200); // 等入队 + 下一点字节
+        this.FindControl<RadioButton>("NavDownload")!.IsChecked = true;
+    }
+
     private void SelfCheckJump() => SelfCheckJump(Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE"));
 
     private void SelfCheckJump(string? want)
@@ -99,6 +110,7 @@ public partial class MainWindow : Window
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
             case "aggregate": this.FindControl<RadioButton>("NavAggregate")!.IsChecked = true; break;
             case "history": this.FindControl<RadioButton>("NavHistory")!.IsChecked = true; break;
+            case "download": this.FindControl<RadioButton>("NavDownload")!.IsChecked = true; break;
             case "browse":
                 this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true;
                 // 带参数(browse:空文件夹)时再点进那个子目录 —— 「空目录说空目录」要验得到
@@ -113,6 +125,11 @@ public partial class MainWindow : Window
             case "servers": GoServers(); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
+            // 自检:进详情页 → 点「下载」 → 跳下载页。整条链一次走完
+            case "dl":
+                Nav.Push(new DetailPage(_core, srv, arg));
+                _ = SelfCheckDownload();
+                break;
             case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
         }
     }

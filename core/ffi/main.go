@@ -26,6 +26,7 @@ import (
 	"linplayer/core/bus"
 	"linplayer/core/commands"
 	"linplayer/core/config"
+	"linplayer/core/download"
 	"linplayer/core/httpx"
 	"linplayer/core/net/localserve"
 	"linplayer/core/paths"
@@ -216,6 +217,10 @@ func lp_shutdown() {
 	// ★ 关 mpv 必须排在 lp_gl_uninit 之后(S1.2 实测:反过来宿主合成器当场抛异常)。
 	//   这里只关核心;GL 通道由宿主在销毁 GL 上下文前自己调 lp_gl_uninit。
 	player.Close()
+	/* ★ 下载要**等在跑的那条退出**再走。不等的话,正在写的 part 文件会停在一个
+	   没记进索引的长度上 —— 下次启动按文件实际大小恢复所以不会坏,但索引里的进度
+	   明显偏小,用户看到的是「上次明明下了一半,怎么回到 10% 了」。 */
+	download.Close()
 	// ★ 停在 bus.Shutdown 之前:队列一发 EOF 消费者就走了,再有日志也没人收。
 	if localServer != nil {
 		_ = localServer.Close()

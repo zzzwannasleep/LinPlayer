@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using Avalonia.Threading;
 using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
@@ -218,8 +219,48 @@ public sealed class DetailPage : PageBase
             catch (Exception e) { fav.Content = LibraryPage.Advice(e); }
         };
         row.Children.Add(fav);
+
+        // ★ 下载只对**可播条目**给。给一部剧的总条目下载按钮,点了不知道该下哪一集。
+        if (playable)
+        {
+            var dl = new Button { Classes = { "ghost" }, Content = "⭳ 下载" };
+            dl.Click += async (_, _) =>
+            {
+                dl.IsEnabled = false;
+                try
+                {
+                    /* ★ container 从媒体信息里取。给错的话文件后缀就错 ——
+                       播放器认后缀,mkv 存成 mp4 有的播放器直接不认。
+                       取不到就交给核心层兜底(它默认 mkv)。 */
+                    await _core.DownloadEnqueue(new
+                    {
+                        item_id = id, type_ = type, title = name,
+                        container = Str(d, "container"),
+                        poster_url = (string?)null,
+                    });
+                    dl.Content = "已加入下载";
+                }
+                catch (Exception e)
+                {
+                    // ★ 下载权限是**服务端**判的:没权限时如实说,别写成「网络错误」
+                    dl.Content = LibraryPage.Advice(e);
+                    dl.IsEnabled = true;
+                }
+            };
+            row.Children.Add(dl);
+        }
         return row;
     }
+
+    /// <summary>自检用:点一下「下载」按钮。</summary>
+    internal void SelfCheckDownload()
+    {
+        foreach (var b in this.GetVisualDescendants().OfType<Button>())
+            if ((b.Content as string) == "⭳ 下载") { b.Command?.Execute(null); RaiseClick(b); return; }
+    }
+
+    private static void RaiseClick(Button b) =>
+        b.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
 
     private static async Task Fill(Image target, string url, int maxH)
     {
