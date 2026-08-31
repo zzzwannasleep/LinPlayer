@@ -1,0 +1,66 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    设计 token —— **值逐个照抄 ui/shared/tokens.css**(UI_PC §1.1)。
+    那份是被用户调过多轮的成品,别在这里「顺手调好看一点」。
+
+    设计语言:影院沉浸式 —— 分层表面 + 极细发丝线 + 三级墨色 + 单一强调蓝。
+    两套主题:沉浸深色(默认)+ 米黄护眼暖纸 —— 浅色**不是纯白**,
+    墨色带暖偏**不是纯黑**。
+  -->
+
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Dark">
+      <Color x:Key="BgColor">#0c0f14</Color>
+      <Color x:Key="PanelColor">#141922</Color>
+      <Color x:Key="PanelAltColor">#1b212c</Color>
+      <Color x:Key="LineColor">#252c38</Color>
+      <Color x:Key="LineStrongColor">#323b4a</Color>
+      <Color x:Key="InkColor">#e8ebf1</Color>
+      <Color x:Key="Ink2Color">#9aa4b4</Color>
+      <Color x:Key="Ink3Color">#6b7688</Color>
+      <Color x:Key="AccentColor">#5b8def</Color>
+      <Color x:Key="AccentInkColor">#08101f</Color>
+      <Color x:Key="AccentSoftColor">#295b8def</Color>
+      <Color x:Key="WarnColor">#e0a95b</Color>
+      <Color x:Key="DangerColor">#e06c6c</Color>
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Light">
+      <Color x:Key="BgColor">#f1ece2</Color>
+      <Color x:Key="PanelColor">#fbf8f1</Color>
+      <Color x:Key="PanelAltColor">#f5f0e6</Color>
+      <Color x:Key="LineColor">#e4dccc</Color>
+      <Color x:Key="LineStrongColor">#d6ccb6</Color>
+      <Color x:Key="InkColor">#2a2622</Color>
+      <Color x:Key="Ink2Color">#6e6559</Color>
+      <Color x:Key="Ink3Color">#9c9284</Color>
+      <Color x:Key="AccentColor">#3f73d6</Color>
+      <Color x:Key="AccentInkColor">#ffffff</Color>
+      <Color x:Key="AccentSoftColor">#213f73d6</Color>
+      <Color x:Key="WarnColor">#c98a2e</Color>
+      <Color x:Key="DangerColor">#c95555</Color>
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <SolidColorBrush x:Key="Bg" Color="{DynamicResource BgColor}" />
+  <SolidColorBrush x:Key="Panel" Color="{DynamicResource PanelColor}" />
+  <SolidColorBrush x:Key="PanelAlt" Color="{DynamicResource PanelAltColor}" />
+  <SolidColorBrush x:Key="Line" Color="{DynamicResource LineColor}" />
+  <SolidColorBrush x:Key="LineStrong" Color="{DynamicResource LineStrongColor}" />
+  <SolidColorBrush x:Key="Ink" Color="{DynamicResource InkColor}" />
+  <SolidColorBrush x:Key="Ink2" Color="{DynamicResource Ink2Color}" />
+  <SolidColorBrush x:Key="Ink3" Color="{DynamicResource Ink3Color}" />
+  <SolidColorBrush x:Key="Accent" Color="{DynamicResource AccentColor}" />
+  <SolidColorBrush x:Key="AccentInk" Color="{DynamicResource AccentInkColor}" />
+  <SolidColorBrush x:Key="AccentSoft" Color="{DynamicResource AccentSoftColor}" />
+  <SolidColorBrush x:Key="Warn" Color="{DynamicResource WarnColor}" />
+  <SolidColorBrush x:Key="Danger" Color="{DynamicResource DangerColor}" />
+
+  <!-- 布局常量(UI_PC §3.1)。标题栏 36 / 侧栏 212(用户 2026-07-16 定,草稿原为 186)/
+       折叠 72 / 正文封顶 1560 / 水槽 18 / 窗口最小 1024×640 -->
+  <x:Double x:Key="TitleBarHeight">36</x:Double>
+  <x:Double x:Key="SidebarWidth">212</x:Double>
+  <x:Double x:Key="SidebarCollapsedWidth">72</x:Double>
+  <x:Double x:Key="ContentMaxWidth">1560</x:Double>
+  <x:Double x:Key="ContentGutter">18</x:Double>
+</ResourceDictionary>

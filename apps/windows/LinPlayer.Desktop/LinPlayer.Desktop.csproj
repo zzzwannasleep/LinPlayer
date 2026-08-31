@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- LinPlayer 的 Windows 端外壳。**UI 层不包含任何业务逻辑** ——
+       所有数据与播放都经由 core/ 的 13 个 FFI 导出(SPEC §5.1)。
+       同一份代码之后要在 Linux 上跑(TODO B2.3),所以别写 Windows 专有 API,
+       除非确实只有 Windows 需要(那时用 OperatingSystem.IsWindows() 圈起来)。 -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LinPlayer</AssemblyName>
+    <RootNamespace>LinPlayer.Desktop</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 命令绑定是**生成的**(scripts/gen-bindings.py),不许手写。
+         266 x 3 = 798 次抄写机会,错的那几次全是运行时才发现。 -->
+    <ProjectReference Include="..\..\..\bindings\csharp\LinPlayer.Core.csproj" />
+  </ItemGroup>
+
+</Project>

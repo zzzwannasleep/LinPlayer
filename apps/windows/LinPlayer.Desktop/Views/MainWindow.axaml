@@ -1,0 +1,78 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LinPlayer.Desktop.Views.MainWindow"
+        Title="LinPlayer"
+        Width="1280" Height="800"
+        MinWidth="1024" MinHeight="640"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Bg}"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="NoChrome"
+        ExtendClientAreaTitleBarHeightHint="-1">
+  <!--
+    外壳骨架(UI_PC §3.1):
+      自绘标题栏 36px  |  侧栏 212px  |  内容区(正文封顶 1560,左右水槽 18)
+
+    ★ 自绘标题栏必须留**拖拽区**:不留的话窗口拖不动,而用户第一反应是「卡死了」。
+  -->
+  <Grid RowDefinitions="36,*">
+
+    <!-- ══════ 标题栏 ══════ -->
+    <Grid Grid.Row="0" Name="TitleBar" Background="{DynamicResource Panel}"
+          ColumnDefinitions="Auto,*,Auto">
+      <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="14,0,0,0" Spacing="9"
+                  VerticalAlignment="Center">
+        <Border Width="16" Height="16" CornerRadius="4" Background="{DynamicResource Accent}" />
+        <TextBlock Text="LinPlayer" FontSize="12.5" FontWeight="SemiBold"
+                   Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
+      </StackPanel>
+
+      <!-- 拖拽区:整条中段都能拖 -->
+      <Border Grid.Column="1" Background="Transparent" Name="DragArea" />
+
+      <StackPanel Grid.Column="2" Orientation="Horizontal">
+        <Button Classes="caption" Name="BtnMin" Content="&#xE921;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
+        <Button Classes="caption" Name="BtnMax" Content="&#xE922;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
+        <Button Classes="caption close" Name="BtnClose" Content="&#xE8BB;" FontFamily="Segoe MDL2 Assets" FontSize="10" />
+      </StackPanel>
+    </Grid>
+
+    <!-- ══════ 主体 ══════ -->
+    <Grid Grid.Row="1" ColumnDefinitions="212,*">
+
+      <!-- 侧栏 -->
+      <Border Grid.Column="0" Background="{DynamicResource Panel}"
+              BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
+        <DockPanel LastChildFill="True">
+          <!-- 服务器切换器 -->
+          <Border DockPanel.Dock="Top" Margin="10,12,10,10" Padding="10,9"
+                  Background="{DynamicResource PanelAlt}" CornerRadius="10">
+            <StackPanel Spacing="2">
+              <TextBlock Name="ServerName" Text="未连接" FontSize="13" FontWeight="SemiBold"
+                         TextTrimming="CharacterEllipsis" />
+              <TextBlock Name="ServerSub" Classes="dim" Text="还没有添加服务器"
+                         FontSize="11" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </Border>
+
+          <!-- 底部:设置 -->
+          <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,10">
+            <RadioButton Classes="nav" Name="NavSettings" GroupName="nav" Content="设置" />
+          </StackPanel>
+
+          <StackPanel Name="NavList" Spacing="0">
+            <RadioButton Classes="nav" Name="NavHome" GroupName="nav" Content="首页" IsChecked="True" />
+            <RadioButton Classes="nav" Name="NavLibrary" GroupName="nav" Content="媒体库" />
+            <RadioButton Classes="nav" Name="NavSearch" GroupName="nav" Content="搜索" />
+            <RadioButton Classes="nav" Name="NavFavorites" GroupName="nav" Content="收藏" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- 内容区 -->
+      <Panel Grid.Column="1">
+        <ContentControl Name="PageHost" />
+      </Panel>
+    </Grid>
+  </Grid>
+</Window>

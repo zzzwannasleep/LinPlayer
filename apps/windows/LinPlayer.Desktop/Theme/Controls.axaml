@@ -1,0 +1,120 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    组件样式(UI_PC §4)。**只写这一层用得到的**,别提前造轮子。
+
+    ★ 状态矩阵(§4.1):每个可交互组件都要有 默认 / 悬停 / 按下 / 禁用 / 加载 五态。
+      少一态的表现是「点了没反应」—— 用户分不清是没点上还是在加载。
+  -->
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource Bg}" />
+  </Style>
+
+  <Style Selector="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+  </Style>
+
+  <!-- 标题栏上的窗口按钮:46×36,悬停变底色,关闭键悬停变红 -->
+  <Style Selector="Button.caption">
+    <Setter Property="Width" Value="46" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.caption:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource Ink}" />
+  </Style>
+  <Style Selector="Button.caption.close:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Danger}" />
+    <Setter Property="TextBlock.Foreground" Value="White" />
+  </Style>
+
+  <!-- 侧栏导航项 -->
+  <Style Selector="RadioButton.nav">
+    <Setter Property="Height" Value="38" />
+    <Setter Property="Margin" Value="8,1" />
+    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Name="root" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
+          <ContentPresenter VerticalAlignment="Center"
+                            Content="{TemplateBinding Content}"
+                            TextBlock.Foreground="{TemplateBinding Foreground}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.nav:pointerover /template/ Border#root">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+  </Style>
+  <Style Selector="RadioButton.nav:checked /template/ Border#root">
+    <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+  </Style>
+  <Style Selector="RadioButton.nav:checked">
+    <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <!-- 主按钮 -->
+  <Style Selector="Button.primary">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentInk}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="16,9" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.primary:disabled /template/ ContentPresenter">
+    <Setter Property="Opacity" Value="0.45" />
+  </Style>
+
+  <!-- 次按钮 -->
+  <Style Selector="Button.ghost">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="14,8" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="TextBox.field">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="12,9" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+
+  <!-- 卡片 -->
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="{DynamicResource Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+
+  <Style Selector="TextBlock.h1">
+    <Setter Property="FontSize" Value="22" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.h2">
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.dim">
+    <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+</Styles>
