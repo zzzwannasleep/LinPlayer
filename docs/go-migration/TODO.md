@@ -800,6 +800,19 @@
 > 顺带修了 `player.chapterInfo` 的一处移植漏项:Rust 侧**关了开关时区间恒为 null**
 > (调用方不必再判一次),我第一版把这层去掉了 —— 判两次早晚判岔。
 >
+>
+> **2026-08-31 十二续:**`core/shaders` 落地(28 个画质档位 + 17 个 glsl 文件嵌进二进制),
+> `player.setShaderLevel` 接线。**共 107 条命令。**
+>
+> ★ 这一块的价值全在**测试**上 —— 八条判据都是「不报错、只是静默不干活」那类:
+> opts 参数名不属于本档挂载的 shader(mpv 整条拒掉,强度回默认)/ 参数值越界 /
+> 同一档叠两个共用 `STR` 的锐化器(量纲不同,必然串味)/「窗口也生效」的判断
+> 必须从 shader 源里**现算**而不是手工名单 / `WhenRatio` 与源里写死的门槛一致 /
+> 尺寸未知时**不下结论** / Restore CNN 不许加回来。
+>
+> ★ `core/shaders/files/` 是从 `apps/desktop/shaders/` **复制**的 520KB。
+> 迁移期两边各一份是有意的(Rust 版还得能编),阶段 5 下线 Rust 版时删掉那一份。
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/

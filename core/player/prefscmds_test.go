@@ -10,6 +10,7 @@ import (
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/paths"
+	"linplayer/core/shaders"
 )
 
 func TestMain(m *testing.M) {
@@ -177,7 +178,7 @@ func TestShaderLevels(t *testing.T) {
 	if !r.OK {
 		t.Fatal(r.Msg)
 	}
-	var levels []shaderLevel
+	var levels []shaders.Level
 	if err := json.Unmarshal(r.Data, &levels); err != nil {
 		t.Fatal(err)
 	}

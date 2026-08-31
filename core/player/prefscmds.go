@@ -8,63 +8,18 @@ package player
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/emby"
 	"linplayer/core/media"
+	"linplayer/core/paths"
+	"linplayer/core/shaders"
 )
-
-// shaderLevel 一个超分/锐化档位。
-type shaderLevel struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Group string `json:"group"`
-}
-
-// shaderLevels 全部档位。**顺序就是 UI 里的顺序**,别按字母排。
-//
-// ★ 「锐化/去噪(源分辨率就跑,窗口也生效)」与「放大(要输出 > 源 1.2 倍)」
-// 是两件事。放大族在窗口模式下整条链空转,画面一点不变 —— 所以「锐化专精」
-// 那一族放在最后但**它才是日常首选**,UI 分组标题里要写明「窗口也生效」。
-//
-// ★ 档位**不持久化**是故意的,别改。
-var shaderLevels = []shaderLevel{
-	{"off", "关闭", ""},
-	// Anime4K:动漫特化(双边去噪 + CNN 超分)
-	{"ak_denoise_l", "去噪 · 轻", "Anime4K"},
-	{"ak_denoise_h", "去噪 · 强", "Anime4K"},
-	{"ak_sharp", "锐化+去噪 · 推荐", "Anime4K"},
-	{"ak_up_m", "放大 · CNN M", "Anime4K"},
-	{"ak_up_dn", "放大+去噪 · CNN M", "Anime4K"},
-	{"ak_up_vl", "放大去噪 · CNN VL · 壮机", "Anime4K"},
-	{"ak_up_artcnn", "放大 · ArtCNN · 清晰轻量", "Anime4K"},
-	{"ak_up_artcnn_sh", "放大+锐化 · ArtCNN · 最清晰", "Anime4K"},
-	// AMD FSR:通用锐化 + FSR1 放大
-	{"fsr_sharp_l", "锐化 · 轻", "FSR"},
-	{"fsr_sharp_m", "锐化 · 推荐", "FSR"},
-	{"fsr_sharp_h", "锐化 · 强", "FSR"},
-	{"fsr_up", "放大+锐化 · FSR1", "FSR"},
-	{"fsr_up_h", "放大+锐化 · 强", "FSR"},
-	{"fsr_up_dn", "放大+锐化+去噪", "FSR"},
-	// NVIDIA Image Scaling
-	{"nv_sharp_l", "锐化 · 轻", "NVIDIA"},
-	{"nv_sharp_m", "锐化 · 推荐", "NVIDIA"},
-	{"nv_sharp_h", "锐化 · 强", "NVIDIA"},
-	{"nv_up", "放大 · NIS", "NVIDIA"},
-	{"nv_up_h", "放大+锐化 · NIS", "NVIDIA"},
-	{"nv_up_dn", "放大+锐化+去噪 · NIS", "NVIDIA"},
-	// 锐化专精:窗口/全屏都生效,开销最低
-	{"sh_ada_l", "自适应锐化 · 轻", "Sharpen"},
-	{"sh_ada_m", "自适应锐化 · 推荐", "Sharpen"},
-	{"sh_ada_h", "自适应锐化 · 强", "Sharpen"},
-	{"sh_fine_m", "精细锐化 · 推荐", "Sharpen"},
-	{"sh_fine_h", "精细锐化 · 强", "Sharpen"},
-	{"sh_warp", "线条锐化 · 动漫线稿", "Sharpen"},
-	{"sh_bcas", "双边锐化 BCAS · 强", "Sharpen"},
-}
 
 var prefsClient *emby.Client
 
@@ -73,7 +28,49 @@ func registerPrefsCommands(version string) {
 	prefsClient = emby.NewClient(version)
 
 	bus.Register("player.shaderLevels", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
-		return shaderLevels, nil
+		return shaders.Levels(), nil
+	})
+
+	// setShaderLevel 应用一个画质档位。
+	//
+	// ★★ 返回体里**必须带 will_run**,不能只回一个「挂了几个 shader」的数字。
+	//   `count>0` 只能证明 mpv **收下了**路径,**证明不了 shader 会跑** ——
+	//   Anime4K 每个 pass 都带 `//!WHEN 输出>源*1.2`,窗口没比源大就整条链空转,
+	//   画面一点没变,而旧版 UI 照样报「超分已生效 · 挂载 6 个 shader」。
+	//   **那是在撒谎**,正是本项目最贵的那类 bug。
+	bus.Register("player.setShaderLevel", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
+		level, _ := a["level"].(string)
+		// .glsl 是编进二进制、首次用时落盘的 —— 丢了能重生成,所以归 cache/
+		dir := filepath.Join(paths.CacheDir(), "shaders")
+		list, err := shaders.Paths(dir, level)
+		if err != nil {
+			return nil, bus.NewErr(bus.EInternal, "%v", err)
+		}
+		/* 强度是**档位设计的一部分**,每次挂载都得重设:glsl-shader-opts 是全局的,
+		   不设就吃 shader 自带默认(CAS STR=0.5,只开一半)—— 用户实测「看不太出来」
+		   正是这个。切到 off 时 opts 为空串,顺带把上一档的参数清掉。 */
+		setProp("glsl-shader-opts", shaders.Opts(level))
+		setProp("glsl-shaders", strings.Join(list, string(filepath.ListSeparator)))
+
+		out := map[string]any{"level": level, "count": len(list)}
+		if len(list) == 0 {
+			return out, nil // off:关掉就完事,没有「会不会跑」这回事
+		}
+		vw, vh := propF("video-params/w"), propF("video-params/h")
+		ow, oh := propF("osd-dimensions/w"), propF("osd-dimensions/h")
+		if run, ok := shaders.WillRun(level, vw, vh, ow, oh); ok {
+			out["will_run"] = run
+			if !run {
+				// ★ 说清楚**为什么**不生效,以及怎么办 —— 只回一个 false 等于让用户猜
+				out["note"] = fmt.Sprintf(
+					"这档是**放大**滤镜,当前尺寸下不会生效:要求画面区大于源的 %.1f 倍才工作。"+
+						"现在源 %.0f×%.0f、画面区只有 %.0f×%.0f(%.2f×)—— 你在缩小画面,没有可放大的。"+
+						"全屏即可生效;想在窗口里就见效,请选「锐化」「去噪」那几族。",
+					shaders.WhenRatio, vw, vh, ow, oh, ow/vw)
+			}
+		}
+		// ok=false(尺寸未知 = 没在播)时**不给 will_run** —— 猜一个就是在撒谎
+		return out, nil
 	})
 
 	// validateTrackRegex 设置页的即时校验。
