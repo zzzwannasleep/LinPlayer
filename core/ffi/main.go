@@ -29,6 +29,7 @@ import (
 	"linplayer/core/net/localserve"
 	"linplayer/core/paths"
 	"linplayer/core/player"
+	"linplayer/core/prefs"
 	"linplayer/core/system"
 )
 
@@ -112,6 +113,7 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 		player.RegisterCommands()
 		emby.RegisterCommands(system.Version)
 		account.RegisterCommands(system.Version)
+		prefs.RegisterCommands(system.Version)
 
 		// ★ 起本地 HTTP 数据通道(SPEC §6)。地址和 token 通过**首个事件**告知宿主 ——
 		//   三端的图片加载器要拿它拼 `/img?src=`,拿不到就是「一张图都没有」。

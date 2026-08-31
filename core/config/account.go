@@ -351,6 +351,19 @@ func (c *AppConfig) Remove(serverID string) bool {
 	}
 	c.AccountList = append(c.AccountList[:idx], c.AccountList[idx+1:]...)
 
+	// ★ 按服务器存的开关要跟着账号走。留着的话,重新加同一地址的服会「自己就开着」——
+	//   用户没开过多线程加载,它却是开的,而且没有任何地方解释为什么。
+	if p := c.PrefsOf(); len(p.PrefetchServers) > 0 {
+		kept := p.PrefetchServers[:0]
+		for _, s := range p.PrefetchServers {
+			if s != serverID {
+				kept = append(kept, s)
+			}
+		}
+		p.PrefetchServers = kept
+		_ = c.SetPrefs(p)
+	}
+
 	switch {
 	case len(c.AccountList) == 0:
 		c.Active = nil

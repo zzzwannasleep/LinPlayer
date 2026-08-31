@@ -717,6 +717,21 @@
 > updateAccount / setActiveLine / setLines / syncLines / testConnection),
 > `emby.*` 再加 currentSession / relogin。**共 49 条命令。**
 >
+>
+> **2026-08-31 四续:**`core/config` 的 Prefs 接成强类型(31 个字段),
+> 新建 `core/prefs` 落地 `prefs.*` 11 条(getPrefs / setPrefs /
+> get·setPrefetchSettings / get·setPreloadSettings / get·setWritebackSettings /
+> get·setUpdateSettings / setDetailBlur)。**共 60 条命令。**
+>
+> ★ 这一批又抓到一个**移植期的系统性坑**(已写进 `knowledge/PORTING_TRAPS.md` T5):
+> Rust 的 `serde(default = "…")` 在 Go 这边**一个都不存在**,直接 unmarshal 进零值
+> 结构体会把 14 个默认值全部清零 —— 字幕默认不开、倍速变成 0 放不出来、
+> hwdec 空串直接喂 mpv 变软解。规矩:**先造默认值再往上面盖**。
+> 同批还记了 T6:「读的时候钳」和「写的时候拒」是两件事,不许统一。
+>
+> 顺带补了一处上一批的漏:`config.Remove` 没有清 `prefs.prefetch_servers`
+> (Rust 侧有)。表现是删了服务器再加同一地址,多线程加载「自己就开着」。
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/

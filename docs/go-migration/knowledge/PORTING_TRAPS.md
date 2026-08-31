@@ -15,6 +15,8 @@
 - [T2. `Option<String>` 的 `.or()` 短路:`Some("")` 不会回落](#t2)
 - [T3. `sort_by` 不稳定,`SliceStable` 才等价](#t3)
 - [T4. 空串折 `null` 这件事,每个结构体的口径都不一样](#t4)
+- [T5. serde 的 `default = "…"` 在 Go 这边一个都不存在](#t5)
+- [T6. 「读的时候钳」和「写的时候拒」是两件事,不许统一](#t6)
 
 ---
 
@@ -109,3 +111,75 @@ Go 的 `sort.Slice` **不稳定**,`sort.SliceStable` 才是。
 移植时看到两处不一致,先假定它是有意的 —— 去 `git log -S` 查那行是什么时候加的。
 真是笔误的话,改它属于**改黄金实现的行为**,要单独提出来,不能夹在移植提交里
 (会破坏差分对账的基准,见 `docs/go-migration/README.md` 的三条硬规矩)。
+
+---
+
+<a id="t5"></a>
+## T5. serde 的 `default = "…"` 在 Go 这边一个都不存在
+
+**移植 `Prefs` 时发现,是这份清单里目前最贵的一条。**
+
+Rust 的 `Prefs` 有 14 个字段带 `#[serde(default = "…")]`,缺字段时拿到的是
+`true` / `1.0` / `"auto-safe"` / `512MB` / `3` / `40`。
+Go 的 `encoding/json` 缺字段时**一律零值**。
+
+```go
+var p Prefs
+json.Unmarshal(raw, &p)   // ← 这一行把 14 个默认值全变成了 false / 0 / ""
+```
+
+**它错了会长什么样:** 老用户升级之后 ——
+
+| 字段 | 零值的后果 |
+|---|---|
+| `sub_enabled` | **字幕默认不开了** |
+| `default_speed` | 变成 0 倍速,**根本放不出来** |
+| `hwdec` | 空串直接喂 mpv = 走软解,用户:「我没关硬解啊怎么这么卡」 |
+| `preview_thumbs` | 进度条悬停缩略图没了 |
+| `dolby_auto_sw` | DV 走硬解,画面发绿/发紫 |
+| `preload_enabled` | 起播慢回去了,没人知道为什么 |
+| `prefetch_threads` | 0 线程 |
+
+而且**配置文件看上去一点问题都没有** —— 它只是少了几个键,那本来就是合法的。
+
+**规矩:凡是 Rust 侧带 `serde(default = …)` 的结构体,Go 侧解析必须
+「先造一份默认值,再往上面盖」,绝不 unmarshal 进零值结构体。**
+
+```go
+func ParsePrefs(raw json.RawMessage) Prefs {
+    p := DefaultPrefs()          // ← 起手就是默认值
+    json.Unmarshal(raw, &p)      // 有的键才覆盖
+    return p.Clamped()
+}
+```
+
+**怎么钉住:** `core/config/prefs_test.go` 的
+`TestParsePrefs缺字段要拿到默认值不是零值` —— 拿一份**只有一个键**的 prefs 去解,
+把每个「默认非零」的字段都点一遍。改成从零值起手,一次报 7 条红。
+
+> 反向也要看一眼:默认**关**的那几个(`cross_server_resume` /
+> `cross_server_writeback`)零值恰好是对的,但那是巧合不是设计。
+> 同一条测试里也断言了它们必须是关的 —— 哪天有人「顺手把默认值都改成 true」会红。
+
+---
+
+<a id="t6"></a>
+## T6. 「读的时候钳」和「写的时候拒」是两件事,不许统一
+
+Rust 侧 `get_prefetch_settings` 把越界值**钳**回合法区间,
+`set_prefetch_settings` 对越界值**报错**。移植时很容易觉得「重复了,统一成一种吧」。
+
+两种都错:
+
+| 只钳不拒 | 只拒不钳 |
+|---|---|
+| 用户设 8 线程 / 8GB,界面显示成功,**实际生效 4 线程 / 4GB**,毫无反馈,下次他还会再设一遍 | 老配置里存着离谱值(Rust 侧真发生过:旧配置存 1GB,新校验是 16~32MB),**设置页一保存就被拒**,用户连「打开某台服务器」都点不动,而且不知道哪儿不对 |
+
+**规矩:**
+
+- `core/config` 的 `Clamped()` —— 读的时候钳,保证界面永远打得开
+- `core/prefs` 的 setter —— 写的时候拒,保证用户设的值要么生效要么报错
+
+**怎么钉住:** `core/prefs/prefs_test.go` 的
+`TestSetters拒绝越界而不是悄悄钳`(8 个子用例)与
+`TestGetters对老配置里的离谱值要钳`。把 setter 改成钳,第一条当场红。
