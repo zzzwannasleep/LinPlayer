@@ -113,10 +113,10 @@ internal static partial class Core
     public static void CallAsync(string cmd, string argsJson)
         => lp_call(Interlocked.Increment(ref _seq), cmd, argsJson);
 
-    /// <summary>读一个 mpv 属性 —— 经由 player.prop 命令,不是专用导出。</summary>
+    /// <summary>读一个 mpv 属性 —— 经由 debug.mpvProp 命令,不是专用导出。</summary>
     public static string Prop(string name)
     {
-        var r = Call("player.prop", "{\"name\":\"" + name + "\"}");
+        var r = Call("debug.mpvProp", "{\"name\":\"" + name + "\"}");
         if (r is not { } e || !e.GetProperty("ok").GetBoolean()) return null;
         return e.GetProperty("data").GetProperty("value").GetString();
     }
@@ -130,7 +130,7 @@ internal static partial class Core
     public static void Counters(out ulong renders, out ulong swaps)
     {
         renders = swaps = 0;
-        if (Call("player.counters", "{}") is not { } e || !e.GetProperty("ok").GetBoolean()) return;
+        if (Call("debug.glCounters", "{}") is not { } e || !e.GetProperty("ok").GetBoolean()) return;
         var d = e.GetProperty("data");
         renders = (ulong)d.GetProperty("renderCalls").GetInt64();
         swaps = (ulong)d.GetProperty("swapCalls").GetInt64();
@@ -430,8 +430,8 @@ internal sealed class Report
         // SPIKE-5:起播之后再开弹幕
         if (_o.Danmaku > 0)
         {
-            Core.Call("danmaku.load", "{\"count\":" + _o.Danmaku + ",\"span\":30}");
-            Core.Call("danmaku.start", "{\"hz\":" + _o.DanmakuHz + ",\"fpsFilter\":" + _o.FpsFilter + "}", 15000);
+            Core.Call("debug.danmakuLoad", "{\"count\":" + _o.Danmaku + ",\"span\":30}");
+            Core.Call("debug.danmakuStart", "{\"hz\":" + _o.DanmakuHz + ",\"fpsFilter\":" + _o.FpsFilter + "}", 15000);
         }
 
         Thread.Sleep(1500);   // 预热,别把起播抖动算进去
@@ -625,7 +625,7 @@ internal sealed class Report
         {
             W("");
             W("---- 弹幕(SPIKE-5)----");
-            var st = Core.Call("danmaku.stats", "{}");
+            var st = Core.Call("debug.danmakuStats", "{}");
             if (st is { } e2 && e2.GetProperty("ok").GetBoolean())
             {
                 var d2 = e2.GetProperty("data");
@@ -640,7 +640,7 @@ internal sealed class Report
                 W($"  位置变化间隔标准差: {d2.GetProperty("stdDelta").GetDouble() * 1000:F2} ms");
                 W($"  弹幕条数         : {d2.GetProperty("items").GetInt32()}");
             }
-            Core.Call("danmaku.stop", "{}");
+            Core.Call("debug.danmakuStop", "{}");
         }
         {
             // ★ 无论开不开弹幕都要打:--danmaku 0 那次是 A/B 的**基线**,

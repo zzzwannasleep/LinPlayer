@@ -146,3 +146,10 @@ ui/mobile/check-shots/
 # 资源站接口地址清单(vod.json 之类)。里面是一串站点域名 —— 按全局红线,
 # 这类东西不进版本库,插件也不内置它:VOD 资源站插件只留一个地址输入框,用户自己填。
 vod.json
+
+# 绑定层的编译产物(Commands.g.cs / .kt 本身是要进仓库的,它们是生成的**源码**)
+bindings/csharp/bin/
+bindings/csharp/obj/
+bindings/kotlin/build/
+bindings/kotlin/.gradle/
+build/kotlin-check/

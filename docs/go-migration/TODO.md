@@ -544,8 +544,27 @@
     叠加区帧间差 1.20 / 每帧都在;60.1 fps
   - 探针 `spikes/s1-2/AvaloniaProbe` **只用 13 个契约导出**,UI 侧没有任何 mpv 类型
 - [ ] **B2.3** Linux:与 B2.2 同一份 C# 代码跑通 🟡
-- [ ] **B2.4** 三端各自的绑定层**代码生成器**(从 `COMMANDS.md` 生成) 🟡
-  - 判据:生成的 Kotlin / C# 类型能编译;新增一条命令只需改 `COMMANDS.md` + 重跑生成
+- [x] **B2.4** ✅ 绑定层**代码生成器**(从 `COMMANDS.md` 生成)
+  - `scripts/gen-bindings.py` → `bindings/csharp/Commands.g.cs` + `bindings/kotlin/Commands.g.kt`
+  - `scripts/check-bindings.sh` 四关全绿:产物最新 / C# 编得过 / Kotlin 编得过 /
+    **四方比对**(COMMANDS.md ↔ Go 注册表 ↔ C# ↔ Kotlin)
+  - 判据达成:C# `dotnet build` 0 警告 0 错误(`TreatWarningsAsErrors`);
+    Kotlin `gradlew compileKotlin` 出 class;改 `COMMANDS.md` 后不重跑生成器,第 1 关当场红
+  - **现在只生成命令名 + 方法壳,不生成参数/返回的强类型** —— `COMMANDS.md` 的参数列
+    装的是现有 Rust 签名,不是新契约的 JSON 形状。拿它硬生成 record 会造出一批
+    和真实 JSON 对不上的类型,**比没有类型更糟:它看起来是类型安全的**。
+    形状随各模块移植回填后再生成强类型
+  - ⚠️ 这一关上来就抓到两处真漂移:
+    1. Go 侧注册了 6 条**探针专用**命令(GL 计数器 / 裸 mpv 属性 / 合成弹幕),
+       其中 `danmaku.load` 还和契约里那条**同名不同义** —— 真的那条移植过来时
+       `bus.Register` 会直接 panic。已全部改到 `debug.*`(不进契约,门禁里显式摘掉)
+    2. 5 条命令 Go 侧有、契约里没有(`system.ping` / `capabilities` /
+       `exportDiagnostics` / `emby.counts` / `emby.logout`)—— 它们在 Rust 版里
+       本来就不存在。给 `gen-commands.py` 加了一张**手维护的「新增命令」表**,
+       契约 266 → 271 条
+  - 排查中还栽了两次「脚本自己的假绿」,都写进注释了:Python 的 `write_text`
+    在 Windows 上出 CRLF 而 `sort` 出 LF,`comm` 会把**每一条**都报成差异;
+    Python 按码点排而系统 `sort` 按语言环境排,同样全红
 
 ### 阶段 1 出口
 

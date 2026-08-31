@@ -28,7 +28,7 @@ func RegisterCommands() {
 		return map[string]any{"playing": path}, nil
 	})
 
-	bus.Register("player.prop", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+	bus.Register("debug.mpvProp", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		name, _ := args["name"].(string)
 		if name == "" {
 			return nil, bus.NewErr(bus.EInvalid, "缺少 name")
@@ -41,7 +41,7 @@ func RegisterCommands() {
 		return map[string]any{"name": name, "value": v}, nil
 	})
 
-	bus.Register("player.counters", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+	bus.Register("debug.glCounters", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		return map[string]any{
 			"renderCalls": renderCalls.Load(),
 			"swapCalls":   swapCalls.Load(),
@@ -50,14 +50,14 @@ func RegisterCommands() {
 
 	// ---- 弹幕(SPEC §7.5:走 osd-overlay,不占字幕轨)----
 
-	bus.Register("danmaku.load", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+	bus.Register("debug.danmakuLoad", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		n := intArg(args, "count", 500)
 		span := floatArg(args, "span", 60)
 		danmakuLoad(n, span)
 		return map[string]any{"loaded": n}, nil
 	})
 
-	bus.Register("danmaku.start", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+	bus.Register("debug.danmakuStart", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		if f := intArg(args, "fpsFilter", 0); f > 0 {
 			applyFpsFilter(f)
 		}
@@ -66,12 +66,12 @@ func RegisterCommands() {
 		return map[string]any{"hz": hz}, nil
 	})
 
-	bus.Register("danmaku.stop", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+	bus.Register("debug.danmakuStop", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		danmakuStop()
 		return map[string]any{"stopped": true}, nil
 	})
 
-	bus.Register("danmaku.stats", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+	bus.Register("debug.danmakuStats", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		return danmakuStats(), nil
 	})
 }

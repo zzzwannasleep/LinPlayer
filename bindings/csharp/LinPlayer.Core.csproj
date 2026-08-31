@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 核心层命令绑定(C#)。**Commands.g.cs 是生成的** —— 见 scripts/gen-bindings.py。
+       这个 csproj 的存在意义有两个:
+         1. 让 B2.4 的判据「生成的类型能编译」有个真的编译得起来的地方
+         2. Windows / Linux 的 Avalonia 宿主直接引用它,不用各抄一份 -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>LinPlayer.Core</AssemblyName>
+    <RootNamespace>LinPlayer.Core</RootNamespace>
+    <!-- 生成的文件里有中文文档注释,别让 CS1591 之类的把日志刷满 -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

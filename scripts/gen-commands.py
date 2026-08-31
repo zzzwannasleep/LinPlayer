@@ -58,6 +58,31 @@ for _c in ("afdian_sponsor_url afdian_verify cache_size clear_cache data_paths o
     EXPLICIT[_c] = "system"
 EXPLICIT["set_detail_blur"] = "prefs"
 
+# -- 新契约里有、Rust 版没有的命令 --------------------------------------
+# 这张表**是手维护的**,和上面从 Rust 注册表抽出来的那批不同。
+#
+# 为什么需要它:新架构有几条命令在 Rust 版里根本不存在(核心层自检、能力协商、
+# 诊断导出…),它们同样要进三端绑定。没有这张表的话,Go 侧注册了、
+# 绑定里却没有 —— 四方比对(scripts/check-bindings.sh)当场红,
+# 而红的理由会被误读成「Go 里有野命令」。
+#
+# 只放**产品命令**。探针 / 自检用的一律走 debug.*,不进契约
+# (debug.* 由 LP_DEBUG_CMDS 门控,三端绑定里不该出现)。
+ADDED = {
+    "emby": [
+        ("emby.counts", "server, token, user_id", "Counts",
+         "媒体库规模统计。Rust 版里 emby::counts 只被 aggregate_overview 内部调用,没单独成命令"),
+        ("emby.logout", "server, token, user_id, device_id", "{ server_ok: bool }",
+         "服务端登出。尽力而为:某 fork 该端点 404 且 token 仍可用,失败不挡本地删账号"),
+    ],
+    "system": [
+        ("system.ping", "-", "{ pong: true, ... }", "核心层活着吗。契约测试的第一条"),
+        ("system.capabilities", "-", "{ commands: string[], ... }",
+         "本平台支持哪些命令。UI 启动时拿它隐藏入口(SPEC 5.6)"),
+        ("system.exportDiagnostics", "-", "{ ... }", "诊断导出(SPEC 5.6)。**不许带凭据**"),
+    ],
+}
+
 PREFIXES = [
     ("anirss_", "anirss"), ("player_", "player"), ("plugin_", "plugin"), ("plugins_", "plugin"),
     ("danmaku_", "danmaku"), ("source_", "source"), ("download_", "download"),
@@ -189,19 +214,30 @@ def build():
     body, total, and_total = [], 0, 0
     for dom in ORDER:
         cmds = sorted(groups.get(dom, []))
-        if not cmds:
+        added = sorted(ADDED.get(dom, []))
+        if not cmds and not added:
             continue
         n_and = sum(1 for c in cmds if c in android)
-        summary.append(f"| {TITLES[dom]} | `{dom}.*` | {len(cmds)} | {n_and} |")
-        body.append(f"\n### {TITLES[dom]} · `{dom}.*` — {len(cmds)} 条\n")
+        n = len(cmds) + len(added)
+        summary.append(f"| {TITLES[dom]} | `{dom}.*` | {n} | {n_and} |")
+        body.append(f"\n### {TITLES[dom]} · `{dom}.*` — {n} 条\n")
         body.append("| 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |")
         body.append("|:--:|---|---|---|---|:--:|")
+        rows = []
         for c in cmds:
             sig = sigs.get(c, "")
             mark = "✅" if c in android else "❌"
-            body.append(f"| [ ] | `{new_name(c, dom)}` | `{c}` | "
-                        f"`{esc(args_of(sig))}` | `{esc(ret_of(sig))}` | {mark} |")
-            total += 1
+            rows.append((new_name(c, dom),
+                         f"| [ ] | `{new_name(c, dom)}` | `{c}` | "
+                         f"`{esc(args_of(sig))}` | `{esc(ret_of(sig))}` | {mark} |"))
+        # 新增的那批:「现有名」写「新增」,理由塞进行尾的 HTML 注释里(渲染时不显示)
+        for name, a, r, why in added:
+            rows.append((name,
+                         f"| [ ] | `{name}` | **新增** | `{esc(a)}` | `{esc(r)}` | — |"
+                         f" <!-- {why} -->"))
+        for _, line in sorted(rows):
+            body.append(line)
+        total += n
         and_total += n_and
     summary.append(f"| **合计** | | **{total}** | **{and_total}** |")
     return "\n".join(summary) + "\n" + "\n".join(body) + "\n", total
