@@ -41,6 +41,8 @@ public partial class MainWindow : Window
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Nav.Root(new LibraryPage(_core!));
         this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Nav.Root(new SearchPage(_core!));
         this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Nav.Root(new FavoritesPage(_core!));
+        this.FindControl<RadioButton>("NavAggregate")!.Checked += (_, _) => Nav.Root(new AggregatePage(_core!));
+        this.FindControl<RadioButton>("NavHistory")!.Checked += (_, _) => Nav.Root(new HistoryPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
         Opened += async (_, _) => await BootAsync();
@@ -74,6 +76,8 @@ public partial class MainWindow : Window
             case "search": this.FindControl<RadioButton>("NavSearch")!.IsChecked = true; break;
             case "favorites": this.FindControl<RadioButton>("NavFavorites")!.IsChecked = true; break;
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
+            case "aggregate": this.FindControl<RadioButton>("NavAggregate")!.IsChecked = true; break;
+            case "history": this.FindControl<RadioButton>("NavHistory")!.IsChecked = true; break;
             case "servers": GoServers(); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
@@ -98,7 +102,8 @@ public partial class MainWindow : Window
     private void GoServers()
     {
         if (_core is null) return;
-        foreach (var n in new[] { "NavHome", "NavLibrary", "NavSearch", "NavFavorites", "NavSettings" })
+        foreach (var n in new[] { "NavHome", "NavLibrary", "NavSearch", "NavFavorites",
+                                  "NavAggregate", "NavHistory", "NavSettings" })
             this.FindControl<RadioButton>(n)!.IsChecked = false;
         Nav.Root(new ServersPage(_core, OnServerSwitched));
     }

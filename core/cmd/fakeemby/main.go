@@ -178,6 +178,25 @@ func main() {
 		})
 	}
 
+	// 全库规模。★ 真 Emby 是 **/Items/Counts**(根路径),不在 /Users/{id} 下 ——
+	// 聚合视界打的就是这条。挂错地方的表现是「这台服务器没有提供规模统计」,
+	// 而那恰好和某些 fork 真的没有这个端点长得一模一样。
+	mux.HandleFunc("/Items/Counts", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"MovieCount": 128, "SeriesCount": 42, "EpisodeCount": 1580, "BoxSetCount": 6,
+		})
+	})
+
+	// 接着看下一集。★ 真 Emby 挂在 /Shows/NextUp,不在 /Users/{id} 下面。
+	mux.HandleFunc("/Shows/NextUp", func(w http.ResponseWriter, r *http.Request) {
+		ep := item("ep-2", "第 4 集", "Episode")
+		ep["SeriesName"] = "某部剧"
+		ep["SeriesId"] = "s1"
+		ep["IndexNumber"] = 4
+		ep["RunTimeTicks"] = 14000000000
+		writeJSON(w, page(ep))
+	})
+
 	// 视频流。★ 必须支持 Range —— http.ServeFile 自带。
 	// 不支持的话核心层的 `bytes=0-0` 探测会选错前缀,而表现是「跳到没缓冲的位置就卡死」。
 	mux.HandleFunc("/Videos/", func(w http.ResponseWriter, r *http.Request) {

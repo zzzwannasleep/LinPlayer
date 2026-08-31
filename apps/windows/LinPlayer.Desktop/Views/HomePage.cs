@@ -60,8 +60,10 @@ public sealed class HomePage : PageBase
         // ★ 三块并发发出去,各自渲染 —— 谁先回来谁先出现,不互相等
         var resume = Track("继续观看", () => core.EmbyListResume(new { s.server, s.token, s.user_id, s.device_id, limit = 12 }), true);
         var views = Track("媒体库", () => core.EmbyViews(new { s.server, s.token, s.user_id, s.device_id }), true);
+        var nextUp = Track("接着看下一集", () => core.EmbyListNextUp(new { s.server, s.token, s.user_id, s.device_id, limit = 12 }), true);
         var latest = Track("最新加入", () => core.EmbyListLatest(new { s.server, s.token, s.user_id, s.device_id, limit = 16 }), false);
-        await Task.WhenAll(resume, views, latest);
+        var random = Track("随便看看", () => core.EmbyListRandom(new { s.server, s.token, s.user_id, s.device_id, limit = 8 }), false);
+        await Task.WhenAll(resume, views, nextUp, latest, random);
     }
 
     private async Task Track(string title, Func<Task<JsonElement>> load, bool wide)
