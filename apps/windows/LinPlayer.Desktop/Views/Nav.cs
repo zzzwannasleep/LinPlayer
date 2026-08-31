@@ -37,6 +37,14 @@ public static class Nav
 
     public static Sess? Session;
 
+    /// <summary>
+    /// 沉浸模式:收起标题栏和侧栏,窗口进全屏。播放页用。
+    ///
+    /// <para>★ 收起不能只 IsVisible=false —— 那样 36px 的行和 212px 的列还在,
+    /// 画面会被挤在一个偏右下的框里。行高列宽要一起归零。</para>
+    /// </summary>
+    public static Action<bool>? Immersive;
+
     /// <summary>换根:侧栏切页用。清栈 —— 换了大类之后「返回」回到上一大类是错的。</summary>
     public static void Root(Control page)
     {

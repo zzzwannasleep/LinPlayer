@@ -15,7 +15,7 @@
 
     ★ 自绘标题栏必须留**拖拽区**:不留的话窗口拖不动,而用户第一反应是「卡死了」。
   -->
-  <Grid RowDefinitions="36,*">
+  <Grid Name="RootGrid" RowDefinitions="36,*">
 
     <!-- ══════ 标题栏 ══════ -->
     <Grid Grid.Row="0" Name="TitleBar" Background="{DynamicResource Panel}"
@@ -38,10 +38,10 @@
     </Grid>
 
     <!-- ══════ 主体 ══════ -->
-    <Grid Grid.Row="1" ColumnDefinitions="212,*">
+    <Grid Name="BodyGrid" Grid.Row="1" ColumnDefinitions="212,*">
 
       <!-- 侧栏 -->
-      <Border Grid.Column="0" Background="{DynamicResource Panel}"
+      <Border Name="Sidebar" Grid.Column="0" Background="{DynamicResource Panel}"
               BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
         <DockPanel LastChildFill="True">
           <!-- 服务器切换器 -->

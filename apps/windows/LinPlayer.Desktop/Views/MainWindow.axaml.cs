@@ -3,6 +3,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Layout;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
@@ -33,6 +34,7 @@ public partial class MainWindow : Window
         this.FindControl<Button>("BtnClose")!.Click += (_, _) => Close();
 
         Nav.Host = Show;
+        Nav.Immersive = SetImmersive;
         this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Nav.Root(new LibraryPage(_core!));
         this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Nav.Root(new SearchPage(_core!));
@@ -74,6 +76,18 @@ public partial class MainWindow : Window
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
             case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
         }
+    }
+
+    /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>
+    private void SetImmersive(bool on)
+    {
+        var root = this.FindControl<Grid>("RootGrid")!;
+        var body = this.FindControl<Grid>("BodyGrid")!;
+        root.RowDefinitions[0].Height = on ? new GridLength(0) : new GridLength(36);
+        body.ColumnDefinitions[0].Width = on ? new GridLength(0) : new GridLength(212);
+        this.FindControl<Grid>("TitleBar")!.IsVisible = !on;
+        this.FindControl<Border>("Sidebar")!.IsVisible = !on;
+        WindowState = on ? WindowState.FullScreen : WindowState.Normal;
     }
 
     private void Show(Control page) => this.FindControl<ContentControl>("PageHost")!.Content = page;
