@@ -74,3 +74,50 @@ func EnsureDirs() error {
 	}
 	return nil
 }
+
+// DownloadsDir 下载目录。**用户的资产**,清缓存不许碰。
+func DownloadsDir() string { return sub("downloads") }
+
+// CacheSize 缓存目录的总占用(字节)。
+//
+// ★ 只统计 cache/ —— 设置页那个「已用 xx MB」旁边就是「清除缓存」按钮,
+// 两个数必须说的是同一件事。把 data/ 或 downloads/ 算进去的话,
+// 用户点了清除发现数字没怎么变,那按钮就成了安慰剂。
+func CacheSize() (int64, error) {
+	var total int64
+	err := filepath.Walk(CacheDir(), func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // 单个文件读不到不该让整次统计失败
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
+}
+
+// ClearCache 清空缓存目录。
+//
+// ★★ **只动 cache/**,config / data / downloads **一根汗毛都不碰**。
+// 观看记录、账号、已下载的片子都在后者里 —— 清缓存把它们带走的话,
+// 用户是找不回来的。
+func ClearCache() error {
+	ents, err := os.ReadDir(CacheDir())
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		if err := os.RemoveAll(filepath.Join(CacheDir(), e.Name())); err != nil {
+			return err
+		}
+	}
+	// 目录树要留着 —— 删光之后下一次写入会因为父目录不存在而失败
+	return EnsureDirs()
+}

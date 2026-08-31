@@ -778,6 +778,15 @@
 > **2026-08-31 八续:**`core/aggregate` 落地 `emby.aggregate*` 2 条
 > (聚合搜索 / 聚合视界)。**共 89 条命令。**
 >
+>
+> **2026-08-31 九续:**`system.*` 补 6 条(cacheSize / clearCache / dataPaths +
+> 三个文件选择器返回 `E_UNSUPPORTED`)。**共 95 条命令。**
+>
+> ⚠️ 顺带修了门禁自己的一个洞:`check-core.sh` 第 1 关跑 `go test ./...` 时
+> **没把 libmpv 放进 DLL 搜索路径**,`core/player` 这个 cgo 包的测试二进制
+> 起不来就是 `0xc0000135`。之前一直绿是**因为 go 的测试缓存在挡着** ——
+> 包一改动就现形。这类「靠缓存假绿」的门禁洞,只有在改动那个包时才会暴露。
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/

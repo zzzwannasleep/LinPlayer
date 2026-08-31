@@ -4,10 +4,12 @@ package system
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
 	"linplayer/core/bus"
+	"linplayer/core/imgcache"
 	"linplayer/core/paths"
 )
 
@@ -40,6 +42,69 @@ func RegisterCommands() {
 			"goroutines": runtime.NumGoroutine(),
 		}, nil
 	})
+
+	// ---- 缓存 ----
+	//
+	// ★ 这两条说的必须是**同一件事**:设置页里「已用 xx MB」旁边就是「清除缓存」按钮。
+	//   统计把 data/ 或 downloads/ 算进去的话,用户点了清除发现数字没怎么变 ——
+	//   那按钮就成了安慰剂。
+	bus.Register("system.cacheSize", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+		n, err := paths.CacheSize()
+		if err != nil {
+			return nil, bus.NewErr(bus.EInternal, "统计缓存失败: %v", err)
+		}
+		return map[string]any{"bytes": n}, nil
+	})
+
+	bus.Register("system.clearCache", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+		before, _ := paths.CacheSize()
+		if err := paths.ClearCache(); err != nil {
+			return nil, bus.NewErr(bus.EInternal, "清理缓存失败: %v", err)
+		}
+		// ★★ **内存层必须一起清**:只删磁盘的话内存里那份还在继续供图,
+		//   用户看着占用变 0、封面却还是旧的 —— 那不叫清理,叫骗人。
+		imgcache.MemClear()
+		after, _ := paths.CacheSize()
+		return map[string]any{"freed_bytes": before - after, "bytes": after}, nil
+	})
+
+	// ---- 路径 ----
+	//
+	// ★ UI 要靠这些解释「为什么数据在这个位置」。
+	//   绿色包的全部意义就是「数据留在包里」,所以这几个值必须能直接摆给用户看。
+	bus.Register("system.dataPaths", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+		exe, _ := os.Executable()
+		return map[string]any{
+			"root":      paths.Root(),
+			"config":    paths.ConfigFile(),
+			"history":   paths.HistoryFile(),
+			"cache":     paths.CacheDir(),
+			"logs":      paths.LogsDir(),
+			"downloads": paths.DownloadsDir(),
+			"plugins":   paths.PluginsDir(),
+			"models":    paths.ModelsDir(),
+			"exe_dir":   filepath.Dir(exe),
+			// ponytail: RootKind(Portable / Overridden / SystemFallback)等 paths 补上。
+			// **SystemFallback 意味着数据没能留在包里,必须显眼告警,不能装没事** ——
+			// 现在报 unknown,UI 不该拿它当「一切正常」。
+			"kind": "unknown",
+		}, nil
+	})
+
+	// ---- 本平台做不了的那几条 ----
+	//
+	// ★ 契约里**保留**这些命令,在做不到的平台返回 E_UNSUPPORTED
+	//   (SPEC §5.6:命令表全平台一致)。两份不同的命令表 = 两份不同的契约测试,
+	//   而漏的那份就是「点了没反应」。
+	// ★ 文件选择器**属于 UI 层**:核心层是个 DLL,弹不了系统对话框,
+	//   也不该去弹 —— 宿主自己调平台 API 拿到路径再传进来。
+	for _, name := range []string{"system.pickFile", "system.pickDirectory", "system.pickLocalFolder"} {
+		n := name
+		bus.Register(n, func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+			return nil, bus.NewErr(bus.EUnsupported,
+				"%s 由宿主实现:核心层是个库,弹不了系统对话框。宿主拿到路径后用参数传进来", n)
+		})
+	}
 
 	// ---- 只在开了 LP_DEBUG_CMDS 时存在。SPEC §5.10 的先红要求靠它们。----
 	//
