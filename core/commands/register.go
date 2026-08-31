@@ -21,6 +21,7 @@ import (
 	"linplayer/core/player"
 	"linplayer/core/prefs"
 	"linplayer/core/ranking"
+	"linplayer/core/sourcecmd"
 	"linplayer/core/system"
 )
 
@@ -37,4 +38,5 @@ func RegisterAll(version string) {
 	history.RegisterCommands()
 	aggregate.RegisterCommands(version)
 	ranking.RegisterCommands()
+	sourcecmd.RegisterCommands()
 }

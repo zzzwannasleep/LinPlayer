@@ -117,6 +117,32 @@ func (a Account) SourceKind() string {
 	return s
 }
 
+// RestValue 取一个「还没接强类型」的键的原始 JSON。没有返回 nil。
+//
+// ★ 给命令层读 `source` 这类整块结构用。**不要**因此把 rest 变成公共读写口 ——
+// 强类型字段永远优先,rest 只是「我们还没接的那部分」。
+func (a Account) RestValue(key string) json.RawMessage {
+	if a.rest == nil {
+		return nil
+	}
+	return a.rest[key]
+}
+
+// SetRestValue 写一个还没接强类型的键。v 会被序列化成 JSON。
+//
+// ★ 写进 rest 而不是加字段:加字段就要同步 accountTypedKeys、三端绑定、
+// 差分对账口径 —— 而这些键(source / source_kind)在迁移完成前形状还会变。
+func (a *Account) SetRestValue(key string, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	if a.rest == nil {
+		a.rest = map[string]json.RawMessage{}
+	}
+	a.rest[key] = b
+}
+
 // IsFileBrowse 是不是浏览型源(网盘 / 局域网 / 资源站)。
 func (a Account) IsFileBrowse() bool { return a.SourceKind() != "emby" }
 

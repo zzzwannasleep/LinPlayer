@@ -56,6 +56,36 @@ if [ "${LP_FRESH:-}" = "1" ]; then
   PAGE="login:http://127.0.0.1:$PORT|u1|p"
 else
 
+if [ "${LP_SOURCE:-}" = "1" ]; then
+  # 文件浏览型源(本地源)。造一棵真的目录树 —— 假的目录树列不出真的排序 / 大小 / 视频判定。
+  echo "== 4/5 灌一个**本地源**账号 + 造目录树(LP_SOURCE=1)=="
+  TREE="$BIN/userdata/_selfcheck_tree"
+  rm -rf "$TREE"; mkdir -p "$TREE/剧集/S01" "$TREE/空文件夹"
+  printf 'x%.0s' $(seq 1 1234) > "$TREE/某部电影.mkv"
+  printf 'x%.0s' $(seq 1 999)  > "$TREE/封面.jpg"
+  printf 'x%.0s' $(seq 1 5678) > "$TREE/剧集/S01/第01集.mp4"
+  # ★ 路径要进 JSON,反斜杠必须转义。Windows 上 $TREE 是 /d/... 形式,
+  #   但 exe 拿到的是 D:\... —— 统一用正斜杠,Go 的 filepath 两种都吃。
+  TREE_JSON="$(cd "$TREE" && pwd -W 2>/dev/null || printf '%s' "$TREE")"
+  mkdir -p "$BIN/userdata"
+  cat > "$BIN/userdata/config.json" <<JSON
+{
+  "device_id": "linplayer-selfcheck",
+  "accounts": [{
+    "server": "$TREE_JSON",
+    "user_name": "本地文件夹",
+    "name": "自检本地源",
+    "lines": [],
+    "active_line": 0,
+    "source_kind": "local",
+    "source": { "id": "$TREE_JSON", "base_url": "$TREE_JSON", "extra": {} }
+  }],
+  "active": 0,
+  "theme": "dark"
+}
+JSON
+else
+
 echo "== 4/5 灌一个账号(冷启动形态:配置里就有,本次会话没登录过)=="
 mkdir -p "$BIN/userdata"
 cat > "$BIN/userdata/config.json" <<JSON
@@ -76,6 +106,7 @@ cat > "$BIN/userdata/config.json" <<JSON
   "plugin_official_enabled": true
 }
 JSON
+fi
 fi
 
 echo "== 5/5 起 exe 截图 =="

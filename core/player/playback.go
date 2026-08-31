@@ -134,21 +134,14 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	current = target
 	currentMu.Unlock()
 
-	// loadfile 的 start= 选项把续播位置交给 mpv 自己处理 ——
-	// ★ 别在 FILE_LOADED 之后自己 seek:那时画面已经从 0 开始解了,
-	//   用户会看到「先闪一下开头再跳过去」。
-	opts := "replace"
-	if resumeSecs > 1 {
-		opts = "replace"
+	/* 起播走 loadWith 这个**唯一入口**(见 load.go)。
+	   ★ Emby 这条路不需要额外的逐流头,但**仍然要走它** ——
+	     loadWith 会无条件把 http-header-fields 清空、把 UA 设回 LinPlayer/{版本}。
+	     不清的话,上一次放网盘源留下的 Authorization / Cookie 会**发给 Emby 服务器**,
+	     而且画面照放,只有服务端日志里看得出来。 */
+	if err := loadWith(playURL, resumeSecs, nil, ""); err != nil {
+		return nil, err
 	}
-	args := []string{"loadfile", playURL, opts}
-	if resumeSecs > 1 {
-		args = append(args, "start="+strconv.FormatFloat(resumeSecs, 'f', 3, 64))
-	}
-	if err := command(args...); err != nil {
-		return nil, fmt.Errorf("loadfile 失败: %w", err)
-	}
-	setProp("pause", "no")
 
 	// 上报 start。★ 失败**不阻断播放** —— 上报是记账,播放是主线。
 	if err := prefsClient.ReportStart(ctx, s, target, resumeSecs); err != nil {

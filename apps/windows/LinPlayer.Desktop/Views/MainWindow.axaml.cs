@@ -40,6 +40,11 @@ public partial class MainWindow : Window
         // ★ 需要 Emby 会话的页面统一走 Emby():账号是网盘 / 局域网源时 Nav.Session 是 null,
         //   页面里直接解引用会抛在 Task 里 —— 没提示、不崩、就是永远停在「加载中」。
         this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
+        /* ★★ 「文件浏览」只在当前账号是**浏览型源**时才出现。
+           Emby 账号下亮着它,点进去只会拿到一句「当前没有已登录的文件源」——
+           那不是功能,那是一个专门用来报错的入口。 */
+        this.FindControl<RadioButton>("NavBrowse")!.Checked += (_, _) =>
+            Nav.Root(new BrowsePage(_core!, _sourceName));
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Emby("媒体库", () => new LibraryPage(_core!));
         this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Emby("搜索", () => new SearchPage(_core!));
         this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Emby("收藏", () => new FavoritesPage(_core!));
@@ -94,6 +99,11 @@ public partial class MainWindow : Window
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
             case "aggregate": this.FindControl<RadioButton>("NavAggregate")!.IsChecked = true; break;
             case "history": this.FindControl<RadioButton>("NavHistory")!.IsChecked = true; break;
+            case "browse":
+                this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true;
+                // 带参数(browse:空文件夹)时再点进那个子目录 —— 「空目录说空目录」要验得到
+                if (arg.Length > 0 && Nav.Current is BrowsePage bp) bp.SelfCheckEnter(arg);
+                break;
             case "ranking":
                 // ★ 带参数(ranking:movie)时落到指定分组 —— TMDB 那条链和弹弹那条
                 //   解析口径不同(id 数字/字符串混、图床要自己拼前缀),要分别验
@@ -206,6 +216,9 @@ public partial class MainWindow : Window
         SelfCheckJump(Environment.GetEnvironmentVariable("LP_SELFCHECK_AFTER"));
     }
 
+    /// <summary>当前源的显示名。文件浏览页的面包屑根节点用它。</summary>
+    private string _sourceName = "";
+
     private void UpdateServerChip(JsonElement accounts)
     {
         if (accounts.ValueKind != JsonValueKind.Array) return;
@@ -215,6 +228,15 @@ public partial class MainWindow : Window
             active = accounts.EnumerateArray().FirstOrDefault();
         if (active.ValueKind != JsonValueKind.Object) return;
 
+        /* 浏览型源(网盘 / 局域网 / 本地)和 Emby 的可用页面是**两套**。
+           ★ 判据是 `source_kind != "emby"`,**线上一律小写**。
+             前端曾整套写成首字母大写:每处比较恒 false、登录送错值,而两边都不报错。
+           ★ 没有这个键 = 老配置 = Emby(这个键是后加的)。 */
+        var kind = active.TryGetProperty("source_kind", out var sk) && sk.ValueKind == JsonValueKind.String
+            ? sk.GetString() ?? "emby" : "emby";
+        var isBrowse = kind.Length > 0 && kind != "emby";
+        _sourceName = active.TryGetProperty("name", out var sn) ? sn.GetString() ?? "" : "";
+
         Dispatcher.UIThread.Post(() =>
         {
             this.FindControl<TextBlock>("ServerName")!.Text =
@@ -222,6 +244,17 @@ public partial class MainWindow : Window
             this.FindControl<TextBlock>("ServerSub")!.Text =
                 active.TryGetProperty("user_name", out var u) && !string.IsNullOrEmpty(u.GetString())
                     ? u.GetString() : "已连接";
+
+            /* ★★ 按账号类型显隐入口,而不是全都亮着。
+               全亮的话:Emby 账号点「文件浏览」拿到「当前没有已登录的文件源」,
+               网盘账号点「媒体库」拿到「请先登录服务器」—— 两个都是**专门用来报错的入口**。 */
+            this.FindControl<RadioButton>("NavBrowse")!.IsVisible = isBrowse;
+            foreach (var name in new[] { "NavLibrary", "NavSearch", "NavFavorites" })
+                this.FindControl<RadioButton>(name)!.IsVisible = !isBrowse;
+
+            // 浏览型源进来时,首页那一套是空的 —— 直接落到文件浏览
+            if (isBrowse && Nav.Current is HomePage)
+                this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true;
         });
     }
 }

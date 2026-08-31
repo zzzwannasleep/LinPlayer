@@ -65,6 +65,7 @@
 
           <StackPanel Name="NavList" Spacing="0">
             <RadioButton Classes="nav" Name="NavHome" GroupName="nav" Content="首页" IsChecked="True" />
+            <RadioButton Classes="nav" Name="NavBrowse" GroupName="nav" Content="文件浏览" IsVisible="False" />
             <RadioButton Classes="nav" Name="NavLibrary" GroupName="nav" Content="媒体库" />
             <RadioButton Classes="nav" Name="NavSearch" GroupName="nav" Content="搜索" />
             <RadioButton Classes="nav" Name="NavFavorites" GroupName="nav" Content="收藏" />

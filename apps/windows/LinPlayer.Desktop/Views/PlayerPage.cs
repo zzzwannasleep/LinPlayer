@@ -105,9 +105,24 @@ public sealed class PlayerPage : UserControl
     /// </summary>
     private double _seekTarget = -1;
 
-    public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs)
+    /// <summary>这一条是不是文件浏览型源的条目(走 source.play)。</summary>
+    private readonly bool _isSource;
+    private readonly string _title = "";
+
+    /// <summary>
+    /// 播放页。
+    ///
+    /// <para><paramref name="isSource"/> = true 表示这是**文件浏览型源**的条目
+    /// (网盘 / 局域网 / 本地),走 <c>source.play</c> 而不是 <c>player.play</c>。</para>
+    ///
+    /// <para>★ 两条起播路的差别只在这一句上,别的(OSD、快捷键、进度、轨道)全共用 ——
+    /// 另开一个「源播放页」等于把这些再实现一遍,还得再维护一遍。</para>
+    /// </summary>
+    public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs, bool isSource = false)
     {
         _core = core;
+        _isSource = isSource;
+        _title = title;
 
         _bar = new Slider { Minimum = 0, Maximum = 1, Value = 0, IsEnabled = false };
         _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 110 };
@@ -236,12 +251,25 @@ public sealed class PlayerPage : UserControl
         if (_view.InitError is not null) { _msg.Text = _view.InitError; return; }
         try
         {
-            var s = Nav.Session!;
-            await _core.PlayerPlay(new
+            if (_isSource)
             {
-                s.server, s.token, s.user_id, s.device_id,
-                item_id = itemId, resume_secs = resumeSecs,
-            });
+                /* ★ 源播放**没有 Emby 会话**:网盘 / 局域网 / 本地源根本没有 server/token。
+                   硬塞 Nav.Session 的话,网盘用户那边 Session 是 null,
+                   这里会抛在 Task 里 —— 没提示、不崩、就是永远停在黑屏。 */
+                await _core.SourcePlay(new
+                {
+                    entry_id = itemId, entry_name = _title, resume_secs = resumeSecs,
+                });
+            }
+            else
+            {
+                var s = Nav.Session!;
+                await _core.PlayerPlay(new
+                {
+                    s.server, s.token, s.user_id, s.device_id,
+                    item_id = itemId, resume_secs = resumeSecs,
+                });
+            }
         }
         catch (Exception e) { _msg.Text = $"起播失败:{LibraryPage.Advice(e)}"; }
     }

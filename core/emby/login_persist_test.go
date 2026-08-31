@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"linplayer/core/bus"
 	"linplayer/core/config"
@@ -176,7 +177,10 @@ func TestLogin_重登保住用户改过的名称(t *testing.T) {
 // waitErr 等这条 seq 的 result,并要求它是**失败**。
 func waitErr(t *testing.T, seq int64) {
 	t.Helper()
-	for i := 0; i < 50; i++ {
+	// ★ 按**时间**等,不按迭代次数 —— 每条日志事件都会立刻返回并白耗一次迭代,
+	//   日志一多就在时间没到之前把次数耗光了(同 waitResult 的注释)。
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
 		b := bus.NextEvent(200)
 		if len(b) == 0 {
 			continue
