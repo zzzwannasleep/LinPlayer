@@ -1,0 +1,17 @@
+{
+  "name": "emby.seasons · 没有季的剧返回空,调用方要回落",
+  "note": "有些剧没有季(单季番剧直接挂集)。这里返回空切片,调用方要回落到「拿 seriesId 当 parent 直接分页拉集」—— 不回落的表现是「点进去一集都没有」,而且不报错。",
+  "provenance": "crates/core/src/emby.rs:1048 seasons() 的文档注释",
+  "upstream": [
+    {
+      "path": "/Users/u/Items",
+      "status": 200,
+      "body": "{\"Items\": [], \"TotalRecordCount\": 0}"
+    }
+  ],
+  "command": "emby.seasons",
+  "args": {
+    "series_id": "series-1"
+  },
+  "expect": []
+}

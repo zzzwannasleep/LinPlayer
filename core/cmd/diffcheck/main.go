@@ -121,6 +121,17 @@ var runners = map[string]runner{
 		c, s := newSession(server, args)
 		return c.CountsOf(ctx, s)
 	},
+	"emby.detail": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		wc, _ := args["with_children"].(bool)
+		id, _ := args["item_id"].(string)
+		return c.Detail(ctx, s, id, wc)
+	},
+	"emby.seasons": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		id, _ := args["series_id"].(string)
+		return c.Seasons(ctx, s, id)
+	},
 	"emby.items": func(ctx context.Context, server string, args map[string]any) (any, error) {
 		c, s := newSession(server, args)
 		pid, _ := args["parent_id"].(string)

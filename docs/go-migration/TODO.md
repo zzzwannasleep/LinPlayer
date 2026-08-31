@@ -607,6 +607,8 @@
 | `emby.items · 复筛 + total 要改` | 某 fork 忽略 Genres/Years/评分下限;复筛动过手 total 必须改成本页条数,否则前端画出永远翻不满的页码 | 不改 total → 「total 期望 1 实得 3276」 |
 | `emby.resume · 只靠 series_id 命中` | 屏蔽判据 2(名字故意对不上,**只有 series_id 能生效**) | 停用 series_id 判据 → 只有这条红 |
 | `emby.resume · 跨服靠名字命中` | 屏蔽判据 3(id 全对不上,只有剧名对得上) | 停用剧名判据 → 只有这条红 |
+| `emby.detail · 背景图与演职人员排序` | **背景图在 `BackdropImageTags` 数组里不在 `ImageTags` 里**;Taglines 取第一条且空串折 null;导演优先且其余保持服务端顺序(必须稳定排序);空名字的演职人员要滤掉 | 读 `ImageTags["Backdrop"]` → 「has_backdrop 期望 true 实得 false」;不给导演提前 → 「people[0].id 期望 p-c 实得 p-a」;不滤空名字 → 「people 长度 3 vs 4」 |
+| `emby.seasons · 没有季时返回空` | 有些剧没有季(单季番剧直接挂集),调用方要回落到「拿 seriesId 当 parent 拉集」—— 不回落是「点进去一集都没有」且不报错 | —— |
 
 > **两条 resume 用例是拆出来的,拆的理由值得记:**
 > 第一版只有一条,屏蔽项的 `name` 和分集的 `SeriesName` 恰好相同 ——
@@ -651,6 +653,12 @@
   - 判据:`/releases` 顺序被打乱的夹具下仍取到最大版本;版本单调性门禁
 
 ### 4.2 Emby
+
+> **进度(2026-08-31):`core/emby` 已落地首页 + 媒体库 + 详情页那条链** ——
+> views / listItemsPage / listLatest / listResume / listNextUp / listFavorites /
+> listCollections / counts / itemDetail / seriesSeasons / seasonEpisodes /
+> blockedList / setBlocked,共 **14 条命令**,9 条对账用例全绿且每条都有注入验证。
+> 剩下的 24 条(登录 / 搜索 / 相似 / 人物 / 上报 / 观看记录 / 排行榜…)未做。
 
 - [ ] **C5** `core/emby` 主体 🔴
 - [ ] **C6** `core/media`:版本 / 音轨 / 字幕正则筛选

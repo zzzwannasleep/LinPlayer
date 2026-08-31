@@ -1,0 +1,66 @@
+{
+  "name": "emby.detail · 背景图看 BackdropImageTags,不是 ImageTags",
+  "note": "背景图在 BackdropImageTags 数组里。写成 ImageTags[\"Backdrop\"] 永远是 false —— 详情页就永远没有大图,而且不报错。另盯:Taglines 取第一条且空串折 null(实测只有 34% 的条目有,没值前端整行不画);导演优先排前且其余保持服务端顺序(必须稳定排序);演职人员里空名字的要滤掉。",
+  "provenance": "crates/core/src/emby.rs:786 detail() 的实现与注释 + docs/lessons/emby.md「Emby image tags」",
+  "upstream": [
+    {
+      "path": "/Users/u/Items/it-1",
+      "status": 200,
+      "body": "{\"Id\": \"it-1\", \"Name\": \"某剧\", \"Type\": \"Series\", \"Overview\": \"简介\", \"ProductionYear\": 2024, \"Genres\": [\"剧情\", \"悬疑\"], \"CommunityRating\": 8.5, \"RunTimeTicks\": 0, \"ImageTags\": {\"Primary\": \"p1\"}, \"BackdropImageTags\": [\"b1\"], \"UserData\": {\"IsFavorite\": true, \"PlaybackPositionTicks\": 6000000000}, \"OfficialRating\": \"TV-14\", \"Status\": \"Continuing\", \"Taglines\": [\"在演艺圈中,谎言就是武器\"], \"ChildCount\": 3, \"People\": [{\"Id\": \"p-a\", \"Name\": \"演员甲\", \"Role\": \"角色甲\", \"Type\": \"Actor\", \"PrimaryImageTag\": \"x\"}, {\"Id\": \"p-b\", \"Name\": \"\", \"Role\": \"\", \"Type\": \"Actor\"}, {\"Id\": \"p-c\", \"Name\": \"导演丙\", \"Role\": \"\", \"Type\": \"Director\"}, {\"Id\": \"p-d\", \"Name\": \"演员丁\", \"Role\": \"角色丁\", \"Type\": \"Actor\"}]}"
+    }
+  ],
+  "command": "emby.detail",
+  "args": {
+    "item_id": "it-1",
+    "with_children": false
+  },
+  "expect": {
+    "id": "it-1",
+    "name": "某剧",
+    "type_": "Series",
+    "overview": "简介",
+    "year": 2024,
+    "genres": [
+      "剧情",
+      "悬疑"
+    ],
+    "rating": 8.5,
+    "runtime_secs": 0,
+    "resume_secs": 600,
+    "has_primary": true,
+    "has_backdrop": true,
+    "is_favorite": true,
+    "series_name": null,
+    "series_id": null,
+    "season_no": null,
+    "episode_no": null,
+    "official_rating": "TV-14",
+    "status": "Continuing",
+    "tagline": "在演艺圈中,谎言就是武器",
+    "child_count": 3,
+    "children": [],
+    "people": [
+      {
+        "id": "p-c",
+        "name": "导演丙",
+        "role": null,
+        "type_": "Director",
+        "has_primary": false
+      },
+      {
+        "id": "p-a",
+        "name": "演员甲",
+        "role": "角色甲",
+        "type_": "Actor",
+        "has_primary": true
+      },
+      {
+        "id": "p-d",
+        "name": "演员丁",
+        "role": "角色丁",
+        "type_": "Actor",
+        "has_primary": false
+      }
+    ]
+  }
+}
