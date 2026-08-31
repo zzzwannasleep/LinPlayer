@@ -21,6 +21,7 @@ import (
 	"image/png"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -100,10 +101,22 @@ func main() {
 			writeJSON(w, d)
 
 		case strings.Contains(p, "/Items"):
-			writeJSON(w, page(
-				item("m1", "库里的第一部", "Movie"),
-				item("m2", "库里的第二部", "Movie"),
-			))
+			// ★ 给 140 条,超过一页(60)—— 只给两条的话「滚到底翻页」永远没被跑过
+			q := r.URL.Query()
+			start := atoi(q.Get("StartIndex"))
+			limit := atoi(q.Get("Limit"))
+			if limit <= 0 {
+				limit = 60
+			}
+			const total = 140
+			items := []map[string]any{}
+			for i := start; i < start+limit && i < total; i++ {
+				it := item(fmt.Sprintf("m%d", i+1), fmt.Sprintf("库里的第 %d 部", i+1), "Movie")
+				it["ProductionYear"] = 2000 + i%25
+				it["Genres"] = []string{[]string{"剧情", "科幻", "喜剧"}[i%3]}
+				items = append(items, it)
+			}
+			writeJSONRaw(w, map[string]any{"Items": items, "TotalRecordCount": total})
 		default:
 			// /Users/{id} —— 管理员位
 			writeJSON(w, map[string]any{"Id": "u1", "Name": "自检用户",
@@ -146,6 +159,24 @@ func main() {
 			http.NotFound(w, r)
 		}
 	})
+
+	// 分面(筛选面板)。★ 真 Emby 是 /Genres /Tags /Studios /OfficialRatings 四个独立端点。
+	for _, ep := range []string{"/Genres", "/Tags", "/Studios", "/OfficialRatings"} {
+		names := map[string][]string{
+			"/Genres":  {"剧情", "科幻", "喜剧"},
+			"/Tags":    {"自检"},
+			"/Studios": {},
+			// ★ 故意给空:「某个分面一个取值都没有」是真实形状,前端不许因此报错
+			"/OfficialRatings": {},
+		}[ep]
+		mux.HandleFunc(ep, func(w http.ResponseWriter, r *http.Request) {
+			out := []any{}
+			for _, n := range names {
+				out = append(out, map[string]any{"Name": n})
+			}
+			writeJSON(w, map[string]any{"Items": out})
+		})
+	}
 
 	// 视频流。★ 必须支持 Range —— http.ServeFile 自带。
 	// 不支持的话核心层的 `bytes=0-0` 探测会选错前缀,而表现是「跳到没缓冲的位置就卡死」。
@@ -208,6 +239,11 @@ func detailID(path string) string {
 		return ""
 	}
 	return parts[3]
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }
 
 func page(items ...map[string]any) map[string]any {

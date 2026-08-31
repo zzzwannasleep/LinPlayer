@@ -102,6 +102,9 @@ public sealed class Card : Button
         if (onOpen is not null) Click += (_, _) => onOpen(item);
 
         if (item.HasPrimary) _ = LoadArt(core, server, item, img, (int)(h * 2));
+
+        // 右键动作:标记已看 / 收藏 / 屏蔽。**一处实现,所有卡片共用**(见 CardActions)
+        CardActions.Attach(this, core, item);
     }
 
     private static async Task LoadArt(CoreClient core, string server, CardItem item, Image target, int maxH)

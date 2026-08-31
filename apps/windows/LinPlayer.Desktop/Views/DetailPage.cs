@@ -207,9 +207,11 @@ public sealed class DetailPage : PageBase
             try
             {
                 var s = Nav.Session!;
+                // ★ 参数名是 fav,不是 favorite。写错了**不报错** ——
+                //   布尔默认成 false,表现是「点收藏反而取消了收藏」。
                 await _core.EmbySetFavorite(new
                 {
-                    s.server, s.token, s.user_id, s.device_id, item_id = id, favorite = on,
+                    s.server, s.token, s.user_id, s.device_id, item_id = id, fav = on,
                 });
                 fav.Content = on ? "♥ 已收藏" : "♡ 收藏";
             }
