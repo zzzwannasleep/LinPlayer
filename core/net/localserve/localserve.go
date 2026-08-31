@@ -95,10 +95,10 @@ func Start() (*Server, error) {
 		return nil, fmt.Errorf("生成 token 失败: %w", err)
 	}
 	s := &Server{
-		Addr:   ln.Addr().String(),
-		Token:  hex.EncodeToString(tok),
-		ln:     ln,
-		allow:  map[string]http.Header{},
+		Addr:  ln.Addr().String(),
+		Token: hex.EncodeToString(tok),
+		ln:    ln,
+		allow: map[string]http.Header{},
 		// ★ 走 tlspolicy:自签名服务器上不走的话**一张封面都没有,而命令全都正常** ——
 		//   和「白名单没同步」长得一模一样,极难分辨。
 		Client: &http.Client{Timeout: fetchTimeout, Transport: tlspolicy.Transport()},
@@ -379,6 +379,15 @@ func RevokeDefault(origin string) {
 // 回调里调 add 逐条登记;回调返回后一次性换上。回调内不要再碰这个 Server。
 func (s *Server) ReplaceAllowlist(fill func(add func(origin string, headers http.Header))) {
 	next := map[string]http.Header{}
+	// ★★ 静态 origin 要在重建时**自动补回来**。
+	//   ReplaceAllowlist 是**整表**重建,而调它的是账号那一路(它只知道账号)——
+	//   排行榜的图床不在账号表里,不在这儿补的话:排行榜第一次打开有图,
+	//   之后随便动一下账号(切服务器 / 改线路)图就全没了,而且**一点错都不报**。
+	staticMu.RLock()
+	for o, h := range staticAllow {
+		next[o] = h
+	}
+	staticMu.RUnlock()
 	fill(func(origin string, headers http.Header) {
 		o, ok := originOf(origin)
 		if !ok {
@@ -392,4 +401,30 @@ func (s *Server) ReplaceAllowlist(fill func(add func(origin string, headers http
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.allow = next
+}
+
+// ---------------------------------------------------------------------------
+// 静态 origin:不来自账号表的图床(排行榜的 TMDB / 弹弹Play 图床等)
+// ---------------------------------------------------------------------------
+
+var (
+	staticMu    sync.RWMutex
+	staticAllow = map[string]http.Header{}
+)
+
+// AllowStatic 永久放行一批 origin(不带凭据)。
+//
+// 和 Allow 的区别:这批**不受 ReplaceAllowlist 影响**。它们不是账号派生的,
+// 是某个功能固定要用的第三方图床 —— 由那个功能在注册命令时报一次即可。
+//
+// ★ 只接受写死在代码里的常量。**绝不能**把用户输入的地址喂进来:
+// 这个白名单是本地图片代理的唯一防线,放进来的每个 origin 都是一个可达出口。
+func AllowStatic(origins ...string) {
+	staticMu.Lock()
+	defer staticMu.Unlock()
+	for _, raw := range origins {
+		if o, ok := originOf(raw); ok {
+			staticAllow[o] = http.Header{}
+		}
+	}
 }

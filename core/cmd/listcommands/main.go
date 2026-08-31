@@ -2,32 +2,21 @@
 //
 // 给四方比对用(COMMANDS.md ↔ Go 注册表 ↔ 三端绑定,SPEC §5.6)。
 // 单独一个小程序而不是让契约测试顺带打:比对脚本不该依赖 .dll 出得来。
+//
+// ★★ 注册走 core/commands 这个**唯一入口** —— 这里再手抄一份清单的话,
+// 漏一个模块就是「门禁说绿、应用里没有那条命令」,而且两边都不报错。
 package main
 
 import (
 	"fmt"
 	"sort"
 
-	"linplayer/core/account"
-	"linplayer/core/aggregate"
 	"linplayer/core/bus"
-	"linplayer/core/emby"
-	"linplayer/core/history"
-	"linplayer/core/player"
-	"linplayer/core/prefs"
-	"linplayer/core/system"
+	"linplayer/core/commands"
 )
 
 func main() {
-	// 只注册,不 bus.Init() —— 注册表和工作池是两件事,这里不需要后者。
-	system.RegisterCommands()
-	player.RegisterCommands("listcommands")
-	emby.RegisterCommands("listcommands")
-	account.RegisterCommands("listcommands")
-	prefs.RegisterCommands("listcommands")
-	history.RegisterCommands()
-	aggregate.RegisterCommands("listcommands")
-
+	commands.RegisterAll("listcommands")
 	cmds := bus.Commands()
 	sort.Strings(cmds)
 	for _, c := range cmds {

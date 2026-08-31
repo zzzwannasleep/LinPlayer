@@ -53,6 +53,9 @@ public static class Nav
         Host?.Invoke(page);
     }
 
+    /// <summary>栈顶那一页。自检要在跳过去之后对那一页再下指令时用得上。</summary>
+    public static Control? Current => Stack.Count > 0 ? Stack.Peek() : null;
+
     public static void Push(Control page)
     {
         Stack.Push(page);

@@ -73,9 +73,21 @@ func (p *byHost) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // Transport 造一个按 host 分派的 RoundTripper。
-func Transport() http.RoundTripper {
+func Transport() http.RoundTripper { return TransportWith(nil) }
+
+// TransportWith 同 Transport,但让调用方**同时**调两个底层 Transport
+// (代理、超时之类)。
+//
+// ★★ 「同时」是这个函数存在的全部理由。自己 Clone 一份再改的话,只会改到
+// 严格那条道 —— 勾了自签名的那几台服务器就绕过了你刚设的代理/超时,
+// 而且**一点错都不报**:平时没人勾自签名,这条岔路可以静静躺几个月。
+func TransportWith(tune func(*http.Transport)) http.RoundTripper {
 	strict := http.DefaultTransport.(*http.Transport).Clone()
 	lax := http.DefaultTransport.(*http.Transport).Clone()
 	lax.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // 仅对用户勾选的 host 生效,见包注释
+	if tune != nil {
+		tune(strict)
+		tune(lax)
+	}
 	return &byHost{strict: strict, lax: lax}
 }

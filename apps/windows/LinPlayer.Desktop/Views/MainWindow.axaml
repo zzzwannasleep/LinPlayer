@@ -70,6 +70,7 @@
             <RadioButton Classes="nav" Name="NavFavorites" GroupName="nav" Content="收藏" />
             <RadioButton Classes="nav" Name="NavAggregate" GroupName="nav" Content="聚合视界" />
             <RadioButton Classes="nav" Name="NavHistory" GroupName="nav" Content="观看历史" />
+            <RadioButton Classes="nav" Name="NavRanking" GroupName="nav" Content="排行榜" />
           </StackPanel>
         </DockPanel>
       </Border>

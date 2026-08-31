@@ -59,6 +59,43 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	/* ---- 排行榜的两个上游(弹弹Play / TMDB)----
+
+	   ★★ 为什么假 Emby 要管排行榜:排行榜**有凭据时长什么样**,单测验不到 ——
+	   凭据是编译期注入的,而页面渲染只有真 exe 跑起来才现形。
+	   本仓库已经栽过两次「预置形状 ≠ 真实形状」(自检永远灌配置没走过真登录 /
+	   假服务器不开 gzip 让 Go 不解压那个洞本地全绿),所以这条路要能端到端走一遍。
+
+	   核心层那边靠 LP_RANKING_BASE_DANDAN / LP_RANKING_BASE_TMDB 指过来。 */
+	mux.HandleFunc("/api/v2/trending/", func(w http.ResponseWriter, r *http.Request) {
+		// ★ 顺带把签名头验了:三个头缺一个都说明命令层漏了东西
+		for _, h := range []string{"X-AppId", "X-Timestamp", "X-Signature"} {
+			if r.Header.Get(h) == "" {
+				writeJSON(w, map[string]any{"success": false, "errorCode": 400,
+					"errorMessage": "缺少签名头 " + h})
+				return
+			}
+		}
+		list := []map[string]any{}
+		for i := 1; i <= 12; i++ {
+			list = append(list, map[string]any{
+				"animeId": i, "animeTitle": fmt.Sprintf("假榜番剧 %d", i),
+				"imageUrl":        fmt.Sprintf("http://%s/rankimg/anime-%d.png", r.Host, i),
+				"rating":          9.5 - float64(i)/10,
+				"typeDescription": "TV 动画", "isFavorited": i%3 == 0,
+			})
+		}
+		writeJSON(w, map[string]any{"success": true, "bangumiList": list})
+	})
+	mux.HandleFunc("/trending/", tmdbList)
+	mux.HandleFunc("/movie/", tmdbList)
+	mux.HandleFunc("/tv/", tmdbList)
+	// 榜单封面:和 Emby 的封面不同源,走的是**静态白名单**那条路
+	mux.HandleFunc("/rankimg/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_ = png.Encode(w, solid(strings.TrimPrefix(r.URL.Path, "/rankimg/")))
+	})
+
 	// 探测(登录前,「测试连接」用)
 	mux.HandleFunc("/System/Info/Public", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ServerName": "自检用假服务器", "Version": "4.9.5", "Id": "fake-1"})
@@ -403,4 +440,34 @@ func writePem(path, typ string, der []byte) {
 	if err := pem.Encode(f, &pem.Block{Type: typ, Bytes: der}); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// tmdbList 假的 TMDB 榜。★ 故意让 id 一半是数字一半是字符串 ——
+// 真 TMDB 给数字,但我们的解析要两种都吃得下(移植时这里错过一次)。
+func tmdbList(w http.ResponseWriter, r *http.Request) {
+	kind := "movie"
+	if strings.Contains(r.URL.Path, "/tv") {
+		kind = "tv"
+	}
+	out := []map[string]any{}
+	for i := 1; i <= 12; i++ {
+		m := map[string]any{
+			"poster_path":  fmt.Sprintf("/rankimg/%s-%d.png", kind, i),
+			"vote_average": 8.8 - float64(i)/10,
+		}
+		if i%2 == 0 {
+			m["id"] = i
+		} else {
+			m["id"] = fmt.Sprintf("%d", i)
+		}
+		if kind == "tv" {
+			m["name"] = fmt.Sprintf("假榜剧集 %d", i)
+			m["first_air_date"] = "2023-09-01"
+		} else {
+			m["title"] = fmt.Sprintf("假榜电影 %d", i)
+			m["release_date"] = "2024-05-01"
+		}
+		out = append(out, m)
+	}
+	writeJSON(w, map[string]any{"page": 1, "results": out})
 }

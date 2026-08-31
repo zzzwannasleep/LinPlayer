@@ -23,15 +23,13 @@ import (
 	"unsafe"
 
 	"linplayer/core/account"
-	"linplayer/core/aggregate"
 	"linplayer/core/bus"
+	"linplayer/core/commands"
 	"linplayer/core/config"
-	"linplayer/core/emby"
-	"linplayer/core/history"
+	"linplayer/core/httpx"
 	"linplayer/core/net/localserve"
 	"linplayer/core/paths"
 	"linplayer/core/player"
-	"linplayer/core/prefs"
 	"linplayer/core/system"
 )
 
@@ -110,14 +108,13 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 			system.Version = hostCfg.Version
 		}
 
+		// ★ UA 里要带版本,而版本刚从宿主传进来 —— 必须排在注册命令之前:
+		//   注册的那一刻就可能有请求发出去,版本没设好的话发出去的是 LinPlayer/0.0.0。
+		httpx.SetVersion(system.Version)
+
 		bus.Init()
-		system.RegisterCommands()
-		player.RegisterCommands(system.Version)
-		emby.RegisterCommands(system.Version)
-		account.RegisterCommands(system.Version)
-		prefs.RegisterCommands(system.Version)
-		history.RegisterCommands()
-		aggregate.RegisterCommands(system.Version)
+		// ★ 全部命令走**唯一入口**(见 core/commands 的包注释:两处手写清单会静默漂移)
+		commands.RegisterAll(system.Version)
 
 		// ★ 起本地 HTTP 数据通道(SPEC §6)。地址和 token 通过**首个事件**告知宿主 ——
 		//   三端的图片加载器要拿它拼 `/img?src=`,拿不到就是「一张图都没有」。
@@ -144,6 +141,13 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 		// ★ 配置加载完之后把图片白名单同步一遍 —— 冷启动时账号早就在配置里了,
 		//   不同步的话一张封面都没有,而命令全都正常(最难查的那种)。
 		account.SyncImageAllowlist()
+
+		// ★ 代理同理:配置里存着代理,冷启动不装上的话「设置里明明开着,
+		//   重启之后就不走代理了」—— 而且一声不吭。
+		if u := config.Current().ProxyConf().ProxyURL(); u != "" {
+			httpx.SetProxy(u)
+			bus.Logf("info", "已启用出网代理(回环地址不走代理)")
+		}
 
 		bus.Logf("info", "核心层已启动 ABI=%d 平台=%s 数据根=%s 命令=%d 条",
 			LP_ABI, hostCfg.Platform, paths.Root(), len(bus.Commands()))

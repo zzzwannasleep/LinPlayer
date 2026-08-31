@@ -46,6 +46,10 @@ public partial class MainWindow : Window
         // 聚合视界和观看历史**不需要**当前会话:前者自己遍历账号表,后者读的是本地库
         this.FindControl<RadioButton>("NavAggregate")!.Checked += (_, _) => Nav.Root(new AggregatePage(_core!));
         this.FindControl<RadioButton>("NavHistory")!.Checked += (_, _) => Nav.Root(new HistoryPage(_core!));
+        // ★ 排行榜**不需要** Emby 会话:它打的是弹弹Play / TMDB,和用户的服务器无关。
+        //   套 Emby() 的话,网盘用户和没登录的人会被挡在 NoSessionPage 上,
+        //   而那页说的是「请先登录服务器」—— 和这一页的实际前提对不上。
+        this.FindControl<RadioButton>("NavRanking")!.Checked += (_, _) => Nav.Root(new RankingPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
         /* ★★ 自检模式下把窗口置顶。
@@ -90,6 +94,12 @@ public partial class MainWindow : Window
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
             case "aggregate": this.FindControl<RadioButton>("NavAggregate")!.IsChecked = true; break;
             case "history": this.FindControl<RadioButton>("NavHistory")!.IsChecked = true; break;
+            case "ranking":
+                // ★ 带参数(ranking:movie)时落到指定分组 —— TMDB 那条链和弹弹那条
+                //   解析口径不同(id 数字/字符串混、图床要自己拼前缀),要分别验
+                this.FindControl<RadioButton>("NavRanking")!.IsChecked = true;
+                if (arg.Length > 0 && Nav.Current is RankingPage rp) rp.SelfCheckGroup(arg);
+                break;
             case "servers": GoServers(); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;

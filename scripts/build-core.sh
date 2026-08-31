@@ -24,8 +24,16 @@ case "$(go env GOOS)" in
   *)       LIB="liblpcore.so" ;;
 esac
 
+# 编译期凭据(弹弹Play / TMDB)。**只有密文进 ldflags** —— 明文会原样出现在
+# 构建日志和进程命令行里。一个都没配时 SEAL 是空串,本地构建照常出得来,
+# 对应功能会明说「此构建没有凭据」(honest,不是装作没数据)。
+SEAL="$( cd "$ROOT/core" && go run ./cmd/sealsecrets )"
+if [ -n "$SEAL" ]; then
+  echo "  已注入编译期凭据($(printf '%s' "$SEAL" | grep -o -- '-X' | wc -l) 项)"
+fi
+
 echo "== 编 $LIB =="
-( cd "$ROOT/core" && go build -buildmode=c-shared -ldflags "-s -w" -o "$OUT/$LIB" ./ffi )
+( cd "$ROOT/core" && go build -buildmode=c-shared -ldflags "-s -w $SEAL" -o "$OUT/$LIB" ./ffi )
 
 # libmpv 得在 DLL 搜索路径上。Windows 拷一份到产物旁边;
 # Linux **不拷** —— 那边依赖系统安装的 libmpv(SPEC §15.4)。

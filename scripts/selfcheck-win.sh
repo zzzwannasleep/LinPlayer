@@ -79,6 +79,12 @@ JSON
 fi
 
 echo "== 5/5 起 exe 截图 =="
+# ★ 排行榜的两个上游也指到假服务器上(它顺带假扮弹弹Play / TMDB)。
+#   没有这一步的话,排行榜只验得到「没凭据」那一半 —— 而**有数据时长什么样**
+#   才是会出 bug 的那一半(图床白名单、id 数字/字符串两种、名次角标)。
+export LP_RANKING_BASE_DANDAN="http://127.0.0.1:$PORT"
+export LP_RANKING_BASE_TMDB="http://127.0.0.1:$PORT"
+export LP_RANKING_BASE_TMDBIMG="http://127.0.0.1:$PORT"
 LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
