@@ -59,12 +59,18 @@ cat > "$BIN/userdata/config.json" <<JSON
 JSON
 
 echo "== 5/5 起 exe 截图 =="
-LP_SELFCHECK_PAGE="$PAGE" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
   -ProcName LinPlayer -Out "$ROOT/build/$SHOT.png"
-powershell -NoProfile -Command "Get-Process LinPlayer -EA SilentlyContinue | Stop-Process -Force" || true
+# ★ **优雅关闭**,不是 Stop-Process。
+#   Kill 掉的话退出路径(lp_shutdown:停 mpv + 上报进度 + 写历史)根本不会跑,
+#   而「看一半退出续播不落地」正是这条路断掉的唯一表现。
+powershell -NoProfile -Command "
+  \$p = Get-Process LinPlayer -EA SilentlyContinue
+  if (\$p) { \$null = \$p.CloseMainWindow(); if (-not \$p.WaitForExit(8000)) { \$p.Kill(); Write-Output '!! 8 秒没退干净,只能 kill' } }
+" || true
 
 echo
 echo "假 Emby 收到的请求:"

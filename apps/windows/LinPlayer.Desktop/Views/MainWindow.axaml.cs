@@ -55,6 +55,11 @@ public partial class MainWindow : Window
     /// </summary>
     private void SelfCheckJump()
     {
+        // ★ 最大化必须单独验一遍:无边框窗口最大化时四周会溢出屏幕 8px,
+        //   把自绘标题栏的按钮顶到屏幕外(Rust 版栽过,根治办法是 WM_GETMINMAXINFO 钉 rcWork)。
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_MAXIMIZE") == "1")
+            WindowState = WindowState.Maximized;
+
         var want = Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE");
         if (string.IsNullOrEmpty(want) || _core is null) return;
         var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";

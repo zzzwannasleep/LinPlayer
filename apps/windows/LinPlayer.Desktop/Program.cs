@@ -36,6 +36,16 @@ internal static class Program
         }
 
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+
+        /* 退出时调 lp_shutdown(Dispose 里)。它**阻塞到落盘完成**:停 mpv、
+           关本地数据通道、停命令总线。
+
+           ★ 实测说明:进度上报那条**不靠它** —— 关窗口时播放页的
+             DetachedFromVisualTree 已经发过 player.stopPlayback,
+             注入「不调 Dispose」跑一遍,/Sessions/Playing/Stopped 照样上报。
+             所以这一句守的是**关停顺序与落盘**,不是上报;
+             别拿上报当它的验收判据(我第一版就是这么错的)。 */
+        Core?.Dispose();
     }
 
     public static AppBuilder BuildAvaloniaApp() =>
