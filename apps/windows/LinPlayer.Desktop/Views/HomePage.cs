@@ -57,16 +57,70 @@ public sealed class HomePage : PageBase
             device_id = "linplayer-desktop",
         };
 
-        // ★ 三块并发发出去,各自渲染 —— 谁先回来谁先出现,不互相等
-        var resume = Track("继续观看", () => core.EmbyListResume(new { s.server, s.token, s.user_id, s.device_id, limit = 12 }), true);
-        var views = Track("媒体库", () => core.EmbyViews(new { s.server, s.token, s.user_id, s.device_id }), true);
-        var nextUp = Track("接着看下一集", () => core.EmbyListNextUp(new { s.server, s.token, s.user_id, s.device_id, limit = 12 }), true);
-        var latest = Track("最新加入", () => core.EmbyListLatest(new { s.server, s.token, s.user_id, s.device_id, limit = 16 }), false);
-        var random = Track("随便看看", () => core.EmbyListRandom(new { s.server, s.token, s.user_id, s.device_id, limit = 8 }), false);
-        await Task.WhenAll(resume, views, nextUp, latest, random);
+        // ★ 各块并发发出去,各自渲染 —— 谁先回来谁先出现,不互相等
+        var resume = Track("继续观看", () => ResumeAndNextUp(core, s), true);
+        var views = Track("媒体库", () => Arr(core.EmbyViews(new { s.server, s.token, s.user_id, s.device_id })), true);
+        var latest = Track("最新加入", () => Arr(core.EmbyListLatest(new { s.server, s.token, s.user_id, s.device_id, limit = 16 })), false);
+        var random = Track("随便看看", () => Arr(core.EmbyListRandom(new { s.server, s.token, s.user_id, s.device_id, limit = 8 })), false);
+        await Task.WhenAll(resume, views, latest, random);
     }
 
-    private async Task Track(string title, Func<Task<JsonElement>> load, bool wide)
+    /// <summary>
+    /// 「继续观看」= <b>看了一半的</b> + <b>接着看下一集</b>,合并成一条轨道。
+    ///
+    /// <para>★★ 按剧去重,<b>看了一半的优先</b>。同一部剧不该出现两张卡 ——
+    /// 「第 3 集看了一半」和「下一集是第 4 集」是同一件事的两种说法,
+    /// 而用户继续看一部剧只有一个正确入口。不去重的话追一部剧会看到两张卡,
+    /// 点哪张都对不上自己的预期。</para>
+    ///
+    /// <para>★ 去重键优先用 <c>series_id</c>(分集),没有就用条目自己的 id(电影)。
+    /// 只按 id 去重是不够的:同一部剧的第 3 集和第 4 集 id 不同,照样会出两张。</para>
+    ///
+    /// <para>★ 这里的 <c>WhenAll</c> 是**这一条轨道内部**的屏障 —— 去重要求两份数据
+    /// 都到齐,这是数据本身的要求。其它几条轨道照旧各自渲染,不受它拖累。</para>
+    ///
+    /// <para>★ 两条各自吞错:NextUp 在某些 fork 上没有,不能因此把「看了一半」也弄没。</para>
+    /// </summary>
+    private static async Task<List<JsonElement>> ResumeAndNextUp(CoreClient core, object s)
+    {
+        var a = Arr(core.EmbyListResume(With(s, new { limit = 12 })));
+        var b = Arr(core.EmbyListNextUp(With(s, new { limit = 12 })));
+        var resume = await Safe(a);
+        var nextUp = await Safe(b);
+
+        var seen = new HashSet<string>();
+        var outp = new List<JsonElement>();
+        foreach (var it in resume.Concat(nextUp))
+        {
+            var key = Str(it, "series_id") is { Length: > 0 } sid ? "s:" + sid : "i:" + Str(it, "id");
+            if (seen.Add(key)) outp.Add(it);
+        }
+        return outp;
+    }
+
+    /// <summary>失败当空表 —— 合并的两条里挂了一条,不该把另一条也弄没。</summary>
+    private static async Task<List<JsonElement>> Safe(Task<List<JsonElement>> t)
+    {
+        try { return await t; }
+        catch { return []; }
+    }
+
+    private static async Task<List<JsonElement>> Arr(Task<JsonElement> t)
+    {
+        var d = await t;
+        return d.ValueKind == JsonValueKind.Array ? d.EnumerateArray().ToList() : [];
+    }
+
+    /// <summary>把会话四件套和额外参数并成一个字典(匿名类型合不了)。</summary>
+    private static Dictionary<string, object?> With(object sess, object extra)
+    {
+        var d = new Dictionary<string, object?>();
+        foreach (var p in sess.GetType().GetProperties()) d[p.Name] = p.GetValue(sess);
+        foreach (var p in extra.GetType().GetProperties()) d[p.Name] = p.GetValue(extra);
+        return d;
+    }
+
+    private async Task Track(string title, Func<Task<List<JsonElement>>> load, bool wide)
     {
         var host = new StackPanel { Spacing = 10 };
         var body = new TextBlock { Classes = { "dim" }, Text = "加载中…" };
@@ -76,8 +130,7 @@ public sealed class HomePage : PageBase
 
         try
         {
-            var data = await load();
-            var items = data.ValueKind == JsonValueKind.Array ? data.EnumerateArray().ToList() : [];
+            var items = await load();
             Dispatcher.UIThread.Post(() =>
             {
                 host.Children.Remove(body);
