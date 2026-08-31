@@ -9,6 +9,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHOT="${1:-selfcheck}"
+# 第二个参数 = 落到哪一页(见 MainWindow.SelfCheckJump)。空 = 首页。
+PAGE="${2:-}"
+# 第三个参数 = 起播用的视频文件。给了才验播放链路。
+CLIP="${3:-}"
 APP="$ROOT/apps/windows/LinPlayer.Desktop"
 BIN="$APP/bin/Debug/$(grep -oP "(?<=<TargetFramework>)[^<]+" "$APP/LinPlayer.Desktop.csproj")"
 PORT=18096
@@ -28,7 +32,7 @@ echo "== 3/5 起假 Emby =="
 powershell -NoProfile -Command "Get-Process LinPlayer,fakeemby -EA SilentlyContinue | Stop-Process -Force" || true
 go build -o "$ROOT/build/fakeemby.exe" ./core/cmd/fakeemby 2>/dev/null || \
   ( cd "$ROOT/core" && go build -o "$ROOT/build/fakeemby.exe" ./cmd/fakeemby )
-"$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" > "$ROOT/build/fakeemby.log" 2>&1 &
+"$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" -clip "$CLIP" > "$ROOT/build/fakeemby.log" 2>&1 &
 FAKE=$!
 trap 'kill $FAKE 2>/dev/null || true' EXIT
 for _ in $(seq 30); do curl -s "http://127.0.0.1:$PORT/System/Info/Public" >/dev/null && break; sleep 0.2; done
@@ -55,8 +59,9 @@ cat > "$BIN/userdata/config.json" <<JSON
 JSON
 
 echo "== 5/5 起 exe 截图 =="
-"$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
-sleep 6
+LP_SELFCHECK_PAGE="$PAGE" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+# 播放页要等起播 + 解码,别的页 6 秒够
+sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
   -ProcName LinPlayer -Out "$ROOT/build/$SHOT.png"
 powershell -NoProfile -Command "Get-Process LinPlayer -EA SilentlyContinue | Stop-Process -Force" || true

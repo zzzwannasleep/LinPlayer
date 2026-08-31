@@ -32,11 +32,12 @@ public partial class MainWindow : Window
         this.FindControl<Button>("BtnMax")!.Click += (_, _) => ToggleMaximize();
         this.FindControl<Button>("BtnClose")!.Click += (_, _) => Close();
 
-        this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Show(new HomePage(_core));
-        this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Show(new PlaceholderPage("媒体库"));
-        this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Show(new PlaceholderPage("搜索"));
-        this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Show(new PlaceholderPage("收藏"));
-        this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Show(new PlaceholderPage("设置"));
+        Nav.Host = Show;
+        this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
+        this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Nav.Root(new LibraryPage(_core!));
+        this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Nav.Root(new SearchPage(_core!));
+        this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Nav.Root(new FavoritesPage(_core!));
+        this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
         Opened += async (_, _) => await BootAsync();
     }
@@ -46,7 +47,36 @@ public partial class MainWindow : Window
     private void ToggleMaximize() =>
         WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
 
+    /// <summary>
+    /// 真机自检用:环境变量 <c>LP_SELFCHECK_PAGE</c> 指到哪一页就直接落到哪一页。
+    ///
+    /// <para>★ 截图工具点不了按钮。没有这个钩子的话「除首页以外的每一页」
+    /// 都只能靠编译通过来证明 —— 而本仓库栽过的渲染 bug **一个都不会在编译期现形**。</para>
+    /// </summary>
+    private void SelfCheckJump()
+    {
+        var want = Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE");
+        if (string.IsNullOrEmpty(want) || _core is null) return;
+        var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";
+        var srv = Nav.Session?.server ?? "";
+        switch (want.Split(':')[0])
+        {
+            case "library": this.FindControl<RadioButton>("NavLibrary")!.IsChecked = true; break;
+            case "search": this.FindControl<RadioButton>("NavSearch")!.IsChecked = true; break;
+            case "favorites": this.FindControl<RadioButton>("NavFavorites")!.IsChecked = true; break;
+            case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
+            case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
+            case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
+            case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
+        }
+    }
+
     private void Show(Control page) => this.FindControl<ContentControl>("PageHost")!.Content = page;
+
+    /// <summary>首页。点卡片进详情 —— 库卡进网格,条目卡进详情(判断在 OpenDetail 一处)。</summary>
+    private Control Home() =>
+        new HomePage(_core, Nav.Session is null ? null
+            : LibraryPage.OpenDetail(_core!, Nav.Session.server));
 
     /// <summary>
     /// 启动流程:核心层没起来就如实说;没有账号就进首登闸口;有账号就进首页。
@@ -71,7 +101,11 @@ public partial class MainWindow : Window
                 return;
             }
             UpdateServerChip(accounts);
-            Show(new HomePage(_core));
+            // ★ 会话拉一次存住:命令层迁移期还要显式传 server/token/user_id,
+            //   每页各拉一次就是每页多一次往返。
+            try { Nav.Session = Sess.From(await _core.EmbyCurrentSession()); } catch { /* 非 Emby 账号没有会话 */ }
+            Nav.Root(Home());
+            SelfCheckJump();
         }
         catch (Exception e)
         {
@@ -86,8 +120,9 @@ public partial class MainWindow : Window
             UpdateServerChip(await _core!.AccountListAccounts());
         }
         catch { /* 服务器名没刷新不影响用 */ }
+        try { Nav.Session = Sess.From(await _core!.EmbyCurrentSession()); } catch { /* 同上 */ }
         this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
-        Show(new HomePage(_core));
+        Nav.Root(Home());
     }
 
     private void UpdateServerChip(JsonElement accounts)

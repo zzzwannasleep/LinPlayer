@@ -24,8 +24,12 @@ import (
 	"strings"
 )
 
+// clip 起播时真正吐出去的文件。空 = 播放自检跳过。
+var clip *string
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
+	clip = flag.String("clip", "", "起播时回放的本地视频文件")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -76,6 +80,25 @@ func main() {
 			writeJSON(w, map[string]any{
 				"MovieCount": 128, "SeriesCount": 42, "EpisodeCount": 1580, "BoxSetCount": 6,
 			})
+		// 详情:/Users/{uid}/Items/{itemId}(尾段是具体 id,不是 Resume/Latest/Counts)
+		case detailID(p) != "":
+			id := detailID(p)
+			d := item(id, "某部电影", "Movie")
+			d["Overview"] = "自检用简介。这一段是拿来验「有值就画、没值不留空位」的。"
+			d["ProductionYear"] = 2024
+			d["Genres"] = []string{"剧情", "科幻"}
+			d["CommunityRating"] = 8.4
+			d["RunTimeTicks"] = 72000000000
+			d["OfficialRating"] = "PG-13"
+			d["Taglines"] = []string{"一句自检用的标语"}
+			d["UserData"] = map[string]any{"PlaybackPositionTicks": 12000000000, "IsFavorite": false}
+			d["People"] = []any{
+				map[string]any{"Id": "p1", "Name": "某演员", "Role": "主角", "Type": "Actor",
+					"PrimaryImageTag": "tag-p1"},
+				map[string]any{"Id": "p2", "Name": "某导演", "Type": "Director"},
+			}
+			writeJSON(w, d)
+
 		case strings.Contains(p, "/Items"):
 			writeJSON(w, page(
 				item("m1", "库里的第一部", "Movie"),
@@ -94,12 +117,50 @@ func main() {
 	//   「封面加载出来了」和「三张卡都是同一个占位」。
 	mux.HandleFunc("/Items/", func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(parts) < 3 || parts[2] != "Images" {
+		switch {
+		case len(parts) >= 3 && parts[2] == "Images":
+			w.Header().Set("Content-Type", "image/png")
+			_ = png.Encode(w, solid(parts[1]))
+
+		// 起播:PlaybackInfo → DirectStreamUrl。
+		//
+		// ★ DirectStreamUrl 故意给**相对路径** —— 真 Emby 就是这么回的,
+		//   而「把相对路径拼在服务器根上」正是 Range 前缀那个坑的源头。
+		case len(parts) >= 3 && parts[2] == "PlaybackInfo":
+			id := parts[1]
+			writeJSON(w, map[string]any{
+				"PlaySessionId": "ps-selfcheck",
+				"MediaSources": []any{map[string]any{
+					"Id": "ms-1", "Name": "1080p", "Container": "mp4",
+					"SupportsDirectStream": true,
+					"DirectStreamUrl":      "/Videos/" + id + "/stream.mp4?static=true&mediaSourceId=ms-1",
+					"MediaStreams": []any{
+						map[string]any{"Type": "Video", "Codec": "h264", "Height": 1080, "Index": 0},
+						map[string]any{"Type": "Audio", "Codec": "aac", "Language": "jpn", "Index": 1},
+					},
+				}},
+			})
+
+		// 详情:/Items/{id} 直接位(不带 /Users/ 前缀的那条 UI 不走,留着兜底)
+		default:
 			http.NotFound(w, r)
+		}
+	})
+
+	// 视频流。★ 必须支持 Range —— http.ServeFile 自带。
+	// 不支持的话核心层的 `bytes=0-0` 探测会选错前缀,而表现是「跳到没缓冲的位置就卡死」。
+	mux.HandleFunc("/Videos/", func(w http.ResponseWriter, r *http.Request) {
+		if *clip == "" {
+			http.Error(w, "自检没带 -clip,没有可播的文件", http.StatusNotFound)
 			return
 		}
-		w.Header().Set("Content-Type", "image/png")
-		_ = png.Encode(w, solid(parts[1]))
+		http.ServeFile(w, r, *clip)
+	})
+
+	// 播放上报。★ 三件套都得回 2xx:回错的话核心层会当成上报失败,
+	// 而「看一半退出续播不落地」正是这条链断掉的表现。
+	mux.HandleFunc("/Sessions/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	log.Printf("假 Emby 起在 http://%s", *addr)
@@ -133,6 +194,20 @@ func item(id, name, typ string) map[string]any {
 		"IsFolder":  typ == "CollectionFolder" || typ == "Series",
 		"ImageTags": map[string]any{"Primary": "tag-" + id},
 	}
+}
+
+// detailID 从 /Users/{uid}/Items/{itemId} 里取条目 id。
+// 尾段是列表名(Resume / Latest / Counts)或路径不是这个形状时返回空串。
+func detailID(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "Users" || parts[2] != "Items" {
+		return ""
+	}
+	switch parts[3] {
+	case "Resume", "Latest", "Counts", "":
+		return ""
+	}
+	return parts[3]
 }
 
 func page(items ...map[string]any) map[string]any {

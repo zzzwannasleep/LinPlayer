@@ -26,8 +26,11 @@ public abstract class PageBase : UserControl
         {
             // ★ 正文封顶 1560 居中 + 左右水槽 18(§3.1)。
             //   不封顶的话 4K 屏上一行能塞十几张卡,眼睛要横扫整块屏。
+            // ★ Stretch **不是** Center:Center 会让容器缩到内容宽,
+            //   内容窄的页(详情、设置)就整块飘到屏幕中间,和侧栏对不齐。
+            //   Stretch + MaxWidth 才是「撑满、但封顶 1560 后居中」。
             MaxWidth = 1560,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 18, 18, 28),
             Child = content,
         },
