@@ -35,6 +35,8 @@ public partial class MainWindow : Window
 
         Nav.Host = Show;
         Nav.Immersive = SetImmersive;
+
+        this.FindControl<Button>("ServerChip")!.Click += (_, _) => GoServers();
         this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Nav.Root(new LibraryPage(_core!));
         this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Nav.Root(new SearchPage(_core!));
@@ -72,6 +74,7 @@ public partial class MainWindow : Window
             case "search": this.FindControl<RadioButton>("NavSearch")!.IsChecked = true; break;
             case "favorites": this.FindControl<RadioButton>("NavFavorites")!.IsChecked = true; break;
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
+            case "servers": GoServers(); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
             case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
@@ -88,6 +91,16 @@ public partial class MainWindow : Window
         this.FindControl<Grid>("TitleBar")!.IsVisible = !on;
         this.FindControl<Border>("Sidebar")!.IsVisible = !on;
         WindowState = on ? WindowState.FullScreen : WindowState.Normal;
+    }
+
+    /// <summary>进服务器管理。★ 顺手把侧栏的选中态摘掉 —— 不摘的话
+    /// 界面在说「你在首页」,而实际在服务器页,用户会以为点了没反应。</summary>
+    private void GoServers()
+    {
+        if (_core is null) return;
+        foreach (var n in new[] { "NavHome", "NavLibrary", "NavSearch", "NavFavorites", "NavSettings" })
+            this.FindControl<RadioButton>(n)!.IsChecked = false;
+        Nav.Root(new ServersPage(_core, OnServerSwitched));
     }
 
     private void Show(Control page) => this.FindControl<ContentControl>("PageHost")!.Content = page;
@@ -130,6 +143,22 @@ public partial class MainWindow : Window
         {
             Show(new FatalPage($"读账号表失败:{e.Message}"));
         }
+    }
+
+    /// <summary>
+    /// 切了服务器 / 改了账号之后:会话和侧栏都要重来。
+    ///
+    /// <para>★ 只刷侧栏不刷会话的话,整个应用还在拿旧 token 打新服务器 ——
+    /// 表现是切完之后每一页都 401,而侧栏显示的是新服务器的名字。</para>
+    /// </summary>
+    private async void OnServerSwitched()
+    {
+        try
+        {
+            UpdateServerChip(await _core!.AccountListAccounts());
+            Nav.Session = Sess.From(await _core.EmbyCurrentSession());
+        }
+        catch { /* 非 Emby 账号没有会话 */ }
     }
 
     private async void OnLoggedIn()

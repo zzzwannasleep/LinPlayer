@@ -45,15 +45,18 @@
               BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
         <DockPanel LastChildFill="True">
           <!-- 服务器切换器 -->
-          <Border DockPanel.Dock="Top" Margin="10,12,10,10" Padding="10,9"
-                  Background="{DynamicResource PanelAlt}" CornerRadius="10">
+          <!-- ★ 这块是**可点的**:点开就是服务器管理。
+               没有入口的话登录一台之后就再也换不了服务器,而这是个多服务器播放器。 -->
+          <Button DockPanel.Dock="Top" Name="ServerChip" Margin="10,12,10,10" Padding="10,9"
+                  Background="{DynamicResource PanelAlt}" BorderThickness="0" CornerRadius="10"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Cursor="Hand">
             <StackPanel Spacing="2">
               <TextBlock Name="ServerName" Text="未连接" FontSize="13" FontWeight="SemiBold"
                          TextTrimming="CharacterEllipsis" />
               <TextBlock Name="ServerSub" Classes="dim" Text="还没有添加服务器"
                          FontSize="11" TextTrimming="CharacterEllipsis" />
             </StackPanel>
-          </Border>
+          </Button>
 
           <!-- 底部:设置 -->
           <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,10">

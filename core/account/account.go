@@ -118,6 +118,7 @@ var client *emby.Client
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands(version string) {
 	client = emby.NewClient(version)
+	registerProbeCommands()
 
 	bus.Register("account.listAccounts", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		return listOf(config.Current()), nil
