@@ -21,6 +21,8 @@
 package prefetch
 
 import (
+	"linplayer/core/net/tlspolicy"
+
 	"context"
 	"errors"
 	"fmt"
@@ -168,7 +170,8 @@ func Start(ctx context.Context, upstreamURL string, threads int, cacheLimit int6
 		readAheadChunks: max64(readAhead/ChunkSize, 1),
 		// ★ 预取拉上游用 LinPlayerPreload 这条 UA 道(SPEC §14.1):
 		//   服主要能把「替 mpv 提前拉的旁路请求」和「用户正在看的那一路」在日志里分开。
-		client:    &http.Client{},
+		// ★ 走 tlspolicy:不走的话自签名服务器上「多线程加载」一开就取不到流
+		client:    &http.Client{Transport: tlspolicy.Transport()},
 		onInvalid: onInvalid,
 		liveMap:   map[int64]*live{},
 	}

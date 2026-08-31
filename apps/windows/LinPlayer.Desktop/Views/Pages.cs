@@ -133,7 +133,7 @@ public sealed class AddServerPage : PageBase
             Busy(true, "正在连接…");
             try
             {
-                var info = await core.AccountTestConnection(new { server = server.Text ?? "" });
+                var info = await core.AccountTestConnection(new { server = WithScheme(server.Text ?? "") });
                 hint.Text = $"连上了:{Get(info, "name")} · 版本 {Get(info, "version")}";
             }
             catch (CoreException e) { hint.Text = e.Advice; }
@@ -148,7 +148,7 @@ public sealed class AddServerPage : PageBase
             {
                 await core.EmbyLogin(new
                 {
-                    server = server.Text ?? "",
+                    server = WithScheme(server.Text ?? ""),
                     username = user.Text ?? "",
                     password = pass.Text ?? "",
                     // ★ 设备 id 必须**持久**:每次换一个会把服务器的设备列表刷满,
@@ -206,6 +206,29 @@ public sealed class AddServerPage : PageBase
                 Child = form,
             },
         };
+    }
+
+    /// <summary>
+    /// 地址补全:用户没写 <c>http://</c> 时补一个。
+    ///
+    /// <para>★★ 不补的表现是 Go 的 URL 解析直接报
+    /// 「first path segment in URL cannot contain colon」—— 一句纯英文技术话,
+    /// 而且它以前还被盖成「网络不通」。而 <c>192.168.1.10:8096</c> 是**最常见的输入**。</para>
+    ///
+    /// <para>★ 补在 UI 侧,<b>不动核心层的 NormServer</b> —— 那是黄金实现里
+    /// 逐字移植过来的(Rust 版的 norm 也只 trim),动了会破坏差分对账基准。</para>
+    ///
+    /// <para>★ 默认补 <c>http://</c> 不是 https:内网 IP 和裸主机名绝大多数是 http;
+    /// 补错了协议只会连不上,而补 https 到一台只有 http 的服务器上,
+    /// 报的是看不懂的 TLS 错。</para>
+    /// </summary>
+    internal static string WithScheme(string raw)
+    {
+        var t = (raw ?? "").Trim();
+        if (t.Length == 0) return t;
+        if (t.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            t.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return t;
+        return "http://" + t;
     }
 
     private static TextBlock Label(string t) => new()

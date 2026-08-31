@@ -12,6 +12,7 @@ import (
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/net/localserve"
+	"linplayer/core/net/tlspolicy"
 	"linplayer/core/paths"
 )
 
@@ -425,5 +426,30 @@ func TestSyncImageAllowlist冷启动也要同步(t *testing.T) {
 
 	if got := img(); got == http.StatusNotFound {
 		t.Fatal("冷启动同步之后仍不在白名单里 —— 表现是「一张封面都没有,而命令全都正常」")
+	}
+}
+
+// ★★ 冷启动时自签名白名单也要同步上。
+//
+// 不同步的表现是「我勾了允许自签名,重启之后才生效」—— 而实际上重启也不生效,
+// 因为登记只发生在「这次会话里改过账号」的那条路上。
+func TestSyncImageAllowlist_自签名白名单也要一起刷(t *testing.T) {
+	setup(t)
+	tlspolicy.Set(nil)
+	defer tlspolicy.Set(nil)
+
+	c := config.Current()
+	c.AccountList = []config.Account{{
+		Server: "https://self-signed.invalid:8920", AllowInsecureTLS: true,
+	}}
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if tlspolicy.AllowsHost("self-signed.invalid:8920") {
+		t.Fatal("前提不成立:同步之前不该已经放行")
+	}
+	SyncImageAllowlist()
+	if !tlspolicy.AllowsHost("self-signed.invalid:8920") {
+		t.Fatal("冷启动同步之后仍没放行 —— 表现是「勾了允许自签名却还是连不上」")
 	}
 }

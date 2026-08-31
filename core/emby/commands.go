@@ -3,6 +3,8 @@ package emby
 // 本包自己注册 `emby.*`。命令归属跟着实现走(理由见 core/player/commands.go)。
 
 import (
+	"crypto/x509"
+	"errors"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -294,6 +296,13 @@ func RegisterCommands(version string) {
 //
 // 无论哪一类,`Msg` 都带上真实原因 —— UI 那边负责把它显示出来。
 func classify(err error) error {
+	// ★★ 证书问题要**指路**,不能只把 x509 那句英文丢给用户。
+	//   自建 Emby 用自签名证书极常见,而用户看到
+	//   「x509: certificate signed by unknown authority」是不知道该干什么的 ——
+	//   表现就是「有网,但就是进不去」。
+	if hint := certHint(err); hint != "" {
+		return &bus.Err{Code: bus.ENetwork, Msg: hint, Detail: err.Error()}
+	}
 	switch code := StatusOf(err); {
 	case code == 401 || code == 403:
 		return &bus.Err{Code: bus.EAuth, Msg: err.Error()}
@@ -304,6 +313,25 @@ func classify(err error) error {
 		return &bus.Err{Code: bus.EInternal, Msg: err.Error(), Retryable: true}
 	}
 	return &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
+}
+
+// certHint 认出 TLS 证书类的错,给一句能照着做的话。认不出就返回空串。
+func certHint(err error) string {
+	var unknownCA x509.UnknownAuthorityError
+	var badHost x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	switch {
+	case errors.As(err, &unknownCA):
+		return "这台服务器用的是自签名证书。要连它,请在「服务器」页面勾上「允许这台服务器的自签名证书」"
+	case errors.As(err, &badHost):
+		return "证书上的域名和你填的地址对不上(证书签给的是别的域名)。" +
+			"要么改用证书上的那个域名,要么在「服务器」页面勾上「允许这台服务器的自签名证书」"
+	case errors.As(err, &invalid):
+		// 过期是这一类里最常见的
+		return "服务器的证书不被信任(常见原因是证书过期)。" +
+			"确认服务器证书没问题;自建服务器可以在「服务器」页面勾上「允许这台服务器的自签名证书」"
+	}
+	return ""
 }
 
 func str(a map[string]any, k string) string {

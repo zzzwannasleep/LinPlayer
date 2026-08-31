@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"linplayer/core/net/tlspolicy"
 )
 
 // Session 一次会话所需的全部身份信息。
@@ -274,7 +276,10 @@ type Client struct {
 // 空闲超时要在 net 层实现(TODO C33)。
 func NewClient(version string) *Client {
 	return &Client{
-		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		// ★ Transport 按 host 决定要不要放行自签名证书(见 net/tlspolicy)。
+		//   用默认 Transport 的话,用户勾了「允许自签名」也连不上自建服务器 ——
+		//   而报出来的是一句看不懂的 x509 英文。
+		HTTP: &http.Client{Timeout: 60 * time.Second, Transport: tlspolicy.Transport()},
 		UA:      "LinPlayer/" + version,
 		Version: version,
 	}

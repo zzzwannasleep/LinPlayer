@@ -27,6 +27,8 @@
 package preload
 
 import (
+	"linplayer/core/net/tlspolicy"
+
 	"context"
 	"io"
 	"net/http"
@@ -68,7 +70,8 @@ type Preloader struct {
 func New() *Preloader {
 	return &Preloader{
 		cur:    job{cancel: &atomic.Bool{}, got: &atomic.Int64{}},
-		Client: &http.Client{},
+		// ★ 走 tlspolicy:不走的话自签名服务器上预热永远失败(而且是静默的)
+		Client: &http.Client{Transport: tlspolicy.Transport()},
 	}
 }
 

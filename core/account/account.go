@@ -19,6 +19,7 @@ import (
 	"linplayer/core/config"
 	"linplayer/core/emby"
 	"linplayer/core/net/localserve"
+	"linplayer/core/net/tlspolicy"
 )
 
 // Info 交给 UI 的账号视图。
@@ -77,7 +78,9 @@ func commit(c *config.AppConfig) error {
 		return bus.NewErr(bus.EInternal, "配置保存失败: %v", err)
 	}
 	syncImageAllowlist(c)
-	// ponytail: 自签名白名单等 net 层落地后接上(config.InsecureHosts 已经把值算好了)。
+	// ★ 自签名白名单和图片白名单一样,**每条改账号的路径末尾都要刷** ——
+	//   漏一条的表现是「我勾了允许自签名,重启之后才生效」。
+	tlspolicy.Set(c.InsecureHosts())
 	return nil
 }
 
@@ -86,7 +89,12 @@ func commit(c *config.AppConfig) error {
 // ★★ 没有这一步的话:**冷启动(账号早就存在配置里)时白名单是空的,一张封面都没有**,
 // 而命令全都正常。只有「这次会话里登录过 / 改过账号」才会被登记 ——
 // 那正好是开发时最常走的路径,所以这个洞在开发机上极难发现。
-func SyncImageAllowlist() { syncImageAllowlist(config.Current()) }
+func SyncImageAllowlist() {
+	c := config.Current()
+	syncImageAllowlist(c)
+	// ★ 自签名白名单同理:冷启动时账号早就在配置里,不同步的话勾了也不生效
+	tlspolicy.Set(c.InsecureHosts())
+}
 
 // syncImageAllowlist 让图片通道的白名单和账号表**完全一致**。
 //

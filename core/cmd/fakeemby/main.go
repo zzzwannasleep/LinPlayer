@@ -12,7 +12,12 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"image"
@@ -20,8 +25,14 @@ import (
 	"image/draw"
 	"image/png"
 	"log"
+	"math/big"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
+	"time"
 	"strings"
 )
 
@@ -31,10 +42,14 @@ var clip *string
 // reject 登录一律回 401。
 var reject *bool
 
+// useTLS 用自签名证书起 https。
+var useTLS *bool
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
 	clip = flag.String("clip", "", "起播时回放的本地视频文件")
 	reject = flag.Bool("reject", false, "登录一律回 401(验错误提示用)")
+	useTLS = flag.Bool("tls", false, "用自签名证书起 https")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -247,6 +262,15 @@ func main() {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	// -tls:用自签名证书起 https。验「允许自签名」那条开关用 ——
+	// 自建 Emby 用自签名证书很常见,而这条路以前报的是一句看不懂的 x509 英文。
+	if *useTLS {
+		log.Printf("假 Emby(自签名 https)起在 https://%s", *addr)
+		if err := http.ListenAndServeTLS(*addr, certFile(), keyFile(), logged(mux)); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	log.Printf("假 Emby 起在 http://%s", *addr)
 	if err := http.ListenAndServe(*addr, logged(mux)); err != nil {
 		log.Fatal(err)
@@ -308,4 +332,57 @@ func writeJSON(w http.ResponseWriter, v any) { writeJSONRaw(w, v) }
 func writeJSONRaw(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// certFile / keyFile 现生成一张自签名证书,落到临时目录。
+//
+// ★ 证书**不进仓库**:仓库里放私钥是红线,而且每次现生成也省得管过期。
+func certFile() string { ensureCert(); return certPath }
+func keyFile() string  { ensureCert(); return keyPath }
+
+var (
+	certPath, keyPath string
+	certOnce          sync.Once
+)
+
+func ensureCert() {
+	certOnce.Do(func() {
+		key, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			log.Fatal(err)
+		}
+		tpl := x509.Certificate{
+			SerialNumber: big.NewInt(1),
+			Subject:      pkix.Name{CommonName: "linplayer-selfcheck"},
+			NotBefore:    time.Now().Add(-time.Hour),
+			NotAfter:     time.Now().Add(24 * time.Hour),
+			IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+			DNSNames:     []string{"localhost"},
+			KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		}
+		der, err := x509.CreateCertificate(rand.Reader, &tpl, &tpl, &key.PublicKey, key)
+		if err != nil {
+			log.Fatal(err)
+		}
+		dir, err := os.MkdirTemp("", "fakeemby-cert")
+		if err != nil {
+			log.Fatal(err)
+		}
+		certPath = filepath.Join(dir, "cert.pem")
+		keyPath = filepath.Join(dir, "key.pem")
+		writePem(certPath, "CERTIFICATE", der)
+		writePem(keyPath, "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(key))
+	})
+}
+
+func writePem(path, typ string, der []byte) {
+	f, err := os.Create(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	if err := pem.Encode(f, &pem.Block{Type: typ, Bytes: der}); err != nil {
+		log.Fatal(err)
+	}
 }

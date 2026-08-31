@@ -109,6 +109,29 @@ public sealed class ServersPage : PageBase
             catch (Exception e) { msg.Text = LibraryPage.Advice(e); }
         };
 
+        // ★ 「允许自签名」必须有个入口。核心层的白名单已经接好了(net/tlspolicy),
+        //   但界面上没开关的话用户根本用不上 —— 自建 Emby 用自签名证书很常见,
+        //   而报出来的是一句看不懂的 x509 英文。
+        var insecure = new CheckBox
+        {
+            Content = "允许这台服务器的自签名证书",
+            IsChecked = a.TryGetProperty("allow_insecure_tls", out var ai) && ai.ValueKind == JsonValueKind.True,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        insecure.IsCheckedChanged += async (_, _) =>
+        {
+            try
+            {
+                await _core.AccountUpdateAccount(new
+                {
+                    server_id = server, allow_insecure_tls = insecure.IsChecked == true,
+                });
+                msg.Text = insecure.IsChecked == true
+                    ? "已允许自签名证书(只对这台生效)。" : "已恢复严格校验。";
+            }
+            catch (Exception e) { msg.Text = LibraryPage.Advice(e); }
+        };
+
         var probe = new Button { Classes = { "ghost" }, Content = "测线路" };
         _autoProbe ??= () => probe.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         probe.Click += async (_, _) =>
@@ -172,6 +195,7 @@ public sealed class ServersPage : PageBase
                         Classes = { "dim" }, FontSize = 12, TextWrapping = TextWrapping.Wrap,
                     },
                     new TextBlock { Text = lineText, Classes = { "dim" }, FontSize = 12 },
+                    insecure,
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal, Spacing = 10,

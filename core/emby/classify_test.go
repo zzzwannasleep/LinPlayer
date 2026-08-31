@@ -3,7 +3,9 @@ package emby
 // 「一直提示没网了,实际上有网络」这条真实故障的护栏(用户 2026-08-31 实测撞上)。
 
 import (
+	"crypto/x509"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -74,5 +76,42 @@ func TestClassify_连不上才是网络问题(t *testing.T) {
 	e := codeOf(t, classify(errors.New("网络错误: dial tcp 10.0.0.1:8096: i/o timeout")))
 	if e.Code != bus.ENetwork {
 		t.Fatalf("连不上应当是 %s,实得 %s", bus.ENetwork, e.Code)
+	}
+}
+
+// ★★ 证书类的错必须**指路**,不能只把 x509 那句英文丢给用户。
+//
+// 自建 Emby 用自签名证书极常见。用户看到
+// 「x509: certificate signed by unknown authority」是不知道该干什么的 ——
+// 表现就是「有网,但就是进不去」(用户 2026-08-31 的原话)。
+func TestClassify_证书问题要告诉用户去哪儿勾开关(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"自签名", x509.UnknownAuthorityError{}},
+		// ★ HostnameError 的 Error() 会读 Certificate —— 不给就 nil 解引用。
+		//   夹具不真实的话,测的是「panic 的字符串里没有那句话」,不是真行为。
+		{"域名对不上", x509.HostnameError{Host: "a.example", Certificate: &x509.Certificate{}}},
+		{"证书过期", x509.CertificateInvalidError{Reason: x509.Expired}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := codeOf(t, classify(fmt.Errorf("网络错误: %w", tc.err)))
+			if !strings.Contains(e.Msg, "允许这台服务器的自签名证书") {
+				t.Fatalf("应当指到那个开关上,实得 %q", e.Msg)
+			}
+			// ★ 原始英文也要留着 —— 排查时要看它
+			if e.Detail == "" || !strings.Contains(e.Detail, "x509") {
+				t.Fatalf("原始错误应当留在 Detail 里,实得 %q", e.Detail)
+			}
+		})
+	}
+}
+
+// ★ 别把普通网络错也认成证书错。
+func TestClassify_普通网络错不该被认成证书问题(t *testing.T) {
+	e := codeOf(t, classify(errors.New("网络错误: dial tcp: i/o timeout")))
+	if strings.Contains(e.Msg, "自签名") {
+		t.Fatalf("超时被认成证书问题了:%q", e.Msg)
 	}
 }

@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"linplayer/core/imgcache"
+	"linplayer/core/net/tlspolicy"
 )
 
 // Server 一个跑着的本地服务。
@@ -98,7 +99,9 @@ func Start() (*Server, error) {
 		Token:  hex.EncodeToString(tok),
 		ln:     ln,
 		allow:  map[string]http.Header{},
-		Client: &http.Client{Timeout: fetchTimeout},
+		// ★ 走 tlspolicy:自签名服务器上不走的话**一张封面都没有,而命令全都正常** ——
+		//   和「白名单没同步」长得一模一样,极难分辨。
+		Client: &http.Client{Timeout: fetchTimeout, Transport: tlspolicy.Transport()},
 		gate:   make(chan struct{}, fetchSlots),
 	}
 	mux := http.NewServeMux()

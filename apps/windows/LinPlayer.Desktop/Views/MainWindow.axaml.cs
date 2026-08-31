@@ -48,6 +48,14 @@ public partial class MainWindow : Window
         this.FindControl<RadioButton>("NavHistory")!.Checked += (_, _) => Nav.Root(new HistoryPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
+        /* ★★ 自检模式下把窗口置顶。
+           截图走的是 CopyFromScreen —— 抓的是**屏幕那块区域**,不是窗口自身内容。
+           被别的程序压住时截出来的是压在上面那个窗口,而脚本照样报「成功」。
+           2026-08-31 真栽过:截到了另一个程序的界面,差点当成 LinPlayer 的界面来读。
+           SetForegroundWindow 在调用方不是前台进程时会被 Windows 拒掉,靠不住;
+           由被截的窗口**自己置顶**才是稳的。只在自检时开,不影响产品行为。 */
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK") == "1") Topmost = true;
+
         Opened += async (_, _) => await BootAsync();
     }
 
