@@ -1,0 +1,12 @@
+{
+  "name": "emby.counts · UserId 必须带",
+  "note": "不带 UserId,服务端把该用户看不到的库也算进去。实测差值:带 → Movie 1579/Series 2393/Episode 98476;不带 → 1618/2652/99346。差 39 部电影、259 部剧、870 集 —— 数字看着都「像那么回事」,所以漏了不会有人发现。本用例的 mock 按 path+query 精确匹配:Go 侧只要漏了 UserId 就打不中,直接失败。",
+  "provenance": "crates/core/src/emby.rs:545 counts() 的文档注释(带实测数字)",
+  "upstream": [
+    {"path": "/Items/Counts?UserId=u", "status": 200,
+     "body": "{\"MovieCount\":1579,\"SeriesCount\":2393,\"EpisodeCount\":98476,\"BoxSetCount\":12}"}
+  ],
+  "command": "emby.counts",
+  "args": {},
+  "expect": {"movie":1579,"series":2393,"episode":98476,"boxset":12}
+}

@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"linplayer/core/blocklist"
 	"linplayer/core/emby"
 )
 
@@ -61,14 +62,16 @@ type knownDiff struct {
 }
 
 type testCase struct {
-	Name       string          `json:"name"`
-	Note       string          `json:"note"`
-	Provenance string          `json:"provenance"`
-	Upstream   []upstreamResp  `json:"upstream"`
-	Command    string          `json:"command"`
-	Args       map[string]any  `json:"args"`
-	Expect     json.RawMessage `json:"expect"`
-	KnownDiffs []knownDiff     `json:"knownDiffs"`
+	Name       string         `json:"name"`
+	Note       string         `json:"note"`
+	Provenance string         `json:"provenance"`
+	Upstream   []upstreamResp `json:"upstream"`
+	Command    string         `json:"command"`
+	Args       map[string]any `json:"args"`
+	// blocklist 让用例能设屏蔽名单 —— 「屏蔽在哪条路上生效」是这个域最容易漏的一类
+	Blocklist  []blocklist.Entry `json:"blocklist"`
+	Expect     json.RawMessage   `json:"expect"`
+	KnownDiffs []knownDiff       `json:"knownDiffs"`
 
 	file string
 }
@@ -76,14 +79,57 @@ type testCase struct {
 // runner 一条命令的 Go 侧入口。server 是 mock 上游的地址。
 type runner func(ctx context.Context, server string, args map[string]any) (any, error)
 
+func newSession(server string, args map[string]any) (*emby.Client, *emby.Session) {
+	c := emby.NewClient("diffcheck")
+	s := &emby.Session{Server: server, Token: "t", UserID: "u", DeviceID: "d"}
+	if v, ok := args["user_id"].(string); ok && v != "" {
+		s.UserID = v
+	}
+	return c, s
+}
+
+func intArg(args map[string]any, k string, def int) int {
+	if v, ok := args[k].(float64); ok {
+		return int(v)
+	}
+	return def
+}
+
 var runners = map[string]runner{
 	"emby.views": func(ctx context.Context, server string, args map[string]any) (any, error) {
-		c := emby.NewClient("diffcheck")
-		s := &emby.Session{Server: server, Token: "t", UserID: "u", DeviceID: "d"}
-		if v, ok := args["user_id"].(string); ok && v != "" {
-			s.UserID = v
-		}
+		c, s := newSession(server, args)
 		return c.Views(ctx, s)
+	},
+	"emby.latest": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		pid, _ := args["parent_id"].(string)
+		return c.Latest(ctx, s, pid, intArg(args, "limit", 16))
+	},
+	"emby.resume": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		return c.Resume(ctx, s, intArg(args, "limit", 12))
+	},
+	"emby.nextUp": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		return c.NextUp(ctx, s, intArg(args, "limit", 12))
+	},
+	"emby.favorites": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		return c.Favorites(ctx, s)
+	},
+	"emby.counts": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		return c.CountsOf(ctx, s)
+	},
+	"emby.items": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		pid, _ := args["parent_id"].(string)
+		q := &emby.ItemQuery{}
+		if raw, ok := args["query"]; ok {
+			b, _ := json.Marshal(raw)
+			_ = json.Unmarshal(b, q)
+		}
+		return c.Items(ctx, s, pid, q)
 	},
 }
 
@@ -160,6 +206,10 @@ func runCase(tc testCase, verbose bool) bool {
 		fmt.Println("  [不通过] 缺 provenance —— 期望值从哪来没写,这条不算对账")
 		return false
 	}
+	// ★ 每条用例都重设名单。共用进程级状态的用例不隔离,表现是**随机红** ——
+	//   Rust 侧那份测试就为此专门加了串行锁,这里靠「每次重设」达到同样效果。
+	blocklist.Replace(tc.Blocklist)
+
 	fn, ok := runners[tc.Command]
 	if !ok {
 		fmt.Printf("  [不通过] 没有 %s 的 Go 侧 runner\n", tc.Command)

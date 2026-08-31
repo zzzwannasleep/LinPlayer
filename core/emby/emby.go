@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -254,28 +253,9 @@ func NewClient(version string) *Client {
 
 // fetchPage 取一页(含总数)。**所有 {Items} 包裹的列表端点都从这里过。**
 func (c *Client) fetchPage(ctx context.Context, s *Session, u string) (*Page, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	b, err := c.getBytes(ctx, s, u)
 	if err != nil {
-		return nil, fmt.Errorf("请求构造失败: %w", err)
-	}
-	req.Header.Set("X-Emby-Token", s.Token)
-	// ★ 不设 UA = reqwest/Go 一个头都不发,某些 fork 的 CF 会直接 403,
-	//   而且伪装成「AccessToken 无效」。curl 自带 UA,所以手测永远复现不出来。
-	req.Header.Set("User-Agent", c.UA)
-	// Emby 支持 gzip;不声明的话大列表会白跑很多带宽
-	req.Header.Set("Accept-Encoding", "gzip")
-
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("网络错误: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("请求失败: HTTP %d", resp.StatusCode)
-	}
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读响应失败: %w", err)
+		return nil, err
 	}
 	var data itemsResponse
 	if err := json.Unmarshal(b, &data); err != nil {

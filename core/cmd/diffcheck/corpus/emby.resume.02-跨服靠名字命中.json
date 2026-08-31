@@ -1,0 +1,50 @@
+{
+  "name": "emby.resume · 跨服:id 全对不上,只有剧名对得上",
+  "note": "跨服的同一部剧 id 不同,只有名字对得上 —— 这是判据 3 存在的全部理由。本用例里屏蔽项的 id 在这台服务器上根本不存在。",
+  "provenance": "crates/core/src/blocklist.rs:105 is_blocked() 的判据 3",
+  "blocklist": [
+    {
+      "id": "另一台服务器上的-id",
+      "name": "某剧"
+    }
+  ],
+  "upstream": [
+    {
+      "path": "/Users/u/Items/Resume",
+      "status": 200,
+      "body": "{\"Items\": [{\"Id\": \"ep-9\", \"Name\": \"第 9 集\", \"Type\": \"Episode\", \"SeriesId\": \"本机-series-9\", \"SeriesName\": \"某剧\"}, {\"Id\": \"ep-8\", \"Name\": \"第 8 集\", \"Type\": \"Episode\", \"SeriesId\": \"本机-series-8\", \"SeriesName\": \"别的剧\"}], \"TotalRecordCount\": 2}"
+    }
+  ],
+  "command": "emby.resume",
+  "args": {
+    "limit": 12
+  },
+  "expect": [
+    {
+      "id": "ep-8",
+      "name": "第 8 集",
+      "type_": "Episode",
+      "is_folder": false,
+      "has_primary": false,
+      "runtime_secs": 0,
+      "resume_secs": 0,
+      "series_name": "别的剧",
+      "episode_no": null,
+      "season_no": null,
+      "video_height": null,
+      "bitrate": null,
+      "size_bytes": null,
+      "played": false,
+      "unplayed_item_count": 0,
+      "genres": [],
+      "year": null,
+      "rating": null,
+      "provider_ids": {},
+      "presentation_unique_key": null,
+      "path": null,
+      "series_id": "本机-series-8",
+      "date_updated": null,
+      "sort_name": null
+    }
+  ]
+}

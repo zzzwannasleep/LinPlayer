@@ -1,0 +1,19 @@
+{
+  "name": "emby.latest · 裸数组端点的屏蔽过滤要自己补",
+  "note": "Latest 端点直接返回裸数组(非 {Items} 包裹),所以不走 fetch_items —— 屏蔽过滤得自己补一句。漏了的表现就是「首页别的行都干净了,唯独『最新更新』里还挂着」。",
+  "provenance": "crates/core/src/emby.rs:709 latest() 的注释与实现",
+  "blocklist": [{"id": "movie-blocked", "name": "被屏蔽的电影"}],
+  "upstream": [
+    {"path": "/Users/u/Items/Latest", "status": 200,
+     "body": "[{\"Id\":\"movie-blocked\",\"Name\":\"被屏蔽的电影\",\"Type\":\"Movie\"},{\"Id\":\"movie-ok\",\"Name\":\"正常电影\",\"Type\":\"Movie\"}]"}
+  ],
+  "command": "emby.latest",
+  "args": {"parent_id": "lib-1", "limit": 16},
+  "expect": [
+    {"id":"movie-ok","name":"正常电影","type_":"Movie","is_folder":false,"has_primary":false,
+     "runtime_secs":0,"resume_secs":0,"series_name":null,"episode_no":null,"season_no":null,
+     "video_height":null,"bitrate":null,"size_bytes":null,"played":false,"unplayed_item_count":0,
+     "genres":[],"year":null,"rating":null,"provider_ids":{},"presentation_unique_key":null,
+     "path":null,"series_id":null,"date_updated":null,"sort_name":null}
+  ]
+}

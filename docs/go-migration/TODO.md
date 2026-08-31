@@ -596,12 +596,29 @@
 - [~] **D7** 接进门禁 —— 已进 `scripts/check-core.sh` 第 5 关;**还没进 GitHub workflow**
   - 判据:PR 上自动跑;红了不许合
 
-### 第一批对账用例(已通过,且抓到过真差异)
+### 对账用例(7 条,全部有对应的注入验证)
 
-| 用例 | 盯的是什么 |
-|---|---|
-| `emby.views · 被屏蔽的库必须原样返回` | 屏蔽名单在 `fetch_items` 那条路生效,**媒体库网格不走那条** —— 滤掉了用户就再也解除不了 |
-| `emby.views · 字段映射` | ticks 换秒 / 空串折 null / MediaSources 取第一个的 Video 流高度 |
+| 用例 | 盯的是什么 | 注入什么会红 |
+|---|---|---|
+| `emby.views · 被屏蔽的库必须原样返回` | 屏蔽在 `fetch_items` 那条路生效,**媒体库网格不走那条** —— 滤掉了用户就再也解除不了 | 给 `views` 加上过滤 → 「长度 2 vs 1」 |
+| `emby.views · 字段映射` | ticks 换秒 / 空串折 null / MediaSources 取第一个的 Video 流高度 | 改坏字段名、漏一处空串折 null |
+| `emby.counts · UserId 必须带` | 不带 UserId 服务端把用户看不到的库也算进去(实测差 39 部电影 / 259 部剧 / 870 集)。**mock 按 path+query 精确匹配,漏了直接打不中** | 去掉 `UserId` → HTTP 599 |
+| `emby.latest · 裸数组也要过滤屏蔽` | Latest 端点返回裸数组不走 `fetch_items`,**过滤要自己补一句** | 去掉那句 → 「长度 1 vs 2」 |
+| `emby.items · 复筛 + total 要改` | 某 fork 忽略 Genres/Years/评分下限;复筛动过手 total 必须改成本页条数,否则前端画出永远翻不满的页码 | 不改 total → 「total 期望 1 实得 3276」 |
+| `emby.resume · 只靠 series_id 命中` | 屏蔽判据 2(名字故意对不上,**只有 series_id 能生效**) | 停用 series_id 判据 → 只有这条红 |
+| `emby.resume · 跨服靠名字命中` | 屏蔽判据 3(id 全对不上,只有剧名对得上) | 停用剧名判据 → 只有这条红 |
+
+> **两条 resume 用例是拆出来的,拆的理由值得记:**
+> 第一版只有一条,屏蔽项的 `name` 和分集的 `SeriesName` 恰好相同 ——
+> 于是「按名字命中」先兜住了,`series_id` 那条判据**根本没被测到**。
+> 停用 series_id 之后用例照样绿。**它一直在用错误的理由通过。**
+> 是注入把它揪出来的。
+
+> **另一条方法论教训:注入必须能编译。**
+> 我第一次停用 series_id 判据时留下了「声明未使用」的编译错误,`go run` 直接失败,
+> 而我只 grep「不通过」—— 把编译失败读成了「没红」。
+> **「注入之后没红」有两种可能:护栏没在测东西,或者注入压根没跑。**
+> 先确认注入跑起来了,再下结论。
 
 > **它已经抓到过一个真差异。** 移植 `date_updated` 时我写成了「空串也回退到 DateCreated」,
 > 而 Rust 是 `date_last_media_added.or(date_created).filter(非空)` ——

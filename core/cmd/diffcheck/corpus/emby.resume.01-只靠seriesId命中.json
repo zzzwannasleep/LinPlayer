@@ -1,0 +1,50 @@
+{
+  "name": "emby.resume · 只靠 series_id 命中(名字故意对不上)",
+  "note": "屏蔽判据三条缺一不可。这条**专门只留 series_id 那一条能生效**:屏蔽项的 name 与分集的 SeriesName 故意不同,分集自己的 id 也不在名单里 —— 所以去掉「按 series_id 判」就必须变红。第一版语料里两者同名,结果「按名字命中」先兜住了,那条用例是在用错误的理由通过(注入验出来的)。",
+  "provenance": "crates/core/src/blocklist.rs:105 is_blocked() 的判据 2",
+  "blocklist": [
+    {
+      "id": "series-X",
+      "name": "用户当初屏蔽时记下的名字"
+    }
+  ],
+  "upstream": [
+    {
+      "path": "/Users/u/Items/Resume",
+      "status": 200,
+      "body": "{\"Items\": [{\"Id\": \"ep-1\", \"Name\": \"第 1 集\", \"Type\": \"Episode\", \"SeriesId\": \"series-X\", \"SeriesName\": \"服务器上现在的剧名\"}, {\"Id\": \"ep-2\", \"Name\": \"第 2 集\", \"Type\": \"Episode\", \"SeriesId\": \"series-Y\", \"SeriesName\": \"正常的剧\"}], \"TotalRecordCount\": 2}"
+    }
+  ],
+  "command": "emby.resume",
+  "args": {
+    "limit": 12
+  },
+  "expect": [
+    {
+      "id": "ep-2",
+      "name": "第 2 集",
+      "type_": "Episode",
+      "is_folder": false,
+      "has_primary": false,
+      "runtime_secs": 0,
+      "resume_secs": 0,
+      "series_name": "正常的剧",
+      "episode_no": null,
+      "season_no": null,
+      "video_height": null,
+      "bitrate": null,
+      "size_bytes": null,
+      "played": false,
+      "unplayed_item_count": 0,
+      "genres": [],
+      "year": null,
+      "rating": null,
+      "provider_ids": {},
+      "presentation_unique_key": null,
+      "path": null,
+      "series_id": "series-Y",
+      "date_updated": null,
+      "sort_name": null
+    }
+  ]
+}
