@@ -55,6 +55,8 @@ scripts/           构建与门禁脚本
 | **拉工具链(新机器第一步)** | `bash scripts/fetch-toolchain.sh` | Go + C 编译器,版本与 sha256 钉在脚本里 |
 | **激活工具链** | `source scripts/env.sh` | PowerShell:`. .\scripts\env.ps1` |
 | **工具链自检** | `bash scripts/check-toolchain.sh` | 含反向注入,见 §2.2 |
+| **核心层出库** | `bash scripts/build-core.sh` | Go → `build/core/lpcore.dll` |
+| **核心层门禁(推前必跑)** | `bash scripts/check-core.sh` | 四关:go test / 出库 / FFI 契约 / C# 契约测试 |
 | 前端开发服务器 | `npm run dev` | |
 | 前端构建 | `npm run build` | |
 | **桌面出包(必做)** | `npm run pack` | 出绿色 zip + 解包测试目录 |

@@ -36,14 +36,17 @@ docs/go-migration/spikes/s1-2/out/
 docs/go-migration/spikes/s1-2/AvaloniaProbe/bin/
 docs/go-migration/spikes/s1-2/AvaloniaProbe/obj/
 docs/go-migration/spikes/s2/out/
-docs/go-migration/spikes/s2/CsHost/bin/
-docs/go-migration/spikes/s2/CsHost/obj/
+tools/corecheck/bin/
+tools/corecheck/obj/
 docs/go-migration/spikes/s2/*.txt
 docs/go-migration/spikes/s3/*.exe
 
 # --- 项目级工具链(scripts/fetch-toolchain.sh 现拉,版本与 sha256 钉在脚本里)-------
 # Go + zig + 各自的缓存,700MB 起步。换机器重跑 fetch 脚本,不入库。
 .toolchain/
+
+# 核心层产物(scripts/build-core.sh 的输出)
+build/
 
 # --- 密钥 / 凭据 -------------------------------------------------------------
 *.env

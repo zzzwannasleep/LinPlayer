@@ -486,30 +486,51 @@
 
 ### 核心层
 
-- [ ] **B1.1** `core/ffi`:七个导出函数 + 生成 C 头文件 🔴
-  - 判据:头文件签名与 `SPEC.md` §5.1 逐字一致
-- [ ] **B1.2** `core/bus`:命令注册表 + 分派 + 事件队列 🔴
-  - 判据:`system.ping` 往返;未注册的命令返回 `E_INVALID` 不 panic
-- [ ] **B1.3** `lp_cancel` 真取消
-  - 判据:注册一个 sleep 5s 的假命令,发出后立即 cancel,1s 内收到取消结果
-- [ ] **B1.4** 内存所有权压测
-  - 判据:100 万次 `lp_call` + `lp_free` 循环,RSS 平稳(±5MB)
-- [ ] **B1.5** panic 隔离:任何命令 goroutine 里 panic 不打死进程
-  - 判据:注册一个必 panic 的假命令,调用后收到 `E_INTERNAL`,进程存活
-  - 参照:现有教训是"同步命令里裸 spawn 当场 panic 打死进程"
-- [ ] **B1.6** `core/paths` + `core/config`:能读现有 `config.json`
-  - 判据:见 §4 的 C1
+> **一条命令跑全部:`bash scripts/check-core.sh`**(四关:go vet+test / 出库 /
+> FFI 契约 / C# 契约测试)。推之前跑它。
+
+- [x] **B1.1** ✅ `core/ffi`:13 个导出 + C 头文件 —— **有门禁钉住**
+  - 判据达成:`scripts/check-ffi-contract.py` 把生成的 `lpcore.h` 与 `SPEC.md` §5.1
+    的代码块逐条比(函数集合 / 顺序 / 返回类型 / 参数类型),**13 vs 13 全一致**
+  - **先红验证**:把 `lp_gl_render` 的 `flipY` 改成 `int64_t`,门禁报
+    「SPEC (…, int32_t) vs 头文件 (…, int64_t)」;还原后绿
+  - 两处刻意允许的差异已写进脚本注释:参数名不比;`const char*` 视同 `char*`
+    (**cgo 表达不了 const**,是工具限制不是我们的选择)
+- [x] **B1.2** ✅ `core/bus`:命令**注册表** + 分派 + 事件队列
+  - 判据达成:`system.ping` 往返 ✓;未注册的命令返回 **`E_INVALID`** 不 panic ✓
+  - 注册表而不是大 switch:命令归属跟着实现走。现有 Rust 版最痛的一处正是
+    「桌面与安卓两份手工拷贝的命令层」(N9/N10/N11 的共同根因)
+- [x] **B1.3** ✅ `lp_cancel` 真取消 —— 发出 `debug.slow` 后立即 cancel,收到 `ok=false`
+- [x] **B1.4** ✅ 内存所有权压测 —— **100 万次** `lp_call`+`lp_free`:
+  分配 1000020 / 释放 1000020 / **未释放 0**
+  - ⚠️ 判据原文写「RSS 平稳(±5MB)」。**已改成数 alloc/free** ——
+    SPIKE-2 §4.3 实测证明进程内存测不出泄漏(正常 23.7MB vs 故意漏 24.5MB)
+- [x] **B1.5** ✅ panic 隔离 —— `debug.panic` 后进程存活、该 seq 收到 `E_INTERNAL`、日志里有栈
+  - ★ 关键不是 `defer recover()`,是**命令必须跑在 worker 池上**(SPIKE-2 §4.2)
+- [x] **B1.6** ✅ `core/paths` + `core/config`:**能读现有 config.json**
+  - 判据达成:拿**真实**配置(5493 字节)读入再回写,**5493 字节,一个字节没丢**
+  - 硬规矩(写进包注释):文件不存在 = 新装返回空配置;**文件存在但解析失败 =
+    返回错误,绝不返回空配置**。后者正是 Rust 版那条真故障
+    ——「.ok() 吞掉 → unwrap_or_default() → 用户所有账号一次性消失且不报错」
+  - **先红验证**:把「解析失败退回空配置」注入回去,测试立刻红
+  - 未移植的键(accounts/prefs/proxy/…)**原样透传**,保存不抹掉 ——
+    否则用户看到的是「升级之后我的 XX 设置没了」
+  - 🔴 夹具**全部占位符**:真配置里有服务器地址与 token,一个真值都不许入库
 - [ ] **B1.7** `core/net/localserve`:`/img` 路由 + token 校验 + src 白名单
   - 判据:带 token 能取图并落缓存;不带 token 401;白名单外的 src 404
-- [ ] **B1.8** `core/player` 最小可播 + `lp_set_surface`
-  - 判据:硬编码一个本地文件,在各端窗口里出画面
-- [ ] **B1.9** `lp_set_surface(0,...)` 解绑是同步阻塞的
+- [x] **B1.8** ✅(Windows 部分)`core/player` 最小可播 —— 1080p60 满帧 60.1、`d3d11va-copy`
+  - 安卓 / Linux 部分未做
+- [ ] **B1.9** `lp_set_surface(0,...)` 解绑是同步阻塞的 🔴 **现在是桩**
   - 判据:Android 上快速反复旋转屏幕 100 次,不崩
+  - 注:现有 Rust 版**现在就漏着**(N5),别再漏一次
 
 ### 各端空壳
 
 - [ ] **B2.1** Android:Compose 空页 + SurfaceView + JNI 薄层,能播 🟡
-- [ ] **B2.2** Windows:Avalonia 空窗 + 视频层,能播 **且 OSD 能盖在上面** 🟡
+- [x] **B2.2** ✅ Windows:Avalonia + 视频层,能播**且半透明控件盖在上面**
+  - 判据达成(对真 `core/` 跑的):视频区逐像素帧间差 2.56 / 最小品红偏移 325.8 /
+    叠加区帧间差 1.20 / 每帧都在;60.1 fps
+  - 探针 `spikes/s1-2/AvaloniaProbe` **只用 13 个契约导出**,UI 侧没有任何 mpv 类型
 - [ ] **B2.3** Linux:与 B2.2 同一份 C# 代码跑通 🟡
 - [ ] **B2.4** 三端各自的绑定层**代码生成器**(从 `COMMANDS.md` 生成) 🟡
   - 判据:生成的 Kotlin / C# 类型能编译;新增一条命令只需改 `COMMANDS.md` + 重跑生成
