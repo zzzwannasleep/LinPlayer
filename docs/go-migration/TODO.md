@@ -813,6 +813,11 @@
 > ★ `core/shaders/files/` 是从 `apps/desktop/shaders/` **复制**的 520KB。
 > 迁移期两边各一份是有意的(Rust 版还得能编),阶段 5 下线 Rust 版时删掉那一份。
 >
+>
+> **2026-08-31 十三续:**`core/net/cf` 落地路由改写 + 本地反代,
+> `prefs.cfProxy*` 3 条接线,`config.Account.ActiveLineURL()` 那个
+> **唯一 choke point 真接上了**(此前一直等于 DirectLineURL)。**共 110 条命令。**
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/
@@ -916,8 +921,23 @@
     `prefs.preloadCancel`;`player.play` 起播先 `preloader.Cancel()`
   - ⚠️ 起播耗时那条判据**没验** —— 它要真服务器 + 真链路,本机的假上游没有意义。
     留到真机自检时量
-- [ ] **C28** `core/net/cf`
-  - 判据:路由改写表与代理句柄同步开关
+- [x] **C28**(路由改写 + 反代那半)✅ `core/net/cf`(2026-08-31)
+  - 判据达成:**路由改写表与代理句柄同步开关** —— 只有 `bindProxy` / `unbindProxy`
+    一个写入口(起服和登记一起做、一起失败;撤销时**先撤表再停服**,
+    反过来的话中间那一瞬表里还指着一个已经关掉的端口)
+  - 每条都注入验过:
+    - [x] 键归一化(尾斜杠同键)—— 不归一化就是「开了优选没生效」且不报错
+    - [x] 本地基址**保留上游路径前缀** —— 丢了是「连得上但全 404」
+    - [x] IPv6 端口分隔符按 `]` 之后的 `:` 切 —— 按最后一个冒号切会把地址切碎
+    - [x] 反代**钉 IP 同时保住 SNI/Host** —— Host 写成 127.0.0.1 直接 404/403
+    - [x] 响应带 `Connection: close` —— 和预取代理**同一个坑**,那边修了这边当时漏了
+    - [x] **不代客户端跟跳**:302 原样透传(取流那条路要自己拿 CDN 落点)
+    - [x] 换 IP **端口不变** —— 换端口等于让已登记的改写全部指向死端口
+    - [x] `ActiveLineURL` 这个 choke point **按线路查不按服务器查**
+  - 已接线:`prefs.cfProxyEnable` / `cfProxyDisable` / `cfProxyStatus`
+  - ⚠️ **测速引擎(`prefs.cfSpeedTest`)没做** —— 那是另外 600 行
+    (CF IP 段抽样 + 延迟/丢包筛选 + HTTPS 下载测速)。没有它的话优选 IP 得用户手填,
+    功能是残的。留作下一批
 - [ ] **C29** `core/net/localserve` 完整化(所有路由 + 安全约束)
 - [ ] **C30** `core/companion`
 

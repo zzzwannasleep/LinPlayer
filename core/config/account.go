@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"linplayer/core/net/cf"
 )
 
 // ServerLine 一条备用线路(同一服务器的不同入口:直连 / CDN / 内网)。
@@ -135,17 +137,22 @@ func (a Account) DirectLineURL() string {
 	return a.Lines[i].URL
 }
 
-// ActiveLineURL 当前生效的线路地址。
+// ActiveLineURL 当前生效的线路地址。**会被线路优选反代改写**。
 //
-// ★ Rust 版在这里会被 CF 优选反代改写(返回本地反代基址)。**Go 侧 net/cf 还没移植**,
-// 所以现在它等于 DirectLineURL。
+// ★★ 这是线路优选的**唯一 choke point** —— 取基址一律走这里,
+// 新增取流路径绕开它就会出现「API 走优选、取流仍走原线」这种一半生效的静默故障。
 //
-// 移植 net/cf 时**必须回到这里**:这是 CF 优选的唯一 choke point,
-// 新增取流路径绕开它会出现「API 走优选、取流仍走原线」这种一半生效的静默故障。
-// 而且查表要用**当前那条线**而不是 a.Server —— 按服务器查等于把每条线都劫持到
-// 同一个反代上,切到没走 CF 的线路后请求会被送去「A 线的域名 + 钉死的 CF IP」,
-// 连得上但拿不到数据,且不报错。
-func (a Account) ActiveLineURL() string { return a.DirectLineURL() }
+// ★★ 查表用的是 **DirectLineURL()(当前那条线)**,不是 a.Server(整台服)。
+// 按服务器查等于把这台服的每条线都劫持到同一个反代上,而反代的上游 host 是开启时
+// 那条线定死的 —— 切到没走优选的线路后,请求会被送去「A 线的域名 + 钉死的 IP」,
+// **连得上但拿不到数据,且不报错**。
+func (a Account) ActiveLineURL() string {
+	direct := a.DirectLineURL()
+	if local := cf.LocalURLFor(direct); local != "" {
+		return local
+	}
+	return direct
+}
 
 // DisplayName 显示名:优先用户起的名,否则回落 host,再否则整个 URL。
 func (a Account) DisplayName() string {

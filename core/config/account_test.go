@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"linplayer/core/net/cf"
 )
 
 func acc(server string) Account { return Account{Server: server, Token: "t", UserID: "u"} }
@@ -265,4 +267,45 @@ func serversOf(c *AppConfig) []string {
 		out = append(out, a.Server)
 	}
 	return out
+}
+
+// ★★ ActiveLineURL 是线路优选的**唯一 choke point**,而且查表用的是
+// **当前那条线**而不是账号主键。
+//
+// 按服务器查等于把这台服的每条线都劫持到同一个反代上,而反代的上游 host 是开启时
+// 那条线定死的 —— 切到没走优选的线路后,请求会被送去「A 线的域名 + 钉死的 IP」,
+// **连得上但拿不到数据,且不报错**。
+func TestActiveLineURL只改写当前那条线(t *testing.T) {
+	cf.Clear()
+	defer cf.Clear()
+
+	a := acc("https://主键")
+	a.Lines = []ServerLine{
+		{ID: "1", URL: "https://线路甲"},
+		{ID: "2", URL: "https://线路乙"},
+	}
+	a.ActiveLine = 0
+
+	// 只给「线路甲」开优选。
+	// ★ 同时也给**账号主键**登记一条 —— 这是能把「按线路查」和「按服务器查」
+	//   分开的唯一形状:只登记线路的话,按服务器查的实现在切到乙时同样查不到,
+	//   用例就分不出对错(我第一版就是这么写的,注入按服务器查完全不红)。
+	cf.Bind("https://线路甲", "http://127.0.0.1:5001")
+	cf.Bind("https://主键", "http://127.0.0.1:5999")
+
+	if got := a.ActiveLineURL(); got != "http://127.0.0.1:5001" {
+		t.Fatalf("生效线路是甲,该走优选,实得 %q", got)
+	}
+	// 切到乙:必须走原线,**不能**被甲的反代劫持
+	a.ActiveLine = 1
+	if got := a.ActiveLineURL(); got != "https://线路乙" {
+		t.Fatalf("切到没开优选的线路后该走原线,实得 %q —— "+
+			"按服务器查的话每条线都被劫持到同一个反代上,"+
+			"请求会送到「甲的域名 + 钉死的 IP」,连得上但拿不到数据且不报错", got)
+	}
+	// DirectLineURL 永远是原始地址(起反代自身的上游、编辑线路、展示给用户看都要它)
+	a.ActiveLine = 0
+	if got := a.DirectLineURL(); got != "https://线路甲" {
+		t.Fatalf("DirectLineURL 不该被改写: %q", got)
+	}
 }

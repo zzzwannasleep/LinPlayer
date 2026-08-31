@@ -20,6 +20,8 @@ import (
 
 // RegisterCommands 由 lp_init 调用。version 是发行版本号(更新设置要用)。
 func RegisterCommands(version string) {
+	registerCFCommands()
+
 	// ---- 选轨偏好 ----
 	bus.Register("prefs.getPrefs", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		return config.Current().PrefsOf(), nil
