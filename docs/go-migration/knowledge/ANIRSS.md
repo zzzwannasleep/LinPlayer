@@ -200,6 +200,106 @@ README 原文定位:「基于RSS自动追番、订阅、下载、刮削、洗版
 
 ---
 
+## 2.5 【范围已定 + 实测】只对接播放:上游播放链路的全部三个端点
+
+> **决策(负责人 2026-08-31):「Ani-RSS 我们只对接播放功能。clone 其项目,
+> 读源码里面的和播放视频相关的 API,只做相关的。」**
+>
+> 于是 Ani-RSS 从「媒体源 + 远程管理台」砍成**只是媒体源**。管理台那半(增删改订阅、
+> 改服务端配置、看下载进度与日志)不移植。Q10「51 条能不能收敛」就此关闭 —— 不是收敛,是砍。
+
+本节是**照上游源码读出来的**,不是照我们的命令名反推的。
+读的版本:`3845c8e0`(tag **3.2.27**,2026-08-29),`git clone --depth 1` 后逐文件读。
+
+### 2.5.1 播放只需要三个端点,其中两个必需
+
+| 端点 | 方法 | 入参 | 出参 | 我们要不要 |
+|---|---|---|---|---|
+| `/api/playList` | POST | body = `Ani` 对象(**服务端只用 `url` 字段做匹配**,见 `PlayController.java:88-95`) | `List<PlayItem>` | ✅ **必需** |
+| `/api/file` | GET | `filename`=Base64(路径)、`s`=token | 字节流,**支持 Range → 206** | ✅ **必需** |
+| `/api/getSubtitles` | POST | `filename`=Base64(路径) | mkv 内封字幕,抽成 **VTT 文本内容**(不是 URL) | ❌ **不要**。只支持 mkv,而且给的是文本;我们交给 mpv 播,内封字幕 mpv 自己读 |
+
+`PlayItem` 的字段(`entity/PlayItem.java`):`title` / `filename` / `name` / `lastModify` /
+`episode` / `formatSize` / `extName` / `subtitles[]`,
+其中 `subtitles[]` 是 `{html, name, url, content, type}`。
+
+### 2.5.2 🔴 断点:`PlayItem.filename` 在上游 v3.1.23 改过,我们没跟
+
+**这是 `TODO.md` N15「Ani-RSS 源在上游 v3.x 上可能整个放不出来(未实测)」的答案:成立。**
+
+```
+commit a91b5b7  refactor: 图片与文件接口改动   2026-05-08
+-        playItem.setFilename(Base64.encode(absolutePath))
++        playItem.setFilename(absolutePath)
+```
+
+| 上游版本 | `PlayItem.filename` 的内容 | 我们的实现 |
+|---|---|---|
+| ≤ **v3.1.22** | **Base64(绝对路径)** | ✅ 正确 |
+| ≥ **v3.1.23**(含 3.2.27) | **明文绝对路径**(只把 `\` 归一成 `/`) | ❌ **点播 404** |
+
+我们的代码把它当成已经是 base64,**从不编码**:
+
+```rust
+// crates/core/src/source/anirss.rs:302
+let b64 = p["filename"].as_str().unwrap_or("").to_string();
+// :340  「filename 已是 base64(路径+文件名)」
+// :354  &[("filename", b64.as_str()), ("s", token.as_str())]
+```
+
+而上游 `FileController.java:41-43` 对这个查询参数做 `Base64.decodeStr`。
+喂明文路径进去 = 解出乱码 = 文件不存在 = 404。
+
+**为什么一直没人发现:** 列表照常显示。因为显示名优先取 `title` / `name`
+(`anirss.rs:303-307`),只有它们都缺时才走 `safe_decode(&b64)`,
+而那个函数「解码失败回退原串」—— 于是**名字永远是对的,只有播放是坏的**。
+又一例「界面在撒谎」。
+
+> **同一个提交 `a91b5b7` 还新建了 `ProxyImageController`(+109 行)** ——
+> 正是 `TODO.md` N17 说的那条图片接口。**有人跟进了图片那条,没跟进播放这条。**
+> 我们代码里 `anirss.rs:1015` 那句「服务端 `ProxyImageController` 对 `imgUrl` 做 Base64 解码」
+> 就是那次跟进留下的。
+
+### 2.5.3 Go 版怎么做:嗅探,不要按版本号分支
+
+按服务端版本号分支需要先拿到版本、还要维护一张对照表。**按内容嗅探更省也更稳:**
+
+```
+拿到 PlayItem.filename:
+  尝试 Base64 解码
+    ├─ 成功 且 结果像路径(含 '/' 或匹配 ^[A-Za-z]:)  -> 原串已是 base64,直接用
+    └─ 否则                                          -> 原串是明文路径,自己 base64 编码
+```
+
+**不能用「含 `/` 就是路径」来判**:标准 Base64 字符集本身就含 `/`。判据必须落在**解码之后**。
+
+> 我们其实已经有这个解码函数了(`anirss.rs:242` `safe_decode`),
+> 只是它的结果只拿去当显示兜底,**没有用来分流**。
+
+### 2.5.4 取流与鉴权的四个细节(都来自源码)
+
+1. **鉴权走查询参数 `s=<token>`**,不是请求头 —— `@Auth` 的 `AuthType.FORM`。
+   前端 `ani-rss-ui/src/js/global.js:145-150` 的 `toApiFile` 就是这么拼的:
+   `api/file?filename=<base64>&s=<authorization>`。
+   我们的做法一致(`anirss.rs:352`),**这条在 3.2.27 上仍然成立**。
+   > 这也和 `SPEC.md` §6 那条「给 mpv 吃的路由,token 必须在 URL 里」对上 —— mpv 拿不到请求头。
+2. **`/api/file` 有格式白名单**:`isImageFormat || isSubtitleFormat || isVideoFormat`,
+   否则直接 `不允许访问`(`FileController.java:52-63`)。
+3. **Range 是手写的**:`bytes=start-end` → 206 + `Content-Range`。
+   ⚠️ **`Accept-Ranges: bytes` 只在带 Range 的请求上才设**(`FileController.java:97`),
+   不带 Range 的首个请求不返回它。靠这个头判断能否 seek 的播放器会误判。
+4. **服务端对 `filename` 先做 `replace(" ", "+")` 再解码**(`FileController.java:41`、
+   `PlayController.java:42`)—— 这是在补「Base64 的 `+` 被 URL 解码成空格」。
+   所以**不要用 URL-safe Base64**(`-_` 字符集),上游解的是标准字符集。
+
+### 2.5.5 外挂字幕
+
+`PlayItem.subtitles[].url` 是**服务端绝对路径**(`PlayController.java:205`),
+和 `filename` 同一个坑 —— 要自己包成 `/api/file?filename=<base64>&s=<token>` 才能给 mpv 挂。
+上游前端也是这么干的。
+
+---
+
 ## 3. 我们的 51 条命令
 
 三层结构,每条命令都是**同一条流水线**:

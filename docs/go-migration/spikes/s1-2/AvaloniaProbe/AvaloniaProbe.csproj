@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- SPIKE S1.2 · Avalonia 侧接路径 B 的最小工程。
+       故意不用 XAML:UI 全在 Program.cs 里用代码搭,少一个构建环节、少三个文件。
+       Avalonia 钉 11.3.20 —— SPEC §7.2 写的是「Avalonia 11 的 OpenGlControlBase」,
+       验的就该是它。12.1.1 已发布但未验,见报告「未覆盖」一节。 -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>AvaloniaProbe</AssemblyName>
+    <RootNamespace>AvaloniaProbe</RootNamespace>
+    <!-- 有窗口但也要往 stdout 打报告:WinExe 在 Windows 上不带控制台,
+         由 Program.Main 自己 AttachConsole 到父进程,见 Program.cs -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <!-- Window 的默认模板来自主题,一个主题都不加会得到一个空白窗口。Simple 比 Fluent 轻 -->
+    <PackageReference Include="Avalonia.Themes.Simple" Version="11.3.20" />
+    <!-- 截屏取证用。Windows 专用,Linux(S1.4)重跑时要换成别的 -->
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

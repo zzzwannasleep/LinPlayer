@@ -294,11 +294,14 @@ int32_t  lp_gl_wants_redraw(void);
 int32_t  lp_gl_render(uint32_t fbo, int32_t width, int32_t height, int32_t flip_y);
 
 // 报告「上一帧真的上屏了」。**渲完并 present 之后必须调**。
-// ★ 漏了它 mpv 的帧率控制是瞎的 —— 实测 4K60 从满帧掉到 18fps,
-//   而且表现得像「架构性能不行」。见 spikes/SPIKE-1b-zero-copy.md §7 第 3 条。
+// ★ 2026-08-31 订正:「漏了它 4K60 掉到 18fps」复现不出来(S1.2,10 组 A/B)。
+//   仍然必须调 —— 代价是零、是 mpv 规定的上报口;但别再拿那个数字去反查性能。
+//   见 spikes/SPIKE-1c-avalonia-path-b.md §5.4。
 void     lp_gl_swapped(void);
 
 // 解绑并销毁 render context。**必须在销毁 GL 上下文之前调,且阻塞返回。**
+// ★ 也必须排在 lp_shutdown 之前:反过来先关核心、render context 还活着,
+//   宿主的合成器会当场抛异常(S1.2 实测)。关停顺序是「先拆 UI,再关核心」。
 void     lp_gl_uninit(void);
 ```
 
@@ -363,6 +366,22 @@ C# `TaskCompletionSource`、Swift `withCheckedContinuation`)。
 
 > 违反这三条中任何一条,表现都是"偶发崩溃、复现不了"。
 > 这是本文档里唯一必须写进三端 code review checklist 的一节。
+
+**判据必须是 `alloc` / `free` 计数,不是进程内存。**【实测 · SPIKE-2 §4.3】
+
+第一版判据写的是「2 万次往返后进程私有内存增长 < 阈值」。接上反向注入(故意不调
+`lp_free`)之后:**正常 23.7 MB,故意漏 24.5 MB —— 几乎一样**。
+漏掉的 C 字符串只有约 2 MB,完全被宿主运行时自己的分配淹没。
+
+改成在核心层数 `alloc`/`free` 并通过 `system.exportDiagnostics` 透出之后:
+
+| | 分配 | 释放 | 未释放 |
+|---|---:|---:|---:|
+| 正常 | 20020 | 20020 | **0** |
+| 故意不 free【注入】 | 20020 | 0 | **20020** |
+
+> **这是「先红」纪律最典型的一次兑现**:不做反向注入,第一版那条判据会以
+> 「红了但看起来只是阈值偏紧」的样子被调松,然后永远测不出真泄漏。
 
 ### 5.4 错误模型
 
@@ -570,10 +589,31 @@ UI 会缓存列表。核心层通过事件告诉它什么时候该丢:
 Rust 版靠 `Result<T,E>` 把这类错误逼到类型系统里,Go 没有这个保护。
 **所以 panic 边界必须是显式契约,不是编码习惯。**
 
+> ### 🔴【实测补充 · 2026-08-31 · SPIKE-2】光有 `defer recover()` 不够
+>
+> **命令必须由 `lp_init` 时就建好的 worker 池执行,不许在 cgo 调用里现开 goroutine。**
+>
+> 实测(Go 1.27 / .NET 10 / Windows,见
+> [`spikes/SPIKE-2-go-ffi.md`](spikes/SPIKE-2-go-ffi.md) §4.2):
+>
+> | 故障 | goroutine 在哪儿创建 | .NET 宿主 | Python 宿主 |
+> |---|---|:--:|:--:|
+> | 显式 `panic("…")` | cgo 调用里现开 | ✅ recover 住 | ✅ |
+> | **空指针解引用** | **cgo 调用里现开** | ❌ **进程被 `0xC0000409` 硬杀** | ✅ |
+> | 空指针解引用 | `lp_init` 时就存在的 | ✅ recover 住 | ✅ |
+>
+> **死的时候什么都不打印** —— `GOTRACEBACK=system` 一个字没有,stderr 全空,
+> 只剩一个退出码。这是最难查的一种崩溃。
+> 试过无效的缓解:`DOTNET_LegacyExceptionHandling=1`、`debug.SetPanicOnFault(true)`、
+> `GOTRACEBACK=system`。**有效的只有 worker 池。**
+>
+> 这条**必须做成唯一入口**(`lp_call` → channel → worker),不能靠 code review
+> 或注释提醒 —— 它的失效模式是「偶发、无日志、无栈」,人眼拦不住。
+
 | 位置 | 要求 |
 |---|---|
 | `ffi` 的每个导出函数体 | 顶层 `defer recover()`。参数解析本身就可能 panic(空指针、非法 UTF-8) |
-| 每条 `lp_call` 起的 goroutine | 顶层 `defer recover()` → 转成 `{"ok":false,"err":{"code":"E_INTERNAL"}}` 正常回给该 `seq` |
+| **命令的执行** | **投给 `lp_init` 建立的 worker 池**,worker 顶层 `defer recover()` → 转成 `{"ok":false,"err":{"code":"E_INTERNAL"}}` 正常回给该 `seq`。**不许 `go func(){…}()` 现开** |
 | mpv 事件线程的回调 | 同上。这条线程死了 = 播放状态永远不再更新,而画面还在动,最难查 |
 | `localserve` 的每个 handler | `net/http` 自带 per-connection recover,**但它只保护连接不保护你的清理逻辑** —— 仍要自己 recover 并回 500 |
 | 插件宿主 goroutine | 同上。一个坏插件不许带走宿主 |
@@ -589,9 +629,15 @@ recover 之后必须做三件事,少一件这条契约就白写:
    「点了没反应」,比崩溃更难查
 3. **计数并通过 `log` 事件透出**,让诊断包能看到「这个版本 panic 了多少次」
 
-> **测试要求(必须先红):** 注册一条只在测试构建里存在的 `debug.panic` 命令,
+> **测试要求(必须先红):** 注册只在测试构建里存在的 panic 命令,
 > 断言 ① 宿主进程存活 ② 该 `seq` 收到 `E_INTERNAL` ③ 日志里有栈。
 > 先把 recover 注释掉确认这条测试会红 —— 否则它测的是「没 panic」。
+>
+> **★ 必须分成两条命令测**(SPIKE-2 实测它们的结果不同):
+> · `debug.panic` —— 显式 `panic()`,纯 Go 控制流
+> · `debug.panicnil` —— 运行时故障(空指针),由硬件异常转成 panic
+> 只测前者会得到「recover 有效」的假结论 —— 而真实世界里的 panic 大多是后者。
+> 反向注入开关:退回「在 cgo 调用里现开 goroutine」,`debug.panicnil` 必须变红。
 
 ### 5.11 【一次做对】事件队列与背压
 
@@ -722,16 +768,36 @@ UI 的渲染线程(GL 上下文 current)          核心层
   │◄─ 返回后才可以销毁 GL 上下文 ──────────────│
 ```
 
-**五条硬约束,每条都有实测出处**(见 [`spikes/SPIKE-1b-zero-copy.md`](spikes/SPIKE-1b-zero-copy.md) §7):
+**七条硬约束,每条都有实测出处**(1~5 见 [`spikes/SPIKE-1b-zero-copy.md`](spikes/SPIKE-1b-zero-copy.md) §7,
+6~7 见 [`spikes/SPIKE-1c-avalonia-path-b.md`](spikes/SPIKE-1c-avalonia-path-b.md) §5.2 / §4.5):
 
 1. **`lp_gl_*` 五个函数必须在同一个线程调用**,且调用时 GL 上下文必须是 current 的。
    这个线程**不能**是事件线程(`lp_next_event` 那条)。
-2. **`lp_gl_swapped()` 不许省。** 漏了它 mpv 不知道帧何时上屏,帧率控制整个失效 ——
-   实测 4K60 从满帧掉到 18 fps,而且**表现得像"架构性能不行"**,极难反查。
+2. **`lp_gl_swapped()` 不许省。** mpv 靠它知道帧何时上屏。
+   ⚠️ **2026-08-31 订正:「漏了它 4K60 从满帧掉到 18fps」这个数字复现不出来。**
+   S1.2 在 Avalonia 侧 8 组配置 + SPIKE-1b 自己的裸 harness 2 组上做了 A/B,
+   全部无可测差别(见 [`spikes/SPIKE-1c-avalonia-path-b.md`](spikes/SPIKE-1c-avalonia-path-b.md) §5.4)。
+   **仍然必须调** —— 它是 mpv 规定的呈现时刻上报口,代价是零,别的刷新率 / vsync 模型下可能有用;
+   但**不要再拿那个 18fps 去反查性能问题**,那是一条追不到的线索。
 3. **`lp_gl_uninit()` 必须阻塞**,返回后宿主才能销毁 GL 上下文。理由同通道 A 的解绑。
 4. **一个进程内只能有一条 GL 通道。** 实测:同一进程里连开多个 GL 上下文 + 多个 mpv render
    context 会卡死(400 秒不返回)。主窗与播放窗**共用同一条**。
 5. **`flip_y`**:GL 的原点在左下,多数 UI 框架在左上。传 1 让核心层翻,别在宿主侧再翻一次。
+6. **【实测新增】起播必须排在 `lp_gl_init` 之后。** `vo=libmpv` 在 render context 存在之前
+   初始化是**致命失败,而且 mpv 不重试**:轨道当场被 deselect,整个文件作废。
+   宿主侧看到的只有「全程黑屏 + `lp_gl_wants_redraw()` 恒 0 + mpv 属性全空」,
+   **没有任何回调会喊**。日志里唯一的线索是这两行:
+   ```
+   [f][vo/libmpv] No render context set.
+   [f][cplayer] Error opening/initializing the selected video_out (--vo) device.
+   ```
+   导航到播放页时先发 `player.play`、GL 控件的 init 还没到,就是这个现象。
+   **核心层必须把 `player.play` 挡到 render context 就绪之后**,不能指望每个端自觉。
+7. **【实测新增】`mpv_render_context_render` 默认阻塞到该帧的呈现时刻**
+   (`MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME` 默认 1)。在 Avalonia 上这等于
+   **把整条 UI 渲染线程按片源帧率钉住** —— 实测 24fps 的片子,UI 渲染循环只转 25 次/秒,
+   OSD 动画、进度条拖动、悬停反馈全部降到 25 Hz。关掉它(传 0)循环回到 65/s,
+   渲出的视频帧数不变。谁来给节奏由 `UI_PC.md` §8 定。
 
 #### Avalonia 侧怎么接
 
@@ -743,9 +809,25 @@ Avalonia 11 的 `OpenGlControlBase` 每帧把一个 FBO 交给你,签名与本�
 | `OnOpenGlRender(gl, fb)` | `lp_gl_wants_redraw` → `lp_gl_render(fb, …)` → `lp_gl_swapped` |
 | `OnOpenGlDeinit` | `lp_gl_uninit` |
 
-**【待验证】** Avalonia 在 Windows 上的 GL 默认走 ANGLE。本项目实测 ANGLE 能满帧
-(4K24 满帧 / 1080p60 满帧),但 CPU 比原生 WGL 高一档。
-**S1.2 要在真正的 Avalonia 控件里复量一次**,不要拿本项目的裸 ctypes harness 的数替代。
+**【已验证 · 2026-08-31 · S1.2】** 判据四条全过,详见
+[`spikes/SPIKE-1c-avalonia-path-b.md`](spikes/SPIKE-1c-avalonia-path-b.md)。
+契约那个窄接口(`fbo / w / h / flip_y`)**够用**,不需要给 UI 层开额外口子。
+
+在**真 Avalonia 控件**里复量的 CPU(Avalonia 11.3.20 / Intel UHD 770 核显 /
+1080p60 → 输出 1920×1080 / 满帧 0 丢帧):
+
+| GL 后端 | 渲视频 | 只合成不渲视频(底噪) |
+|---|---:|---:|
+| **ANGLE**(Avalonia 在 Windows 上的默认) | **60%** 单核 | 39% |
+| **WGL** | **18~24%** 单核 | 13% |
+| 参考:裸 ctypes harness(WGL,无 UI 合成) | 15% | — |
+
+**ANGLE 贵约 2.9 倍,而且贵在宿主合成底噪上**(39% vs 13%),不是 mpv 渲得慢。
+所以 PC 端要显式选 `Win32RenderingMode.Wgl`,别吃默认。
+
+⚠️ **但 WGL 上有一个上游崩溃挡着**:`OpenGlControlBase` 重建自己的 FBO 时会抛
+`Unable to configure OpenGL FBO`,**纯 Avalonia 完全不碰核心层也复现(2/10)** ——
+与 libmpv 和路径 B 无关,ANGLE 上 20 次 0 崩。取舍与后续见 `TODO.md` S1.11。
 
 ### 7.3 【已定】Windows / Linux 走路径 B
 
@@ -896,16 +978,43 @@ mpv 手册对 `osd-overlay` 明确写着 **`Timing is unused`** —— **mpv 不
 - 核心层进程内直读 `time-pos`,不再像现在的 Canvas 那样靠 IPC 轮询 + 墙钟外推
   (现在的实现必须自己乘倍速因子来补外推误差,否则 2x 播放时弹幕按 1x 爬)
 
-#### 未验证的风险
+#### 【实测 · 2026-08-31 · SPIKE-5】机制成立,观感待验
 
-**`osd-overlay` 的刷新率够不够支撑平滑滚动,没有实测。** 这是整个方案唯一的观感风险点。
-`TODO.md` 立了 SPIKE-5,**先测再定**。
+报告:[`spikes/SPIKE-5-osd-overlay-danmaku.md`](spikes/SPIKE-5-osd-overlay-danmaku.md)。
+Intel UHD 770 核显 / 4K24 片源 / 输出 1920×1080:
+
+| 配置 | 渲染 fps | 丢帧 | CPU | **位置真变/秒** | 近白占比 |
+|---|---:|---:|---:|---:|---:|
+| 关弹幕(基线) | 24.0 | +0 | 21% | — | **0.00%** |
+| **500 条弹幕** | **24.0** | **+0** | 30~36% | **18~19** | **7.9%** |
+| 500 条 + `fps=60` 滤镜 | 21.9 | **+477** | 54~61% | 30~32 | 7.9% |
+
+1. **方案不用推翻。** 500 条弹幕下满帧、丢帧 0;近白占比从 **0.00% 跳到 7.9%**
+   (基线正好是 0,这个 A/B 是决定性的)。代价是 CPU **+9~15 个百分点**。
+2. **平滑度被钉在约 19 次/秒**,而**不是**循环不够快(循环转了 52.6 拍/秒)——
+   `\pos` 是从 `time-pos` 插出来的,而 **`time-pos` 只在视频帧边界更新**。
+3. 🔴 **uosc_danmaku 的补救手段(`vf append fps`)在核显上代价太大**:
+   平滑度 19 → 30 次/秒,但**丢帧 0 → 477**,CPU 再 +25 点。**不能默认开。**
+
+> **仍未回答的:19 次/秒对滚动弹幕够不够。** 这是观感问题,
+> `TODO.md` S5.2 要求的「录屏逐帧看」**没做**。
+> **这条是「机制通过、观感待验」,不是结题。**
+>
+> 另:④ 号做法(`display-fps < 58` 时跳过插帧)没实现,而且
+> `estimated-display-fps` 在 `vo=libmpv` 下**实测恒为空**(S1.2 §4.4)——
+> 这条判据在本架构下可能根本取不到值,要先解决「拿什么判」。
 
 #### 载体格式(XML)另说
 
 "弹幕用 XML" 是**存储 / 交换**格式的问题,与渲染无关 —— 见 §7.5.1。
 
 ### 7.5.1 弹幕载体:XML
+
+> **【已定 · 2026-08-31】维持本节结论,不再评估(TODO 的 Q8 就此关闭)。**
+> 负责人:「不改了,uosc_danmaku 用成熟方案即可。」
+> 即:**载体照现状(XML 作导入/导出)、渲染照社区主流做法**,不自创。
+> uosc_danmaku 的具体做法已拆解在 `knowledge/DANMAKU_CARRIER.md` §1.7,
+> SPIKE-5 直接照它的四条来验(见 `TODO.md`)。
 
 **结论:XML 只作导入 / 导出 / 本地文件,不升格为内部唯一表示。**
 
@@ -1127,6 +1236,21 @@ Go 侧用 `encoding/xml` 标准库,零新依赖,但有两条硬要求:
 > goja 的支持面与 QuickJS 有差异,而差异会表现为"某个插件在新版本上莫名其妙不工作"。
 > 既然已经因为 libmpv 用了 cgo,再多一个 cgo 依赖不增加边际成本。
 
+#### 🔴【实测 · 2026-08-31 · SPIKE-3】三条不写就偶发出错的宿主约束
+
+三个真插件 3/3 跑通(报告:[`spikes/SPIKE-3-quickjs-plugins.md`](spikes/SPIKE-3-quickjs-plugins.md)),
+§9.1 那条「不重新打包即可运行」成立。**但下面三条不做,表现全是「偶发,而且错得像插件的锅」:**
+
+| # | 约束 | 不做会怎样 |
+|---|---|---|
+| ① | **跑 JS 的线程必须 `runtime.LockOSThread()`** | QuickJS 用「栈指针 vs 创建时的栈基址」查栈溢出,Go 会把 goroutine 在 OS 线程间搬 → 误报 `RangeError: Maximum call stack size exceeded`。实测**锁线程 5/5 全绿,不锁 5/5 全败**,每次失败的项还不一样 |
+| ② | **异步结果必须投回 JS 线程再造值** | 在非 owner goroutine 上 `NewObject()` 造的值是无效的,JS 侧拿到 `undefined` 且**不报错**。`NewNull()` 这类常量 tag 不受影响 —— 所以 `ctx.sleep` 一直是好的,一换成返回对象的 `ctx.http` 就坏,**最容易漏测的形态** |
+| ③ | **回调注册放在 JS 侧,不要在 Go 里存** | `Value.Set` 接管引用,而回调参数是**借来的** → 同一引用释放两次 → `JS_FreeValue` 段错误。quickjs-go 没有 `Dup`/`Retain` 可补 |
+
+**看门狗的两条:** 中断处理器只在 JS **正在执行**时被调用,所以 `await` 期间不会误杀
+(这是 S3.4 能成立的机制);但 `await` 恢复后插件还要接着干活,
+**deadline 必须在每次泵作业时重置**,否则那段活会被立刻杀掉。
+
 ### 9.3 逃生舱
 
 插件的自定义 UI 走**独立 origin** 的 WebView(不能是宿主 UI 的一部分,否则权限模型是摆设)。
@@ -1156,6 +1280,9 @@ Go 侧用 `encoding/xml` 标准库,零新依赖,但有两条硬要求:
 | Apple | `~/Library/Application Support/LinPlayer` |
 
 Android / Apple 的数据根由宿主通过 `lp_init(config_json)` 传入 —— **核心层不猜**。
+
+**Windows 绿色包的承诺是"数据全在这个文件夹里",而这条承诺有判据**:
+§16.2 的外溢探针(快照 → 冒烟 → diff → 断言用户目录零新增)是发布门禁,不是自觉。
 
 ```
 userdata/
@@ -1309,7 +1436,7 @@ Rust 版是**黄金实现**。Go 版每个模块完成后,用同一份输入喂�
 
 | # | 风险 | 影响 | 缓解 | 状态 |
 |---|---|---|---|---|
-| R1 | Windows / Linux 纹理互操作走不通 | 推翻 Avalonia 选型 | **已实测:mpv 侧渲进自建纹理 FBO 通过**(SPIKE-1a/1b)。剩余未验的是 **Avalonia 侧能否显示这张纹理**(S1.2) | 🟡 mpv 侧已通,Avalonia 侧待验 |
+| R1 | Windows / Linux 纹理互操作走不通 | 推翻 Avalonia 选型 | **Windows 侧已闭环**:mpv 渲进纹理 FBO(SPIKE-1a/1b)+ **Avalonia 侧四条判据全过**(S1.2,`spikes/SPIKE-1c-avalonia-path-b.md`)。Linux 侧仍未跑(S1.4 / S1.4b) | 🟢 Windows 已解除 / 🔴 Linux 未验 |
 | R2 | cgo + NDK 交叉编译链路复杂 | 拖慢一切 | SPIKE-2 先跑通并固化进 CI | 🔴 未验证 |
 | R3 | quickjs-go 跑不了现有插件 | 插件生态断代 | SPIKE-3 拿现存全部插件当验收语料 | 🔴 未验证 |
 | R4 | Compose TV 焦点不如预期 | TV 端要自己写空间导航 | SPIKE-4 用最复杂的页面(EpisodePage)验证 | 🔴 未验证 |
@@ -1320,8 +1447,9 @@ Rust 版是**黄金实现**。Go 版每个模块完成后,用同一份输入喂�
 | R9 | **Linux 只能跑 X11**(Wayland 走不通) | Wayland 会话下靠 XWayland,分数缩放可能糊;长期看是死路 | SPIKE-1 必须同时跑两条(§15.2);走不通则明确写进发行说明,不静默降级 | 🔴 未验证 |
 | R10 | **Linux 双显卡跑核显** | 超分卡顿,而且**不报错** | 按 §15.3 做 PRIME 环境变量 + 回读 GPU 名字;`system.gpuInfo` 暴露给用户 | 🔴 未实现 |
 | R11 | Linux 用户没装 libmpv | 起不来 | §15.4:不打包 + 首启检测 + 给各发行版的安装命令 | 🟡 有方案 |
-| R12 | **Windows 未签名** | SmartScreen 常驻 + 杀软误报,而且更新后信誉从零开始 | §16.3 给了三个选项与代价,需负责人裁决;无论签不签,首次运行指引现在就要写 | 🔴 待裁决 |
+| R12 | **Windows 未签名** | SmartScreen 常驻 + 杀软误报,而且更新后信誉从零开始 | **已裁决 2026-08-31:方案 A,维持不签**(便携包分发)。⚠️ 便携包**规避不了** SmartScreen —— MOTW 会随 zip 解压传播给包内 exe。所以首次运行指引 + 发布校验和是必做项,见 §16.3 | 🟡 已裁决,代价已接受 |
 | R14 | **路径 B 在 Windows 上拿不到 d3d11va 零拷贝** | CPU 上升:4K24 核显 3% → ~12%(同解码路径下 mpv 自有 VO 实测)。**可用性没问题**:1080p60 与 4K24 都满帧 | 结构性(只要渲染走 OpenGL 就跨 D3D11 设备边界)。默认接受;低端机真机验证不达标则退 A2 | 🟡 已量化,可接受 |
+| R15 | **数据根外溢**(新栈的落点没点干净) | 绿色包"数据全在这个文件夹里"的承诺破掉;卸载后留垃圾;换机器拷不走 | §16.2 已把新栈的四条落点写进表;**判据是外溢探针门禁**(快照 → 冒烟 → diff → 断言零新增),不是自觉。方法已在工具链上验过并抓到 3 处 | 🟡 有方案,待实现 |
 | R13 | **长路径 / 文件锁** | 下载静默失败;预取环形缓存删不掉分段 → "占用恒等于上限"这条承诺破掉 | §16.6:清单声明 + 落盘前校验 + 删除失败要计数不许静默跳过 | 🔴 未实现 |
 
 ---
@@ -2091,12 +2219,19 @@ is_writable(dir):
 
 绿色包的承诺是"数据全在这个文件夹里"。**有几条路会绕过它,每条都要单独按住:**
 
+> **【负责人要求 · 2026-08-31】「数据存到解压出来的文件夹,不存 AppData。不喜欢到处拉屎。」**
+> 这不是偏好,是绿色包的定义。下面这张表是**换栈之后重新点过的**一遍 ——
+> 旧栈按住的两条继续有效,新栈引入了四条新的。
+
 | 暗道 | 现状 | 规定 |
 |---|---|---|
 | 进程临时目录 | 已按住:启动时把 `TEMP` / `TMP` / `TMPDIR` 指进数据根 | 保留 |
-| **WebView2 profile** | 已按住:显式给 `data_directory`。不给它就自己在 `%LOCALAPPDATA%` 下建,**实测 126 MB,而且含 localStorage** | 保留,见 §16.4 |
-| **.NET 运行时自己的落点** | 【待确认】 | 新架构必须查一遍:崩溃转储、日志、临时程序集 |
-| 崩溃上报缓存 | 【待确认】 | 同上 |
+| **WebView2 profile** | 已按住:显式给 `data_directory`。不给它就自己在 `%LOCALAPPDATA%` 下建,**实测 126 MB,而且含 localStorage** | 保留,见 §16.4。新架构下它只服务插件逃生舱 |
+| **libmpv 的 shader cache** | **旧栈已经踩过**:不显式给 `gpu-shader-cache-dir`,libmpv 自己找地方写 | 显式指到 `userdata/cache/shaders`。**换播放器内核 / 换 libmpv 构建时要重新确认** |
+| **libmpv 的 config-dir / watch-later** | mpv 默认往用户配置目录写 | 显式指到数据根。注意 `config=no` 只挡配置读取,**挡不住 watch-later 之类的写** |
+| **.NET 单文件解包目录** | 新栈引入 | single-file 发布默认解到 `%TEMP%`。要么**不用 single-file**,要么显式设 `DOTNET_BUNDLE_EXTRACT_BASE_DIR` 到数据根 |
+| **.NET 崩溃转储 / 日志** | 新栈引入 | 显式指到数据根,不许吃默认位置 |
+| **Go 运行时侧** | 新栈引入 | 核心层**不许调** `os.UserConfigDir` / `os.UserCacheDir` / `os.TempDir` 去决定落点 —— 路径只能来自 §10.1 那个唯一出口 |
 
 两条硬约束:
 
@@ -2110,6 +2245,24 @@ is_writable(dir):
 
 > 另:"清理缓存"算占用时**不含 WebView2 profile** —— 那里有 localStorage,不归"缓存"管。
 > 清理动作对 `config` / `data` / `downloads` / WebView2 profile **一根汗毛都不许动**。
+
+#### 判据:外溢探针,发布门禁
+
+**"我们注意了"不是判据。** 上面那张表只覆盖我们**想得到**的落点,而这类东西的特征恰恰是
+想不到 —— 所以发布前必须实测一次:
+
+1. 快照:`%APPDATA%` / `%LOCALAPPDATA%` / `%USERPROFILE%` / `%TEMP%` 的文件清单
+2. 跑完整冒烟路径:启动 → 登录 → 浏览 → 详情 → 起播 → seek → 切字幕 → 退出
+3. 再快照,diff
+4. **断言新增为空。** 允许白名单,但每条必须写明**为什么挪不动**,而不是"这个不重要"
+
+> **这个方法今天刚验过一次,而且抓到了东西。** 2026-08-31 给项目级工具链做同一件事,
+> 快照 diff 抓到三处默认往用户目录写的落点:Go 的 `GOENV`、Go 的遥测计数、zig 的全局缓存。
+> **三处没有一处是从文档里看得出来的**,全靠 diff。其中 Go 遥测那处进一步查实
+> **根本挪不动**(`GOTELEMETRYDIR` 由系统用户配置目录推导,环境变量不认 —— 实测
+> `GOTELEMETRY=off go env GOTELEMETRY` 仍返回 `local`),只能用一个 14 字节的 `off` 标记堵住。
+> 做法见 `scripts/check-toolchain.sh`,那份脚本可以直接当本探针的模板 ——
+> 包括它第 4 关的**反向注入**:不注入一个真的外溢,你不知道探针是不是在空跑。
 
 ### 16.3 🔴 分发信任:代码签名与 SmartScreen
 
@@ -2131,7 +2284,26 @@ is_writable(dir):
 | B. OV 代码签名证书 | 年费 + 需要主体资质 | 仍要**积累信誉**才不弹,但会随下载量收敛 |
 | C. EV 代码签名证书 | 更贵 + 硬件令牌(CI 签名麻烦) | **立刻**通过 SmartScreen |
 
-**建议:先 A,把决定权留给项目负责人;但无论签不签,下面这条现在就要做。**
+#### 【已裁决 · 2026-08-31】方案 A —— 不签
+
+负责人拍板:**用便携包分发,维持不签。**
+
+裁决时澄清过一个前提,写在这里免得下次又绕回来:
+
+> 问:「便携包都是可写目录,没这个问题吧?」
+>
+> **写入那半是对的**:便携包不进 `Program Files`、不写注册表、不要管理员权限,
+> 这一类问题确实不存在。
+>
+> **但签名解决的不是写入,是下载信任,便携包规避不了。**
+> zip 从浏览器下来带 Mark-of-the-Web,**Windows 10 1803 起解压时 MOTW 会传播给包内的 exe**,
+> 首次运行照样弹 SmartScreen。杀软那条也一样:未签名 + 写同目录 + 起本地 HTTP 服务 +
+> 拉子进程,这组特征很容易被启发式引擎盯上。
+
+所以选 A 是**接受这个代价**,不是「这个代价不存在」。现有 Rust 版就是这么发的,
+属于既成事实而非新增风险。下面两条因此成了必做项,不是可选项:
+
+**无论签不签,下面这条现在就要做。**
 
 - **下载页与首次运行指引必须写清楚会遇到什么、为什么。**
   用户看到"Windows 已保护你的电脑"时,如果我们一个字都没提,他的第一反应是"这是病毒"。
@@ -2305,9 +2477,22 @@ Linux 侧靠二进制的硬依赖清单确定下限(§15.6)。Windows 侧的下�
 | WebView2 运行时 | **不再影响下限**(已降为可选,§16.4) | ✅ |
 | libmpv / 其依赖 | 由所用的构建决定 | 【待确认】 |
 
+**【已定 · 2026-08-31】目标下限 = Windows 10。** 负责人拍板。
+
+但这条纪律不因此松掉 —— **「目标是 Win10」和「在 Win10 上真的能跑」是两件事**:
+
+| 要查实的 | 为什么不能拍脑袋 |
+|---|---|
+| Win10 的**哪个 build** | 「Windows 10」跨了 1507 到 22H2,.NET 与 Avalonia 各有自己的下限 build,取三者最大值 |
+| .NET 运行时在 Win10 上的实际下限 | self-contained 也仍有系统 API 依赖 |
+| libmpv 构建的实际下限 | 由所用构建决定,看导入表 |
+
+**下限最终写成一个 build 号**(例:`Windows 10 build 1xxxx`),不是「Win10 及以上」这种说法。
+
 **规定:**
 
-1. 三个"待确认"必须在 SPIKE 阶段查实并写进发行说明,**不许写"应该支持 Win10 及以上"**
+1. 三个"待确认"必须在 SPIKE 阶段查实,与上面的目标下限取交集后写进发行说明。
+   **不许写"应该支持 Win10 及以上"** —— 目标定了不等于验过了
 2. 打包步骤把**实际的导入表**打进构建日志 —— 与 Linux 侧的做法对齐,
    谁哪天引入了一个新的系统依赖,这里一眼可见
 3. **在最低支持版本的干净虚拟机上跑一次启动冒烟**,作为发版门禁。
