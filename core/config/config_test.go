@@ -94,8 +94,8 @@ func TestLoad_读得出现有形状的配置(t *testing.T) {
 	if c.Theme != "dark" {
 		t.Fatalf("theme 读错了: %q", c.Theme)
 	}
-	if len(c.Accounts) == 0 {
-		t.Fatal("accounts 应当被原样透传住,而不是丢掉")
+	if len(c.AccountList) == 0 {
+		t.Fatal("accounts 应当读得出来,而不是丢掉")
 	}
 }
 

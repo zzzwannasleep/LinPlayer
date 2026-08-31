@@ -710,7 +710,14 @@
 > 在透明窗口下就是**一片黑且不报错**。已修 `facet` / `yearRange` / `fetchAllPaged`
 > 三处,并留了一条专门钉空列表形状的用例。**后续每移植一个返回列表的函数都要过一眼这条。**
 >
-> 剩下的 8 条各自压着一个还没移植的子系统,要先做那个:
+>
+> **2026-08-31 三续:**`core/config` 接上账号表(Account / ServerLine / MergeLines /
+> Upsert / Reorder / Remove),新建 `core/account` 落地 `account.*` 9 条
+> (listAccounts / setActiveServer / removeAccount / reorderAccounts /
+> updateAccount / setActiveLine / setLines / syncLines / testConnection),
+> `emby.*` 再加 currentSession / relogin。**共 49 条命令。**
+>
+> 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/
 > currentSession、relogin(账号存储,等 core/config)。

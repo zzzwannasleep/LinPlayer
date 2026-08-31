@@ -9,6 +9,7 @@ import (
 
 	"linplayer/core/blocklist"
 	"linplayer/core/bus"
+	"linplayer/core/config"
 	"linplayer/core/net/localserve"
 )
 
@@ -179,6 +180,63 @@ func RegisterCommands(version string) {
 		//   很容易被误判成「图片接口坏了」。
 		localserve.AllowDefault(res.Server, http.Header{"X-Emby-Token": {res.Token}})
 		return res, nil
+	})
+
+	// currentSession 已登录的 Emby 账号(启动时跳过登录页直接进库);无则 null。
+	//
+	// ★ 活跃的是**浏览型源**(网盘 / 局域网 / 资源站)时返回 null ——
+	//   它没有 Emby token,吐个空 token 的会话会让调用方拿去打 401。
+	// ★ 但**前端判断「要不要进登录页」不能只看这一条** —— 只判它的话
+	//   网盘用户永远进不了门(他有账号,只是不是 Emby 的)。要连 account.listAccounts
+	//   一起看。这条已经害过一次,见 docs/lessons。
+	bus.Register("emby.currentSession", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+		a := config.Current().ActiveAccount()
+		if a == nil || a.IsFileBrowse() {
+			return nil, nil
+		}
+		return map[string]any{
+			// ★ 调用方拿这个 server 直接拼封面 / 背景图地址,所以必须是**当前生效线路**,
+			//   不能是账号主键 —— 否则用户切到备用线路后 API 走新线、封面还打老线,
+			//   表现为「封面全白但不报错」。
+			"server":    a.ActiveLineURL(),
+			"token":     a.Token,
+			"user_id":   a.UserID,
+			"user_name": a.UserName,
+			// 头像 tag 只在登录那一刻有意义(用来建服务器图标,已存进 icon_url);
+			// 恢复会话时没有也不需要重新取。
+			"primary_image_tag": nil,
+		}, nil
+	})
+
+	// relogin 定点换凭据。
+	//
+	// ★ **不能直接调 login 那条路** —— 那条走 Upsert,会把账号当成「新登录的」处理。
+	//   这里要的是:只换 token/user/password,**不动 server/name/remark/icon/lines/active_line**
+	//   (那些是用户的编辑)。
+	// ★ 打的是**当前生效线路**不是账号主键:用户多半正是因为主线连不上才来重新登录的。
+	bus.Register("emby.relogin", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+		c := config.Current()
+		id, user, pw := str(args, "server_id"), str(args, "username"), str(args, "password")
+		acc := c.Find(id)
+		if acc == nil {
+			return nil, bus.NewErr(bus.ENotFound, "找不到该服务器: %s", id)
+		}
+		_, res, err := defaultClient.Login(ctx, acc.DirectLineURL(), user, pw, c.DeviceID)
+		if err != nil {
+			return nil, &bus.Err{Code: bus.EAuth, Msg: err.Error()}
+		}
+		acc.Token = res.Token
+		acc.UserID = res.UserID
+		acc.UserName = res.UserName
+		if pw != "" {
+			acc.Password = &pw
+		}
+		if err := c.Save(); err != nil {
+			return nil, bus.NewErr(bus.EInternal, "配置保存失败: %v", err)
+		}
+		// 新 token 要立刻进图片白名单,否则重新登录之后封面还在用旧 token 打 401
+		localserve.AllowDefault(acc.Server, http.Header{"X-Emby-Token": {acc.Token}})
+		return map[string]any{"server_id": id, "user_name": res.UserName}, nil
 	})
 
 	// ★ logout **尽力而为**:实测某 fork 该端点 404 且 token 登出后仍可用,

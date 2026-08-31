@@ -365,3 +365,28 @@ func RevokeDefault(origin string) {
 		s.Revoke(origin)
 	}
 }
+
+// ReplaceAllowlist 整表重建白名单。
+//
+// ★ 为什么是**重建**而不是提供 Allow/Revoke 让调用方增量维护:
+// 删账号 / 删线路时忘了 Revoke 的话,那个 origin 会永久留在白名单里 ——
+// 一个长期存在、谁也不会再想起来的 SSRF 出口。让调用方每次把「现在应该有哪些」
+// 完整报一遍,漏删这件事就不可能发生。
+//
+// 回调里调 add 逐条登记;回调返回后一次性换上。回调内不要再碰这个 Server。
+func (s *Server) ReplaceAllowlist(fill func(add func(origin string, headers http.Header))) {
+	next := map[string]http.Header{}
+	fill(func(origin string, headers http.Header) {
+		o, ok := originOf(origin)
+		if !ok {
+			return
+		}
+		if headers == nil {
+			headers = http.Header{}
+		}
+		next[o] = headers
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.allow = next
+}

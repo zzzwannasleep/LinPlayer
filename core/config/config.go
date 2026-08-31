@@ -27,12 +27,6 @@ import (
 	"linplayer/core/paths"
 )
 
-// Account 一个媒体服务器账号。字段名与现有 config.json 保持一致 ——
-// **迁移期不许改名**,否则老用户的配置读不出来(SPEC §10.2)。
-type Account struct {
-	Raw json.RawMessage `json:"-"` // 整条原样留着,移植期没接的字段不丢
-}
-
 // AppConfig 与现有 config.json 的顶层结构对齐(12 个键)。
 //
 // ★ 移植期的策略:**已接的字段用强类型,没接的原样透传**。
@@ -46,8 +40,11 @@ type AppConfig struct {
 	CompanionEnabled      bool `json:"companion_enabled"`
 	PluginOfficialEnabled bool `json:"plugin_official_enabled"`
 
+	// AccountList 服务器账号表。**已接强类型**,但每条账号内部没接的键仍原样透传
+	// (见 account.go 的 Account.rest)。
+	AccountList []Account `json:"accounts"`
+
 	// 下面这些迁移期还没接,**原样透传**,别丢
-	Accounts       json.RawMessage `json:"accounts,omitempty"`
 	Prefs          json.RawMessage `json:"prefs,omitempty"`
 	DanmakuSources json.RawMessage `json:"danmaku_sources,omitempty"`
 	Proxy          json.RawMessage `json:"proxy,omitempty"`

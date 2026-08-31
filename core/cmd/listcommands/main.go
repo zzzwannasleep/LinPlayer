@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 
+	"linplayer/core/account"
 	"linplayer/core/bus"
 	"linplayer/core/emby"
 	"linplayer/core/player"
@@ -19,6 +20,7 @@ func main() {
 	system.RegisterCommands()
 	player.RegisterCommands()
 	emby.RegisterCommands("listcommands")
+	account.RegisterCommands("listcommands")
 
 	cmds := bus.Commands()
 	sort.Strings(cmds)
