@@ -16,7 +16,9 @@ import (
 )
 
 // RegisterCommands 由 lp_init 调用。
-func RegisterCommands() {
+func RegisterCommands(version string) {
+	registerPrefsCommands(version)
+
 	bus.Register("player.play", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		path, _ := args["path"].(string)
 		if path == "" {

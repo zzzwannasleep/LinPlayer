@@ -26,6 +26,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -131,6 +132,16 @@ var runners = map[string]runner{
 		c, s := newSession(server, args)
 		id, _ := args["series_id"].(string)
 		return c.Seasons(ctx, s, id)
+	},
+	"emby.resolveStream": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		// 每条用例都要重置 Range 前缀探测缓存 —— 那是进程级的,
+		// 不重置的话第二条用例会拿到第一条的探测结论(表现是随机红)
+		emby.ResetRangePrefixCache()
+		id, _ := args["item_id"].(string)
+		msid, _ := args["media_source_id"].(string)
+		re, _ := args["version_regex"].(string)
+		return c.ResolveStream(ctx, s, id, msid, re)
 	},
 	"emby.itemMedia": func(ctx context.Context, server string, args map[string]any) (any, error) {
 		c, s := newSession(server, args)
@@ -298,8 +309,12 @@ func runCase(tc testCase, verbose bool) bool {
 		fmt.Printf("  [不通过] 归一化失败: %v\n", err)
 		return false
 	}
+	// ★ 期望值里的 `SERVER` 换成 mock 上游的真实地址。
+	//   取流那类命令的返回里带着完整 URL,而 mock 端口是随机的 —— 没有这个占位符,
+	//   这类用例根本没法写(写死端口的话每次都红)。
+	expect := bytes.ReplaceAll(tc.Expect, []byte("SERVER"), []byte(srv.URL))
 	var wantAny any
-	if err := json.Unmarshal(tc.Expect, &wantAny); err != nil {
+	if err := json.Unmarshal(expect, &wantAny); err != nil {
 		fmt.Printf("  [不通过] expect 不是合法 JSON: %v\n", err)
 		return false
 	}

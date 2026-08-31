@@ -1,0 +1,26 @@
+{
+  "name": "emby.resolveStream · 版本正则命中第二条(没手动指定时)",
+  "note": "版本正则只在**没有手动指定版本**时参与,手动选的永远优先。这条用例不指定 media_source_id、给一条 `4K` 正则,期望选中第二条 —— 匹配文本要补 4K/8K 口语档位(用户的正则几乎都写 4K 而不是 2160)。配套的反向要求写在 Go 侧单测里:指定了 media_source_id 却找不到时**必须报错,不静默回落第一条**,否则用户以为在看 4K、实际放的是 1080p 且毫无提示。",
+  "provenance": "crates/core/src/emby.rs:2089 resolve_stream() 的 media_source_id 分支 + :2061 source_match_text()",
+  "upstream": [
+    {
+      "path": "/Items/it1/PlaybackInfo?UserId=u",
+      "status": 200,
+      "body": "{\"PlaySessionId\":\"psid\",\"MediaSources\":[{\"Id\":\"ms-1080\",\"Name\":\"版本一\",\"Container\":\"mkv\",\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"h264\",\"Height\":1080,\"Index\":0}]},{\"Id\":\"ms-4k\",\"Name\":\"版本二\",\"Container\":\"mkv\",\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"hevc\",\"Height\":2160,\"Index\":0}]}]}"
+    }
+  ],
+  "command": "emby.resolveStream",
+  "args": {
+    "item_id": "it1",
+    "version_regex": "4K"
+  },
+  "expect": {
+    "item_id": "it1",
+    "media_source_id": "ms-4k",
+    "play_session_id": "psid",
+    "play_method": "DirectStream",
+    "is_dolby_vision": false,
+    "external_subs": [],
+    "url": "SERVER/Videos/it1/stream.mkv?static=true&mediaSourceId=ms-4k&api_key=t"
+  }
+}

@@ -208,6 +208,9 @@ func (c *Client) RandomPicks(ctx context.Context, s *Session, limit int) ([]Item
 	return c.fetchItems(ctx, s, u)
 }
 
+// pickIndex 是 media.PickIndex 的本包别名 —— 取流和版本列表都要用,收在一处。
+func pickIndex(texts []string, pattern string) int { return media.PickIndex(texts, pattern) }
+
 func deref(p *string) string {
 	if p == nil {
 		return ""

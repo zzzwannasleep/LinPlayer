@@ -19,7 +19,7 @@ import (
 func main() {
 	// 只注册,不 bus.Init() —— 注册表和工作池是两件事,这里不需要后者。
 	system.RegisterCommands()
-	player.RegisterCommands()
+	player.RegisterCommands("listcommands")
 	emby.RegisterCommands("listcommands")
 	account.RegisterCommands("listcommands")
 	prefs.RegisterCommands("listcommands")

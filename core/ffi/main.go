@@ -110,7 +110,7 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 
 		bus.Init()
 		system.RegisterCommands()
-		player.RegisterCommands()
+		player.RegisterCommands(system.Version)
 		emby.RegisterCommands(system.Version)
 		account.RegisterCommands(system.Version)
 		prefs.RegisterCommands(system.Version)

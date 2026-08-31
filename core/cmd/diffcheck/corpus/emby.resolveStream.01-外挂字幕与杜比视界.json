@@ -1,0 +1,43 @@
+{
+  "name": "emby.resolveStream · 外挂字幕地址、DV 判定、PlaySessionId",
+  "note": "取流这一跳同时定死四件事:①外挂字幕优先用服务器给的 DeliveryUrl,没有就按 index 拼标准路由(subrip 的扩展名要写成 srt,webvtt 写成 vtt);②图形字幕(pgssub/dvdsub)跳过 —— 外挂形态少见且 mpv 挂载后多半不可用;③DV 判定在这里算,因为 MediaStreams 只有这条路上拿得到,调用方手里的版本列表是另一次请求、可能选的不是同一个版本;④PlaySessionId 必须贯穿上报三件套,服务器给了就用服务器的。另外 api_key 要补在 DeliveryUrl 上(它是相对路径且不带凭据)。",
+  "provenance": "crates/core/src/emby.rs:2089 resolve_stream() + :1785 subtitle_path() + :341 is_dolby_vision()",
+  "upstream": [
+    {
+      "path": "/Items/it1/PlaybackInfo?UserId=u",
+      "status": 200,
+      "body": "{\"PlaySessionId\":\"psid-from-server\",\"MediaSources\":[{\"Id\":\"ms-1\",\"Name\":\"版本一\",\"Container\":\"mkv\",\"DirectStreamUrl\":\"/videos/it1/original.mkv?static=true\",\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"hevc\",\"Profile\":\"Main 10\",\"Height\":2160,\"Index\":0,\"VideoRangeType\":\"DOVI\"},{\"Type\":\"Subtitle\",\"Codec\":\"subrip\",\"Index\":3,\"IsExternal\":true,\"Language\":\"chi\"},{\"Type\":\"Subtitle\",\"Codec\":\"ass\",\"Index\":4,\"IsExternal\":true,\"DeliveryUrl\":\"/Videos/it1/ms-1/Subtitles/4/0/Stream.ass\",\"DisplayTitle\":\"简体中文\",\"IsDefault\":true},{\"Type\":\"Subtitle\",\"Codec\":\"pgssub\",\"Index\":5,\"IsExternal\":true},{\"Type\":\"Subtitle\",\"Codec\":\"ass\",\"Index\":6,\"IsExternal\":false}]}]}"
+    },
+    {
+      "path": "/videos/it1/original.mkv",
+      "status": 206,
+      "body": "x"
+    }
+  ],
+  "command": "emby.resolveStream",
+  "args": {
+    "item_id": "it1"
+  },
+  "expect": {
+    "item_id": "it1",
+    "media_source_id": "ms-1",
+    "play_session_id": "psid-from-server",
+    "play_method": "DirectStream",
+    "is_dolby_vision": true,
+    "external_subs": [
+      {
+        "url": "SERVER/Videos/it1/ms-1/Subtitles/3/0/Stream.srt?api_key=t",
+        "title": "chi",
+        "lang": "chi",
+        "is_default": false
+      },
+      {
+        "url": "SERVER/Videos/it1/ms-1/Subtitles/4/0/Stream.ass?api_key=t",
+        "title": "简体中文",
+        "lang": null,
+        "is_default": true
+      }
+    ],
+    "url": "SERVER/videos/it1/original.mkv?static=true&api_key=t"
+  }
+}

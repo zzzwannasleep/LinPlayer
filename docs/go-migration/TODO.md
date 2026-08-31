@@ -642,6 +642,9 @@
 | `emby.search · 服务端无视类型筛选` | 某 fork 带 SearchTerm 时把 IncludeItemTypes/ParentId 一起忽略 —— **只信服务端过滤 = 「包括集」开关是个摆设且不报错** | 去掉客户端复筛 → 「长度 2 vs 3」 |
 | `emby.person · 生平与出生地为空` | 生平空是**常态**(空串,不是 null);出生地空串要折 null,否则前端画出一行空的「出生地:」 | 不折空串 → 「birth_place 期望 null 实得 ""」 |
 | `emby.isAdmin · 缺 Policy 判否` | 宁可少给按钮;而且这个位**不从登录响应取** —— 老账号不会再走 login,取了会永远判成非管理员 | 缺 Policy 判是 → 「期望 false 实得 true」 |
+| `emby.resolveStream · 外挂字幕与杜比视界` | 外挂字幕优先 DeliveryUrl,没有就按 index 拼(subrip→srt / webvtt→vtt);图形字幕跳过;DV 在取流这一跳算(MediaStreams 只有这条路上有);PlaySessionId 服务器优先 | subrip 不换扩展名 → URL 对不上;图形字幕不跳 → 长度 2 vs 3 |
+| `emby.resolveStream · 反代只在 /emby 下处理 Range` | 裸路径回 200、`/emby` 下回 206 时,必须选 `/emby` —— 否则 ffmpeg 顺读丢弃到目标字节(跳 9 分钟 = 370MB),表现是「跳到没缓冲的位置卡死」 | —— (写死 `/emby` 时这条仍绿,靠 `TestChoosePrefix` 的另外三种组合抓) |
+| `emby.resolveStream · 版本正则命中第二条` | 正则只在没手动指定版本时参与;匹配文本要补 4K/8K 口语档位 | —— |
 | `emby.getFilters · 一个分面挂掉不拖垮面板` | 某 fork 上 /Tags、/OfficialRatings、/Years 全是 404;各自吞错返回空,**报错才是错的**(整块面板红字重试,而重试永远不会有结果)。年份靠两次 Limit=1 探针铺区间 | 失败退回 nil 切片 → 「tags 期望数组实得 nil」 |
 | `emby.itemMedia · 正则标中的必须是真会被播的` | preferred 那条 = 详情页/播放器显示的「当前版本」,和真起播同端点同批同匹配文本;匹配文本要补 4K/8K 口语档位;VideoRange 的 "Unknown" 折 null;非 A/V/S 流不进卡 | 恒标第一条 → 「[0]/[1].preferred 反了」;不补 4K → 「[1].preferred 期望 true」;Unknown 原样透 → 「期望 null 实得 "Unknown"」 |
 | `emby.favorites · 空列表给 [] 不是 null` | **Go 的零值切片序列化成 `null`,Rust 的 `Vec::new()` 是 `[]`** —— 前端拿 null 直接 `.map()` 抛错,透明窗口下是一片黑且不报错 | 退回 `var out []Item` → 「(根)期望数组实得 nil」 |
@@ -731,6 +734,16 @@
 >
 > 顺带补了一处上一批的漏:`config.Remove` 没有清 `prefs.prefetch_servers`
 > (Rust 侧有)。表现是删了服务器再加同一地址,多线程加载「自己就开着」。
+>
+>
+> **2026-08-31 五续:**取流那条链移植完(`ResolveStream` / Range 前缀实测 /
+> 外挂字幕 / DV 判定 / PlaySessionId),章节与片头片尾区间移植完
+> (`Chapters` / `IntroRange` / `OutroRange`),`player.*` 落地 6 条
+> (shaderLevels / validateTrackRegex / setTrackRegexes / get·setPlaybackPrefs /
+> chapterInfo)。**共 66 条命令,对账 18 条。**
+>
+> 差分对账新增 `SERVER` 占位符:取流那类命令返回里带完整 URL,而 mock 端口是随机的
+> —— 没有它这类用例根本没法写。
 >
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/

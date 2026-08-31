@@ -1,0 +1,35 @@
+{
+  "name": "emby.resolveStream · 反代只在 /emby 前缀下处理 Range",
+  "note": "2026-07-27 用户报「跳到缓存条没缓存到的地方,画面和进度条一起卡死,别的播放器都正常」。根因:DirectStreamUrl 是相对路径,我们拼在服务器根上;而用户那两台服前面挂了反代,只有 /emby 那条路由正确处理 Range —— 根路径下的同一个地址收到 Range 也回 200 + 完整 Content-Length,ffmpeg 只能顺读丢弃到目标字节(往前跳 9 分钟 = 370MB)。解法不是写死 /emby(那会在 Jellyfin 和带 base path 的部署上把好地址改坏),而是各发一次 `Range: bytes=0-0` 实测。这条用例的 mock 就照那两台服的行为答:裸路径回 200,/emby 下回 206。",
+  "provenance": "crates/core/src/emby.rs:2031 seekable_path() 上方的长注释(带 curl 实测记录)",
+  "upstream": [
+    {
+      "path": "/emby/videos/it1/original.mkv",
+      "status": 206,
+      "body": "x"
+    },
+    {
+      "path": "/videos/it1/original.mkv",
+      "status": 200,
+      "body": "整个文件"
+    },
+    {
+      "path": "/Items/it1/PlaybackInfo?UserId=u",
+      "status": 200,
+      "body": "{\"PlaySessionId\":\"psid\",\"MediaSources\":[{\"Id\":\"ms-1\",\"Container\":\"mkv\",\"DirectStreamUrl\":\"/videos/it1/original.mkv?static=true\",\"MediaStreams\":[]}]}"
+    }
+  ],
+  "command": "emby.resolveStream",
+  "args": {
+    "item_id": "it1"
+  },
+  "expect": {
+    "item_id": "it1",
+    "media_source_id": "ms-1",
+    "play_session_id": "psid",
+    "play_method": "DirectStream",
+    "is_dolby_vision": false,
+    "external_subs": [],
+    "url": "SERVER/emby/videos/it1/original.mkv?static=true&api_key=t"
+  }
+}
