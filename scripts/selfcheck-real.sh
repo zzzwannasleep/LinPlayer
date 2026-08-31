@@ -57,11 +57,16 @@ LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$WANT" LP_SELFCHECK_AFTER="$AFTER" \
 
 # 真服务器比假的慢得多:库大、要走公网、可能还要转码探测
 sleep "${LP_WAIT:-20}"
+# ★ 页面名里可能有冒号(player:12345),**Windows 文件名不许有冒号** ——
+#   直接拼进去的话 PowerShell 保存会失败,而脚本还照样打印「截图:...」。
+SAFE="$(printf '%s' "${PAGE:-}" | tr -c 'a-zA-Z0-9_-' '_')"
+OUT="$ROOT/build/real-$IDX${SAFE:+-$SAFE}.png"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
-  -ProcName LinPlayer -Out "$ROOT/build/real-$IDX${PAGE:+-$PAGE}.png"
+  -ProcName LinPlayer -Out "$OUT"
 
 powershell -NoProfile -Command "
   \$p = Get-Process LinPlayer -EA SilentlyContinue
   if (\$p) { \$null = \$p.CloseMainWindow(); if (-not \$p.WaitForExit(8000)) { \$p.Kill() } }" || true
 
-echo "截图:build/real-$IDX${PAGE:+-$PAGE}.png"
+echo "截图:$OUT"
+[ -f "$OUT" ] || { echo "!! 截图没落盘"; exit 3; }
