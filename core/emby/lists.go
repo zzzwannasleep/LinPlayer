@@ -369,7 +369,7 @@ func (c *Client) getBytes(ctx context.Context, s *Session, u string) ([]byte, er
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("请求失败: HTTP %d", resp.StatusCode)
+		return nil, &StatusError{Status: resp.StatusCode, What: "取数据"}
 	}
 	return io.ReadAll(resp.Body)
 }

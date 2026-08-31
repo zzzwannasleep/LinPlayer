@@ -75,7 +75,8 @@ func (c *Client) Login(ctx context.Context, server, username, password, deviceID
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, nil, fmt.Errorf("登录失败: HTTP %d", resp.StatusCode)
+		// ★ 带上状态码,别只留一句话 —— 命令层要靠它把「密码不对」和「没网」分开
+		return nil, nil, &StatusError{Status: resp.StatusCode, What: "登录"}
 	}
 	var auth struct {
 		AccessToken string `json:"AccessToken"`

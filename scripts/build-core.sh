@@ -10,6 +10,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${1:-$ROOT/build/core}"
 mkdir -p "$OUT"
+# ★ 转绝对路径:下面要 `cd "$ROOT/core"` 再往 $OUT 写,相对路径会在那儿再解一次 ——
+#   产物静默落到 core/<你给的相对路径>/ 下,而**调用方看到的是「编译成功」**。
+#   2026-08-31 真栽过:自检一直加载着一小时前的旧 lpcore.dll,查了半天以为是代码没生效。
+OUT="$(cd "$OUT" && pwd)"
 
 # shellcheck source=/dev/null
 source "$ROOT/scripts/env.sh"

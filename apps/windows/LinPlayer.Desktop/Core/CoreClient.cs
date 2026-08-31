@@ -49,21 +49,45 @@ internal static partial class Native
 }
 
 /// <summary>核心层抛回来的错误(SPEC §5.4:错误是对象不是字符串)。</summary>
-public sealed class CoreException(string code, string message, bool retryable) : Exception(message)
+public sealed class CoreException(string code, string message, bool retryable, string? detail = null)
+    : Exception(message)
 {
     public string Code { get; } = code;
     public bool Retryable { get; } = retryable;
 
-    /// <summary>UI 该怎么处理这个错误(UI_PC §6.3 的映射)。</summary>
-    public string Advice => Code switch
+    /// <summary>核心层给的补充细节(SPEC §5.4 的 err.detail)。有就一起显示,别丢。</summary>
+    public string? Detail { get; } = detail;
+
+    /// <summary>
+    /// 给用户看的一句话。
+    ///
+    /// <para>★★ <b>永远带上核心层给的真实原因</b>。这里原来是「错误码 → 一句固定话」,
+    /// 把 <c>Message</c> 整个丢掉了 —— 于是密码错、token 过期、地址打错、证书不认,
+    /// 用户看到的全是「网络不通,可以重试」。用户 2026-08-31 实测撞上:
+    /// 「我登陆了 Emby 服务器一直提示没网了,实际上有网络」——
+    /// 有网、也照着提示重试了,但真因根本没显示出来,他和我都是瞎的。</para>
+    ///
+    /// <para>★ 固定话只是**补一句该怎么办**,不是替换原因。</para>
+    /// </summary>
+    public string Advice
     {
-        "E_AUTH" => "登录状态失效,请重新登录",
-        "E_NETWORK" => "网络不通,可以重试",
-        "E_UNSUPPORTED" => "这台服务器或这个平台不支持这项功能",
-        "E_NOTFOUND" => "找不到这个内容",
-        "E_PERMISSION" => "当前账号没有权限",
-        _ => Message,
-    };
+        get
+        {
+            var what = Code switch
+            {
+                "E_AUTH" => "登录状态失效或凭据不对,请重新登录",
+                "E_NETWORK" => "连不上服务器",
+                "E_UNSUPPORTED" => "这台服务器或这个平台不支持这项功能",
+                "E_NOTFOUND" => "找不到这个内容",
+                "E_PERMISSION" => "当前账号没有权限",
+                _ => "",
+            };
+            var why = string.IsNullOrWhiteSpace(Message) ? "" : Message;
+            if (!string.IsNullOrEmpty(Detail)) why = why.Length > 0 ? $"{why}({Detail})" : Detail;
+            if (what.Length == 0) return why.Length > 0 ? why : $"出错了({Code})";
+            return why.Length > 0 && why != what ? $"{what} —— {why}" : what;
+        }
+    }
 }
 
 /// <summary>
@@ -165,7 +189,9 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
                             Str(err, "code") ?? "E_INTERNAL",
                             Str(err, "msg") ?? "核心层报错",
                             err.ValueKind == JsonValueKind.Object
-                                && err.TryGetProperty("retryable", out var r) && r.GetBoolean()));
+                                && err.TryGetProperty("retryable", out var r) && r.GetBoolean(),
+                            // ★ detail 以前直接丢了。它装的常常正是「到底怎么了」那一句。
+                            Str(err, "detail")));
                     }
                     return;
                 }

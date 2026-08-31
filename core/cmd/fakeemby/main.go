@@ -28,9 +28,13 @@ import (
 // clip 起播时真正吐出去的文件。空 = 播放自检跳过。
 var clip *string
 
+// reject 登录一律回 401。
+var reject *bool
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
 	clip = flag.String("clip", "", "起播时回放的本地视频文件")
+	reject = flag.Bool("reject", false, "登录一律回 401(验错误提示用)")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -40,8 +44,13 @@ func main() {
 		writeJSON(w, map[string]any{"ServerName": "自检用假服务器", "Version": "4.9.5", "Id": "fake-1"})
 	})
 
-	// 登录
+	// 登录。★ -reject 让它回 401,用来验「密码不对」显示成什么 ——
+	// 这条路曾经显示成「网络不通,可以重试」,用户明明有网。
 	mux.HandleFunc("/Users/AuthenticateByName", func(w http.ResponseWriter, r *http.Request) {
+		if *reject {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		writeJSON(w, map[string]any{
 			"AccessToken": "fake-token",
 			"User":        map[string]any{"Id": "u1", "Name": "自检用户"},

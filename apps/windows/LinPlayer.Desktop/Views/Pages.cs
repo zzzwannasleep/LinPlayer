@@ -181,6 +181,18 @@ public sealed class AddServerPage : PageBase
             },
         };
 
+        // 真机自检:LP_SELFCHECK_PAGE=login:<地址>|<用户名>|<密码> 直接填好并点登录。
+        // ★ 不能靠 SendKeys —— 焦点落在哪儿不确定,实测一个字符都没进去。
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE") is { } sc && sc.StartsWith("login:"))
+        {
+            var parts = sc["login:".Length..].Split('|');
+            server.Text = parts.ElementAtOrDefault(0) ?? "";
+            user.Text = parts.ElementAtOrDefault(1) ?? "";
+            pass.Text = parts.ElementAtOrDefault(2) ?? "";
+            AttachedToVisualTree += (_, _) => Dispatcher.UIThread.Post(() =>
+                login.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)));
+        }
+
         Content = new Border
         {
             Padding = new Thickness(24),

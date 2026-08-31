@@ -29,7 +29,7 @@ func RegisterCommands(version string) {
 			}
 			out, err := fn(ctx, s, args)
 			if err != nil {
-				return nil, &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
+				return nil, classify(err)
 			}
 			return out, nil
 		})
@@ -173,7 +173,7 @@ func RegisterCommands(version string) {
 		}
 		_, res, err := defaultClient.Login(ctx, server, user, str(args, "password"), dev)
 		if err != nil {
-			return nil, &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
+			return nil, classify(err)
 		}
 		// ★ 登录成功才把这台服务器放进图片通道的白名单(SPEC §6)。
 		//   漏了这一步的表现是**登录进去一张封面都没有**,而命令全都正常 ——
@@ -278,6 +278,32 @@ func RegisterCommands(version string) {
 		blocklist.Set(id, str(args, "name"), on)
 		return map[string]any{"id": id, "blocked": on}, nil
 	})
+}
+
+// classify 把出网错误分到正确的错误码上。
+//
+// ★★ 原来这里**一律** E_NETWORK,而 UI 对 E_NETWORK 只显示「网络不通,可以重试」——
+// 密码错、token 过期、地址打错、证书不认,用户看到的全是「没网」。
+// 用户 2026-08-31 实测撞上:「我登陆了 Emby 服务器一直提示没网了,实际上有网络」。
+//
+// ★ 三条判据:
+//   - 401/403 是**认证**问题,不是网络问题,而且**不该标 Retryable** ——
+//     密码不对时重试一百次也还是不对。
+//   - 其余非 2xx 是服务器在说话,说明**网络是通的**,标成 E_NETWORK 是误导。
+//   - 只有连不上(DNS / 拒绝连接 / 超时 / TLS 握手失败)才是 E_NETWORK。
+//
+// 无论哪一类,`Msg` 都带上真实原因 —— UI 那边负责把它显示出来。
+func classify(err error) error {
+	switch code := StatusOf(err); {
+	case code == 401 || code == 403:
+		return &bus.Err{Code: bus.EAuth, Msg: err.Error()}
+	case code == 404:
+		return &bus.Err{Code: bus.ENotFound, Msg: err.Error()}
+	case code != 0:
+		// 服务器回了话(5xx 之类)—— 网络是通的,可以重试
+		return &bus.Err{Code: bus.EInternal, Msg: err.Error(), Retryable: true}
+	}
+	return &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
 }
 
 func str(a map[string]any, k string) string {
