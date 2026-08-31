@@ -37,6 +37,7 @@ Swift/SwiftUI(Apple,后置)。**
 | `SOURCES.md` | 媒体源抽象、19 个后端、登录逆向与签名算法 |
 | `PLUGINS.md` | 插件宿主契约(`ctx.*` API、manifest、权限、贡献点) |
 | `UI_LESSONS.md` | 前端经验甄别:哪些换 UI 框架后依然成立、哪些是浏览器/架构包袱 |
+| `PORTING_TRAPS.md` | **Rust → Go 的等价性陷阱**:两边都编译通过、单测都绿、但输出不一样的那类 |
 
 > 另见仓库根的 [`docs/lessons/`](../lessons/) —— 按领域整理的**历史踩坑全集**(123 条)。
 > `knowledge/` 是「这块该怎么做」,`lessons/` 是「以前在这块栽过什么」。
