@@ -20,6 +20,7 @@ func RegisterCommands(version string) {
 	registerPrefsCommands(version)
 	registerTransport()
 	registerWarmCommands()
+	registerSubtitleCommands()
 
 	bus.Register("debug.mpvProp", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		name, _ := args["name"].(string)

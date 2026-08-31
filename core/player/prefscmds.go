@@ -182,7 +182,22 @@ func registerPrefsCommands(version string) {
 		}
 		// ★ 不报错:没刮削章节的库返回空表,两个功能都自动静默不工作 ——
 		//   那是**正常情况**,不该让播放页弹红字。
-		return prefsClient.ChapterInfoOf(ctx, sess, id, runtime, w), nil
+		info := prefsClient.ChapterInfoOf(ctx, sess, id, runtime, w)
+		/* ★★ 用户关了开关时这里就该恒为 null —— **调用方不必再判一次开关**。
+		   判两次早晚判岔:一边按核心层给的区间跳、一边按自己那份开关决定要不要跳,
+		   两处状态一不同步就是「关了还在跳」或者「开了不跳」。 */
+		pf := config.Current().PrefsOf()
+		if !pf.SkipIntro {
+			info.Intro = nil
+		}
+		if !pf.SkipOutro {
+			info.Outro = nil
+		}
+		return map[string]any{
+			"chapters": info.Chapters, "intro": info.Intro, "outro": info.Outro,
+			// 缩略图开关(关着时调用方别去加载章节图,白费流量)
+			"thumbs": pf.PreviewThumbs,
+		}, nil
 	})
 }
 

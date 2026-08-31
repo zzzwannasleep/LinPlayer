@@ -792,6 +792,14 @@
 > `prefs.preloadCancel` 接线,代理句柄改成**共享复用**。**共 97 条命令。**
 > `player.play` 的 ponytail 只剩两段(Trakt·Bangumi / 插件 onPlay)。
 >
+>
+> **2026-08-31 十一续:**`player.*` 再落 9 条(setSubStyle / setSecondarySub /
+> setSecondarySubOpts / screenshot / get·setScreenshotDir / get·setMpvConf / opts)。
+> **共 106 条命令。**
+>
+> 顺带修了 `player.chapterInfo` 的一处移植漏项:Rust 侧**关了开关时区间恒为 null**
+> (调用方不必再判一次),我第一版把这层去掉了 —— 判两次早晚判岔。
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/
