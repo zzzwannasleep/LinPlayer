@@ -37,6 +37,21 @@ FAKE=$!
 trap 'kill $FAKE 2>/dev/null || true' EXIT
 for _ in $(seq 30); do curl -s "http://127.0.0.1:$PORT/System/Info/Public" >/dev/null && break; sleep 0.2; done
 
+# ★★ LP_FRESH=1:**不灌账号,走真的登录那条路**。
+#
+#   一直灌 config.json 起的代价:11 个页面全验过了,唯独「登录成功之后要把账号
+#   写进配置」这一环从来没被走过 —— 而它漏了的表现是「登录进去了,
+#   但整个应用当作你没登录」。2026-08-31 用户实测撞上,原话
+#   「进去了但是还是不行,提示缺少 server-id」。
+#
+#   预置状态跑得快,但**跑不到状态是怎么来的那条路**。两条都要有。
+if [ "${LP_FRESH:-}" = "1" ]; then
+  echo "== 4/5 不灌账号 —— 走真的登录(LP_FRESH=1)=="
+  rm -rf "$BIN/userdata"
+  mkdir -p "$BIN/userdata"
+  PAGE="login:http://127.0.0.1:$PORT|u1|p"
+else
+
 echo "== 4/5 灌一个账号(冷启动形态:配置里就有,本次会话没登录过)=="
 mkdir -p "$BIN/userdata"
 cat > "$BIN/userdata/config.json" <<JSON
@@ -57,6 +72,7 @@ cat > "$BIN/userdata/config.json" <<JSON
   "plugin_official_enabled": true
 }
 JSON
+fi
 
 echo "== 5/5 起 exe 截图 =="
 LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &

@@ -13,6 +13,7 @@ import (
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/net/localserve"
+	"linplayer/core/net/tlspolicy"
 )
 
 var defaultClient *Client
@@ -177,10 +178,42 @@ func RegisterCommands(version string) {
 		if err != nil {
 			return nil, classify(err)
 		}
+		/* ★★ 持久化账号 → 重启免登。**这一步漏了的表现极其阴**:
+		   认证成功、token 拿到了、白名单也登记了,但账号表是空的 ——
+		     account.listAccounts → 空;emby.currentSession → null(没有活跃账号);
+		     侧栏 → 还是「未连接」;按 server_id 找账号的命令 → 「没有这个服务器: 」
+		   也就是「登录成功了,但整个应用当作你没登录」,而且一步都不报错。
+		   用户 2026-08-31 实测撞上,原话:「进去了但是还是不行,提示缺少 server-id」。
+
+		   ★ 用 Upsert 不是 append:它保住用户编辑过的名称 / 备注 / 图标 / 线路 /
+		     active_line / 自签名开关,重登不会把这些冲掉;同时它自带 setActive,
+		     所以新登录的账号会成为活跃账号(currentSession 靠的就是这个)。 */
+		c := config.Current()
+		acc := config.Account{
+			Server:   res.Server,
+			Token:    res.Token,
+			UserID:   res.UserID,
+			UserName: res.UserName,
+		}
+		// ★ 空密码**不存成空串** —— 那会让「有密码」和「没设过密码」分不清。
+		//   存它是给重新登录和插件的 emby.credentials 权限用的。
+		if pw := str(args, "password"); pw != "" {
+			acc.Password = &pw
+		}
+		// ponytail: 服务器图标默认取登录用户的 Emby 头像(黄金实现里首次添加时设)。
+		// 那要 server_batch.BuildIconURL,还没移植 —— 先留空,由前端回落默认图。
+		c.Upsert(acc)
+		if err := c.Save(); err != nil {
+			return nil, bus.NewErr(bus.EInternal, "配置保存失败: %v", err)
+		}
+
 		// ★ 登录成功才把这台服务器放进图片通道的白名单(SPEC §6)。
 		//   漏了这一步的表现是**登录进去一张封面都没有**,而命令全都正常 ——
 		//   很容易被误判成「图片接口坏了」。
 		localserve.AllowDefault(res.Server, http.Header{"X-Emby-Token": {res.Token}})
+		// ★ 自签名白名单也要跟着刷:新账号默认不放行,但这里和 account.commit
+		//   保持同一套动作,免得以后加了「登录时勾自签名」又漏一处。
+		tlspolicy.Set(c.InsecureHosts())
 		return res, nil
 	})
 
