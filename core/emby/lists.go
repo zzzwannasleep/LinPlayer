@@ -370,3 +370,25 @@ func (c *Client) getBytes(ctx context.Context, s *Session, u string) ([]byte, er
 	}
 	return io.ReadAll(resp.Body)
 }
+
+// FilterBlockedLibraries 媒体库列表的屏蔽过滤。**只有命令层调它。**
+//
+// ★ 缺省过滤,`includeBlocked=true` 才给全量 —— 只有媒体库页那份列表要全量:
+// 它是唯一能把库找回来解除屏蔽的地方,滤掉就成了**单向门**。
+// 2026-08-02 真发生过(用户屏蔽完两个库来问「那我怎么恢复呢」)。
+//
+// ★ 这里**不走** blocklist.IsBlocked(那条按 series_id / 名字比,是给条目用的):
+// 库没有 series_id,而「名字对得上」在库上是错的判据 —— 两台服务器上都叫
+// 「电影」的库是两个不同的库,按名字判会一屏两台一起屏蔽。
+func FilterBlockedLibraries(items []Item, includeBlocked bool) []Item {
+	if includeBlocked {
+		return items
+	}
+	out := items[:0]
+	for _, it := range items {
+		if !blocklist.IsBlockedID(it.ID) {
+			out = append(out, it)
+		}
+	}
+	return out
+}

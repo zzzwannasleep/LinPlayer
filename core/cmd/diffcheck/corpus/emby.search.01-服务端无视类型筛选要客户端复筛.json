@@ -1,0 +1,75 @@
+{
+  "name": "emby.search · 服务端无视 IncludeItemTypes 时靠客户端复筛兜底",
+  "note": "某 fork 带 SearchTerm 时把筛选参数一起忽略(2026-08-17 curl 实测,ParentId/Ids/NameContains 一并中招)。这条用例的上游就照那台的行为答:点名要 Movie,Series,它照样把 Episode 塞回来。只信服务端过滤 = 搜索浮层的「包括集」开关在那台上是个摆设,而且不报错。另外验一条:屏蔽名单在 fetchItems 那条路上生效,搜索结果里也要滤掉。",
+  "provenance": "crates/core/src/emby.rs:1270 filter_types() 的文档注释 + 同文件 search()",
+  "blocklist": [
+    { "id": "blocked-movie", "name": "", "at": 0 }
+  ],
+  "upstream": [
+    {
+      "path": "/Users/u/Items",
+      "status": 200,
+      "body": "{\"Items\":[{\"Id\":\"m1\",\"Name\":\"电影甲\",\"Type\":\"Movie\"},{\"Id\":\"e1\",\"Name\":\"第 3 集\",\"Type\":\"Episode\",\"SeriesName\":\"剧乙\",\"SeriesId\":\"s9\",\"IndexNumber\":3,\"ParentIndexNumber\":1},{\"Id\":\"blocked-movie\",\"Name\":\"被屏蔽的电影\",\"Type\":\"Movie\"},{\"Id\":\"s1\",\"Name\":\"剧乙\",\"Type\":\"Series\",\"IsFolder\":true}],\"TotalRecordCount\":4}"
+    }
+  ],
+  "command": "emby.search",
+  "args": {
+    "query": "甲",
+    "types": ["Movie", "Series"],
+    "limit": 50
+  },
+  "expect": [
+    {
+      "id": "m1",
+      "name": "电影甲",
+      "type_": "Movie",
+      "is_folder": false,
+      "has_primary": false,
+      "runtime_secs": 0,
+      "resume_secs": 0,
+      "series_name": null,
+      "episode_no": null,
+      "season_no": null,
+      "video_height": null,
+      "bitrate": null,
+      "size_bytes": null,
+      "played": false,
+      "unplayed_item_count": 0,
+      "genres": [],
+      "year": null,
+      "rating": null,
+      "provider_ids": {},
+      "presentation_unique_key": null,
+      "path": null,
+      "series_id": null,
+      "date_updated": null,
+      "sort_name": null
+    },
+    {
+      "id": "s1",
+      "name": "剧乙",
+      "type_": "Series",
+      "is_folder": true,
+      "has_primary": false,
+      "runtime_secs": 0,
+      "resume_secs": 0,
+      "series_name": null,
+      "episode_no": null,
+      "season_no": null,
+      "video_height": null,
+      "bitrate": null,
+      "size_bytes": null,
+      "played": false,
+      "unplayed_item_count": 0,
+      "genres": [],
+      "year": null,
+      "rating": null,
+      "provider_ids": {},
+      "presentation_unique_key": null,
+      "path": null,
+      "series_id": null,
+      "date_updated": null,
+      "sort_name": null
+    }
+  ]
+}

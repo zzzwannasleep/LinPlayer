@@ -237,6 +237,8 @@ func fromRaw(r rawItem) Item {
 type Client struct {
 	HTTP *http.Client
 	UA   string
+	// Version 只给 X-Emby-Authorization 的 Version 字段用(UA 是另一条道,别复用)
+	Version string
 }
 
 // NewClient 造一个默认客户端。
@@ -246,8 +248,9 @@ type Client struct {
 // 空闲超时要在 net 层实现(TODO C33)。
 func NewClient(version string) *Client {
 	return &Client{
-		HTTP: &http.Client{Timeout: 60 * time.Second},
-		UA:   "LinPlayer/" + version,
+		HTTP:    &http.Client{Timeout: 60 * time.Second},
+		UA:      "LinPlayer/" + version,
+		Version: version,
 	}
 }
 

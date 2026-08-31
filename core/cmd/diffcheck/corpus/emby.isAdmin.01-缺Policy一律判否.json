@@ -1,0 +1,15 @@
+{
+  "name": "emby.isAdmin · 缺 Policy / 缺字段一律判否",
+  "note": "宁可少给按钮。这个位不从登录响应里取:配置里存下来的老账号根本不会再走一次 login,那样升级后老账号会永远判成非管理员(菜单静默不出现,还以为是权限没给)—— 所以每次都打 /Users/{id}。这条用例的上游回的就是一个没有 Policy 的用户对象。",
+  "provenance": "crates/core/src/emby.rs:974 admin_flag() + :958 is_admin()",
+  "upstream": [
+    {
+      "path": "/Users/u",
+      "status": 200,
+      "body": "{\"Id\":\"u\",\"Name\":\"某用户\"}"
+    }
+  ],
+  "command": "emby.isAdmin",
+  "args": {},
+  "expect": false
+}

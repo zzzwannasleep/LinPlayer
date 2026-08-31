@@ -33,7 +33,18 @@ func RegisterCommands(version string) {
 	}
 
 	list("emby.views", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
-		return defaultClient.Views(ctx, s)
+		v, err := defaultClient.Views(ctx, s)
+		if err != nil {
+			return nil, err
+		}
+		/* 屏蔽掉的媒体库不出现在**列表里**(首页的媒体库轨、各库「最新」行、侧栏)。
+		   ★ 缺省过滤,`include_blocked=true` 才给全量 —— 只有媒体库页那份列表要全量:
+		     它是唯一能把库找回来解除屏蔽的地方,滤掉就成了单向门。
+		   ★ 这里**不走**条目那条屏蔽判定(它按 series_id / 名字比):
+		     库没有 series_id,而「名字对得上」在库上是错的判据 —— 两台服务器上都叫
+		     「电影」的库是两个不同的库,按名字判会一屏两台一起屏蔽。 */
+		inc, _ := a["include_blocked"].(bool)
+		return FilterBlockedLibraries(v, inc), nil
 	})
 	list("emby.listLatest", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		return defaultClient.Latest(ctx, s, str(a, "parent_id"), intArg(a, "limit", 16))
@@ -78,6 +89,78 @@ func RegisterCommands(version string) {
 			intArg(a, "start_index", 0), intArg(a, "limit", 30))
 	})
 
+	// ---- 搜索 / 相似 / 演职员 ----
+	list("emby.search", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		// ★ types 缺省 = 全要(不是一个都不要);「包括集」开关关着时前端显式传 Movie,Series
+		return defaultClient.Search(ctx, s, str(a, "query"), strList(a, "types"),
+			intArg(a, "limit", 50), str(a, "parent_id"))
+	})
+	list("emby.similarItems", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.Similar(ctx, s, str(a, "item_id"), intArg(a, "limit", 12))
+	})
+	list("emby.personDetail", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.Person(ctx, s, str(a, "person_id"))
+	})
+	list("emby.personItems", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.PersonItems(ctx, s, str(a, "person_id"), intArg(a, "limit", 60))
+	})
+
+	// ---- 收藏 / 已看 ----
+	// ★ 返回体带上刚设成什么:前端拿它对账自己的乐观更新,而不是各自记一份状态
+	list("emby.setFavorite", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		fav, _ := a["fav"].(bool)
+		if err := defaultClient.SetFavorite(ctx, s, str(a, "item_id"), fav); err != nil {
+			return nil, err
+		}
+		return map[string]any{"item_id": str(a, "item_id"), "fav": fav}, nil
+	})
+	list("emby.setPlayed", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		played, _ := a["played"].(bool)
+		if err := defaultClient.SetPlayed(ctx, s, str(a, "item_id"), played); err != nil {
+			return nil, err
+		}
+		return map[string]any{"item_id": str(a, "item_id"), "played": played}, nil
+	})
+
+	// ---- 管理员动作 ----
+	list("emby.isAdmin", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.IsAdmin(ctx, s)
+	})
+	list("emby.refreshItem", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		full, _ := a["full"].(bool)
+		return nil, defaultClient.RefreshItem(ctx, s, str(a, "item_id"), full)
+	})
+	list("emby.scanLibraries", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return nil, defaultClient.ScanAllLibraries(ctx, s)
+	})
+
+	// ★ login 单列:它**没有会话**(会话就是它产出的),走不了 list() 的取会话那步。
+	//   密码只在这一处出现,**不进日志、不进事件、不进错误串** —— 错误只说 HTTP 码。
+	bus.Register("emby.login", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
+		server, user := str(args, "server"), str(args, "username")
+		if server == "" || user == "" {
+			return nil, bus.NewErr(bus.EInvalid, "缺少 server 或 username")
+		}
+		dev := str(args, "device_id")
+		if dev == "" {
+			// 设备 ID 必须**持久**:每次换一个会把服务器的设备列表刷满,续播会话也对不上。
+			// ponytail: 迁移期先由调用方传;接进 core/config 之后改成核心层自己存一个。
+			return nil, bus.NewErr(bus.EInvalid, "缺少 device_id")
+		}
+		_, res, err := defaultClient.Login(ctx, server, user, str(args, "password"), dev)
+		if err != nil {
+			return nil, &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
+		}
+		return res, nil
+	})
+
+	// ★ logout **尽力而为**:实测某 fork 该端点 404 且 token 登出后仍可用,
+	//   所以它的失败**不能**挡住本地删账号 —— 这里永远返回成功,只把结果写进返回体。
+	list("emby.logout", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		err := defaultClient.Logout(ctx, s)
+		return map[string]any{"server_ok": err == nil}, nil
+	})
+
 	// ★ counts 单列不走 list():这个端点在某些 fork 上是 404,
 	//   调用方**必须容忍它失败** —— 统计条是锦上添花,不该让首页整个报错。
 	//   所以它的错误码是 E_UNSUPPORTED(信息,UI 静默降级)而不是 E_NETWORK(红字 + 重试)。
@@ -112,6 +195,19 @@ func RegisterCommands(version string) {
 func str(a map[string]any, k string) string {
 	v, _ := a[k].(string)
 	return v
+}
+
+// strList 取一个字符串数组参数。**空 / 缺省一律返回 nil** ——
+// 下游把 nil 当「没点名 = 全要」,把空数组当同一件事,别在这里造出区别。
+func strList(a map[string]any, k string) []string {
+	raw, _ := a[k].([]any)
+	var out []string
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func intArg(a map[string]any, k string, def int) int {

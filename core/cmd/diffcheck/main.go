@@ -132,6 +132,29 @@ var runners = map[string]runner{
 		id, _ := args["series_id"].(string)
 		return c.Seasons(ctx, s, id)
 	},
+	"emby.search": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		q, _ := args["query"].(string)
+		pid, _ := args["parent_id"].(string)
+		var types []string
+		if raw, ok := args["types"].([]any); ok {
+			for _, v := range raw {
+				if x, ok := v.(string); ok {
+					types = append(types, x)
+				}
+			}
+		}
+		return c.Search(ctx, s, q, types, intArg(args, "limit", 50), pid)
+	},
+	"emby.person": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		id, _ := args["person_id"].(string)
+		return c.Person(ctx, s, id)
+	},
+	"emby.isAdmin": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		return c.IsAdmin(ctx, s)
+	},
 	"emby.items": func(ctx context.Context, server string, args map[string]any) (any, error) {
 		c, s := newSession(server, args)
 		pid, _ := args["parent_id"].(string)

@@ -608,6 +608,9 @@
 | `emby.resume · 只靠 series_id 命中` | 屏蔽判据 2(名字故意对不上,**只有 series_id 能生效**) | 停用 series_id 判据 → 只有这条红 |
 | `emby.resume · 跨服靠名字命中` | 屏蔽判据 3(id 全对不上,只有剧名对得上) | 停用剧名判据 → 只有这条红 |
 | `emby.detail · 背景图与演职人员排序` | **背景图在 `BackdropImageTags` 数组里不在 `ImageTags` 里**;Taglines 取第一条且空串折 null;导演优先且其余保持服务端顺序(必须稳定排序);空名字的演职人员要滤掉 | 读 `ImageTags["Backdrop"]` → 「has_backdrop 期望 true 实得 false」;不给导演提前 → 「people[0].id 期望 p-c 实得 p-a」;不滤空名字 → 「people 长度 3 vs 4」 |
+| `emby.search · 服务端无视类型筛选` | 某 fork 带 SearchTerm 时把 IncludeItemTypes/ParentId 一起忽略 —— **只信服务端过滤 = 「包括集」开关是个摆设且不报错** | 去掉客户端复筛 → 「长度 2 vs 3」 |
+| `emby.person · 生平与出生地为空` | 生平空是**常态**(空串,不是 null);出生地空串要折 null,否则前端画出一行空的「出生地:」 | 不折空串 → 「birth_place 期望 null 实得 ""」 |
+| `emby.isAdmin · 缺 Policy 判否` | 宁可少给按钮;而且这个位**不从登录响应取** —— 老账号不会再走 login,取了会永远判成非管理员 | 缺 Policy 判是 → 「期望 false 实得 true」 |
 | `emby.seasons · 没有季时返回空` | 有些剧没有季(单季番剧直接挂集),调用方要回落到「拿 seriesId 当 parent 拉集」—— 不回落是「点进去一集都没有」且不报错 | —— |
 
 > **两条 resume 用例是拆出来的,拆的理由值得记:**
@@ -658,7 +661,13 @@
 > views / listItemsPage / listLatest / listResume / listNextUp / listFavorites /
 > listCollections / counts / itemDetail / seriesSeasons / seasonEpisodes /
 > blockedList / setBlocked,共 **14 条命令**,9 条对账用例全绿且每条都有注入验证。
-> 剩下的 24 条(登录 / 搜索 / 相似 / 人物 / 上报 / 观看记录 / 排行榜…)未做。
+> **2026-08-31 续:**再落 12 条 —— login / logout / search / similarItems /
+> personDetail / personItems / setFavorite / setPlayed / isAdmin / refreshItem /
+> scanLibraries,外加 `emby.views` 补上命令层的 `include_blocked` 过滤
+> (之前只做了核心层的「不滤」,命令层那半漏了 = 屏蔽的库照样出现在首页)。
+> **共 26 条命令**,12 条对账用例 + 3 组 Go 单测,全绿。
+> 剩下的 12 条(相关:aggregate* / watchHistory* / ranking* / itemMedia /
+> reportProgress / getFilters / listItems / listRandom / currentSession / relogin)未做。
 
 - [ ] **C5** `core/emby` 主体 🔴
 - [ ] **C6** `core/media`:版本 / 音轨 / 字幕正则筛选
