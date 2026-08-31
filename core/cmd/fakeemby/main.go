@@ -81,9 +81,34 @@ func main() {
 			writeJSON(w, map[string]any{
 				"MovieCount": 128, "SeriesCount": 42, "EpisodeCount": 1580, "BoxSetCount": 6,
 			})
+		// 剧的分集:/Users/{uid}/Items?ParentId=s1&IncludeItemTypes=Episode
+		case strings.Contains(p, "/Items") && r.URL.Query().Get("IncludeItemTypes") == "Episode":
+			eps := []map[string]any{}
+			for i := 1; i <= 12; i++ {
+				e := item(fmt.Sprintf("s1e%d", i), fmt.Sprintf("第 %d 集", i), "Episode")
+				e["SeriesName"] = "某部剧"
+				e["SeriesId"] = "s1"
+				e["IndexNumber"] = i
+				e["ParentIndexNumber"] = 1
+				e["RunTimeTicks"] = 14000000000
+				eps = append(eps, e)
+			}
+			writeJSON(w, page(eps...))
+
 		// 详情:/Users/{uid}/Items/{itemId}(尾段是具体 id,不是 Resume/Latest/Counts)
 		case detailID(p) != "":
 			id := detailID(p)
+			// s1 是剧,其余当电影 —— 详情页对这两种是**两张不同的版式**
+			if id == "s1" {
+				d := item("s1", "某部剧", "Series")
+				d["Overview"] = "自检用剧集简介。"
+				d["ProductionYear"] = 2023
+				d["Status"] = "Continuing"
+				d["ChildCount"] = 12
+				d["UserData"] = map[string]any{"IsFavorite": true}
+				writeJSON(w, d)
+				return
+			}
 			d := item(id, "某部电影", "Movie")
 			d["Overview"] = "自检用简介。这一段是拿来验「有值就画、没值不留空位」的。"
 			d["ProductionYear"] = 2024

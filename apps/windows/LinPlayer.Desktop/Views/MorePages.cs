@@ -115,23 +115,42 @@ public sealed class SettingsPage : PageBase
 {
     public SettingsPage(CoreClient core)
     {
-        var rows = new StackPanel { Spacing = 18, Children = { H1("设置") } };
+        // ★ 分组横向铺开(卡固定 720 宽):竖着排的话十来组要滚三屏,
+        //   而「设置里有什么」本身就得一眼看全。
+        var groups = new WrapPanel();
         var busy = Dim("加载中…");
-        rows.Children.Add(busy);
+        var rows = new StackPanel { Spacing = 18, Children = { H1("设置"), busy, groups } };
         Content = Scrolled(rows);
 
         _ = Task.Run(async () =>
         {
             try
             {
+                // ★ 各组**各拉各的**,一组失败不该把整页拖红 ——
+                //   有的组对应的命令在某些平台上就是没有的。
                 var p = await core.PrefsGetPrefs(new { });
                 var paths = await core.SystemDataPaths(new { });
+                var prefetch = await Safe(() => core.PrefsGetPrefetchSettings(new { }));
+                var preload = await Safe(() => core.PrefsGetPreloadSettings(new { }));
+                var writeback = await Safe(() => core.PrefsGetWritebackSettings(new { }));
+                var update = await Safe(() => core.PrefsGetUpdateSettings(new { }));
+
                 Dispatcher.UIThread.Post(() =>
                 {
                     rows.Children.Remove(busy);
-                    rows.Children.Add(TrackPrefs(core, p));
-                    rows.Children.Add(Playback(core, p));
-                    rows.Children.Add(Storage(core, paths));
+                    void Add(Control c)
+                    {
+                        c.Margin = new Thickness(0, 0, 18, 18);
+                        groups.Children.Add(c);
+                    }
+                    Add(TrackPrefs(core, p));
+                    Add(Playback(core, p));
+                    if (prefetch is { } pf) Add(SettingsSections.Prefetch(core, pf));
+                    if (preload is { } pl) Add(SettingsSections.Preload(core, pl));
+                    if (writeback is { } wb) Add(SettingsSections.Writeback(core, wb));
+                    if (update is { } up) Add(SettingsSections.Update(core, up));
+                    Add(SettingsSections.Blocked(core));
+                    Add(Storage(core, paths));
                 });
             }
             catch (Exception e)
@@ -139,6 +158,13 @@ public sealed class SettingsPage : PageBase
                 Dispatcher.UIThread.Post(() => busy.Text = $"加载失败:{LibraryPage.Advice(e)}");
             }
         });
+    }
+
+    /// <summary>拉一组设置,拉不到就返回 null —— 那一组不画,别把整页拖红。</summary>
+    private static async Task<JsonElement?> Safe(Func<Task<JsonElement>> f)
+    {
+        try { return await f(); }
+        catch { return null; }
     }
 
     private static Control TrackPrefs(CoreClient core, JsonElement p)
@@ -241,7 +267,7 @@ public sealed class SettingsPage : PageBase
 
     private static Control Card(string title, Control body) => new Border
     {
-        Classes = { "card" }, Padding = new Thickness(18), MaxWidth = 720,
+        Classes = { "card" }, Padding = new Thickness(18), Width = 620,
         HorizontalAlignment = HorizontalAlignment.Left,
         Child = new StackPanel { Spacing = 12, Children = { H2(title), body } },
     };
