@@ -52,6 +52,9 @@ scripts/           构建与门禁脚本
 
 | 干什么 | 命令 | 备注 |
 |---|---|---|
+| **拉工具链(新机器第一步)** | `bash scripts/fetch-toolchain.sh` | Go + C 编译器,版本与 sha256 钉在脚本里 |
+| **激活工具链** | `source scripts/env.sh` | PowerShell:`. .\scripts\env.ps1` |
+| **工具链自检** | `bash scripts/check-toolchain.sh` | 含反向注入,见 §2.2 |
 | 前端开发服务器 | `npm run dev` | |
 | 前端构建 | `npm run build` | |
 | **桌面出包(必做)** | `npm run pack` | 出绿色 zip + 解包测试目录 |
@@ -64,6 +67,34 @@ scripts/           构建与门禁脚本
 | 命令契约校验 | `python scripts/gen-commands.py --check` | |
 | 单元测试 | `cargo test` | |
 | 前端逻辑自检 | `npm run check:telemetry` / `check:shortcuts` / `check:lan` | 直跑真模块,不是副本 |
+
+### 2.2 项目级工具链(Go 侧)
+
+迁移期新增的 Go 工具链**不装进系统**,全部在 `.toolchain/` 下(已 gitignore,约 700 MB):
+
+```
+.toolchain/
+  go/        GOROOT(钉 go1.27.0)
+  zig/       cgo 用的 C 编译器(钉 0.16.0)
+  gopath/  gocache/  zigcache/     全部缓存
+```
+
+三条要知道的事:
+
+1. **Go 编 `c-shared`(核心层那个 `lpcore.dll`)必须走 cgo,cgo 要 gcc/clang 口径的编译器 ——
+   MSVC 不算。** 这台机器上原本一个都没有,所以工具链里必须带一个。
+   选 zig 是因为一个包同时能当 Windows 和 Linux 的 cc(核心层要出三平台产物),
+   且官方发布带 sha256、是纯 zip。**安卓那边不用它**,走已装的 NDK clang。
+2. **`GOTOOLCHAIN=local`。** 不许 Go 因为某个 `go.mod` 写了更高版本就自己下一个工具链 ——
+   那会静默换掉编译器,还说不清产物是谁编的。
+3. **「项目级」是有判据的,不是说法。** `check-toolchain.sh` 逐项断言
+   `GOROOT / GOPATH / GOMODCACHE / GOCACHE / GOENV / ZIG_*_CACHE` 都落在 `.toolchain/` 下 ——
+   这三处都实测抓到过默认往用户目录写。唯一挪不动的是 Go 的遥测标记
+   (`GOTELEMETRYDIR` 由操作系统用户配置目录推导,环境变量不认),
+   已用 `go telemetry off` 在那里留一个 14 字节的 "off" 塞子。
+
+自检的第 4 关是**反向注入**:把 `CC` 指到一个不存在的编译器,`c-shared` 构建必须变红。
+不做这一步,第 3 关可能压根没走 cgo —— 那就是条恒绿的假门禁(§4.1)。
 
 ### 2.1 「编译绿」不等于「做完了」
 

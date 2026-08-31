@@ -28,6 +28,23 @@ docs/tv-drafts.html
 docs/login-drafts.html
 scripts/pack-portable.ps1
 
+# --- SPIKE 的语料与产物(脚本现造,不入库)-------------------------------------
+# clip*.mp4 由 spikes/s1-2/mkclip.py 现造(4K60 那个 141MB);out/ 是截图与报告
+docs/go-migration/spikes/*.mp4
+docs/go-migration/spikes/s1-2/*.mp4
+docs/go-migration/spikes/s1-2/out/
+docs/go-migration/spikes/s1-2/AvaloniaProbe/bin/
+docs/go-migration/spikes/s1-2/AvaloniaProbe/obj/
+docs/go-migration/spikes/s2/out/
+docs/go-migration/spikes/s2/CsHost/bin/
+docs/go-migration/spikes/s2/CsHost/obj/
+docs/go-migration/spikes/s2/*.txt
+docs/go-migration/spikes/s3/*.exe
+
+# --- 项目级工具链(scripts/fetch-toolchain.sh 现拉,版本与 sha256 钉在脚本里)-------
+# Go + zig + 各自的缓存,700MB 起步。换机器重跑 fetch 脚本,不入库。
+.toolchain/
+
 # --- 密钥 / 凭据 -------------------------------------------------------------
 *.env
 *.env.local
