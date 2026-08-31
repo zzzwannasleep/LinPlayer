@@ -11,6 +11,43 @@
 
 ---
 
+## 进度总览(2026-08-31 盘点)
+
+> 口径:只数**带编号的条目**(N/S/B/D/C/U/W/L/X/T),不数下面的判据小项。
+> 数字是数出来的,不是估的 —— 复核办法写在每行的「怎么验」里。
+
+| 维度 | 完成 | 进行中 | 未开始 | 怎么验 |
+|---|---|---|---|---|
+| 条目总数 | **38** | 12 | 186 | 数本文件的 `- [x] **ID**` |
+| 命令契约 | **106 / 271**(39%) | — | 165 | `bash scripts/check-bindings.sh` |
+| 桌面页面 | **8.5 / 18** | — | 9.5 | `UI_PC.md` §7 逐页对 `apps/windows/.../Views/` |
+| 差分对账 | **18 条全绿** | — | — | `bash scripts/check-core.sh` 第 5 关 |
+
+**按端看,进度是极不平均的 —— 这是有意的:**
+
+| 端 | 状态 |
+|---|---|
+| **Windows** | 🟢 出得了绿色包,真 Emby 服上跑通「登录 → 首页 → 库 → 详情 → 播放」全链 |
+| **Linux** | ⚪ **一行没写**(L1–L11 全未开始;S1.4 的 X11/Wayland spike 也没跑) |
+| **Android / TV** | ⚪ **一行没写**(B2.1 / U1.x 全未开始) |
+
+**已注册命令的分布**(`build/_audit/go.txt`):
+
+| 命名空间 | 已注册 / 契约 |
+|---|---|
+| `emby.*` | 36 / 40 |
+| `player.*` | 34 / 39 |
+| `prefs.*` | 16 / 25 |
+| `account.*` | 11 / 21 |
+| `system.*` | 9 / 13 |
+| `source.*` / `plugin.*` / `danmaku.*` / `sync.*` / `download.*` / `translate.*` / `anirss.*` | **0 / 133** |
+
+★ 最后一行是**剩余工作量的大头**:133 条命令、7 个功能域一个都没开始。
+桌面 UI 缺的 7 个页面(文件浏览 / 影视目录 / 下载 / 插件市场 / 排行榜 / 日历 / Ani-RSS)
+全部卡在这里 —— **不是 UI 欠的**。
+
+---
+
 ## 0. 迁移必带清单(现网不修 —— 用户 2026-08-30 决定)
 
 调研中从代码里挖出的 17 条缺陷。**用户决定:现网一条都不修,迁移完自然就没了。**
@@ -686,10 +723,13 @@
 
 ### 4.1 基础
 
-- [ ] **C1** `core/config` + `core/paths` 🔴
-  - 判据:真实旧 `config.json`(脱敏)读进来再写出去语义等价;
-    **先红**:故意改一个字段名,测试变红
-  - 特别核对:`SourceKind` 小写、`active_line` 是下标、密码字段不进日志
+- [x] **C1** ✅ `core/config` + `core/paths`(2026-08-31)
+  - 判据:真实旧 `config.json`(脱敏)读进来再写出去语义等价 ✅
+    —— `TestSave_未接的字段原样保留` / `TestPrefs往返一致` / `TestAccount未接的键不丢`
+  - 判据:`TestSave_原子写不留临时文件` / `TestLoad_文件坏了必须报错而不是返回空配置`
+  - 特别核对:`SourceKind` 小写 ✅ `TestSourceKind线上小写`;
+    `active_line` 是下标 ✅ `TestDirectLineURL越界`
+  - ⚠️ 「密码字段不进日志」**没有独立测试** —— 这条还没验(见 T14)
 - [ ] **C2** `core/httpx` 🔴
   - 判据:三个客户端的**空闲超时**都设了(不是整体超时);
     UA 三分口径有测试钉住(Emby / 预取 / 默认不许串)
@@ -823,13 +863,24 @@
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/
 > currentSession、relogin(账号存储,等 core/config)。
 
-- [ ] **C5** `core/emby` 主体 🔴
-- [ ] **C6** `core/media`:版本 / 音轨 / 字幕正则筛选
-  - 判据:**核心层返回 preferred 标记**;三端不得各自回落 `versions[0]`;
-    判据是 mpv 命令行里的 MediaSourceId,不是命令入参
-- [ ] **C7** `core/blocklist`
-  - 判据:屏蔽单条 / 屏蔽整库两条路径分别验;媒体库网格**不滤**(否则解除不了)
-- [ ] **C8** `core/history` + 跨服续播
+- [~] **C5** `core/emby` 主体 —— **36 / 40 条命令**(2026-08-31)
+  - 还差 4 条,每条都压着一个没移植的模块:
+    `rankingCategories` / `rankingFetch`(等 C10)、
+    `watchHistoryRestoreCandidate` / `watchHistoryScanRestore`(等跨服续播那半)
+- [x] **C6** ✅ `core/media`:版本 / 音轨 / 字幕正则筛选(2026-08-31)
+  - 判据:**核心层返回 preferred 标记** ✅ `emby/mediainfo.go` 的 `Preferred` 字段;
+    `versionRegex` 只标不筛(mediainfo.go:129)
+  - 判据:对账用例 `emby.itemMedia.01-正则标中的那条必须是真会被播的那条`
+    钉的就是「标出来的那条 == 真起播用的 MediaSourceId」
+- [~] **C7** `core/blocklist` —— 实现全在,判据只覆盖了一半
+  - 判据:媒体库网格**不滤** ✅ 对账用例 `emby.views.01-屏蔽库不过滤`;
+    裸数组那条 ✅ `emby.latest.01-裸数组也要过滤屏蔽`
+  - ⚠️ `core/blocklist` 这个包**一个单测都没有**;「屏蔽整库」那条路径也没有独立用例
+- [~] **C8** `core/history` ✅ + 跨服续播**命令层还差两条**
+  - 已落:归一化 / canonicalKey / 指纹 / 置信度 + `watch_history.json` 读写 +
+    续播位置决策,并且**接进了起播链**(`player.play` 真的会算跨服最大进度)
+  - 对账用例 `emby.resume.01-只靠seriesId命中` / `emby.resume.02-跨服靠名字命中`
+  - ⚠️ 还差:`account.getCrossServerResume` / `account.setCrossServerResume` 没注册
 - [ ] **C9** `core/serverbatch` + 深链
 - [ ] **C10** `core/ranking`
   - 判据:fetch 错误不吞,以 `E_UPSTREAM` 上抛
@@ -938,25 +989,28 @@
   - ⚠️ **测速引擎(`prefs.cfSpeedTest`)没做** —— 那是另外 600 行
     (CF IP 段抽样 + 延迟/丢包筛选 + HTTPS 下载测速)。没有它的话优选 IP 得用户手填,
     功能是残的。留作下一批
-- [ ] **C29** `core/net/localserve` 完整化(所有路由 + 安全约束)
+- [~] **C29** `core/net/localserve` —— 只有 `/img` 那条路由(见 B1.7)
+  - ⚠️ 其余路由(逃生舱资源 `/plugin/<id>/*`、SMB 本地 Range 桥、companion 网页)
+    都还没有 —— 它们各自等着 C44 / C13 / C30
 - [ ] **C30** `core/companion`
 
 ### 4.5 播放器
 
-- [ ] **C31** `core/player` 完整化 🔴
+- [~] **C31** `core/player` —— **34 / 39 条命令**;下面 13 条判据过了 6 条
   - 判据(逐条):
-    - [ ] 外挂字幕等 `FILE_LOADED` 且在事件线程挂载,`sub-add` 返回值不许吞
-    - [ ] 判播完读 `eof-reached`(`keep-open` 下 `END_FILE` 永不发)
-    - [ ] ASS 字幕字号用 `sub-scale` 不用 `sub-font-size`
-    - [ ] seek 闩不拿粘性值和目标比
-    - [ ] `FILE_LOADED` 前的 seek 排队不丢
-    - [ ] 换片时 `ready` 在 play 之前复位
-    - [ ] 302 跳转流删 `multiple_requests=1`
-    - [ ] 双显卡钉独显(Windows)
-    - [ ] `vd=-magicyuv` 拉黑(CVE-2026-8461)
-    - [ ] 安卓 `sub-fonts-dir=/system/fonts`
-    - [ ] 显式设 `gpu-shader-cache-dir`
-    - [ ] 日志级别由环境变量门控(`log-file` 会把 mpv+ffmpeg 钉在 debug 级)
+    - [x] 外挂字幕等 `FILE_LOADED` 且在事件线程挂载,`sub-add` 返回值不许吞 —— `player/playback.go:29-50`
+    - [x] 判播完读 `eof-reached`(`keep-open` 下 `END_FILE` 永不发) —— `player/transport.go:236`
+    - [x] ASS 字幕字号用 `sub-scale` 不用 `sub-font-size` —— `player/subtitle.go:191`
+    - [ ] seek 闩不拿粘性值和目标比 —— **没做**(`player.seek` 直接下命令,没有闩)
+    - [ ] `FILE_LOADED` 前的 seek 排队不丢 —— **没做**(只有外挂字幕排了队)
+    - [ ] 换片时 `ready` 在 play 之前复位 —— **没做**(核心层里没有 ready 这个概念)
+    - [x] 302 跳转流删 `multiple_requests=1` —— 核心层从头到尾没设过这个选项(grep 零命中)
+    - [ ] 双显卡钉独显(Windows)—— **没做**,而且这条**换宿主后要重做**:
+      导出符号现在在 Rust 的 `apps/desktop/build.rs` 里,C# 的 exe 上没有
+    - [x] `vd=-magicyuv` 拉黑(CVE-2026-8461) —— `player/player.go:153` —— **N1 在 Go 版已经补回来了**
+    - [ ] 安卓 `sub-fonts-dir=/system/fonts` —— 没做(安卓端整体还没开工)
+    - [ ] 显式设 `gpu-shader-cache-dir` —— **没做**(grep 全仓零命中)
+    - [x] 日志级别由环境变量门控(`log-file` 会把 mpv+ffmpeg 钉在 debug 级) —— `player/player.go:157` `LP_MPV_LOG`
   - **删除**:独立顶层窗口对齐、z 序钩子、`WM_WINDOWPOSCHANGED` 子类化、
     `set_overlay_top_inset`、`is_overlay_host`(约 700 行)
 
@@ -1006,7 +1060,9 @@
 
 - [ ] **C49** `COMMANDS.md` 全部 266 条标 ✅
 - [ ] **C50** 差分对账全绿且在 CI 常驻
-- [ ] **C51** 四方契约测试(COMMANDS ↔ Go 注册表 ↔ 三端绑定)通过
+- [~] **C51** 四方契约测试 —— **脚本已建成且常绿**(`scripts/check-bindings.sh`)
+  - C# / Kotlin 与 `COMMANDS.md` **逐条相等**;Go 侧按**子集**判(野命令即红)
+  - 等 Go 侧移完 271 条时把子集判改成相等 —— 这条写在 B3 出口里
 
 ---
 
@@ -1086,9 +1142,11 @@
 
 #### 地基(在任何一页之前做完)
 
-- [ ] **U2.0a** `Tokens.axaml`:两套主题的色 / 字 / 间距 / 圆角 / 阴影 / 滚动条
-  - 判据:值与 `UI_PC.md` §1.1 逐项一致;**浅色下玻璃底控件不是深底深字**
-  - 判据:两套主题的对比度自动检查(正文 ≥ 4.5:1,次要 ≥ 3:1)
+- [~] **U2.0a** `Tokens.axaml` —— 两套主题的**色**已落,其余没落
+  - `Theme/Tokens.axaml`(66 行)`ThemeDictionaries` 里 Dark / Light 两套,
+    值照抄 `ui/shared/tokens.css`
+  - ⚠️ 字 / 间距 / 圆角 / 阴影 / 滚动条**还没抽成 token**(散在各页里)
+  - ⚠️ 对比度自动检查**没做**
 - [ ] **U2.0b** 动效 token + 转场目录(`UI_PC.md` §2)
   - 判据:只有 `dur-fast/med/slow` 三档,代码里搜不到别的时长常量
   - 判据:**跟随系统"减少动画"生效**
@@ -1297,8 +1355,10 @@
 - [ ] **T1b** 生成器接进 CI
   - 判据:PR 里加了命令但没重跑生成器,CI 红
 - [ ] **T1c** 生成器切到 Go 注册表(阶段 3 中)
-- [ ] **T1d** 四方比对:`COMMANDS.md` ↔ Go 注册表 ↔ 三端绑定
-  - 判据:任何一方缺一条即红
+- [x] **T1d** ✅ 四方比对 —— `scripts/check-bindings.sh`(2026-08-31)
+  - 判据:C# / Kotlin 缺一条即红 ✅(两边都要求与 `COMMANDS.md` 逐条相等)
+  - Go 侧**有意**按子集判:野命令(三端调不到的)即红,没移植的不红。
+    迁移完成时改成相等 —— 见 C51 / B3
 - [ ] **T1e** `system.capabilities` 自洽性测试
   - 判据:`features.X == false` ⟺ 对应命令在 `unsupported` 里
 - [ ] **T2** CI:编译期凭据门禁
@@ -1314,25 +1374,29 @@
 - [ ] **T7** 提交红线扫描
   - 判据:推前扫 IP / 域名 / 端口 / 账号 / 密码 / token;
     这类值只放不进版本控制的配置文件,仓库里只留 `*.example`
-- [ ] **T9** 核心层 panic 边界(`SPEC.md` §5.10) 🔴
-  - 判据:注入 `debug.panic` 命令 → ① 进程存活 ② 该 seq 收到 `E_INTERNAL` ③ 日志里有栈
-  - 判据:**先把 recover 注释掉确认这条测试会红**(否则它测的是"没 panic")
-- [ ] **T10** 事件队列背压(`SPEC.md` §5.11)
-  - 判据:模拟宿主停止消费 10 s,`result` 一条不丢、`player.status` 只留最新、
-    `log` 丢弃计数正确透出
-  - 判据:队列非空且 5 s 没被取过时写 warn 日志
-- [ ] **T11** ABI 版本协商(`SPEC.md` §5.0)
-  - 判据:三端绑定里的 `LP_ABI` 与核心层常量比对,不等即红
-  - 判据:拿一个故意改了 ABI 的库启动,得到**明确报错**而不是崩溃
+- [x] **T9** ✅ 核心层 panic 边界(`SPEC.md` §5.10)—— 见 B1.5 / SPIKE-2
+  - 三条判据在 `tools/corecheck` 第 8 组里逐条断言,`check-core.sh` 第 4 关常跑
+  - **显式 panic 与运行时故障分成两条命令测**(只测前者会得到「recover 有效」的假结论)
+- [~] **T10** 事件队列背压 —— **实现全在,判据一条没验**
+  - 实现:`core/bus/queue.go` 按事件类分级(`classOf`)、`player.status` 合并、
+    日志丢弃计数、`watchStall` 5 s 停滞 warn、`queueCap = 1024`
+  - ⚠️ `core/bus` **一个 `_test.go` 都没有**;`corecheck` 只验了关停发 `eof` 那条。
+    「停止消费 10 s」这条压根没跑过 —— 别把「代码写了」当成「验过了」
+- [x] **T11** ✅ ABI 版本协商(`SPEC.md` §5.0)
+  - 判据:`corecheck` 第 1 组断言 `lp_abi_version() == 宿主编译期 LP_ABI` ✅
+  - 判据:`SimulateMismatch(abi+1)` 走的是**拒绝启动**那条路 ✅
+    (是在宿主侧模拟错配,不是真去改一份库的字节)
 - [ ] **T12** 出网规格落地(`SPEC.md` §14.1)
   - 判据:三条 UA 道**按行为验**(打本地测试服务器读 `User-Agent` 头),不比对常量
   - 判据:**空闲超时而不是整体超时** —— 构造一个"慢但一直在出字节"的上游,
     拉满 60 s 不许被判死;再构造一个"连上就不出字节"的上游,30 s 内必须失败
   - 判据:护栏测试共用全局超时值时**必须加锁串行**
-- [ ] **T13** 存储规格落地(`SPEC.md` §14.2)
-  - 判据:配置写入是**临时文件 → fsync → rename**;写到一半杀进程,重启后配置完好
-  - 判据:损坏的 `config.json` 被改名保留而**不是静默重置**
-  - 判据:`system.storageUsage` 各项与实际占用一致
+- [~] **T13** 存储规格落地(`SPEC.md` §14.2)—— 三条判据过了一条
+  - [x] 临时文件 → `Sync()` → rename ✅ `config/config.go:141-155`,
+        `TestSave_原子写不留临时文件` 钉住
+  - [~] 损坏的 `config.json`:现在是**报错**(`TestLoad_文件坏了必须报错而不是返回空配置`),
+        **还没做「改名保留」** —— 报错不等于留下现场
+  - [ ] `system.storageUsage` 还没有(只有 `system.cacheSize`)
 - [ ] **T14** 诊断包脱敏(`SPEC.md` §14.3)
   - 判据:构造含已知假凭据的配置,导出后断言那些字符串**一个都不出现**
   - 判据:**这条必须先红过**
