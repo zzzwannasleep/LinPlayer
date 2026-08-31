@@ -745,6 +745,19 @@
 > 差分对账新增 `SERVER` 占位符:取流那类命令返回里带完整 URL,而 mock 端口是随机的
 > —— 没有它这类用例根本没法写。
 >
+>
+> **2026-08-31 六续:**起播主链路打通 —— `player.play` 走真取流
+> (resolveStream → 应用播放偏好 → loadfile with start= → 等 FILE_LOADED 挂外挂字幕
+> → 上报 start),外加传输控制那批(seek / setPause / setSpeed / setVolume /
+> setMute / setHwdec / setAspectRatio / setSubDelay / setAudioDelay / setTrack /
+> addSubtitle / mpvCommand·Get·Set / status / tracks / stopPlayback)
+> 与上报三件套(`emby.reportProgress`)。**共 84 条命令。**
+>
+> ⚠️ `player.play` 里有六段 `ponytail:` 标着还没接的子系统(预加载取消 /
+> 多线程加载代理 / 跨服续播 / 观看记录上下文 / Trakt·Bangumi / 插件 onPlay),
+> 每段都写清了**缺了会怎样** —— 它们都不影响「能不能播出来」,
+> 但每一条都是「功能静默不工作」。
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/

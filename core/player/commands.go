@@ -18,17 +18,7 @@ import (
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands(version string) {
 	registerPrefsCommands(version)
-
-	bus.Register("player.play", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
-		path, _ := args["path"].(string)
-		if path == "" {
-			return nil, bus.NewErr(bus.EInvalid, "缺少 path")
-		}
-		if err := playFile(path); err != nil {
-			return nil, bus.NewErr(bus.EInternal, err.Error())
-		}
-		return map[string]any{"playing": path}, nil
-	})
+	registerTransport()
 
 	bus.Register("debug.mpvProp", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		name, _ := args["name"].(string)

@@ -46,6 +46,7 @@ typedef struct lp_gl_fbo { int fbo; int w; int h; int internal_format; } lp_gl_f
 extern void*    mpv_create(void);
 extern int      mpv_initialize(void*);
 extern int      mpv_set_option_string(void*, const char*, const char*);
+extern int      mpv_set_property_string(void*, const char*, const char*);
 extern int      mpv_command(void*, const char**);
 extern char*    mpv_get_property_string(void*, const char*);
 extern void     mpv_free(void*);
@@ -76,6 +77,10 @@ static int lp_rc_create(void **out, void *mpv, void *gpa, void *gpa_ctx) {
     return mpv_render_context_create(out, mpv, ps);
 }
 
+// mpv_event 的头两个字段就是 event_id 与 error(client.h 保证的布局)。
+// 只读 event_id,不碰后面的 union —— 那部分随版本变,读了就是在赌。
+static int lp_event_id(void *ev) { return ev ? *(int*)ev : 0; }
+
 static int lp_rc_render(void *rc, unsigned int fbo, int w, int h, int flip, int block) {
     lp_gl_fbo f; f.fbo = (int)fbo; f.w = w; f.h = h;
     f.internal_format = 0;  // 0 = 让 mpv 自己问 GL 要;宿主的 FBO 格式由宿主定
@@ -92,6 +97,7 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -174,9 +180,27 @@ func drainEvents(h unsafe.Pointer) {
 		}
 	}()
 	for !drainStop.Load() {
-		C.mpv_wait_event(h, 0.1)
+		ev := C.mpv_wait_event(h, 0.1)
+		if ev == nil {
+			continue
+		}
+		switch int(C.lp_event_id(ev)) {
+		case evFileLoaded:
+			onFileLoaded()
+		case evEndFile:
+			// ★ keep-open=yes 时 END_FILE **永远不发**(文件不卸载)。
+			//   判「播完」必须读 eof-reached 属性 —— 这是「播完不同步 Trakt/Bangumi」的根因。
+			//   这个分支留着只为文档:真走到这儿说明 keep-open 被谁改了。
+			bus.Logf("info", "mpv END_FILE(keep-open 下本不该出现)")
+		}
 	}
 }
+
+// mpv 事件 id(client.h)。只列我们真的处理的两个。
+const (
+	evFileLoaded = 6
+	evEndFile    = 7
+)
 
 // pumpStatus 4 Hz 推 player.status —— 高频状态事件,队列里会被原地合并(SPEC §5.11)。
 func pumpStatus() {
@@ -325,6 +349,49 @@ func waitRenderCtx(d time.Duration) bool {
 	}
 	return false
 }
+
+// command 发一条 mpv 命令。可变参数,自己管 C 字符串的生命周期。
+func command(args ...string) error {
+	mpvMu.Lock()
+	h := mpvH
+	mpvMu.Unlock()
+	if h == nil {
+		return errors.New("mpv 未就绪")
+	}
+	cargs := make([]*C.char, 0, len(args)+1)
+	for _, a := range args {
+		ca := C.CString(a)
+		defer C.free(unsafe.Pointer(ca))
+		cargs = append(cargs, ca)
+	}
+	cargs = append(cargs, nil)
+	if C.mpv_command(h, (**C.char)(unsafe.Pointer(&cargs[0]))) < 0 {
+		return fmt.Errorf("mpv 命令失败: %v", args)
+	}
+	return nil
+}
+
+// setProp 设一个 mpv 属性。
+//
+// ★ 失败只记日志不返回错误:这些属性有的在没在播时设不上(mpv 会拒),
+// 那是正常的,不该让调用方以为整件事失败了。
+func setProp(name, value string) {
+	mpvMu.Lock()
+	h := mpvH
+	mpvMu.Unlock()
+	if h == nil {
+		return
+	}
+	cn, cv := C.CString(name), C.CString(value)
+	defer C.free(unsafe.Pointer(cn))
+	defer C.free(unsafe.Pointer(cv))
+	if C.mpv_set_property_string(h, cn, cv) < 0 {
+		bus.Logf("debug", "mpv 属性设不上 %s=%s(没在播时是正常的)", name, value)
+	}
+}
+
+// Prop 读一个 mpv 属性(字符串)。给命令层用。
+func Prop(name string) string { return prop(name) }
 
 func playFile(path string) error {
 	if r := ensureMpv(); r != 0 {
