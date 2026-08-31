@@ -5,9 +5,11 @@ package emby
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 
 	"linplayer/core/blocklist"
 	"linplayer/core/bus"
+	"linplayer/core/net/localserve"
 )
 
 var defaultClient *Client
@@ -172,6 +174,10 @@ func RegisterCommands(version string) {
 		if err != nil {
 			return nil, &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
 		}
+		// ★ 登录成功才把这台服务器放进图片通道的白名单(SPEC §6)。
+		//   漏了这一步的表现是**登录进去一张封面都没有**,而命令全都正常 ——
+		//   很容易被误判成「图片接口坏了」。
+		localserve.AllowDefault(res.Server, http.Header{"X-Emby-Token": {res.Token}})
 		return res, nil
 	})
 
@@ -179,6 +185,9 @@ func RegisterCommands(version string) {
 	//   所以它的失败**不能**挡住本地删账号 —— 这里永远返回成功,只把结果写进返回体。
 	list("emby.logout", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		err := defaultClient.Logout(ctx, s)
+		// ★ 无论服务端登出成不成,本地都要撤销白名单 ——
+		//   留着的话那个 origin 就是一个永久的 SSRF 出口。
+		localserve.RevokeDefault(s.Server)
 		return map[string]any{"server_ok": err == nil}, nil
 	})
 

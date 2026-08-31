@@ -25,6 +25,7 @@ import (
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/emby"
+	"linplayer/core/net/localserve"
 	"linplayer/core/paths"
 	"linplayer/core/player"
 	"linplayer/core/system"
@@ -73,6 +74,9 @@ func goStr(p *C.char) string {
 // lp_abi_version 必须在 lp_init 之前调,不匹配就不要 init(SPEC §5.0)。
 // 它天然向后兼容 —— 旧库里没有这个符号,**这件事本身就是信号**。
 //
+// localServer 是本地数据通道(SPEC §6)。lp_init 起、lp_shutdown 停。
+var localServer *localserve.Server
+
 //export lp_abi_version
 func lp_abi_version() C.int32_t { return C.int32_t(LP_ABI) }
 
@@ -106,6 +110,20 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 		system.RegisterCommands()
 		player.RegisterCommands()
 		emby.RegisterCommands(system.Version)
+
+		// ★ 起本地 HTTP 数据通道(SPEC §6)。地址和 token 通过**首个事件**告知宿主 ——
+		//   三端的图片加载器要拿它拼 `/img?src=`,拿不到就是「一张图都没有」。
+		//   起不来不算致命:命令通道照走,只是图片全空。所以只记 error 不 return。
+		if srv, err := localserve.Start(); err != nil {
+			bus.Logf("error", "本地数据通道起不来(图片将全部为空): %v", err)
+		} else {
+			localServer = srv
+			localserve.SetDefault(srv)
+			bus.Emit("localserve.ready", map[string]string{
+				"baseUrl": srv.BaseURL(),
+				"token":   srv.Token,
+			}, "")
+		}
 
 		if err := paths.EnsureDirs(); err != nil {
 			bus.Logf("error", "建数据目录失败: %v", err)
@@ -182,6 +200,11 @@ func lp_shutdown() {
 	// ★ 关 mpv 必须排在 lp_gl_uninit 之后(S1.2 实测:反过来宿主合成器当场抛异常)。
 	//   这里只关核心;GL 通道由宿主在销毁 GL 上下文前自己调 lp_gl_uninit。
 	player.Close()
+	// ★ 停在 bus.Shutdown 之前:队列一发 EOF 消费者就走了,再有日志也没人收。
+	if localServer != nil {
+		_ = localServer.Close()
+		localServer = nil
+	}
 	bus.Shutdown()
 }
 

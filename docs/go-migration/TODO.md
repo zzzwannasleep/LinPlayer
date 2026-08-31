@@ -516,8 +516,20 @@
   - 未移植的键(accounts/prefs/proxy/…)**原样透传**,保存不抹掉 ——
     否则用户看到的是「升级之后我的 XX 设置没了」
   - 🔴 夹具**全部占位符**:真配置里有服务器地址与 token,一个真值都不许入库
-- [ ] **B1.7** `core/net/localserve`:`/img` 路由 + token 校验 + src 白名单
-  - 判据:带 token 能取图并落缓存;不带 token 401;白名单外的 src 404
+- [x] **B1.7** ✅ `core/net/localserve`:`/img` 路由 + token 校验 + src 白名单
+  - 判据全达成(`go test ./net/localserve/`,每条都注入验过):
+    - 带 token 能取图**并落缓存** —— 断言的是「上游只被打一次」+「清掉内存层后仍由磁盘层供图」,
+      不是「第一次拿到了字节」;注入「不落缓存」当场红
+    - 不带 token / token 不对 → 401,且请求**没到达上游**
+    - 白名单外的 src → 404(试了未登记源 / 内网直连 / `file://` / `gopher://` / 相对路径 / 空)
+    - 白名单按 **origin** 存不按完整 URL;`Revoke` 之后立刻失效
+    - 登记环节只收 http/https(单拎一条测,因为上面那条名单为空、盖不到它)
+  - 同批落地 `core/imgcache`(内存 128MB + 磁盘 2GB/30 天两层,移植自 `image_cache.rs`)
+  - `lp_init` 起服务并发首个事件 `localserve.ready`(baseUrl + token);`lp_shutdown` 停
+  - `emby.login` 成功登记白名单、`emby.logout` 撤销 —— **端到端走真总线**验的:
+    漏了的表现是「登录进去一张封面都没有而命令全都正常」,两边各自的单测都是绿的
+  - ⚠️ 顺带订正 SPEC:配额表写的「`cache/img/` 默认 512 MB」是错的(黄金实现是 2 GB,
+    用户 2026-07-15 亲自定),而且漏了 128 MB 内存层。已改
 - [x] **B1.8** ✅(Windows 部分)`core/player` 最小可播 —— 1080p60 满帧 60.1、`d3d11va-copy`
   - 安卓 / Linux 部分未做
 - [ ] **B1.9** `lp_set_surface(0,...)` 解绑是同步阻塞的 🔴 **现在是桩**
