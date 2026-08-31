@@ -37,10 +37,13 @@ public partial class MainWindow : Window
         Nav.Immersive = SetImmersive;
 
         this.FindControl<Button>("ServerChip")!.Click += (_, _) => GoServers();
+        // ★ 需要 Emby 会话的页面统一走 Emby():账号是网盘 / 局域网源时 Nav.Session 是 null,
+        //   页面里直接解引用会抛在 Task 里 —— 没提示、不崩、就是永远停在「加载中」。
         this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
-        this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Nav.Root(new LibraryPage(_core!));
-        this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Nav.Root(new SearchPage(_core!));
-        this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Nav.Root(new FavoritesPage(_core!));
+        this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Emby("媒体库", () => new LibraryPage(_core!));
+        this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Emby("搜索", () => new SearchPage(_core!));
+        this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Emby("收藏", () => new FavoritesPage(_core!));
+        // 聚合视界和观看历史**不需要**当前会话:前者自己遍历账号表,后者读的是本地库
         this.FindControl<RadioButton>("NavAggregate")!.Checked += (_, _) => Nav.Root(new AggregatePage(_core!));
         this.FindControl<RadioButton>("NavHistory")!.Checked += (_, _) => Nav.Root(new HistoryPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
@@ -107,6 +110,10 @@ public partial class MainWindow : Window
             this.FindControl<RadioButton>(n)!.IsChecked = false;
         Nav.Root(new ServersPage(_core, OnServerSwitched));
     }
+
+    /// <summary>需要 Emby 会话的页面。没会话就落到防崩页,别让它自己去解引用 null。</summary>
+    private void Emby(string name, Func<Control> make) =>
+        Nav.Root(Nav.Session is null ? new NoSessionPage(name) : make());
 
     private void Show(Control page) => this.FindControl<ContentControl>("PageHost")!.Content = page;
 

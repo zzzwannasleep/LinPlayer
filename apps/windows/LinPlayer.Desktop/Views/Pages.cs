@@ -65,6 +65,34 @@ public sealed class FatalPage : PageBase
     }
 }
 
+/// <summary>
+/// 当前账号不是 Emby 时的落地页。
+///
+/// <para>★★ 这不是「懒得做」的占位页。这些页面全都直接用 <c>Nav.Session</c> 取会话;
+/// 账号是网盘 / 局域网源时它是 null,解引用就是空引用异常。
+/// **实测**(注入摘掉这个守卫跑一遍):页面自己的 catch 会接住,但显示的是
+/// 「加载失败:Object reference not set to an instance of an object.」——
+/// 一句用户看不懂、也不知道该干什么的英文。守卫换来的是一句能照着做的中文。</para>
+///
+/// <para>这条路真实存在:从旧版升上来的用户,活跃账号本来就可能不是 Emby。</para>
+/// </summary>
+public sealed class NoSessionPage : PageBase
+{
+    public NoSessionPage(string what)
+    {
+        Content = Scrolled(new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                H1(what),
+                Dim("当前账号不是 Emby 服务器,这一页还没有对应的实现。"),
+                Dim("点左上角的服务器信息可以切换到 Emby 账号。"),
+            },
+        });
+    }
+}
+
 public sealed class PlaceholderPage : PageBase
 {
     public PlaceholderPage(string name)
