@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"linplayer/core/account"
+	"linplayer/core/aggregate"
 	"linplayer/core/bus"
 	"linplayer/core/emby"
 	"linplayer/core/history"
@@ -25,6 +26,7 @@ func main() {
 	account.RegisterCommands("listcommands")
 	prefs.RegisterCommands("listcommands")
 	history.RegisterCommands()
+	aggregate.RegisterCommands("listcommands")
 
 	cmds := bus.Commands()
 	sort.Strings(cmds)

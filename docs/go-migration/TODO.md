@@ -774,6 +774,10 @@
 > 这样 `player.play` 的 ponytail 从六段减到四段(预加载取消 / 多线程加载代理 /
 > Trakt·Bangumi / 插件 onPlay)。
 >
+>
+> **2026-08-31 八续:**`core/aggregate` 落地 `emby.aggregate*` 2 条
+> (聚合搜索 / 聚合视界)。**共 89 条命令。**
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/
