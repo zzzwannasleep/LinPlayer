@@ -18,7 +18,6 @@ import (
 	"linplayer/core/config"
 	"linplayer/core/emby"
 	"linplayer/core/history"
-	"linplayer/core/net/prefetch"
 )
 
 // current 当前这次播放的目标。上报三件套要靠它拿 PlaySessionId。
@@ -92,6 +91,10 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	   这些**都不影响本次能不能播出来**,所以先把主链路打通;
 	   但它们各自都是「功能静默不工作」,别当成可选项忘掉。 */
 
+	/* ★ **预热到此为止**:起播那一刻带宽该全给播放器。
+	   它自己跨过这一刻继续拉,就成了和播放器抢带宽 —— 反倒把起播拖慢。 */
+	preloader.Cancel()
+
 	playURL := startPrefetch(ctx, s, target, prefs)
 
 	/* 观看记录上下文 与 取流地址本可以**并发**打 —— 两者互不依赖。
@@ -162,9 +165,6 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	}, nil
 }
 
-// proxy 当前这次播放的预取代理。换片 / 停播时要关掉,否则缓存文件和端口都留着。
-var proxy *prefetch.Handle
-
 // startPrefetch 按需起多线程加载代理,返回真正交给 mpv 的地址。
 //
 // ★ 开关按**服务器**查(账号主键),不是全局:它是**优化**不是功能 ——
@@ -174,42 +174,39 @@ var proxy *prefetch.Handle
 // ★ **只代理直传流**:转码 URL 是分段流,套一层字节代理没有意义。
 // ★ 起服失败一律回退直连 —— 代理是加速手段,它挂了不该让片子播不了。
 func startPrefetch(ctx context.Context, s *emby.Session, target *emby.PlaybackTarget, p config.Prefs) string {
-	closeProxy()
 	if target.PlayMethod != "DirectStream" {
+		closeSharedProxy() // 转码流:停掉旧代理走直连
 		return target.URL
 	}
 	acc := config.Current().ActiveAccount()
 	// ★ 认**账号主键**而不是 session.Server:后者是当前生效线路,还可能被反代改写。
 	//   线路只是同一台服的入口,开关不该跟着线路走。
-	if acc == nil || !p.PrefetchEnabledFor(acc.Server) {
-		return target.URL
-	}
+	on := acc != nil && p.PrefetchEnabledFor(acc.Server)
 
-	itemID, msID := target.ItemID, target.MediaSourceID
-	resign := func(ctx context.Context) string {
-		// 上游签名链到期 → 重走取流拿新地址。**指定原来那个版本**,
-		// 别让重签顺手换成另一条流(那会在播放中途画质突变)。
-		t2, err := prefsClient.ResolveStream(ctx, s, itemID, msID, "")
-		if err != nil {
-			return ""
-		}
-		return t2.URL
+	/* ★★ 预热已经把这条流的头部灌进某个代理的环形缓存里了 —— 那就**必须走那个代理**,
+	   否则预热白做。判据是**上游地址一致**(同一条流),和「这台服开没开多线程加载」
+	   **无关**:开关管的是播放中并发拉多凶,而不是「已经在本地的字节要不要用」。 */
+	warmHit := false
+	proxyMu.Lock()
+	if sharedProxy != nil && sharedProxy.Upstream() == target.URL {
+		warmHit = true
 	}
-	h, err := prefetch.Start(ctx, target.URL, p.PrefetchThreads, p.PrefetchCacheBytes, resign)
-	if err != nil {
-		bus.Logf("warn", "多线程加载起不来,回退直连: %v", err)
+	proxyMu.Unlock()
+
+	if !on && !warmHit {
+		closeSharedProxy()
 		return target.URL
 	}
-	proxy = h
-	bus.Logf("info", "多线程加载已开(%d 线程,缓存上限 %d MB)", p.PrefetchThreads, p.PrefetchCacheBytes>>20)
+	h := proxyFor(ctx, target.URL, p)
+	if h == nil {
+		return target.URL
+	}
+	if warmHit {
+		bus.Logf("info", "复用预热好的本地代理(缓存已就位)")
+	} else {
+		bus.Logf("info", "多线程加载已开(%d 线程,缓存上限 %d MB)", p.PrefetchThreads, p.PrefetchCacheBytes>>20)
+	}
 	return h.URL
-}
-
-func closeProxy() {
-	if proxy != nil {
-		proxy.Close()
-		proxy = nil
-	}
 }
 
 // historyContext 这次播放在观看记录里的上下文。
@@ -294,7 +291,7 @@ func Stop(ctx context.Context, s *emby.Session, pos float64) error {
 	pendingSubs = nil
 	currentMu.Unlock()
 	_ = command("stop")
-	closeProxy() // 停播就把代理停掉:端口、goroutine、缓存文件一起收
+	closeSharedProxy() // 停播就把代理停掉:端口、goroutine、缓存文件一起收
 	// ★ 停播这一下**必须落盘**(force):不 force 的话会被 10 秒节流吃掉,
 	//   最后那段进度就丢了 —— 而用户下次进来看到的正是那个旧位置。
 	captureHistory(pos, true)

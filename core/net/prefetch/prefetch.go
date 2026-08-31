@@ -110,6 +110,9 @@ func (h *Handle) Upstream() string {
 	return h.origin.url
 }
 
+// CachePathForTest 缓存文件路径。**只给测试用**(验换片时旧文件真的删了)。
+func (h *Handle) CachePathForTest() string { return h.origin.disk.path }
+
 // Close 停服并删掉缓存文件。
 func (h *Handle) Close() {
 	h.origin.closed.Store(true)
