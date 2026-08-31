@@ -540,6 +540,12 @@
 
 - [ ] **B2.1** Android:Compose 空页 + SurfaceView + JNI 薄层,能播 🟡
 - [x] **B2.2** ✅ Windows:Avalonia + 视频层,能播**且半透明控件盖在上面**
+  - **2026-08-31 回归复跑**(命令改名 + `player.play` 重写之后,对真 `core/` 跑的):
+    四条像素判据全过 —— 视频区逐像素帧间差 34.82 / 最小品红偏移 332.0 /
+    叠加区帧间差 1.73 / 每帧都在;**60.07 fps**、播放时长比 0.997、丢帧 +50;
+    弹幕 300 条、位置真变化 59.2 次/秒(≈60Hz)、视频区被遮 4.58%。
+    命令:`AvaloniaProbe.exe --clip clip1080p60.mp4 --core build/core/lpcore.dll
+    --seconds 6 --shots 3 --danmaku 300`
   - 判据达成(对真 `core/` 跑的):视频区逐像素帧间差 2.56 / 最小品红偏移 325.8 /
     叠加区帧间差 1.20 / 每帧都在;60.1 fps
   - 探针 `spikes/s1-2/AvaloniaProbe` **只用 13 个契约导出**,UI 侧没有任何 mpv 类型
