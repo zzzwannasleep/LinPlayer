@@ -132,6 +132,17 @@ var runners = map[string]runner{
 		id, _ := args["series_id"].(string)
 		return c.Seasons(ctx, s, id)
 	},
+	"emby.itemMedia": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		id, _ := args["item_id"].(string)
+		re, _ := args["version_regex"].(string)
+		return c.MediaVersions(ctx, s, id, re)
+	},
+	"emby.getFilters": func(ctx context.Context, server string, args map[string]any) (any, error) {
+		c, s := newSession(server, args)
+		pid, _ := args["parent_id"].(string)
+		return c.FiltersOf(ctx, s, pid)
+	},
 	"emby.search": func(ctx context.Context, server string, args map[string]any) (any, error) {
 		c, s := newSession(server, args)
 		q, _ := args["query"].(string)

@@ -104,14 +104,37 @@ type rawUserData struct {
 }
 
 type rawMediaSource struct {
+	ID           *string          `json:"Id"`
+	Name         *string          `json:"Name"`
+	Container    *string          `json:"Container"`
 	Size         *int64           `json:"Size"`
 	Bitrate      *int64           `json:"Bitrate"`
+	RunTimeTicks *int64           `json:"RunTimeTicks"`
 	MediaStreams []rawMediaStream `json:"MediaStreams"`
 }
 
 type rawMediaStream struct {
-	Type   *string `json:"Type"`
-	Height *int64  `json:"Height"`
+	Type          *string  `json:"Type"`
+	Codec         *string  `json:"Codec"`
+	Profile       *string  `json:"Profile"`
+	DisplayTitle  *string  `json:"DisplayTitle"`
+	Language      *string  `json:"Language"`
+	Width         *int64   `json:"Width"`
+	Height        *int64   `json:"Height"`
+	Bitrate       *int64   `json:"BitRate"`
+	Channels      *int64   `json:"Channels"`
+	ChannelLayout *string  `json:"ChannelLayout"`
+	FrameRate     *float64 `json:"AverageFrameRate"`
+	VideoRange    *string  `json:"VideoRange"`
+	// VideoRange 只有 SDR/HDR 两档,**分不出 DoVi 和 HDR10** —— 判杜比视界必须看这个
+	// (取值 DOVI / HDR10 / HLG / HDR10Plus)。老服务器可能不发,故还要看 codec/profile 兜底。
+	VideoRangeType *string `json:"VideoRangeType"`
+	IsDefault      *bool   `json:"IsDefault"`
+	Index          *int64  `json:"Index"`
+	// 外挂字幕三件套。不解析这几个字段 = 分不出外挂和内封,
+	// 也就永远拼不出取字幕的地址 —— 「外挂字幕不加载」的第一层根因。
+	IsExternal  *bool   `json:"IsExternal"`
+	DeliveryURL *string `json:"DeliveryUrl"`
 }
 
 type itemsResponse struct {

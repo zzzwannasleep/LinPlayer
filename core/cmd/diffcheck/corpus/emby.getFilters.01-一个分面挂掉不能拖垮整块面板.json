@@ -1,0 +1,48 @@
+{
+  "name": "emby.getFilters · 一个分面 404 不能拖垮整块面板",
+  "note": "端点可用性是实测出来的:某 fork 上 /Genres、/Studios 是 200,而 /Tags、/OfficialRatings、/Years 全是 404。旧栈也在拉这三个并**吞错**,所以旧版的年份/标签分面一直是空的 —— 空是对的,报错才是错的:整块面板显示红字重试,而重试永远不会有结果。年份没有可用端点,靠两次 Limit=1 探针取最早/最晚年再铺成倒序区间。分面取值里的空名字要滤掉。",
+  "provenance": "crates/core/src/emby.rs:1655 filters() / :1674 facet() / :1704 year_range() 的文档注释",
+  "upstream": [
+    {
+      "path": "/Users/u/Items?ParentId=lib1&Recursive=true&IncludeItemTypes=Movie,Series&SortBy=ProductionYear&SortOrder=Descending&Limit=1&Fields=ProductionYear",
+      "status": 200,
+      "body": "{\"Items\":[{\"Id\":\"newest\",\"Name\":\"最新的\",\"Type\":\"Movie\",\"ProductionYear\":2024}],\"TotalRecordCount\":1}"
+    },
+    {
+      "path": "/Users/u/Items?ParentId=lib1&Recursive=true&IncludeItemTypes=Movie,Series&SortBy=ProductionYear&SortOrder=Ascending&Limit=1&Fields=ProductionYear",
+      "status": 200,
+      "body": "{\"Items\":[{\"Id\":\"oldest\",\"Name\":\"最老的\",\"Type\":\"Movie\",\"ProductionYear\":2021}],\"TotalRecordCount\":1}"
+    },
+    {
+      "path": "/Genres",
+      "status": 200,
+      "body": "{\"Items\":[{\"Name\":\"动作\"},{\"Name\":\"\"},{\"Name\":\"科幻\"}]}"
+    },
+    {
+      "path": "/Studios",
+      "status": 200,
+      "body": "{\"Items\":[{\"Name\":\"某制片厂\"}]}"
+    },
+    {
+      "path": "/Tags",
+      "status": 404,
+      "body": "{}"
+    },
+    {
+      "path": "/OfficialRatings",
+      "status": 404,
+      "body": "{}"
+    }
+  ],
+  "command": "emby.getFilters",
+  "args": {
+    "parent_id": "lib1"
+  },
+  "expect": {
+    "genres": ["动作", "科幻"],
+    "tags": [],
+    "years": [2024, 2023, 2022, 2021],
+    "studios": ["某制片厂"],
+    "official_ratings": []
+  }
+}

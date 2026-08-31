@@ -89,6 +89,27 @@ func RegisterCommands(version string) {
 			intArg(a, "start_index", 0), intArg(a, "limit", 30))
 	})
 
+	list("emby.listItems", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		// ★ 保持返回**数组**而不是 {items,total}:要总数/翻页/筛选走 listItemsPage。
+		//   这两条的返回形状不同是故意的,前端各有各的调用点。
+		p, err := defaultClient.Items(ctx, s, str(a, "parent_id"), &ItemQuery{})
+		if err != nil {
+			return nil, err
+		}
+		return p.Items, nil
+	})
+	list("emby.listRandom", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.RandomPicks(ctx, s, intArg(a, "limit", 8))
+	})
+	list("emby.getFilters", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.FiltersOf(ctx, s, str(a, "parent_id"))
+	})
+	list("emby.itemMedia", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		// ★ version_regex 只用来标 preferred,不影响返回哪些版本。
+		//   ponytail: 迁移期由调用方传;接进 core/config 之后从设置里读。
+		return defaultClient.MediaVersions(ctx, s, str(a, "item_id"), str(a, "version_regex"))
+	})
+
 	// ---- 搜索 / 相似 / 演职员 ----
 	list("emby.search", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		// ★ types 缺省 = 全要(不是一个都不要);「包括集」开关关着时前端显式传 Movie,Series

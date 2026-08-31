@@ -76,7 +76,10 @@ func (c *Client) fetchItems(ctx context.Context, s *Session, u string) ([]Item, 
 // 到闸就停并返回已拿到的,**不报错** —— 对收藏/分集这两个场景,
 // 拿到前 max 条远好过整页失败。
 func (c *Client) fetchAllPaged(ctx context.Context, s *Session, baseURL string, max int) ([]Item, error) {
-	var out []Item
+	// ★ **空切片不是 nil**:nil 序列化成 JSON `null`,而黄金实现给的是 `[]`。
+	//   一条收藏都没有时前端拿到 null 直接 `.map()` 会抛错,
+	//   在透明窗口下就是**一片黑且不报错** —— 本仓最难查的那类。
+	out := []Item{}
 	for {
 		u := fmt.Sprintf("%s&StartIndex=%d&Limit=%d", baseURL, len(out), ServerPageCap)
 		page, err := c.fetchItems(ctx, s, u)

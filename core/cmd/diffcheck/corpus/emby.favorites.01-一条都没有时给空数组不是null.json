@@ -1,0 +1,15 @@
+{
+  "name": "emby.favorites · 一条收藏都没有时给 [] 不是 null",
+  "note": "Go 的零值切片序列化成 JSON null,而黄金实现(Rust Vec::new())给的是 []。前端拿到 null 直接 .map() 会抛错,在透明窗口下就是一片黑且不报错 —— 本仓最难查的那类。这条用例把「空列表的形状」钉死,顺带钉住收藏走的是翻页拉全那条路(服务端把任何 Limit 都夹到 200,写 Limit=500 只会静默少拿)。",
+  "provenance": "crates/core/src/emby.rs:889 fetch_all_paged() —— 以 Vec::new() 起手,空结果就是 []",
+  "upstream": [
+    {
+      "path": "/Users/u/Items",
+      "status": 200,
+      "body": "{\"Items\":[],\"TotalRecordCount\":0}"
+    }
+  ],
+  "command": "emby.favorites",
+  "args": {},
+  "expect": []
+}

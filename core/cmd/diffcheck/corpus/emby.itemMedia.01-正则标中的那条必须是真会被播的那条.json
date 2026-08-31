@@ -1,0 +1,98 @@
+{
+  "name": "emby.itemMedia · 正则标中的那条必须是真会被播的那条",
+  "note": "详情页/播放器的「当前版本」显示的就是 preferred 那条。它和真起播打的是同一个 PlaybackInfo 端点、同一批 MediaSource、同一套匹配文本 —— 不一致的表现是「界面说在放第一条、实际在放另一条」,用户看到的就是「正则根本没生效」(2026-07-30 那次误判)。匹配文本里要补口语档位 4K(height>=2160),用户的版本正则几乎都写 4K 而不是 2160。另外三条:非 Video/Audio/Subtitle 的流不进媒体信息卡;VideoRange 的 \"Unknown\" 要当没有(否则前端画出「制式:Unknown」);字幕地址只认 DeliveryUrl,Path 是服务端本地路径拿来当 URL 只会 404。",
+  "provenance": "crates/core/src/emby.rs:362 MediaVersion(preferred 字段的文档注释)/ :430 media_versions() / :2061 source_match_text()",
+  "upstream": [
+    {
+      "path": "/Items/it1/PlaybackInfo",
+      "status": 200,
+      "body": "{\"MediaSources\":[{\"Id\":\"ms-1\",\"Name\":\"版本一\",\"Container\":\"mkv\",\"Size\":100,\"Bitrate\":2000,\"RunTimeTicks\":36000000000,\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"h264\",\"Height\":1080,\"Width\":1920,\"Index\":0,\"VideoRange\":\"Unknown\",\"VideoRangeType\":\"Unknown\"},{\"Type\":\"EmbeddedImage\",\"Index\":9}]},{\"Id\":\"ms-2\",\"Name\":\"版本二\",\"Container\":\"mkv\",\"Size\":900,\"Bitrate\":9000,\"RunTimeTicks\":36000000000,\"MediaStreams\":[{\"Type\":\"Video\",\"Codec\":\"hevc\",\"Height\":2160,\"Width\":3840,\"Index\":0,\"VideoRange\":\"HDR\",\"VideoRangeType\":\"HDR10\"},{\"Type\":\"Subtitle\",\"Codec\":\"ass\",\"Index\":2,\"IsExternal\":true,\"DeliveryUrl\":\"/x.ass\",\"Path\":\"/media/x.ass\",\"Language\":\"chi\"}]}]}"
+    }
+  ],
+  "command": "emby.itemMedia",
+  "args": {
+    "item_id": "it1",
+    "version_regex": "4K"
+  },
+  "expect": [
+    {
+      "id": "ms-1",
+      "name": "版本一",
+      "container": "mkv",
+      "size_bytes": 100,
+      "bitrate": 2000,
+      "runtime_secs": 3600,
+      "preferred": false,
+      "streams": [
+        {
+          "index": 0,
+          "type_": "Video",
+          "codec": "h264",
+          "profile": null,
+          "display_title": null,
+          "language": null,
+          "width": 1920,
+          "height": 1080,
+          "bitrate": null,
+          "channels": null,
+          "channel_layout": null,
+          "frame_rate": null,
+          "video_range": null,
+          "video_range_type": null,
+          "is_default": false,
+          "is_external": false,
+          "delivery_url": null
+        }
+      ]
+    },
+    {
+      "id": "ms-2",
+      "name": "版本二",
+      "container": "mkv",
+      "size_bytes": 900,
+      "bitrate": 9000,
+      "runtime_secs": 3600,
+      "preferred": true,
+      "streams": [
+        {
+          "index": 0,
+          "type_": "Video",
+          "codec": "hevc",
+          "profile": null,
+          "display_title": null,
+          "language": null,
+          "width": 3840,
+          "height": 2160,
+          "bitrate": null,
+          "channels": null,
+          "channel_layout": null,
+          "frame_rate": null,
+          "video_range": "HDR",
+          "video_range_type": "HDR10",
+          "is_default": false,
+          "is_external": false,
+          "delivery_url": null
+        },
+        {
+          "index": 2,
+          "type_": "Subtitle",
+          "codec": "ass",
+          "profile": null,
+          "display_title": null,
+          "language": "chi",
+          "width": null,
+          "height": null,
+          "bitrate": null,
+          "channels": null,
+          "channel_layout": null,
+          "frame_rate": null,
+          "video_range": null,
+          "video_range_type": null,
+          "is_default": false,
+          "is_external": true,
+          "delivery_url": "/x.ass"
+        }
+      ]
+    }
+  ]
+}

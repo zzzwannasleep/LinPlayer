@@ -611,6 +611,9 @@
 | `emby.search · 服务端无视类型筛选` | 某 fork 带 SearchTerm 时把 IncludeItemTypes/ParentId 一起忽略 —— **只信服务端过滤 = 「包括集」开关是个摆设且不报错** | 去掉客户端复筛 → 「长度 2 vs 3」 |
 | `emby.person · 生平与出生地为空` | 生平空是**常态**(空串,不是 null);出生地空串要折 null,否则前端画出一行空的「出生地:」 | 不折空串 → 「birth_place 期望 null 实得 ""」 |
 | `emby.isAdmin · 缺 Policy 判否` | 宁可少给按钮;而且这个位**不从登录响应取** —— 老账号不会再走 login,取了会永远判成非管理员 | 缺 Policy 判是 → 「期望 false 实得 true」 |
+| `emby.getFilters · 一个分面挂掉不拖垮面板` | 某 fork 上 /Tags、/OfficialRatings、/Years 全是 404;各自吞错返回空,**报错才是错的**(整块面板红字重试,而重试永远不会有结果)。年份靠两次 Limit=1 探针铺区间 | 失败退回 nil 切片 → 「tags 期望数组实得 nil」 |
+| `emby.itemMedia · 正则标中的必须是真会被播的` | preferred 那条 = 详情页/播放器显示的「当前版本」,和真起播同端点同批同匹配文本;匹配文本要补 4K/8K 口语档位;VideoRange 的 "Unknown" 折 null;非 A/V/S 流不进卡 | 恒标第一条 → 「[0]/[1].preferred 反了」;不补 4K → 「[1].preferred 期望 true」;Unknown 原样透 → 「期望 null 实得 "Unknown"」 |
+| `emby.favorites · 空列表给 [] 不是 null` | **Go 的零值切片序列化成 `null`,Rust 的 `Vec::new()` 是 `[]`** —— 前端拿 null 直接 `.map()` 抛错,透明窗口下是一片黑且不报错 | 退回 `var out []Item` → 「(根)期望数组实得 nil」 |
 | `emby.seasons · 没有季时返回空` | 有些剧没有季(单季番剧直接挂集),调用方要回落到「拿 seriesId 当 parent 拉集」—— 不回落是「点进去一集都没有」且不报错 | —— |
 
 > **两条 resume 用例是拆出来的,拆的理由值得记:**
@@ -666,8 +669,20 @@
 > scanLibraries,外加 `emby.views` 补上命令层的 `include_blocked` 过滤
 > (之前只做了核心层的「不滤」,命令层那半漏了 = 屏蔽的库照样出现在首页)。
 > **共 26 条命令**,12 条对账用例 + 3 组 Go 单测,全绿。
-> 剩下的 12 条(相关:aggregate* / watchHistory* / ranking* / itemMedia /
-> reportProgress / getFilters / listItems / listRandom / currentSession / relogin)未做。
+>
+> **2026-08-31 再续:**listItems / listRandom / getFilters / itemMedia 四条,
+> 外加新建 `core/media` 包(选轨/选版本的偏好正则)。**共 30 条命令**,
+> 15 条对账用例 + 4 组 Go 单测。
+>
+> ★ 这一批里对账当场抓到一个**移植期的系统性坑**:Go 的零值切片序列化成 JSON
+> `null`,而黄金实现(`Vec::new()`)给的是 `[]`。前端拿到 null 直接 `.map()` 会抛错,
+> 在透明窗口下就是**一片黑且不报错**。已修 `facet` / `yearRange` / `fetchAllPaged`
+> 三处,并留了一条专门钉空列表形状的用例。**后续每移植一个返回列表的函数都要过一眼这条。**
+>
+> 剩下的 8 条各自压着一个还没移植的子系统,要先做那个:
+> aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
+> ranking*(排行榜模块)/ reportProgress(播放会话状态)/
+> currentSession、relogin(账号存储,等 core/config)。
 
 - [ ] **C5** `core/emby` 主体 🔴
 - [ ] **C6** `core/media`:版本 / 音轨 / 字幕正则筛选
