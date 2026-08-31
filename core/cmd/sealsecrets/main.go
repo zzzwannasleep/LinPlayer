@@ -56,5 +56,19 @@ func main() {
 	add("dandanAppID", strings.TrimSpace(os.Getenv("DANDANPLAY_APP_ID")))
 	add("dandanSecretEnc", seal(os.Getenv("DANDANPLAY_APP_SECRET")))
 	add("tmdbKeyEnc", seal(os.Getenv("TMDB_API_KEY")))
+
+	/* 同步代理三项。★ 这三个在 Rust 版里是**明文常量**并且已经进了版本库 ——
+	   其中 LP_SYNC_PROXY_KEY 是访问自建 OAuth 代理的共享密钥,拿到源码就能拿它
+	   去换别人的 OAuth token。Go 侧一律走注入,源码不留。
+	   ⚠️ 现网那条明文密钥仍在 git 历史里,换语言不会让它消失:要轮换 + 改写历史。 */
+	const sp = "linplayer/core/sync"
+	addTo := func(pkg, name, val string) {
+		if val != "" {
+			parts = append(parts, fmt.Sprintf("-X %s.%s=%s", pkg, name, val))
+		}
+	}
+	addTo(sp, "proxyBase", strings.TrimSpace(os.Getenv("LP_SYNC_PROXY_BASE")))
+	addTo(sp, "proxyKey", strings.TrimSpace(os.Getenv("LP_SYNC_PROXY_KEY")))
+	addTo(sp, "bangumiRedirectURI", strings.TrimSpace(os.Getenv("LP_BANGUMI_REDIRECT_URI")))
 	fmt.Print(strings.Join(parts, " "))
 }

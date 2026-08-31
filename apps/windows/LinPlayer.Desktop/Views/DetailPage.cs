@@ -153,7 +153,19 @@ public sealed class DetailPage : PageBase
                     av.Child = im;
                     _ = Fill(im, Images.EmbyImageUrl(_server, Str(p, "id"), "Primary"), 168);
                 }
-                wrap.Children.Add(new StackPanel
+                // ★ 头像可点 → 人物详情。做成 Button 而不是给 Border 挂 PointerPressed:
+                //   Button 自带 hover / focus / 键盘可达,手写那三样迟早漏一个。
+                var pid = Str(p, "id");
+                var pname = Str(p, "name");
+                var cell = new Button
+                {
+                    Background = Brushes.Transparent,
+                    BorderThickness = new Thickness(0),
+                    Padding = new Thickness(0),
+                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                };
+                cell.Click += (_, _) => Nav.Push(new PersonPage(_core, _server, pid, pname));
+                cell.Content = new StackPanel
                 {
                     Width = 100, Spacing = 6, Margin = new Thickness(0, 0, 10, 14),
                     Children =
@@ -172,7 +184,8 @@ public sealed class DetailPage : PageBase
                             Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
                         },
                     },
-                });
+                };
+                wrap.Children.Add(cell);
             }
             body.Children.Add(wrap);
         }

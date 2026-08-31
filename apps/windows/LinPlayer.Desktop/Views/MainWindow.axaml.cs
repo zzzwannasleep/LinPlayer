@@ -57,6 +57,8 @@ public partial class MainWindow : Window
         this.FindControl<RadioButton>("NavRanking")!.Checked += (_, _) => Nav.Root(new RankingPage(_core!));
         // 下载页不要求 Emby 会话:列表读的是本地索引,网盘用户也看得到自己的历史任务
         this.FindControl<RadioButton>("NavDownload")!.Checked += (_, _) => Nav.Root(new DownloadPage(_core!));
+        // 日历同样不要求 Emby 会话:它打的是 Bangumi / Trakt
+        this.FindControl<RadioButton>("NavCalendar")!.Checked += (_, _) => Nav.Root(new CalendarPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
         /* ★★ 自检模式下把窗口置顶。
@@ -110,6 +112,7 @@ public partial class MainWindow : Window
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
             case "aggregate": this.FindControl<RadioButton>("NavAggregate")!.IsChecked = true; break;
             case "history": this.FindControl<RadioButton>("NavHistory")!.IsChecked = true; break;
+            case "calendar": this.FindControl<RadioButton>("NavCalendar")!.IsChecked = true; break;
             case "download": this.FindControl<RadioButton>("NavDownload")!.IsChecked = true; break;
             case "browse":
                 this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true;
@@ -125,6 +128,7 @@ public partial class MainWindow : Window
             case "servers": GoServers(); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
+            case "person": Nav.Push(new PersonPage(_core, srv, arg, "自检人物")); break;
             // 自检:进详情页 → 点「下载」 → 跳下载页。整条链一次走完
             case "dl":
                 Nav.Push(new DetailPage(_core, srv, arg));

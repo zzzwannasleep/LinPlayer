@@ -73,6 +73,7 @@
             <RadioButton Classes="nav" Name="NavHistory" GroupName="nav" Content="观看历史" />
             <RadioButton Classes="nav" Name="NavDownload" GroupName="nav" Content="下载" />
             <RadioButton Classes="nav" Name="NavRanking" GroupName="nav" Content="排行榜" />
+            <RadioButton Classes="nav" Name="NavCalendar" GroupName="nav" Content="追剧日历" />
           </StackPanel>
         </DockPanel>
       </Border>

@@ -23,6 +23,7 @@ import (
 	"linplayer/core/prefs"
 	"linplayer/core/ranking"
 	"linplayer/core/sourcecmd"
+	lpsync "linplayer/core/sync"
 	"linplayer/core/system"
 )
 
@@ -41,4 +42,5 @@ func RegisterAll(version string) {
 	ranking.RegisterCommands()
 	sourcecmd.RegisterCommands()
 	download.RegisterCommands()
+	lpsync.RegisterCommands()
 }

@@ -87,6 +87,40 @@ func main() {
 		}
 		writeJSON(w, map[string]any{"success": true, "bangumiList": list})
 	})
+	/* 假的 Bangumi 放送表(自检用)。核心层靠 LP_BANGUMI_API 指过来。
+	   ★ 夹具要带上**真实形状里那些会出事的东西**:0 分的条目、只有原名的条目、
+	     协议相对的图片地址 —— 缺一样,对应那条 UI 判据就验不到。 */
+	mux.HandleFunc("/calendar", func(w http.ResponseWriter, r *http.Request) {
+		groups := []any{}
+		names := []string{"假番一号", "假番二号", "假番三号", "假番四号", "假番五号", "假番六号", "假番七号"}
+		for wd := 1; wd <= 7; wd++ {
+			items := []any{}
+			for i := 0; i <= wd%3; i++ {
+				it := map[string]any{
+					"id":       wd*10 + i,
+					"name":     fmt.Sprintf("Fake Anime %d-%d", wd, i),
+					"name_cn":  fmt.Sprintf("%s · 第%d部", names[wd-1], i+1),
+					"air_date": "2026-07-06",
+					"images": map[string]any{
+						"large": fmt.Sprintf("http://%s/rankimg/bgm-%d-%d.png", r.Host, wd, i),
+					},
+				}
+				// 一半有评分、一半 0 分(0 分不许画出来)
+				if i == 0 {
+					it["rating"] = map[string]any{"score": 8.0 + float64(wd)/10}
+				} else {
+					it["rating"] = map[string]any{"score": 0}
+				}
+				items = append(items, it)
+			}
+			groups = append(groups, map[string]any{
+				"weekday": map[string]any{"id": wd},
+				"items":   items,
+			})
+		}
+		writeJSON(w, groups)
+	})
+
 	mux.HandleFunc("/trending/", tmdbList)
 	mux.HandleFunc("/movie/", tmdbList)
 	mux.HandleFunc("/tv/", tmdbList)
@@ -164,6 +198,22 @@ func main() {
 		// 详情:/Users/{uid}/Items/{itemId}(尾段是具体 id,不是 Resume/Latest/Counts)
 		case detailID(p) != "":
 			id := detailID(p)
+			/* p* 是人物。★ 故意让 p1 有生平和出生地、p2 **什么都没有** ——
+			   「生卒 / 出生地空是常态」是真实形状,人物页不许因此留一片空白。 */
+			if strings.HasPrefix(id, "p") {
+				d := item(id, "某演员", "Person")
+				if id == "p1" {
+					d["Overview"] = "自检用的人物生平。"
+					d["PremiereDate"] = "1980-03-15T00:00:00.0000000Z"
+					d["ProductionLocations"] = []string{"某地"}
+				} else {
+					d["Name"] = "某导演"
+					// ★ 空数组元素:有的刮削器就这么写,出生地要被滤掉而不是显示成空
+					d["ProductionLocations"] = []string{""}
+				}
+				writeJSON(w, d)
+				return
+			}
 			// s1 是剧,其余当电影 —— 详情页对这两种是**两张不同的版式**
 			if id == "s1" {
 				d := item("s1", "某部剧", "Series")
