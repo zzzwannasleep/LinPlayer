@@ -16,6 +16,7 @@ package commands
 import (
 	"linplayer/core/account"
 	"linplayer/core/aggregate"
+	"linplayer/core/danmaku"
 	"linplayer/core/download"
 	"linplayer/core/emby"
 	"linplayer/core/history"
@@ -43,4 +44,5 @@ func RegisterAll(version string) {
 	sourcecmd.RegisterCommands()
 	download.RegisterCommands()
 	lpsync.RegisterCommands()
+	danmaku.RegisterCommands()
 }
