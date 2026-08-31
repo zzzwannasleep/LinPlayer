@@ -362,7 +362,16 @@ func (c *Client) getBytes(ctx context.Context, s *Session, u string) ([]byte, er
 	}
 	req.Header.Set("X-Emby-Token", s.Token)
 	req.Header.Set("User-Agent", c.UA)
-	req.Header.Set("Accept-Encoding", "gzip")
+	/* ★★ **不要手动设 Accept-Encoding**。
+	   Go 的 Transport 会自己加 `Accept-Encoding: gzip` 并把响应**自动解压**;
+	   但只要调用方手动设了这个头,Go 就认为「你要自己处理压缩」,于是不再解压,
+	   把原始 gzip 字节交给你 —— 表现是每一条列表都报
+	   「解析失败: invalid character '' looking for beginning of value」
+	   ( 是 gzip 魔数的第一个字节)。
+
+	   黄金实现用的是 reqwest 的 gzip feature,那是**发头 + 解压一起**做的;
+	   照抄时只抄了「要发头」这一半,就成了这个洞。
+	   2026-08-31 用户拿真 Emby 实测撞上 —— 假 Emby 不开压缩,本地全绿。 */
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("网络错误: %w", err)

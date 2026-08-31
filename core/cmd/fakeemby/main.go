@@ -12,6 +12,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -45,11 +46,15 @@ var reject *bool
 // useTLS 用自签名证书起 https。
 var useTLS *bool
 
+// useGzip JSON 响应压缩。
+var useGzip *bool
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
 	clip = flag.String("clip", "", "起播时回放的本地视频文件")
 	reject = flag.Bool("reject", false, "登录一律回 401(验错误提示用)")
 	useTLS = flag.Bool("tls", false, "用自签名证书起 https")
+	useGzip = flag.Bool("gzip", false, "JSON 响应用 gzip 压缩(真 Emby 默认就是压的)")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -329,9 +334,22 @@ func page(items ...map[string]any) map[string]any {
 
 func writeJSON(w http.ResponseWriter, v any) { writeJSONRaw(w, v) }
 
+// writeJSONRaw 回 JSON。★ -gzip 时**压缩后再回**。
+//
+// 真 Emby 默认开压缩,而假 Emby 一开始不压 —— 于是
+// 「手动设了 Accept-Encoding 导致 Go 不再自动解压」这个洞本地全绿,
+// 只有拿真服务器打才现形(2026-08-31 用户实测)。
+// 把这个形状造进来:**假服务器只能造出你想到的形状,想到了就得造**。
 func writeJSONRaw(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	if !*useGzip {
+		_ = json.NewEncoder(w).Encode(v)
+		return
+	}
+	w.Header().Set("Content-Encoding", "gzip")
+	zw := gzip.NewWriter(w)
+	defer zw.Close()
+	_ = json.NewEncoder(zw).Encode(v)
 }
 
 // certFile / keyFile 现生成一张自签名证书,落到临时目录。

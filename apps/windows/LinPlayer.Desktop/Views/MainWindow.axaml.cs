@@ -70,14 +70,15 @@ public partial class MainWindow : Window
     /// <para>★ 截图工具点不了按钮。没有这个钩子的话「除首页以外的每一页」
     /// 都只能靠编译通过来证明 —— 而本仓库栽过的渲染 bug **一个都不会在编译期现形**。</para>
     /// </summary>
-    private void SelfCheckJump()
+    private void SelfCheckJump() => SelfCheckJump(Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE"));
+
+    private void SelfCheckJump(string? want)
     {
         // ★ 最大化必须单独验一遍:无边框窗口最大化时四周会溢出屏幕 8px,
         //   把自绘标题栏的按钮顶到屏幕外(Rust 版栽过,根治办法是 WM_GETMINMAXINFO 钉 rcWork)。
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_MAXIMIZE") == "1")
             WindowState = WindowState.Maximized;
 
-        var want = Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE");
         if (string.IsNullOrEmpty(want) || _core is null) return;
         var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";
         var srv = Nav.Session?.server ?? "";
@@ -191,6 +192,8 @@ public partial class MainWindow : Window
         try { Nav.Session = Sess.From(await _core!.EmbyCurrentSession()); } catch { /* 同上 */ }
         this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
         Nav.Root(Home());
+        // 真机自检:登录成功之后再跳到指定页面(LP_SELFCHECK_PAGE 那会儿装的是 login:...)
+        SelfCheckJump(Environment.GetEnvironmentVariable("LP_SELFCHECK_AFTER"));
     }
 
     private void UpdateServerChip(JsonElement accounts)

@@ -19,6 +19,10 @@ PORT=18096
 
 source "$ROOT/scripts/env.sh"
 
+# ★ 默认开 gzip:**真 Emby 默认就是压的**。不压的假服务器曾让
+#   「手动设 Accept-Encoding 导致 Go 不自动解压」这个洞本地全绿。
+GZ="-gzip"; [ "${LP_NOGZIP:-}" = "1" ] && GZ=""
+
 echo "== 1/5 编核心层 =="
 bash "$ROOT/scripts/build-core.sh" "$BIN" >/dev/null
 echo "   lpcore.dll $(stat -c%s "$BIN/lpcore.dll") 字节"
@@ -32,7 +36,7 @@ echo "== 3/5 起假 Emby =="
 powershell -NoProfile -Command "Get-Process LinPlayer,fakeemby -EA SilentlyContinue | Stop-Process -Force" || true
 go build -o "$ROOT/build/fakeemby.exe" ./core/cmd/fakeemby 2>/dev/null || \
   ( cd "$ROOT/core" && go build -o "$ROOT/build/fakeemby.exe" ./cmd/fakeemby )
-"$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" -clip "$CLIP" > "$ROOT/build/fakeemby.log" 2>&1 &
+"$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" -clip "$CLIP" $GZ > "$ROOT/build/fakeemby.log" 2>&1 &
 FAKE=$!
 trap 'kill $FAKE 2>/dev/null || true' EXIT
 for _ in $(seq 30); do curl -s "http://127.0.0.1:$PORT/System/Info/Public" >/dev/null && break; sleep 0.2; done
