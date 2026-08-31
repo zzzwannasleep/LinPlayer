@@ -5,6 +5,7 @@ package emby
 import (
 	"crypto/x509"
 	"errors"
+	"time"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -195,6 +196,23 @@ func RegisterCommands(version string) {
 			UserID:   res.UserID,
 			UserName: res.UserName,
 		}
+		/* 顺带取服务器名当显示名(用户 2026-08-31 要求)——
+		   不取的话侧栏首次登录后显示的是一串地址。
+
+		   ★★ **只在新账号时带**:Upsert 对非空 Name 是**覆盖**语义,
+		     无条件传的话「重新登录一次,用户改过的服务器名就被冲回原名」。
+		   ★★ 用**独立的短超时**:和登录共用 60 秒客户端超时的话,
+		     这个端点一卡登录就跟着卡 60 秒,用户只会觉得「登录巨慢」,
+		     根本想不到是在取一个可有可无的名字。
+		   ★ 探失败**不挡登录**:有的 fork 没有这个端点。名字是锦上添花,
+		     登录是刚需 —— 取不到就留空,由前端回落 host。 */
+		if c.Find(res.Server) == nil {
+			pctx, cancel := context.WithTimeout(ctx, serverNameTimeout)
+			if info, e := defaultClient.ProbeServer(pctx, res.Server); e == nil && info != nil {
+				acc.Name = info.Name
+			}
+			cancel()
+		}
 		// ★ 空密码**不存成空串** —— 那会让「有密码」和「没设过密码」分不清。
 		//   存它是给重新登录和插件的 emby.credentials 权限用的。
 		if pw := str(args, "password"); pw != "" {
@@ -314,6 +332,10 @@ func RegisterCommands(version string) {
 		return map[string]any{"id": id, "blocked": on}, nil
 	})
 }
+
+// serverNameTimeout 登录时取服务器名的上限。**独立于登录本身的超时** ——
+// 它只是个显示名,不值得让用户多等哪怕一秒。
+const serverNameTimeout = 5 * time.Second
 
 // classify 把出网错误分到正确的错误码上。
 //
