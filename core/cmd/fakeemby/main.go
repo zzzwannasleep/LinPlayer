@@ -1,9 +1,10 @@
 // fakeemby 是一台**假 Emby**,给 Windows 端做真机自检用。
 //
 // 为什么要它:真机自检不能依赖真服务器 ——
-//   · 真服务器的地址和账号是红线,不能进仓库
-//   · 网络一抖自检就红,那种门禁没人信
-//   · 有些形状(空库 / 404 的统计端点 / 慢链路)在真服务器上根本造不出来
+//
+//	· 真服务器的地址和账号是红线,不能进仓库
+//	· 网络一抖自检就红,那种门禁没人信
+//	· 有些形状(空库 / 404 的统计端点 / 慢链路)在真服务器上根本造不出来
 //
 // 它只实现 UI 主链路真正会打的那几个端点,回的字段名与真 Emby 一致。
 //
@@ -14,6 +15,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"log"
 	"net/http"
 	"strings"
@@ -83,6 +88,20 @@ func main() {
 		}
 	})
 
+	// 图片:/Items/{id}/Images/{kind}
+	//
+	// ★ 生成的是**每个 id 一种颜色**的纯色图 —— 截图里一眼就能分辨
+	//   「封面加载出来了」和「三张卡都是同一个占位」。
+	mux.HandleFunc("/Items/", func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if len(parts) < 3 || parts[2] != "Images" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_ = png.Encode(w, solid(parts[1]))
+	})
+
 	log.Printf("假 Emby 起在 http://%s", *addr)
 	if err := http.ListenAndServe(*addr, logged(mux)); err != nil {
 		log.Fatal(err)
@@ -94,6 +113,18 @@ func logged(h http.Handler) http.Handler {
 		fmt.Printf("  <- %s %s\n", r.Method, r.URL.RequestURI())
 		h.ServeHTTP(w, r)
 	})
+}
+
+// solid 按 id 摊出一种颜色,同 id 必得同色。
+func solid(id string) image.Image {
+	var h uint32 = 2166136261
+	for _, c := range []byte(id) {
+		h = (h ^ uint32(c)) * 16777619
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 64, 96))
+	c := color.RGBA{uint8(h>>16)/2 + 60, uint8(h>>8)/2 + 60, uint8(h)/2 + 60, 255}
+	draw.Draw(img, img.Bounds(), &image.Uniform{c}, image.Point{}, draw.Src)
+	return img
 }
 
 func item(id, name, typ string) map[string]any {

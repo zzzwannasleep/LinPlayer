@@ -383,3 +383,47 @@ func TestTestConnectionNeedsNoAccount(t *testing.T) {
 		t.Fatal("测试连接不该往账号表里加东西")
 	}
 }
+
+// ★★ 冷启动(账号早就在配置里)时也要把图片白名单同步上。
+//
+// 没有这一步的表现是:**一张封面都没有,而命令全都正常** ——
+// 因为只有「这次会话里登录过 / 改过账号」才会登记。而那正好是开发时最常走的路径,
+// 所以这个洞在开发机上极难发现:开发者总是刚登录完就在看效果。
+func TestSyncImageAllowlist冷启动也要同步(t *testing.T) {
+	setup(t)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte{0x89, 'P', 'N', 'G', 0, 0, 0, 0})
+	}))
+	defer up.Close()
+
+	srv, err := localserve.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	localserve.SetDefault(srv)
+	defer localserve.SetDefault(nil)
+
+	// 模拟冷启动:配置里已经有账号,但本次会话**没有登录过**
+	addAccount(t, up.URL, "tok")
+
+	img := func() int {
+		req, _ := http.NewRequest(http.MethodGet, srv.BaseURL()+"/img?src="+up.URL+"/x.jpg", nil)
+		req.Header.Set("X-LP-Token", srv.Token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := img(); got != http.StatusNotFound {
+		t.Fatalf("前提不成立:同步之前不该在白名单里(实得 %d)", got)
+	}
+
+	SyncImageAllowlist()
+
+	if got := img(); got == http.StatusNotFound {
+		t.Fatal("冷启动同步之后仍不在白名单里 —— 表现是「一张封面都没有,而命令全都正常」")
+	}
+}

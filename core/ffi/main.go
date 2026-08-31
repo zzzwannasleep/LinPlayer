@@ -141,6 +141,10 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 			//   那会在下一次保存时把用户的账号全覆盖掉(见 core/config 包注释)
 			bus.Logf("error", "配置加载失败(不会退回空配置): %v", err)
 		}
+		// ★ 配置加载完之后把图片白名单同步一遍 —— 冷启动时账号早就在配置里了,
+		//   不同步的话一张封面都没有,而命令全都正常(最难查的那种)。
+		account.SyncImageAllowlist()
+
 		bus.Logf("info", "核心层已启动 ABI=%d 平台=%s 数据根=%s 命令=%d 条",
 			LP_ABI, hostCfg.Platform, paths.Root(), len(bus.Commands()))
 	})

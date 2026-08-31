@@ -81,6 +81,13 @@ func commit(c *config.AppConfig) error {
 	return nil
 }
 
+// SyncImageAllowlist 由 lp_init 在配置加载完之后调一次。
+//
+// ★★ 没有这一步的话:**冷启动(账号早就存在配置里)时白名单是空的,一张封面都没有**,
+// 而命令全都正常。只有「这次会话里登录过 / 改过账号」才会被登记 ——
+// 那正好是开发时最常走的路径,所以这个洞在开发机上极难发现。
+func SyncImageAllowlist() { syncImageAllowlist(config.Current()) }
+
 // syncImageAllowlist 让图片通道的白名单和账号表**完全一致**。
 //
 // ★ 全量重建而不是增量加:删账号 / 换线路时只加不删的话,

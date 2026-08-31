@@ -23,12 +23,15 @@ namespace LinPlayer.Desktop.Views;
 /// </summary>
 public sealed class HomePage : PageBase
 {
-    private readonly CoreClient? _core;
     private readonly StackPanel _rows = new() { Spacing = 26 };
+    private readonly Action<CardItem>? _onOpen;
+    private CoreClient? _core;
+    private string _server = "";
 
-    public HomePage(CoreClient? core)
+    public HomePage(CoreClient? core, Action<CardItem>? onOpen = null)
     {
         _core = core;
+        _onOpen = onOpen;
         Content = Scrolled(_rows);
         if (core is not null) _ = LoadAsync(core);
     }
@@ -45,9 +48,10 @@ public sealed class HomePage : PageBase
             AddRow(Dim("当前账号不是 Emby(网盘 / 局域网源的首页还没做)。"));
             return;
         }
+        _server = Str(session, "server");
         var s = new
         {
-            server = Str(session, "server"),
+            server = _server,
             token = Str(session, "token"),
             user_id = Str(session, "user_id"),
             device_id = "linplayer-desktop",
@@ -95,56 +99,16 @@ public sealed class HomePage : PageBase
     }
 
     /// <summary>横向轨道。宽卡 240×135(16:9),窄卡 150×225(2:3)—— UI_PC §3.2。</summary>
-    private static Control Strip(List<JsonElement> items, bool wide)
+    private Control Strip(List<JsonElement> items, bool wide)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        foreach (var it in items.Take(20)) panel.Children.Add(Card(it, wide));
+        foreach (var it in items.Take(20))
+            panel.Children.Add(new Card(_core!, _server, CardItem.From(it), wide, _onOpen));
         return new ScrollViewer
         {
             HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = panel,
-        };
-    }
-
-    private static Control Card(JsonElement it, bool wide)
-    {
-        var name = Str(it, "name");
-        var series = Str(it, "series_name");
-        // ★ 分集的 Name 只是「第 35 集」,单看无意义 —— 混排列表里必须靠剧名才说得清是哪部剧
-        var title = string.IsNullOrEmpty(series) ? name : $"{series} · {name}";
-
-        var w = wide ? 240 : 150;
-        var h = wide ? 135 : 225;
-
-        var art = new Border
-        {
-            Width = w, Height = h, CornerRadius = new CornerRadius(10),
-            Background = new SolidColorBrush(Color.Parse("#1b212c")),
-            Child = new TextBlock
-            {
-                Text = name,
-                Classes = { "dim" },
-                Margin = new Thickness(10),
-                TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                TextAlignment = TextAlignment.Center,
-            },
-        };
-
-        return new StackPanel
-        {
-            Width = w, Spacing = 6,
-            Children =
-            {
-                art,
-                new TextBlock
-                {
-                    Text = title, FontSize = 12.5, MaxLines = 2,
-                    TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis,
-                },
-            },
         };
     }
 
