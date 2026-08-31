@@ -11,6 +11,7 @@ import (
 	"linplayer/core/account"
 	"linplayer/core/bus"
 	"linplayer/core/emby"
+	"linplayer/core/history"
 	"linplayer/core/player"
 	"linplayer/core/prefs"
 	"linplayer/core/system"
@@ -23,6 +24,7 @@ func main() {
 	emby.RegisterCommands("listcommands")
 	account.RegisterCommands("listcommands")
 	prefs.RegisterCommands("listcommands")
+	history.RegisterCommands()
 
 	cmds := bus.Commands()
 	sort.Strings(cmds)

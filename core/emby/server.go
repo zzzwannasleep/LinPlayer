@@ -128,3 +128,42 @@ func (c *Client) ExtDomains(ctx context.Context, s *Session) ([]ExtDomain, error
 	}
 	return out, nil
 }
+
+// ItemForHistory 取单条 Item(带跨服续播强匹配所需的**全部** Fields)。
+//
+// ★ 与 Detail 的区别:Detail 面向详情页(要 Overview/People/子集),
+// 这个面向观看记录 —— **只要匹配判据**。
+// 少要 HistoryFields 的话匹配会静默降级到「剧名+季集号」,那正是跨服续播
+// 最容易假装能用的失败形态。
+func (c *Client) ItemForHistory(ctx context.Context, s *Session, itemID string) (*Item, error) {
+	u := fmt.Sprintf("%s/Users/%s/Items/%s?Fields=Genres,ProductionYear,CommunityRating,%s",
+		s.Server, url.PathEscape(s.UserID), url.PathEscape(itemID), HistoryFields)
+	b, err := c.getBytes(ctx, s, u)
+	if err != nil {
+		return nil, err
+	}
+	var raw rawItem
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return nil, fmt.Errorf("解析失败: %w", err)
+	}
+	it := fromRaw(raw)
+	return &it, nil
+}
+
+// SeriesTmdbID 取某剧的 TMDB id。
+//
+// ★ 跨服务器匹配剧集时用:同一部剧在两台服的 item_id 不同,但 TMDB id 相同。
+// 剧不存在 / 没刮到 TMDB → 返回 nil,**不是错误**:没刮削的库属正常,匹配自然降级。
+func (c *Client) SeriesTmdbID(ctx context.Context, s *Session, seriesID string) *string {
+	it, err := c.ItemForHistory(ctx, s, seriesID)
+	if err != nil || it == nil {
+		return nil
+	}
+	for k, v := range it.ProviderIDs {
+		if strings.EqualFold(k, "Tmdb") && strings.TrimSpace(v) != "" {
+			t := strings.TrimSpace(v)
+			return &t
+		}
+	}
+	return nil
+}

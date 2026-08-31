@@ -764,6 +764,16 @@
 > 每段都写清了**缺了会怎样** —— 它们都不影响「能不能播出来」,
 > 但每一条都是「功能静默不工作」。
 >
+>
+> **2026-08-31 七续:**`core/history` 落地 —— 跨服匹配那套纯逻辑
+> (归一化 / canonicalKey / 指纹 / 置信度)+ watch_history.json 的读写
+> + 续播位置决策,`emby.watchHistory*` 3 条。并且**接进了起播链**:
+> `player.play` 现在真的会取「带全部匹配判据的条目」、算跨服最大进度、落本地记录,
+> `player.stopPlayback` 强制落盘。**共 87 条命令。**
+>
+> 这样 `player.play` 的 ponytail 从六段减到四段(预加载取消 / 多线程加载代理 /
+> Trakt·Bangumi / 插件 onPlay)。
+>
 > 剩下的 emby 条目各自压着一个还没移植的子系统,要先做那个:
 > aggregate*(多账号,等 core/config)/ watchHistory*(观看记录模块)/
 > ranking*(排行榜模块)/ reportProgress(播放会话状态)/

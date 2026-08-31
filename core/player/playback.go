@@ -17,6 +17,7 @@ import (
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/emby"
+	"linplayer/core/history"
 )
 
 // current 当前这次播放的目标。上报三件套要靠它拿 PlaySessionId。
@@ -86,12 +87,28 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	/* ponytail: 下面这几段等对应子系统移植后接上,**缺了各自的后果**:
 	   · 预加载取消        —— 起播那一刻预热还在拉,和播放器抢带宽,反倒更慢
 	   · 多线程加载代理    —— 慢链路上起播仍是冷握手 + 冷 seek
-	   · 跨服续播          —— 别的服务器上更靠后的进度不会被用上(取最大那条规则失效)
-	   · 观看记录上下文    —— 本次播放不进本地记录,跨服回传和恢复扫描都没有依据
 	   · Trakt/Bangumi     —— 播放期同步不发 start
 	   · 插件 onPlay 事件  —— 插件收不到「开始播放」
 	   这些**都不影响本次能不能播出来**,所以先把主链路打通;
 	   但它们各自都是「功能静默不工作」,别当成可选项忘掉。 */
+
+	/* 观看记录上下文 与 取流地址本可以**并发**打 —— 两者互不依赖。
+	   ★ 能并发的前提是这两条路上**没有跨 await 持有的锁**。Go 这边暂时串着:
+	     history 的写锁在 Capture 内部,不跨网络调用;真要并发时先确认这一点,
+	     否则就是同一线程上两个 future 抢同一把锁 = 自我死锁(症状是起播直接吊死,不报错)。 */
+	whCtx := buildHistoryContext(ctx, s, itemID)
+	if whCtx != nil {
+		// ★ 调用方传进来的 resumeSecs 只是**这一台** Emby 的进度;
+		//   跨服续播开着时,本地记录里别的服务器上更靠后的进度会覆盖它(取最大)。
+		remote := int64(resumeSecs * float64(history.TicksPerSec))
+		if t := history.Shared().ResolveResumeTicks(whCtx.scope, whCtx.candidate,
+			whCtx.seriesTmdbID, &remote, whCtx.candidate.Played, prefs.CrossServerResume); t != nil {
+			resumeSecs = float64(*t) / float64(history.TicksPerSec)
+		}
+	}
+	currentMu.Lock()
+	currentCtx = whCtx
+	currentMu.Unlock()
 
 	bus.Logf("info", "PLAY item=%s resume=%.1f psid=%s method=%s",
 		itemID, resumeSecs, target.PlaySessionID, target.PlayMethod)
@@ -143,6 +160,80 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	}, nil
 }
 
+// historyContext 这次播放在观看记录里的上下文。
+type historyContext struct {
+	scope        string
+	candidate    history.Candidate
+	seriesTmdbID *string
+}
+
+var currentCtx *historyContext
+
+// buildHistoryContext 取「带全部匹配判据的条目」+ 剧的 TMDB id。
+//
+// ★ 取不到判据(网络抖 / 权限)**不该拦住播放** —— 返回 nil,
+// 这次播放就不进本地记录,但片子照放。
+func buildHistoryContext(ctx context.Context, s *emby.Session, itemID string) *historyContext {
+	it, err := prefsClient.ItemForHistory(ctx, s, itemID)
+	if err != nil || it == nil {
+		bus.Logf("warn", "取观看记录判据失败(本次播放不进本地记录): %v", err)
+		return nil
+	}
+	cand := candidateOf(*it)
+	var seriesTmdb *string
+	if cand.SeriesID != nil && *cand.SeriesID != "" {
+		// ponytail: 这里每次起播都打一次。Rust 侧按 seriesId 缓存(含「查过但没有」的
+		// 负缓存)—— 没有缓存的表现是对没刮削的剧反复打服务器。接 net 层时补上。
+		seriesTmdb = prefsClient.SeriesTmdbID(ctx, s, *cand.SeriesID)
+	}
+	return &historyContext{
+		scope:        history.ScopeKey(s.Server, s.UserID),
+		candidate:    cand,
+		seriesTmdbID: seriesTmdb,
+	}
+}
+
+// candidateOf 把 Emby 条目折成观看记录的候选。
+//
+// ★ ProviderIds / PresentationUniqueKey / Path 三样**必须是带 HistoryFields 取回来的**,
+// 否则这里全是空,匹配自动降级到「剧名+季集号」—— 跨服续播最容易假装能用的失败形态。
+func candidateOf(it emby.Item) history.Candidate {
+	rt := int64(it.RuntimeSecs * float64(history.TicksPerSec))
+	return history.Candidate{
+		ID: it.ID, Name: it.Name, Type: it.Type,
+		TmdbID:          history.ExtractProviderID(it.ProviderIDs, "Tmdb"),
+		SeriesID:        it.SeriesID,
+		SeriesName:      it.SeriesName,
+		PresentationKey: it.PresentationUniqueKey,
+		Path:            it.Path,
+		SeasonNo:        it.SeasonNo,
+		EpisodeNo:       it.EpisodeNo,
+		Year:            it.Year,
+		RunTimeTicks:    &rt,
+		Played:          it.Played,
+		PositionTicks:   int64(it.ResumeSecs * float64(history.TicksPerSec)),
+	}
+}
+
+// captureHistory 落一次观看记录。force=true 用于停播那一下。
+func captureHistory(posSecs float64, force bool) {
+	currentMu.Lock()
+	c := currentCtx
+	currentMu.Unlock()
+	if c == nil {
+		return
+	}
+	history.Shared().Capture(history.CaptureOpts{
+		ScopeKey: c.scope, Candidate: c.candidate, SeriesTmdbID: c.seriesTmdbID,
+		PositionTicks: int64(posSecs * float64(history.TicksPerSec)),
+		Source:        history.SourceInternal,
+		// ponytail: 阈值应当来自服务器的用户配置(Emby 默认 90%)。
+		// 先写死 90 —— 与 Rust 版调用点一致。
+		WatchedThresholdPercent: 90,
+		Force:                   force,
+	})
+}
+
 // Stop 停播并上报。pos 是停在哪一秒。
 func Stop(ctx context.Context, s *emby.Session, pos float64) error {
 	t := Current()
@@ -151,6 +242,12 @@ func Stop(ctx context.Context, s *emby.Session, pos float64) error {
 	pendingSubs = nil
 	currentMu.Unlock()
 	_ = command("stop")
+	// ★ 停播这一下**必须落盘**(force):不 force 的话会被 10 秒节流吃掉,
+	//   最后那段进度就丢了 —— 而用户下次进来看到的正是那个旧位置。
+	captureHistory(pos, true)
+	currentMu.Lock()
+	currentCtx = nil
+	currentMu.Unlock()
 	if t == nil {
 		return nil
 	}

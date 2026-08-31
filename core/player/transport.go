@@ -73,6 +73,10 @@ func registerTransport() {
 		}
 		pos, _ := a["pos"].(float64)
 		paused, _ := a["paused"].(bool)
+		// ★ 顺手落一次本地观看记录(内部有 10 秒节流)。
+		//   放在这里而不是另开一条定时器:上报本来就是「每几秒一次」的节奏,
+		//   再开一条只会多一份状态要对齐。
+		captureHistory(pos, false)
 		if err := prefsClient.ReportProgress(ctx, s, t, pos, paused); err != nil {
 			// ★ 上报失败不该冒到用户面前:它每几秒一次,弹一次红字就是刷屏
 			bus.Logf("warn", "report_progress 失败: %v", err)
