@@ -98,24 +98,24 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `account.batchAddServers` | `batch_add_servers` | `blocks: Vec<linplayer_core::server_batch::ParsedServerBlock>, fallback_username: Option<String>, fallback_password: Option<String>, fallback_name: Option<String>` | `Result<Vec<BatchAddResult>, String>` | ✅ |
-| [ ] | `account.batchParse` | `batch_parse` | `text: String` | `Vec<linplayer_core::server_batch::ParsedServerBlock>` | ✅ |
-| [ ] | `account.clearAccountIcon` | `clear_account_icon` | `server_id: String` | `()` | ✅ |
+| [x] | `account.batchAddServers` | `batch_add_servers` | `blocks: Vec<linplayer_core::server_batch::ParsedServerBlock>, fallback_username: Option<String>, fallback_password: Option<String>, fallback_name: Option<String>` | `Result<Vec<BatchAddResult>, String>` | ✅ |
+| [x] | `account.batchParse` | `batch_parse` | `text: String` | `Vec<linplayer_core::server_batch::ParsedServerBlock>` | ✅ |
+| [x] | `account.clearAccountIcon` | `clear_account_icon` | `server_id: String` | `()` | ✅ |
 | [x] | `account.getCrossServerResume` | `get_cross_server_resume` | `—` | `bool` | ✅ |
-| [ ] | `account.icon` | `account_icon` | `server_id: String` | `Result<String, String>` | ✅ |
+| [x] | `account.icon` | `account_icon` | `server_id: String` | `Result<String, String>` | ✅ |
 | [x] | `account.listAccounts` | `list_accounts` | `—` | `Vec<AccountInfo>` | ✅ |
-| [ ] | `account.parseDeepLink` | `parse_deep_link` | `url: String` | `Option<linplayer_core::server_batch::DeepLinkAddServer>` | ✅ |
+| [x] | `account.parseDeepLink` | `parse_deep_link` | `url: String` | `Option<linplayer_core::server_batch::DeepLinkAddServer>` | ✅ |
 | [x] | `account.probeAccounts` | `probe_accounts` | `—` | `Result<Vec<AccountInfo>, String>` | ✅ |
 | [x] | `account.probeLine` | `probe_line` | `server_id: String, index: usize` | `Result<LineProbe, String>` | ✅ |
 | [x] | `account.probeLines` | `probe_lines` | `server_id: String` | `Result<Vec<LineProbe>, String>` | ✅ |
 | [x] | `account.removeAccount` | `remove_account` | `server_id: String` | `Result<(), String>` | ✅ |
 | [x] | `account.reorderAccounts` | `reorder_accounts` | `from: usize, to: usize` | `Result<(), String>` | ✅ |
-| [ ] | `account.setAccountIconFile` | `set_account_icon_file` | `server_id: String, file_path: String` | `Result<String, String>` | ✅ |
+| [x] | `account.setAccountIconFile` | `set_account_icon_file` | `server_id: String, file_path: String` | `Result<String, String>` | ✅ |
 | [x] | `account.setActiveLine` | `set_active_line` | `server_id: String, index: usize` | `Result<(), String>` | ✅ |
 | [x] | `account.setActiveServer` | `set_active_server` | `server_id: String` | `Result<(), String>` | ✅ |
 | [x] | `account.setCrossServerResume` | `set_cross_server_resume` | `enabled: bool` | `Result<(), String>` | ✅ |
 | [x] | `account.setLines` | `set_lines` | `server_id: String, lines: Vec<linplayer_core::config::ServerLine>` | `Result<(), String>` | ✅ |
-| [ ] | `account.startupDeepLink` | `startup_deep_link` | `—` | `Option<String>` | ✅ |
+| [x] | `account.startupDeepLink` | `startup_deep_link` | `—` | `Option<String>` | ✅ |
 | [x] | `account.syncLines` | `sync_lines` | `server_id: String` | `Result<SyncedLines, String>` | ✅ |
 | [x] | `account.testConnection` | `test_connection` | `server: String` | `Result<emby::ServerInfo, String>` | ✅ |
 | [x] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<(), String>` | ✅ |
@@ -350,7 +350,7 @@
 | [ ] | `prefs.getTranslationSettings` | `get_translation_settings` | `—` | `tr::TranslationSettings` | ❌ |
 | [x] | `prefs.getUpdateSettings` | `get_update_settings` | `—` | `UpdateSettings` | ✅ |
 | [x] | `prefs.getWritebackSettings` | `get_writeback_settings` | `—` | `WritebackSettings` | ✅ |
-| [ ] | `prefs.iconLibrary` | `icon_library` | `—` | `()` | ✅ |
+| [x] | `prefs.iconLibrary` | `icon_library` | `—` | `()` | ✅ |
 | [x] | `prefs.preloadCancel` | `preload_cancel` | `—` | `()` | ❌ |
 | [x] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |

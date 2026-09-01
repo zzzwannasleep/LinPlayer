@@ -72,5 +72,8 @@ func main() {
 	addTo(sp, "bangumiRedirectURI", strings.TrimSpace(os.Getenv("LP_BANGUMI_REDIRECT_URI")))
 	// ★ 赞助地址同理:它是账号地址,而且**错了不会报错**(收益直接归零)
 	addTo("linplayer/core/system", "afdianSponsorURL", strings.TrimSpace(os.Getenv("LP_AFDIAN_SPONSOR_URL")))
+	// ★ 图标库的聚合源地址(逗号分隔)。它们是**别人的域名**,同样不进提交 ——
+	//   黄金实现把四条硬编在 icon_library.rs 里,那是既有的红线欠账。
+	addTo("linplayer/core/prefs", "iconSources", strings.TrimSpace(os.Getenv("LP_ICON_LIBRARY_SOURCES")))
 	fmt.Print(strings.Join(parts, " "))
 }

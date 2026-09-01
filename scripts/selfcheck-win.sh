@@ -118,6 +118,9 @@ export LP_RANKING_BASE_TMDB="http://127.0.0.1:$PORT"
 export LP_RANKING_BASE_TMDBIMG="http://127.0.0.1:$PORT"
 # 追剧日历的上游同理(假服务器兼职 Bangumi)
 export LP_BANGUMI_API="http://127.0.0.1:$PORT"
+# 图标库的聚合源(假服务器兼职图床)。
+# ★ 真实构建里这个是 -ldflags 注入的,源码里没有 —— 自检走环境变量那条覆盖。
+export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 sleep $([ -n "$CLIP" ] && echo 12 || echo 6)

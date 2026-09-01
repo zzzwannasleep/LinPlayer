@@ -21,6 +21,7 @@ import (
 // RegisterCommands 由 lp_init 调用。version 是发行版本号(更新设置要用)。
 func RegisterCommands(version string) {
 	registerCFCommands()
+	registerIconLibrary()
 	registerProxyCommands()
 
 	// ---- 选轨偏好 ----

@@ -127,6 +127,15 @@ public partial class MainWindow : Window
                 if (arg.Length > 0 && Nav.Current is RankingPage rp) rp.SelfCheckGroup(arg);
                 break;
             case "servers": GoServers(); break;
+            // 自检:批量添加页(带参数时把那段文本填进去并解析)
+            case "batch":
+                {
+                    var batchPage = new BatchAddPage(_core, OnServerSwitched);
+                    Nav.Push(batchPage);
+                    if (arg.Length > 0) _ = batchPage.LoadDeepLink(arg);
+                    break;
+                }
+            case "icons": Nav.Push(new IconLibraryPage(_core, srv, () => { })); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
             case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
             case "person": Nav.Push(new PersonPage(_core, srv, arg, "自检人物")); break;
@@ -221,11 +230,33 @@ public partial class MainWindow : Window
             try { Nav.Session = Sess.From(await _core.EmbyCurrentSession()); } catch { /* 非 Emby 账号没有会话 */ }
             Nav.Root(Home());
             SelfCheckJump();
+            await StartupDeepLinkAsync();
         }
         catch (Exception e)
         {
             Show(new FatalPage($"读账号表失败:{e.Message}"));
         }
+    }
+
+    /// <summary>
+    /// 冷启动时点了一条 <c>linplayer://</c> 链接:落到批量添加页让用户核对。
+    ///
+    /// <para>★★ **绝不直接添加**。链接可能来自任何网页或聊天窗口 ——
+    /// 核心层解得开只表示格式对,不表示这台服务器是用户想加的。
+    /// 必须让他看清地址和用户名再点。</para>
+    /// </summary>
+    private async Task StartupDeepLinkAsync()
+    {
+        if (_core is null) return;
+        try
+        {
+            var r = await _core.AccountStartupDeepLink(new { });
+            if (r.ValueKind != JsonValueKind.String) return;
+            var page = new BatchAddPage(_core, () => { OnServerSwitched(); Nav.Back(); });
+            Nav.Push(page);
+            await page.LoadDeepLink(r.GetString() ?? "");
+        }
+        catch { /* 没有深链是常态,不是错误 */ }
     }
 
     /// <summary>

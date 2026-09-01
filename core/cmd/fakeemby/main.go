@@ -87,6 +87,23 @@ func main() {
 		}
 		writeJSON(w, map[string]any{"success": true, "bangumiList": list})
 	})
+	/* 假的图标聚合源(自检用)。核心层靠 LP_ICON_LIBRARY_SOURCES 指过来。
+	   ★ 夹具里要带上**会出事的那两种条目**:空 url 和非 http 的 url ——
+	     不带的话「丢掉坏条目」那条判据在真渲染里根本走不到。 */
+	mux.HandleFunc("/icons.json", func(w http.ResponseWriter, r *http.Request) {
+		icons := []any{
+			map[string]any{"name": "", "url": ""},              // 空的:要被丢掉
+			map[string]any{"name": "坏协议", "url": "ftp://x/y.png"}, // 非 http:要被丢掉
+		}
+		for i := 1; i <= 24; i++ {
+			icons = append(icons, map[string]any{
+				"name": fmt.Sprintf("假图标 %02d", i),
+				"url":  fmt.Sprintf("http://%s/rankimg/icon-%d.png", r.Host, i),
+			})
+		}
+		writeJSON(w, map[string]any{"name": "自检图标库", "description": "", "icons": icons})
+	})
+
 	/* 假的 Bangumi 放送表(自检用)。核心层靠 LP_BANGUMI_API 指过来。
 	   ★ 夹具要带上**真实形状里那些会出事的东西**:0 分的条目、只有原名的条目、
 	     协议相对的图片地址 —— 缺一样,对应那条 UI 判据就验不到。 */

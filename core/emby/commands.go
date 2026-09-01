@@ -3,21 +3,44 @@ package emby
 // 本包自己注册 `emby.*`。命令归属跟着实现走(理由见 core/player/commands.go)。
 
 import (
-	"crypto/x509"
-	"errors"
-	"time"
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
+	"time"
 
 	"linplayer/core/blocklist"
 	"linplayer/core/bus"
 	"linplayer/core/config"
 	"linplayer/core/net/localserve"
 	"linplayer/core/net/tlspolicy"
+	"linplayer/core/serverbatch"
 )
 
 var defaultClient *Client
+
+// Default 给同仓别的包用的那份客户端(批量添加服务器要逐线路试登录)。
+//
+// ★ 不另建一个:另建的那份不带同一套 UA / 代理 / TLS 白名单,
+// 表现是「单独加服务器能连,批量加就连不上」。
+func Default() *Client { return defaultClient }
+
+// ProbeName 探服务器名。**探失败不算错**,返回空串由调用方回落 ——
+// 有的 fork 根本没有这个端点,名字是锦上添花,加服务器是刚需。
+func ProbeName(ctx context.Context, server string) string {
+	if defaultClient == nil {
+		return ""
+	}
+	pctx, cancel := context.WithTimeout(ctx, serverNameTimeout)
+	defer cancel()
+	info, err := defaultClient.ProbeServer(pctx, server)
+	if err != nil || info == nil {
+		return ""
+	}
+	return strings.TrimSpace(info.Name)
+}
 
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands(version string) {
@@ -218,8 +241,20 @@ func RegisterCommands(version string) {
 		if pw := str(args, "password"); pw != "" {
 			acc.Password = &pw
 		}
-		// ponytail: 服务器图标默认取登录用户的 Emby 头像(黄金实现里首次添加时设)。
-		// 那要 server_batch.BuildIconURL,还没移植 —— 先留空,由前端回落默认图。
+		/* 服务器图标默认取**登录用户的 Emby 头像**:很多 Emby 服把品牌 logo
+		   直接设成用户头像,而用户头像在 Emby 是免鉴权的公开资源。
+		   该用户没头像时退回 /web/touchicon.png,两者都取不到由 UI 回落内置图标。
+
+		   ★ 和 Name 同理**只在新账号时带**:Upsert 对非空值是覆盖语义,
+		     无条件写的话用户自己传上去的那张图标每次重登都被冲掉。 */
+		if c.Find(res.Server) == nil {
+			tag := ""
+			if res.PrimaryImageTag != nil {
+				tag = *res.PrimaryImageTag
+			}
+			icon := serverbatch.BuildIconURL(res.Server, res.UserID, tag)
+			acc.IconURL = &icon
+		}
 		c.Upsert(acc)
 		if err := c.Save(); err != nil {
 			return nil, bus.NewErr(bus.EInternal, "配置保存失败: %v", err)

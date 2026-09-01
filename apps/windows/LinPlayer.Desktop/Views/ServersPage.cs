@@ -35,6 +35,14 @@ public sealed class ServersPage : PageBase
             Nav.Back();
         }));
 
+        // 批量添加:贴一段开通信息 / 一条 linplayer:// 链接。
+        var batch = new Button { Classes = { "ghost" }, Content = "批量添加 / 深链" };
+        batch.Click += (_, _) => Nav.Push(new BatchAddPage(core, () =>
+        {
+            _onSwitched();
+            Nav.Back();
+        }));
+
         Content = Scrolled(new StackPanel
         {
             Spacing = 16,
@@ -43,7 +51,7 @@ public sealed class ServersPage : PageBase
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal, Spacing = 14,
-                    Children = { H1("服务器"), add },
+                    Children = { H1("服务器"), add, batch },
                 },
                 _hint, _list,
             },
@@ -145,6 +153,14 @@ public sealed class ServersPage : PageBase
             catch (Exception e) { msg.Text = LibraryPage.Advice(e); }
         };
 
+        // 换图标 —— 进图标库(§7.17),挑一张网络图标或上传本地图片。
+        var icon = new Button { Classes = { "ghost" }, Content = "换图标" };
+        icon.Click += (_, _) => Nav.Push(new IconLibraryPage(_core, server, () =>
+        {
+            _onSwitched();
+            _ = Reload();
+        }));
+
         // ★ 删除要二次确认。设置页整体是「零二次确认」的,但**删账号是不可逆的**,
         //   这一条是例外 —— 误点一下要重新登录一台服务器。
         var del = new Button { Classes = { "ghost" }, Content = "删除" };
@@ -199,7 +215,7 @@ public sealed class ServersPage : PageBase
                     new StackPanel
                     {
                         Orientation = Orientation.Horizontal, Spacing = 10,
-                        Children = { use, save, probe, del, msg },
+                        Children = { use, save, icon, probe, del, msg },
                     },
                 },
             },
