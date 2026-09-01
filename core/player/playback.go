@@ -221,7 +221,7 @@ func buildHistoryContext(ctx context.Context, s *emby.Session, itemID string) *h
 		bus.Logf("warn", "取观看记录判据失败(本次播放不进本地记录): %v", err)
 		return nil
 	}
-	cand := candidateOf(*it)
+	cand := history.CandidateFromItem(*it)
 	var seriesTmdb *string
 	if cand.SeriesID != nil && *cand.SeriesID != "" {
 		// ponytail: 这里每次起播都打一次。Rust 侧按 seriesId 缓存(含「查过但没有」的
@@ -232,28 +232,6 @@ func buildHistoryContext(ctx context.Context, s *emby.Session, itemID string) *h
 		scope:        history.ScopeKey(s.Server, s.UserID),
 		candidate:    cand,
 		seriesTmdbID: seriesTmdb,
-	}
-}
-
-// candidateOf 把 Emby 条目折成观看记录的候选。
-//
-// ★ ProviderIds / PresentationUniqueKey / Path 三样**必须是带 HistoryFields 取回来的**,
-// 否则这里全是空,匹配自动降级到「剧名+季集号」—— 跨服续播最容易假装能用的失败形态。
-func candidateOf(it emby.Item) history.Candidate {
-	rt := int64(it.RuntimeSecs * float64(history.TicksPerSec))
-	return history.Candidate{
-		ID: it.ID, Name: it.Name, Type: it.Type,
-		TmdbID:          history.ExtractProviderID(it.ProviderIDs, "Tmdb"),
-		SeriesID:        it.SeriesID,
-		SeriesName:      it.SeriesName,
-		PresentationKey: it.PresentationUniqueKey,
-		Path:            it.Path,
-		SeasonNo:        it.SeasonNo,
-		EpisodeNo:       it.EpisodeNo,
-		Year:            it.Year,
-		RunTimeTicks:    &rt,
-		Played:          it.Played,
-		PositionTicks:   int64(it.ResumeSecs * float64(history.TicksPerSec)),
 	}
 }
 

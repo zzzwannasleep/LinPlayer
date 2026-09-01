@@ -125,11 +125,48 @@ public sealed class HistoryPage : PageBase
         var only = new CheckBox { Content = "只看当前服务器", IsChecked = true };
         var list = new StackPanel { Spacing = 8 };
         var status = Dim("加载中…");
+        var scanHint = Dim("");
+
+        /* 扫描恢复:换服 / 重装之后把本地记录推回服务器。
+           ★★ 报告里的 errors 必须显示出来。这条链路最危险的 bug 是
+             「不崩,只是悄悄少恢复了几条」—— 只报个成功数的话没人会发现。
+           ★ prompt_candidates 是**要用户拍板**的那一批(可能匹配但不确定):
+             自动写下去的后果是把进度写到另一部片上,而且看起来一切正常。
+             这一版先如实报个数,逐条确认的界面待做。 */
+        var scan = new Button { Classes = { "ghost" }, Content = "扫描恢复到当前服务器" };
+        scan.Click += async (_, _) =>
+        {
+            scan.IsEnabled = false;
+            scanHint.Text = "扫描中…(逐条比对,可能要十几秒)";
+            try
+            {
+                var r = await core.EmbyWatchHistoryScanRestore(new { });
+                var errs = r.TryGetProperty("errors", out var e) && e.ValueKind == JsonValueKind.Array
+                    ? e.EnumerateArray().Select(x => x.GetString() ?? "").ToList() : [];
+                var prompts = r.TryGetProperty("prompt_candidates", out var pc) && pc.ValueKind == JsonValueKind.Array
+                    ? pc.GetArrayLength() : 0;
+                var msg = $"扫了 {Num(r, "scanned"):0} 条,自动恢复 {Num(r, "auto_restored"):0} 条";
+                if (prompts > 0) msg += $",{prompts} 条拿不准(需要人工确认)";
+                if (errs.Count > 0) msg += $"。{errs.Count} 条出错:{string.Join(";", errs.Take(3))}";
+                scanHint.Text = msg;
+            }
+            catch (Exception ex) { scanHint.Text = LibraryPage.Advice(ex); }
+            finally { scan.IsEnabled = true; }
+        };
 
         Content = Scrolled(new StackPanel
         {
             Spacing = 14,
-            Children = { H1("观看历史"), only, status, list },
+            Children =
+            {
+                H1("观看历史"),
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Spacing = 12,
+                    Children = { only, scan },
+                },
+                scanHint, status, list,
+            },
         });
 
         async Task Load()

@@ -91,8 +91,8 @@
 | [x] | `emby.watchHistoryClear` | `watch_history_clear` | `—` | `()` | ✅ |
 | [x] | `emby.watchHistoryDelete` | `watch_history_delete` | `record_id: String` | `()` | ✅ |
 | [x] | `emby.watchHistoryList` | `watch_history_list` | `current_only: bool` | `Vec<wh::Record>` | ✅ |
-| [ ] | `emby.watchHistoryRestoreCandidate` | `watch_history_restore_candidate` | `candidate: wh::RestoreCandidate` | `Result<bool, String>` | ✅ |
-| [ ] | `emby.watchHistoryScanRestore` | `watch_history_scan_restore` | `—` | `Result<linplayer_core::watch_history_sync::RestoreReport, String>` | ✅ |
+| [x] | `emby.watchHistoryRestoreCandidate` | `watch_history_restore_candidate` | `candidate: wh::RestoreCandidate` | `Result<bool, String>` | ✅ |
+| [x] | `emby.watchHistoryScanRestore` | `watch_history_scan_restore` | `—` | `Result<linplayer_core::watch_history_sync::RestoreReport, String>` | ✅ |
 
 ### 账号与线路 · `account.*` — 21 条
 
