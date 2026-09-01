@@ -53,44 +53,44 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `emby.aggregateOverview` | `aggregate_overview` | `—` | `Result<Vec<SourceOverview>, String>` | ✅ |
-| [ ] | `emby.aggregateSearch` | `aggregate_search` | `query: String, include_episodes: Option<bool>` | `Result<Vec<ServerGroup>, String>` | ✅ |
-| [ ] | `emby.blockedList` | `blocked_list` | `—` | `Vec<linplayer_core::blocklist::BlockedItem>` | ✅ |
-| [ ] | `emby.counts` | **新增** | `server, token, user_id` | `Counts` | — | <!-- 媒体库规模统计。Rust 版里 emby::counts 只被 aggregate_overview 内部调用,没单独成命令 -->
-| [ ] | `emby.currentSession` | `current_session` | `—` | `Option<LoginResult>` | ✅ |
-| [ ] | `emby.getFilters` | `get_filters` | `parent_id: String` | `Result<emby::Filters, String>` | ✅ |
-| [ ] | `emby.isAdmin` | `is_admin` | `—` | `Result<bool, String>` | ✅ |
-| [ ] | `emby.itemDetail` | `item_detail` | `item_id: String, // 缺省 = true（桌面/TV 的旧调用点不传，行为不变）。 // 手机端传 false：它按季分页拉集，不需要这一坨。 with_children: Option<bool>` | `Result<emby::ItemDetail, String>` | ✅ |
-| [ ] | `emby.itemMedia` | `item_media` | `item_id: String` | `Result<Vec<emby::MediaVersion>, String>` | ✅ |
-| [ ] | `emby.listCollections` | `list_collections` | `—` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.listFavorites` | `list_favorites` | `—` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.listItems` | `list_items` | `parent_id: String` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.listItemsPage` | `list_items_page` | `parent_id: String, start_index: Option<u32>, limit: Option<u32>, sort_by: Option<String>, sort_order: Option<String>, genres: Option<Vec<String>>, tags: Option<Vec<String>>, years: Option<Vec<i32>>, studios: Option<Vec<String>>, rating_min: Option<f64>, rating_max: Option<f64>` | `Result<emby::ItemPage, String>` | ✅ |
-| [ ] | `emby.listLatest` | `list_latest` | `parent_id: String, limit: u32` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.listNextUp` | `list_next_up` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.listRandom` | `list_random` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.listResume` | `list_resume` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.login` | `login` | `server: String, username: String, password: String` | `Result<LoginResult, String>` | ✅ |
-| [ ] | `emby.logout` | **新增** | `server, token, user_id, device_id` | `{ server_ok: bool }` | — | <!-- 服务端登出。尽力而为:某 fork 该端点 404 且 token 仍可用,失败不挡本地删账号 -->
-| [ ] | `emby.personDetail` | `person_detail` | `person_id: String` | `Result<emby::PersonDetail, String>` | ✅ |
-| [ ] | `emby.personItems` | `person_items` | `person_id: String, limit: Option<u32>` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.rankingCategories` | `ranking_categories` | `—` | `Vec<linplayer_core::ranking::RankingCategory>` | ✅ |
-| [ ] | `emby.rankingFetch` | `ranking_fetch` | `category_id: String, force_refresh: Option<bool>` | `Result<Vec<linplayer_core::ranking::RankingEntry>, String>` | ✅ |
-| [ ] | `emby.refreshItem` | `refresh_item` | `item_id: String, full: bool` | `Result<(), String>` | ✅ |
-| [ ] | `emby.relogin` | `relogin` | `server_id: String, username: String, password: String` | `Result<(), String>` | ✅ |
-| [ ] | `emby.reportProgress` | `report_progress` | `pos: f64, paused: bool` | `Result<(), String>` | ✅ |
-| [ ] | `emby.scanLibraries` | `scan_libraries` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `emby.search` | `search` | `query: String, types: Option<Vec<String>>, limit: Option<u32>, parent_id: Option<String>` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.seasonEpisodes` | `season_episodes` | `parent_id: String, start_index: Option<i64>, limit: Option<i64>` | `Result<emby::ItemPage, String>` | ✅ |
-| [ ] | `emby.seriesSeasons` | `series_seasons` | `series_id: String` | `Result<Vec<emby::SeasonInfo>, String>` | ✅ |
-| [ ] | `emby.setBlocked` | `set_blocked` | `item_id: String, name: String, blocked: bool` | `()` | ✅ |
-| [ ] | `emby.setFavorite` | `set_favorite` | `item_id: String, fav: bool` | `Result<(), String>` | ✅ |
-| [ ] | `emby.setPlayed` | `set_played` | `item_id: String, played: bool` | `Result<(), String>` | ✅ |
-| [ ] | `emby.similarItems` | `similar_items` | `item_id: String` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.views` | `views` | `include_blocked: Option<bool>` | `Result<Vec<Item>, String>` | ✅ |
-| [ ] | `emby.watchHistoryClear` | `watch_history_clear` | `—` | `()` | ✅ |
-| [ ] | `emby.watchHistoryDelete` | `watch_history_delete` | `record_id: String` | `()` | ✅ |
-| [ ] | `emby.watchHistoryList` | `watch_history_list` | `current_only: bool` | `Vec<wh::Record>` | ✅ |
+| [x] | `emby.aggregateOverview` | `aggregate_overview` | `—` | `Result<Vec<SourceOverview>, String>` | ✅ |
+| [x] | `emby.aggregateSearch` | `aggregate_search` | `query: String, include_episodes: Option<bool>` | `Result<Vec<ServerGroup>, String>` | ✅ |
+| [x] | `emby.blockedList` | `blocked_list` | `—` | `Vec<linplayer_core::blocklist::BlockedItem>` | ✅ |
+| [x] | `emby.counts` | **新增** | `server, token, user_id` | `Counts` | — | <!-- 媒体库规模统计。Rust 版里 emby::counts 只被 aggregate_overview 内部调用,没单独成命令 -->
+| [x] | `emby.currentSession` | `current_session` | `—` | `Option<LoginResult>` | ✅ |
+| [x] | `emby.getFilters` | `get_filters` | `parent_id: String` | `Result<emby::Filters, String>` | ✅ |
+| [x] | `emby.isAdmin` | `is_admin` | `—` | `Result<bool, String>` | ✅ |
+| [x] | `emby.itemDetail` | `item_detail` | `item_id: String, // 缺省 = true（桌面/TV 的旧调用点不传，行为不变）。 // 手机端传 false：它按季分页拉集，不需要这一坨。 with_children: Option<bool>` | `Result<emby::ItemDetail, String>` | ✅ |
+| [x] | `emby.itemMedia` | `item_media` | `item_id: String` | `Result<Vec<emby::MediaVersion>, String>` | ✅ |
+| [x] | `emby.listCollections` | `list_collections` | `—` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.listFavorites` | `list_favorites` | `—` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.listItems` | `list_items` | `parent_id: String` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.listItemsPage` | `list_items_page` | `parent_id: String, start_index: Option<u32>, limit: Option<u32>, sort_by: Option<String>, sort_order: Option<String>, genres: Option<Vec<String>>, tags: Option<Vec<String>>, years: Option<Vec<i32>>, studios: Option<Vec<String>>, rating_min: Option<f64>, rating_max: Option<f64>` | `Result<emby::ItemPage, String>` | ✅ |
+| [x] | `emby.listLatest` | `list_latest` | `parent_id: String, limit: u32` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.listNextUp` | `list_next_up` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.listRandom` | `list_random` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.listResume` | `list_resume` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.login` | `login` | `server: String, username: String, password: String` | `Result<LoginResult, String>` | ✅ |
+| [x] | `emby.logout` | **新增** | `server, token, user_id, device_id` | `{ server_ok: bool }` | — | <!-- 服务端登出。尽力而为:某 fork 该端点 404 且 token 仍可用,失败不挡本地删账号 -->
+| [x] | `emby.personDetail` | `person_detail` | `person_id: String` | `Result<emby::PersonDetail, String>` | ✅ |
+| [x] | `emby.personItems` | `person_items` | `person_id: String, limit: Option<u32>` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.rankingCategories` | `ranking_categories` | `—` | `Vec<linplayer_core::ranking::RankingCategory>` | ✅ |
+| [x] | `emby.rankingFetch` | `ranking_fetch` | `category_id: String, force_refresh: Option<bool>` | `Result<Vec<linplayer_core::ranking::RankingEntry>, String>` | ✅ |
+| [x] | `emby.refreshItem` | `refresh_item` | `item_id: String, full: bool` | `Result<(), String>` | ✅ |
+| [x] | `emby.relogin` | `relogin` | `server_id: String, username: String, password: String` | `Result<(), String>` | ✅ |
+| [x] | `emby.reportProgress` | `report_progress` | `pos: f64, paused: bool` | `Result<(), String>` | ✅ |
+| [x] | `emby.scanLibraries` | `scan_libraries` | `—` | `Result<(), String>` | ✅ |
+| [x] | `emby.search` | `search` | `query: String, types: Option<Vec<String>>, limit: Option<u32>, parent_id: Option<String>` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.seasonEpisodes` | `season_episodes` | `parent_id: String, start_index: Option<i64>, limit: Option<i64>` | `Result<emby::ItemPage, String>` | ✅ |
+| [x] | `emby.seriesSeasons` | `series_seasons` | `series_id: String` | `Result<Vec<emby::SeasonInfo>, String>` | ✅ |
+| [x] | `emby.setBlocked` | `set_blocked` | `item_id: String, name: String, blocked: bool` | `()` | ✅ |
+| [x] | `emby.setFavorite` | `set_favorite` | `item_id: String, fav: bool` | `Result<(), String>` | ✅ |
+| [x] | `emby.setPlayed` | `set_played` | `item_id: String, played: bool` | `Result<(), String>` | ✅ |
+| [x] | `emby.similarItems` | `similar_items` | `item_id: String` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.views` | `views` | `include_blocked: Option<bool>` | `Result<Vec<Item>, String>` | ✅ |
+| [x] | `emby.watchHistoryClear` | `watch_history_clear` | `—` | `()` | ✅ |
+| [x] | `emby.watchHistoryDelete` | `watch_history_delete` | `record_id: String` | `()` | ✅ |
+| [x] | `emby.watchHistoryList` | `watch_history_list` | `current_only: bool` | `Vec<wh::Record>` | ✅ |
 | [ ] | `emby.watchHistoryRestoreCandidate` | `watch_history_restore_candidate` | `candidate: wh::RestoreCandidate` | `Result<bool, String>` | ✅ |
 | [ ] | `emby.watchHistoryScanRestore` | `watch_history_scan_restore` | `—` | `Result<linplayer_core::watch_history_sync::RestoreReport, String>` | ✅ |
 
@@ -101,66 +101,66 @@
 | [ ] | `account.batchAddServers` | `batch_add_servers` | `blocks: Vec<linplayer_core::server_batch::ParsedServerBlock>, fallback_username: Option<String>, fallback_password: Option<String>, fallback_name: Option<String>` | `Result<Vec<BatchAddResult>, String>` | ✅ |
 | [ ] | `account.batchParse` | `batch_parse` | `text: String` | `Vec<linplayer_core::server_batch::ParsedServerBlock>` | ✅ |
 | [ ] | `account.clearAccountIcon` | `clear_account_icon` | `server_id: String` | `()` | ✅ |
-| [ ] | `account.getCrossServerResume` | `get_cross_server_resume` | `—` | `bool` | ✅ |
+| [x] | `account.getCrossServerResume` | `get_cross_server_resume` | `—` | `bool` | ✅ |
 | [ ] | `account.icon` | `account_icon` | `server_id: String` | `Result<String, String>` | ✅ |
-| [ ] | `account.listAccounts` | `list_accounts` | `—` | `Vec<AccountInfo>` | ✅ |
+| [x] | `account.listAccounts` | `list_accounts` | `—` | `Vec<AccountInfo>` | ✅ |
 | [ ] | `account.parseDeepLink` | `parse_deep_link` | `url: String` | `Option<linplayer_core::server_batch::DeepLinkAddServer>` | ✅ |
-| [ ] | `account.probeAccounts` | `probe_accounts` | `—` | `Result<Vec<AccountInfo>, String>` | ✅ |
-| [ ] | `account.probeLine` | `probe_line` | `server_id: String, index: usize` | `Result<LineProbe, String>` | ✅ |
-| [ ] | `account.probeLines` | `probe_lines` | `server_id: String` | `Result<Vec<LineProbe>, String>` | ✅ |
-| [ ] | `account.removeAccount` | `remove_account` | `server_id: String` | `Result<(), String>` | ✅ |
-| [ ] | `account.reorderAccounts` | `reorder_accounts` | `from: usize, to: usize` | `Result<(), String>` | ✅ |
+| [x] | `account.probeAccounts` | `probe_accounts` | `—` | `Result<Vec<AccountInfo>, String>` | ✅ |
+| [x] | `account.probeLine` | `probe_line` | `server_id: String, index: usize` | `Result<LineProbe, String>` | ✅ |
+| [x] | `account.probeLines` | `probe_lines` | `server_id: String` | `Result<Vec<LineProbe>, String>` | ✅ |
+| [x] | `account.removeAccount` | `remove_account` | `server_id: String` | `Result<(), String>` | ✅ |
+| [x] | `account.reorderAccounts` | `reorder_accounts` | `from: usize, to: usize` | `Result<(), String>` | ✅ |
 | [ ] | `account.setAccountIconFile` | `set_account_icon_file` | `server_id: String, file_path: String` | `Result<String, String>` | ✅ |
-| [ ] | `account.setActiveLine` | `set_active_line` | `server_id: String, index: usize` | `Result<(), String>` | ✅ |
-| [ ] | `account.setActiveServer` | `set_active_server` | `server_id: String` | `Result<(), String>` | ✅ |
-| [ ] | `account.setCrossServerResume` | `set_cross_server_resume` | `enabled: bool` | `Result<(), String>` | ✅ |
-| [ ] | `account.setLines` | `set_lines` | `server_id: String, lines: Vec<linplayer_core::config::ServerLine>` | `Result<(), String>` | ✅ |
+| [x] | `account.setActiveLine` | `set_active_line` | `server_id: String, index: usize` | `Result<(), String>` | ✅ |
+| [x] | `account.setActiveServer` | `set_active_server` | `server_id: String` | `Result<(), String>` | ✅ |
+| [x] | `account.setCrossServerResume` | `set_cross_server_resume` | `enabled: bool` | `Result<(), String>` | ✅ |
+| [x] | `account.setLines` | `set_lines` | `server_id: String, lines: Vec<linplayer_core::config::ServerLine>` | `Result<(), String>` | ✅ |
 | [ ] | `account.startupDeepLink` | `startup_deep_link` | `—` | `Option<String>` | ✅ |
-| [ ] | `account.syncLines` | `sync_lines` | `server_id: String` | `Result<SyncedLines, String>` | ✅ |
-| [ ] | `account.testConnection` | `test_connection` | `server: String` | `Result<emby::ServerInfo, String>` | ✅ |
-| [ ] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<(), String>` | ✅ |
+| [x] | `account.syncLines` | `sync_lines` | `server_id: String` | `Result<SyncedLines, String>` | ✅ |
+| [x] | `account.testConnection` | `test_connection` | `server: String` | `Result<emby::ServerInfo, String>` | ✅ |
+| [x] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<(), String>` | ✅ |
 
 ### 播放器 · `player.*` — 39 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `player.addSubtitle` | `add_subtitle` | `url: String, title: Option<String>, secondary: Option<bool>` | `Result<(), String>` | ✅ |
-| [ ] | `player.chapterInfo` | `chapter_info` | `item_id: String, runtime_secs: f64` | `Result<ChapterInfo, String>` | ✅ |
-| [ ] | `player.getMpvConf` | `get_mpv_conf` | `—` | `MpvConf` | ❌ |
-| [ ] | `player.getPlaybackPrefs` | `get_playback_prefs` | `—` | `PlaybackPrefs` | ✅ |
-| [ ] | `player.getScreenshotDir` | `get_screenshot_dir` | `—` | `ScreenshotDir` | ❌ |
-| [ ] | `player.mpvCommand` | `mpv_command` | `args: Vec<String>` | `Result<(), String>` | ✅ |
-| [ ] | `player.mpvGet` | `mpv_get` | `name: String` | `Result<Option<String>, String>` | ✅ |
-| [ ] | `player.mpvSet` | `mpv_set` | `name: String, value: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.opts` | `player_opts` | `—` | `Result<PlayerOpts, String>` | ✅ |
-| [ ] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<f64, String>` | ✅ |
+| [x] | `player.addSubtitle` | `add_subtitle` | `url: String, title: Option<String>, secondary: Option<bool>` | `Result<(), String>` | ✅ |
+| [x] | `player.chapterInfo` | `chapter_info` | `item_id: String, runtime_secs: f64` | `Result<ChapterInfo, String>` | ✅ |
+| [x] | `player.getMpvConf` | `get_mpv_conf` | `—` | `MpvConf` | ❌ |
+| [x] | `player.getPlaybackPrefs` | `get_playback_prefs` | `—` | `PlaybackPrefs` | ✅ |
+| [x] | `player.getScreenshotDir` | `get_screenshot_dir` | `—` | `ScreenshotDir` | ❌ |
+| [x] | `player.mpvCommand` | `mpv_command` | `args: Vec<String>` | `Result<(), String>` | ✅ |
+| [x] | `player.mpvGet` | `mpv_get` | `name: String` | `Result<Option<String>, String>` | ✅ |
+| [x] | `player.mpvSet` | `mpv_set` | `name: String, value: String` | `Result<(), String>` | ✅ |
+| [x] | `player.opts` | `player_opts` | `—` | `Result<PlayerOpts, String>` | ✅ |
+| [x] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<f64, String>` | ✅ |
 | [ ] | `player.playExternal` | `play_external` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<String, String>` | ✅ |
-| [ ] | `player.playLocal` | `play_local` | `id: String, resume_secs: f64` | `Result<f64, String>` | ✅ |
-| [ ] | `player.screenshot` | `screenshot` | `dir: Option<String>` | `Result<String, String>` | ✅ |
-| [ ] | `player.seek` | `seek` | `pos: f64` | `Result<(), String>` | ✅ |
-| [ ] | `player.setAspectRatio` | `set_aspect_ratio` | `ratio: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.setAudioDelay` | `set_audio_delay` | `secs: f64` | `Result<(), String>` | ✅ |
-| [ ] | `player.setHwdec` | `set_hwdec` | `mode: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.setMpvConf` | `set_mpv_conf` | `text: String` | `Result<MpvConf, String>` | ❌ |
-| [ ] | `player.setMute` | `set_mute` | `mute: bool` | `Result<(), String>` | ✅ |
-| [ ] | `player.setPause` | `set_pause` | `paused: bool` | `Result<(), String>` | ✅ |
-| [ ] | `player.setPlaybackPrefs` | `set_playback_prefs` | `settings: PlaybackPrefs` | `Result<(), String>` | ✅ |
-| [ ] | `player.setScreenshotDir` | `set_screenshot_dir` | `dir: Option<String>` | `Result<ScreenshotDir, String>` | ❌ |
-| [ ] | `player.setSecondarySub` | `set_secondary_sub` | `id: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.setSecondarySubOpts` | `set_secondary_sub_opts` | `delay: Option<f64>, position: Option<f64>, ass_override: Option<String>` | `Result<(), String>` | ✅ |
-| [ ] | `player.setShaderLevel` | `set_shader_level` | `level: String` | `Result<ShaderApplied, String>` | ✅ |
-| [ ] | `player.setSpeed` | `set_speed` | `speed: f64` | `Result<(), String>` | ✅ |
-| [ ] | `player.setSubDelay` | `set_sub_delay` | `secs: f64` | `Result<(), String>` | ✅ |
-| [ ] | `player.setSubStyle` | `set_sub_style` | `font: Option<String>, scale: Option<f64>, position: Option<f64>, background: Option<bool>, blend_mode: Option<String>` | `Result<(), String>` | ✅ |
-| [ ] | `player.setTrack` | `set_track` | `kind: String, id: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.setTrackRegexes` | `set_track_regexes` | `version_regex: String, sub_regex: String, audio_regex: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.setVolume` | `set_volume` | `volume: f64` | `Result<(), String>` | ✅ |
-| [ ] | `player.shaderLevels` | `shader_levels` | `—` | `Vec<(&'static str, &'static str, &'static str)>` | ✅ |
-| [ ] | `player.status` | `status` | `—` | `Result<Status, String>` | ✅ |
-| [ ] | `player.stopPlayback` | `stop_playback` | `pos: f64` | `Result<(), String>` | ✅ |
+| [x] | `player.playLocal` | `play_local` | `id: String, resume_secs: f64` | `Result<f64, String>` | ✅ |
+| [x] | `player.screenshot` | `screenshot` | `dir: Option<String>` | `Result<String, String>` | ✅ |
+| [x] | `player.seek` | `seek` | `pos: f64` | `Result<(), String>` | ✅ |
+| [x] | `player.setAspectRatio` | `set_aspect_ratio` | `ratio: String` | `Result<(), String>` | ✅ |
+| [x] | `player.setAudioDelay` | `set_audio_delay` | `secs: f64` | `Result<(), String>` | ✅ |
+| [x] | `player.setHwdec` | `set_hwdec` | `mode: String` | `Result<(), String>` | ✅ |
+| [x] | `player.setMpvConf` | `set_mpv_conf` | `text: String` | `Result<MpvConf, String>` | ❌ |
+| [x] | `player.setMute` | `set_mute` | `mute: bool` | `Result<(), String>` | ✅ |
+| [x] | `player.setPause` | `set_pause` | `paused: bool` | `Result<(), String>` | ✅ |
+| [x] | `player.setPlaybackPrefs` | `set_playback_prefs` | `settings: PlaybackPrefs` | `Result<(), String>` | ✅ |
+| [x] | `player.setScreenshotDir` | `set_screenshot_dir` | `dir: Option<String>` | `Result<ScreenshotDir, String>` | ❌ |
+| [x] | `player.setSecondarySub` | `set_secondary_sub` | `id: String` | `Result<(), String>` | ✅ |
+| [x] | `player.setSecondarySubOpts` | `set_secondary_sub_opts` | `delay: Option<f64>, position: Option<f64>, ass_override: Option<String>` | `Result<(), String>` | ✅ |
+| [x] | `player.setShaderLevel` | `set_shader_level` | `level: String` | `Result<ShaderApplied, String>` | ✅ |
+| [x] | `player.setSpeed` | `set_speed` | `speed: f64` | `Result<(), String>` | ✅ |
+| [x] | `player.setSubDelay` | `set_sub_delay` | `secs: f64` | `Result<(), String>` | ✅ |
+| [x] | `player.setSubStyle` | `set_sub_style` | `font: Option<String>, scale: Option<f64>, position: Option<f64>, background: Option<bool>, blend_mode: Option<String>` | `Result<(), String>` | ✅ |
+| [x] | `player.setTrack` | `set_track` | `kind: String, id: String` | `Result<(), String>` | ✅ |
+| [x] | `player.setTrackRegexes` | `set_track_regexes` | `version_regex: String, sub_regex: String, audio_regex: String` | `Result<(), String>` | ✅ |
+| [x] | `player.setVolume` | `set_volume` | `volume: f64` | `Result<(), String>` | ✅ |
+| [x] | `player.shaderLevels` | `shader_levels` | `—` | `Vec<(&'static str, &'static str, &'static str)>` | ✅ |
+| [x] | `player.status` | `status` | `—` | `Result<Status, String>` | ✅ |
+| [x] | `player.stopPlayback` | `stop_playback` | `pos: f64` | `Result<(), String>` | ✅ |
 | [ ] | `player.takePending` | `player_take_pending` | `—` | `Option<serde_json::Value>` | ❌ |
-| [ ] | `player.tracks` | `tracks` | `—` | `Result<Vec<Track>, String>` | ✅ |
-| [ ] | `player.validateTrackRegex` | `validate_track_regex` | `pattern: String` | `Result<(), String>` | ✅ |
+| [x] | `player.tracks` | `tracks` | `—` | `Result<Vec<Track>, String>` | ✅ |
+| [x] | `player.validateTrackRegex` | `validate_track_regex` | `pattern: String` | `Result<(), String>` | ✅ |
 | [ ] | `player.windowClose` | `player_window_close` | `—` | `Result<(), String>` | ❌ |
 | [ ] | `player.windowOpen` | `player_window_open` | `payload: serde_json::Value` | `Result<(), String>` | ❌ |
 
@@ -168,20 +168,20 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `source.catalog` | `source_catalog` | `category_id: Option<String>, keyword: Option<String>, page: u32` | `Result<linplayer_core::source::MediaPage, String>` | ✅ |
-| [ ] | `source.categories` | `source_categories` | `—` | `Result<Vec<linplayer_core::source::MediaCategory>, String>` | ✅ |
-| [ ] | `source.currentSource` | `current_source` | `—` | `Option<AccountInfo>` | ✅ |
-| [ ] | `source.listDir` | `source_list_dir` | `dir_id: Option<String>` | `Result<Vec<SourceEntry>, String>` | ✅ |
-| [ ] | `source.login` | `source_login` | `kind: SourceKind, base_url: String, username: String, password: String, cookie: Option<String>, // 令牌系源用它带 refresh_token(也可走 cookie)与可选的 oplist 地址/driver 覆盖。 // additive:老调用不传即空, 行为不变。 extra: Option<HashMap<String, String>>` | `Result<(), String>` | ✅ |
-| [ ] | `source.mediaDetail` | `source_media_detail` | `id: String` | `Result<linplayer_core::source::MediaDetail, String>` | ✅ |
-| [ ] | `source.passwordLogin` | `source_password_login` | `kind: SourceKind, username: String, password: String` | `Result<HashMap<String, String>, String>` | ✅ |
-| [ ] | `source.play` | `source_play` | `entry_id: String, entry_name: String, resume_secs: f64, raw: Option<serde_json::Value>` | `Result<f64, String>` | ✅ |
-| [ ] | `source.qrPoll` | `source_qr_poll` | `kind: SourceKind, ctx: String` | `Result<QrPoll, String>` | ✅ |
-| [ ] | `source.qrStart` | `source_qr_start` | `kind: SourceKind` | `Result<QrStart, String>` | ✅ |
-| [ ] | `source.quarkScanPoll` | `quark_scan_poll` | `device_id: String, query_token: String` | `Result<bool, String>` | ✅ |
-| [ ] | `source.quarkScanStart` | `quark_scan_start` | `—` | `Result<QuarkScan, String>` | ✅ |
-| [ ] | `source.search` | `source_search` | `query: String` | `Result<Vec<SourceEntry>, String>` | ✅ |
-| [ ] | `source.watchdog` | `source_watchdog` | `pos: f64` | `Result<bool, String>` | ✅ |
+| [x] | `source.catalog` | `source_catalog` | `category_id: Option<String>, keyword: Option<String>, page: u32` | `Result<linplayer_core::source::MediaPage, String>` | ✅ |
+| [x] | `source.categories` | `source_categories` | `—` | `Result<Vec<linplayer_core::source::MediaCategory>, String>` | ✅ |
+| [x] | `source.currentSource` | `current_source` | `—` | `Option<AccountInfo>` | ✅ |
+| [x] | `source.listDir` | `source_list_dir` | `dir_id: Option<String>` | `Result<Vec<SourceEntry>, String>` | ✅ |
+| [x] | `source.login` | `source_login` | `kind: SourceKind, base_url: String, username: String, password: String, cookie: Option<String>, // 令牌系源用它带 refresh_token(也可走 cookie)与可选的 oplist 地址/driver 覆盖。 // additive:老调用不传即空, 行为不变。 extra: Option<HashMap<String, String>>` | `Result<(), String>` | ✅ |
+| [x] | `source.mediaDetail` | `source_media_detail` | `id: String` | `Result<linplayer_core::source::MediaDetail, String>` | ✅ |
+| [x] | `source.passwordLogin` | `source_password_login` | `kind: SourceKind, username: String, password: String` | `Result<HashMap<String, String>, String>` | ✅ |
+| [x] | `source.play` | `source_play` | `entry_id: String, entry_name: String, resume_secs: f64, raw: Option<serde_json::Value>` | `Result<f64, String>` | ✅ |
+| [x] | `source.qrPoll` | `source_qr_poll` | `kind: SourceKind, ctx: String` | `Result<QrPoll, String>` | ✅ |
+| [x] | `source.qrStart` | `source_qr_start` | `kind: SourceKind` | `Result<QrStart, String>` | ✅ |
+| [x] | `source.quarkScanPoll` | `quark_scan_poll` | `device_id: String, query_token: String` | `Result<bool, String>` | ✅ |
+| [x] | `source.quarkScanStart` | `quark_scan_start` | `—` | `Result<QuarkScan, String>` | ✅ |
+| [x] | `source.search` | `source_search` | `query: String` | `Result<Vec<SourceEntry>, String>` | ✅ |
+| [x] | `source.watchdog` | `source_watchdog` | `pos: f64` | `Result<bool, String>` | ✅ |
 
 ### Ani-RSS 管理 · `anirss.*` — 51 条
 
@@ -243,20 +243,20 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `danmaku.autoLoad` | `danmaku_auto_load` | `input: danmaku::MatchInput, options: danmaku::FilterOptions, ch_convert: Option<i32>, anchor_key: Option<String>` | `Result<Option<Vec<DanmakuComment>>, String>` | ✅ |
-| [ ] | `danmaku.cacheClear` | `danmaku_cache_clear` | `—` | `usize` | ✅ |
-| [ ] | `danmaku.cacheSize` | `danmaku_cache_size` | `—` | `u64` | ✅ |
-| [ ] | `danmaku.episodes` | `danmaku_episodes` | `source_id: String, anime_id: String, anime_title: String` | `Result<Vec<danmaku::DanmakuEpisode>, String>` | ✅ |
-| [ ] | `danmaku.filter` | `danmaku_filter` | `comments: Vec<DanmakuComment>, options: danmaku::FilterOptions` | `Vec<DanmakuComment>` | ✅ |
-| [ ] | `danmaku.getDanmakuConfig` | `get_danmaku_config` | `—` | `Vec<DanmakuServer>` | ✅ |
-| [ ] | `danmaku.getOfficialDanmaku` | `get_official_danmaku` | `—` | `OfficialDanmaku` | ✅ |
-| [ ] | `danmaku.importBlocklist` | `danmaku_import_blocklist` | `xml: String` | `danmaku::DanmakuFilterImportResult` | ✅ |
-| [ ] | `danmaku.load` | `danmaku_load` | `episode_id: String, source_id: Option<String>, ch_convert: Option<i32>` | `Result<Vec<DanmakuComment>, String>` | ✅ |
-| [ ] | `danmaku.loadLocal` | `danmaku_load_local` | `path: String` | `Result<Vec<DanmakuComment>, String>` | ✅ |
-| [ ] | `danmaku.match` | `danmaku_match` | `input: danmaku::MatchInput` | `Result<Vec<danmaku::DanmakuMatchCandidate>, String>` | ✅ |
-| [ ] | `danmaku.minAutoScore` | `danmaku_min_auto_score` | `—` | `f64` | ✅ |
-| [ ] | `danmaku.search` | `danmaku_search` | `keyword: String` | `Result<Vec<danmaku::DanmakuSourceGroup>, String>` | ✅ |
-| [ ] | `danmaku.setDanmakuConfig` | `set_danmaku_config` | `sources: Vec<DanmakuServer>` | `Result<(), String>` | ✅ |
+| [x] | `danmaku.autoLoad` | `danmaku_auto_load` | `input: danmaku::MatchInput, options: danmaku::FilterOptions, ch_convert: Option<i32>, anchor_key: Option<String>` | `Result<Option<Vec<DanmakuComment>>, String>` | ✅ |
+| [x] | `danmaku.cacheClear` | `danmaku_cache_clear` | `—` | `usize` | ✅ |
+| [x] | `danmaku.cacheSize` | `danmaku_cache_size` | `—` | `u64` | ✅ |
+| [x] | `danmaku.episodes` | `danmaku_episodes` | `source_id: String, anime_id: String, anime_title: String` | `Result<Vec<danmaku::DanmakuEpisode>, String>` | ✅ |
+| [x] | `danmaku.filter` | `danmaku_filter` | `comments: Vec<DanmakuComment>, options: danmaku::FilterOptions` | `Vec<DanmakuComment>` | ✅ |
+| [x] | `danmaku.getDanmakuConfig` | `get_danmaku_config` | `—` | `Vec<DanmakuServer>` | ✅ |
+| [x] | `danmaku.getOfficialDanmaku` | `get_official_danmaku` | `—` | `OfficialDanmaku` | ✅ |
+| [x] | `danmaku.importBlocklist` | `danmaku_import_blocklist` | `xml: String` | `danmaku::DanmakuFilterImportResult` | ✅ |
+| [x] | `danmaku.load` | `danmaku_load` | `episode_id: String, source_id: Option<String>, ch_convert: Option<i32>` | `Result<Vec<DanmakuComment>, String>` | ✅ |
+| [x] | `danmaku.loadLocal` | `danmaku_load_local` | `path: String` | `Result<Vec<DanmakuComment>, String>` | ✅ |
+| [x] | `danmaku.match` | `danmaku_match` | `input: danmaku::MatchInput` | `Result<Vec<danmaku::DanmakuMatchCandidate>, String>` | ✅ |
+| [x] | `danmaku.minAutoScore` | `danmaku_min_auto_score` | `—` | `f64` | ✅ |
+| [x] | `danmaku.search` | `danmaku_search` | `keyword: String` | `Result<Vec<danmaku::DanmakuSourceGroup>, String>` | ✅ |
+| [x] | `danmaku.setDanmakuConfig` | `set_danmaku_config` | `sources: Vec<DanmakuServer>` | `Result<(), String>` | ✅ |
 
 ### 插件 · `plugin.*` — 22 条
 
@@ -289,34 +289,34 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `download.andApplyUpdate` | `download_and_apply_update` | `—` | `Result<(), String>` | ❌ |
-| [ ] | `download.clearCompleted` | `download_clear_completed` | `—` | `usize` | ✅ |
-| [ ] | `download.enqueue` | `download_enqueue` | `item_id: String, type_: String, title: String, container: String, poster_url: Option<String>` | `Result<String, String>` | ✅ |
-| [ ] | `download.list` | `download_list` | `—` | `Vec<linplayer_core::download::DownloadItem>` | ✅ |
-| [ ] | `download.pause` | `download_pause` | `id: String` | `()` | ✅ |
-| [ ] | `download.remove` | `download_remove` | `id: String` | `()` | ✅ |
-| [ ] | `download.resume` | `download_resume` | `id: String` | `()` | ✅ |
-| [ ] | `download.setThreads` | `download_set_threads` | `threads: usize` | `()` | ✅ |
+| [x] | `download.andApplyUpdate` | `download_and_apply_update` | `—` | `Result<(), String>` | ❌ |
+| [x] | `download.clearCompleted` | `download_clear_completed` | `—` | `usize` | ✅ |
+| [x] | `download.enqueue` | `download_enqueue` | `item_id: String, type_: String, title: String, container: String, poster_url: Option<String>` | `Result<String, String>` | ✅ |
+| [x] | `download.list` | `download_list` | `—` | `Vec<linplayer_core::download::DownloadItem>` | ✅ |
+| [x] | `download.pause` | `download_pause` | `id: String` | `()` | ✅ |
+| [x] | `download.remove` | `download_remove` | `id: String` | `()` | ✅ |
+| [x] | `download.resume` | `download_resume` | `id: String` | `()` | ✅ |
+| [x] | `download.setThreads` | `download_set_threads` | `threads: usize` | `()` | ✅ |
 
 ### 同步(Trakt / Bangumi / 日历) · `sync.*` — 15 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `sync.bangumiAccount` | `bangumi_account` | `—` | `Option<linplayer_core::sync::SyncAccount>` | ✅ |
-| [ ] | `sync.bangumiAuthorizeUrl` | `bangumi_authorize_url` | `redirect_uri: Option<String>` | `String` | ✅ |
-| [ ] | `sync.bangumiCalendar` | `bangumi_calendar` | `only_mine: Option<bool>` | `Result<Vec<linplayer_core::sync::calendar::CalendarEntry>, String>` | ✅ |
-| [ ] | `sync.bangumiExchange` | `bangumi_exchange` | `code: String, redirect_uri: Option<String>` | `Result<linplayer_core::sync::SyncAccount, String>` | ✅ |
-| [ ] | `sync.bangumiLoginToken` | `bangumi_login_token` | `token: String` | `Result<linplayer_core::sync::SyncAccount, String>` | ✅ |
-| [ ] | `sync.bangumiLogout` | `bangumi_logout` | `—` | `()` | ✅ |
-| [ ] | `sync.bangumiSetCollection` | `bangumi_set_collection` | `subject_id: i64, type_: i32` | `Result<bool, String>` | ✅ |
-| [ ] | `sync.bangumiSummary` | `bangumi_summary` | `subject_id: i64` | `Result<Option<String>, String>` | ✅ |
-| [ ] | `sync.bangumiUpdateEpisode` | `bangumi_update_episode` | `subject_id: i64, episode_id: i64, type_: Option<i32>` | `Result<bool, String>` | ✅ |
-| [ ] | `sync.traktAccount` | `trakt_account` | `—` | `Option<linplayer_core::sync::SyncAccount>` | ✅ |
-| [ ] | `sync.traktCalendar` | `trakt_calendar` | `only_mine: Option<bool>` | `Result<Vec<linplayer_core::sync::calendar::CalendarEntry>, String>` | ✅ |
-| [ ] | `sync.traktDeviceCode` | `trakt_device_code` | `—` | `Result<trakt::TraktDeviceCode, String>` | ✅ |
-| [ ] | `sync.traktLogout` | `trakt_logout` | `—` | `()` | ✅ |
-| [ ] | `sync.traktPoll` | `trakt_poll` | `device_code: String` | `Result<trakt::TraktPollResult, String>` | ✅ |
-| [ ] | `sync.traktScrobble` | `trakt_scrobble` | `type_: String, ids: serde_json::Value, progress: f64, action: String` | `Result<bool, String>` | ✅ |
+| [x] | `sync.bangumiAccount` | `bangumi_account` | `—` | `Option<linplayer_core::sync::SyncAccount>` | ✅ |
+| [x] | `sync.bangumiAuthorizeUrl` | `bangumi_authorize_url` | `redirect_uri: Option<String>` | `String` | ✅ |
+| [x] | `sync.bangumiCalendar` | `bangumi_calendar` | `only_mine: Option<bool>` | `Result<Vec<linplayer_core::sync::calendar::CalendarEntry>, String>` | ✅ |
+| [x] | `sync.bangumiExchange` | `bangumi_exchange` | `code: String, redirect_uri: Option<String>` | `Result<linplayer_core::sync::SyncAccount, String>` | ✅ |
+| [x] | `sync.bangumiLoginToken` | `bangumi_login_token` | `token: String` | `Result<linplayer_core::sync::SyncAccount, String>` | ✅ |
+| [x] | `sync.bangumiLogout` | `bangumi_logout` | `—` | `()` | ✅ |
+| [x] | `sync.bangumiSetCollection` | `bangumi_set_collection` | `subject_id: i64, type_: i32` | `Result<bool, String>` | ✅ |
+| [x] | `sync.bangumiSummary` | `bangumi_summary` | `subject_id: i64` | `Result<Option<String>, String>` | ✅ |
+| [x] | `sync.bangumiUpdateEpisode` | `bangumi_update_episode` | `subject_id: i64, episode_id: i64, type_: Option<i32>` | `Result<bool, String>` | ✅ |
+| [x] | `sync.traktAccount` | `trakt_account` | `—` | `Option<linplayer_core::sync::SyncAccount>` | ✅ |
+| [x] | `sync.traktCalendar` | `trakt_calendar` | `only_mine: Option<bool>` | `Result<Vec<linplayer_core::sync::calendar::CalendarEntry>, String>` | ✅ |
+| [x] | `sync.traktDeviceCode` | `trakt_device_code` | `—` | `Result<trakt::TraktDeviceCode, String>` | ✅ |
+| [x] | `sync.traktLogout` | `trakt_logout` | `—` | `()` | ✅ |
+| [x] | `sync.traktPoll` | `trakt_poll` | `device_code: String` | `Result<trakt::TraktPollResult, String>` | ✅ |
+| [x] | `sync.traktScrobble` | `trakt_scrobble` | `type_: String, ids: serde_json::Value, progress: f64, action: String` | `Result<bool, String>` | ✅ |
 
 ### 字幕翻译 / Whisper(桌面独占) · `translate.*` — 9 条
 
@@ -336,47 +336,47 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `prefs.applyPrefs` | `apply_prefs` | `—` | `Result<(Option<String>, Option<String>), String>` | ✅ |
-| [ ] | `prefs.cfProxyDisable` | `cf_proxy_disable` | `line_url: String` | `Result<(), String>` | ✅ |
-| [ ] | `prefs.cfProxyEnable` | `cf_proxy_enable` | `line_url: String, ip: String` | `Result<String, String>` | ✅ |
-| [ ] | `prefs.cfProxyStatus` | `cf_proxy_status` | `—` | `Result<Vec<CfProxyStatus>, String>` | ✅ |
+| [x] | `prefs.applyPrefs` | `apply_prefs` | `—` | `Result<(Option<String>, Option<String>), String>` | ✅ |
+| [x] | `prefs.cfProxyDisable` | `cf_proxy_disable` | `line_url: String` | `Result<(), String>` | ✅ |
+| [x] | `prefs.cfProxyEnable` | `cf_proxy_enable` | `line_url: String, ip: String` | `Result<String, String>` | ✅ |
+| [x] | `prefs.cfProxyStatus` | `cf_proxy_status` | `—` | `Result<Vec<CfProxyStatus>, String>` | ✅ |
 | [ ] | `prefs.cfSpeedTest` | `cf_speed_test` | `validate_host: Option<String>, test_url: Option<String>` | `Result<Vec<linplayer_core::net::cf::CfTestResult>, String>` | ✅ |
 | [ ] | `prefs.configExportQr` | `config_export_qr` | `—` | `String` | ✅ |
 | [ ] | `prefs.configImportQr` | `config_import_qr` | `payload: String` | `Result<usize, String>` | ✅ |
-| [ ] | `prefs.getPrefetchSettings` | `get_prefetch_settings` | `—` | `PrefetchSettings` | ✅ |
-| [ ] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
-| [ ] | `prefs.getPreloadSettings` | `get_preload_settings` | `—` | `PreloadSettings` | ❌ |
-| [ ] | `prefs.getProxy` | `get_proxy` | `—` | `linplayer_core::ProxyConfig` | ✅ |
+| [x] | `prefs.getPrefetchSettings` | `get_prefetch_settings` | `—` | `PrefetchSettings` | ✅ |
+| [x] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
+| [x] | `prefs.getPreloadSettings` | `get_preload_settings` | `—` | `PreloadSettings` | ❌ |
+| [x] | `prefs.getProxy` | `get_proxy` | `—` | `linplayer_core::ProxyConfig` | ✅ |
 | [ ] | `prefs.getTranslationSettings` | `get_translation_settings` | `—` | `tr::TranslationSettings` | ❌ |
-| [ ] | `prefs.getUpdateSettings` | `get_update_settings` | `—` | `UpdateSettings` | ✅ |
-| [ ] | `prefs.getWritebackSettings` | `get_writeback_settings` | `—` | `WritebackSettings` | ✅ |
+| [x] | `prefs.getUpdateSettings` | `get_update_settings` | `—` | `UpdateSettings` | ✅ |
+| [x] | `prefs.getWritebackSettings` | `get_writeback_settings` | `—` | `WritebackSettings` | ✅ |
 | [ ] | `prefs.iconLibrary` | `icon_library` | `—` | `()` | ✅ |
-| [ ] | `prefs.preloadCancel` | `preload_cancel` | `—` | `()` | ❌ |
-| [ ] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
-| [ ] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |
-| [ ] | `prefs.setPrefetchSettings` | `set_prefetch_settings` | `settings: PrefetchSettings` | `Result<(), String>` | ✅ |
-| [ ] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool` | `Result<(), String>` | ✅ |
-| [ ] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
-| [ ] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |
+| [x] | `prefs.preloadCancel` | `preload_cancel` | `—` | `()` | ❌ |
+| [x] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
+| [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setPrefetchSettings` | `set_prefetch_settings` | `settings: PrefetchSettings` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
+| [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |
 | [ ] | `prefs.setTranslationSettings` | `set_translation_settings` | `settings: tr::TranslationSettings` | `Result<(), String>` | ❌ |
-| [ ] | `prefs.setUpdateSettings` | `set_update_settings` | `channel: linplayer_core::update::UpdateChannel, auto_check: bool` | `Result<(), String>` | ✅ |
-| [ ] | `prefs.setWritebackSettings` | `set_writeback_settings` | `settings: WritebackSettings` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setUpdateSettings` | `set_update_settings` | `channel: linplayer_core::update::UpdateChannel, auto_check: bool` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setWritebackSettings` | `set_writeback_settings` | `settings: WritebackSettings` | `Result<(), String>` | ✅ |
 
 ### 系统 · `system.*` — 13 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `system.afdianSponsorUrl` | `afdian_sponsor_url` | `—` | `String` | ✅ |
+| [x] | `system.afdianSponsorUrl` | `afdian_sponsor_url` | `—` | `String` | ✅ |
 | [ ] | `system.afdianVerify` | `afdian_verify` | `order_no: String` | `Result<linplayer_core::sync::AfdianVerifyResult, String>` | ✅ |
-| [ ] | `system.cacheSize` | `cache_size` | `—` | `Result<u64, String>` | ✅ |
-| [ ] | `system.capabilities` | **新增** | `-` | `{ commands: string[], ... }` | — | <!-- 本平台支持哪些命令。UI 启动时拿它隐藏入口(SPEC 5.6) -->
+| [x] | `system.cacheSize` | `cache_size` | `—` | `Result<u64, String>` | ✅ |
+| [x] | `system.capabilities` | **新增** | `-` | `{ commands: string[], ... }` | — | <!-- 本平台支持哪些命令。UI 启动时拿它隐藏入口(SPEC 5.6) -->
 | [ ] | `system.checkUpdate` | `check_update` | `—` | `Result<Option<linplayer_core::update::UpdateInfo>, String>` | ✅ |
-| [ ] | `system.clearCache` | `clear_cache` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `system.dataPaths` | `data_paths` | `—` | `DataPaths` | ✅ |
-| [ ] | `system.exportDiagnostics` | **新增** | `-` | `{ ... }` | — | <!-- 诊断导出(SPEC 5.6)。**不许带凭据** -->
-| [ ] | `system.openDataDir` | `open_data_dir` | `sub: Option<String>` | `Result<(), String>` | ❌ |
-| [ ] | `system.pickDirectory` | `pick_directory` | `start: Option<String>` | `Result<Option<String>, String>` | ❌ |
-| [ ] | `system.pickFile` | `pick_file` | `start: Option<String>, filter_name: Option<String>, extensions: Option<Vec<String>>` | `Result<Option<String>, String>` | ❌ |
-| [ ] | `system.pickLocalFolder` | `pick_local_folder` | `—` | `Result<Option<String>, String>` | ❌ |
-| [ ] | `system.ping` | **新增** | `-` | `{ pong: true, ... }` | — | <!-- 核心层活着吗。契约测试的第一条 -->
+| [x] | `system.clearCache` | `clear_cache` | `—` | `Result<(), String>` | ✅ |
+| [x] | `system.dataPaths` | `data_paths` | `—` | `DataPaths` | ✅ |
+| [x] | `system.exportDiagnostics` | **新增** | `-` | `{ ... }` | — | <!-- 诊断导出(SPEC 5.6)。**不许带凭据** -->
+| [x] | `system.openDataDir` | `open_data_dir` | `sub: Option<String>` | `Result<(), String>` | ❌ |
+| [x] | `system.pickDirectory` | `pick_directory` | `start: Option<String>` | `Result<Option<String>, String>` | ❌ |
+| [x] | `system.pickFile` | `pick_file` | `start: Option<String>, filter_name: Option<String>, extensions: Option<Vec<String>>` | `Result<Option<String>, String>` | ❌ |
+| [x] | `system.pickLocalFolder` | `pick_local_folder` | `—` | `Result<Option<String>, String>` | ❌ |
+| [x] | `system.ping` | **新增** | `-` | `{ pong: true, ... }` | — | <!-- 核心层活着吗。契约测试的第一条 -->
 <!-- END GENERATED -->

@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -201,8 +202,32 @@ def ret_of(sig):
     return m.group(1).strip() if m else "()"
 
 
+def ported():
+    """已经在 Go 核心层注册的命令集合 —— 「移植」列的勾从这里来。
+
+    ★ 手打勾是不行的:这张表是生成的,下一次跑生成器就把勾全冲掉了;
+      更糟的是**勾和事实会分家** —— 打了勾的命令实际没注册,而这正是
+      「点了没反应」那一类 bug 的温床。勾必须是**算出来的**。
+
+    ★ 取不到就**直接失败**,不许退回「当作一条都没移植」。
+      「环境里没有就当过了/当没有」是假绿的一类:那样一次误跑就会把整张表的勾
+      全抹掉,而 diff 看起来只是「生成器又跑了一遍」。
+    """
+    env = dict(os.environ)
+    # cgo 出来的可执行文件要找得到 libmpv,否则起不来(0xc0000135)
+    env["PATH"] = os.path.join(ROOT, "crates", "mpv", "libmpv") + os.pathsep + env.get("PATH", "")
+    r = subprocess.run(["go", "run", "./cmd/listcommands"],
+                       cwd=os.path.join(ROOT, "core"), env=env,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("拿不到 Go 注册表(go run ./cmd/listcommands 失败),「移植」列没法算。"
+                 + (r.stderr or "").strip())
+    return {ln.strip() for ln in r.stdout.splitlines() if ln.strip()}
+
+
 def build():
     sigs = signatures()
+    done = ported()
     desktop = registry(DESKTOP_REG)
     android = set(registry(ANDROID_REG))
     groups = {}
@@ -227,13 +252,15 @@ def build():
         for c in cmds:
             sig = sigs.get(c, "")
             mark = "✅" if c in android else "❌"
-            rows.append((new_name(c, dom),
-                         f"| [ ] | `{new_name(c, dom)}` | `{c}` | "
+            nn = new_name(c, dom)
+            rows.append((nn,
+                         f"| {'[x]' if nn in done else '[ ]'} | `{nn}` | `{c}` | "
                          f"`{esc(args_of(sig))}` | `{esc(ret_of(sig))}` | {mark} |"))
         # 新增的那批:「现有名」写「新增」,理由塞进行尾的 HTML 注释里(渲染时不显示)
         for name, a, r, why in added:
             rows.append((name,
-                         f"| [ ] | `{name}` | **新增** | `{esc(a)}` | `{esc(r)}` | — |"
+                         f"| {'[x]' if name in done else '[ ]'} | `{name}` | **新增** | "
+                         f"`{esc(a)}` | `{esc(r)}` | — |"
                          f" <!-- {why} -->"))
         for _, line in sorted(rows):
             body.append(line)

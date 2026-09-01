@@ -21,6 +21,9 @@ fail=0
 step() { echo; echo "===== $* ====="; }
 
 step "1. 产物是否最新"
+# ★ COMMANDS.md 的「移植」勾是**算出来的**(读 Go 注册表),不是手打的 ——
+#   所以这一关顺带守住「移植进度表和事实分家」:注册了却没勾、勾了却没注册,都红。
+python "$ROOT/scripts/gen-commands.py" --check || fail=$((fail + 1))
 python "$ROOT/scripts/gen-bindings.py" --check || fail=$((fail + 1))
 
 step "2. C# 编译"
