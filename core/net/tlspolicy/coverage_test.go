@@ -34,15 +34,31 @@ func TestAllHTTPClients_都必须走tlspolicy(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for _, line := range strings.Split(string(b), "\n") {
+		lines := strings.Split(string(b), "\n")
+		for i, line := range lines {
 			if !newClient.MatchString(line) {
 				continue
 			}
-			// 同一行里要么直接给 Transport,要么这一行就是在 tlspolicy 包里
-			if strings.Contains(line, "Transport") || strings.Contains(path, "tlspolicy") {
+			if strings.Contains(path, "tlspolicy") {
 				continue
 			}
-			bad = append(bad, path+": "+strings.TrimSpace(line))
+			/* ★ 看的是**整个字面量**,不是这一行:`&http.Client{` 之后换行写
+			   Transport 是完全正常的写法,只看一行会把它误报成漏网 ——
+			   而误报久了这条门禁就会被人关掉(长期红的门禁 = 没有门禁)。
+			   往后扫到闭合大括号,最多 24 行。 */
+			ok := false
+			for j := i; j < len(lines) && j < i+24; j++ {
+				if strings.Contains(lines[j], "Transport") {
+					ok = true
+					break
+				}
+				if j > i && strings.TrimSpace(lines[j]) == "}" {
+					break
+				}
+			}
+			if !ok {
+				bad = append(bad, path+": "+strings.TrimSpace(line))
+			}
 		}
 		return nil
 	})

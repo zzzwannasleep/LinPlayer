@@ -340,9 +340,9 @@
 | [x] | `prefs.cfProxyDisable` | `cf_proxy_disable` | `line_url: String` | `Result<(), String>` | ✅ |
 | [x] | `prefs.cfProxyEnable` | `cf_proxy_enable` | `line_url: String, ip: String` | `Result<String, String>` | ✅ |
 | [x] | `prefs.cfProxyStatus` | `cf_proxy_status` | `—` | `Result<Vec<CfProxyStatus>, String>` | ✅ |
-| [ ] | `prefs.cfSpeedTest` | `cf_speed_test` | `validate_host: Option<String>, test_url: Option<String>` | `Result<Vec<linplayer_core::net::cf::CfTestResult>, String>` | ✅ |
-| [ ] | `prefs.configExportQr` | `config_export_qr` | `—` | `String` | ✅ |
-| [ ] | `prefs.configImportQr` | `config_import_qr` | `payload: String` | `Result<usize, String>` | ✅ |
+| [x] | `prefs.cfSpeedTest` | `cf_speed_test` | `validate_host: Option<String>, test_url: Option<String>` | `Result<Vec<linplayer_core::net::cf::CfTestResult>, String>` | ✅ |
+| [x] | `prefs.configExportQr` | `config_export_qr` | `—` | `String` | ✅ |
+| [x] | `prefs.configImportQr` | `config_import_qr` | `payload: String` | `Result<usize, String>` | ✅ |
 | [x] | `prefs.getPrefetchSettings` | `get_prefetch_settings` | `—` | `PrefetchSettings` | ✅ |
 | [x] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
 | [x] | `prefs.getPreloadSettings` | `get_preload_settings` | `—` | `PreloadSettings` | ❌ |

@@ -75,5 +75,8 @@ func main() {
 	// ★ 图标库的聚合源地址(逗号分隔)。它们是**别人的域名**,同样不进提交 ——
 	//   黄金实现把四条硬编在 icon_library.rs 里,那是既有的红线欠账。
 	addTo("linplayer/core/prefs", "iconSources", strings.TrimSpace(os.Getenv("LP_ICON_LIBRARY_SOURCES")))
+	// ★ CF 优选的测速文件地址,同样是具体域名 —— 不注入时下载测速阶段跳过,
+	//   排序退化成纯按延迟,功能仍然可用。
+	addTo("linplayer/core/net/cf", "defaultTestURL", strings.TrimSpace(os.Getenv("LP_CF_TEST_URL")))
 	fmt.Print(strings.Join(parts, " "))
 }

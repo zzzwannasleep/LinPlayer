@@ -22,6 +22,8 @@ import (
 func RegisterCommands(version string) {
 	registerCFCommands()
 	registerIconLibrary()
+	registerTransferCommands()
+	registerSpeedTest()
 	registerProxyCommands()
 
 	// ---- 选轨偏好 ----

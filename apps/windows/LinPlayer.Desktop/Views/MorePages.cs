@@ -151,6 +151,8 @@ public sealed class SettingsPage : PageBase
                     if (writeback is { } wb) Add(SettingsSections.Writeback(core, wb));
                     if (update is { } up) Add(SettingsSections.Update(core, up));
                     Add(SettingsSections.Blocked(core));
+                    Add(SettingsSections.CfSpeed(core));
+                    Add(SettingsSections.Transfer(core));
                     Add(Storage(core, paths));
                 });
             }

@@ -196,6 +196,131 @@ public static class SettingsSections
 
     // ---------------------------------------------------------------- 更新
 
+    /// <summary>
+    /// 备份 / 搬迁(UI_PC §7.15)。
+    ///
+    /// <para>★★ 导出的载荷里**带着所有服务器的登录凭据**(只是混淆级加密,
+    /// 密钥随载荷走)。用户会把它截图发群里 —— 警示必须显眼,不能只写在提示行里。</para>
+    ///
+    /// <para>★★ **导入是合并不是覆盖**:覆盖的话用户在新机器上已经加好的服务器
+    /// 会被静默抹掉,而他以为只是「把老机器上的搬过来」。核心层已经按合并做了,
+    /// 界面上也要这么说。</para>
+    /// </summary>
+    public static Control Transfer(CoreClient core)
+    {
+        var hint = Hint();
+        var box = new TextBox
+        {
+            Classes = { "field" }, AcceptsReturn = true, Height = 90,
+            TextWrapping = TextWrapping.Wrap,
+            Watermark = "导出的载荷会出现在这里;导入时把另一台设备上的载荷贴进来",
+        };
+
+        var export = new Button { Classes = { "ghost" }, Content = "导出" };
+        export.Click += async (_, _) =>
+        {
+            try
+            {
+                var r = await core.PrefsConfigExportQr(new { });
+                box.Text = Str(r, "payload");
+                hint.Text = $"已导出 {Num(r, "count")} 台服务器。{Str(r, "warning")}";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        };
+
+        var import = new Button { Classes = { "ghost" }, Content = "导入(合并)" };
+        import.Click += async (_, _) =>
+        {
+            try
+            {
+                var r = await core.PrefsConfigImportQr(new { payload = box.Text ?? "" });
+                hint.Text = $"导入 {Num(r, "imported")} 台,现在共 {Num(r, "total")} 台。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        };
+
+        return Group("备份 / 搬迁", new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                Note("⚠ 导出的内容包含所有服务器的登录凭据,只做了混淆,别公开分享。"),
+                box,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Spacing = 10,
+                    Children = { export, import },
+                },
+                Note("导入是合并:同一台服务器会被覆盖,新机器上原有的其它服务器保留。"),
+                hint,
+            },
+        });
+    }
+
+    /// <summary>
+    /// CF 优选测速(UI_PC §6)。
+    ///
+    /// <para>★★ 这条命令要跑几十秒(256 个候选 IP × 4 次握手 + 若干次下载测速)。
+    /// 按钮必须**当场变成「测速中…」并禁用** —— 一个转圈四十秒毫无反馈的按钮,
+    /// 用户会当它卡死了然后反复点,而每点一次就是又一轮几十秒。</para>
+    /// </summary>
+    public static Control CfSpeed(CoreClient core)
+    {
+        var hint = Hint();
+        var host = new TextBox
+        {
+            Classes = { "field" }, Width = 260,
+            Watermark = "校验域名(通常是你的服务器域名)",
+        };
+        var results = new StackPanel { Spacing = 4 };
+        var run = new Button { Classes = { "ghost" }, Content = "开始测速" };
+        run.Click += async (_, _) =>
+        {
+            run.IsEnabled = false;
+            run.Content = "测速中…";
+            hint.Text = "正在抽样 CF 边缘并测速,要几十秒。";
+            results.Children.Clear();
+            try
+            {
+                var r = await core.PrefsCfSpeedTest(new { validate_host = (host.Text ?? "").Trim() });
+                var list = r.TryGetProperty("results", out var rs) && rs.ValueKind == JsonValueKind.Array
+                    ? rs.EnumerateArray().ToList() : [];
+                if (list.Count == 0)
+                {
+                    // ★ 「一个都没过校验」多半是这个域名根本不走 CF —— 说清楚,
+                    //   别让用户以为是网不好然后一遍遍重测。
+                    hint.Text = "没有可用的边缘 IP。如果填了校验域名,先确认它确实走 Cloudflare。";
+                    return;
+                }
+                foreach (var e in list.Take(10))
+                {
+                    var kb = e.TryGetProperty("download_kbps", out var k) && k.ValueKind == JsonValueKind.Number
+                        ? $" · {k.GetDouble() / 1024:0.0} MB/s" : "";
+                    results.Children.Add(new TextBlock
+                    {
+                        Text = $"{Str(e, "ip")} — {Num(e, "latency_ms")} ms{kb}",
+                        FontSize = 12.5,
+                    });
+                }
+                hint.Text = $"测出 {list.Count} 个可用边缘,最优在最上面。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+            finally { run.IsEnabled = true; run.Content = "开始测速"; }
+        };
+
+        return Group("Cloudflare 优选", new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                Note("给走 Cloudflare 的服务器挑一个更快的边缘节点。要跑几十秒。"),
+                Field("校验域名", host),
+                new StackPanel { Orientation = Orientation.Horizontal, Children = { run } },
+                hint, results,
+            },
+        });
+    }
+
     public static Control Update(CoreClient core, JsonElement s)
     {
         var hint = Hint();
