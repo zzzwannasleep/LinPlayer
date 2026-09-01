@@ -70,5 +70,7 @@ func main() {
 	addTo(sp, "proxyBase", strings.TrimSpace(os.Getenv("LP_SYNC_PROXY_BASE")))
 	addTo(sp, "proxyKey", strings.TrimSpace(os.Getenv("LP_SYNC_PROXY_KEY")))
 	addTo(sp, "bangumiRedirectURI", strings.TrimSpace(os.Getenv("LP_BANGUMI_REDIRECT_URI")))
+	// ★ 赞助地址同理:它是账号地址,而且**错了不会报错**(收益直接归零)
+	addTo("linplayer/core/system", "afdianSponsorURL", strings.TrimSpace(os.Getenv("LP_AFDIAN_SPONSOR_URL")))
 	fmt.Print(strings.Join(parts, " "))
 }

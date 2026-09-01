@@ -256,6 +256,9 @@ func registerTransport() {
 		return out, nil
 	})
 
+	registerApplyPrefs()
+	registerLocalCommands()
+
 	// tracks 当前文件的轨道表。
 	bus.Register("player.tracks", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		return parseTracks(Prop("track-list")), nil

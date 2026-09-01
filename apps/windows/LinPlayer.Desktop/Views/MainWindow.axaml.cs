@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LinPlayer.Core;
 
 namespace LinPlayer.Desktop.Views;
@@ -136,6 +137,26 @@ public partial class MainWindow : Window
                 break;
             case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
         }
+        SelfCheckScroll();
+    }
+
+    /// <summary>
+    /// 自检:LP_SELFCHECK_SCROLL=像素 → 把当前页滚下去再截图。
+    ///
+    /// ★ 长页(设置十来组)一屏只装得下前两组,**折线以下的控件从来没被看过一眼**。
+    ///   「编译过了」和「它在页面上」之间差的就是这一段。
+    /// ★ 必须**延后**滚:页面内容是异步拉回来的,刚落页时高度还是 0,当场滚等于没滚。
+    /// </summary>
+    private void SelfCheckScroll()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_SCROLL") is not { } raw ||
+            !double.TryParse(raw, out var y)) return;
+        _ = Task.Delay(3000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var sv = this.GetVisualDescendants().OfType<ScrollViewer>()
+                .FirstOrDefault(v => v.Extent.Height > v.Viewport.Height);
+            if (sv is not null) sv.Offset = sv.Offset.WithY(y);
+        }));
     }
 
     /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>

@@ -252,6 +252,15 @@ public sealed class SettingsPage : PageBase
             catch (Exception e) { size.Text = LibraryPage.Advice(e); }
         };
 
+        // ★ 打开目录交给核心层(system.openDataDir):UI 里自己拼 explorer 的话,
+        //   Linux 壳上就得再抄一份,而且**白名单在核心层**,绕过去等于没有白名单。
+        var open = new Button { Classes = { "ghost" }, Content = "打开数据目录" };
+        open.Click += async (_, _) =>
+        {
+            try { await core.SystemOpenDataDir(new { }); }
+            catch (Exception e) { size.Text = LibraryPage.Advice(e); }
+        };
+
         var root = paths.TryGetProperty("root", out var r2) ? r2.GetString() ?? "" : "";
         return Card("存储", new StackPanel
         {
@@ -260,7 +269,8 @@ public sealed class SettingsPage : PageBase
             {
                 // ★ 绿色包:数据全在 exe 同级 userdata/,把路径写出来用户才知道备份什么
                 Dim(root == "" ? "" : $"数据目录:{root}"),
-                size, new StackPanel { Orientation = Orientation.Horizontal, Children = { clear } },
+                size,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { clear, open } },
             },
         });
     }

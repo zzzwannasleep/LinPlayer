@@ -157,3 +157,6 @@ build/kotlin-check/
 # Avalonia 桌面端的编译产物
 apps/windows/**/bin/
 apps/windows/**/obj/
+
+# 自检 / 冒烟用的临时可执行文件(scripts/selfcheck-win.sh 会在 core/ 下兜底编一份)
+core/*.exe

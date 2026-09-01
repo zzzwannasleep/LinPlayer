@@ -125,6 +125,7 @@ var client *emby.Client
 
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands(version string) {
+	registerMiscCommands()
 	client = emby.NewClient(version)
 	registerProbeCommands()
 

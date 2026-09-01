@@ -154,9 +154,44 @@ public static class SettingsSections
             Children =
             {
                 Note("同一部片在多台服务器上都有时,把「看到哪儿了」同步过去。"),
-                on, progress, Field("回写范围", range), hint,
+                on, progress, Field("回写范围", range), CrossResume(core), hint,
             },
         });
+    }
+
+    /// <summary>
+    /// 「起播时取跨服最大进度」开关。
+    ///
+    /// <para>★ 它和上面那三项是**两个方向**:上面是「看完之后把进度推给别台」,
+    /// 这条是「起播时从别台把进度拉回来」。合成一个开关的话,想要单向的人没法配。</para>
+    /// </summary>
+    private static Control CrossResume(CoreClient core)
+    {
+        var box = new CheckBox { Content = "起播时取各服务器里最靠后的进度" };
+        var hint = Hint();
+        // ★ 初值从核心层**读回来**,不是默认一个再灌下去
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var v = await core.AccountGetCrossServerResume();
+                Dispatcher.UIThread.Post(() =>
+                {
+                    box.IsChecked = v.ValueKind == JsonValueKind.True;
+                    box.IsCheckedChanged += async (_, _) =>
+                    {
+                        try
+                        {
+                            await core.AccountSetCrossServerResume(new { enabled = box.IsChecked == true });
+                            hint.Text = "已保存。";
+                        }
+                        catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+                    };
+                });
+            }
+            catch { /* 读不到就让它保持未勾,别显示一个错的状态 */ }
+        });
+        return new StackPanel { Spacing = 6, Children = { box, hint } };
     }
 
     // ---------------------------------------------------------------- 更新

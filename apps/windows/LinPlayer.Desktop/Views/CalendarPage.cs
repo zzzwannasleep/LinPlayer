@@ -35,8 +35,6 @@ public sealed class CalendarPage : PageBase
     private readonly ComboBox _source = new() { Width = 176, MinHeight = 34 };
     private readonly CheckBox _onlyMine = new() { Content = "只看我追的", MinHeight = 34 };
 
-    private bool _building;
-
     private static readonly string[] WeekNames = ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
     public CalendarPage(CoreClient core)
@@ -46,8 +44,10 @@ public sealed class CalendarPage : PageBase
         foreach (var (k, label) in new[] { ("bangumi", "番剧(Bangumi)"), ("trakt", "剧集(Trakt)") })
             _source.Items.Add(new ComboBoxItem { Content = label, Tag = k });
         _source.SelectedIndex = 0; // 解锁后默认 Bangumi(公开放送表免登录就能返回整张表)
-        _source.SelectionChanged += (_, _) => { if (!_building) _ = Load(); };
-        _onlyMine.IsCheckedChanged += (_, _) => { if (!_building) _ = Load(); };
+        // ★ 先设默认值再挂事件 —— 反过来的话 SelectedIndex=0 会自己触发一次 Load,
+        //   页面一进来就打两次上游。
+        _source.SelectionChanged += (_, _) => _ = Load();
+        _onlyMine.IsCheckedChanged += (_, _) => _ = Load();
 
         Content = Scrolled(new StackPanel
         {
