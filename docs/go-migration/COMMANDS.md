@@ -262,28 +262,28 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `plugin.devPoll` | `plugin_dev_poll` | `—` | `Result<Vec<String>, String>` | ✅ |
-| [ ] | `plugin.disable` | `plugin_disable` | `id: String` | `Result<(), String>` | ✅ |
-| [ ] | `plugin.enable` | `plugin_enable` | `id: String` | `Result<(), String>` | ✅ |
-| [ ] | `plugin.extensions` | `plugin_extensions` | `type_id: String` | `Result<Vec<serde_json::Value>, String>` | ✅ |
-| [ ] | `plugin.install` | `plugin_install` | `path: String` | `Result<serde_json::Value, String>` | ✅ |
-| [ ] | `plugin.invokeField` | `plugin_invoke_field` | `plugin_id: String, type_id: String, ext_id: String, field: String, args: Option<serde_json::Value>` | `Result<serde_json::Value, String>` | ✅ |
-| [ ] | `plugin.list` | `plugin_list` | `—` | `Result<Vec<serde_json::Value>, String>` | ✅ |
-| [ ] | `plugin.marketAddSource` | `plugin_market_add_source` | `name: String, url: String` | `Result<Vec<PluginSource>, String>` | ✅ |
-| [ ] | `plugin.marketInstall` | `plugin_market_install` | `id: String, version: Option<String>` | `Result<Json, String>` | ✅ |
-| [ ] | `plugin.marketList` | `plugin_market_list` | `refresh: Option<bool>` | `Result<Json, String>` | ✅ |
-| [ ] | `plugin.marketRemoveSource` | `plugin_market_remove_source` | `id: String` | `Result<Vec<PluginSource>, String>` | ✅ |
-| [ ] | `plugin.marketSources` | `plugin_market_sources` | `—` | `Vec<PluginSource>` | ✅ |
-| [ ] | `plugin.marketToggleSource` | `plugin_market_toggle_source` | `id: String, enabled: bool` | `Result<Vec<PluginSource>, String>` | ✅ |
-| [ ] | `plugin.panels` | `plugin_panels` | `slot: String` | `Result<Vec<serde_json::Value>, String>` | ✅ |
-| [ ] | `plugin.permissionCatalog` | `plugin_permission_catalog` | `—` | `Vec<Json>` | ✅ |
-| [ ] | `plugin.pickDevDir` | `plugin_pick_dev_dir` | `—` | `Result<Option<serde_json::Value>, String>` | ❌ |
-| [ ] | `plugin.pickInstall` | `plugin_pick_install` | `—` | `Result<Option<serde_json::Value>, String>` | ❌ |
-| [ ] | `plugin.reload` | `plugin_reload` | `id: String` | `Result<(), String>` | ✅ |
-| [ ] | `plugin.sources` | `plugin_sources` | `—` | `Result<Vec<serde_json::Value>, String>` | ✅ |
-| [ ] | `plugin.trigger` | `plugin_trigger` | `plugin_id: String, type_id: String, ext_id: String, args: Option<serde_json::Value>` | `Result<serde_json::Value, String>` | ✅ |
-| [ ] | `plugin.uiRespond` | `plugin_ui_respond` | `id: u64, value: Option<serde_json::Value>` | `()` | ✅ |
-| [ ] | `plugin.uninstall` | `plugin_uninstall` | `id: String` | `Result<(), String>` | ✅ |
+| [x] | `plugin.devPoll` | `plugin_dev_poll` | `—` | `Result<Vec<String>, String>` | ✅ |
+| [x] | `plugin.disable` | `plugin_disable` | `id: String` | `Result<(), String>` | ✅ |
+| [x] | `plugin.enable` | `plugin_enable` | `id: String` | `Result<(), String>` | ✅ |
+| [x] | `plugin.extensions` | `plugin_extensions` | `type_id: String` | `Result<Vec<serde_json::Value>, String>` | ✅ |
+| [x] | `plugin.install` | `plugin_install` | `path: String` | `Result<serde_json::Value, String>` | ✅ |
+| [x] | `plugin.invokeField` | `plugin_invoke_field` | `plugin_id: String, type_id: String, ext_id: String, field: String, args: Option<serde_json::Value>` | `Result<serde_json::Value, String>` | ✅ |
+| [x] | `plugin.list` | `plugin_list` | `—` | `Result<Vec<serde_json::Value>, String>` | ✅ |
+| [x] | `plugin.marketAddSource` | `plugin_market_add_source` | `name: String, url: String` | `Result<Vec<PluginSource>, String>` | ✅ |
+| [x] | `plugin.marketInstall` | `plugin_market_install` | `id: String, version: Option<String>` | `Result<Json, String>` | ✅ |
+| [x] | `plugin.marketList` | `plugin_market_list` | `refresh: Option<bool>` | `Result<Json, String>` | ✅ |
+| [x] | `plugin.marketRemoveSource` | `plugin_market_remove_source` | `id: String` | `Result<Vec<PluginSource>, String>` | ✅ |
+| [x] | `plugin.marketSources` | `plugin_market_sources` | `—` | `Vec<PluginSource>` | ✅ |
+| [x] | `plugin.marketToggleSource` | `plugin_market_toggle_source` | `id: String, enabled: bool` | `Result<Vec<PluginSource>, String>` | ✅ |
+| [x] | `plugin.panels` | `plugin_panels` | `slot: String` | `Result<Vec<serde_json::Value>, String>` | ✅ |
+| [x] | `plugin.permissionCatalog` | `plugin_permission_catalog` | `—` | `Vec<Json>` | ✅ |
+| [x] | `plugin.pickDevDir` | `plugin_pick_dev_dir` | `—` | `Result<Option<serde_json::Value>, String>` | ❌ |
+| [x] | `plugin.pickInstall` | `plugin_pick_install` | `—` | `Result<Option<serde_json::Value>, String>` | ❌ |
+| [x] | `plugin.reload` | `plugin_reload` | `id: String` | `Result<(), String>` | ✅ |
+| [x] | `plugin.sources` | `plugin_sources` | `—` | `Result<Vec<serde_json::Value>, String>` | ✅ |
+| [x] | `plugin.trigger` | `plugin_trigger` | `plugin_id: String, type_id: String, ext_id: String, args: Option<serde_json::Value>` | `Result<serde_json::Value, String>` | ✅ |
+| [x] | `plugin.uiRespond` | `plugin_ui_respond` | `id: u64, value: Option<serde_json::Value>` | `()` | ✅ |
+| [x] | `plugin.uninstall` | `plugin_uninstall` | `id: String` | `Result<(), String>` | ✅ |
 
 ### 下载 · `download.*` — 8 条
 

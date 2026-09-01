@@ -62,6 +62,15 @@ func PluginsDir() string    { return sub("plugins", "installed") }
 func PluginStorage() string { return sub("plugins", "storage") }
 func ModelsDir() string     { return sub("models") } // Whisper 等按需下载的模型(Q6 已定:拆出来)
 
+// PluginStateFile 插件启用态 / 已同意权限。
+func PluginStateFile() string { return sub("plugins", "state.json") }
+
+// TempDir 自家临时目录。
+//
+// ★ **不用系统 %TEMP%**:绿色包的口径是「数据全在 exe 同级 userdata/」,
+// 往系统临时目录里丢东西会在用户机器上留下我们自己都找不到的垃圾。
+func TempDir() string { return sub("temp") }
+
 // EnsureDirs 建好数据根下的目录树。
 func EnsureDirs() error {
 	for _, d := range []string{

@@ -21,6 +21,7 @@ import (
 	"linplayer/core/emby"
 	"linplayer/core/history"
 	"linplayer/core/player"
+	"linplayer/core/plugincmd"
 	"linplayer/core/prefs"
 	"linplayer/core/ranking"
 	"linplayer/core/sourcecmd"
@@ -45,4 +46,5 @@ func RegisterAll(version string) {
 	download.RegisterCommands()
 	lpsync.RegisterCommands()
 	danmaku.RegisterCommands()
+	plugincmd.RegisterCommands(version)
 }

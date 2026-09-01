@@ -76,6 +76,22 @@ func (k Kind) IsBuiltin() bool {
 // IsPlugin 是不是插件贡献的源。
 func (k Kind) IsPlugin() bool { return strings.HasPrefix(string(k), pluginPrefix) }
 
+// PluginKind 拼一个插件源的 Kind。
+func PluginKind(pluginID, srcID string) Kind { return Kind(pluginPrefix + pluginID + "/" + srcID) }
+
+// SplitPlugin 把插件源的 Kind 拆回 (插件id, 源id)。不是插件源就返回 false。
+func SplitPlugin(k Kind) (string, string, bool) {
+	rest, ok := strings.CutPrefix(string(k), pluginPrefix)
+	if !ok {
+		return "", "", false
+	}
+	i := strings.Index(rest, "/")
+	if i <= 0 || i == len(rest)-1 {
+		return "", "", false
+	}
+	return rest[:i], rest[i+1:], true
+}
+
 // LegacyDebugLabel 逐字复刻 Rust 早期 `format!("{kind:?}")` 的输出(首字母大写)。
 //
 // ★ 这个方法看起来毫无道理,但**不能删**:那些字符串已经躺在用户的配置文件里了

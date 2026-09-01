@@ -226,6 +226,33 @@ func Call(seq int64, cmd, argsJSON string) error {
 	return nil
 }
 
+// Invoke 在**当前 goroutine 上**同步跑一条已注册命令,结果直接返回,不进事件队列。
+//
+// 只给核心层内部的跨模块转发用(插件的 ctx.player / ctx.emby 就是靠它落到
+// 已有的 player.* / emby.* 实现上)。**不要**拿它当宿主入口 —— 宿主必须走
+// Call,那条路才有 seq / 取消 / worker 池那套保障。
+//
+// ★ 复用已注册的 handler 而不是另写一份:另写一份的后果是同一个能力在
+// 命令层和插件层慢慢长成两个行为,而差异只有用户会撞见。
+func Invoke(ctx context.Context, cmd string, args map[string]any) (out any, err error) {
+	h, ok := lookup(cmd)
+	if !ok {
+		return nil, NewErr(ENotFound, "没有这条命令: %s", cmd)
+	}
+	defer func() {
+		// 同 runGuarded:panic 跨不过 cgo,这里也得兜住。
+		if r := recover(); r != nil {
+			panicCount.Add(1)
+			err = NewErr(EInternal, "命令 %s 内部错误: %v", cmd, r)
+			out = nil
+		}
+	}()
+	if args == nil {
+		args = map[string]any{}
+	}
+	return h(ctx, 0, args)
+}
+
 // Cancel 取消一条在途命令。对已完成的 seq 是空操作。
 func Cancel(seq int64) {
 	inflightMu.Lock()
