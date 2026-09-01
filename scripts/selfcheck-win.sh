@@ -49,11 +49,17 @@ for _ in $(seq 30); do curl -s "http://127.0.0.1:$PORT/System/Info/Public" >/dev
 #   「进去了但是还是不行,提示缺少 server-id」。
 #
 #   预置状态跑得快,但**跑不到状态是怎么来的那条路**。两条都要有。
-if [ "${LP_FRESH:-}" = "1" ]; then
+if [ "${LP_FRESH:-}" = "1" ] || [ "${LP_FRESH:-}" = "2" ]; then
   echo "== 4/5 不灌账号 —— 走真的登录(LP_FRESH=1)=="
   rm -rf "$BIN/userdata"
   mkdir -p "$BIN/userdata"
-  PAGE="login:http://127.0.0.1:$PORT|u1|p"
+  # ★ LP_FRESH=2:清干净但**不自动登录** —— 用来看首登闸口自己长什么样。
+  #   只有 =1 才走那条自动填表点登录的路。
+  if [ "${LP_FRESH:-}" != "2" ]; then
+    PAGE="login:http://127.0.0.1:$PORT|u1|p"
+  else
+    PAGE=""
+  fi
 else
 
 if [ "${LP_SOURCE:-}" = "1" ]; then
@@ -121,7 +127,7 @@ export LP_BANGUMI_API="http://127.0.0.1:$PORT"
 # 图标库的聚合源(假服务器兼职图床)。
 # ★ 真实构建里这个是 -ldflags 注入的,源码里没有 —— 自检走环境变量那条覆盖。
 export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
-LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \

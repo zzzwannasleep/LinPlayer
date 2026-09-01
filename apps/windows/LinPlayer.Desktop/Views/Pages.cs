@@ -8,6 +8,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Platform.Storage;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using LinPlayer.Core;
@@ -141,24 +142,77 @@ public sealed class AddServerPage : PageBase
             finally { Busy(false); }
         };
 
-        login.Click += async (_, _) =>
+        /* 源类型选择(UI_PC §7.6:一份表单定义 + 三种版式)。
+           ★★ **不能只有 Emby**:核心层已经接了本地文件夹 / WebDAV / Ani-RSS 三个
+             文件浏览型源,而界面上没有入口的话它们等于不存在 —— 而且这种「后端有、
+             前端没接」正是本仓最常见的一类静默缺口。
+           ★ 新增一种源只改这张表一处:分散在各处的话,漏掉的那处就是
+             「某个入口加不了这种源」。 */
+        var kinds = new[]
         {
-            Busy(true, "正在登录…");
-            try
+            ("Emby", "emby", "填服务器地址和账号即可;先「测试连接」可以确认地址对不对。"),
+            ("本地文件夹", "local", "选一个本机目录当作源。没有地址也没有账号密码。"),
+            ("WebDAV", "webdav", "填 WebDAV 地址和账号密码。账号密码可留空(匿名)。"),
+            ("Ani-RSS", "anirss", "填 Ani-RSS 服务地址和账号密码。只对接播放,不含管理台。"),
+        };
+        // ★ 用 WrapPanel:四个芯片在固定宽的卡里一行放不下,
+        //   用 StackPanel 的话最后一个会被卡的边缘裁掉(而且**一点提示都没有**)。
+        var kindBar = new WrapPanel();
+        var kindDesc = Dim(kinds[0].Item3);
+        var kindIndex = 0;
+        var serverRow = new StackPanel { Spacing = 8, Children = { Label("服务器地址"), server } };
+        var userRow = new StackPanel { Spacing = 8, Children = { Label("用户名"), user } };
+        var passRow = new StackPanel { Spacing = 8, Children = { Label("密码"), pass } };
+        var pickDir = new Button { Classes = { "ghost" }, Content = "选择文件夹…" };
+        var pickedDir = Dim("");
+        var dirRow = new StackPanel
+        {
+            Spacing = 8, IsVisible = false,
+            Children = { Label("本机目录"), pickDir, pickedDir },
+        };
+
+        void ApplyKind()
+        {
+            var k = kinds[kindIndex].Item2;
+            kindDesc.Text = kinds[kindIndex].Item3;
+            // ★ 本地源的表单**只有一个「选择文件夹」按钮** —— 没有地址框也没有账号密码。
+            var isLocal = k == "local";
+            serverRow.IsVisible = userRow.IsVisible = passRow.IsVisible = !isLocal;
+            dirRow.IsVisible = isLocal;
+            test.IsVisible = k == "emby";
+            // ★ 局域网 / Ani-RSS 各给各的占位符 —— 在 WebDAV 的框里摆个 Emby 的
+            //   示例地址只会把人带沟里。
+            server.Watermark = k switch
             {
-                await core.EmbyLogin(new
-                {
-                    server = WithScheme(server.Text ?? ""),
-                    username = user.Text ?? "",
-                    password = pass.Text ?? "",
-                    // ★ 设备 id 必须**持久**:每次换一个会把服务器的设备列表刷满,
-                    //   续播会话也对不上。核心层的 config 里有一个,这里先用机器名兜底。
-                    device_id = DeviceId(),
-                });
-                onDone();
-            }
-            catch (CoreException e) { hint.Text = e.Advice; Busy(false); }
-            catch (Exception e) { hint.Text = e.Message; Busy(false); }
+                "webdav" => "https://你的 WebDAV 地址/dav",
+                "anirss" => "http://你的 Ani-RSS 地址:7789",
+                _ => "https://你的服务器地址",
+            };
+            for (var i = 0; i < kindBar.Children.Count; i++)
+                ((Button)kindBar.Children[i]).Classes.Set("primary", i == kindIndex);
+        }
+
+        for (var i = 0; i < kinds.Length; i++)
+        {
+            var idx = i;
+            var chip = new Button
+            {
+                Classes = { "ghost" }, Content = kinds[i].Item1,
+                Margin = new Thickness(0, 0, 8, 8),
+            };
+            chip.Click += (_, _) => { kindIndex = idx; ApplyKind(); };
+            kindBar.Children.Add(chip);
+        }
+
+        pickDir.Click += async (_, _) =>
+        {
+            var top = TopLevel.GetTopLevel(pickDir);
+            if (top is null) return;
+            var dirs = await top.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "选择要当作源的文件夹", AllowMultiple = false,
+            });
+            if (dirs.Count > 0) pickedDir.Text = dirs[0].Path.LocalPath;
         };
 
         var form = new StackPanel
@@ -167,10 +221,8 @@ public sealed class AddServerPage : PageBase
             Children =
             {
                 H1("连接到你的媒体服务器"),
-                Dim("支持 Emby。填服务器地址和账号即可;先「测试连接」可以确认地址对不对。"),
-                new StackPanel { Spacing = 8, Children = { Label("服务器地址"), server } },
-                new StackPanel { Spacing = 8, Children = { Label("用户名"), user } },
-                new StackPanel { Spacing = 8, Children = { Label("密码"), pass } },
+                kindBar, kindDesc,
+                serverRow, userRow, passRow, dirRow,
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal, Spacing = 10,
@@ -180,6 +232,52 @@ public sealed class AddServerPage : PageBase
                 hint,
             },
         };
+        ApplyKind();
+
+        login.Click += async (_, _) =>
+        {
+            Busy(true, "正在登录…");
+            try
+            {
+                var kind = kinds[kindIndex].Item2;
+                if (kind == "emby")
+                {
+                    await core.EmbyLogin(new
+                    {
+                        server = WithScheme(server.Text ?? ""),
+                        username = user.Text ?? "",
+                        password = pass.Text ?? "",
+                        // ★ 设备 id 必须**持久**:每次换一个会把服务器的设备列表刷满,
+                        //   续播会话也对不上。核心层的 config 里有一个,这里先用机器名兜底。
+                        device_id = DeviceId(),
+                    });
+                }
+                else
+                {
+                    // ★ 文件浏览型源走 source.login:它会先探一次再落盘,
+                    //   探不通就不入库 —— 免得列表里躺着一台永远打不开的源。
+                    await core.SourceLogin(new
+                    {
+                        kind,
+                        base_url = kind == "local" ? (pickedDir.Text ?? "") : WithScheme(server.Text ?? ""),
+                        username = user.Text ?? "",
+                        password = pass.Text ?? "",
+                    });
+                }
+                onDone();
+            }
+            catch (CoreException e) { hint.Text = e.Advice; Busy(false); }
+            catch (Exception e) { hint.Text = e.Message; Busy(false); }
+        };
+
+
+        // 真机自检:LP_SELFCHECK_SOURCE=<源 kind> 直接切到那一种源的版式,
+        // 用来验「本地源只有一个选择文件夹按钮」这类**只有真渲染才看得见**的判据。
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_SOURCE") is { Length: > 0 } wantKind)
+        {
+            var at = Array.FindIndex(kinds, k => k.Item2 == wantKind);
+            if (at >= 0) { kindIndex = at; ApplyKind(); }
+        }
 
         // 真机自检:LP_SELFCHECK_PAGE=login:<地址>|<用户名>|<密码> 直接填好并点登录。
         // ★ 不能靠 SendKeys —— 焦点落在哪儿不确定,实测一个字符都没进去。
@@ -199,7 +297,7 @@ public sealed class AddServerPage : PageBase
             Child = new Border
             {
                 Classes = { "card" },
-                Width = 460,
+                Width = 520,
                 Padding = new Thickness(28),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,

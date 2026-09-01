@@ -20,6 +20,7 @@ import (
 	"linplayer/core/httpx"
 	"linplayer/core/player"
 	"linplayer/core/source"
+	"linplayer/core/source/anirss"
 	"linplayer/core/source/local"
 	"linplayer/core/source/webdav"
 )
@@ -58,6 +59,7 @@ func RegisterCommands() {
 func registerBackends() {
 	source.Register(local.New())
 	source.Register(webdav.New())
+	source.Register(anirss.New())
 }
 
 // ---------------------------------------------------------------------------
