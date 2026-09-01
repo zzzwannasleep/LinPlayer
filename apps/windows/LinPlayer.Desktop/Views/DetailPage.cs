@@ -261,6 +261,38 @@ public sealed class DetailPage : PageBase
                 }
             };
             row.Children.Add(dl);
+
+            /* 用外部播放器打开。
+               ★ 按钮**只在配了外部播放器时才出现**:没配的话点了只会得到
+                 「未设置外部播放器」,那是一条纯噪音 —— 摆一个必定失败的按钮
+                 比没有更糟。所以先问核心层,拿到非空才加。 */
+            var ext = new Button { Classes = { "ghost" }, Content = "⧉ 外部播放器" };
+            ext.Click += async (_, _) =>
+            {
+                ext.IsEnabled = false;
+                try
+                {
+                    var s = Nav.Session!;
+                    await _core.PlayerPlayExternal(new
+                    {
+                        s.server, s.token, s.user_id, s.device_id,
+                        item_id = id, resume_secs = resume,
+                    });
+                    ext.Content = "已交给外部播放器";
+                }
+                catch (Exception e) { ext.Content = LibraryPage.Advice(e); }
+                finally { ext.IsEnabled = true; }
+            };
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var p = await _core.PlayerGetPlaybackPrefs(new { });
+                    if (Str(p, "external_player") != "")
+                        Dispatcher.UIThread.Post(() => row.Children.Add(ext));
+                }
+                catch { /* 拿不到就当没配 —— 这一个按钮不值得把详情页拖红 */ }
+            });
         }
         return row;
     }

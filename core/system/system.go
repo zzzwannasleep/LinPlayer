@@ -19,6 +19,7 @@ var Version = "dev"
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands() {
 	registerMiscCommands()
+	registerUpdateCommands()
 	bus.Register("system.ping", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		return map[string]any{"pong": true, "ts": bus.MonoMillis()}, nil
 	})

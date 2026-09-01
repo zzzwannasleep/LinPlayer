@@ -134,7 +134,7 @@
 | [x] | `player.mpvSet` | `mpv_set` | `name: String, value: String` | `Result<(), String>` | ✅ |
 | [x] | `player.opts` | `player_opts` | `—` | `Result<PlayerOpts, String>` | ✅ |
 | [x] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<f64, String>` | ✅ |
-| [ ] | `player.playExternal` | `play_external` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<String, String>` | ✅ |
+| [x] | `player.playExternal` | `play_external` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<String, String>` | ✅ |
 | [x] | `player.playLocal` | `play_local` | `id: String, resume_secs: f64` | `Result<f64, String>` | ✅ |
 | [x] | `player.screenshot` | `screenshot` | `dir: Option<String>` | `Result<String, String>` | ✅ |
 | [x] | `player.seek` | `seek` | `pos: f64` | `Result<(), String>` | ✅ |
@@ -158,11 +158,11 @@
 | [x] | `player.shaderLevels` | `shader_levels` | `—` | `Vec<(&'static str, &'static str, &'static str)>` | ✅ |
 | [x] | `player.status` | `status` | `—` | `Result<Status, String>` | ✅ |
 | [x] | `player.stopPlayback` | `stop_playback` | `pos: f64` | `Result<(), String>` | ✅ |
-| [ ] | `player.takePending` | `player_take_pending` | `—` | `Option<serde_json::Value>` | ❌ |
+| [x] | `player.takePending` | `player_take_pending` | `—` | `Option<serde_json::Value>` | ❌ |
 | [x] | `player.tracks` | `tracks` | `—` | `Result<Vec<Track>, String>` | ✅ |
 | [x] | `player.validateTrackRegex` | `validate_track_regex` | `pattern: String` | `Result<(), String>` | ✅ |
-| [ ] | `player.windowClose` | `player_window_close` | `—` | `Result<(), String>` | ❌ |
-| [ ] | `player.windowOpen` | `player_window_open` | `payload: serde_json::Value` | `Result<(), String>` | ❌ |
+| [x] | `player.windowClose` | `player_window_close` | `—` | `Result<(), String>` | ❌ |
+| [x] | `player.windowOpen` | `player_window_open` | `payload: serde_json::Value` | `Result<(), String>` | ❌ |
 
 ### 媒体源(浏览型 / 影视目录) · `source.*` — 14 条
 
@@ -367,10 +367,10 @@
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
 | [x] | `system.afdianSponsorUrl` | `afdian_sponsor_url` | `—` | `String` | ✅ |
-| [ ] | `system.afdianVerify` | `afdian_verify` | `order_no: String` | `Result<linplayer_core::sync::AfdianVerifyResult, String>` | ✅ |
+| [x] | `system.afdianVerify` | `afdian_verify` | `order_no: String` | `Result<linplayer_core::sync::AfdianVerifyResult, String>` | ✅ |
 | [x] | `system.cacheSize` | `cache_size` | `—` | `Result<u64, String>` | ✅ |
 | [x] | `system.capabilities` | **新增** | `-` | `{ commands: string[], ... }` | — | <!-- 本平台支持哪些命令。UI 启动时拿它隐藏入口(SPEC 5.6) -->
-| [ ] | `system.checkUpdate` | `check_update` | `—` | `Result<Option<linplayer_core::update::UpdateInfo>, String>` | ✅ |
+| [x] | `system.checkUpdate` | `check_update` | `—` | `Result<Option<linplayer_core::update::UpdateInfo>, String>` | ✅ |
 | [x] | `system.clearCache` | `clear_cache` | `—` | `Result<(), String>` | ✅ |
 | [x] | `system.dataPaths` | `data_paths` | `—` | `DataPaths` | ✅ |
 | [x] | `system.exportDiagnostics` | **新增** | `-` | `{ ... }` | — | <!-- 诊断导出(SPEC 5.6)。**不许带凭据** -->

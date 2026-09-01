@@ -199,7 +199,9 @@ public static class SettingsSections
     public static Control Update(CoreClient core, JsonElement s)
     {
         var hint = Hint();
-        var channels = new[] { ("正式版", "stable"), ("预览版", "preview") };
+        // ★ 线上值是 `prerelease`,不是 `preview`。写错的那一版选「预览版」会被核心层
+        //   顶回「未知的更新渠道」—— 渠道从来就切不过去。
+        var channels = new[] { ("正式版", "stable"), ("预览版", "prerelease") };
         var ch = new ComboBox
         {
             Width = 160, MinHeight = 34,
@@ -234,10 +236,40 @@ public static class SettingsSections
             Text = $"当前版本 {Str(s, "current_version")}",
             Classes = { "dim" }, FontSize = 12,
         });
+        // 立即检查更新。
+        //
+        // ★★ 「已是最新」和「查不动」要**分开说**。核心层已经把两者分开了
+        //   (has_update=false 是确实没有,报错是限流/断网),界面不能再把它们
+        //   合并成一句「检查失败」—— 那会让用户永远等不到更新还以为自己是最新的。
+        var check = new Button { Classes = { "ghost" }, Content = "检查更新" };
+        check.Click += async (_, _) =>
+        {
+            check.IsEnabled = false;
+            hint.Text = "检查中…";
+            try
+            {
+                var r = await core.SystemCheckUpdate(new { });
+                if (r.TryGetProperty("has_update", out var h) && h.GetBoolean() &&
+                    r.TryGetProperty("update", out var u))
+                {
+                    var url = u.TryGetProperty("asset_url", out var a2) ? a2.GetString() ?? "" : "";
+                    if (url == "") url = u.TryGetProperty("html_url", out var w) ? w.GetString() ?? "" : "";
+                    hint.Text = $"有新版本 {Str(u, "version")}:{url}";
+                }
+                else hint.Text = "已是最新版本。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+            finally { check.IsEnabled = true; }
+        };
+
         // ★ 绿色包被解压到写不进去的地方时不能自更新。核心层这一版保守报 false,
         //   界面就得如实说 —— 摆一个点了没反应的「立即更新」比没有更糟。
         if (!Bool(s, "can_self_update"))
             body.Children.Add(Note("这一版还不能自动安装更新,检查到新版本会给下载地址。"));
+        body.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 10, Children = { check },
+        });
         body.Children.Add(hint);
 
         return Group("更新", body);

@@ -257,6 +257,7 @@ func registerTransport() {
 	})
 
 	registerApplyPrefs()
+	registerExternalCommands()
 	registerLocalCommands()
 
 	// tracks 当前文件的轨道表。

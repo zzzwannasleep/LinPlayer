@@ -11,6 +11,8 @@ import (
 
 // RegisterCommands 由 core/commands 调用。
 func RegisterCommands() {
+	registerAfdian()
+
 	// ---- Trakt ----
 	bus.Register("sync.traktAccount", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		return Load("trakt"), nil // nil = 没连,不是错误

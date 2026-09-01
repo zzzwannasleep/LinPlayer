@@ -2,6 +2,7 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
@@ -223,10 +224,62 @@ public sealed class SettingsPage : PageBase
             catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
         };
 
+        // 外部播放器。
+        //
+        // ★ 系统文件对话框由**宿主**弹(核心层是个库,弹不了对话框 ——
+        //   system.pickFile 在核心层就是明着返回 E_UNSUPPORTED 的)。
+        //   挑完把路径交给 player.setPlaybackPrefs,由核心层校验它真的存在:
+        //   存一个打不开的路径,等到起播时才炸,那时用户早忘了自己填过什么。
+        var ext = new TextBox { Classes = { "field" }, Width = 300, IsReadOnly = true };
+        var pick = new Button { Classes = { "ghost" }, Content = "选择…" };
+        var clearExt = new Button { Classes = { "ghost" }, Content = "清除" };
+        _ = Task.Run(async () =>
+        {
+            var got = await Safe(() => core.PlayerGetPlaybackPrefs(new { }));
+            if (got is { } g)
+                Dispatcher.UIThread.Post(() => ext.Text = Str(g, "external_player"));
+        });
+        async Task SetExt(string path)
+        {
+            try
+            {
+                await core.PlayerSetPlaybackPrefs(new { settings = new { external_player = path } });
+                ext.Text = path;
+                hint.Text = path == "" ? "已清除外部播放器。" : "已保存。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        }
+        pick.Click += async (_, _) =>
+        {
+            var top = TopLevel.GetTopLevel(pick);
+            if (top is null) return;
+            // ★ 后缀过滤要**按平台给**:`*.exe` 在 Linux 上会把列表滤空,
+            //   而用户看到的是一个「什么都没有」的对话框。
+            var types = OperatingSystem.IsWindows()
+                ? new List<FilePickerFileType> { new("可执行文件") { Patterns = ["*.exe"] } }
+                : null;
+            var files = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "选择外部播放器", AllowMultiple = false, FileTypeFilter = types,
+            });
+            if (files.Count > 0) await SetExt(files[0].Path.LocalPath);
+        };
+        clearExt.Click += async (_, _) => await SetExt("");
+
         return Card("播放", new StackPanel
         {
             Spacing = 10,
-            Children = { Field("硬件解码", hw), hint },
+            Children =
+            {
+                Field("硬件解码", hw),
+                Field("外部播放器", new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Spacing = 8,
+                    Children = { ext, pick, clearExt },
+                }),
+                Dim("设了之后,详情页会多一个「用外部播放器打开」。"),
+                hint,
+            },
         });
     }
 
