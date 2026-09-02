@@ -1,0 +1,122 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Templates;
+using Avalonia.Layout;
+using LinPlayer.Desktop.Core;
+
+namespace LinPlayer.Desktop.Views;
+
+/// <summary>
+/// 会虚拟化的媒体网格。
+///
+/// <para>★★ 原来是一个 <c>WrapPanel</c> 把所有条目一次性 new 成卡片。
+/// 140 条时是 140 张卡 × 约 10 个可视元素 = 一千四百个控件要测量、排布、命中测试;
+/// 而真实媒体库动辄上千条,滚到底就是上万个。**这不是「慢一点」,是量级问题**。</para>
+///
+/// <para>★ Avalonia 11 的基础包里<b>没有 ItemsRepeater / UniformGridLayout</b>
+/// (那是另一个 NuGet 包),但有 <see cref="VirtualizingStackPanel"/> —— 它只虚拟化
+/// <b>一维列表</b>。所以这里把网格<b>按行折</b>:数据是「一行若干张卡」,
+/// 竖直方向交给它虚拟化。卡片宽高固定 = 行高一致,这正是它工作得最好的形状。</para>
+///
+/// <para>★ 列数<b>按实际宽度算</b>,窗口变了要重算。写死列数的话,
+/// 侧栏收起、窗口最大化、4K 屏 —— 每一种都会留下一条空白或者切掉半张卡。</para>
+/// </summary>
+public sealed class MediaGrid : ContentControl
+{
+    /// <summary>卡片之间的横纵间距。和原来 WrapPanel 时代的 Margin 一致,换过来不跳版。</summary>
+    private const double Gap = 14;
+
+    private readonly CoreClient _core;
+    private readonly string _server;
+    private readonly bool _wide, _episodeStyle;
+    private readonly double? _width;
+    private readonly Action<CardItem>? _onOpen;
+
+    private readonly List<CardItem> _items = [];
+    private readonly ItemsControl _list;
+    private int _cols = -1;
+
+    public MediaGrid(CoreClient core, string server, bool wide,
+        Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null)
+    {
+        _core = core; _server = server; _wide = wide;
+        _onOpen = onOpen; _episodeStyle = episodeStyle; _width = width;
+
+        _list = new ItemsControl
+        {
+            // ★ 这一行就是虚拟化的开关。不设的话默认是 StackPanel,全量实例化。
+            ItemsPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel()),
+            ItemTemplate = new FuncDataTemplate<List<CardItem>>((row, _) => Row(row), true),
+        };
+        Content = _list;
+        HorizontalAlignment = HorizontalAlignment.Stretch;
+
+        /* ★ 用 SizeChanged 重算列数。
+           ★★ 只在**列数真的变了**时才重建 —— 拖窗口时 SizeChanged 每帧都发,
+             每次都重建 ItemsSource 的话,拖动过程中会一直在丢弃/重建容器,
+             那比不虚拟化还卡。 */
+        SizeChanged += (_, _) => Relayout();
+    }
+
+    /// <summary>一张卡多宽(含右侧间距)。</summary>
+    private double CellWidth => (_width ?? (_wide ? 256.0 : 158.0)) + Gap;
+
+    /// <summary>追加一批。分页拉取的网格用 —— 已经画出来的行不重建。</summary>
+    public void Append(IEnumerable<CardItem> more)
+    {
+        _items.AddRange(more);
+        Rebuild();
+    }
+
+    /// <summary>清空(换排序 / 换筛选)。</summary>
+    public void Clear()
+    {
+        _items.Clear();
+        Rebuild();
+    }
+
+    public int Count => _items.Count;
+
+    private void Relayout()
+    {
+        var avail = Bounds.Width;
+        if (avail <= 1) return;
+        var cols = Math.Max(1, (int)((avail + Gap) / CellWidth));
+        if (cols == _cols) return; // ★ 列数没变就什么都不做,见构造函数里那段
+        _cols = cols;
+        Rebuild();
+    }
+
+    private void Rebuild()
+    {
+        if (_cols <= 0)
+        {
+            // 还没量到宽度(首次挂载)。先按一行铺出去,Relayout 会立刻纠正。
+            var w = Bounds.Width;
+            _cols = w > 1 ? Math.Max(1, (int)((w + Gap) / CellWidth)) : 1;
+        }
+        var rows = new List<List<CardItem>>();
+        for (var i = 0; i < _items.Count; i += _cols)
+            rows.Add(_items.GetRange(i, Math.Min(_cols, _items.Count - i)));
+        _list.ItemsSource = rows;
+    }
+
+    private Control Row(List<CardItem> row)
+    {
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = Gap,
+            Margin = new Thickness(0, 0, 0, Gap + 2),
+        };
+        foreach (var it in row)
+            panel.Children.Add(new Card(_core, _server, it, _wide,
+                _onOpen ?? LibraryPage.OpenDetail(_core, _server),
+                width: _width,
+                subtitle: _episodeStyle ? it.RuntimeLabel : null,
+                title: _episodeStyle ? it.Name : null,
+                // 分集标题都是「第 N 集」,一行足够;留两行的话时长会掉到空出来的那行下面。
+                titleLines: _episodeStyle ? 1 : 2));
+        return panel;
+    }
+}

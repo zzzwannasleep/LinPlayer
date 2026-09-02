@@ -158,22 +158,23 @@ public sealed class LibraryPage : PageBase
     /// 每张卡再写一遍「某部剧 · 第 3 集」等于把仅有的两行标题位浪费掉一行半 ——
     /// 那一行要留给<b>时长</b>,那才是选集时真会看的东西。</para>
     /// </summary>
+    /// <summary>
+    /// 自动铺满的网格。
+    ///
+    /// <para>★★ 交给 <see cref="MediaGrid"/> —— 它<b>按行虚拟化</b>。
+    /// 原来是 WrapPanel 一次性把所有条目 new 成卡片:140 条 = 一千四百个控件,
+    /// 而真实媒体库上千条,滚到底就是上万个。这不是慢一点,是量级问题。</para>
+    ///
+    /// <para>★ 这一处是**四个入口共用的**(媒体库网格 / 搜索结果 / 收藏 / 详情页分集),
+    /// 改在这儿四处一起受益 —— 各处各写一份网格的话,虚拟化只会做在想起来的那一处。</para>
+    /// </summary>
     internal static Control Grid(CoreClient core, string server, List<CardItem> items, bool wide,
         Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null)
     {
-        using var _ = Core.Perf.Measure($"造 {items.Count} 张卡(网格)");
-        var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var it in items)
-            wrap.Children.Add(new Card(core, server, it, wide, onOpen ?? OpenDetail(core, server),
-                width: width,
-                subtitle: episodeStyle ? it.RuntimeLabel : null,
-                title: episodeStyle ? it.Name : null,
-                // 分集标题都是「第 N 集」,一行足够;留两行的话时长会掉到空出来的那行下面。
-                titleLines: episodeStyle ? 1 : 2)
-            {
-                Margin = new Thickness(0, 0, 14, 16),
-            });
-        return wrap;
+        using var _ = Core.Perf.Measure($"铺 {items.Count} 条(虚拟化网格)");
+        var g = new MediaGrid(core, server, wide, onOpen, episodeStyle, width);
+        g.Append(items);
+        return g;
     }
 
     internal static Action<CardItem> OpenDetail(CoreClient core, string server) => item =>
@@ -212,7 +213,8 @@ public sealed class LibraryGridPage : PageBase
 
     private readonly CoreClient _core;
     private readonly string _server, _parentId;
-    private readonly WrapPanel _wrap = new();
+    /// <summary>★ 虚拟化网格。这一页是全站最长的一页(分页拉,能拉到上千条)。</summary>
+    private readonly MediaGrid _grid;
     private readonly TextBlock _status = new() { Classes = { "dim" } };
     /// <summary>首屏骨架。★ 第一页回来之前这块是空的,不垫的话进库先见一片黑。</summary>
     private readonly ContentControl _first = new() { Content = Skeleton.Grid(false, 18) };
@@ -227,6 +229,7 @@ public sealed class LibraryGridPage : PageBase
     public LibraryGridPage(CoreClient core, string server, string parentId, string title)
     {
         _core = core; _server = server; _parentId = parentId;
+        _grid = new MediaGrid(core, server, false, LibraryPage.OpenDetail(core, server));
 
         _sort.ItemsSource = Sorts.Select(x => x.Label).ToList();
         _sort.SelectedIndex = 0;
@@ -249,7 +252,7 @@ public sealed class LibraryGridPage : PageBase
             Orientation = Orientation.Horizontal, Spacing = 10,
             Children = { _sort, _genre, _year },
         };
-        var body = new StackPanel { Spacing = 14, Children = { head, bar, _first, _wrap, _status } };
+        var body = new StackPanel { Spacing = 14, Children = { head, bar, _first, _grid, _status } };
 
         var sv = new ScrollViewer
         {
@@ -280,7 +283,7 @@ public sealed class LibraryGridPage : PageBase
     /// </summary>
     private void Requery()
     {
-        _wrap.Children.Clear();
+        _grid.Clear();
         _loaded = 0;
         _total = -1;
         _ = LoadMore();
@@ -367,13 +370,8 @@ public sealed class LibraryGridPage : PageBase
                 // 第一页到了就把骨架撤掉。★ 换排序 / 换筛选时它不再回来 ——
                 //   那时候屏幕上已经有内容了,再闪一次骨架反而像整页重载。
                 _first.IsVisible = false;
-                using var _sp = Core.Perf.Measure($"造 {items.Count} 张卡(网格)");
-                foreach (var it in items)
-                    _wrap.Children.Add(new Card(_core, _server, it, false,
-                        LibraryPage.OpenDetail(_core, _server))
-                    {
-                        Margin = new Thickness(0, 0, 14, 16),
-                    });
+                using var _sp = Core.Perf.Measure($"追加 {items.Count} 条(虚拟化网格)");
+                _grid.Append(items);
                 _status.Text = _loaded >= _total ? $"共 {_total} 项" : $"已加载 {_loaded} / {_total}";
                 if (_loaded == 0) _status.Text = "这个筛选下没有内容。";
             });

@@ -173,6 +173,7 @@ public partial class MainWindow : Window
            一个「设了没反应」的自检开关比没有更糟:它会让人以为已经验过了。 */
         SelfCheckScroll();
         SelfCheckMenu();
+        SelfCheckCount();
         if (string.IsNullOrEmpty(want) || _core is null) return;
         var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";
         var srv = Nav.Session?.server ?? "";
@@ -375,6 +376,21 @@ public partial class MainWindow : Window
                     : "[右键自检] ✗ 右键之后仍然没有菜单"),
                 DispatcherPriority.Background);
         }));
+    }
+
+    /// <summary>
+    /// 自检:数一数<b>真的被实例化出来</b>的卡片有几张。
+    ///
+    /// <para>★★ 「加了虚拟化」这句话本身是验不了的 —— 代码写上了、编译过了、
+    /// 页面看着也对,但只要 <c>ItemsPanel</c> 那一行没生效,它就退化成全量实例化,
+    /// <b>而且外观一模一样</b>。唯一的判据是数视觉树里的 <see cref="Card"/>:
+    /// 服务端给了 140 条,屏幕上放得下十几张 —— 数出来接近 140 就是没虚拟化。</para>
+    /// </summary>
+    private void SelfCheckCount()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_COUNT") != "1") return;
+        _ = Task.Delay(4000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+            Console.WriteLine($"[卡片计数] 视觉树里实例化了 {this.GetVisualDescendants().OfType<Card>().Count()} 张卡")));
     }
 
     /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>
