@@ -107,6 +107,14 @@ public sealed class PlayerPage : UserControl
 
     /// <summary>这一条是不是文件浏览型源的条目(走 source.play)。</summary>
     private readonly bool _isSource;
+
+    /// <summary>
+    /// 源条目的原始数据,原样回传给核心层。
+    ///
+    /// <para>★★ 资源站(影视目录)的**可播地址就藏在 raw 里** —— 不带它的话
+    /// 后端只拿到一个 id,解析不出流。表现是「点了集数没反应」。</para>
+    /// </summary>
+    private readonly object? _sourceRaw;
     private readonly string _title = "";
 
     /// <summary>
@@ -118,10 +126,12 @@ public sealed class PlayerPage : UserControl
     /// <para>★ 两条起播路的差别只在这一句上,别的(OSD、快捷键、进度、轨道)全共用 ——
     /// 另开一个「源播放页」等于把这些再实现一遍,还得再维护一遍。</para>
     /// </summary>
-    public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs, bool isSource = false)
+    public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs,
+        bool isSource = false, object? sourceRaw = null)
     {
         _core = core;
         _isSource = isSource;
+        _sourceRaw = sourceRaw;
         _title = title;
 
         _bar = new Slider { Minimum = 0, Maximum = 1, Value = 0, IsEnabled = false };
@@ -259,6 +269,7 @@ public sealed class PlayerPage : UserControl
                 await _core.SourcePlay(new
                 {
                     entry_id = itemId, entry_name = _title, resume_secs = resumeSecs,
+                    raw = _sourceRaw,
                 });
             }
             else

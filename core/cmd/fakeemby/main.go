@@ -104,6 +104,43 @@ func main() {
 		writeJSON(w, map[string]any{"name": "自检图标库", "description": "", "icons": icons})
 	})
 
+	/* 假的插件源 registry(自检用)。核心层靠 LP_PLUGIN_OFFICIAL_REGISTRY 指过来。
+	   ★ 夹具要带上**会出事的那几种条目**,不然对应的 UI 判据在真渲染里走不到:
+	     · 一条 v1 schema(author 是对象)—— 它必须被跳过,而且「跳了几条」要报出来
+	     · 版本数组**故意乱序且 1.10 在 1.9 前面** —— 卡片必须显示 1.10.0
+	       (照数组第一个取的话显示 1.2.0,而装下去是另一版)
+	     · 一条 apiVersion=3 的高版本 —— 宿主装不了,要回退到能装的那版
+	     · 权限里带危险权限 —— 授权弹窗的 ⚠ 那一支才有东西可画 */
+	mux.HandleFunc("/plugins/registry.json", func(w http.ResponseWriter, r *http.Request) {
+		ver := func(v string, api int) map[string]any {
+			return map[string]any{
+				"version": v, "api_version": api,
+				"package_url": fmt.Sprintf("http://%s/plugins/pkg-%s.ipk", r.Host, v),
+			}
+		}
+		writeJSON(w, map[string]any{"plugins": []any{
+			map[string]any{
+				"id": "com.fake.source", "name": "假网盘源", "author": "自检",
+				"description": "贡献一个数据源,用来验「添加服务器」里能不能看到插件源。",
+				"category":    "source",
+				"permissions": []string{"sources", "http", "storage"},
+				"versions":    []any{ver("1.2.0", 2), ver("1.10.0", 2), ver("1.9.0", 2), ver("2.0.0", 3)},
+			},
+			map[string]any{
+				"id": "com.fake.tools", "name": "假工具", "author": "自检",
+				"description": "只申请了界面权限的插件。", "category": "tools",
+				"permissions": []string{"ui", "extensions"},
+				"versions":    []any{ver("0.1.0", 2)},
+			},
+			// v1 schema:author 是对象。**必须被跳过**,而且跳过数要能报出来
+			map[string]any{
+				"id": "com.fake.v1", "name": "老插件",
+				"author":   map[string]any{"name": "谁"},
+				"versions": []any{ver("1.0.0", 2)},
+			},
+		}})
+	})
+
 	/* 假的 Bangumi 放送表(自检用)。核心层靠 LP_BANGUMI_API 指过来。
 	   ★ 夹具要带上**真实形状里那些会出事的东西**:0 分的条目、只有原名的条目、
 	     协议相对的图片地址 —— 缺一样,对应那条 UI 判据就验不到。 */

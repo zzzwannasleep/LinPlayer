@@ -46,6 +46,15 @@ public partial class MainWindow : Window
            那不是功能,那是一个专门用来报错的入口。 */
         this.FindControl<RadioButton>("NavBrowse")!.Checked += (_, _) =>
             Nav.Root(new BrowsePage(_core!, _sourceName));
+        /* ★★ 「影视目录」和「文件浏览」是**两页**,不是一页的两种模式。
+           资源站有分类、有分页、有分集,不是文件树 —— 塞进文件浏览页的话
+           分类要伪装成文件夹、翻页要伪装成一个叫「下一页」的文件夹。
+           入口按源的能力显隐:探不到影视目录能力时这一页会自己退回文件浏览。 */
+        this.FindControl<RadioButton>("NavCatalog")!.Checked += (_, _) =>
+            Nav.Root(new CatalogPage(_core!, () =>
+                this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true));
+        // 插件页不需要 Emby 会话:它打的是插件源和本地插件目录,和用户的服务器无关。
+        this.FindControl<RadioButton>("NavPlugins")!.Checked += (_, _) => Nav.Root(new PluginPage(_core!));
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Emby("媒体库", () => new LibraryPage(_core!));
         this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Emby("搜索", () => new SearchPage(_core!));
         this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Emby("收藏", () => new FavoritesPage(_core!));
@@ -95,6 +104,32 @@ public partial class MainWindow : Window
 
     private void SelfCheckJump() => SelfCheckJump(Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE"));
 
+    /// <summary>
+    /// 自检:挂一个开发目录插件、直接启用(自检不弹授权框)。
+    /// <paramref name="loginKind"/> 非空时顺带把它贡献的源登录进来并落到影视目录页。
+    /// </summary>
+    private async Task SelfCheckMountPlugin(string dir, string? loginKind)
+    {
+        try
+        {
+            var info = await _core!.PluginPickDevDir(new { path = dir });
+            var id = info.TryGetProperty("id", out var v) ? v.GetString() ?? "" : "";
+            if (id != "") await _core.PluginEnable(new { id });
+            if (loginKind is not null)
+            {
+                await _core.SourceLogin(new { kind = loginKind, base_url = "http://127.0.0.1:18096" });
+                UpdateServerChip(await _core.AccountListAccounts());
+                this.FindControl<RadioButton>("NavCatalog")!.IsChecked = true;
+                // 自检:再把详情盖层打开一次 —— 它是这一页最容易画错的部分。
+                if (Environment.GetEnvironmentVariable("LP_SELFCHECK_CATALOG_DETAIL") == "1" &&
+                    Nav.Current is CatalogPage cp) await cp.SelfCheckOpenFirst();
+                return;
+            }
+        }
+        catch (Exception e) { Console.WriteLine("[自检] 挂插件失败:" + e.Message); }
+        if (Nav.Current is PluginPage pp2) { pp2.SelectTab(1); await pp2.SelfCheckReload(); }
+    }
+
     private void SelfCheckJump(string? want)
     {
         // ★ 最大化必须单独验一遍:无边框窗口最大化时四周会溢出屏幕 8px,
@@ -115,6 +150,29 @@ public partial class MainWindow : Window
             case "history": this.FindControl<RadioButton>("NavHistory")!.IsChecked = true; break;
             case "calendar": this.FindControl<RadioButton>("NavCalendar")!.IsChecked = true; break;
             case "download": this.FindControl<RadioButton>("NavDownload")!.IsChecked = true; break;
+            case "catalog":
+                this.FindControl<RadioButton>("NavCatalog")!.IsChecked = true;
+                break;
+            /* 自检:挂一个开发目录插件并启用,再落到「已装」。
+               ★ 这一条是**不能省的**:市场那两张卡片走的是 registry 解析那条路,
+                 而「装上 → 授权 → 启用 → 引擎跑起来 → 贡献点出现」是另一条路,
+                 只截市场页的话它一次都没被走过。 */
+            case "plugindev":
+                this.FindControl<RadioButton>("NavPlugins")!.IsChecked = true;
+                if (arg.Length > 0) _ = SelfCheckMountPlugin(arg, null);
+                break;
+            /* 自检:挂插件 → 把它贡献的源登录进来 → 落到影视目录页。
+               这条走的是**最长的一条链**:JS 引擎 → 贡献点 → 源分派表 →
+               source.categories/catalog → 影视目录页渲染。 */
+            case "plugincatalog":
+                if (arg.Length > 0) _ = SelfCheckMountPlugin(arg, "plugin:com.linplayer.selfcheck/vod");
+                break;
+            case "plugins":
+                this.FindControl<RadioButton>("NavPlugins")!.IsChecked = true;
+                // 自检用:plugins:1 直接落到「已装」,plugins:2 落到「源订阅」。
+                if (arg.Length > 0 && int.TryParse(arg, out var tab) && Nav.Current is PluginPage pp)
+                    pp.SelectTab(tab);
+                break;
             case "browse":
                 this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true;
                 // 带参数(browse:空文件夹)时再点进那个子目录 —— 「空目录说空目录」要验得到
@@ -322,6 +380,7 @@ public partial class MainWindow : Window
                全亮的话:Emby 账号点「文件浏览」拿到「当前没有已登录的文件源」,
                网盘账号点「媒体库」拿到「请先登录服务器」—— 两个都是**专门用来报错的入口**。 */
             this.FindControl<RadioButton>("NavBrowse")!.IsVisible = isBrowse;
+            this.FindControl<RadioButton>("NavCatalog")!.IsVisible = isBrowse;
             foreach (var name in new[] { "NavLibrary", "NavSearch", "NavFavorites" })
                 this.FindControl<RadioButton>(name)!.IsVisible = !isBrowse;
 

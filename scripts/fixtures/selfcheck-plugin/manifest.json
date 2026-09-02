@@ -1,0 +1,15 @@
+{
+  "id": "com.linplayer.selfcheck",
+  "name": "自检示例插件",
+  "version": "1.0.0",
+  "apiVersion": 2,
+  "author": "自检",
+  "category": "source",
+  "description": "贡献一个影视目录型数据源 + 一个设置面板,用来验插件引擎全链路。",
+  "permissions": ["sources", "extensions", "storage", "ui"],
+  "httpAllowedHosts": ["$sourceServer"],
+  "contributes": {
+    "dataSources": [{ "id": "vod", "name": "自检资源站" }],
+    "panels": [{ "id": "cfg", "slot": "settings", "title": "自检设置" }]
+  }
+}

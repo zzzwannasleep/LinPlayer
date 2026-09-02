@@ -58,9 +58,18 @@ func InvalidateMarketCache() {
 	cacheMu.Unlock()
 }
 
+// officialURL 官方源地址。做成函数是为了让自检指向假上游 ——
+// 和 core/system 的 githubAPI 同一个手法(真跑一遍比 mock 掉整层可信)。
+func officialURL() string {
+	if v := strings.TrimSpace(os.Getenv("LP_PLUGIN_OFFICIAL_REGISTRY")); v != "" {
+		return v
+	}
+	return officialSourceURL
+}
+
 func officialSource() Source {
 	return Source{
-		ID: OfficialSourceID, Name: officialSourceName, URL: officialSourceURL,
+		ID: OfficialSourceID, Name: officialSourceName, URL: officialURL(),
 		Enabled: true, Builtin: true,
 	}
 }
@@ -121,7 +130,7 @@ func AddSource(name, rawURL string) ([]Source, error) {
 		return nil, err
 	}
 	id := sourceIDFor(rawURL)
-	if id == OfficialSourceID || rawURL == officialSourceURL {
+	if id == OfficialSourceID || rawURL == officialURL() {
 		return nil, fmt.Errorf("这已经是官方源了")
 	}
 	list := userSources()
@@ -209,10 +218,24 @@ func MarketList(ctx context.Context, refresh bool) (map[string]any, error) {
 		if !s.Enabled {
 			continue
 		}
-		list, err := fetchOneSource(ctx, s)
+		list, skipped, err := fetchOneSource(ctx, s)
 		if err != nil {
-			errors = append(errors, map[string]any{"source": s.Name, "error": err.Error()})
+			errors = append(errors, map[string]any{
+				"source": s.Name, "kind": "fetch", "error": err.Error()})
 			continue
+		}
+		/* ★★ **部分跳过也要报出来。** 黄金实现只在「一条都没认出来」时报错,
+		   于是「10 条里坏了 3 条」是彻底无声的 —— 用户看到 7 张卡片,
+		   完全不知道还有 3 个插件在这个源里但装不了。
+		   这是本文件顶上那条教训的同一个坑,只是换了个规模,所以这里补上。 */
+		if skipped > 0 {
+			/* ★ kind 分开:**「这个源挂了」和「这个源里有几条坏的」是两回事**,
+			   合成一句的话界面只能都写「拉取失败」,而后者其实拉成功了。
+			   用户看到「拉取失败」却又看到卡片,只会更糊涂。 */
+			errors = append(errors, map[string]any{
+				"source": s.Name, "kind": "skipped",
+				"error":  fmt.Sprintf("有 %d 条认不出来,已跳过(多半是旧版 registry 条目)", skipped),
+			})
 		}
 		perSource = append(perSource, list)
 	}
@@ -227,34 +250,35 @@ func MarketList(ctx context.Context, refresh bool) (map[string]any, error) {
 	}, nil
 }
 
-func fetchOneSource(ctx context.Context, src Source) ([]RegistryPlugin, error) {
+// fetchOneSource 拉一个源。第二个返回值是**被跳过的条目数**。
+func fetchOneSource(ctx context.Context, src Source) ([]RegistryPlugin, int, error) {
 	if err := CheckFetchURL(src.URL); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, src.URL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("地址非法: %w", err)
+		return nil, 0, fmt.Errorf("地址非法: %w", err)
 	}
 	resp, err := httpx.Client().Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("连不上: %w", err)
+		return nil, 0, fmt.Errorf("连不上: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, 0, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("读取失败: %w", err)
+		return nil, 0, fmt.Errorf("读取失败: %w", err)
 	}
 	parsed, err := ParseRegistry(string(raw))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	// ★ 一条都没认出来 ≠ 这个源是空的。不说清楚的话前端只会显示「没有找到插件」,
 	//   用户完全看不出真实原因是 schema 对不上(2026-07-23 官方源正是这个状态)。
 	if len(parsed.Plugins) == 0 && parsed.Skipped > 0 {
-		return nil, fmt.Errorf(
+		return nil, 0, fmt.Errorf(
 			"这个源里的 %d 条插件全都认不出来 —— 多半是旧版(v1)registry,需要源那边升级到 v2",
 			parsed.Skipped)
 	}
@@ -265,7 +289,7 @@ func fetchOneSource(ctx context.Context, src Source) ([]RegistryPlugin, error) {
 		list[i].SourceName = src.Name
 		list[i].FromBuiltin = src.Builtin
 	}
-	return list, nil
+	return list, parsed.Skipped, nil
 }
 
 // MarketInstall 从市场安装(或升级)一个插件。

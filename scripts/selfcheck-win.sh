@@ -5,7 +5,17 @@
 #   透明窗口下渲染抛错=一片黑不报错 / 卡片没加 .ready 类=封面隐身 /
 #   命令全绿但白名单空=一张封面都没有 —— **全都只有真渲染才现形**。
 #
-#   bash scripts/selfcheck-win.sh [截图名]
+#   bash scripts/selfcheck-win.sh [截图名] [落到哪一页] [起播用的视频]
+#
+# 几个跑得最多的:
+#   bash scripts/selfcheck-win.sh plugins       plugins        插件市场(市场 tab)
+#   bash scripts/selfcheck-win.sh plugins-inst  plugins:1      已装 tab
+#   bash scripts/selfcheck-win.sh plugin-dev    "plugindev:$PWD/scripts/fixtures/selfcheck-plugin"
+#                                                              装一个真插件跑起来
+#   LP_CATDETAIL=1 bash scripts/selfcheck-win.sh catalog #       "plugincatalog:$PWD/scripts/fixtures/selfcheck-plugin"
+#                                                              影视目录 + 详情盖层
+#     ↑ 这条走的是**最长的一条链**:JS 引擎 → 贡献点 → 源分派表 →
+#       source.categories/catalog → 影视目录页渲染。只截市场页的话它一次都没被走过。
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHOT="${1:-selfcheck}"
@@ -127,7 +137,11 @@ export LP_BANGUMI_API="http://127.0.0.1:$PORT"
 # 图标库的聚合源(假服务器兼职图床)。
 # ★ 真实构建里这个是 -ldflags 注入的,源码里没有 —— 自检走环境变量那条覆盖。
 export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
-LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+# 插件市场的官方源(假服务器兼职插件仓库)。同上:真实构建里是硬编的公开地址。
+# ★ 不指过去的话,市场页在没网的机器上只验得到「拉取失败」那一半 ——
+#   而**有插件时长什么样**(第三方徽章、跳过数提示、版本取最大)才是会出 bug 的那半。
+export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
+LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
