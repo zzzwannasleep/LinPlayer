@@ -196,6 +196,12 @@ public partial class MainWindow : Window
         SelfCheckHero();
         SelfCheckNavHover();
         SelfCheckGlyphs();
+        /* 自检:把侧栏收起来。
+           ★ 折叠态是这一版新加的,而它<b>收着的时候才是新形态</b> ——
+             不主动收一次,截图永远拍的是展开态,图标有没有对齐、
+             服务器卡会不会被裁掉半个字,全没人看过。 */
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_COLLAPSE") == "1")
+            _ = Task.Delay(1200).ContinueWith(_ => Dispatcher.UIThread.Post(ToggleSidebar));
         /* 自检:往 UI 线程上扔一个异常,验兜网。
            ★ 这个钩子是**必须留着**的:兜网本身没有任何外在表现 ——
              它没生效的唯一症状是「某天某个页面把进程打死了」,
