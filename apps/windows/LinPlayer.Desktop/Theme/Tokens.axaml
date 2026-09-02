@@ -56,6 +56,22 @@
   <SolidColorBrush x:Key="Warn" Color="{DynamicResource WarnColor}" />
   <SolidColorBrush x:Key="Danger" Color="{DynamicResource DangerColor}" />
 
+  <!--
+    滑块(进度条 / 音量)的配色。
+    ★★ 覆盖的是 **Fluent 主题自己的资源键**,不是去改模板里那几个部件的名字 ——
+       部件名在 Avalonia 大版本之间会变,而且**名字写错不报错,只是静默不生效**。
+       资源键这一层稳得多。
+    ★ 已播那段用强调色:默认是一条灰线,进度条上「看到哪儿了」全靠它,
+      灰得和未播段几乎一样就等于没有进度条。
+  -->
+  <SolidColorBrush x:Key="SliderTrackValueFill" Color="{DynamicResource AccentColor}" />
+  <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="{DynamicResource AccentColor}" />
+  <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="{DynamicResource AccentColor}" />
+  <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="{DynamicResource Ink3Color}" />
+  <SolidColorBrush x:Key="SliderThumbBackground" Color="{DynamicResource AccentColor}" />
+  <SolidColorBrush x:Key="SliderThumbBackgroundPointerOver" Color="{DynamicResource AccentColor}" />
+  <SolidColorBrush x:Key="SliderThumbBackgroundPressed" Color="{DynamicResource AccentColor}" />
+
   <!-- 布局常量(UI_PC §3.1)。标题栏 36 / 侧栏 212(用户 2026-07-16 定,草稿原为 186)/
        折叠 72 / 正文封顶 1560 / 水槽 18 / 窗口最小 1024×640 -->
   <x:Double x:Key="TitleBarHeight">36</x:Double>

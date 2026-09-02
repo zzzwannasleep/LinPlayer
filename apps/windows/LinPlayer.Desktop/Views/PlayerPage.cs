@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
@@ -81,12 +82,22 @@ public sealed class PlayerPage : UserControl
     private readonly Slider _bar;
     private readonly Slider _vol;
     private readonly TextBlock _time = new() { Foreground = Brushes.White, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+    /// <summary>总时长,画在进度条右端。★ 和已播时间**分列进度条两侧** ——
+    /// 挤在一起写成 <c>12:30 / 1:45:00</c> 时,眼睛得先找到那个斜杠才知道读到哪儿了。</summary>
+    private readonly TextBlock _total = new() { Foreground = Brushes.White, FontSize = 12.5, Opacity = 0.75, VerticalAlignment = VerticalAlignment.Center };
+    /// <summary>音轨 / 字幕 / 画质那一盘。★ 平铺在控制条上的话底下一整行都是下拉框,
+    /// 那是设置面板不是 OSD;而且它们**看片时基本不动**,不该长期占着画面。</summary>
+    private readonly Border _settings;
+    /// <summary>静音按钮。图标跟着 <c>_muted</c> 走,见 <see cref="SyncMute"/>。</summary>
+    private readonly Button _mute;
     private readonly TextBlock _msg = new() { Foreground = Brushes.White, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _pause;
     private readonly Border _top, _bottom;
-    private readonly ComboBox _audio = new() { Width = 170, MinHeight = 30 };
-    private readonly ComboBox _subs = new() { Width = 170, MinHeight = 30 };
-    private readonly ComboBox _quality = new() { Width = 210, MinHeight = 30 };
+    /* ★ 三个下拉**同宽**。抽屉里竖排三行,宽度不一样右边缘就是锯齿状 ——
+       这种参差在一块半透明面板上特别扎眼,而它只是三个数没对齐。 */
+    private readonly ComboBox _audio = new() { Width = 210, MinHeight = 32 };
+    private readonly ComboBox _subs = new() { Width = 210, MinHeight = 32 };
+    private readonly ComboBox _quality = new() { Width = 210, MinHeight = 32 };
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
     private double _duration;
@@ -137,12 +148,20 @@ public sealed class PlayerPage : UserControl
 
         _bar = new Slider { Minimum = 0, Maximum = 1, Value = 0, IsEnabled = false };
         _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 110 };
-        _pause = new Button { Classes = { "ghost" }, Content = "⏸" };
+        /* ★ OSD 上的按钮统一走 <c>Button.osd</c>。
+           混着用的表现很具体:暂停和全屏带一圈边框、旁边四个不带,
+           一排按钮看着像是两批人做的。 */
+        _pause = new Button { Classes = { "osd" }, Content = "⏸" };
+        ToolTip.SetTip(_pause, "播放 / 暂停(空格)");
 
-        var back = new Button { Classes = { "ghost" }, Content = "← 返回" };
+        // 返回是**唯一**带字的按钮:它离开这一页,和旁边那排「就地调整」不是一类动作。
+        var back = new Button
+        {
+            Classes = { "ghost" }, Content = "← 返回", Foreground = Brushes.White,
+        };
         back.Click += (_, _) => Leave();
 
-        var full = new Button { Classes = { "ghost" }, Content = "⛶" };
+        var full = Glyph("⛶", "全屏(F)");
         full.Click += (_, _) => ToggleFullscreen();
 
         _pause.Click += (_, _) => _ = TogglePause();
@@ -166,38 +185,93 @@ public sealed class PlayerPage : UserControl
             await SeekTo(_bar.Value);
         }, RoutingStrategies.Tunnel);
 
-        _bottom = new Border
+        var back10 = Glyph("⟲", "后退 10 秒(←)");
+        back10.Click += (_, _) => _ = SeekBy(-10);
+        var fwd10 = Glyph("⟳", "前进 10 秒(→)");
+        fwd10.Click += (_, _) => _ = SeekBy(10);
+
+        /* ★★ 静音图标**不能用彩色 emoji**(🔊):Windows 拿 Segoe UI Emoji 渲染,
+           出来是一枚彩色图标,和旁边一排线条符号完全不是一套东西。
+           ★ 而且它得**跟着状态变** —— 图标不变的话按下去除了没声音之外
+             没有任何反馈,用户会以为按钮坏了。 */
+        _mute = Glyph("🕪", "静音(M)");
+        _mute.Click += (_, _) =>
         {
-            Background = new SolidColorBrush(Color.Parse("#cc000000")),
-            Padding = new Thickness(16, 10),
+            _muted = !_muted;
+            SyncMute();
+            _ = Send("player.setMute", new { mute = _muted });
+        };
+
+        /* 音轨 / 字幕 / 画质收进一个抽屉。
+           ★★ 它们平铺在控制条上时,底下一整行都是下拉框和标签 —— 那是**设置面板**,
+             不是 OSD。看片时这三样基本不动,不该长期压着画面。
+           ★ 抽屉贴右下角弹,不是居中弹窗:它是就地调整,不是一次决策,
+             居中弹窗会把整块画面遮掉。 */
+        _settings = new Border
+        {
+            Background = new SolidColorBrush(Color.Parse("#f0161b24")),
+            BorderBrush = new SolidColorBrush(Color.Parse("#323b4a")),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(16),
+            Margin = new Thickness(0, 0, 20, 108),
+            IsVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
             Child = new StackPanel
             {
-                Spacing = 6,
+                Spacing = 10,
                 Children =
                 {
-                    _bar,
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal, Spacing = 10,
-                        Children =
-                        {
-                            _pause, _time,
-                            Label("音量"), _vol,
-                            Label("音轨"), _audio,
-                            Label("字幕"), _subs,
-                            Label("画质"), _quality,
-                            full,
-                        },
-                    },
+                    Row("音轨", _audio), Row("字幕", _subs), Row("画质", _quality),
                 },
             },
+        };
+        var gear = Glyph("⚙", "音轨 / 字幕 / 画质(U)");
+        gear.Click += (_, _) => _settings.IsVisible = !_settings.IsVisible;
+
+        var progress = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        _time.Margin = new Thickness(0, 0, 12, 0);
+        _total.Margin = new Thickness(12, 0, 0, 0);
+        Grid.SetColumn(_time, 0);
+        Grid.SetColumn(_bar, 1);
+        Grid.SetColumn(_total, 2);
+        progress.Children.Add(_time);
+        progress.Children.Add(_bar);
+        progress.Children.Add(_total);
+
+        var left = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 4,
+            Children = { _pause, back10, fwd10, _mute, _vol },
+        };
+        var right = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 4,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { gear, full },
+        };
+        var controls = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        Grid.SetColumn(left, 0);
+        Grid.SetColumn(right, 2);
+        controls.Children.Add(left);
+        controls.Children.Add(right);
+
+        /* ★★ 上下两条都用**渐变蒙版**,不是一块实心黑条。
+           实心条是一条硬边压在画面上,边缘那一行像素会突兀地断掉;
+           渐变从画面里长出来,而字仍然压得住 —— 这是所有播放器都这么做的原因。 */
+        _bottom = new Border
+        {
+            Background = Scrim(false),
+            Padding = new Thickness(20, 34, 20, 14),
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Child = new StackPanel { Spacing = 4, Children = { progress, controls } },
         };
 
         _top = new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#99000000")),
-            Padding = new Thickness(14, 10),
+            Background = Scrim(true),
+            Padding = new Thickness(16, 12, 16, 30),
             VerticalAlignment = VerticalAlignment.Top,
             Child = new StackPanel
             {
@@ -207,7 +281,9 @@ public sealed class PlayerPage : UserControl
                     back,
                     new TextBlock
                     {
-                        Text = title, Foreground = Brushes.White, FontSize = 15,
+                        Text = title, Foreground = Brushes.White, FontSize = 16,
+                        FontWeight = FontWeight.SemiBold,
+                        TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 900,
                         VerticalAlignment = VerticalAlignment.Center,
                     },
                     _msg,
@@ -218,7 +294,7 @@ public sealed class PlayerPage : UserControl
         Content = new Panel
         {
             Background = Brushes.Black,
-            Children = { _view, _top, _bottom },
+            Children = { _view, _top, _bottom, _settings },
         };
 
         // ★ 键盘要能收到,控件得先能拿焦点 —— 不设 Focusable 按空格毫无反应,
@@ -235,7 +311,11 @@ public sealed class PlayerPage : UserControl
         _poll.Start();
         DetachedFromVisualTree += (_, _) => Stop();
 
-        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "1") _ = Drill();
+        // ★ 判「非空」而不是 == "1":LP_DRILL=2(拉开抽屉)也得先把 Drill 跑起来,
+        //   只认 "1" 的话 =2 那次连 OSD 都不会钉住,截出来是一张干净画面 ——
+        //   而它看着**很像**「抽屉没画出来」。这个坑当场踩了一次。
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL")))
+            _ = Drill();
         /* ★ 自检台驱动画质档位。选的是**真的下拉项**,走 SelectionChanged 那条真路 ——
            绕开 UI 直接调命令的自检只能证明核心层活着,证明不了这个面板接对了。 */
         var lvl = Environment.GetEnvironmentVariable("LP_SELFCHECK_SHADER");
@@ -256,12 +336,70 @@ public sealed class PlayerPage : UserControl
         // 钉住 OSD:收起来之后截图看不到控制条,分不清「自动收了」和「压根没画」
         _lastMove = DateTime.UtcNow.AddYears(1);
         ShowOsd(true);
+        /* ★ LP_DRILL=2 顺带把音轨/字幕/画质那个抽屉拉开。
+           收起来的东西**截图里等于不存在** —— 抽屉里三行控件排没排齐、
+           弹出位置有没有盖住控制条,不拉开一次就永远没人看过。 */
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "2")
+            Dispatcher.UIThread.Post(() => _settings.IsVisible = true);
     }
 
     private static TextBlock Label(string t) => new()
     {
         Text = t, Foreground = Brushes.White, FontSize = 12,
         VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    /// <summary>静音图标跟状态走。★ 轮询里也调一次 —— 键盘 M 和按钮是两条路。</summary>
+    private void SyncMute() => _mute.Content = _muted ? "🕨" : "🕪";
+
+    /// <summary>抽屉里的一行:标签 + 控件。标签宽度对齐,三行才排得整齐。</summary>
+    private static Control Row(string label, Control input) => new StackPanel
+    {
+        Orientation = Orientation.Horizontal, Spacing = 10,
+        Children =
+        {
+            new TextBlock
+            {
+                Text = label, Width = 40, Foreground = Brushes.White, FontSize = 12.5,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+            input,
+        },
+    };
+
+    /// <summary>
+    /// OSD 上的图标按钮。
+    ///
+    /// <para>★ 每个都要有 <c>ToolTip</c> 并把快捷键写进去 —— 一排符号按钮
+    /// 光看图形猜不出是什么,而快捷键写在别处等于没人知道。</para>
+    /// </summary>
+    private static Button Glyph(string glyph, string tip)
+    {
+        var b = new Button
+        {
+            Classes = { "osd" }, Content = glyph,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTip.SetTip(b, tip);
+        return b;
+    }
+
+    /// <summary>
+    /// OSD 的渐变蒙版。
+    ///
+    /// <para>★★ 不用实心黑条:实心是一条硬边压在画面上,边缘那一行像素突兀地断掉。
+    /// 渐变从画面里长出来,字仍然压得住。</para>
+    /// </summary>
+    private static IBrush Scrim(bool fromTop) => new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, fromTop ? 0 : 1, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(0, fromTop ? 1 : 0, RelativeUnit.Relative),
+        GradientStops =
+        {
+            new GradientStop(Color.Parse("#d9000000"), 0),
+            new GradientStop(Color.Parse("#73000000"), 0.55),
+            new GradientStop(Color.Parse("#00000000"), 1),
+        },
     };
 
     private async Task Start(string itemId, double resumeSecs)
@@ -306,8 +444,17 @@ public sealed class PlayerPage : UserControl
             case Key.Right: _ = SeekBy(10); break;
             case Key.Up: SetVolume(_vol.Value + 5); break;
             case Key.Down: SetVolume(_vol.Value - 5); break;
-            case Key.M: _muted = !_muted; _ = Send("player.setMute", new { mute = _muted }); break;
-            case Key.U: _quality.IsDropDownOpen = !_quality.IsDropDownOpen; break;
+            case Key.M:
+                _muted = !_muted;
+                SyncMute();
+                _ = Send("player.setMute", new { mute = _muted });
+                break;
+            // U:开抽屉再展开画质。★ 抽屉关着时直接展开下拉框,下拉列表会飘在
+            //    一块看不见的面板上 —— 得先把面板拿出来。
+            case Key.U:
+                _settings.IsVisible = true;
+                _quality.IsDropDownOpen = !_quality.IsDropDownOpen;
+                break;
             case Key.F or Key.Enter: ToggleFullscreen(); break;
             // ★ 全屏时 Esc 只退全屏,不退出播放 —— 看片时误按一下就把片关了很恼人
             case Key.Escape when _full: ToggleFullscreen(); break;
@@ -352,6 +499,9 @@ public sealed class PlayerPage : UserControl
     {
         if (_top.IsVisible == on) return;
         _top.IsVisible = _bottom.IsVisible = on;
+        // ★ 抽屉要跟着收。留着的话 OSD 收了之后画面上孤零零飘着一块面板,
+        //   而且它下面那条控制条已经没了,看着像画错了。
+        if (!on) _settings.IsVisible = false;
         Cursor = new Cursor(on ? StandardCursorType.Arrow : StandardCursorType.None);
     }
 
@@ -518,7 +668,9 @@ public sealed class PlayerPage : UserControl
         _bar.IsEnabled = dur > 0;
         _bar.Maximum = dur > 0 ? dur : 1;
         _bar.Value = Math.Clamp(pos, 0, _bar.Maximum);
-        _time.Text = dur > 0 ? $"{Clock(pos)} / {Clock(dur)}" : "加载中…";
+        SyncMute();
+        _time.Text = dur > 0 ? Clock(pos) : "加载中…";
+        _total.Text = dur > 0 ? Clock(dur) : "";
         _pause.Content = paused ? "▶" : "⏸";
     }
 
@@ -550,6 +702,11 @@ public sealed class PlayerPage : UserControl
             // 选中**当前在放的**那条,不是第一条 —— 显示和实际不一致比没有更糟
             _audio.SelectedItem = audio.FirstOrDefault(a => a.Id == curAudio) ?? audio.FirstOrDefault();
             _subs.SelectedItem = subs.FirstOrDefault(x => x.Id == curSub) ?? subs[0];
+            /* ★ 一条音轨都没有时(纯画面的片子真的存在)下拉框是**空白**的,
+               看着像没加载出来。禁用 + 写明「无音轨」才说得清是「没有」而不是「没拉到」。
+               字幕不用这一手 —— 它永远至少有一项「关闭字幕」。 */
+            _audio.IsEnabled = audio.Count > 0;
+            _audio.PlaceholderText = "无音轨";
         });
     }
 

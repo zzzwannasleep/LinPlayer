@@ -241,6 +241,35 @@
     </Style.Animations>
   </Style>
 
+  <!--
+    播放页 OSD 的图标按钮。
+    ★ 40×36 的方形热区:符号本身只有十来像素,靠字形大小当热区的话
+      鼠标要瞄准才点得中 —— 而 OSD 三秒就收,瞄不中就得再晃一次鼠标。
+  -->
+  <Style Selector="Button.osd">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.osd /template/ ContentPresenter">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.osd:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#33ffffff" />
+  </Style>
+
   <!-- 季/筛选之类的小胶囊 -->
   <Style Selector="Button.chip">
     <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
