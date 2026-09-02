@@ -365,9 +365,40 @@ public sealed class PlayerPage : UserControl
     /// 它跟当前这一片的分辨率和窗口大小绑定,记住上一片的档位只会带来
     /// 「上次好好的这次不生效」。</para>
     /// </summary>
+    /// <summary>
+    /// 自检:<c>LP_SHADER=all</c> —— <b>把全部档位挨个挂一遍</b>,报出哪些编译不过。
+    ///
+    /// <para>★★ 存在的理由:着色器方言跟渲染后端走。换了后端(这里是
+    /// libplacebo → gl_video + ANGLE),<b>每一档都得重新验</b> ——
+    /// 而这类失败编译绿、单测绿、返回码也绿,只有真渲染才现形。
+    /// 一档一档手点要跑 28 轮,没人会跑;一轮跑完才有人跑。</para>
+    /// </summary>
+    private async Task SelfCheckSweepQuality()
+    {
+        await Task.Delay(7000);
+        if (_quality.ItemsSource is not IEnumerable<ShaderLevel> items) return;
+        Console.WriteLine("[shader-sweep] 开始");
+        foreach (var lv in items)
+        {
+            if (lv.Id == "off") continue;
+            try
+            {
+                var r = await _core.PlayerSetShaderLevel(new { level = lv.Id });
+                var reverted = r.TryGetProperty("reverted", out var rv) && rv.ValueKind == JsonValueKind.True;
+                Console.WriteLine(reverted
+                    ? $"[shader-sweep] BAD  {lv.Id}  {Str(r, "note")}"
+                    : $"[shader-sweep] ok   {lv.Id}");
+            }
+            catch (Exception e) { Console.WriteLine($"[shader-sweep] ERR  {lv.Id}  {e.Message}"); }
+            await _core.PlayerSetShaderLevel(new { level = "off" }); // 每档之间清干净
+        }
+        Console.WriteLine("[shader-sweep] 结束");
+    }
+
     /// <summary>自检:等起播和档位表就位之后选一档,并把 OSD 钉住不收。</summary>
     private async Task SelfCheckPickQuality(string id)
     {
+        if (id == "all") { await SelfCheckSweepQuality(); return; }
         await Task.Delay(7000);
         if (_quality.ItemsSource is IEnumerable<ShaderLevel> items)
         {

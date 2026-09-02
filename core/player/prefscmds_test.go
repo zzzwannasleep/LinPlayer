@@ -187,12 +187,19 @@ func TestShaderLevels(t *testing.T) {
 	}
 	groups := map[string]bool{}
 	for _, l := range levels {
+		if l.ID == "off" {
+			continue // off 没有家族(Group 是空串)
+		}
 		groups[l.Group] = true
 	}
-	// ★ Sharpen 那一族是「窗口也生效」的那批,用户点名最有用 —— 少了等于日常首选没了
-	for _, g := range []string{"Anime4K", "FSR", "NVIDIA", "Sharpen"} {
-		if !groups[g] {
-			t.Errorf("缺了 %s 这一族", g)
-		}
+	/* ★ 2026-09-02 砍到只剩 Anime4K 一族(用户拍板:「有一个 Anime4K 足以了超分」)。
+	   直接起因是换渲染后端之后 AMD_CAS_luma_RT.glsl 编译不过 —— 少一族就少一族
+	   要在每次换后端时真机重验的东西。 */
+	if !groups["Anime4K"] {
+		t.Error("缺了 Anime4K 这一族 —— 那是现在唯一的一族,没了画质档位就是空的")
+	}
+	if len(groups) != 1 {
+		t.Errorf("档位家族应当只剩 Anime4K,实得 %v —— "+
+			"新加一族之前先在真机上跑一遍 LP_SHADER=all,别再让编译不过的档位混进来", groups)
 	}
 }

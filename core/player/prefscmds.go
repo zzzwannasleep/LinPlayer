@@ -49,6 +49,13 @@ func registerPrefsCommands(version string) {
 		/* 强度是**档位设计的一部分**,每次挂载都得重设:glsl-shader-opts 是全局的,
 		   不设就吃 shader 自带默认(CAS STR=0.5,只开一半)—— 用户实测「看不太出来」
 		   正是这个。切到 off 时 opts 为空串,顺带把上一档的参数清掉。 */
+		/* ★ 已经知道会坏的档位,**连试都不试** —— 不试就不会有那一帧纯色闪过去。
+		   mpv 每个着色器程序一个进程里只报一次错(实测),所以「等错误冒出来」
+		   这一招只挡得住第一档,后面共用同一个坏文件的全会漏过去。 */
+		if r := knownBadReason(level, list); r != "" {
+			return revertedResult(level, r), nil
+		}
+
 		clearShaderErr() // 先清,免得读到上一次的
 		setProp("glsl-shader-opts", shaders.Opts(level))
 		setProp("glsl-shaders", strings.Join(list, string(filepath.ListSeparator)))
@@ -71,14 +78,11 @@ func registerPrefsCommands(version string) {
 		if e := waitShaderCompileError(); e != "" {
 			setProp("glsl-shader-opts", "")
 			setProp("glsl-shaders", "")
-			out["count"] = 0
-			out["will_run"] = false
-			out["reverted"] = true
-			out["note"] = "这档在你这台机器的渲染后端上编译不过,已自动退回「关闭」" +
-				"(画面不会被弄坏)。mpv 的原话:" + firstLine(e)
+			markShaderBad(level, list, e)
 			bus.Logf("error", "着色器档位 %s 编译失败,已退回关闭:%s", level, e)
-			return out, nil
+			return revertedResult(level, e), nil
 		}
+		markShaderOK(level, list)
 		vw, vh := propF("video-params/w"), propF("video-params/h")
 		ow, oh := propF("osd-dimensions/w"), propF("osd-dimensions/h")
 		if run, ok := shaders.WillRun(level, vw, vh, ow, oh); ok {

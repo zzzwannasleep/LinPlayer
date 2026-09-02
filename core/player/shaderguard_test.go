@@ -117,3 +117,65 @@ func Test着色器错误_要升级到真正的诊断行(t *testing.T) {
 		t.Fatalf("升级只该发生一次,实得 %q", got)
 	}
 }
+
+// 坏文件记忆:能唯一定位时才归罪,定位不到只记这一档。
+//
+// ★★ 这条测的是**误判防线**。归罪太宽的话:`ak_sharp` 是「去噪 + 锐化」两个 pass,
+// 坏的只是锐化那个;把去噪也拉黑,`ak_denoise_h` 这个好档就被冤枉了。
+// 漏报只是少挡一次,误判是**无故关掉用户能用的功能**,后者更贵。
+func Test坏文件归罪_只有能唯一定位时才拉黑(t *testing.T) {
+	resetShaderMemory()
+	t.Cleanup(resetShaderMemory)
+
+	denoise, sharp := "Denoise.glsl", "BadSharp.glsl"
+
+	// 先有一档只挂去噪,成功 —— 去噪从此是「证明过的」
+	markShaderOK("ak_denoise_h", []string{denoise})
+
+	// 再来一档挂「去噪 + 锐化」,失败。未证明过的只剩锐化 → 唯一定位
+	markShaderBad("ak_sharp", []string{denoise, sharp}, "ERROR: 'linearize' …")
+
+	if r := knownBadReason("ak_denoise_h", []string{denoise}); r != "" {
+		t.Fatalf("**误判**:去噪是好文件却被拉黑了(%q)—— 用户能用的档位被无故关掉", r)
+	}
+	// 另一个挂同一个坏文件的档位:不必等 mpv 再报一次,直接知道它坏
+	if r := knownBadReason("fsr_sharp_m", []string{sharp}); r == "" {
+		t.Fatal("共用同一个坏文件的档位没被挡住 —— mpv 每个程序只报一次错," +
+			"漏了它用户就会拿到一屏纯色还被告知「已启用」")
+	}
+	// 没关系的档位不受影响
+	if r := knownBadReason("ak_up_m", []string{"CNN.glsl"}); r != "" {
+		t.Fatalf("不相干的档位被牵连了:%q", r)
+	}
+}
+
+// 定位不到时**只记这一档**,不许牵连它挂的任何文件。
+func Test坏文件归罪_定位不到就不牵连(t *testing.T) {
+	resetShaderMemory()
+	t.Cleanup(resetShaderMemory)
+
+	a, b := "A.glsl", "B.glsl"
+	// 两个文件都没被证明过 → 说不清是谁坏的
+	markShaderBad("某档", []string{a, b}, "ERROR: …")
+
+	if r := knownBadReason("某档", []string{a, b}); r == "" {
+		t.Fatal("失败过的那一档本身要记住,再选一次不该又闪一帧纯色")
+	}
+	for _, f := range []string{a, b} {
+		if r := knownBadReason("别的档", []string{f}); r != "" {
+			t.Fatalf("定位不到却把 %s 拉黑了 —— 会冤枉好档位", f)
+		}
+	}
+}
+
+// 成功之后要把「这一档坏」的记录消掉(换了片子 / 换了窗口尺寸,情况可能变了)。
+func Test坏档位_成功之后要解除(t *testing.T) {
+	resetShaderMemory()
+	t.Cleanup(resetShaderMemory)
+
+	markShaderBad("x", []string{"P.glsl", "Q.glsl"}, "ERROR: …") // 两个文件,定位不到
+	markShaderOK("x", []string{"P.glsl", "Q.glsl"})
+	if r := knownBadReason("x", []string{"P.glsl", "Q.glsl"}); r != "" {
+		t.Fatalf("成功之后还记着坏:%q", r)
+	}
+}

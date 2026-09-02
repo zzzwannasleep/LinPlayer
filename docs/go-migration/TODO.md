@@ -1324,35 +1324,48 @@ Ani-RSS 管理台(同 C24b)。
   - 自检台加了 `LP_SHADER=<档位>`:**选真的下拉项**走 SelectionChanged,
     不是直接调命令 —— 绕开 UI 的自检只能证明核心层活着
 
-- [~] **W17** 🔴 **28 个画质档位里有 5 个在新渲染后端上编译不过** —— 运行时闸已挡住,根治未做
+- [x] **W17** ✅ **画质档位:砍到只剩 Anime4K 一族,坏的那族删掉**(2026-09-02)
 
-  接完 W15 的面板,真机一开 `ak_sharp` **整屏变纯蓝**。而且:
-  `mpv_set_option_string` 返回 0、`count=2`、`will_run=true` —— **没有任何返回码或属性
-  会说这件事**。唯一的出口是 mpv 的 error 级日志:
+  接完 W15 的面板,真机一开 `ak_sharp` **整屏变纯蓝**。而且
+  `mpv_set_option_string` 返回 0、`count=2`、`will_run=true` —— **没有任何返回码
+  或属性会说这件事**,唯一的出口是 mpv 的 error 级日志:
 
   ```
   ERROR: 0:58: 'linearize' : no matching overloaded function found
   ```
 
-  - **根因:换渲染后端 = 换着色器方言。** 黄金实现(Rust)用 `vo=gpu-next`,那是
+  - **根因:换渲染后端 = 换着色器方言。** 黄金实现(Rust)用 `vo=gpu-next` =
     **libplacebo**;新栈是 `vo=libmpv` + OpenGL render API,走 mpv 旧的 `gl_video`,
-    而 Avalonia 在 Windows 上的 GL 后端是 **ANGLE**,着色器按 `#version 300 es` 编译。
+    而 Avalonia 在 Windows 上的 GL 后端是 **ANGLE**,按 `#version 300 es` 编译。
     `linearize()` 是 libplacebo 提供的,这条路上没有
-  - **受影响的 5 个档位**(调 `linearize` 的两个文件:`AMD_CAS_luma_RT.glsl` /
-    `AMD_BCAS_RT.glsl`):`ak_sharp`(默认推荐档!)· `fsr_sharp_l` · `fsr_sharp_m` ·
-    `fsr_sharp_h` · `sh_bcas`。其余 23 档实测正常(`ak_denoise_l` 已真机验过)
-  - [x] **W17.1** ✅ 运行时闸:编译失败**自动退回关闭** + 把 mpv 原话交给 UI +
-    下拉框跟着回位(`core/player/shaderguard.go`)。三条判据都在真机截图上验过:
-    画面完好 / 下拉回到「关闭」/ 顶栏显示 `ERROR: … 'linearize' …`
-  - [x] **W17.2** ✅ 误判防线:分类器只认着色器编译/链接失败。
-    **先红已验** —— 放宽成「含 failed 就算」之后,`Loading failed.`、CUDA、
-    `auto_profiles` 三条正常日志全被误判(那会无故关掉用户好好的档位)
-  - [ ] **W17.3** 根治,三条路选一条(**未决**):
-    ① 改写那两个 `.glsl`,把 `linearize()` 换成自己实现的转换(风险:改动黄金实现的画质行为)
-    ② 看 libmpv 能不能走 libplacebo(要确认 `vo_libmpv` 支不支持,现在是推断不是实测)
-    ③ 就地承认:把这 5 档在 Windows 上标灰并说明原因(最省事,但默认推荐档没了)
-  - ⚠️ **这条要在 Linux 上单独验一遍**:那边 GL 后端不是 ANGLE,结论可能不同 ——
-    「拿一台的结论替另一台签字」是本仓的老坑
+  - **坏的只有一个文件**:`AMD_CAS_luma_RT.glsl`。用它的 4 个档位全坏
+    (`ak_sharp` / `fsr_sharp_l` / `fsr_sharp_m` / `fsr_sharp_h`)。
+    ⚠️ 我一开始按文件名推断说「5 个」,把 `sh_bcas`(`AMD_BCAS_RT.glsl`)也算进去了 ——
+    **实测那个是好的**。推断不算数
+  - [x] **W17.1** ✅ 运行时闸(`core/player/shaderguard.go`):订阅 mpv error 级日志,
+    编译失败**自动退回关闭** + 交出 mpv 原话 + 下拉框回位。三条判据真机截图验过
+  - [x] **W17.2** ✅ 误判防线:分类器只认着色器编译/链接失败。**先红已验** ——
+    放宽成「含 failed 就算」之后,`Loading failed.`、CUDA 探测、`auto_profiles`
+    三条正常日志全被误判(那会无故关掉用户好好的档位)
+  - [x] **W17.3** ✅ **档位表砍到一族**(用户 2026-09-02 拍板:「有一个 Anime4K
+    足以了超分,其他的不需要」)。四族 28 档 → 一族 8 档,删掉 FSR / NVIDIA /
+    锐化专精三族和 8 个 `.glsl`。
+    `ak_sharp` 不是删掉而是**换 shader**(`AMD_CAS_luma_RT` → `Adaptive_sharpen_lite`,
+    同轮扫描验过能编译;STR 量纲 0~1 → 0~2,所以 0.85 → 1.30):
+    它是唯一「窗口模式也生效」的锐化+去噪档,而用户的基线是「清晰最重要的是锐化」
+  - [x] **W17.4** ✅ 坏文件记忆 —— **修掉扫描工具的假绿**。
+    实测:mpv **每个着色器程序一个进程里只报一次错**,所以全表扫描里
+    `ak_sharp` 报 BAD 之后,同样挂那个文件的 `fsr_sharp_*` 全报 ok
+    (单独起进程跑 `fsr_sharp_m`,照样炸 10 行)。
+    现在一档失败会记住坏文件,后面共用它的档位**连试都不试**直接退回。
+    ⚠️ 归罪**必须能唯一定位才算** —— `ak_sharp` 是去噪+锐化两个 pass,
+    把去噪也拉黑就冤枉了 `ak_denoise_h`。**误判比漏报贵**,有测试钉住
+  - [x] **W17.5** ✅ 护栏:`Test档位与文件一一对应`(引用已删文件 → 红,验过)、
+    `Test档位只剩一族`
+  - 判据:新表真机全扫 **8/8 ok**,mpv 日志里编译错误 **0 条**
+  - ⚠️ **Linux 要单独验**:那边 GL 后端不是 ANGLE,结论可能不同 ——
+    「拿一台的结论替另一台签字」是本仓老坑。工具现成:
+    `LP_SHADER=all bash scripts/selfcheck-win.sh sweep "player:mv-1" <片子>`
 
 - [ ] **W16** 🔴 **接线报告:107 条已注册命令,Windows 宿主一次都没调过**
 

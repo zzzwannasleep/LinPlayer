@@ -132,3 +132,97 @@ func firstLine(s string) string {
 	}
 	return strings.TrimSpace(s)
 }
+
+// ---------------------------------------------------------------- 坏文件记忆
+//
+// ## 为什么需要
+//
+// **mpv 每个着色器程序在一个进程里只报一次编译错误。** 2026-09-02 实测:
+// 全表扫描里 `ak_sharp` 报了 BAD,而后面同样挂 `AMD_CAS_luma_RT.glsl` 的
+// `fsr_sharp_l/m/h` 全报 ok —— 单独起一个进程跑 `fsr_sharp_m`,照样炸(10 行错误)。
+//
+// 也就是说:**光靠"等错误冒出来"这一招,同一个坏文件只挡得住第一档。**
+// 用户切到第二档就会拿到一屏纯色,而我们还告诉他"已启用"。
+//
+// ## 归罪必须精确
+//
+// 一档失败时**不能把它挂的文件全打成坏的** —— `ak_sharp` 是
+// 去噪 + 锐化两个 pass,坏的只是后者。把去噪也拉黑,`ak_denoise_h` 就被冤枉了,
+// 而那是好档。**误判比漏报更糟**:漏报只是少挡一次,误判是无故关掉用户能用的功能。
+//
+// 所以规则是:**只有能唯一定位时才归罪** —— 失败档的文件里,除掉已经被
+// 证明能编译的(在别的成功档里出现过),剩下**恰好一个**时才把它拉黑。
+// 定位不了就只记住"这一档坏",不牵连别人。
+
+var (
+	badMu     sync.Mutex
+	badFiles  = map[string]string{} // 坏文件 → 错误原文
+	goodFiles = map[string]bool{}   // 已证明能编译的文件
+	badLevels = map[string]string{} // 坏档位 → 错误原文(定位不到文件时的兜底)
+)
+
+// markShaderOK 一档挂上去没出错,它的文件就都算证明过了。
+func markShaderOK(level string, files []string) {
+	badMu.Lock()
+	defer badMu.Unlock()
+	for _, f := range files {
+		goodFiles[f] = true
+	}
+	delete(badLevels, level)
+}
+
+// markShaderBad 一档编译失败。能唯一定位到某个文件就拉黑那个文件,否则只记这一档。
+func markShaderBad(level string, files []string, reason string) {
+	badMu.Lock()
+	defer badMu.Unlock()
+	badLevels[level] = reason
+	var suspects []string
+	for _, f := range files {
+		if !goodFiles[f] && badFiles[f] == "" {
+			suspects = append(suspects, f)
+		}
+	}
+	if len(suspects) == 1 {
+		badFiles[suspects[0]] = reason
+	}
+}
+
+// knownBadReason 这一档是不是已经知道会坏。空串 = 不知道,该照常试。
+func knownBadReason(level string, files []string) string {
+	badMu.Lock()
+	defer badMu.Unlock()
+	if r := badLevels[level]; r != "" {
+		return r
+	}
+	for _, f := range files {
+		if r := badFiles[f]; r != "" {
+			return r
+		}
+	}
+	return ""
+}
+
+// resetShaderMemory 只给测试用。
+func resetShaderMemory() {
+	badMu.Lock()
+	defer badMu.Unlock()
+	badFiles = map[string]string{}
+	goodFiles = map[string]bool{}
+	badLevels = map[string]string{}
+}
+
+// revertedResult 「这档用不了,已退回关闭」的统一返回体。
+//
+// ★ 三个字段缺一不可:`count=0` 和 `will_run=false` 让老调用方也不会误判成成功,
+// `reverted` 让 UI 知道要把下拉框拨回「关闭」—— 显示某档而实际是关的,
+// 是同一类谎换个地方说。
+func revertedResult(level, reason string) map[string]any {
+	return map[string]any{
+		"level":    level,
+		"count":    0,
+		"will_run": false,
+		"reverted": true,
+		"note": "这档在你这台机器的渲染后端上编译不过,已自动退回「关闭」" +
+			"(画面不会被弄坏)。mpv 的原话:" + firstLine(reason),
+	}
+}

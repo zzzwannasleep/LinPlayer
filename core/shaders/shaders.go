@@ -87,9 +87,19 @@ type Level struct {
 
 // Levels 全部档位。
 //
-// 用户 2026-07-16:「去掉放大才生效的模式那种分组,加入 FSR、专门的 NV 滤镜,
-// 三种滤镜每种六个模式」。第三个字段是**家族名**,UI 按它分组 ——
-// 不再按「窗口可用 / 需放大」分组(那个割裂的角标去掉了)。
+// ## 2026-09-02:砍到只剩 Anime4K 一族
+//
+// 用户原话:「有一个 Anime4K 足以了超分,其他的不需要」。此前有四族 28 档
+// (Anime4K / FSR / NVIDIA / 锐化专精,2026-07-16 与 07-20 陆续加的),现在只留第一族。
+//
+// **直接起因**:换渲染后端之后真机全表跑了一遍,`AMD_CAS_luma_RT.glsl` 在
+// `gl_video` + ANGLE(`#version 300 es`)下编译不过(`linearize()` 是 libplacebo 才有的),
+// 用它的四个档位全是坏的。既然要删坏的,顺手把用不上的三族一起删了 ——
+// 少一族就少一族要在每次换后端时重验的东西。
+//
+// ★ `ak_sharp` 原来挂的就是那个坏文件,**换成了 Adaptive_sharpen_lite**
+// (同一轮真机验过能编译)。不是删掉这一档:它是唯一「窗口模式也生效」的
+// 锐化+去噪档,而用户的基线是「清晰最重要的是锐化」。
 //
 // 「某档在当前窗口尺寸下会不会真跑」由 WillRun 在点击时如实告知,不在列表里预标。
 //
@@ -98,7 +108,6 @@ type Level struct {
 func Levels() []Level {
 	return []Level{
 		{"off", "关闭", ""},
-		// —— 家族一:Anime4K(动漫特化:双边去噪 + CNN 超分)——
 		{"ak_denoise_l", "去噪 · 轻", "Anime4K"},
 		{"ak_denoise_h", "去噪 · 强", "Anime4K"},
 		{"ak_sharp", "锐化+去噪 · 推荐", "Anime4K"},
@@ -107,31 +116,6 @@ func Levels() []Level {
 		{"ak_up_vl", "放大去噪 · CNN VL · 壮机", "Anime4K"},
 		{"ak_up_artcnn", "放大 · ArtCNN · 清晰轻量", "Anime4K"},
 		{"ak_up_artcnn_sh", "放大+锐化 · ArtCNN · 最清晰", "Anime4K"},
-		// —— 家族二:AMD FSR(通用锐化 + FSR1 放大)——
-		{"fsr_sharp_l", "锐化 · 轻", "FSR"},
-		{"fsr_sharp_m", "锐化 · 推荐", "FSR"},
-		{"fsr_sharp_h", "锐化 · 强", "FSR"},
-		{"fsr_up", "放大+锐化 · FSR1", "FSR"},
-		{"fsr_up_h", "放大+锐化 · 强", "FSR"},
-		{"fsr_up_dn", "放大+锐化+去噪", "FSR"},
-		// —— 家族三:NVIDIA Image Scaling(NIS)——
-		{"nv_sharp_l", "锐化 · 轻", "NVIDIA"},
-		{"nv_sharp_m", "锐化 · 推荐", "NVIDIA"},
-		{"nv_sharp_h", "锐化 · 强", "NVIDIA"},
-		{"nv_up", "放大 · NIS", "NVIDIA"},
-		{"nv_up_h", "放大+锐化 · NIS", "NVIDIA"},
-		{"nv_up_dn", "放大+锐化+去噪 · NIS", "NVIDIA"},
-		/* —— 家族四:锐化专精(2026-07-20 用户点名)——
-		   原话:「其实清晰最重要的是锐化 锐化是最能提升看起来清晰的程度的」。
-		   这一族**全部窗口模式就生效**、**全部 luma-only**(不碰色度,便宜),
-		   放最后一族但**它才是日常首选**,UI 分组标题里要写明「窗口也生效」。 */
-		{"sh_ada_l", "自适应锐化 · 轻", "Sharpen"},
-		{"sh_ada_m", "自适应锐化 · 推荐", "Sharpen"},
-		{"sh_ada_h", "自适应锐化 · 强", "Sharpen"},
-		{"sh_fine_m", "精细锐化 · 推荐", "Sharpen"},
-		{"sh_fine_h", "精细锐化 · 强", "Sharpen"},
-		{"sh_warp", "线条锐化 · 动漫线稿", "Sharpen"},
-		{"sh_bcas", "双边锐化 BCAS · 强", "Sharpen"},
 	}
 }
 
@@ -149,9 +133,15 @@ var presets = map[string]Preset{
 	// Denoise_Bilateral 没有 //!PARAM,强度靠换 Mean(温和)/ Mode(更狠)两个算法拉开
 	"ak_denoise_l": {Files: []string{"Anime4K_Denoise_Bilateral_Mean.glsl"}},
 	"ak_denoise_h": {Files: []string{"Anime4K_Denoise_Bilateral_Mode.glsl"}},
+	/* ★★ 原来第二个 pass 是 AMD_CAS_luma_RT.glsl,**在新渲染后端上编译不过**
+	   (2026-09-02 真机:`ERROR: 'linearize' : no matching overloaded function found`,
+	   整屏变纯蓝)。换成 Adaptive_sharpen_lite —— 同一轮扫描里验过能编译,
+	   而且 ak_up_artcnn_sh 一直在用它。
+	   STR 量纲跟着换了:CAS 是 0~1,Adaptive 是 0~2,所以 0.85 → 1.30
+	   (对齐 sh_ada_m 那档「推荐」的强度,那个值是 2026-07-20 调出来的)。 */
 	"ak_sharp": {
-		Files: []string{"Anime4K_Denoise_Bilateral_Mode.glsl", "AMD_CAS_luma_RT.glsl"},
-		Opts:  "STR=0.85",
+		Files: []string{"Anime4K_Denoise_Bilateral_Mode.glsl", "Adaptive_sharpen_lite_luma_RT.glsl"},
+		Opts:  "STR=1.30",
 	},
 	// CNN x2 放大(窗口下不跑,全屏才生效)。Clamp_Highlights 是前置辅助 pass
 	"ak_up_m": {Files: []string{"Anime4K_Clamp_Highlights.glsl", "Anime4K_Upscale_CNN_x2_M.glsl"}},
@@ -175,49 +165,6 @@ var presets = map[string]Preset{
 		Files: []string{"Anime4K_Clamp_Highlights.glsl", "ArtCNN_C4F16.glsl", "Adaptive_sharpen_lite_luma_RT.glsl"},
 		Opts:  "STR=1.30",
 	},
-
-	// ★ 「轻」也比 shader 默认(0.5)高一档:用户的基线是「默认档我看不出来」
-	"fsr_sharp_l": {Files: []string{"AMD_CAS_luma_RT.glsl"}, Opts: "STR=0.60"},
-	"fsr_sharp_m": {Files: []string{"AMD_CAS_luma_RT.glsl"}, Opts: "STR=0.85"},
-	// 「强」:CAS 挂 LUMA、RCAS 挂 MAIN —— **不同阶段,可以叠**,两个都拉到各自最锐端
-	"fsr_sharp_h": {
-		Files: []string{"AMD_CAS_luma_RT.glsl", "AMD_FSR1_RCAS_RT.glsl"},
-		Opts:  "STR=1.00,SHARP=0.00",
-	},
-	// FSR1 官方链:EASU 放大 → RCAS 锐化。RCAS 门槛是**参数**,窗口下退化成「只锐化」
-	"fsr_up":   {Files: []string{"AMD_FSR1_EASU.glsl", "AMD_FSR1_RCAS_RT.glsl"}, Opts: "SHARP=0.25"},
-	"fsr_up_h": {Files: []string{"AMD_FSR1_EASU.glsl", "AMD_FSR1_RCAS_RT.glsl"}, Opts: "SHARP=0.00"},
-	"fsr_up_dn": {
-		Files: []string{"Anime4K_Denoise_Bilateral_Mode.glsl", "AMD_FSR1_EASU.glsl", "AMD_FSR1_RCAS_RT.glsl"},
-		Opts:  "SHARP=0.00",
-	},
-
-	// NVSharpen:纯锐化,//!WHEN SHARP 是**参数**(0~1,越大越锐),窗口模式也跑
-	"nv_sharp_l": {Files: []string{"NVSharpen_RT.glsl"}, Opts: "SHARP=0.30"},
-	"nv_sharp_m": {Files: []string{"NVSharpen_RT.glsl"}, Opts: "SHARP=0.50"},
-	"nv_sharp_h": {Files: []string{"NVSharpen_RT.glsl"}, Opts: "SHARP=0.85"},
-	// NVScaler:放大 + 内建锐化(//!WHEN OUTPUT 挑尺寸,全屏才跑)
-	"nv_up":   {Files: []string{"NVScaler_RT.glsl"}, Opts: "SHARP=0.30"},
-	"nv_up_h": {Files: []string{"NVScaler_RT.glsl"}, Opts: "SHARP=0.50"},
-	"nv_up_dn": {
-		Files: []string{"Anime4K_Denoise_Bilateral_Mode.glsl", "NVScaler_RT.glsl"},
-		Opts:  "SHARP=0.50",
-	},
-
-	/* ⚠️ 锐化专精每档只挂**一个**锐化器:Adaptive / aWarpSharp2 / BCAS 都叫 `STR`,
-	   而 `glsl-shader-opts` 是**全局**的 —— 叠在同一档里会共用一个值、量纲还不同
-	   (0~2 / -20~20 / 0~1),**必然串味且不报错**。有测试钉住这条。
-	   强度一律开到远高于 shader 自带默认(Adaptive 1.0 / FineSharp 0.5 / aWarpSharp2 4.0),
-	   那个默认正是「开到最大档也只有一点点变清晰」的病根。 */
-	"sh_ada_l":  {Files: []string{"Adaptive_sharpen_lite_luma_RT.glsl"}, Opts: "STR=0.70"},
-	"sh_ada_m":  {Files: []string{"Adaptive_sharpen_lite_luma_RT.glsl"}, Opts: "STR=1.30"},
-	"sh_ada_h":  {Files: []string{"Adaptive_sharpen_lite_luma_RT.glsl"}, Opts: "STR=1.90"},
-	"sh_fine_m": {Files: []string{"FineSharp_RT.glsl"}, Opts: "SSTR=2.50"},
-	"sh_fine_h": {Files: []string{"FineSharp_RT.glsl"}, Opts: "SSTR=5.00"},
-	// aWarpSharp2:不加对比度,靠**把像素往边缘推**收紧线条 —— 动漫线稿提升最明显
-	"sh_warp": {Files: []string{"aWarpSharp2_RT.glsl"}, Opts: "STR=10.00"},
-	// BCAS:双边 CAS,锐化同时按局部方差压噪,比裸 CAS 敢开到顶
-	"sh_bcas": {Files: []string{"AMD_BCAS_RT.glsl"}, Opts: "STR=1.00,SIGMA=0.30"},
 }
 
 // PresetOf 取一个档位。off / 未知 = 关(ok=false)。

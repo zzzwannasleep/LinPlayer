@@ -132,27 +132,14 @@ func TestSharpenPresetsLoadOnlyOneSharpener(t *testing.T) {
 // Rust 侧第一版照直觉把 FSR 档标成 false,是测试红了才发现 RCAS 的门槛
 // (`//!WHEN SHARP 4.0 <`)是**参数**不是尺寸。
 func TestWorksAtAnySize(t *testing.T) {
-	// 锐化专精那一族:**全部**该是「窗口也生效」—— 它是日常首选,标错就等于把它藏了
-	for _, id := range []string{"sh_ada_l", "sh_ada_m", "sh_ada_h", "sh_fine_m", "sh_fine_h", "sh_warp", "sh_bcas"} {
-		if !WorksAtAnySize(id) {
-			t.Errorf("%s 该是窗口也生效的 —— 这一族全是参数门槛,不挑尺寸", id)
-		}
-	}
-	// 去噪族也不挑尺寸
+	// 去噪 / 锐化档不挑尺寸 —— 它们是窗口模式下唯一有效果的,标错就等于把它们藏了
 	for _, id := range []string{"ak_denoise_l", "ak_denoise_h", "ak_sharp"} {
 		if !WorksAtAnySize(id) {
-			t.Errorf("%s 该是窗口也生效的", id)
-		}
-	}
-	// FSR 放大档:窗口下退化成只锐化,仍算「有效果」
-	for _, id := range []string{"fsr_up", "fsr_up_h", "fsr_up_dn"} {
-		if !WorksAtAnySize(id) {
-			t.Errorf("%s 在窗口下会退化成只锐化,仍该判 true —— "+
-				"RCAS 的门槛是参数不是尺寸(这是照直觉最容易写错的一条)", id)
+			t.Errorf("%s 该是窗口也生效的 —— 门槛是参数不是尺寸", id)
 		}
 	}
 	// 纯 CNN 放大档:窗口下**一帧都不跑**
-	for _, id := range []string{"ak_up_m", "ak_up_vl", "ak_up_artcnn", "nv_up", "nv_up_h"} {
+	for _, id := range []string{"ak_up_m", "ak_up_vl", "ak_up_artcnn"} {
 		if WorksAtAnySize(id) {
 			t.Errorf("%s 是纯放大档,窗口下一帧都不跑,不该判 true —— "+
 				"标错就是「UI 说生效了,画面一点没变」", id)
@@ -182,7 +169,7 @@ func TestWillRun(t *testing.T) {
 		t.Error("恰好 1.2 倍不该跑 —— shader 里写的是严格大于")
 	}
 	// 锐化档:任何尺寸都跑,连尺寸都不用问
-	if run, ok := WillRun("sh_ada_m", 0, 0, 0, 0); !ok || !run {
+	if run, ok := WillRun("ak_sharp", 0, 0, 0, 0); !ok || !run {
 		t.Errorf("锐化档不挑尺寸,尺寸未知也该判 true,实得 run=%v ok=%v", run, ok)
 	}
 	// 尺寸未知(没在播)时**不下结论**
@@ -248,7 +235,7 @@ func TestEnsureFilesIsIdempotent(t *testing.T) {
 	if len(m1) == 0 {
 		t.Fatal("一个都没落下来")
 	}
-	target := m1["AMD_CAS_luma_RT.glsl"]
+	target := m1["Adaptive_sharpen_lite_luma_RT.glsl"]
 	st1, err := os.Stat(target)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +275,7 @@ func TestPaths(t *testing.T) {
 		t.Fatalf("ak_sharp 该有两个 pass,实得 %v", got)
 	}
 	// ★ 顺序就是 pipeline:先去噪(在源分辨率上最干净)再锐化,反了效果就不一样
-	if !strings.Contains(got[0], "Denoise") || !strings.Contains(got[1], "CAS") {
+	if !strings.Contains(got[0], "Denoise") || !strings.Contains(got[1], "sharpen") {
 		t.Fatalf("顺序不对(该是先去噪再锐化): %v", got)
 	}
 	for _, p := range got {
@@ -310,8 +297,8 @@ func TestOptsForOff(t *testing.T) {
 	if Opts("off") != "" || Opts("根本没这档") != "" {
 		t.Error("off / 未知档位的 opts 该是空串")
 	}
-	if Opts("sh_ada_h") != "STR=1.90" {
-		t.Errorf("档位参数没取对: %q", Opts("sh_ada_h"))
+	if Opts("ak_sharp") != "STR=1.30" {
+		t.Errorf("档位参数没取对: %q", Opts("ak_sharp"))
 	}
 }
 
@@ -366,4 +353,56 @@ func paramRange(file, param string) (min, max float64, ok bool) {
 		}
 	}
 	return min, max, gotMin && gotMax
+}
+
+// 每个档位引用的 .glsl 都必须真在 embed 里,且档位表与 preset 表一一对应。
+//
+// ★★ 2026-09-02 把档位表从四族 28 档砍到一族 8 档、删了 8 个 .glsl 文件。
+// 漏改一处引用的话:`bodyOf` 返回空串 → 落一个空文件 → mpv 收下路径之后
+// **静默不跑**,不报错、不影响返回码。正是本仓最讨厌的失败形态。
+func Test档位与文件一一对应(t *testing.T) {
+	listed := map[string]bool{}
+	for _, lv := range Levels() {
+		if lv.ID == "off" {
+			continue
+		}
+		listed[lv.ID] = true
+		p, ok := PresetOf(lv.ID)
+		if !ok {
+			t.Errorf("档位 %s 在列表里,却没有对应的 preset —— 点了等于什么都没发生", lv.ID)
+			continue
+		}
+		if len(p.Files) == 0 {
+			t.Errorf("档位 %s 一个 shader 都没挂", lv.ID)
+		}
+		for _, f := range p.Files {
+			if bodyOf(f) == "" {
+				t.Errorf("档位 %s 引用了 %s,但它不在 embed 里 —— "+
+					"会落一个空文件,mpv 静默不跑", lv.ID, f)
+			}
+		}
+	}
+	for id := range presets {
+		if !listed[id] {
+			t.Errorf("preset %s 没出现在 Levels() 里 —— 用户永远选不到它,"+
+				"却还占着二进制体积", id)
+		}
+	}
+}
+
+// 砍表之后:只剩 Anime4K 一族(用户 2026-09-02 拍板)。
+//
+// ★ 这条不是洁癖:每多一族,换渲染后端时就多一族要真机重验 ——
+// 而这类失败编译绿、单测绿、返回码也绿。
+func Test档位只剩一族(t *testing.T) {
+	fams := map[string]int{}
+	for _, lv := range Levels() {
+		if lv.ID == "off" {
+			continue
+		}
+		fams[lv.Group]++
+	}
+	if len(fams) != 1 || fams["Anime4K"] == 0 {
+		t.Fatalf("档位家族应当只剩 Anime4K,实得 %v", fams)
+	}
 }

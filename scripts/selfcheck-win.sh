@@ -145,7 +145,8 @@ export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
 LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
-sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
+# LP_SHADER=all 要把 28 档挨个挂一遍(每档要等真渲染一帧才编译),得多给点时间
+sleep $([ "${LP_SHADER:-}" = "all" ] && echo 45 || { [ -n "$CLIP" ] && echo 12 || echo 6; })
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
   -ProcName LinPlayer -Out "$ROOT/build/$SHOT.png"
 # ★ **优雅关闭**,不是 Stop-Process。
