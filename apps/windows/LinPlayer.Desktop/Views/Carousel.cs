@@ -46,8 +46,18 @@ public static class Carousel
             Content = row,
         };
 
-        var left = Arrow("‹", HorizontalAlignment.Left, artHeight);
-        var right = Arrow("›", HorizontalAlignment.Right, artHeight);
+        var left = Arrow("‹", HorizontalAlignment.Left);
+        var right = Arrow("›", HorizontalAlignment.Right);
+        // 对齐**图区中线**,不是整张卡的中线(卡下面还有两行标题,按整张卡居中会偏低);
+        // 左右各压进去 4px,压在最边上那张卡的边缘上。
+        foreach (var (b, side) in new[] { (left, HorizontalAlignment.Left), (right, HorizontalAlignment.Right) })
+        {
+            b.VerticalAlignment = VerticalAlignment.Top;
+            b.Margin = side == HorizontalAlignment.Left
+                ? new Thickness(-4, artHeight / 2 - ButtonSize / 2, 0, 0)
+                : new Thickness(0, artHeight / 2 - ButtonSize / 2, -4, 0);
+            b.IsVisible = false;
+        }
 
         void Sync()
         {
@@ -80,7 +90,13 @@ public static class Carousel
         return new Panel { Children = { sv, left, right } };
     }
 
-    private static Button Arrow(string glyph, HorizontalAlignment side, double artHeight)
+    /// <summary>
+    /// 圆形翻页按钮。默认垂直居中、贴边 —— 轨道那边要对齐图区中线,自己再改。
+    ///
+    /// <para>★ 首页 Hero 共用这一个:一个应用里两处「左右翻页」长得不一样,
+    /// 用户会以为它们是两种不同的东西。</para>
+    /// </summary>
+    internal static Button Arrow(string glyph, HorizontalAlignment side)
     {
         var b = new Button
         {
@@ -95,12 +111,7 @@ public static class Carousel
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalAlignment = side,
-            VerticalAlignment = VerticalAlignment.Top,
-            // 对齐图区中线;左右各压进去 4px,压在最边上那张卡的边缘上
-            Margin = side == HorizontalAlignment.Left
-                ? new Thickness(-4, artHeight / 2 - ButtonSize / 2, 0, 0)
-                : new Thickness(0, artHeight / 2 - ButtonSize / 2, -4, 0),
-            IsVisible = false,
+            VerticalAlignment = VerticalAlignment.Center,
             Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
         };
         return b;

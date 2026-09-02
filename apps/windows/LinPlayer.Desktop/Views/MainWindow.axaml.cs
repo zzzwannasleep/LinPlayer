@@ -191,6 +191,7 @@ public partial class MainWindow : Window
         SelfCheckScroll();
         SelfCheckMenu();
         SelfCheckCount();
+        SelfCheckHero();
         /* 自检:往 UI 线程上扔一个异常,验兜网。
            ★ 这个钩子是**必须留着**的:兜网本身没有任何外在表现 ——
              它没生效的唯一症状是「某天某个页面把进程打死了」,
@@ -407,6 +408,26 @@ public partial class MainWindow : Window
                     ? $"[右键自检] 菜单建出来了,{m.ItemCount} 项,打开={m.IsOpen}"
                     : "[右键自检] ✗ 右键之后仍然没有菜单"),
                 DispatcherPriority.Background);
+        }));
+    }
+
+    /// <summary>
+    /// 自检:把首页 Hero 翻到第 N 张。
+    ///
+    /// <para>★★ 「轮播到底动没动」<b>截图判不出来</b> —— 一张静止的大图和一个
+    /// 停住的轮播长得一模一样,而轮播停住恰恰是最容易发生的失败
+    /// (循环挂在异常上、协程被取消、Attached 没再启动)。
+    /// 所以这里让它<b>报出自己停在第几张、叫什么</b>,由日志对账。</para>
+    /// </summary>
+    private void SelfCheckHero()
+    {
+        var raw = Environment.GetEnvironmentVariable("LP_SELFCHECK_HERO");
+        if (string.IsNullOrEmpty(raw) || !int.TryParse(raw, out var n)) return;
+        // ★ 等随机推荐那条命令回来 —— 立刻问的话它手里一张都还没有
+        _ = Task.Delay(2600).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (Nav.Current is HomePage hp) hp.SelfCheckHero(n);
+            else Console.WriteLine("[Hero 自检] 当前不是首页");
         }));
     }
 

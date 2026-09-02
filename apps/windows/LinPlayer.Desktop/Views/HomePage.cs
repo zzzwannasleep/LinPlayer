@@ -25,8 +25,18 @@ public sealed class HomePage : PageBase
 {
     private readonly StackPanel _rows = new() { Spacing = 26 };
     private readonly Action<CardItem>? _onOpen;
+    private readonly Hero _hero;
     private CoreClient? _core;
     private string _server = "";
+
+    /// <summary>
+    /// Hero 用掉的张数。剩下的进「随便看看」。
+    ///
+    /// <para>★★ 两块<b>共用一次 listRandom</b>,不是各拉一次。分开拉的话
+    /// 两次随机会撞车 —— 同一部片在顶上是大图、在下面又是一张小卡,
+    /// 那不像随机推荐,那像加载出了错。顺带少一次往返。</para>
+    /// </summary>
+    private const int HeroCount = 5;
 
     /// <param name="title">页头。给当前服务器名 —— 见下面那段注释。</param>
     public HomePage(CoreClient? core, Action<CardItem>? onOpen = null, string title = "首页")
@@ -40,7 +50,29 @@ public sealed class HomePage : PageBase
            ★ 名字由外面传进来,不在这儿再拉一次账号表 —— 壳里已经拉过了
              (UpdateServerChip),再拉一次就是每次进首页多一次往返。 */
         _rows.Children.Add(H1(title));
-        Content = Scrolled(_rows);
+
+        /* ★★ 首页<b>不能整页塞进 1560 的水槽里</b> —— Hero 是全宽出血的,
+           封进去就成了「一张居中的插图」,两侧留白、顶上一道描边。
+           所以这一页的结构和详情页一样:头图在水槽外面,正文另外封顶。 */
+        _hero = new Hero(core!, onOpen);
+        Content = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = new StackPanel
+            {
+                Spacing = 0,
+                Children =
+                {
+                    _hero,
+                    new Border
+                    {
+                        MaxWidth = 1560, HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Padding = new Thickness(18, 22, 18, 28), Child = _rows,
+                    },
+                },
+            },
+        };
         if (core is not null) _ = LoadAsync(core);
     }
 
@@ -83,9 +115,31 @@ public sealed class HomePage : PageBase
             () => Arr(core.EmbyViews(new { s.server, s.token, s.user_id, s.device_id })), true,
             onItems: libs => LatestPerLibrary(core, s, libSection, libBusy, libs));
         AddRow(libSection);
-        var random = Track("随便看看", () => Arr(core.EmbyListRandom(new { s.server, s.token, s.user_id, s.device_id, limit = 8 })), false);
+        /* ★ 确认是 Emby 了就先把 Hero 的位置占住(骨架)。
+           它在页面最顶上,晚出现一次就把**整页**往下顶一次。 */
+        _hero.Reserve();
+        var random = Track("随便看看", () => RandomSplit(core, s), false);
         await Task.WhenAll(resume, views, random);
     }
+
+    /// <summary>
+    /// 一次 listRandom,前 <see cref="HeroCount"/> 张给 Hero,剩下的给「随便看看」。
+    ///
+    /// <para>★ 拉失败时要把 Hero <b>收掉</b>,否则骨架会一直闪 ——
+    /// 那看着像「永远在加载」,而它其实已经失败了。</para>
+    /// </summary>
+    private async Task<List<JsonElement>> RandomSplit(CoreClient core, object s)
+    {
+        List<JsonElement> all;
+        try { all = await Arr(core.EmbyListRandom(With(s, new { limit = HeroCount + 8 }))); }
+        catch { _hero.Hide(); throw; }
+        if (all.Count == 0) { _hero.Hide(); return all; }
+        _hero.Show(_server, all.Take(HeroCount).ToList());
+        return all.Skip(HeroCount).ToList();
+    }
+
+    /// <summary>自检:把 Hero 翻到第 n 张(1 起)。</summary>
+    internal void SelfCheckHero(int n) => _hero.SelfCheckJump(n);
 
     /// <summary>
     /// 各库最新:<b>每个库一条轨道</b>,不是一条全局的「最新加入」。

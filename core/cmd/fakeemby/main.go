@@ -341,6 +341,48 @@ func main() {
 			}
 			writeJSON(w, d)
 
+		/* 随机推荐(首页 Hero + 「随便看看」共用这一条)。
+		   ★★ 必须**单独造**,不能让它落进下面那条 140 部的通用列表 ——
+		     通用列表全是 Movie、全都没有评分、名字长度也一样,
+		     于是 Hero 上「年份 / 类型 / 评分 / 类型标签」这一行永远长一个样,
+		     版式排错了也看不出来。
+		   ★ 名字**故意有长有短**:艺术字取不到时要回落成文字标题,
+		     一个 30 字的片名会不会撑破两行、会不会顶掉标签行,只有长名字才验得到。 */
+		case r.URL.Query().Get("SortBy") == "Random":
+			picks := []struct {
+				ID, Name, Type string
+				Year           int
+				Rating         float64
+				Genres         []string
+			}{
+				{"hero-1", "很短的名字", "Movie", 2024, 8.7, []string{"科幻", "冒险"}},
+				{"hero-2", "一部名字长得能占满两行还要再多出一截的自检用剧集", "Series", 2021, 9.2, []string{"剧情", "悬疑", "犯罪"}},
+				{"hero-3", "没有评分的那一部", "Movie", 1998, 0, []string{"动画"}},
+				{"hero-4", "连年份都没有的那一部", "Movie", 0, 7.1, nil},
+				{"hero-5", "第五部", "Series", 2019, 6.4, []string{"喜剧"}},
+			}
+			randItems := []map[string]any{}
+			for _, e := range picks {
+				it := item(e.ID, e.Name, e.Type)
+				if e.Year > 0 {
+					it["ProductionYear"] = e.Year
+				}
+				if e.Rating > 0 {
+					it["CommunityRating"] = e.Rating
+				}
+				if e.Genres != nil {
+					it["Genres"] = e.Genres
+				}
+				it["BackdropImageTags"] = []string{"tag-" + e.ID + "-bd"}
+				randItems = append(randItems, it)
+			}
+			// 剩下的补成普通条目 —— Hero 拿前 5 张,后面的进「随便看看」
+			for i := len(randItems); i < atoi(r.URL.Query().Get("Limit")); i++ {
+				randItems = append(randItems,
+					item(fmt.Sprintf("rnd%d", i), fmt.Sprintf("随便看看第 %d 部", i-4), "Movie"))
+			}
+			writeJSON(w, page(randItems...))
+
 		case strings.Contains(p, "/Items"):
 			// ★ 给 140 条,超过一页(60)—— 只给两条的话「滚到底翻页」永远没被跑过
 			q := r.URL.Query()
@@ -373,11 +415,28 @@ func main() {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		switch {
 		case len(parts) >= 3 && parts[2] == "Images":
+			kind := ""
+			if len(parts) >= 4 {
+				kind = parts[3]
+			}
+			/* ★★ 艺术字(Logo)<b>必须有取不到的那一半</b>。
+			   真实的库里大多数剧集根本没刮 Logo,客户端要回落成文字标题 ——
+			   而假服务器如果每个 id 都给图,那条回落路径<b>一次都不会被渲染</b>。
+			   这里让 id 末位是偶数的条目 404(hero-2 / hero-4 就是),
+			   于是一轮轮播里两种版式都会出现。 */
+			if strings.HasPrefix(kind, "Logo") {
+				if n := parts[1]; len(n) > 0 && (n[len(n)-1]-'0')%2 == 0 {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "image/png")
+				_ = png.Encode(w, wordmark(parts[1]))
+				return
+			}
 			w.Header().Set("Content-Type", "image/png")
 			// ★ Backdrop 要出**宽图**(16:9)。都出 2:3 的话详情页的大图
 			//   会被 UniformToFill 裁得只剩中间一条,看不出比例对不对。
-			wide := len(parts) >= 4 && strings.HasPrefix(parts[3], "Backdrop")
-			_ = png.Encode(w, solid(parts[1], wide))
+			_ = png.Encode(w, solid(parts[1], strings.HasPrefix(kind, "Backdrop")))
 
 		// 起播:PlaybackInfo → DirectStreamUrl。
 		//
@@ -575,6 +634,34 @@ func solid(id string, wide bool) image.Image {
 			f := func(v uint8) uint8 { return uint8(float64(v)*(1.15-0.7*t) + 10) }
 			img.Set(x, y, color.RGBA{f(c.R), f(c.G), f(c.B), 255})
 		}
+	}
+	return img
+}
+
+/*
+wordmark 造一张「艺术字」样的透明 PNG:几条长短不一的白色色块。
+
+	★ 不能拿 solid() 顶替 —— 那是一张**不透明的照片**,贴在 Hero 上会盖住背景,
+	  而真的 Logo 是透明底的字。用一张不透明图当 Logo 的话,
+	  「艺术字压在剧照上好不好看」这件事在自检里就永远是错的。
+*/
+func wordmark(id string) image.Image {
+	var h uint32 = 2166136261
+	for _, c := range []byte(id) {
+		h = (h ^ uint32(c)) * 16777619
+	}
+	const iw, ih = 360, 100
+	img := image.NewRGBA(image.Rect(0, 0, iw, ih))
+	// 三段字块,宽度按 id 抖一抖 —— 每部片的艺术字宽度不同才验得到左对齐
+	x := 10
+	for i := 0; i < 3; i++ {
+		w := 60 + int((h>>(uint(i)*5))%70)
+		for yy := 26; yy < 74; yy++ {
+			for xx := x; xx < x+w && xx < iw; xx++ {
+				img.Set(xx, yy, color.RGBA{245, 246, 250, 255})
+			}
+		}
+		x += w + 14
 	}
 	return img
 }
