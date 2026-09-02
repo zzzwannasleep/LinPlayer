@@ -80,24 +80,39 @@ wrangler pages deploy public --project-name linplayer-oauth
 
 ## 三、让 App 走代理
 
-编辑 `lib/core/services/sync/sync_config.dart`：
+代理地址与共享密钥**不写进源码**,走编译期注入(全局红线:线路/中转地址和密钥
+都不许进提交)。构建核心层前把这三个环境变量准备好:
 
-```dart
-const String kSyncProxyBaseUrl = 'https://<你的项目>.pages.dev/api';
-const String kSyncProxyKey = '';   // 若设了 LINPLAYER_PROXY_KEY，这里填相同值
+| 环境变量 | 填什么 | 对应代理这边的 |
+|---|---|---|
+| `LP_SYNC_PROXY_BASE` | `https://<你的项目>.pages.dev/api` ← **必须带 `/api` 后缀** | 部署地址 |
+| `LP_SYNC_PROXY_KEY` | 和代理的 `LINPLAYER_PROXY_KEY` **一模一样**;代理没设就留空 | `LINPLAYER_PROXY_KEY` |
+| `LP_BANGUMI_REDIRECT_URI` | `https://<你的项目>.pages.dev/oauth/bangumi.html` | 回调页(本项目 `public/` 里那个) |
+
+```bash
+export LP_SYNC_PROXY_BASE="https://<你的项目>.pages.dev/api"
+export LP_SYNC_PROXY_KEY="<和 LINPLAYER_PROXY_KEY 相同>"
+export LP_BANGUMI_REDIRECT_URI="https://<你的项目>.pages.dev/oauth/bangumi.html"
+bash scripts/build-core.sh
 ```
 
-再把 Bangumi 回调对齐（二选一）：
-- 改 `lib/core/services/sync/bangumi_sync_service.dart` 里的 `kDefaultBangumiRedirectUri`
-  为 `https://<你的项目>.pages.dev/oauth/bangumi.html`；**或**
-- App 内「连接 Bangumi → 高级：回调地址」直接填该地址。
+GitHub Actions 里三个都放 **Secrets**(不是 Variables —— Variables 在日志里是明文)。
+全表见 [`docs/go-migration/BUILD-SECRETS.md`](../docs/go-migration/BUILD-SECRETS.md)。
 
-> 设了 `kSyncProxyBaseUrl` 后，所有需要 secret 的调用自动走代理；
-> 客户端内置的混淆 secret 不再被使用。若想彻底从二进制里抹掉，可把
-> `obfuscated_secrets.dart` 里 `_traktSecret` / `_bangumiSecret` 两个数组清空
-> （保留 id 即可），其余代码无需改动。
+> ★★ **Trakt/Bangumi 的 client_id / app_id 不在这三个里。**
+> 它们是 OAuth 的**公开标识符**,编译在客户端里(`core/sync/sync.go` 的
+> `TraktClientID()` / `BangumiAppID()`,轻混淆存放)。真正要保护的 secret
+> 只在代理这边(`TRAKT_CLIENT_SECRET` / `BANGUMI_APP_SECRET`)。
+>
+> **推论:代理的 `TRAKT_CLIENT_ID` / `BANGUMI_APP_ID` 必须和客户端里编译进去的
+> 那一对是同一个应用。** 换成你自己新注册的 Trakt 应用而不改客户端的话:
+> 设备码是应用 A 发的,而客户端拿应用 B 的 key 去打 `api.trakt.tv` ——
+> 表现是「授权成功了,但每次同步都 401」。
+> 要换成自己的应用,得同时改 `core/sync/sync.go` 里那两个混淆数组
+> (或者提个需求把它们也做成注入)。
 
----
+> ⚠️ **老的 Rust 版把共享密钥明文写在 `crates/core/src/sync/mod.rs` 里,已经进了
+> git 历史。** 换语言不会让它消失 —— 那把 key 要轮换,并按红线改写历史。
 
 ## 四、自测
 

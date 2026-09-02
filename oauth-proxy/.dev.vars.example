@@ -4,7 +4,7 @@ TRAKT_CLIENT_ID=你的TraktClientId
 TRAKT_CLIENT_SECRET=你的TraktClientSecret
 BANGUMI_APP_ID=你的BangumiAppId
 BANGUMI_APP_SECRET=你的BangumiAppSecret
-# 可选：客户端与代理之间的共享密钥（与 App 的 kSyncProxyKey 保持一致）
+# 可选：客户端与代理之间的共享密钥（与构建 App 时的 LP_SYNC_PROXY_KEY 保持一致）
 LINPLAYER_PROXY_KEY=
 # 爱发电赞助者名单（/afdian/sponsors.svg 用）。TOKEN 线上务必设为 Encrypted。
 # 两者都在爱发电 dashboard/dev（开发者）页面获取。
