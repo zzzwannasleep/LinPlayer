@@ -31,7 +31,6 @@
 crates/
   core/            各端共用业务核心(数据源/网络/配置/同步/下载/插件),不依赖平台专属 crate
   mpv/             libmpv 封装 + 各平台渲染面。注意 overlay 有 4 个 cfg 变体
-  danmaku-proxy/
 apps/
   desktop/         Tauri 桌面壳(Windows / Linux)
   android/         安卓壳(手机 / TV,同一份代码两个包)

@@ -1,6 +1,6 @@
 # Workspace 根:核心库(桌面/安卓复用) + 桌面 Tauri 壳。
 [workspace]
-members = ["crates/core", "crates/mpv", "crates/danmaku-proxy", "apps/desktop", "apps/android"]
+members = ["crates/core", "crates/mpv", "apps/desktop", "apps/android"]
 resolver = "2"
 
 [profile.release]

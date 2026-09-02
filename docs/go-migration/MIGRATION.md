@@ -224,7 +224,7 @@ macOS 优先。iOS 只做到"能装",不承诺分发。
 | `download.rs` | 839 | `core/download` | 多线程 Range 下载 + 权限门控 |
 | `translation.rs` | 2827 | `core/translation` | **桌面独占**。Whisper 依赖下载 / 模型管理 / 实时预读翻译。移植优先级最低(阶段 3 末尾),但**不许砍** |
 | `crates/mpv/lib.rs` | 2245 | `core/player` | 约 700 行(Win/Linux 独立顶层窗口的对齐、z 序钩子、WM_WINDOWPOSCHANGED 子类化、`is_overlay_host`、`set_overlay_top_inset`)**整段删除** —— 视频在窗口内合成后这些全部不需要。剩下 ~1500 行是真正的 mpv 知识,逐条移植 |
-| `crates/danmaku-proxy` | 1779 | `core/danmaku/proxy` | 路径穿越那条测试不许拿环境当断言 |
+| ~~`crates/danmaku-proxy`~~ | 1779 | **不迁** | 2026-09-02 已删:弹幕改回客户端内置(用户决定) |
 
 ### 3.8 不移植的
 
