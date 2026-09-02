@@ -79,6 +79,19 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	c := config.Current()
 	prefs := c.PrefsOf()
 
+	/* ★★ 观看记录判据和取流地址<b>并发打</b>。
+	   两者互不依赖,而串起来是**起播路径上白白多出的一到两次网络往返**:
+	     取流地址(PlaybackInfo) → 取条目判据 → 查剧的 TMDB id → 这才轮到 loadfile
+	   本机上看不出来,150ms 延迟的服务器上就是黑屏多停将近半秒。
+	   ★ 能并发的前提是这两条路上**没有跨网络调用持有的锁**:
+	     history 的写锁在 Capture 内部(停播/进度上报时才走),buildHistoryContext
+	     只读不写。真要再往里塞东西,先确认这一条还成立 ——
+	     不成立的话就是两个 goroutine 抢同一把锁,症状是起播直接吊死且不报错。
+	   ★ 通道要**带缓冲**:取流地址失败时这里直接 return,没人收这个值,
+	     无缓冲的话那个 goroutine 会永远卡在发送上(每失败一次泄漏一个)。 */
+	histCh := make(chan *historyContext, 1)
+	go func() { histCh <- buildHistoryContext(ctx, s, itemID) }()
+
 	target, err := prefsClient.ResolveStream(ctx, s, itemID, mediaSourceID, prefs.VersionRegex)
 	if err != nil {
 		return nil, err
@@ -97,11 +110,7 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 
 	playURL := startPrefetch(ctx, s, target, prefs)
 
-	/* 观看记录上下文 与 取流地址本可以**并发**打 —— 两者互不依赖。
-	   ★ 能并发的前提是这两条路上**没有跨 await 持有的锁**。Go 这边暂时串着:
-	     history 的写锁在 Capture 内部,不跨网络调用;真要并发时先确认这一点,
-	     否则就是同一线程上两个 future 抢同一把锁 = 自我死锁(症状是起播直接吊死,不报错)。 */
-	whCtx := buildHistoryContext(ctx, s, itemID)
+	whCtx := <-histCh
 	if whCtx != nil {
 		// ★ 调用方传进来的 resumeSecs 只是**这一台** Emby 的进度;
 		//   跨服续播开着时,本地记录里别的服务器上更靠后的进度会覆盖它(取最大)。

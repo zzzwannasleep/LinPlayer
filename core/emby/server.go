@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -150,20 +151,49 @@ func (c *Client) ItemForHistory(ctx context.Context, s *Session, itemID string) 
 	return &it, nil
 }
 
+// tmdbCache 剧 → TMDB id 的缓存。**含负结果**。
+//
+// ★★ 这一条是<b>起播路径上的一次网络往返</b>,而追剧就是同一部剧一集接一集地放 ——
+// 不缓存的话每集都要重打一次,而答案永远一样。
+// ★ 必须缓存「查过但没有」:没刮削的库返回 nil,不记负结果就等于完全没缓存,
+// 而那正是最需要缓存的场景(整库都没刮 TMDB)。
+// ★ 键要带 server —— 同一个 seriesID 在两台服务器上不是同一部剧(分隔符用竖线:
+// 它不会出现在服务器地址里,而拼接时不加分隔的话 "a"+"bc" 和 "ab"+"c" 会撞成同一个键)。
+var (
+	tmdbMu    sync.Mutex
+	tmdbCache = map[string]*string{}
+)
+
 // SeriesTmdbID 取某剧的 TMDB id。
 //
 // ★ 跨服务器匹配剧集时用:同一部剧在两台服的 item_id 不同,但 TMDB id 相同。
 // 剧不存在 / 没刮到 TMDB → 返回 nil,**不是错误**:没刮削的库属正常,匹配自然降级。
 func (c *Client) SeriesTmdbID(ctx context.Context, s *Session, seriesID string) *string {
-	it, err := c.ItemForHistory(ctx, s, seriesID)
-	if err != nil || it == nil {
+	key := s.Server + "|" + seriesID
+	tmdbMu.Lock()
+	if v, ok := tmdbCache[key]; ok {
+		tmdbMu.Unlock()
+		return v
+	}
+	tmdbMu.Unlock()
+
+	var found *string
+	if it, err := c.ItemForHistory(ctx, s, seriesID); err == nil && it != nil {
+		for k, v := range it.ProviderIDs {
+			if strings.EqualFold(k, "Tmdb") && strings.TrimSpace(v) != "" {
+				t := strings.TrimSpace(v)
+				found = &t
+				break
+			}
+		}
+	} else if err != nil {
+		// ★ 网络错**不进缓存**:那不是「这剧没有 TMDB id」,是这次没问到。
+		//   记下来的话一次抖动会让这部剧到重启前都匹配不上。
 		return nil
 	}
-	for k, v := range it.ProviderIDs {
-		if strings.EqualFold(k, "Tmdb") && strings.TrimSpace(v) != "" {
-			t := strings.TrimSpace(v)
-			return &t
-		}
-	}
-	return nil
+
+	tmdbMu.Lock()
+	tmdbCache[key] = found
+	tmdbMu.Unlock()
+	return found
 }
