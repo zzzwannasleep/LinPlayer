@@ -1,8 +1,12 @@
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Animation.Easings;
+using Avalonia.Animation;
 using Avalonia.VisualTree;
 using Avalonia.Threading;
 using LinPlayer.Core;
@@ -22,40 +26,96 @@ public sealed class DetailPage : PageBase
     private readonly string _server;
     private readonly Button _back = null!;
 
+    /// <summary>分集。<b>和头部分开拉</b> —— 见构造函数里那段注释。</summary>
+    private Task<List<CardItem>>? _episodesTask;
+    private readonly ContentControl _episodesHost = new();
+
+    /// <summary>正文封顶宽度。和 <see cref="PageBase.Scrolled"/> 里那一档对齐。</summary>
+    private const double BodyMax = 1560;
+
+    /// <summary>头图区(全宽出血)。</summary>
+    private readonly ContentControl _heroHost = new();
+
     public DetailPage(CoreClient core, string server, string itemId)
     {
         _core = core; _server = server;
 
         var body = new StackPanel { Spacing = 16 };
         /* ★ 返回按钮在**数据回来之前**就得能点:详情拉了 10 秒还在转的时候,
-           用户第一件想做的事就是退出去。所以它先挂上,渲染时再被搬进背景大图里。 */
+           用户第一件想做的事就是退出去。所以它先挂上,渲染时再被搬进头图里。 */
         var back = new Button { Classes = { "ghost" }, Content = "← 返回", HorizontalAlignment = HorizontalAlignment.Left };
         back.Click += (_, _) => Nav.Back();
-        body.Children.Add(back);
         _back = back;
+        _heroHost.Content = new StackPanel { Margin = new Thickness(18, 18, 18, 0), Children = { back } };
         /* ★ 占位用骨架,不是「加载中…」三个字 —— 详情页是全站内容最高的一页,
            从 20px 撑到 1200px 的那一跳最明显。 */
         Control busy = Skeleton.Detail();
         body.Children.Add(busy);
-        Content = Scrolled(body);
+
+        /* ★★ 详情页<b>不能整页塞进 1560 的水槽里</b>。
+           原来头图和正文一起被封在 1560 + 头部信息列又自己封了 900 ——
+           1920 的窗口上右边有将近一半是**死白**,而背景大图本该铺在那儿。
+           这一页的结构是:头图**全宽出血**,正文另外封顶。
+           (旧 React 版就是这么分的:dt-hero 在 dt-body 外面。) */
+        Content = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = new StackPanel
+            {
+                Spacing = 0,
+                Children =
+                {
+                    _heroHost,
+                    new Border
+                    {
+                        MaxWidth = BodyMax, HorizontalAlignment = HorizontalAlignment.Stretch,
+                        Padding = new Thickness(18, 18, 18, 28), Child = body,
+                    },
+                },
+            },
+        };
 
         _ = Task.Run(async () =>
         {
             try
             {
                 var s = Nav.Session!;
-                // ★ 桌面端 with_children=true:一屏铺完所有集。
-                //   手机端才分页(实测最长的剧全量拉 1.8MB / 1841ms)。
+                /* ★★ <b>with_children = false</b>。
+                   原来是 true —— 核心层会在**同一条命令里**先拉条目、再把**全部分集**
+                   拉完才返回。实测最长的剧全量拉 1.8MB / 1841ms,
+                   于是海报、标题、简介、播放按钮这些**早就到手的东西**,
+                   要陪着分集一起等将近两秒。用户说的「详情页加载慢」就是这一下。
+
+                   现在拆成两条:头部先画(一次小请求),分集自己在后面补。
+                   这正是本仓已经写过的那条教训 —— 「不秒加载」的根因是加载结构里的屏障,
+                   不是渲染慢。首页早就是各轨道各自渲染了,详情页这里漏了。 */
                 var d = await core.EmbyItemDetail(new
                 {
                     s.server, s.token, s.user_id, s.device_id,
-                    item_id = itemId, with_children = true,
+                    item_id = itemId, with_children = false,
                 });
+                // 是剧 / 季才有分集。★ 在渲染之前就发出去,让它和布局并行跑。
+                var type = Str(d, "type_");
+                if (type is "Series" or "Season") _episodesTask = LoadEpisodes(itemId);
+
                 Dispatcher.UIThread.Post(() =>
                 {
                     body.Children.Remove(busy);
-                    Render(body, d);
+                    /* ★★ 渲染要有边界。这一页的渲染抛异常时**整个进程会当场退出** ——
+                       没有对话框、没有日志窗口,用户看到的是「点了详情,软件没了」。
+                       (刚刚就撞上了一次:一个控件同时挂两处。)
+                       Rust 版为此有 PageBoundary,这边一直没有对应的东西。 */
+                    try { Render(body, d); }
+                    catch (Exception re)
+                    {
+                        body.Children.Clear();
+                        body.Children.Add(_back);
+                        body.Children.Add(Dim($"这一页画不出来:{re.Message}"));
+                        Console.WriteLine("[详情页] 渲染失败: " + re);
+                    }
                 });
+                if (_episodesTask is not null) await FillEpisodes();
             }
             catch (Exception e)
             {
@@ -69,95 +129,72 @@ public sealed class DetailPage : PageBase
         });
     }
 
+    /// <summary>
+    /// 拉分集。<b>一次拉不完就接着拉</b>(服务端单页有上限)。
+    ///
+    /// <para>★ 不做「滚到底再拉」:剧集详情页是按季分组的,少一半集会让某一季整个空掉,
+    /// 而用户看不出那是「还没拉完」还是「这季就这么几集」。</para>
+    /// </summary>
+    private async Task<List<CardItem>> LoadEpisodes(string itemId)
+    {
+        var all = new List<CardItem>();
+        try
+        {
+            var s = Nav.Session!;
+            while (true)
+            {
+                var page = await _core.EmbySeasonEpisodes(new
+                {
+                    s.server, s.token, s.user_id, s.device_id,
+                    parent_id = itemId, start_index = all.Count, limit = 200,
+                });
+                var got = page.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array
+                    ? arr.EnumerateArray().Select(CardItem.From).ToList() : [];
+                // ★ 空页就停。只看 total 的话,服务端 total 报大了就是个死循环。
+                if (got.Count == 0) break;
+                all.AddRange(got);
+                var total = page.TryGetProperty("total", out var t) && t.ValueKind == JsonValueKind.Number
+                    ? t.GetInt32() : all.Count;
+                if (all.Count >= total) break;
+            }
+        }
+        catch { /* ★ 分集拉不动**不该让整页失败** —— 头部已经在屏幕上了 */ }
+        return all;
+    }
+
+    /// <summary>分集到了,把骨架换成真内容。</summary>
+    private async Task FillEpisodes()
+    {
+        var eps = await _episodesTask!;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _episodesHost.Content = eps.Count > 0
+                ? Episodes(eps)
+                // ★ 说清是「没有」而不是「没拉到」。空着的话和还在加载长得一样。
+                : Dim("这部剧下面没有分集(或者服务器没有返回)。");
+        });
+    }
+
     private void Render(StackPanel body, JsonElement d)
     {
         var id = Str(d, "id");
         var type = Str(d, "type_");
         var name = Str(d, "name");
         var series = Str(d, "series_name");
+        var isShow = type is "Series" or "Season";
 
-        // ★ 分集要在画头部**之前**拿到:主按钮是「继续观看 第 N 集」(得知道下一集),
-        //   元信息里的「共 N 季 · M 集」也要数它。
-        var episodes = Arr2(d, "children").Select(CardItem.From).ToList();
+        // ---- ① 头图:全宽出血 ----
+        _heroHost.Content = Hero(d, id, type, name, series);
 
-        // ---- 头部:海报 + 标题块 ----
-        var poster = new Border
+        // ---- ② 分集 ----
+        /* ★ 分集这会儿<b>还没到</b>(它是第二条命令)。先放和真内容同尺寸的骨架 ——
+           放「加载中…」三个字的话,内容到了这一块会从 20px 撑到上千像素,
+           用户正在读的简介会被顶走。 */
+        if (isShow)
         {
-            Width = 220, Height = 330, CornerRadius = new CornerRadius(12), ClipToBounds = true,
-            VerticalAlignment = VerticalAlignment.Top,
-            Background = new SolidColorBrush(Color.Parse("#1b212c")),
-        };
-        if (Bool(d, "has_primary"))
-        {
-            var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
-            poster.Child = im;
-            _ = Fill(im, Images.EmbyImageUrl(_server, id, "Primary"), 660);
+            _episodesHost.Content = Skeleton.Grid(true, 8, 214);
+            body.Children.Add(_episodesHost);
         }
-
-        var head = new StackPanel { Spacing = 10, MaxWidth = 900 };
-        head.Children.Add(new TextBlock
-        {
-            Text = string.IsNullOrEmpty(series) ? name : $"{series} · {name}",
-            FontSize = 30, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap,
-        });
-
-        var bits = new List<string>();
-        if (Num(d, "year") > 0) bits.Add(((int)Num(d, "year")).ToString());
-        if (Str(d, "official_rating") != "") bits.Add(Str(d, "official_rating"));
-        if (StatusText(Str(d, "status")) != "") bits.Add(StatusText(Str(d, "status")));
-        if (Num(d, "runtime_secs") > 0) bits.Add($"{(int)(Num(d, "runtime_secs") / 60)} 分钟");
-        /* 剧:季数 / 集数。
-           ★ 季数用**分集里真实出现过的季号**去数,不用 child_count ——
-             那个字段在 Series 上是季数、在 Season 上是集数,两种含义,信它就会写反。 */
-        if (type == "Series" && episodes.Count > 0)
-        {
-            var seasonCount = episodes.Select(e => e.SeasonNo).Distinct().Count();
-            bits.Add(seasonCount > 1 ? $"{seasonCount} 季 · {episodes.Count} 集" : $"{episodes.Count} 集");
-        }
-        if (Num(d, "rating") > 0) bits.Add($"★ {Num(d, "rating"):0.0}");
-        if (Arr(d, "genres").Count > 0) bits.Add(string.Join(" / ", Arr(d, "genres")));
-        if (bits.Count > 0) head.Children.Add(Dim(string.Join("  ·  ", bits)));
-
-        // 标语:没有就整行不画
-        var tagline = Str(d, "tagline");
-        if (tagline != "")
-        {
-            head.Children.Add(new TextBlock
-            {
-                Text = tagline, FontStyle = FontStyle.Italic, TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Color.Parse("#9aa5b8")),
-            });
-        }
-
-        head.Children.Add(PlayRow(d, id, type, episodes));
-
-        var overview = Str(d, "overview");
-        if (overview != "")
-        {
-            head.Children.Add(new TextBlock
-            {
-                Text = overview, TextWrapping = TextWrapping.Wrap, LineHeight = 22,
-                Foreground = new SolidColorBrush(Color.Parse("#c2cbdb")),
-            });
-        }
-
-        var headRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 26,
-            Children = { poster, head },
-        };
-        /* ★★ 返回按钮要**盖在背景图上**,不能压在它上面一行。
-           压在上面的话背景图是从页面中间才开始的,顶上留一条黑边 ——
-           那不叫背景图,那叫一张插图。把它搬进来,图才是从内容区顶上铺开的。 */
-        body.Children.Remove(_back);
-        _back.Margin = new Thickness(0, 0, 0, 14);
-        body.Children.Insert(0, Backdrop(d, id, new StackPanel
-        {
-            Spacing = 0, Children = { _back, headRow },
-        }));
-
-        // ---- 分集 ----
-        if (episodes.Count > 0) body.Children.Add(Episodes(episodes));
 
         // ---- 演职人员 ----
         var people = Arr2(d, "people");
@@ -230,6 +267,141 @@ public sealed class DetailPage : PageBase
         }
     }
 
+
+    /// <summary>
+    /// 头图:背景大图出血 + 海报 + 标题信息。
+    ///
+    /// <para>★★ 这一块<b>不受正文 1560 水槽约束</b>,背景图铺满整个内容区宽度;
+    /// 里面的文字和海报仍然按 1560 对齐,和下面的正文成一条线。
+    /// 都封在 1560 里的话,1920 窗口上图只占中间一条,两侧是死白 ——
+    /// 那不叫背景图,那叫一张插图。</para>
+    /// </summary>
+    private Control Hero(JsonElement d, string id, string type, string name, string series)
+    {
+        var poster = new Border
+        {
+            Width = 220, Height = 330, CornerRadius = new CornerRadius(12), ClipToBounds = true,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+        };
+        if (Bool(d, "has_primary"))
+        {
+            var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
+            poster.Child = im;
+            _ = Fill(im, Images.EmbyImageUrl(_server, id, "Primary"), 660);
+        }
+
+        var head = new StackPanel { Spacing = 12 };
+        head.Children.Add(new TextBlock
+        {
+            Text = string.IsNullOrEmpty(series) ? name : $"{series} · {name}",
+            FontSize = 34, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap,
+        });
+
+        /* ★★ 元信息做成<b>一排小片</b>,不是一串用「·」连起来的长句。
+           连成一句的问题不是不好看:它<b>不换行</b>,类型一多就被挤出可视区,
+           而且年份、评分、分级、类型是四种不同的东西,拿同一个分隔符串起来
+           等于告诉眼睛「它们是一类」。片状可以自然折行,也能一眼数清有几项。 */
+        var chips = new WrapPanel();
+        void Chip(string t)
+        {
+            if (t == "") return;
+            chips.Children.Add(new Border
+            {
+                Margin = new Thickness(0, 0, 8, 8), Padding = new Thickness(10, 4),
+                CornerRadius = new CornerRadius(6),
+                Background = new SolidColorBrush(Color.Parse("#2622293a")),
+                BorderBrush = new SolidColorBrush(Color.Parse("#333b4a")),
+                BorderThickness = new Thickness(1),
+                Child = new TextBlock { Text = t, FontSize = 12.5, Foreground = new SolidColorBrush(Color.Parse("#c2cbdb")) },
+            });
+        }
+        if (Num(d, "year") > 0) Chip(((int)Num(d, "year")).ToString());
+        if (Num(d, "rating") > 0) Chip($"★ {Num(d, "rating"):0.0}");
+        Chip(StatusText(Str(d, "status")));
+        Chip(Str(d, "official_rating"));
+        if (Num(d, "runtime_secs") > 0) Chip($"{(int)(Num(d, "runtime_secs") / 60)} 分钟");
+        /* 剧的季数用 child_count(Series 上它就是季数)。
+           ★ 集数<b>不在这儿写</b> —— 分集还没拉回来,写不出来。
+             它在下面「剧集 · N 季 · 共 M 集」那一行,那时候数据已经在手上了。
+             为了凑一个数去等分集,等于把整个头部又拖回去等那 1.8MB。 */
+        if (type == "Series" && Num(d, "child_count") > 0) Chip($"{(int)Num(d, "child_count")} 季");
+        foreach (var g in Arr(d, "genres").Take(4)) Chip(g);
+        if (chips.Children.Count > 0) head.Children.Add(chips);
+
+        // 标语:没有就整行不画(实测只有约三分之一的条目有)
+        var tagline = Str(d, "tagline");
+        if (tagline != "")
+        {
+            head.Children.Add(new TextBlock
+            {
+                Text = tagline, FontStyle = FontStyle.Italic, TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(Color.Parse("#9aa5b8")),
+            });
+        }
+
+        /* ★★ 简介放在<b>头图右列</b>,不放到正文里。
+           放正文的话头图右边那一大片是空的 —— 1920 的窗口上,
+           标题 + 几个小片只占掉左边 40%,剩下 60% 什么都没有,
+           而简介正是唯一一段「宽度越大越好读」的内容。
+           (Emby 自己的详情页也是这么排的。) */
+        var overview = Str(d, "overview");
+        if (overview != "") head.Children.Add(Overview(overview));
+
+        head.Children.Add(PlayRow(d, id, type));
+
+        var headRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 26,
+            Children = { poster, head },
+        };
+        /* ★ 返回按钮盖在背景图上,不压在它上面一行 ——
+           压在上面的话图是从页面中间才开始的,顶上留一条黑边。
+           ★★ 换父之前必须**先从原来的容器里摘掉**。Avalonia 里一个控件同时挂两处
+             不是「后者生效」,是当场抛 InvalidOperationException ——
+             而它抛在渲染里,整个进程就没了。 */
+        (_back.Parent as Panel)?.Children.Remove(_back);
+        _back.Margin = new Thickness(0, 0, 0, 14);
+        var inner = new Border
+        {
+            MaxWidth = BodyMax, HorizontalAlignment = HorizontalAlignment.Stretch,
+            Padding = new Thickness(18, 18, 18, 18),
+            Child = new StackPanel { Spacing = 0, Children = { _back, headRow } },
+        };
+        return Backdrop(d, id, inner);
+    }
+
+    /// <summary>
+    /// 简介。<b>默认收起到 4 行,长了给「展开」</b>。
+    ///
+    /// <para>★ 不收的话一段十几行的简介会把分集整个推到折线以下 ——
+    /// 而进详情页最常见的动作是找集,不是读简介。</para>
+    /// <para>★ 短简介不画「展开」:一个点了什么都不会变的按钮比没有更糟。</para>
+    /// </summary>
+    private static Control Overview(string text)
+    {
+        var tb = new TextBlock
+        {
+            Text = text, TextWrapping = TextWrapping.Wrap, LineHeight = 23,
+            MaxWidth = 860, HorizontalAlignment = HorizontalAlignment.Left,
+            Foreground = new SolidColorBrush(Color.Parse("#c2cbdb")),
+            MaxLines = 3, TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        var box = new StackPanel { Spacing = 6, Children = { tb } };
+        // 3 行 × 每行约 45 个中文字 —— 到不了这个量就不可能被截,没必要给一个点了不动的按钮
+        if (text.Length <= 135) return box;
+
+        var more = new Button { Classes = { "ghost" }, Content = "展开", HorizontalAlignment = HorizontalAlignment.Left };
+        more.Click += (_, _) =>
+        {
+            var open = (string?)more.Content == "展开";
+            tb.MaxLines = open ? 0 : 3;
+            more.Content = open ? "收起" : "展开";
+        };
+        box.Children.Add(more);
+        return box;
+    }
+
     /// <summary>
     /// 秒 → 时间点。
     ///
@@ -273,11 +445,24 @@ public sealed class DetailPage : PageBase
     {
         if (!Bool(d, "has_backdrop")) return content;
 
-        var img = new Image
+        /* ★★ 背景图用 <b>ImageBrush 当底纹</b>,不是塞一个 Image 进去。
+           Image 会<b>把自己的自然尺寸算进布局</b>:一张 16:9 的图铺到 1600 宽,
+           它就要 900 的高,于是头图被撑到近 900px —— 海报底下空出一大片,
+           而那片什么都没有。原来用 `Height = 420` 钉死能挡住这件事,
+           但那样图的下沿又会卡在海报中间。
+           画刷不参与测量:这一层有多高完全由头图内容决定,图自己去适配。 */
+        var brush = new ImageBrush
         {
-            Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" },
-            VerticalAlignment = VerticalAlignment.Top,
+            Stretch = Stretch.UniformToFill,
+            AlignmentY = AlignmentY.Top,
+        };
+        var layer = new Border
+        {
+            Opacity = 0, // 图到了再淡入 —— 直接出现会「啪」地闪一下
+            VerticalAlignment = VerticalAlignment.Stretch,
             HorizontalAlignment = HorizontalAlignment.Stretch,
+            Background = brush,
+            ClipToBounds = true,
             // 上半段实,下半段化开 —— 图和正文之间不要留一条硬边。
             OpacityMask = new LinearGradientBrush
             {
@@ -286,29 +471,37 @@ public sealed class DetailPage : PageBase
                 GradientStops =
                 {
                     new GradientStop(Colors.White, 0),
-                    new GradientStop(Colors.White, 0.35),
+                    new GradientStop(Colors.White, 0.45),
                     new GradientStop(Color.FromArgb(0, 255, 255, 255), 1),
                 },
             },
-        };
-        _ = Fill(img, Images.EmbyImageUrl(_server, id, "Backdrop"), 720);
-
-        return new Panel
-        {
-            Children =
-            {
-                new Border
+            Transitions =
+            [
+                new DoubleTransition
                 {
-                    Height = 420, VerticalAlignment = VerticalAlignment.Top,
-                    ClipToBounds = true,
-                    /* ★ 0.42:实测 0.30 在深色底上**几乎看不见**,等于白做;
-                       再往上标题就压不住图上的高光,读起来吃力。
-                       背景是氛围不是内容 —— 它不许和正文抢注意力,但也得存在。 */
-                    Opacity = 0.42, Child = img,
+                    Property = OpacityProperty,
+                    Duration = TimeSpan.FromMilliseconds(220),
+                    Easing = new CubicEaseOut(),
                 },
-                content,
-            },
+            ],
         };
+
+        _ = FillBrush(brush, layer, Images.EmbyImageUrl(_server, id, "Backdrop"), 720);
+        return new Panel { Children = { layer, content } };
+    }
+
+    /// <summary>
+    /// 取背景图 →(取到了才)淡入。
+    ///
+    /// <para>★ 0.42:实测 0.30 在深色底上<b>几乎看不见</b>,等于白做;
+    /// 再往上标题就压不住图上的高光,读起来吃力。
+    /// 背景是氛围不是内容 —— 它不许和正文抢注意力,但也得存在。</para>
+    /// </summary>
+    private static async Task FillBrush(ImageBrush brush, Visual layer, string url, int maxH)
+    {
+        var bmp = await Images.LoadAsync(Program.Core!, url, maxH);
+        if (bmp is null) return;
+        Dispatcher.UIThread.Post(() => { brush.Source = bmp; layer.Opacity = 0.42; });
     }
 
     /// <summary>
@@ -327,10 +520,13 @@ public sealed class DetailPage : PageBase
         var host = new StackPanel { Spacing = 14 };
         var gridHost = new ContentControl();
 
+        /* ★ 分集卡 214 宽(默认 256)。
+           256 的话 1920 窗口上一行只放得下 4 张,而分集列表是<b>用来找集的</b> ——
+           一屏看得到的集越多越好,单张再大也提供不了更多信息(剧照都长一样)。 */
         void ShowSeason(List<CardItem> list) => gridHost.Content = LibraryPage.Grid(
             _core, _server, list, true,
             it => Nav.Push(new PlayerPage(_core, it.Id, it.DisplayTitle, it.ResumeSecs)),
-            episodeStyle: true);
+            episodeStyle: true, width: 214);
 
         if (groups.Count <= 1)
         {
@@ -370,6 +566,19 @@ public sealed class DetailPage : PageBase
         return host;
     }
 
+    /// <summary>分集到了之后,把「第 N 季 · 第 M 集」补到主按钮上。</summary>
+    private async Task LabelPlayLater(Button play)
+    {
+        if (_episodesTask is null) return;
+        var eps = await _episodesTask;
+        if (eps.Count == 0) return;
+        var next = NextEpisode(eps);
+        var label = next.SeasonNo > 0 && next.EpisodeNo > 0
+            ? $"第 {next.SeasonNo} 季 · {next.Name}" : next.Name;
+        Dispatcher.UIThread.Post(() =>
+            play.Content = next.ResumeSecs > 0 ? $"▶ 继续观看 · {label}" : $"▶ 播放 · {label}");
+    }
+
     /// <summary>
     /// 接着该看哪一集:①看了一半的 → ②第一集没看过的 → ③第一集。
     ///
@@ -382,7 +591,7 @@ public sealed class DetailPage : PageBase
         ?? eps[0];
 
     /// <summary>播放按钮行。有进度就把时间点写在按钮上 —— 只写「播放」用户会以为要从头看。</summary>
-    private Control PlayRow(JsonElement d, string id, string type, List<CardItem> episodes)
+    private Control PlayRow(JsonElement d, string id, string type)
     {
         var resume = Num(d, "resume_secs");
         var name = Str(d, "name");
@@ -399,24 +608,31 @@ public sealed class DetailPage : PageBase
             play.Click += (_, _) => Nav.Push(new PlayerPage(_core, id, name, resume));
             row.Children.Add(play);
         }
-        else if (type == "Series" && episodes.Count > 0)
+        else if (type is "Series" or "Season")
         {
             /* ★★ 剧集详情页**必须有主按钮**。之前只有 Movie/Episode 有,
                剧的详情页上一个播放按钮都没有 —— 用户得滚到下面的分集网格里
                自己找「我看到第几集了」。那不是详情页,那是目录。
 
-               挑哪一集的顺序在 NextEpisode 里,和季条的默认季共用同一份。 */
-            var next = NextEpisode(episodes);
-            var label = next.SeasonNo > 0 && next.EpisodeNo > 0
-                ? $"第 {next.SeasonNo} 季 · {next.Name}" : next.Name;
-            var play = new Button
+               ★★ 按钮<b>不等分集就先出来</b>。分集是第二条命令,慢的时候要一两秒;
+                 为了在按钮上写出「第 3 集」而让整个按钮晚一秒出现,是本末倒置 ——
+                 用户点它的意图是「接着看」,哪一集是我们该算出来的,不是他要读的。
+                 点了之后再等那条命令(通常早就到了),把集号补在按钮上。
+               ★ 挑哪一集的顺序在 NextEpisode 里,和季条的默认季共用同一份。 */
+            var play = new Button { Classes = { "primary" }, Content = "▶ 继续观看" };
+            play.Click += async (_, _) =>
             {
-                Classes = { "primary" },
-                Content = next.ResumeSecs > 0 ? $"▶ 继续观看 · {label}" : $"▶ 播放 · {label}",
-            };
-            play.Click += (_, _) =>
+                if (_episodesTask is null) return;
+                play.IsEnabled = false;
+                var eps = await _episodesTask;
+                play.IsEnabled = true;
+                if (eps.Count == 0) { play.Content = "没有可播的分集"; return; }
+                var next = NextEpisode(eps);
                 Nav.Push(new PlayerPage(_core, next.Id, next.DisplayTitle, next.ResumeSecs));
+            };
             row.Children.Add(play);
+            // 分集到了就把集号补上去 —— 在此之前按钮已经可点了
+            _ = LabelPlayLater(play);
         }
 
         // ★ 收藏跟 Features 走 —— 侧栏的「收藏」下线了,这里还留着按钮的话,

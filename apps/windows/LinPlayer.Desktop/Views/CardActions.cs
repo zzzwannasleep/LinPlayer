@@ -17,8 +17,33 @@ namespace LinPlayer.Desktop.Views;
 /// </summary>
 public static class CardActions
 {
-    /// <summary>给一张卡挂右键菜单。<paramref name="after"/> 在动作成功后调,用来刷新界面。</summary>
+    /// <summary>
+    /// 给一张卡挂右键菜单。<paramref name="after"/> 在动作成功后调,用来刷新界面。
+    ///
+    /// <para>★★ <b>菜单是右键那一下才建的,不是造卡时就建</b>。
+    /// 原来每张卡当场 new 一个 <see cref="ContextMenu"/> 加两三个 MenuItem ——
+    /// 一个 ContextMenu 是个弹出宿主,不是一个轻量对象。
+    /// 一屏 140 张卡就是 140 个弹出宿主 + 200 多个菜单项,
+    /// 而其中<b>被打开过的是 0 个</b>。用户右键一张卡之前,这些东西一件都不需要存在。</para>
+    ///
+    /// <para>★ 建好之后留住(<c>host.ContextMenu</c>),第二次右键不再重建 ——
+    /// 菜单项里的「标记为已看 / 未看」是有状态的,每次重建会把它复位。</para>
+    /// </summary>
     public static void Attach(Control host, CoreClient core, CardItem item, Action<string>? after = null)
+    {
+        host.ContextRequested += (_, e) =>
+        {
+            if (host.ContextMenu is not null) return; // 已经建过了,让它自己弹
+            host.ContextMenu = Build(core, item, after);
+            /* ★ 这一次的右键要**自己补开一次**:ContextMenu 是在事件处理当中才挂上去的,
+               挂之前那一下已经走过「有没有菜单」的判断了。不补的话第一次右键没反应,
+               第二次才出来 —— 而用户只会认为右键坏了。 */
+            e.Handled = true;
+            host.ContextMenu.Open(host);
+        };
+    }
+
+    private static ContextMenu Build(CoreClient core, CardItem item, Action<string>? after)
     {
         var menu = new ContextMenu();
         var items = new List<Control>();
@@ -54,7 +79,7 @@ public static class CardActions
         if (Features.On("card.block")) items.Add(block);
 
         menu.ItemsSource = items;
-        host.ContextMenu = menu;
+        return menu;
     }
 
     private static async Task<bool> Run(CoreClient core, string cmd, object args, Action<string>? after)

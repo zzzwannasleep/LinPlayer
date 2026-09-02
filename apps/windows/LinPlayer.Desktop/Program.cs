@@ -18,6 +18,10 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        /* ★ 控制台按 UTF-8 输出。Windows 默认代码页是 GBK,日志里的中文会变成一串问号 ——
+           而自检脚本正是靠 grep 中文关键字读这些日志的,乱码 = 整套日志形同不存在。 */
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* 无控制台时会抛,忽略 */ }
+
         var exeDir = AppContext.BaseDirectory;
         /* ★★ 数据全在 exe 同级的 userdata/(绿色包单一数据根)。
            用户明确要求过「不喜欢到处拉屎」—— 不要往 AppData 里写。
@@ -45,6 +49,7 @@ internal static class Program
              注入「不调 Dispose」跑一遍,/Sessions/Playing/Stopped 照样上报。
              所以这一句守的是**关停顺序与落盘**,不是上报;
              别拿上报当它的验收判据(我第一版就是这么错的)。 */
+        Perf.Summary();
         Core?.Dispose();
     }
 

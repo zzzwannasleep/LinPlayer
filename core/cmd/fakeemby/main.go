@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"image/png"
 	"log"
 	"math/big"
@@ -505,9 +504,23 @@ func main() {
 	}
 }
 
+// bootAt 进程启动时刻。日志里的毫秒数以它为准。
+var bootAt = time.Now()
+
+// logged 请求日志。
+//
+// ★★ 带**毫秒时间戳和 UA**。只打路径的话,「同一条路径出现 30 次」看不出是
+// 启动时一次性打的还是每秒都在打,也分不清是哪一路发的
+// (Emby 用 LinPlayer/x,预取用 LinPlayerPreload/x,探活不带凭据)——
+// 而这两件事恰恰是排查「响应慢」时唯一要问的问题。
 func logged(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("  <- %s %s\n", r.Method, r.URL.RequestURI())
+		ua := r.Header.Get("User-Agent")
+		if ua == "" {
+			ua = "-"
+		}
+		fmt.Printf("  <- %6d ms %s %s  [%s]\n",
+			time.Since(bootAt).Milliseconds(), r.Method, r.URL.RequestURI(), ua)
 		h.ServeHTTP(w, r)
 	})
 }
@@ -524,7 +537,18 @@ func solid(id string, wide bool) image.Image {
 	}
 	img := image.NewRGBA(image.Rect(0, 0, iw, ih))
 	c := color.RGBA{uint8(h>>16)/2 + 60, uint8(h>>8)/2 + 60, uint8(h)/2 + 60, 255}
-	draw.Draw(img, img.Bounds(), &image.Uniform{c}, image.Point{}, draw.Src)
+	/* ★★ 画成**斜向渐变**,不是一整块纯色。
+	   纯色图在界面上判不出任何东西:铺满了没有、拉伸比例对不对、
+	   淡出遮罩从哪儿开始 —— 全看不出来,因为哪一块都长一样。
+	   自检截图里「背景大图」这一项一直等于没验过。
+	   有了渐变,拉歪了、只铺了一半、遮罩方向反了,一眼就能看见。 */
+	for y := 0; y < ih; y++ {
+		for x := 0; x < iw; x++ {
+			t := float64(x)/float64(iw)*0.6 + float64(y)/float64(ih)*0.4
+			f := func(v uint8) uint8 { return uint8(float64(v)*(1.15-0.7*t) + 10) }
+			img.Set(x, y, color.RGBA{f(c.R), f(c.G), f(c.B), 255})
+		}
+	}
 	return img
 }
 

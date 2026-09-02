@@ -66,6 +66,19 @@ public sealed class Card : Button
     /// <summary>标题行高。12.5px 字配 17px 行高。</summary>
     private const double LineHeight = 17;
 
+    /* ★ 手型光标和这几支画刷**全站共用一份**。
+       每张卡各 new 一个的话:Cursor 是个平台资源(每次都去问一次系统),
+       画刷则是每张卡多 6 次 Color.Parse —— 单看都不贵,乘以 140 张就是白烧的毫秒。
+       它们从头到尾都是同一个值,没有任何理由存在 140 份。 */
+    private static readonly Avalonia.Input.Cursor HandCursor =
+        new(Avalonia.Input.StandardCursorType.Hand);
+    private static readonly IBrush ArtBackdrop = new SolidColorBrush(Color.Parse("#1b212c"));
+    private static readonly IBrush PlaceholderInk = new SolidColorBrush(Color.Parse("#6b7688"));
+    private static readonly IBrush BadgeScrim = new SolidColorBrush(Color.Parse("#b0000000"));
+    private static readonly IBrush WatchedGreen = new SolidColorBrush(Color.Parse("#4caf7d"));
+    private static readonly IBrush AccentBlue = new SolidColorBrush(Color.Parse("#5b8def"));
+    private static readonly IBrush TrackScrim = new SolidColorBrush(Color.Parse("#40000000"));
+
     /// <param name="titleLines">
     /// 标题区固定几行。
     /// <para>★ 默认 2:网格里长短标题混排,不钉死行数下一行就会参差不齐。</para>
@@ -85,7 +98,7 @@ public sealed class Card : Button
             CornerRadius = new CornerRadius(10),
             ClipToBounds = true,
             Classes = { "art" },
-            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+            Background = ArtBackdrop,
             Child = new Panel
             {
                 Children =
@@ -94,7 +107,7 @@ public sealed class Card : Button
                     new TextBlock
                     {
                         Text = title ?? item.Name, FontSize = 12, Margin = new Thickness(10),
-                        Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
+                        Foreground = PlaceholderInk,
                         TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
                         HorizontalAlignment = HorizontalAlignment.Center,
@@ -120,7 +133,7 @@ public sealed class Card : Button
             {
                 Text = subtitle, FontSize = 11.5, MaxLines = 1,
                 TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
+                Foreground = PlaceholderInk,
             });
         }
 
@@ -129,7 +142,7 @@ public sealed class Card : Button
         Background = Brushes.Transparent;
         BorderThickness = new Thickness(0);
         Padding = new Thickness(0);
-        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+        Cursor = HandCursor;
         if (onOpen is not null) Click += (_, _) => onOpen(item);
 
         if (item.HasPrimary) _ = LoadArt(core, server, item, img, (int)(h * 2));
@@ -171,7 +184,7 @@ public sealed class Card : Button
                 Padding = new Thickness(7, 0), Margin = new Thickness(6, 6, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Color.Parse("#b0000000")),
+                Background = BadgeScrim,
                 Child = new TextBlock
                 {
                     Text = item.SeasonNo > 0 ? $"S{item.SeasonNo}E{item.EpisodeNo}" : $"E{item.EpisodeNo}",
@@ -190,7 +203,7 @@ public sealed class Card : Button
                 Margin = new Thickness(0, 6, 6, 0),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Color.Parse("#4caf7d")),
+                Background = WatchedGreen,
                 Child = new TextBlock
                 {
                     Text = "✓", FontSize = 12, Foreground = Brushes.White,
@@ -207,7 +220,7 @@ public sealed class Card : Button
                 Padding = new Thickness(6, 0), Margin = new Thickness(0, 6, 6, 0),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Top,
-                Background = new SolidColorBrush(Color.Parse("#5b8def")),
+                Background = AccentBlue,
                 Child = new TextBlock
                 {
                     Text = item.UnplayedCount.ToString(), FontSize = 11.5,
@@ -223,12 +236,12 @@ public sealed class Card : Button
             panel.Children.Add(new Border
             {
                 Height = 3, VerticalAlignment = VerticalAlignment.Bottom,
-                Background = new SolidColorBrush(Color.Parse("#40000000")),
+                Background = TrackScrim,
                 Child = new Border
                 {
                     Height = 3, Width = w * item.Progress,
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    Background = new SolidColorBrush(Color.Parse("#5b8def")),
+                    Background = AccentBlue,
                 },
             });
         }

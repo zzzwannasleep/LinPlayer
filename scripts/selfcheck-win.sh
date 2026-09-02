@@ -26,7 +26,12 @@ PAGE="${2:-}"
 # 第三个参数 = 起播用的视频文件。给了才验播放链路。
 CLIP="${3:-}"
 APP="$ROOT/apps/windows/LinPlayer.Desktop"
-BIN="$APP/bin/Debug/$(grep -oP "(?<=<TargetFramework>)[^<]+" "$APP/LinPlayer.Desktop.csproj")"
+# ★★ LP_CONF=Release 用发行配置跑。
+#   平时跑 Debug 是对的(快),但**量性能必须用 Release**:
+#   Debug 不做优化、方法不内联,同一段代码能慢好几倍 ——
+#   拿 Debug 的数去优化,优化的是一个用户根本跑不到的程序。
+CONF="${LP_CONF:-Debug}"
+BIN="$APP/bin/$CONF/$(grep -oP "(?<=<TargetFramework>)[^<]+" "$APP/LinPlayer.Desktop.csproj")"
 PORT=18096
 
 source "$ROOT/scripts/env.sh"
@@ -40,7 +45,7 @@ bash "$ROOT/scripts/build-core.sh" "$BIN" >/dev/null
 echo "   lpcore.dll $(stat -c%s "$BIN/lpcore.dll") 字节"
 
 echo "== 2/5 编壳 =="
-( cd "$APP" && dotnet build -v q --nologo >/dev/null )
+( cd "$APP" && dotnet build -c "$CONF" -v q --nologo >/dev/null )
 
 echo "== 3/5 起假 Emby =="
 # ★ 先杀干净。两个 LinPlayer 一起跑的时候截图会拍到上一个(旧界面),
@@ -51,7 +56,13 @@ go build -o "$ROOT/build/fakeemby.exe" ./core/cmd/fakeemby 2>/dev/null || \
 "$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" -clip "$CLIP" $GZ > "$ROOT/build/fakeemby.log" 2>&1 &
 FAKE=$!
 trap 'kill $FAKE 2>/dev/null || true' EXIT
-for _ in $(seq 30); do curl -s "http://127.0.0.1:$PORT/System/Info/Public" >/dev/null && break; sleep 0.2; done
+# ★★ 等它起来。判据必须是 **curl 的退出码**,而且要能读懂 gzip:
+#   原来写的是 `curl -s URL >/dev/null && break` —— 假服务器开着 -gzip 时
+#   curl 不发 Accept-Encoding、拿到一坨 gzip 字节,**退出码 23**(写出错),
+#   于是 break 从来没触发过:每一次自检都白等满 30 轮 ≈ 8 秒,
+#   而且日志里只是多了 30 行 /System/Info/Public,谁也不会多看一眼。
+#   我为此把这 30 行当成「应用在疯狂探活」查了半天。
+for _ in $(seq 30); do curl -s --compressed -o /dev/null "http://127.0.0.1:$PORT/System/Info/Public" && break; sleep 0.2; done
 
 # ★★ LP_FRESH=1:**不灌账号,走真的登录那条路**。
 #
@@ -146,7 +157,8 @@ export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json
 LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 # LP_SHADER=all 要把 28 档挨个挂一遍(每档要等真渲染一帧才编译),得多给点时间
-sleep $([ "${LP_SHADER:-}" = "all" ] && echo 45 || { [ -n "$CLIP" ] && echo 12 || echo 6; })
+# LP_WAIT=秒 覆盖等待时长(滚动扫描这类要跑几秒的自检用)
+sleep "${LP_WAIT:-$([ "${LP_SHADER:-}" = "all" ] && echo 45 || { [ -n "$CLIP" ] && echo 12 || echo 6; })}"
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
   -ProcName LinPlayer -Out "$ROOT/build/$SHOT.png"
 # ★ **优雅关闭**,不是 Stop-Process。

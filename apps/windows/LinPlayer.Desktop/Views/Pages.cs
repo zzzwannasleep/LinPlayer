@@ -19,6 +19,12 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>页面的公共底子:统一的水槽与封顶宽(UI_PC §3.1)。</summary>
 public abstract class PageBase : UserControl
 {
+    /// <summary>
+    /// 页面正文的滚动容器。
+    ///
+    /// <para>★ 平滑滚动<b>不在这里装</b> —— 装在 <see cref="Smooth.Install"/>(类级处理器,
+    /// 全应用一次)。装在这儿的话,自己 new ScrollViewer 的那 6 处页面就漏了。</para>
+    /// </summary>
     protected static ScrollViewer Scrolled(Control content) => new()
     {
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,

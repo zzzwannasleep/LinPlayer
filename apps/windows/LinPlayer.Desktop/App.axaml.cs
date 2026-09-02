@@ -1,3 +1,4 @@
+using System;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -11,6 +12,11 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        /* ★ 平滑滚动:全应用装一次(类级处理器)。必须在建窗口之前 ——
+           之后装的话,已经建出来的那些控件不会补上。
+           LP_NOSMOOTH=1 关掉,用来做 A/B。 */
+        if (Environment.GetEnvironmentVariable("LP_NOSMOOTH") != "1") Views.Smooth.Install();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.MainWindow = new MainWindow();

@@ -167,6 +167,7 @@ public sealed class HomePage : PageBase
     /// </summary>
     private Control Strip(List<JsonElement> items, bool wide)
     {
+        using var _ = Core.Perf.Measure($"造 {Math.Min(items.Count, 20)} 张卡");
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         foreach (var it in items.Take(20))
             panel.Children.Add(new Card(_core!, _server, CardItem.From(it), wide, _onOpen));

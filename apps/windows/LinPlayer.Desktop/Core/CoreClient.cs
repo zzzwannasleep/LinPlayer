@@ -147,7 +147,15 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
         //   而它的结果没人收 —— 事件队列会一直堆着。
         if (ct.CanBeCanceled)
             ct.Register(() => { Native.lp_cancel(seq); _pending.TryRemove(seq, out _); tcs.TrySetCanceled(); });
-        return tcs.Task;
+        return Perf.On ? Timed(command, tcs.Task) : tcs.Task;
+    }
+
+    /// <summary>LP_PERF=1 时给每条命令记一行耗时。关着的时候这个方法一次都不会被调到。</summary>
+    private static async Task<JsonElement> Timed(string command, Task<JsonElement> t)
+    {
+        var t0 = Perf.Ms;
+        try { return await t.ConfigureAwait(false); }
+        finally { Perf.Log($"命令 {command} {Perf.Ms - t0:0} ms"); }
     }
 
     private void Pump()

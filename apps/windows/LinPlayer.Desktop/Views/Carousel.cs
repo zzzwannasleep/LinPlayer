@@ -57,8 +57,13 @@ public static class Carousel
             right.IsVisible = sv.Offset.X < max - 1;
         }
 
-        left.Click += (_, _) => Glide(sv, -sv.Viewport.Width * PageFactor, Sync);
-        right.Click += (_, _) => Glide(sv, sv.Viewport.Width * PageFactor, Sync);
+        /* ★★ 翻页和滚轮**共用同一套缓动**(Smooth)。
+           这里原本有一份自己写的 12 帧 DispatcherTimer 补间 —— 手感和别处对不上,
+           而且 16ms 闹钟和刷新率对不齐,滑到一半会顿一下。
+           一个应用里有两套滚动手感,比只有一套糙的更糟。 */
+        left.Click += (_, _) => Smooth.GlideX(sv, -sv.Viewport.Width * PageFactor);
+        right.Click += (_, _) => Smooth.GlideX(sv, sv.Viewport.Width * PageFactor);
+        // 触控板的横向手势不用在这儿接:Smooth 是类级处理器,对所有 ScrollViewer 都生效。
         sv.ScrollChanged += (_, _) => Sync();
 
         /* ★ 首次要等布局算完再判:构造时 Viewport/Extent 都是 0,当场判等于两个按钮都不出现。
@@ -73,36 +78,6 @@ public static class Carousel
         sv.LayoutUpdated += First;
 
         return new Panel { Children = { sv, left, right } };
-    }
-
-    /// <summary>
-    /// 滑过去,不是跳过去。
-    ///
-    /// <para>★ 直接改 <c>Offset</c> 是一帧瞬移:一整排卡片突然换一批,
-    /// 人眼读不出「它往右移了」,只读到「内容变了」——位置感就丢了。
-    /// 190ms 的缓出刚好够看清方向,又不至于等它。</para>
-    /// </summary>
-    private static void Glide(ScrollViewer sv, double delta, Action done)
-    {
-        var from = sv.Offset.X;
-        var max = Math.Max(0, sv.Extent.Width - sv.Viewport.Width);
-        var to = Math.Clamp(from + delta, 0, max);
-        if (Math.Abs(to - from) < 1) return;
-
-        const int frames = 12;
-        var i = 0;
-        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        timer.Tick += (_, _) =>
-        {
-            i++;
-            var t = Math.Min(1.0, i / (double)frames);
-            var eased = 1 - Math.Pow(1 - t, 3); // CubicEaseOut,和样式表里那三档一个手感
-            sv.Offset = sv.Offset.WithX(from + (to - from) * eased);
-            if (t < 1) return;
-            timer.Stop();
-            done();
-        };
-        timer.Start();
     }
 
     private static Button Arrow(string glyph, HorizontalAlignment side, double artHeight)

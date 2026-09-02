@@ -159,11 +159,13 @@ public sealed class LibraryPage : PageBase
     /// 那一行要留给<b>时长</b>,那才是选集时真会看的东西。</para>
     /// </summary>
     internal static Control Grid(CoreClient core, string server, List<CardItem> items, bool wide,
-        Action<CardItem>? onOpen = null, bool episodeStyle = false)
+        Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null)
     {
+        using var _ = Core.Perf.Measure($"造 {items.Count} 张卡(网格)");
         var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
         foreach (var it in items)
             wrap.Children.Add(new Card(core, server, it, wide, onOpen ?? OpenDetail(core, server),
+                width: width,
                 subtitle: episodeStyle ? it.RuntimeLabel : null,
                 title: episodeStyle ? it.Name : null,
                 // 分集标题都是「第 N 集」,一行足够;留两行的话时长会掉到空出来的那行下面。
@@ -365,6 +367,7 @@ public sealed class LibraryGridPage : PageBase
                 // 第一页到了就把骨架撤掉。★ 换排序 / 换筛选时它不再回来 ——
                 //   那时候屏幕上已经有内容了,再闪一次骨架反而像整页重载。
                 _first.IsVisible = false;
+                using var _sp = Core.Perf.Measure($"造 {items.Count} 张卡(网格)");
                 foreach (var it in items)
                     _wrap.Children.Add(new Card(_core, _server, it, false,
                         LibraryPage.OpenDetail(_core, _server))

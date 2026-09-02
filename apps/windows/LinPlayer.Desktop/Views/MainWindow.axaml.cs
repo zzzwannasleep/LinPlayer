@@ -2,7 +2,9 @@ using System;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Layout;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -10,6 +12,7 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using LinPlayer.Core;
+using LinPlayer.Desktop.Core;
 
 namespace LinPlayer.Desktop.Views;
 
@@ -19,6 +22,7 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        using var _ = Perf.Measure("MainWindow 构造");
         InitializeComponent();
 
         var drag = this.FindControl<Border>("DragArea")!;
@@ -87,7 +91,14 @@ public partial class MainWindow : Window
            由被截的窗口**自己置顶**才是稳的。只在自检时开,不影响产品行为。 */
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK") == "1") Topmost = true;
 
-        Opened += async (_, _) => await BootAsync();
+        // 掉帧探针:只有 LP_PERF=1 时才真的挂上去
+        Perf.WatchJank();
+        Opened += async (_, _) =>
+        {
+            Perf.Log("窗口 Opened");
+            await BootAsync();
+            Perf.Log("BootAsync 结束");
+        };
     }
 
     /// <summary>侧栏入口 → 功能开关 id。改开关去 <see cref="Features"/>,不是这儿。</summary>
@@ -244,14 +255,101 @@ public partial class MainWindow : Window
     /// </summary>
     private void SelfCheckScroll()
     {
-        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_SCROLL") is not { } raw ||
-            !double.TryParse(raw, out var y)) return;
+        var raw0 = Environment.GetEnvironmentVariable("LP_SELFCHECK_SCROLL");
+        // LP_SCROLL=sweep → 连续拨滚轮,独立采样每一帧的位置。见 SelfCheckScrollSweep。
+        if (raw0 == "sweep") { SelfCheckScrollSweep(); return; }
+        if (raw0 is not { } raw || !double.TryParse(raw, out var y)) return;
         _ = Task.Delay(3000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
         {
             var sv = this.GetVisualDescendants().OfType<ScrollViewer>()
                 .FirstOrDefault(v => v.Extent.Height > v.Viewport.Height);
             if (sv is not null) sv.Offset = sv.Offset.WithY(y);
         }));
+    }
+
+    /// <summary>
+    /// 自检:滚动扫描。每 140ms 拨一格滚轮,同时<b>另起一路每帧采样 Offset</b>。
+    ///
+    /// <para>★★ 这是「滑得顺不顺」唯一的客观判据。
+    /// 顺 = 两格滚轮之间有<b>一串中间位置</b>;跳 = 一格一个值,中间什么都没有。
+    /// 帧率是满的、也没掉帧,但内容一格一格瞬移 —— 那正是用户说的「卡」。
+    /// 光看截图和帧率永远看不出这件事。</para>
+    ///
+    /// <para>★ 采样是**独立的一路**,不是动画自己汇报的。
+    /// 让动画自己打日志的话,它只会证明「我被调用了」。</para>
+    /// </summary>
+    private void SelfCheckScrollSweep()
+    {
+        _ = Task.Delay(2500).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var sv = this.GetVisualDescendants().OfType<ScrollViewer>()
+                .FirstOrDefault(v => v.Extent.Height > v.Viewport.Height + 1);
+            if (sv is null) { Console.WriteLine("[滚动扫描] 没找到能滚的 ScrollViewer"); return; }
+
+            var samples = new List<double>();
+            void Sample(TimeSpan _)
+            {
+                samples.Add(Math.Round(sv.Offset.Y, 1));
+                if (samples.Count < 220 && TopLevel.GetTopLevel(sv) is { } t) t.RequestAnimationFrame(Sample);
+                else Report();
+            }
+            var reported = false;
+            void Report()
+            {
+                if (reported) return;
+                reported = true;
+                var distinct = samples.Distinct().Count();
+                // 相邻两帧的位移:越均匀越顺。一格一跳的话这里全是 0 和一个大数
+                var steps = samples.Zip(samples.Skip(1), (a, b) => Math.Abs(b - a)).Where(v => v > 0.05).ToList();
+                Console.WriteLine($"[滚动扫描] 采样 {samples.Count} 帧,出现 {distinct} 个不同位置," +
+                                  $"移动帧 {steps.Count},每帧位移 中位 {Med(steps):0.0}px 最大 {(steps.Count > 0 ? steps.Max() : 0):0.0}px");
+                Console.WriteLine($"[滚动扫描] 轨迹 {string.Join(" ", samples.Where((_, i) => i % 2 == 0).Take(60))}");
+            }
+            static double Med(List<double> v)
+            {
+                if (v.Count == 0) return 0;
+                var s = v.OrderBy(x => x).ToList();
+                return s[s.Count / 2];
+            }
+
+            TopLevel.GetTopLevel(sv)?.RequestAnimationFrame(Sample);
+
+            // 每 140ms 一格,拨 8 格。间隔要比一次缓动(约 130ms)略长 ——
+            // 太密的话几格叠成一次长滑,看不出「一格滚轮长什么样」。
+            var n = 0;
+            var tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(140) };
+            tick.Tick += (_, _) =>
+            {
+                Wheel(sv, -1);
+                if (++n >= 8) tick.Stop();
+            };
+            tick.Start();
+        }));
+    }
+
+    /// <summary>
+    /// 自检:往一个控件上发一个<b>真的</b>滚轮事件。
+    ///
+    /// <para>★★ 不能直接调 <c>Smooth</c> 里的方法。那样发出去的这一格<b>绕过了事件路由</b>,
+    /// 于是「平滑滚动到底有没有挂上去」「隧道阶段有没有把默认那套拦住」这两件事
+    /// 一次都没被验过 —— 而 A/B 对比里关掉开关的那一边照样是平滑的,
+    /// 对出来的两组数没有任何意义。我第一版就是这么错的。</para>
+    /// </summary>
+    private static void Wheel(ScrollViewer sv, double deltaY)
+    {
+        /* ★★ 必须发给 <b>ScrollContentPresenter</b>,不是 ScrollViewer 自己。
+           Avalonia 的滚轮处理挂在 presenter 上,而路由事件是从 Source 往上冒的 ——
+           把 Source 设成 ScrollViewer,presenter 在它下面,**永远收不到**。
+           表现是「发了 8 格滚轮,位置一动不动」,而且不报任何错。 */
+        Control target = sv.GetVisualDescendants().OfType<ScrollContentPresenter>().FirstOrDefault() is { } pr ? pr : sv;
+        var pos = new Point(target.Bounds.Width / 2, target.Bounds.Height / 2);
+        var args = new PointerWheelEventArgs(
+            target, new Pointer(0, PointerType.Mouse, true), target, pos,
+            (ulong)Environment.TickCount64,
+            new PointerPointProperties(RawInputModifiers.None, PointerUpdateKind.Other),
+            KeyModifiers.None, new Vector(0, deltaY))
+        { RoutedEvent = InputElement.PointerWheelChangedEvent };
+        target.RaiseEvent(args);
     }
 
     /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>
@@ -281,7 +379,11 @@ public partial class MainWindow : Window
     private void Emby(string name, Func<Control> make) =>
         Nav.Root(Nav.Session is null ? new NoSessionPage(name) : make());
 
-    private void Show(Control page) => this.FindControl<ContentControl>("PageHost")!.Content = page;
+    private void Show(Control page)
+    {
+        if (Perf.On) Perf.Log($"换页 → {page.GetType().Name}");
+        this.FindControl<ContentControl>("PageHost")!.Content = page;
+    }
 
     /// <summary>首页。点卡片进详情 —— 库卡进网格,条目卡进详情(判断在 OpenDetail 一处)。</summary>
     private Control Home() =>
