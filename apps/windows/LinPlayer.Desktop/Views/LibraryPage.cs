@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Threading;
 using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
@@ -12,13 +13,32 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>媒体库总览:一屏列出所有库,点进去是网格。</summary>
 public sealed class LibraryPage : PageBase
 {
+    /// <summary>库卡的宽度。★ 比条目卡大一圈是故意的:一台服务器通常只有三五个库,
+    /// 用条目卡的尺寸画出来就是「屏幕上方三张小卡 + 下面一大片空白」。</summary>
+    private const double ShelfWidth = 320;
+
     public LibraryPage(CoreClient core)
     {
         var rows = new StackPanel { Spacing = 14 };
+        var summary = Dim("");
         rows.Children.Add(H1("媒体库"));
-        var busy = Dim("加载中…");
+        rows.Children.Add(summary);
+        Control busy = Skeleton.Grid(true, 4, ShelfWidth);
         rows.Children.Add(busy);
         Content = Scrolled(rows);
+
+        /* ★★ Swap **只能在 UI 线程上调**。
+           控件必须在 UI 线程创建 —— 在 Task.Run 里 new 一批 Card 出来,
+           表现不是抛异常给你看,而是**整页卡在骨架屏上**:
+           异常在后台线程里被 catch 吞掉,页面就那么一直呼吸下去。
+           2026-09-02 真栽了一次,只有真机截图才看得出来(编译全绿)。 */
+        void Swap(Control with)
+        {
+            var at = rows.Children.IndexOf(busy);
+            if (at < 0) return;
+            rows.Children[at] = with;
+            busy = with;
+        }
 
         _ = Task.Run(async () =>
         {
@@ -35,27 +55,119 @@ public sealed class LibraryPage : PageBase
                     ? views.EnumerateArray().Select(CardItem.From).ToList() : [];
                 Dispatcher.UIThread.Post(() =>
                 {
-                    rows.Children.Remove(busy);
-                    if (items.Count == 0) { rows.Children.Add(Dim("这台服务器上没有媒体库。")); return; }
-                    rows.Children.Add(Grid(core, s.server, items, true));
+                    if (items.Count == 0) { Swap(Dim("这台服务器上没有媒体库。")); return; }
+
+                    var wrap = new WrapPanel();
+                    var subs = new List<TextBlock>();
+                    foreach (var it in items)
+                    {
+                        /* 副标题先留一个占位,数目回来了再填。
+                           ★ 等它一起出现的话整块网格要多压一轮往返 ——
+                             为了一行小字让整页晚半秒,不划算。 */
+                        var sub = new TextBlock
+                        {
+                            Text = "", FontSize = 11.5, MaxLines = 1,
+                            Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
+                        };
+                        subs.Add(sub);
+                        wrap.Children.Add(Shelf(core, s.server, it, sub));
+                    }
+                    Swap(wrap);
+                    _ = FillCounts(core, items, subs);
+                    _ = FillSummary(core, summary);
                 });
             }
             catch (Exception e)
             {
-                Dispatcher.UIThread.Post(() => busy.Text = $"加载失败:{Advice(e)}");
+                var why = Advice(e);
+                Dispatcher.UIThread.Post(() => Swap(Dim($"加载失败:{why}")));
             }
         });
     }
 
+    /// <summary>
+    /// 一张库卡。用 <see cref="Card"/> 的横版版式,但副标题是**外面塞进来的一个活控件** ——
+    /// 项目数要再打一次服务器才知道,不能让整块网格等它。
+    /// </summary>
+    private static Control Shelf(CoreClient core, string server, CardItem it, TextBlock sub)
+    {
+        // titleLines: 1 —— 库名从来只有一行,留两行的话「140 项」会掉到空出来的那行下面。
+        var card = new Card(core, server, it, true, OpenDetail(core, server), ShelfWidth, titleLines: 1)
+        {
+            Margin = new Thickness(0, 0, 16, 18),
+        };
+        // Card 的副标题是静态字符串,这里要一个之后能改的 —— 直接挂到标题块下面。
+        if (card.Content is StackPanel sp && sp.Children.Count > 1 &&
+            sp.Children[1] is StackPanel caption) caption.Children.Add(sub);
+        return card;
+    }
+
+    /// <summary>
+    /// 各库的项目数。
+    ///
+    /// <para>★ 一库一次请求(<c>limit=1</c> 只要总数,不要条目)。库通常只有三五个,
+    /// 并发发出去,慢的那个不挡快的。</para>
+    /// <para>★ **拿不到就留空**,不写「? 项」也不报错 —— 有的 fork 不给总数,
+    /// 而项目数是锦上添花,不该让媒体库页整个变红。</para>
+    /// </summary>
+    private static async Task FillCounts(CoreClient core, List<CardItem> items, List<TextBlock> subs)
+    {
+        var s = Nav.Session!;
+        await Task.WhenAll(items.Select(async (it, i) =>
+        {
+            try
+            {
+                var page = await core.EmbyListItemsPage(new
+                {
+                    s.server, s.token, s.user_id, s.device_id,
+                    parent_id = it.Id, query = new { limit = 1 },
+                });
+                if (!page.TryGetProperty("total", out var t) || t.ValueKind != JsonValueKind.Number) return;
+                var n = t.GetInt32();
+                Dispatcher.UIThread.Post(() => subs[i].Text = n > 0 ? $"{n} 项" : "空的");
+            }
+            catch { /* 拿不到就留空 */ }
+        }));
+    }
+
+    /// <summary>顶上那行「128 部电影 · 42 部剧 · 1580 集」。★ 这个端点在某些 fork 上是 404。</summary>
+    private static async Task FillSummary(CoreClient core, TextBlock target)
+    {
+        try
+        {
+            var s = Nav.Session!;
+            var c = await core.EmbyCounts(new { s.server, s.token, s.user_id, s.device_id });
+            long N(string k) => c.ValueKind == JsonValueKind.Object && c.TryGetProperty(k, out var v)
+                && v.ValueKind == JsonValueKind.Number ? v.GetInt64() : 0;
+            var bits = new List<string>();
+            if (N("movie") > 0) bits.Add($"{N("movie")} 部电影");
+            if (N("series") > 0) bits.Add($"{N("series")} 部剧");
+            if (N("episode") > 0) bits.Add($"{N("episode")} 集");
+            if (bits.Count > 0)
+                Dispatcher.UIThread.Post(() => target.Text = string.Join("  ·  ", bits));
+        }
+        catch { /* 统计条是锦上添花 */ }
+    }
+
     internal static string Advice(Exception e) => e is CoreException c ? c.Advice : e.Message;
 
-    /// <summary>自动铺满的网格。<b>卡自己有固定宽</b>,所以用 WrapPanel 就够,不必算列数。</summary>
+    /// <summary>
+    /// 自动铺满的网格。<b>卡自己有固定宽</b>,所以用 WrapPanel 就够,不必算列数。
+    ///
+    /// <para><paramref name="episodeStyle"/>:分集版式。剧集详情页里剧名是已知的,
+    /// 每张卡再写一遍「某部剧 · 第 3 集」等于把仅有的两行标题位浪费掉一行半 ——
+    /// 那一行要留给<b>时长</b>,那才是选集时真会看的东西。</para>
+    /// </summary>
     internal static Control Grid(CoreClient core, string server, List<CardItem> items, bool wide,
-        Action<CardItem>? onOpen = null)
+        Action<CardItem>? onOpen = null, bool episodeStyle = false)
     {
         var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
         foreach (var it in items)
-            wrap.Children.Add(new Card(core, server, it, wide, onOpen ?? OpenDetail(core, server))
+            wrap.Children.Add(new Card(core, server, it, wide, onOpen ?? OpenDetail(core, server),
+                subtitle: episodeStyle ? it.RuntimeLabel : null,
+                title: episodeStyle ? it.Name : null,
+                // 分集标题都是「第 N 集」,一行足够;留两行的话时长会掉到空出来的那行下面。
+                titleLines: episodeStyle ? 1 : 2)
             {
                 Margin = new Thickness(0, 0, 14, 16),
             });
@@ -100,6 +212,8 @@ public sealed class LibraryGridPage : PageBase
     private readonly string _server, _parentId;
     private readonly WrapPanel _wrap = new();
     private readonly TextBlock _status = new() { Classes = { "dim" } };
+    /// <summary>首屏骨架。★ 第一页回来之前这块是空的,不垫的话进库先见一片黑。</summary>
+    private readonly ContentControl _first = new() { Content = Skeleton.Grid(false, 18) };
     private readonly ComboBox _sort = new() { Width = 150, MinHeight = 34 };
     private readonly ComboBox _genre = new() { Width = 150, MinHeight = 34 };
     private readonly ComboBox _year = new() { Width = 120, MinHeight = 34 };
@@ -133,7 +247,7 @@ public sealed class LibraryGridPage : PageBase
             Orientation = Orientation.Horizontal, Spacing = 10,
             Children = { _sort, _genre, _year },
         };
-        var body = new StackPanel { Spacing = 14, Children = { head, bar, _wrap, _status } };
+        var body = new StackPanel { Spacing = 14, Children = { head, bar, _first, _wrap, _status } };
 
         var sv = new ScrollViewer
         {
@@ -248,6 +362,9 @@ public sealed class LibraryGridPage : PageBase
 
             Dispatcher.UIThread.Post(() =>
             {
+                // 第一页到了就把骨架撤掉。★ 换排序 / 换筛选时它不再回来 ——
+                //   那时候屏幕上已经有内容了,再闪一次骨架反而像整页重载。
+                _first.IsVisible = false;
                 foreach (var it in items)
                     _wrap.Children.Add(new Card(_core, _server, it, false,
                         LibraryPage.OpenDetail(_core, _server))
@@ -262,7 +379,13 @@ public sealed class LibraryGridPage : PageBase
         }
         catch (Exception e)
         {
-            Dispatcher.UIThread.Post(() => _status.Text = $"加载失败:{LibraryPage.Advice(e)}");
+            Dispatcher.UIThread.Post(() =>
+            {
+                // ★ 失败时骨架也要撤:留着的话「加载失败」那行字底下还有一片在呼吸,
+                //   用户会以为它还在重试。
+                _first.IsVisible = false;
+                _status.Text = $"加载失败:{LibraryPage.Advice(e)}";
+            });
         }
         finally { _busy = false; }
     }

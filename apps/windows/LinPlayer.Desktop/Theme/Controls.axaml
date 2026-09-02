@@ -97,6 +97,26 @@
     <Setter Property="MinHeight" Value="40" />
   </Style>
 
+  <!--
+    输入框的悬停 / 聚焦态。
+    ★★ 不写这两条的话走的是 Fluent 默认:聚焦时**底色刷白、描一圈亮白边**。
+       在一整套深色皮里那是一块刺眼的白斑,而且它和 .field 定的圆角/底色对不上。
+       焦点必须看得见(键盘用户全靠它),但看得见 ≠ 反差拉满。
+    ★ PART_BorderElement 是 Fluent TextBox 模板里那层边框的名字 ——
+      名字对不上时样式**不报错**,只是静默不生效。
+  -->
+  <Style Selector="TextBox.field:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineStrong}" />
+  </Style>
+  <Style Selector="TextBox.field:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+  <Style Selector="TextBox.field:focus">
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+  </Style>
+
   <!-- 卡片 -->
   <Style Selector="Border.card">
     <Setter Property="Background" Value="{DynamicResource Panel}" />
@@ -116,5 +136,135 @@
   <Style Selector="TextBlock.dim">
     <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
     <Setter Property="FontSize" Value="13" />
+  </Style>
+
+  <!-- ══════════════════ 动效(UI_PC §5)══════════════════
+    ★★ 时长档位只有三档,别每处各拍一个数:
+         120ms 微反馈(底色/前景)· 170ms 元素位移(卡片抬起)· 220ms 页面转场。
+       混着写的表现不是「不好看」,是**节奏乱** —— 同一次点击里
+       按钮 90ms 变色、卡片 400ms 缩放,人眼会读成「卡了一下」。
+    ★ 缓动统一 CubicEaseOut:入场快出场慢,这是「跟手」的来源。
+  -->
+
+  <!-- 媒体卡:悬停抬起。★ RenderTransformOrigin 必须给,
+       默认是左上角 —— 缩放时整张卡会往右下角漂,看着像在抖。 -->
+  <Style Selector="Button.media">
+    <Setter Property="RenderTransformOrigin" Value="50%,50%" />
+    <Setter Property="RenderTransform" Value="scale(1)" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <TransformOperationsTransition Property="RenderTransform"
+                                       Duration="0:0:0.17" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.media:pointerover">
+    <Setter Property="RenderTransform" Value="scale(1.045)" />
+  </Style>
+  <Style Selector="Button.media:pressed">
+    <Setter Property="RenderTransform" Value="scale(0.99)" />
+  </Style>
+
+  <!-- 卡面:悬停时描一圈强调色 + 压暗底色,告诉用户「这一张是当前的」。
+       ★ 光靠放大是不够的:一行卡挨在一起时,放大 4% 在截图上几乎读不出来。 -->
+  <Style Selector="Button.media /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.media Border.art">
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.media:pointerover Border.art">
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <!-- 封面淡入:图到了再显。★ 直接塞上去会「啪」地跳一下,一屏几十张同时跳就是闪屏。 -->
+  <Style Selector="Image.art">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.22" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <!-- 按钮微反馈 -->
+  <Style Selector="Button.primary /template/ ContentPresenter">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+    <Setter Property="Opacity" Value="0.86" />
+  </Style>
+  <Style Selector="Button.ghost /template/ ContentPresenter">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.ghost:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource LineStrong}" />
+  </Style>
+
+  <Style Selector="RadioButton.nav /template/ Border#root">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <!-- 骨架屏。
+    ★★ 「加载中…」那三个字**不占位**:内容回来的一瞬间页面高度从 20px 跳到 800px,
+       滚动条、已经在看的那一段全被顶走。骨架要和真内容**同尺寸**,
+       它的价值一半在「有反馈」,另一半在「不跳版」。 -->
+  <Style Selector="Border.skel">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Style.Animations>
+      <Animation Duration="0:0:1.3" IterationCount="INFINITE" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="0.40" /></KeyFrame>
+        <KeyFrame Cue="50%"><Setter Property="Opacity" Value="0.85" /></KeyFrame>
+        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.40" /></KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- 季/筛选之类的小胶囊 -->
+  <Style Selector="Button.chip">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Padding" Value="14,7" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.chip:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Line}" />
+  </Style>
+  <Style Selector="Button.chip.on">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
+    <Setter Property="Foreground" Value="{DynamicResource AccentInk}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.chip.on:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
   </Style>
 </Styles>

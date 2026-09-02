@@ -82,7 +82,21 @@
 
       <!-- 内容区 -->
       <Panel Grid.Column="1">
-        <ContentControl Name="PageHost" />
+        <!--
+          换页淡入淡出。
+          ★★ 用 TransitioningContentControl,不是自己在 Show() 里写动画 ——
+             写在代码里的话每一个换页入口(侧栏 / Nav.Push / Nav.Back / 自检跳转)
+             都得各记得动一次,漏掉的那个入口就是「只有这条路没有转场」。
+          ★ 180ms:再长会挡住内容(用户等的是页面不是动画),
+            再短就看不出来,等于白做。
+          ★ 只淡不滑:滑动要选方向,而「返回」和「进入」的方向应当相反 ——
+            这个栈没有方向信息,硬滑就会出现返回时也往左滑的错觉。
+        -->
+        <TransitioningContentControl Name="PageHost">
+          <TransitioningContentControl.PageTransition>
+            <CrossFade Duration="0:0:0.18" />
+          </TransitioningContentControl.PageTransition>
+        </TransitioningContentControl>
       </Panel>
     </Grid>
   </Grid>

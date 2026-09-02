@@ -181,7 +181,7 @@ func main() {
 	// 榜单封面:和 Emby 的封面不同源,走的是**静态白名单**那条路
 	mux.HandleFunc("/rankimg/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		_ = png.Encode(w, solid(strings.TrimPrefix(r.URL.Path, "/rankimg/")))
+		_ = png.Encode(w, solid(strings.TrimPrefix(r.URL.Path, "/rankimg/"), false))
 	})
 
 	// 探测(登录前,「测试连接」用)
@@ -237,17 +237,58 @@ func main() {
 			})
 		// 剧的分集:/Users/{uid}/Items?ParentId=s1&IncludeItemTypes=Episode
 		case strings.Contains(p, "/Items") && r.URL.Query().Get("IncludeItemTypes") == "Episode":
+			/* ★★ **两季**,不是一季。
+			   只造一季的话「按季分组」这个功能在自检里永远看不出对错 ——
+			   分组代码就算把季号写死成 1 也照样绿。假服务器只能造出你想到的形状,
+			   想到了就得造(2026-09-02 做季分组时补的)。 */
 			eps := []map[string]any{}
-			for i := 1; i <= 12; i++ {
-				e := item(fmt.Sprintf("s1e%d", i), fmt.Sprintf("第 %d 集", i), "Episode")
-				e["SeriesName"] = "某部剧"
-				e["SeriesId"] = "s1"
-				e["IndexNumber"] = i
-				e["ParentIndexNumber"] = 1
-				e["RunTimeTicks"] = 14000000000
-				eps = append(eps, e)
+			for _, sea := range []struct{ No, Count int }{{1, 12}, {2, 8}} {
+				for i := 1; i <= sea.Count; i++ {
+					e := item(fmt.Sprintf("s%de%d", sea.No, i),
+						fmt.Sprintf("第 %d 集", i), "Episode")
+					e["SeriesName"] = "某部剧"
+					e["SeriesId"] = "s1"
+					e["IndexNumber"] = i
+					e["ParentIndexNumber"] = sea.No
+					e["RunTimeTicks"] = 14000000000
+					// 第 1 季前两集已看,第 3 集看了一半 —— 「继续观看 · 第 3 集」
+					// 挑集顺序要有真实数据才验得到。
+					switch {
+					case sea.No == 1 && i <= 2:
+						e["UserData"] = map[string]any{"Played": true}
+					case sea.No == 1 && i == 3:
+						e["UserData"] = map[string]any{"PlaybackPositionTicks": 5000000000}
+					}
+					eps = append(eps, e)
+				}
 			}
 			writeJSON(w, page(eps...))
+
+		/* 搜索:/Users/{uid}/Items?SearchTerm=…
+		   ★★ **真的按词过滤**,不是回一把固定结果。
+		     不过滤的话「搜不到」那半永远出不来 —— 而空结果页恰恰是最容易
+		     做成一片黑的那一页。想验它,假服务器就得有能搜不到的输入。 */
+		case r.URL.Query().Get("SearchTerm") != "":
+			term := r.URL.Query().Get("SearchTerm")
+			catalog := []struct{ ID, Name, Type string }{
+				{"mv-1", "某部电影", "Movie"},
+				{"s1", "某部剧", "Series"},
+				{"mv-2", "另一部电影", "Movie"},
+				{"s1e3", "某部剧 第 3 集", "Episode"},
+			}
+			hits := []map[string]any{}
+			for _, e := range catalog {
+				if !strings.Contains(e.Name, term) {
+					continue
+				}
+				// ★ 关着「包括分集」时前端会传 IncludeItemTypes=Movie,Series —— 要认。
+				if it := r.URL.Query().Get("IncludeItemTypes"); it != "" &&
+					!strings.Contains(it, e.Type) {
+					continue
+				}
+				hits = append(hits, item(e.ID, e.Name, e.Type))
+			}
+			writeJSON(w, page(hits...))
 
 		// 详情:/Users/{uid}/Items/{itemId}(尾段是具体 id,不是 Resume/Latest/Counts)
 		case detailID(p) != "":
@@ -274,7 +315,10 @@ func main() {
 				d["Overview"] = "自检用剧集简介。"
 				d["ProductionYear"] = 2023
 				d["Status"] = "Continuing"
-				d["ChildCount"] = 12
+				d["ChildCount"] = 2 // Series 的 ChildCount 是**季数**,不是集数
+				d["Genres"] = []string{"剧情", "悬疑"}
+				d["CommunityRating"] = 8.9
+				d["BackdropImageTags"] = []string{"tag-s1-bd"}
 				d["UserData"] = map[string]any{"IsFavorite": true}
 				writeJSON(w, d)
 				return
@@ -287,6 +331,9 @@ func main() {
 			d["RunTimeTicks"] = 72000000000
 			d["OfficialRating"] = "PG-13"
 			d["Taglines"] = []string{"一句自检用的标语"}
+			// ★ 背景图挂在 **BackdropImageTags 数组**里,不在 ImageTags 里。
+			//   假服务器不造这个形状,详情页的大图就永远验不到。
+			d["BackdropImageTags"] = []string{"tag-bd"}
 			d["UserData"] = map[string]any{"PlaybackPositionTicks": 12000000000, "IsFavorite": false}
 			d["People"] = []any{
 				map[string]any{"Id": "p1", "Name": "某演员", "Role": "主角", "Type": "Actor",
@@ -328,7 +375,10 @@ func main() {
 		switch {
 		case len(parts) >= 3 && parts[2] == "Images":
 			w.Header().Set("Content-Type", "image/png")
-			_ = png.Encode(w, solid(parts[1]))
+			// ★ Backdrop 要出**宽图**(16:9)。都出 2:3 的话详情页的大图
+			//   会被 UniformToFill 裁得只剩中间一条,看不出比例对不对。
+			wide := len(parts) >= 4 && strings.HasPrefix(parts[3], "Backdrop")
+			_ = png.Encode(w, solid(parts[1], wide))
 
 		// 起播:PlaybackInfo → DirectStreamUrl。
 		//
@@ -463,12 +513,16 @@ func logged(h http.Handler) http.Handler {
 }
 
 // solid 按 id 摊出一种颜色,同 id 必得同色。
-func solid(id string) image.Image {
+func solid(id string, wide bool) image.Image {
 	var h uint32 = 2166136261
 	for _, c := range []byte(id) {
 		h = (h ^ uint32(c)) * 16777619
 	}
-	img := image.NewRGBA(image.Rect(0, 0, 64, 96))
+	iw, ih := 64, 96
+	if wide {
+		iw, ih = 192, 108
+	}
+	img := image.NewRGBA(image.Rect(0, 0, iw, ih))
 	c := color.RGBA{uint8(h>>16)/2 + 60, uint8(h>>8)/2 + 60, uint8(h)/2 + 60, 255}
 	draw.Draw(img, img.Bounds(), &image.Uniform{c}, image.Point{}, draw.Src)
 	return img

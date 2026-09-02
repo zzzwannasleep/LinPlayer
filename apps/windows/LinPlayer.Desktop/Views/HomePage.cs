@@ -28,10 +28,18 @@ public sealed class HomePage : PageBase
     private CoreClient? _core;
     private string _server = "";
 
-    public HomePage(CoreClient? core, Action<CardItem>? onOpen = null)
+    /// <param name="title">页头。给当前服务器名 —— 见下面那段注释。</param>
+    public HomePage(CoreClient? core, Action<CardItem>? onOpen = null, string title = "首页")
     {
         _core = core;
         _onOpen = onOpen;
+        /* ★ 首页也要有页头:媒体库 / 搜索都有 H1,唯独首页没有,三页来回切的时候
+           首页会显得「上面缺了一块」。
+           ★ 写**服务器名**而不是干写「首页」:这是个多服务器播放器,
+             「我现在在看哪台」是真信息;「首页」两个字侧栏已经说过一遍了。
+           ★ 名字由外面传进来,不在这儿再拉一次账号表 —— 壳里已经拉过了
+             (UpdateServerChip),再拉一次就是每次进首页多一次往返。 */
+        _rows.Children.Add(H1(title));
         Content = Scrolled(_rows);
         if (core is not null) _ = LoadAsync(core);
     }
@@ -122,35 +130,32 @@ public sealed class HomePage : PageBase
 
     private async Task Track(string title, Func<Task<List<JsonElement>>> load, bool wide)
     {
+        /* ★★ 占位用**骨架**,不是「加载中…」。
+           三个字只有 20px 高,内容一回来这一行从 20px 撑到 280px,
+           下面几条轨道全被顶下去 —— 用户正看着的东西会跳走。
+           骨架和真卡同尺寸,换上去是「填色」而不是「撑开」。 */
         var host = new StackPanel { Spacing = 10 };
-        var body = new TextBlock { Classes = { "dim" }, Text = "加载中…" };
+        Control body = Skeleton.Strip(wide);
         host.Children.Add(H2(title));
         host.Children.Add(body);
         AddRow(host);
 
+        void Swap(Control with) => Dispatcher.UIThread.Post(() =>
+        {
+            var at = host.Children.IndexOf(body);
+            if (at < 0) return;
+            host.Children[at] = with;
+            body = with;
+        });
+
         try
         {
             var items = await load();
-            Dispatcher.UIThread.Post(() =>
-            {
-                host.Children.Remove(body);
-                if (items.Count == 0)
-                {
-                    // ★ 空态要说清「为什么空」,不是干放一句「暂无数据」(§6.4)
-                    host.Children.Add(Dim($"这台服务器上没有「{title}」的内容。"));
-                    return;
-                }
-                host.Children.Add(Strip(items, wide));
-            });
+            // ★ 空态要说清「为什么空」,不是干放一句「暂无数据」(§6.4)
+            Swap(items.Count == 0 ? Dim($"这台服务器上没有「{title}」的内容。") : Strip(items, wide));
         }
-        catch (CoreException e)
-        {
-            Dispatcher.UIThread.Post(() => body.Text = $"{title}加载失败:{e.Advice}");
-        }
-        catch (Exception e)
-        {
-            Dispatcher.UIThread.Post(() => body.Text = $"{title}加载失败:{e.Message}");
-        }
+        catch (CoreException e) { Swap(Dim($"{title}加载失败:{e.Advice}")); }
+        catch (Exception e) { Swap(Dim($"{title}加载失败:{e.Message}")); }
     }
 
     /// <summary>横向轨道。宽卡 240×135(16:9),窄卡 150×225(2:3)—— UI_PC §3.2。</summary>

@@ -161,7 +161,12 @@ public partial class MainWindow : Window
         switch (want.Split(':')[0])
         {
             case "library": this.FindControl<RadioButton>("NavLibrary")!.IsChecked = true; break;
-            case "search": this.FindControl<RadioButton>("NavSearch")!.IsChecked = true; break;
+            case "search":
+                this.FindControl<RadioButton>("NavSearch")!.IsChecked = true;
+                // search:某 → 填词并让它自己搜一遍。空态和结果态是**两张不同的页**,
+                // 只截空态等于结果那半从来没被看过。
+                if (arg.Length > 0 && Nav.Current is SearchPage sp2) sp2.SelfCheckQuery(arg);
+                break;
             case "favorites": this.FindControl<RadioButton>("NavFavorites")!.IsChecked = true; break;
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
             case "aggregate": this.FindControl<RadioButton>("NavAggregate")!.IsChecked = true; break;
@@ -276,7 +281,8 @@ public partial class MainWindow : Window
     /// <summary>首页。点卡片进详情 —— 库卡进网格,条目卡进详情(判断在 OpenDetail 一处)。</summary>
     private Control Home() =>
         new HomePage(_core, Nav.Session is null ? null
-            : LibraryPage.OpenDetail(_core!, Nav.Session.server));
+            : LibraryPage.OpenDetail(_core!, Nav.Session.server),
+            _sourceName == "" ? "首页" : _sourceName);
 
     /// <summary>
     /// 启动流程:核心层没起来就如实说;没有账号就进首登闸口;有账号就进首页。

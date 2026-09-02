@@ -2,6 +2,7 @@ using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using LinPlayer.Core;
@@ -9,41 +10,87 @@ using LinPlayer.Desktop.Core;
 
 namespace LinPlayer.Desktop.Views;
 
-/// <summary>搜索页。</summary>
+/// <summary>
+/// 搜索页。
+///
+/// <para>★★ 这一页最容易做成<b>一片黑</b>:还没搜之前它什么都没有。
+/// 空态不是装饰 —— 没有空态时用户看到的是「这一页坏了」,而不是「等我输入」。</para>
+///
+/// <para>★ 打开就聚焦。搜索页只有一件事可做,还要用户先点一下输入框,
+/// 那一下点击是白让人做的。</para>
+/// </summary>
 public sealed class SearchPage : PageBase
 {
+    /// <summary>停手多久自动搜。★ 太短会把每个字都发出去,太长会让人以为要自己点按钮。</summary>
+    private static readonly TimeSpan Debounce = TimeSpan.FromMilliseconds(420);
+
+    /// <summary>
+    /// 第几次搜索。
+    ///
+    /// <para>★★ 边打字边搜时<b>响应会乱序回来</b>:「三体」发出去之后「三」才回来,
+    /// 结果就是屏幕上显示的是上一个词的结果,而输入框里写着新词 ——
+    /// 用户只会觉得「搜出来的东西不对」。每次发请求记一个号,回来时对不上就丢掉。</para>
+    /// </summary>
+    private int _seq;
+
+    private CancellationTokenSource? _typing;
+
+    /// <summary>自检用:留住输入框,好让 <see cref="SelfCheckQuery"/> 往里填词。</summary>
+    private readonly TextBox _box;
+
     public SearchPage(CoreClient core)
     {
-        var box = new TextBox { Classes = { "field" }, Watermark = "搜片名、剧名、演员…", Width = 420 };
+        /* ★ 不设 MaxWidth。
+           Stretch + MaxWidth 在 Avalonia 里是「拉满、再按上限收窄、然后**居中**」——
+           表现是搜索框浮在内容区中间,左边空一大块,看着像没对齐。
+           要么真撑满,要么给死宽度;两者中间那档不存在。 */
+        var box = new TextBox
+        {
+            Classes = { "field" }, Watermark = "搜片名、剧名、演员…",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
         var go = new Button { Classes = { "primary" }, Content = "搜索" };
         // ★ 「包括集」默认**关**:开着的话搜一部剧会先刷出几十条「第 N 集」,
         //   把剧本身挤到屏幕外。开关本身要有,不然找某一集就没法搜。
-        var withEps = new CheckBox { Content = "包括分集", IsChecked = false };
+        var withEps = new CheckBox
+        {
+            Content = "包括分集", IsChecked = false,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         var status = Dim("");
-        var results = new WrapPanel();
+        var host = new ContentControl { Content = Empty() };
 
-        var body = new StackPanel
+        var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
+        Grid.SetColumn(box, 0);
+        Grid.SetColumn(go, 1);
+        Grid.SetColumn(withEps, 2);
+        go.Margin = new Thickness(10, 0, 0, 0);
+        withEps.Margin = new Thickness(16, 0, 0, 0);
+        bar.Children.Add(box);
+        bar.Children.Add(go);
+        bar.Children.Add(withEps);
+
+        Content = Scrolled(new StackPanel
         {
             Spacing = 14,
-            Children =
-            {
-                H1("搜索"),
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal, Spacing = 10,
-                    Children = { box, go, withEps },
-                },
-                status, results,
-            },
-        };
-        Content = Scrolled(body);
+            Children = { H1("搜索"), bar, status, host },
+        });
 
         async Task Run()
         {
             var q = (box.Text ?? "").Trim();
-            results.Children.Clear();
-            if (q == "") { status.Text = "输入点什么再搜。"; return; }
-            status.Text = "搜索中…";
+            if (q == "")
+            {
+                // 清空输入框 = 回到空态,不是「没搜到」。两者不能混。
+                _seq++;
+                status.Text = "";
+                host.Content = Empty();
+                return;
+            }
+
+            var mine = ++_seq;
+            status.Text = $"正在搜「{q}」…";
+            host.Content = Skeleton.Grid(false, 12);
             try
             {
                 var s = Nav.Session!;
@@ -56,23 +103,122 @@ public sealed class SearchPage : PageBase
                         s.server, s.token, s.user_id, s.device_id, query = q,
                         types = new[] { "Movie", "Series" },
                     });
+                if (mine != _seq) return; // 过期结果,丢掉
                 var items = res.ValueKind == JsonValueKind.Array
                     ? res.EnumerateArray().Select(CardItem.From).ToList() : [];
                 Dispatcher.UIThread.Post(() =>
                 {
-                    status.Text = items.Count == 0 ? $"没有搜到「{q}」。" : $"{items.Count} 条结果";
-                    foreach (var it in items)
-                        results.Children.Add(new Card(core, s.server, it, false,
-                            LibraryPage.OpenDetail(core, s.server))
-                        { Margin = new Thickness(0, 0, 14, 16) });
+                    if (mine != _seq) return;
+                    status.Text = items.Count == 0 ? "" : $"{items.Count} 条结果";
+                    host.Content = items.Count == 0
+                        ? NoHit(q, withEps.IsChecked == true)
+                        : LibraryPage.Grid(core, s.server, items, false,
+                            LibraryPage.OpenDetail(core, s.server));
                 });
             }
-            catch (Exception e) { status.Text = $"搜索失败:{LibraryPage.Advice(e)}"; }
+            catch (Exception e)
+            {
+                if (mine != _seq) return;
+                status.Text = $"搜索失败:{LibraryPage.Advice(e)}";
+                host.Content = new StackPanel();
+            }
         }
 
-        go.Click += async (_, _) => await Run();
-        box.KeyDown += async (_, e) => { if (e.Key == Avalonia.Input.Key.Enter) await Run(); };
+        /* 停手就搜。
+           ★ 每敲一下就撤销上一次的等待 —— 不撤的话敲 5 个字会排 5 次搜索,
+             前 4 次全是白发的请求,而且它们乱序回来还会盖掉最后一次的结果。 */
+        box.TextChanged += (_, _) =>
+        {
+            _typing?.Cancel();
+            var cts = new CancellationTokenSource();
+            _typing = cts;
+            _ = Task.Delay(Debounce, cts.Token)
+                .ContinueWith(t =>
+                {
+                    if (t.IsCanceled) return;
+                    Dispatcher.UIThread.Post(async () => await Run());
+                }, TaskScheduler.Default);
+        };
+
+        go.Click += async (_, _) => { _typing?.Cancel(); await Run(); };
+        box.KeyDown += async (_, e) =>
+        {
+            if (e.Key != Avalonia.Input.Key.Enter) return;
+            _typing?.Cancel();
+            await Run();
+        };
+        // 换了「包括分集」要重搜 —— 不重搜的话开关看着像没生效。
+        withEps.IsCheckedChanged += async (_, _) => { if ((box.Text ?? "") != "") await Run(); };
+
+        // ★ 打开就把光标放进输入框。必须等挂到可视树之后 —— 在构造函数里 Focus()
+        //   是对着一个还没上屏的控件调,静默无效。
+        AttachedToVisualTree += (_, _) => Dispatcher.UIThread.Post(() => box.Focus());
+        _box = box;
     }
+
+    /// <summary>
+    /// 自检用:填一个词进去,让它自己走一遍防抖 → 搜索 → 渲染结果。
+    ///
+    /// <para>★ 直接调内部的 Run() 就把**防抖那一段**跳过去了 —— 而
+    /// 「边打字边搜、乱序回来的结果要丢掉」正是这一页最容易写错的地方。
+    /// 走真实入口才验得到。</para>
+    /// </summary>
+    internal void SelfCheckQuery(string q) => Dispatcher.UIThread.Post(() => _box.Text = q);
+
+    /// <summary>
+    /// 还没搜之前的那一屏。
+    ///
+    /// <para>★ 不写「暂无数据」:这里根本不是没数据,是<b>还没问</b>。
+    /// 空态要说清下一步该做什么(§6.4)。</para>
+    /// </summary>
+    private static Control Empty() => Frame(
+        "🔍", "搜这台服务器上的片名、剧名、演员",
+        "输入后停一下就会自动搜,回车也行。\n结果里默认只有电影和剧集 —— 要找某一集,把上面的「包括分集」勾上。");
+
+    /// <summary>
+    /// 搜不到时的那一屏。
+    /// <para>★ 要给<b>下一步</b>,不是只说一句「没有」。</para>
+    /// <para>★ 这里<b>不放图标</b>:能表达「没找到」的表情在 Windows 上一律渲染成
+    /// 一张古怪的脸,比不放更糟。空态的图标是给「还没开始」用的,不是给失败用的。</para>
+    /// </summary>
+    private static Control NoHit(string q, bool withEps) => Frame(
+        "", $"没有搜到「{q}」",
+        withEps
+            ? "换个更短的词试试 —— 服务器按片名匹配,输全名反而更容易落空。"
+            : "换个更短的词试试。要找某一集的话,把上面的「包括分集」勾上再搜一次。");
+
+    private static Control Frame(string glyph, string title, string body) => new Border
+    {
+        Padding = new Thickness(24, 70, 24, 90),
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        Child = new StackPanel
+        {
+            Spacing = 12, MaxWidth = 460,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = glyph, FontSize = 40, Opacity = 0.55,
+                    IsVisible = glyph != "",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                },
+                new TextBlock
+                {
+                    Text = title, FontSize = 16, FontWeight = FontWeight.SemiBold,
+                    TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                },
+                new TextBlock
+                {
+                    Text = body, FontSize = 13, LineHeight = 21,
+                    TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
+                },
+            },
+        },
+    };
 }
 
 /// <summary>收藏页。</summary>

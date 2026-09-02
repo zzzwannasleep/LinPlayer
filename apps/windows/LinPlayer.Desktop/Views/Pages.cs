@@ -150,7 +150,7 @@ public sealed class AddServerPage : PageBase
              「某个入口加不了这种源」。 */
         var kinds = new[]
         {
-            ("Emby", "emby", "填服务器地址和账号即可;先「测试连接」可以确认地址对不对。"),
+            ("Emby", "emby", "填服务器地址和账号即可。先点「测试连接」可以确认地址对不对。"),
             ("本地文件夹", "local", "选一个本机目录当作源。没有地址也没有账号密码。"),
             ("WebDAV", "webdav", "填 WebDAV 地址和账号密码。账号密码可留空(匿名)。"),
             ("Ani-RSS", "anirss", "填 Ani-RSS 服务地址和账号密码。只对接播放,不含管理台。"),
@@ -162,7 +162,11 @@ public sealed class AddServerPage : PageBase
         .Where(k => k.Item2 == "emby" || Features.On("nav.browse")).ToArray();
         // ★ 用 WrapPanel:四个芯片在固定宽的卡里一行放不下,
         //   用 StackPanel 的话最后一个会被卡的边缘裁掉(而且**一点提示都没有**)。
-        var kindBar = new WrapPanel();
+        /* ★★ 只剩一种源类型时**整条不画**。
+           一个只有一个选项的选择器是纯噪音 —— 用户会盯着它想「还能选什么」,
+           而答案是没有。(同一条规矩用在详情页的季选择条上。)
+           2026-09-02 砍功能之后这里就只剩 Emby 了,芯片却还孤零零摆着。 */
+        var kindBar = new WrapPanel { IsVisible = kinds.Length > 1 };
         var kindDesc = Dim(kinds[0].Item3);
         var kindIndex = 0;
         var serverRow = new StackPanel { Spacing = 8, Children = { Label("服务器地址"), server } };
@@ -295,6 +299,14 @@ public sealed class AddServerPage : PageBase
             AttachedToVisualTree += (_, _) => Dispatcher.UIThread.Post(() =>
                 login.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)));
         }
+
+        /* ★ 打开就把光标放进第一个要填的框。首登闸口只有一件事可做,
+           还要用户先点一下输入框,那一下点击是白让人做的(和搜索页同一条规矩)。
+           ★ 必须等挂上可视树 —— 构造函数里 Focus() 是对着还没上屏的控件调,静默无效。 */
+        AttachedToVisualTree += (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            if (serverRow.IsVisible) server.Focus();
+        });
 
         Content = new Border
         {
