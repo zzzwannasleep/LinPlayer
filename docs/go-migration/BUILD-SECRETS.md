@@ -13,21 +13,61 @@
 
 ## 全表
 
-| 环境变量 | 配了才有的功能 | 不配时的表现 | 该放 secret 还是 variable |
-|---|---|---|---|
-| `DANDANPLAY_APP_ID` | 弹幕(弹弹Play)、动漫排行榜 | 弹幕搜不到、排行榜空 | **secret** |
-| `DANDANPLAY_APP_SECRET` | 同上 | 同上 | **secret** |
-| `TMDB_API_KEY` | 影视排行榜 | 影视榜那几个分类空 | **secret** |
-| `LP_SYNC_PROXY_BASE` | Trakt / Bangumi 登录(自建 OAuth 代理的**地址**,**要带 `/api` 后缀**) | 两个同步服务登不上 | **secret** |
-| `LP_SYNC_PROXY_KEY` | 同上(访问代理的**共享密钥**,和代理的 `LINPLAYER_PROXY_KEY` 相同) | 同上 | **secret** |
-| `LP_BANGUMI_REDIRECT_URI` | Bangumi OAuth 回调页地址 | Bangumi 登录跳不回来 | **secret** |
-| `LP_AFDIAN_SPONSOR_URL` | 追剧日历的赞助入口 | 赞助按钮指向空地址 | **secret** |
-| `LP_ICON_LIBRARY_SOURCES` | 服务器图标库(逗号分隔的多个 registry 地址) | 图标库页明说「这个构建没有配置图标源」,只能上传本地图片 | **secret** |
-| `LP_CF_TEST_URL` | CF 优选的下载测速文件地址 | 测速跳过下载那一段,排序退化成**纯按延迟**(功能仍可用) | **secret** |
+> ★★ **发行版这九个全都要配。**「选配」这个说法在播放器上不成立 ——
+> 用户不会觉得「这个版本没带弹幕凭据所以搜不到」是一种配置,他只会觉得弹幕坏了。
+> 下面那列写的是**漏配之后用户实际看到什么**,不是「可以不要」。
+>
+> 唯一可以不配的场合是**本地开发**:一个都不配也编得出来,对应功能会
+> 明说「这个构建没配」,不会崩、也不会假装成功。
 
-★ 后两个是 2026-09-01 从黄金实现里挪出来的:Rust 版把四条图标源和测速地址
+| 环境变量 | 管什么 | 漏配之后用户看到什么 |
+|---|---|---|
+| `DANDANPLAY_APP_ID` | 弹幕(弹弹Play)、动漫排行榜 | 弹幕搜不到、动漫榜空 |
+| `DANDANPLAY_APP_SECRET` | 同上 | 同上 |
+| `TMDB_API_KEY` | 影视排行榜 | 影视榜那几个分类空 |
+| `LP_SYNC_PROXY_BASE` | OAuth 代理**地址**,**要带 `/api` 后缀** | Trakt / Bangumi 都登不上 |
+| `LP_SYNC_PROXY_KEY` | 访问代理的**共享密钥**,= 代理的 `LINPLAYER_PROXY_KEY` | 同上(值填错也是同一个现象:全 401) |
+| `LP_BANGUMI_REDIRECT_URI` | Bangumi OAuth 回调页地址 | Bangumi 授权跳不回来 |
+| `LP_AFDIAN_SPONSOR_URL` | 追剧日历的赞助入口 | 赞助按钮指向空地址 |
+| `LP_ICON_LIBRARY_SOURCES` | 服务器图标库(逗号分隔的多个 registry 地址) | 图标库页只能上传本地图片 |
+| `LP_CF_TEST_URL` | CF 优选的下载测速文件地址 | 测速跳过下载那段,排序退化成纯按延迟 |
+
+**全部放 Secrets,不放 Variables** —— Variables 在日志里是明文可见的,
+而这批里有几个本身就是密钥。
+
+★ 最后两个是 2026-09-01 从黄金实现里挪出来的:Rust 版把四条图标源和测速地址
 **硬编在 `.rs` 里**,那是既有的红线欠账。Go 侧一律注入,并各有一条测试钉住
 「源码里必须是空」(`core/prefs/iconlibrary_test.go`、`core/net/cf/speedtest_test.go`)。
+
+## 弹幕那两个是**真密钥,而且必须内置** —— 已知代价
+
+`DANDANPLAY_APP_SECRET` 加密后编进产物,而**解密口令是同一个二进制里的常量**
+(`core/secrets/secrets.go:32`),所以它是**可提取**的 —— 拿到安装包就能用你的配额,
+客户端限流拦不住外人(2026-08-02 真发生过)。
+
+曾经为此建过服务端代理(`crates/danmaku-proxy`),**2026-09-02 用户决定删掉**:
+播放器不能有「弹幕要自己先部署一个服务才有」这种选项。
+
+所以这是一个**已知并接受的取舍**,不是待办:
+
+- 配额被刷爆时没有闸门兜底,**唯一手段是轮换 AppSecret 并发版**
+- 弹弹允许一个 AppId 配**多个 Secret**(换行分隔),轮换时用得上
+- 别再提「挪到服务端」——那个方向已经被否掉了。要重提,先解决「用户不部署服务也得有弹幕」
+
+## GitHub Actions 里**不该有**的
+
+这几个属于 **oauth-proxy(Cloudflare Pages)**,GitHub 这边一次都不会被引用,
+放着只是多一份泄露面:
+
+| 别放在 GitHub | 该放哪 |
+|---|---|
+| `TRAKT_CLIENT_ID` / `TRAKT_CLIENT_SECRET` | Cloudflare Pages 项目的环境变量 |
+| `BANGUMI_APP_ID` / `BANGUMI_APP_SECRET` | 同上 |
+
+> 核查办法:`grep -rc "secrets.<名字>" .github/workflows/`。
+> 但**零引用不等于该删** —— 上面九个里有六个现在也是零引用,因为
+> **CI 里还没有 Go 核心的构建 job**(只有 Rust 版那个)。删之前先分清
+> 「用不上」和「还没接上」。
 
 ## 同步那三个不是 Trakt / Bangumi 的 appid+secret
 
