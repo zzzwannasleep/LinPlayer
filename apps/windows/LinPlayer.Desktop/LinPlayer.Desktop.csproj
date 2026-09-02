@@ -18,6 +18,12 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <ImplicitUsings>enable</ImplicitUsings>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+
+    <!-- ★★ 发布时预编译成机器码(ReadyToRun)。
+         启动那一秒钟里最大的一块是 **JIT**:Avalonia + Win32 + 图形初始化那条路
+         每次开机都要现编一遍。R2R 把它提前编好,代价是包大一些。
+         这是发布专用属性,dotnet build 不受影响。 -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

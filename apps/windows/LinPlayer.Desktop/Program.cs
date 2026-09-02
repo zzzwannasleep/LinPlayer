@@ -22,6 +22,7 @@ internal static class Program
            而自检脚本正是靠 grep 中文关键字读这些日志的,乱码 = 整套日志形同不存在。 */
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* 无控制台时会抛,忽略 */ }
 
+        Perf.Log("Main 入口");
         var exeDir = AppContext.BaseDirectory;
         /* ★★ 数据全在 exe 同级的 userdata/(绿色包单一数据根)。
            用户明确要求过「不喜欢到处拉屎」—— 不要往 AppData 里写。
@@ -39,6 +40,7 @@ internal static class Program
             CoreError = e.Message;
         }
 
+        Perf.Log("核心层就绪");
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
 
         /* 退出时调 lp_shutdown(Dispose 里)。它**阻塞到落盘完成**:停 mpv、

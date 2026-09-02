@@ -8,7 +8,11 @@ namespace LinPlayer.Desktop;
 
 public partial class App : Application
 {
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        using var _ = LinPlayer.Desktop.Core.Perf.Measure("App.Initialize(主题 XAML)");
+        AvaloniaXamlLoader.Load(this);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
@@ -25,5 +29,6 @@ public partial class App : Application
             desktop.ShutdownRequested += (_, _) => Program.Core?.Dispose();
         }
         base.OnFrameworkInitializationCompleted();
+        LinPlayer.Desktop.Core.Perf.Log("框架初始化完成");
     }
 }
