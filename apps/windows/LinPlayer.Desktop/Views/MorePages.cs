@@ -151,19 +151,24 @@ public sealed class SettingsPage : PageBase
                     Add(TrackPrefs(core, p));
                     Add(Playback(core, p));
                     if (prefetch is { } pf) Add(SettingsSections.Prefetch(core, pf));
-                    if (preload is { } pl) Add(SettingsSections.Preload(core, pl));
-                    if (writeback is { } wb) Add(SettingsSections.Writeback(core, wb));
+                    // ★ 下线的分组一并不画。开关表在 Features.cs,这里只查表。
+                    if (Features.On("set.preload") && preload is { } pl) Add(SettingsSections.Preload(core, pl));
+                    if (Features.On("set.writeback") && writeback is { } wb) Add(SettingsSections.Writeback(core, wb));
                     if (update is { } up) Add(SettingsSections.Update(core, up));
-                    Add(SettingsSections.Blocked(core));
+                    if (Features.On("set.blocked")) Add(SettingsSections.Blocked(core));
                     /* ★ 翻译设置**拉不到也要出这一组**,只是里面写清楚原因。
                        静默跳过的表现是「设置页里根本没有字幕翻译」——
-                       用户会以为这个版本没做这个功能,而不是「这次没拉到」。 */
-                    Add(trans is { } tr
-                        ? SettingsTranslate.Section(core, tr)
-                        : SettingsTranslate.Unavailable(transErr));
-                    if (trans is not null) Add(SettingsTranslate.Whisper(core));
-                    Add(SettingsSections.CfSpeed(core));
-                    Add(SettingsSections.Transfer(core));
+                       用户会以为这个版本没做这个功能,而不是「这次没拉到」。
+                       ⚠️ 这条只管「拉不到」,和「整组下线」是两回事:下线时连组都不出。 */
+                    if (Features.On("set.translate"))
+                    {
+                        Add(trans is { } tr
+                            ? SettingsTranslate.Section(core, tr)
+                            : SettingsTranslate.Unavailable(transErr));
+                    }
+                    if (Features.On("set.whisper") && trans is not null) Add(SettingsTranslate.Whisper(core));
+                    if (Features.On("set.cfspeed")) Add(SettingsSections.CfSpeed(core));
+                    if (Features.On("set.transfer")) Add(SettingsSections.Transfer(core));
                     Add(Storage(core, paths));
                 });
             }

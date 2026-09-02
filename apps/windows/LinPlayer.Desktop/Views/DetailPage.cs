@@ -106,7 +106,10 @@ public sealed class DetailPage : PageBase
             });
         }
 
-        head.Children.Add(PlayRow(d, id, type));
+        // ★ 分集要在画播放按钮**之前**拿到:剧集详情页的主按钮是「继续观看 第 N 集」,
+        //   它得知道下一集是哪一集。
+        var children = Arr2(d, "children");
+        head.Children.Add(PlayRow(d, id, type, children));
 
         var overview = Str(d, "overview");
         if (overview != "")
@@ -125,7 +128,6 @@ public sealed class DetailPage : PageBase
         });
 
         // ---- 分集 ----
-        var children = Arr2(d, "children");
         if (children.Count > 0)
         {
             body.Children.Add(H2($"剧集({children.Count})"));
@@ -192,7 +194,7 @@ public sealed class DetailPage : PageBase
     }
 
     /// <summary>播放按钮行。有进度就把时间点写在按钮上 —— 只写「播放」用户会以为要从头看。</summary>
-    private Control PlayRow(JsonElement d, string id, string type)
+    private Control PlayRow(JsonElement d, string id, string type, List<JsonElement> children)
     {
         var resume = Num(d, "resume_secs");
         var name = Str(d, "name");
@@ -209,7 +211,32 @@ public sealed class DetailPage : PageBase
             play.Click += (_, _) => Nav.Push(new PlayerPage(_core, id, name, resume));
             row.Children.Add(play);
         }
+        else if (type == "Series" && children.Count > 0)
+        {
+            /* ★★ 剧集详情页**必须有主按钮**。之前只有 Movie/Episode 有,
+               剧的详情页上一个播放按钮都没有 —— 用户得滚到下面的分集网格里
+               自己找「我看到第几集了」。那不是详情页,那是目录。
 
+               挑哪一集:①有进度的那一集(接着看)→ ②第一集没看过的 → ③第一集。
+               这个顺序和 Emby 的「继续观看」一致。 */
+            var eps = children.Select(CardItem.From).ToList();
+            var next = eps.FirstOrDefault(e => e.ResumeSecs > 0)
+                       ?? eps.FirstOrDefault(e => !e.Played)
+                       ?? eps[0];
+            var play = new Button
+            {
+                Classes = { "primary" },
+                Content = next.ResumeSecs > 0
+                    ? $"▶ 继续观看 · {next.Name}"
+                    : $"▶ 播放 · {next.Name}",
+            };
+            play.Click += (_, _) =>
+                Nav.Push(new PlayerPage(_core, next.Id, next.DisplayTitle, next.ResumeSecs));
+            row.Children.Add(play);
+        }
+
+        // ★ 收藏跟 Features 走 —— 侧栏的「收藏」下线了,这里还留着按钮的话,
+        //   用户收藏完找不到地方看,和「屏蔽了没有解除列表」是同一类坑。
         var fav = new Button
         {
             Classes = { "ghost" },
@@ -231,7 +258,7 @@ public sealed class DetailPage : PageBase
             }
             catch (Exception e) { fav.Content = LibraryPage.Advice(e); }
         };
-        row.Children.Add(fav);
+        if (Features.On("card.favorite")) row.Children.Add(fav);
 
         // ★ 下载只对**可播条目**给。给一部剧的总条目下载按钮,点了不知道该下哪一集。
         if (playable)

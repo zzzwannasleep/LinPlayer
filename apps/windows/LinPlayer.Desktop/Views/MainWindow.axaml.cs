@@ -71,6 +71,14 @@ public partial class MainWindow : Window
         this.FindControl<RadioButton>("NavCalendar")!.Checked += (_, _) => Nav.Root(new CalendarPage(_core!));
         this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
 
+        /* ★★ 基础流程之外的入口在这里统一藏掉。表在 Features.cs —— **只有那一处**。
+           散在各页里写 if 的话,过两周没人知道哪些是关着的。
+
+           ★ 只藏不拆:接线全留着,自检台还要能跳过去(SelfCheckJump);
+             藏起来的 RadioButton 照样能被程序勾中。打磨好一个就从表里删一行。 */
+        foreach (var (ctl, id) in NavGates)
+            this.FindControl<RadioButton>(ctl)!.IsVisible = Features.On(id);
+
         /* ★★ 自检模式下把窗口置顶。
            截图走的是 CopyFromScreen —— 抓的是**屏幕那块区域**,不是窗口自身内容。
            被别的程序压住时截出来的是压在上面那个窗口,而脚本照样报「成功」。
@@ -81,6 +89,16 @@ public partial class MainWindow : Window
 
         Opened += async (_, _) => await BootAsync();
     }
+
+    /// <summary>侧栏入口 → 功能开关 id。改开关去 <see cref="Features"/>,不是这儿。</summary>
+    private static readonly (string Ctl, string Id)[] NavGates =
+    [
+        ("NavFavorites", "nav.favorites"), ("NavAggregate", "nav.aggregate"),
+        ("NavHistory", "nav.history"), ("NavDownload", "nav.download"),
+        ("NavRanking", "nav.ranking"), ("NavCalendar", "nav.calendar"),
+        ("NavPlugins", "nav.plugins"), ("NavBrowse", "nav.browse"),
+        ("NavCatalog", "nav.catalog"),
+    ];
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
@@ -279,6 +297,12 @@ public partial class MainWindow : Window
                这条在 Rust 版害过一次。 */
             if (accounts.ValueKind != JsonValueKind.Array || accounts.GetArrayLength() == 0)
             {
+                /* ★★ 首登时把导航整条藏掉。
+                   之前是亮着的 —— 还没有服务器,「首页 / 媒体库 / 搜索」全能点,
+                   点进去清一色「请先登录服务器」。**摆一堆必定失败的入口**
+                   和摆一个必定失败的按钮是同一个毛病(详情页的外部播放器那条已经这么处理了)。
+                   ★ 设置留着:代理配错了连不上服务器,那是首登时真的要改的东西。 */
+                this.FindControl<StackPanel>("NavList")!.IsVisible = false;
                 Show(new AddServerPage(_core, OnLoggedIn));
                 return;
             }
@@ -341,6 +365,7 @@ public partial class MainWindow : Window
         }
         catch { /* 服务器名没刷新不影响用 */ }
         try { Nav.Session = Sess.From(await _core!.EmbyCurrentSession()); } catch { /* 同上 */ }
+        this.FindControl<StackPanel>("NavList")!.IsVisible = true;
         this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
         Nav.Root(Home());
         // 真机自检:登录成功之后再跳到指定页面(LP_SELFCHECK_PAGE 那会儿装的是 login:...)
@@ -379,10 +404,16 @@ public partial class MainWindow : Window
             /* ★★ 按账号类型显隐入口,而不是全都亮着。
                全亮的话:Emby 账号点「文件浏览」拿到「当前没有已登录的文件源」,
                网盘账号点「媒体库」拿到「请先登录服务器」—— 两个都是**专门用来报错的入口**。 */
-            this.FindControl<RadioButton>("NavBrowse")!.IsVisible = isBrowse;
-            this.FindControl<RadioButton>("NavCatalog")!.IsVisible = isBrowse;
-            foreach (var name in new[] { "NavLibrary", "NavSearch", "NavFavorites" })
-                this.FindControl<RadioButton>(name)!.IsVisible = !isBrowse;
+            // ★ 和功能开关**取与**:这里按账号类型算出来的「该亮」,
+            //   碰上 Features 里关着的仍然不亮 —— 否则切个账号就把下线的入口放出来了。
+            void Gate(string ctl, string id, bool want) =>
+                this.FindControl<RadioButton>(ctl)!.IsVisible = want && Features.On(id);
+
+            Gate("NavBrowse", "nav.browse", isBrowse);
+            Gate("NavCatalog", "nav.catalog", isBrowse);
+            Gate("NavLibrary", "nav.library", !isBrowse);
+            Gate("NavSearch", "nav.search", !isBrowse);
+            Gate("NavFavorites", "nav.favorites", !isBrowse);
 
             // 浏览型源进来时,首页那一套是空的 —— 直接落到文件浏览
             if (isBrowse && Nav.Current is HomePage)

@@ -154,7 +154,12 @@ public sealed class AddServerPage : PageBase
             ("本地文件夹", "local", "选一个本机目录当作源。没有地址也没有账号密码。"),
             ("WebDAV", "webdav", "填 WebDAV 地址和账号密码。账号密码可留空(匿名)。"),
             ("Ani-RSS", "anirss", "填 Ani-RSS 服务地址和账号密码。只对接播放,不含管理台。"),
-        };
+        }
+        /* ★★ 文件浏览型源跟着「文件浏览」入口一起下线。
+           留着的后果是**登进去就是死路**:登录成功 → 侧栏没有文件浏览 → 什么都点不到。
+           2026-09-02 砍功能时现场抓到的:砍入口不砍源类型,等于给用户挖了个坑。
+           开关表在 Features.cs,那边放开 nav.browse 时这里自动跟着回来。 */
+        .Where(k => k.Item2 == "emby" || Features.On("nav.browse")).ToArray();
         // ★ 用 WrapPanel:四个芯片在固定宽的卡里一行放不下,
         //   用 StackPanel 的话最后一个会被卡的边缘裁掉(而且**一点提示都没有**)。
         var kindBar = new WrapPanel();

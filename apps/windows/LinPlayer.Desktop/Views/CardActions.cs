@@ -32,6 +32,9 @@ public static class CardActions
         };
         items.Add(played);
 
+        /* ★★ 收藏和屏蔽跟着 Features 走,而且 card.block 必须和 set.blocked
+           **成对**开关 —— 留着屏蔽却没有解除列表,用户屏蔽掉的东西再也找不回来。
+           本仓的老规矩:隐藏类功能必须配集中解除列表。 */
         var fav = new MenuItem { Header = "收藏 / 取消收藏" };
         fav.Click += async (_, _) =>
         {
@@ -39,7 +42,7 @@ public static class CardActions
             // 一次点击就是一次切换,详情页才有准确的状态
             await Run(core, "emby.setFavorite", new { item_id = item.Id, fav = true }, after);
         };
-        items.Add(fav);
+        if (Features.On("card.favorite")) items.Add(fav);
 
         var block = new MenuItem { Header = "屏蔽这个" };
         block.Click += async (_, _) =>
@@ -48,7 +51,7 @@ public static class CardActions
             //   只有名字对得上。少送名字的表现是「换台服务器就又冒出来了」。
             await Run(core, "emby.setBlocked", new { id = item.Id, name = item.Name, blocked = true }, after);
         };
-        items.Add(block);
+        if (Features.On("card.block")) items.Add(block);
 
         menu.ItemsSource = items;
         host.ContextMenu = menu;
