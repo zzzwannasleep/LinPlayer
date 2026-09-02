@@ -399,8 +399,11 @@ public sealed class PlayerPage : UserControl
         catch (Exception e) { _msg.Text = $"画质档位读不到:{LibraryPage.Advice(e)}"; }
     }
 
+    private bool _qualityMuted;
+
     private async Task PickQuality()
     {
+        if (_qualityMuted) return;
         if (_quality.SelectedItem is not ShaderLevel lv) return;
         try
         {
@@ -413,6 +416,15 @@ public sealed class PlayerPage : UserControl
             if (r.TryGetProperty("will_run", out var wr) && wr.ValueKind == JsonValueKind.False)
             {
                 _msg.Text = Str(r, "note");
+                /* ★★ 核心层自己退回关闭时,下拉框**必须跟着回到「关闭」**。
+                   不回的话界面显示「Anime4K · 锐化+去噪」而实际是关的 ——
+                   那是同一类谎,只是换了个地方说(2026-09-02 截图上抓到)。 */
+                if (r.TryGetProperty("reverted", out var rv) && rv.ValueKind == JsonValueKind.True)
+                {
+                    _qualityMuted = true;          // 回位不该再触发一次请求
+                    _quality.SelectedIndex = 0;
+                    _qualityMuted = false;
+                }
                 return;
             }
             var n = r.TryGetProperty("count", out var c) && c.TryGetInt32(out var ci) ? ci : 0;

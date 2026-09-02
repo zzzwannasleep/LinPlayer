@@ -49,12 +49,35 @@ func registerPrefsCommands(version string) {
 		/* 强度是**档位设计的一部分**,每次挂载都得重设:glsl-shader-opts 是全局的,
 		   不设就吃 shader 自带默认(CAS STR=0.5,只开一半)—— 用户实测「看不太出来」
 		   正是这个。切到 off 时 opts 为空串,顺带把上一档的参数清掉。 */
+		clearShaderErr() // 先清,免得读到上一次的
 		setProp("glsl-shader-opts", shaders.Opts(level))
 		setProp("glsl-shaders", strings.Join(list, string(filepath.ListSeparator)))
 
 		out := map[string]any{"level": level, "count": len(list)}
 		if len(list) == 0 {
 			return out, nil // off:关掉就完事,没有「会不会跑」这回事
+		}
+
+		/* ★★ 第三种「说了不算」:**shader 编译失败**。
+		   前两种(收下路径 ≠ 会跑 / 尺寸不够)上面已经挡了,这一种更狠 ——
+		   mpv 收下选项、返回 0、尺寸判断也过,但那一趟 pass 编译不过,
+		   于是它继续渲染,输出**一片纯色**。没有任何返回码或属性会说这件事,
+		   唯一的出口是 error 级日志(见 shaderguard.go)。
+		   2026-09-02 真机:ak_sharp 整屏变蓝,根因是 AMD_CAS_luma_RT 调了
+		   libplacebo 才有的 linearize()。
+
+		   编译不过就**自己退回关闭** —— 宁可说「这档在你机器上用不了」,
+		   也不能给用户一屏纯蓝还写「已启用」。 */
+		if e := waitShaderCompileError(); e != "" {
+			setProp("glsl-shader-opts", "")
+			setProp("glsl-shaders", "")
+			out["count"] = 0
+			out["will_run"] = false
+			out["reverted"] = true
+			out["note"] = "这档在你这台机器的渲染后端上编译不过,已自动退回「关闭」" +
+				"(画面不会被弄坏)。mpv 的原话:" + firstLine(e)
+			bus.Logf("error", "着色器档位 %s 编译失败,已退回关闭:%s", level, e)
+			return out, nil
 		}
 		vw, vh := propF("video-params/w"), propF("video-params/h")
 		ow, oh := propF("osd-dimensions/w"), propF("osd-dimensions/h")

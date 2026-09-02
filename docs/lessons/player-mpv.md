@@ -904,6 +904,41 @@ grep GL_RENDERER D:/x/mpv.log
   文件、144 KB。⚠️ **没起播的话它永远是空的** —— 我第一次拿一次没真起播的运行
   下结论,差点判成「这条路不支持磁盘缓存」
 
+##### ⚠️ 换渲染后端 = 换着色器方言(2026-09-02,比上面几条都贵)
+
+接完画质档位面板,真机一开 `ak_sharp`,**整屏变纯蓝**。而当时:
+
+- `mpv_set_option_string("glsl-shaders", …)` 返回 **0**
+- `player.setShaderLevel` 回 `count=2, will_run=true`
+- 没有任何属性、任何返回码显示出错
+
+唯一的线索在 mpv 的 **error 级日志**里:
+
+```
+ERROR: 0:58: 'linearize' : no matching overloaded function found
+```
+
+**根因**:黄金实现(Rust)用 `vo=gpu-next` —— 那是 **libplacebo**。
+新栈是 `vo=libmpv` + OpenGL render API,走的是 mpv 旧的 `gl_video`,
+而 Avalonia 在 Windows 上的 GL 后端是 **ANGLE**,着色器按 `#version 300 es` 编译。
+`linearize()` 是 libplacebo 提供的,这条路上**没有**。
+
+于是那一趟 pass 编译失败,mpv **继续渲染**,输出一片纯色。
+
+受影响的是调 `linearize()` 的两个文件(`AMD_CAS_luma_RT.glsl` / `AMD_BCAS_RT.glsl`),
+牵连 28 档里的 5 档,其中包括默认推荐的 `ak_sharp`。其余 23 档实测正常。
+
+**教训:着色器不是数据,是代码。** 「档位表照抄过来了」不等于「档位能用」——
+换渲染后端就得**重新验一遍每一档**,而且这类失败编译绿、单测绿、返回码绿。
+
+处置:`core/player/shaderguard.go` 订阅 error 级日志,编译失败就**自动退回关闭**并
+把 mpv 原话交给 UI。宁可告诉用户「这档在你机器上用不了」,也不能给他一屏纯蓝
+还写「已启用」。⚠️ 分类器**只认**着色器编译/链接失败 —— 放宽成「含 failed 就算」
+会把 `Loading failed.`、CUDA 探测、`auto_profiles` 这些正常日志误判,
+无故关掉用户好好的档位(已有测试钉住)。
+
+⚠️ Linux 那边 GL 后端不是 ANGLE,**要单独验**,别拿这台的结论替它签字。
+
 ##### 这一整条的机制教训:**mpv 收下选项 ≠ 选项生效**
 
 Go 版的 `ensureMpv` 原来和 Rust 版一样把 `mpv_set_option_string` 的返回码

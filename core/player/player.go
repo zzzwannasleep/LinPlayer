@@ -77,9 +77,35 @@ static int lp_rc_create(void **out, void *mpv, void *gpa, void *gpa_ctx) {
     return mpv_render_context_create(out, mpv, ps);
 }
 
-// mpv_event 的头两个字段就是 event_id 与 error(client.h 保证的布局)。
-// 只读 event_id,不碰后面的 union —— 那部分随版本变,读了就是在赌。
-static int lp_event_id(void *ev) { return ev ? *(int*)ev : 0; }
+// mpv_event / mpv_event_log_message 照 client.h 原样声明。
+//
+// ★ 原来这里只读第一个 int(event_id)并注释「不碰后面的,读了就是在赌」。
+//   现在必须读 data —— 但**不是靠猜偏移**:把 client.h 里这两个结构体
+//   原样抄下来,偏移由编译器算。它们是公开且稳定的 ABI(不是那个随版本变的 union)。
+typedef struct lp_mpv_event {
+    int event_id;
+    int error;
+    uint64_t reply_userdata;
+    void *data;
+} lp_mpv_event;
+
+typedef struct lp_log_msg {
+    const char *prefix;
+    const char *level;
+    const char *text;
+    int log_level;
+} lp_log_msg;
+
+extern int mpv_request_log_messages(void*, const char*);
+
+static int lp_event_id(void *ev) { return ev ? ((lp_mpv_event*)ev)->event_id : 0; }
+
+// lp_event_log_text 取一条 MPV_EVENT_LOG_MESSAGE 的正文。非日志事件返回 0。
+static const char* lp_event_log_text(void *ev) {
+    if (!ev) return 0;
+    void *d = ((lp_mpv_event*)ev)->data;
+    return d ? ((lp_log_msg*)d)->text : 0;
+}
 
 static int lp_rc_render(void *rc, unsigned int fbo, int w, int h, int flip, int block) {
     lp_gl_fbo f; f.fbo = (int)fbo; f.w = w; f.h = h;
@@ -217,6 +243,13 @@ func ensureMpv() int32 {
 		C.mpv_terminate_destroy(h)
 		return -1
 	}
+	/* ★ 订阅 error 级日志。**这是「shader 编译失败」唯一的出口** ——
+	   mpv 不会把它写进任何属性,也不会让 set 失败:选项照收、画面照渲染,
+	   只是渲染出来的是一片纯色。2026-09-02 真机撞到:开 ak_sharp 之后整屏变蓝。 */
+	ck := C.CString("error")
+	C.mpv_request_log_messages(h, ck)
+	C.free(unsafe.Pointer(ck))
+
 	mpvH = h
 	go drainEvents(h)
 	go pumpStatus()
@@ -241,6 +274,10 @@ func drainEvents(h unsafe.Pointer) {
 		switch int(C.lp_event_id(ev)) {
 		case evFileLoaded:
 			onFileLoaded()
+		case evLogMessage:
+			if t := C.lp_event_log_text(ev); t != nil {
+				noteMpvLog(C.GoString(t))
+			}
 		case evEndFile:
 			// ★ keep-open=yes 时 END_FILE **永远不发**(文件不卸载)。
 			//   判「播完」必须读 eof-reached 属性 —— 这是「播完不同步 Trakt/Bangumi」的根因。
@@ -252,6 +289,7 @@ func drainEvents(h unsafe.Pointer) {
 
 // mpv 事件 id(client.h)。只列我们真的处理的两个。
 const (
+	evLogMessage = 2
 	evFileLoaded = 6
 	evEndFile    = 7
 )
