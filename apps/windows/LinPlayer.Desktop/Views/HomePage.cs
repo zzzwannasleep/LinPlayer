@@ -158,18 +158,21 @@ public sealed class HomePage : PageBase
         catch (Exception e) { Swap(Dim($"{title}加载失败:{e.Message}")); }
     }
 
-    /// <summary>横向轨道。宽卡 240×135(16:9),窄卡 150×225(2:3)—— UI_PC §3.2。</summary>
+    /// <summary>
+    /// 横向轨道。宽卡 256×144(16:9),窄卡 158×237(2:3)。
+    ///
+    /// <para>★ 交给 <see cref="Carousel"/> 包一层翻页按钮 —— <b>光有滚轮不够</b>:
+    /// 一条轨道 20 张卡,屏幕上只看得到五六张,后面十几张没有任何东西
+    /// 告诉用户它们存在。</para>
+    /// </summary>
     private Control Strip(List<JsonElement> items, bool wide)
     {
         var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         foreach (var it in items.Take(20))
             panel.Children.Add(new Card(_core!, _server, CardItem.From(it), wide, _onOpen));
-        return new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = panel,
-        };
+        // 图区高度:翻页按钮要对齐图的中线,不是整张卡的中线(卡下面还有两行标题)
+        var w = wide ? 256.0 : 158.0;
+        return Carousel.Wrap(panel, wide ? w * 9 / 16 : w * 3 / 2);
     }
 
     private void AddRow(Control c) => Dispatcher.UIThread.Post(() => _rows.Children.Add(c));

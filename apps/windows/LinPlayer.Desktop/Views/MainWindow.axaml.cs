@@ -155,6 +155,12 @@ public partial class MainWindow : Window
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_MAXIMIZE") == "1")
             WindowState = WindowState.Maximized;
 
+        /* ★★ 滚动要在**早退之前**排。
+           LP_SELFCHECK_PAGE 为空(= 落在首页)时这个方法从这里就返回了,
+           于是 LP_SCROLL 在首页上**从来没生效过** —— 而首页恰恰是最长的一页,
+           折线以下那两条轨道一次都没被看过。
+           一个「设了没反应」的自检开关比没有更糟:它会让人以为已经验过了。 */
+        SelfCheckScroll();
         if (string.IsNullOrEmpty(want) || _core is null) return;
         var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";
         var srv = Nav.Session?.server ?? "";
@@ -227,7 +233,6 @@ public partial class MainWindow : Window
                 break;
             case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
         }
-        SelfCheckScroll();
     }
 
     /// <summary>
