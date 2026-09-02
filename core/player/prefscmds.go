@@ -41,7 +41,7 @@ func registerPrefsCommands(version string) {
 	bus.Register("player.setShaderLevel", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		level, _ := a["level"].(string)
 		// .glsl 是编进二进制、首次用时落盘的 —— 丢了能重生成,所以归 cache/
-		dir := filepath.Join(paths.CacheDir(), "shaders")
+		dir := paths.ShaderSourceDir()
 		list, err := shaders.Paths(dir, level)
 		if err != nil {
 			return nil, bus.NewErr(bus.EInternal, "%v", err)

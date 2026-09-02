@@ -58,6 +58,31 @@ func CacheDir() string      { return sub("cache") }
 func ImageCache() string    { return sub("cache", "img") }
 func PrefetchCache() string { return sub("cache", "prefetch") }
 func ShadersDir() string    { return sub("shaders") }
+
+// ShaderCacheDir 是 mpv 编译好的着色器**二进制**缓存。
+//
+// ★★ 目录名不能叫 shaders:`player.setShaderLevel` 已经在往 `cache/shaders`
+// 落我们自带的 .glsl **源文件**了(编进二进制、首次用时落盘)。两者混住的话,
+// mpv 的缓存淘汰和「清缓存」会互相误伤 —— 2026-09-02 第一版就是这么写的,
+// 真机跑完一看目录里全是 .glsl 才发现。
+//
+// ★ libmpv 没有配置目录,**不显式给这个路径它就不缓存** ——
+// 表现是每次起播重编整条 CNN 链,开着超分时第一秒明显卡一下。
+func ShaderCacheDir() string { return sub("cache", "shader-bin") }
+
+// ShaderSourceDir 是我们自带的 .glsl **源文件**落盘的地方。
+//
+// 它们编进了二进制,首次用到时才写出来 —— 丢了能重生成,所以归 cache/。
+func ShaderSourceDir() string { return sub("cache", "shaders") }
+
+// statDir 报告 p 是不是一个已存在的目录。给测试用。
+func statDir(p string) (bool, error) {
+	fi, err := os.Stat(p)
+	if err != nil {
+		return false, err
+	}
+	return fi.IsDir(), nil
+}
 func PluginsDir() string    { return sub("plugins", "installed") }
 func PluginStorage() string { return sub("plugins", "storage") }
 func ModelsDir() string     { return sub("models") } // Whisper 等按需下载的模型(Q6 已定:拆出来)
@@ -75,6 +100,7 @@ func TempDir() string { return sub("temp") }
 func EnsureDirs() error {
 	for _, d := range []string{
 		LogsDir(), ImageCache(), PrefetchCache(), ShadersDir(),
+		ShaderCacheDir(), ShaderSourceDir(),
 		PluginsDir(), PluginStorage(), ModelsDir(),
 	} {
 		if err := os.MkdirAll(d, 0o755); err != nil {

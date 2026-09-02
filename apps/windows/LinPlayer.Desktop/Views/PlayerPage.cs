@@ -86,6 +86,7 @@ public sealed class PlayerPage : UserControl
     private readonly Border _top, _bottom;
     private readonly ComboBox _audio = new() { Width = 170, MinHeight = 30 };
     private readonly ComboBox _subs = new() { Width = 170, MinHeight = 30 };
+    private readonly ComboBox _quality = new() { Width = 210, MinHeight = 30 };
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
 
     private double _duration;
@@ -152,6 +153,8 @@ public sealed class PlayerPage : UserControl
 
         _audio.SelectionChanged += (_, _) => _ = PickTrack("audio", _audio);
         _subs.SelectionChanged += (_, _) => _ = PickTrack("sub", _subs);
+        _quality.SelectionChanged += (_, _) => _ = PickQuality();
+        _ = LoadQualityLevels();
 
         // ★ 拖拽的抬手事件挂在**外层**,不是 Slider 自己身上 ——
         //   挂在自己身上的话拖出控件再松手收不到,进度条会永久钉住(Rust 版栽过)。
@@ -183,6 +186,7 @@ public sealed class PlayerPage : UserControl
                             Label("音量"), _vol,
                             Label("音轨"), _audio,
                             Label("字幕"), _subs,
+                            Label("画质"), _quality,
                             full,
                         },
                     },
@@ -232,6 +236,10 @@ public sealed class PlayerPage : UserControl
         DetachedFromVisualTree += (_, _) => Stop();
 
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "1") _ = Drill();
+        /* ★ 自检台驱动画质档位。选的是**真的下拉项**,走 SelectionChanged 那条真路 ——
+           绕开 UI 直接调命令的自检只能证明核心层活着,证明不了这个面板接对了。 */
+        var lvl = Environment.GetEnvironmentVariable("LP_SELFCHECK_SHADER");
+        if (!string.IsNullOrEmpty(lvl)) _ = SelfCheckPickQuality(lvl);
     }
 
     /// <summary>
@@ -299,6 +307,7 @@ public sealed class PlayerPage : UserControl
             case Key.Up: SetVolume(_vol.Value + 5); break;
             case Key.Down: SetVolume(_vol.Value - 5); break;
             case Key.M: _muted = !_muted; _ = Send("player.setMute", new { mute = _muted }); break;
+            case Key.U: _quality.IsDropDownOpen = !_quality.IsDropDownOpen; break;
             case Key.F or Key.Enter: ToggleFullscreen(); break;
             // ★ 全屏时 Esc 只退全屏,不退出播放 —— 看片时误按一下就把片关了很恼人
             case Key.Escape when _full: ToggleFullscreen(); break;
@@ -344,6 +353,77 @@ public sealed class PlayerPage : UserControl
         if (_top.IsVisible == on) return;
         _top.IsVisible = _bottom.IsVisible = on;
         Cursor = new Cursor(on ? StandardCursorType.Arrow : StandardCursorType.None);
+    }
+
+    /// <summary>
+    /// 画质档位(<c>UI_PC.md</c> §7 底部第七个面板,快捷键 <c>U</c>)。
+    ///
+    /// <para>★★ 档位表由<b>核心层</b>给(28 档,分 Anime4K / FSR / NVIDIA / 通用四族),
+    /// UI 不自己写一份。写一份的下场是加档位要改两处,而漏改的那处不报错。</para>
+    ///
+    /// <para>★★ <b>档位故意不持久化</b>(2026-08-31 已定,别顺手加)——
+    /// 它跟当前这一片的分辨率和窗口大小绑定,记住上一片的档位只会带来
+    /// 「上次好好的这次不生效」。</para>
+    /// </summary>
+    /// <summary>自检:等起播和档位表就位之后选一档,并把 OSD 钉住不收。</summary>
+    private async Task SelfCheckPickQuality(string id)
+    {
+        await Task.Delay(7000);
+        if (_quality.ItemsSource is IEnumerable<ShaderLevel> items)
+        {
+            var hit = items.FirstOrDefault(x => x.Id == id);
+            if (hit is null) { _msg.Text = $"自检:档位表里没有 {id}"; return; }
+            _quality.SelectedItem = hit;
+        }
+        _lastMove = DateTime.UtcNow.AddYears(1);
+        ShowOsd(true);
+    }
+
+    private async Task LoadQualityLevels()
+    {
+        try
+        {
+            var r = await _core.PlayerShaderLevels();
+            if (r.ValueKind != JsonValueKind.Array) return;
+            var items = new List<ShaderLevel>();
+            foreach (var l in r.EnumerateArray())
+            {
+                var id = Str(l, "id");
+                var name = Str(l, "name");
+                var group = Str(l, "group");
+                items.Add(new ShaderLevel(id, group == "" ? name : group + " · " + name));
+            }
+            _quality.ItemsSource = items;
+            _quality.SelectedIndex = 0; // off
+        }
+        catch (Exception e) { _msg.Text = $"画质档位读不到:{LibraryPage.Advice(e)}"; }
+    }
+
+    private async Task PickQuality()
+    {
+        if (_quality.SelectedItem is not ShaderLevel lv) return;
+        try
+        {
+            var r = await _core.PlayerSetShaderLevel(new { level = lv.Id });
+            /* ★★ 这里必须把核心层的判断**原样透出来**。
+               `count > 0` 只能证明 mpv 收下了 shader 路径,**证明不了它会跑** ——
+               放大类每个 pass 都带 `//!WHEN 输出>源*1.2`,窗口没比源大就整条链空转,
+               画面一点没变。旧版 UI 在这种情况下照样报「超分已生效 · 挂载 6 个 shader」,
+               那是在撒谎,是本项目最贵的那类 bug。 */
+            if (r.TryGetProperty("will_run", out var wr) && wr.ValueKind == JsonValueKind.False)
+            {
+                _msg.Text = Str(r, "note");
+                return;
+            }
+            var n = r.TryGetProperty("count", out var c) && c.TryGetInt32(out var ci) ? ci : 0;
+            _msg.Text = n == 0 ? "画质增强已关闭" : $"已启用:{lv.Name}";
+        }
+        catch (Exception e) { _msg.Text = LibraryPage.Advice(e); }
+    }
+
+    private sealed record ShaderLevel(string Id, string Name)
+    {
+        public override string ToString() => Name;
     }
 
     private async Task PickTrack(string kind, ComboBox box)

@@ -114,6 +114,13 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 		httpx.SetVersion(system.Version)
 
 		bus.Init()
+
+		/* ★ 独显钉死要**尽量早**:它写的是 Windows 的 per-exe 显卡偏好,
+		   而这个偏好是**进程启动时**被 DXGI 读走的。排在宿主建 GL 上下文
+		   之前才有机会当次生效(C# 侧 lp_init 排在 Avalonia 启动之前)。
+		   混合显卡机器上漏了它 = 整条 Anime4K 链跑核显,而且一声不吭。 */
+		system.PinHighPerformanceGPU()
+
 		// ★ 全部命令走**唯一入口**(见 core/commands 的包注释:两处手写清单会静默漂移)
 		commands.RegisterAll(system.Version)
 

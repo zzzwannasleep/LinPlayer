@@ -12,6 +12,8 @@
 #   bash scripts/selfcheck-win.sh plugins-inst  plugins:1      已装 tab
 #   bash scripts/selfcheck-win.sh plugin-dev    "plugindev:$PWD/scripts/fixtures/selfcheck-plugin"
 #                                                              装一个真插件跑起来
+#   LP_SHADER=ak_sharp LP_DRILL=1 bash scripts/selfcheck-win.sh quality player <片子>
+#                                                              画质档位面板(真选下拉项)
 #   LP_CATDETAIL=1 bash scripts/selfcheck-win.sh catalog #       "plugincatalog:$PWD/scripts/fixtures/selfcheck-plugin"
 #                                                              影视目录 + 详情盖层
 #     ↑ 这条走的是**最长的一条链**:JS 引擎 → 贡献点 → 源分派表 →
@@ -141,7 +143,7 @@ export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 # ★ 不指过去的话,市场页在没网的机器上只验得到「拉取失败」那一半 ——
 #   而**有插件时长什么样**(第三方徽章、跳过数提示、版本取最大)才是会出 bug 的那半。
 export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
-LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_SELFCHECK=1 LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 sleep $([ -n "$CLIP" ] && echo 12 || echo 6)
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \

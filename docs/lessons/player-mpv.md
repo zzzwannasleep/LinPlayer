@@ -845,6 +845,72 @@ set LP_MPV_LOG=1 && LinPlayer.exe     # 日志门控见 [mpv 发行版卫生](pl
 
 相关:[画质档位口径](player-mpv.md)、[mpv 发行版卫生](player-mpv.md)、「native-rendering-project」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)
 
+##### ⚠️ 2026-09-02 补:换成 Go 核心 + C#/Avalonia 之后,上面那个修法**用不了**
+
+导出符号那条路要求**可执行文件**自己有导出表。C#/.NET 的 apphost 没有可写的导出表,
+`[UnmanagedCallersOnly]` 导出的是**函数**不是 DWORD 数据符号。照抄过不来。
+
+换成 Windows 10 1803 起的 **per-exe 显卡偏好** —— 就是「设置 → 系统 → 显示 → 图形」
+那个界面写的同一处:
+
+```
+HKCU\Software\Microsoft\DirectX\UserGpuPreferences
+  值名 = exe 的完整路径
+  值   = "GpuPreference=2;"      0=系统决定 1=省电 2=高性能
+```
+
+实现在 `core/system/gpupref_windows.go`,由 `lp_init` 调 ——
+**必须尽早**,因为这个偏好是进程启动时被 DXGI 读走的。C# 侧 `lp_init` 排在
+Avalonia 启动之前,所以**当次启动就生效**(实测,不是推断)。
+
+相对导出符号的三个好处:一处同时覆盖 N 卡和 A 卡、不认厂商名、单显卡机器上天然空操作。
+
+**已有值一律不覆盖**:那可能是用户自己选的(笔记本外出时故意钉核显完全合理)。
+
+##### 新栈下的验证方法(和旧栈不同:看的不是 d3d11 的 Device Name)
+
+新栈的画面路径是 `vo=libmpv` + **OpenGL** render API,而 Avalonia 在 Windows 上的
+GL 后端是 **ANGLE(跑在 D3D11 上)**。所以判据在 `GL_RENDERER` 这一行,
+不是 `[vo/gpu-next/d3d11] Device Name:`:
+
+```bash
+LP_MPV_LOG=D:/x/mpv.log LP_SHADER=ak_sharp bash scripts/selfcheck-win.sh q "player:mv-1" 片子.mp4
+grep GL_RENDERER D:/x/mpv.log
+```
+
+2026-09-02 四轮实测(同一台笔记本,Intel UHD + RTX 5060):
+
+| 显卡偏好 | GL_RENDERER |
+|---|---|
+| `0` 系统决定(**= 修之前的行为**) | `ANGLE (Intel, Intel(R) UHD Graphics …)` |
+| `1` 省电 | `ANGLE (Intel, Intel(R) UHD Graphics …)` |
+| `2` 高性能(我们写的) | `ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 Laptop GPU …)` |
+| 整条删掉 → 代码自己写 | `ANGLE (NVIDIA, …)`,**同一次启动** |
+
+第一行是关键:**它证明倒退是真的**,不是推断出来的。
+
+##### 顺带:着色器编译缓存也得自己给路径
+
+`libmpv` 没有配置目录,不显式给 `gpu-shader-cache-dir` 它就**静默不缓存**,
+每次起播重编整条 CNN 链(开着超分时第一秒卡一下)。
+
+- 两个选项都要给:`gpu-shader-cache=yes` + `gpu-shader-cache-dir=<绝对路径>`。
+  实测 libmpv client api 2.5 两个都收(返回 0);不存在的选项名返回 **-5**
+- 目录**必须自己 MkdirAll**,mpv 不建
+- ⚠️ 别和 `.glsl` 源文件同目录。`player.setShaderLevel` 把我们自带的 17 个
+  `.glsl` 落在 `cache/shaders`;第一版把编译缓存也指到那里,两者互相误伤且不报错。
+  已分成 `cache/shaders`(源)/ `cache/shader-bin`(产物),有测试钉住
+- 判据是**真有字节落盘**:跑一轮 `ak_sharp` 之后 `cache/shader-bin/` 有 10 个哈希命名的
+  文件、144 KB。⚠️ **没起播的话它永远是空的** —— 我第一次拿一次没真起播的运行
+  下结论,差点判成「这条路不支持磁盘缓存」
+
+##### 这一整条的机制教训:**mpv 收下选项 ≠ 选项生效**
+
+Go 版的 `ensureMpv` 原来和 Rust 版一样把 `mpv_set_option_string` 的返回码
+`_ =` 掉了(N13 记的「静默失效的机制源头」)。现在逐条看返回值,`< 0` 打 error。
+配套一条测试拿**临时 mpv 句柄**把选项表逐条试一遍 —— 选项名写错、
+或者 libmpv 升级把它改名,这条会红,而不是等用户报「超分没效果」。
+
 ---
 
 ### 超分失效根因+toast统一位置

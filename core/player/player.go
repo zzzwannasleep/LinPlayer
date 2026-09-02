@@ -105,6 +105,7 @@ import (
 	"unsafe"
 
 	"linplayer/core/bus"
+	"linplayer/core/paths"
 )
 
 // 一个进程只能有一条 GL 通道(SPEC §7.2 约束 4),所以是全局单例而不是句柄。
@@ -118,6 +119,55 @@ var (
 	swapCalls   atomic.Int64
 	drainStop   atomic.Bool
 )
+
+// baseOptions 是 mpv 起手的选项表。
+//
+// ★★ **抽成纯函数是为了能被测试钉住**,不是为了好看。N1(CVE-2026-8461 的
+// magicyuv 防护)已经因为一次重构静默丢过一回 —— 丢了之后编译绿、单测绿、
+// 运行时也不报错,只是那条防护没了。文档提醒防不住重构,只有测试能。
+// 见 player_options_test.go。
+func baseOptions(hwdec, shaderCacheDir string) [][2]string {
+	opts := [][2]string{
+		{"vo", "libmpv"},
+		{"hwdec", hwdec},
+		{"terminal", "no"},
+		{"keep-open", "yes"},
+		// N1:CVE-2026-8461。迁移必带清单的第一条,在这里就带上,别等以后补
+		{"vd", "-magicyuv"},
+	}
+	if shaderCacheDir != "" {
+		// libmpv 没有配置目录,这两项不显式给就**不缓存**:每次起播重编整条
+		// Anime4K CNN 链,表现是开着超分时第一秒卡一下(mpv 发行版卫生那条)。
+		opts = append(opts,
+			[2]string{"gpu-shader-cache", "yes"},
+			[2]string{"gpu-shader-cache-dir", shaderCacheDir})
+	}
+	return opts
+}
+
+// checkOptionNames 拿一个**临时** mpv 句柄把选项逐条试一遍,返回 libmpv 不认的那些。
+//
+// ★ 它只被测试调用,却必须住在非测试文件里 —— Go 不允许 `_test.go` 里 `import "C"`。
+// 判据来源:实测 libmpv(client api 2.5)对不存在的选项名返回 -5(option not found),
+// 对 `vd` / `gpu-shader-cache-dir` / `gpu-shader-cache` 都返回 0。
+func checkOptionNames(opts [][2]string) []string {
+	h := C.mpv_create()
+	if h == nil {
+		return []string{"mpv_create 失败"}
+	}
+	defer C.mpv_terminate_destroy(h)
+	var bad []string
+	for _, kv := range opts {
+		ck, cv := C.CString(kv[0]), C.CString(kv[1])
+		r := C.mpv_set_option_string(h, ck, cv)
+		C.free(unsafe.Pointer(ck))
+		C.free(unsafe.Pointer(cv))
+		if r < 0 {
+			bad = append(bad, fmt.Sprintf("%s=%s(错误码 %d)", kv[0], kv[1], int(r)))
+		}
+	}
+	return bad
+}
 
 // ensureMpv 起 mpv 但**不起播**。
 //
@@ -134,30 +184,34 @@ func ensureMpv() int32 {
 	if h == nil {
 		return -1
 	}
-	set := func(k, v string) {
-		ck, cv := C.CString(k), C.CString(v)
-		defer C.free(unsafe.Pointer(ck))
-		defer C.free(unsafe.Pointer(cv))
-		C.mpv_set_option_string(h, ck, cv)
-	}
 	hw := os.Getenv("LP_HWDEC")
 	if hw == "" {
 		hw = "auto"
 	}
-	for _, kv := range [][2]string{
-		{"vo", "libmpv"},
-		{"hwdec", hw},
-		{"terminal", "no"},
-		{"keep-open", "yes"},
-		// N1:CVE-2026-8461。迁移必带清单的第一条,在这里就带上,别等以后补
-		{"vd", "-magicyuv"},
-	} {
-		set(kv[0], kv[1])
+	// 着色器缓存目录得先存在,mpv 不会替我们建。建不出来就不给这个路径 ——
+	// 给一个建不出来的路径,mpv 每帧都会去试,反而更糟。
+	sc := paths.ShaderCacheDir()
+	if err := os.MkdirAll(sc, 0o755); err != nil {
+		bus.Logf("warn", "着色器缓存目录建不出来,本次运行不缓存: %v", err)
+		sc = ""
 	}
+	opts := baseOptions(hw, sc)
 	// 日志走 LP_MPV_LOG 门控:log-file 会把 mpv+ffmpeg 钉在 debug 级
-	if p := os.Getenv("LP_MPV_LOG"); p != "" {
-		set("log-file", p)
-		set("msg-level", "all=v")
+	if lp := os.Getenv("LP_MPV_LOG"); lp != "" {
+		opts = append(opts, [2]string{"log-file", lp}, [2]string{"msg-level", "all=v"})
+	}
+	for _, kv := range opts {
+		ck, cv := C.CString(kv[0]), C.CString(kv[1])
+		r := C.mpv_set_option_string(h, ck, cv)
+		C.free(unsafe.Pointer(ck))
+		C.free(unsafe.Pointer(cv))
+		/* ★★ 返回码**必须看**。这是 N13 记下的「静默失效的机制源头」:
+		   选项名写错、或者 libmpv 升级把它改名了,mpv 只是返回 -5 就完事,
+		   代码路径一切正常、编译绿、单测绿 —— 而那条 CVE 防护已经没了。
+		   N1 就是这么丢过一次的。 */
+		if r < 0 {
+			bus.Logf("error", "mpv 选项没设上:%s=%s(错误码 %d)—— 这一项的功能现在是关的", kv[0], kv[1], int(r))
+		}
 	}
 	if C.mpv_initialize(h) < 0 {
 		C.mpv_terminate_destroy(h)

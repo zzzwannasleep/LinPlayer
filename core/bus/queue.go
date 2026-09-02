@@ -25,7 +25,14 @@ const queueCap = 1024
 
 // 消费停滞阈值:队列非空且这么久没被取过,就写一条 warn。
 // 这是「UI 事件线程被谁堵住了」的唯一线索。
-const stallAfter = 5 * time.Second
+//
+// ★ 是 var 不是 const:测试要把它压到毫秒级,否则这条判据得跑 5 秒 —— 而
+// 「跑得慢的测试等于没人跑的测试」。谁再加一条动这两个值的测试,
+// **必须和现有那条串行**(护栏测试共用全局覆盖值的老坑)。
+var (
+	stallAfter = 5 * time.Second
+	stallTick  = time.Second
+)
 
 // ErrObj 是错误对象(SPEC §5.4)。错误是对象不是字符串 ——
 // 字符串到了 UI 层只能原样弹 toast,分不清「该重试」「该重登」「该报 bug」。
@@ -204,7 +211,7 @@ func (q *queue) close() {
 }
 
 func (q *queue) watchStall() {
-	tick := time.NewTicker(time.Second)
+	tick := time.NewTicker(stallTick)
 	defer tick.Stop()
 	for range tick.C {
 		q.mu.Lock()

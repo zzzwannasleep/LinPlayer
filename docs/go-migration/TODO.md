@@ -96,12 +96,14 @@ Ani-RSS 管理台(同 C24b)。
 - **修法:** 在 mpv 初始化选项里加 `vd` = `-magicyuv`
   (mpv `common/codecs.c` 语义:`-<decoder>` = 排除该项,其余仍自动选)
 
-- [ ] **N1.1** 在 `crates/mpv` 的初始化选项里恢复 `vd=-magicyuv`
-- [ ] **N1.2** **回读验证**,不能只看编译绿 —— `Player::new` 的 `set` 闭包**吞掉 mpv 返回码**
-  (`crates/mpv/src/lib.rs:1229`),选项写错是静默无效
-  - 判据:mpv 日志里确认该解码器被排除;或播一个 magicyuv 样本确认走不到那个解码器
-- [ ] **N1.3** 加一条测试钉住,防止下次重构再丢
-  - **先红**:去掉那行,测试必须变红
+- [x] **N1.1** ✅ Go 版初始化选项里带 `vd=-magicyuv`(`core/player/player.go` `baseOptions`)
+- [x] **N1.2** ✅ **回读验证已做**(2026-09-02)—— Go 版原本一样吞返回码,现在
+  `ensureMpv` 逐条看 `mpv_set_option_string` 的返回值,`< 0` 打 error 日志。
+  实测判据:libmpv(client api 2.5)对不存在的选项名返回 **-5**(option not found),
+  对 `vd` / `gpu-shader-cache` / `gpu-shader-cache-dir` 都返回 0
+- [x] **N1.3** ✅ 测试已钉(`core/player/player_options_test.go`,4 条)
+  - **先红已验**:删掉 `{"vd","-magicyuv"}` → 红;把 `gpu-shader-cache-dir` 改名 → 红(报 -5)
+  - 另有一条**反向断言**钉住探测器本身不是恒绿的
 - [ ] **N1.4** 检查 Windows libmpv 钉版是否已可升到含 FFmpeg ≥ 8.1.2 的构建
 
 > **教训:** 当初的记忆条目里明写着「新增/换播放器内核时,确认播放路径仍带 `vd=-magicyuv`」。
@@ -1274,6 +1276,71 @@ Ani-RSS 管理台(同 C24b)。
   - 判据:先隐身建窗拿真实外框尺寸再摆位(外框每边宽出一圈,建前量不到)
   - 判据:主窗最小化时开播放窗,播放窗**不跑到屏幕外**(哨兵值 -32000)
   - 判据:**最大化 → 点全屏 → 真的全屏**;退出后回到最大化。契约测试钉住单一出口
+- [x] **W13** ✅ **双显卡钉独显**(2026-09-02)—— 这条是**换栈之后的真倒退**,不是没移植
+
+  黄金实现从 exe 导出 `NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance`
+  两个数据符号。那条路在 C#/.NET 宿主上**走不通**(apphost 没有可写的导出表,
+  `[UnmanagedCallersOnly]` 导出的是函数不是 DWORD)。
+
+  改用 Windows 10 1803 起的 per-exe 显卡偏好(`core/system/gpupref_windows.go`),
+  在 `lp_init` 里写 —— 排在 Avalonia 建 GL 上下文之前,所以**当次启动就生效**。
+
+  - 判据(真机 A/B,双显卡笔记本,`LP_MPV_LOG` 读 `GL_RENDERER`):
+
+    | 显卡偏好 | GL_RENDERER |
+    |---|---|
+    | `0` 系统决定(**= 修之前的行为**) | Intel(R) UHD Graphics |
+    | `1` 省电 | Intel(R) UHD Graphics |
+    | `2` 高性能(我们写的) | **NVIDIA GeForce RTX 5060** |
+    | 整条删掉 → 代码自己写 | **NVIDIA GeForce RTX 5060**(同次启动) |
+
+  - 判据:**已有值一律不覆盖**(用户可能自己在系统设置里选了省电)。实测写 `1`
+    之后跑一轮,值仍是 `1`
+  - 测试:`core/system/gpupref_windows_test.go` —— 纯判断 + **真读写注册表**两半都测。
+    先红已验:字节数写成字符数 → 回读截断成 `GpuPrefe`;不存在当成错误 → 逻辑反转
+  - ⚠️ 我们的画面路径是 `vo=libmpv` + OpenGL,Avalonia 在 Windows 上的 GL 后端是
+    **ANGLE(D3D11)**,所以钉住宿主进程的 DXGI 适配器就等于钉住 mpv
+
+- [x] **W14** ✅ **着色器编译缓存**(2026-09-02)—— libmpv 没有配置目录,
+  不显式给 `gpu-shader-cache-dir` 它**静默不缓存**,每次起播重编整条 CNN 链
+
+  - 判据:真机跑一轮 `ak_sharp`,`userdata/cache/shader-bin/` 落 **10 个文件 / 144 KB**
+    (哈希命名的程序二进制),第二轮数量不变 = 在读不在重写
+  - ⚠️ **第一版写错了**:把缓存目录指到 `cache/shaders`,而 `player.setShaderLevel`
+    早就在往那里落我们自带的 17 个 `.glsl` 源文件。两者混住会互相误伤,而且不报错 ——
+    真机 `ls` 了一眼才发现。已分成 `cache/shaders`(源)+ `cache/shader-bin`(编译产物),
+    并加 `core/paths/paths_test.go` 钉住「两个目录不许相同」
+  - 顺带把 `setShaderLevel` 里硬拼的路径改走 `paths.ShaderSourceDir()`(路径唯一出口)
+
+- [x] **W15** ✅ **播放页画质档位面板接线**(2026-09-02)——
+  `UI_PC.md`:1017 要求底部第七个面板是「画质」、:499 要求快捷键 `U`
+
+  - 之前 `player.shaderLevels` / `player.setShaderLevel` 在 Windows 宿主里是**零调用**:
+    核心层 28 个档位(Anime4K / FSR / NVIDIA / 通用四族)一个都点不到。
+    **W13 修的独显就是给它用的** —— 显卡钉住了却没有开关,等于白修
+  - UI **必须原样透出核心层的 `will_run` + `note`**:`count > 0` 只能证明 mpv 收下了
+    shader 路径,证明不了它会跑(放大类带 `//!WHEN 输出>源*1.2`,窗口没比源大就整条空转)。
+    旧版 UI 在这种情况下照样报「已生效 · 挂载 6 个 shader」,那是在撒谎
+  - 自检台加了 `LP_SHADER=<档位>`:**选真的下拉项**走 SelectionChanged,
+    不是直接调命令 —— 绕开 UI 的自检只能证明核心层活着
+
+- [ ] **W16** 🔴 **接线报告:107 条已注册命令,Windows 宿主一次都没调过**
+
+  `scripts/check-bindings.sh` 比的是 `bindings/csharp` 这层**生成的绑定**,
+  它永远和 COMMANDS.md 一致 —— **照不到「App 有没有真去调」**。W15 就是这么漏的。
+
+  - 工具:`python scripts/report-wiring.py`(报告,**不做成门禁** ——
+    从第一天起就红的门禁等于没有门禁)
+  - 2026-09-02 实测:已注册 220 条,零调用 **107** 条。按域分布:
+    `player` 24 · `emby` 16 · `danmaku` 14 · `sync` 13 · `prefs` 9 · `source` 8 ·
+    `system` 8 · `plugin` 6 · `account` 5 · `translate` 3 · `download` 1
+  - ⚠️ **零调用 ≠ 功能缺失**:不少有等价路径(`emby.seriesSeasons` 的活由
+    `emby.getItems` 干了)。这是**待查清单**,不是缺陷清单
+  - 但 `danmaku.*` 14 条 / `sync.*` 13 条整族零调用,说明**弹幕和 Trakt/Bangumi 同步
+    在 Windows 端还没有任何入口** —— 那不是等价路径的问题
+  - [ ] **W16.1** 逐域过一遍,分成「有等价路径」和「真没接」两堆
+  - [ ] **W16.2** 真没接的那堆并进 U2.x
+
 - [x] **W6** 最大化溢出 8 px:**已实测**(§16.5 ⑤)✅ 2026-08-31
   - **结论:Avalonia 无边框窗口最大化没有溢出。** 截图 2560×1600,
     右上角三个按钮完整可见,没有被顶到屏幕外。**不需要**补偿代码。
@@ -1398,11 +1465,14 @@ Ani-RSS 管理台(同 C24b)。
 - [x] **T9** ✅ 核心层 panic 边界(`SPEC.md` §5.10)—— 见 B1.5 / SPIKE-2
   - 三条判据在 `tools/corecheck` 第 8 组里逐条断言,`check-core.sh` 第 4 关常跑
   - **显式 panic 与运行时故障分成两条命令测**(只测前者会得到「recover 有效」的假结论)
-- [~] **T10** 事件队列背压 —— **实现全在,判据一条没验**
-  - 实现:`core/bus/queue.go` 按事件类分级(`classOf`)、`player.status` 合并、
-    日志丢弃计数、`watchStall` 5 s 停滞 warn、`queueCap = 1024`
-  - ⚠️ `core/bus` **一个 `_test.go` 都没有**;`corecheck` 只验了关停发 `eof` 那条。
-    「停止消费 10 s」这条压根没跑过 —— 别把「代码写了」当成「验过了」
+- [x] **T10** ✅ 事件队列背压 —— **判据已逐条验**(2026-09-02,`core/bus/queue_test.go` 10 条)
+  - 分级表照 SPEC §5.11 逐行钉住(result/partial/eof 不丢、三个高频事件合并、log 可丢)
+  - `result` 队列满则**阻塞**:第 1025 条 push 必须不返回,pop 一条后必须被唤醒
+  - 合并要**留最新值**;不同 mergeKey 不许互相吃掉
+  - log 丢弃计数要挂在下一条 log 上带出去,带完清零
+  - 「停止消费」→ `stalled` 标起来,恢复消费后落下去
+    (为此把 `stallAfter` / `stallTick` 从 const 改成 var,测试压到毫秒级)
+  - **先红已验**:四处注入(满了改成丢 / 不合并 / 不带计数 / 不标停滞)→ 四条对应测试全红
 - [x] **T11** ✅ ABI 版本协商(`SPEC.md` §5.0)
   - 判据:`corecheck` 第 1 组断言 `lp_abi_version() == 宿主编译期 LP_ABI` ✅
   - 判据:`SimulateMismatch(abi+1)` 走的是**拒绝启动**那条路 ✅
