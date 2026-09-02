@@ -35,31 +35,95 @@
     <Setter Property="TextBlock.Foreground" Value="White" />
   </Style>
 
-  <!-- 侧栏导航项 -->
+  <!-- 侧栏导航项。
+    ★★ 悬停/选中的底色<b>用一层叠加块的 Opacity 做</b>,**不是**给 Border 的 Background
+       挂 BrushTransition。
+       原来那种写法有个只有肉眼看得见的 bug:退场时是把 PanelAlt 插值到 `Transparent`,
+       而 Avalonia 这条插值路径**中途会经过又亮又透的颜色**。
+       实测采样(深色皮,LP_NAVHOVER=1 注入旧样式跑出来的):
+         alpha 0.83 rgb(116,118,120) → 合成 102
+         alpha 0.68 rgb(154,155,156) → 合成 114   ← 峰值
+         alpha 0.26 rgb(224,224,224) → 合成  78
+       而两端是 悬停 35 / 静止 26 —— <b>中途比两端亮三倍多</b>。
+       这就是用户说的「滑到下一个的时候上一个会闪亮一下」。
+       ★ 别按「非预乘插值会变暗」去推理:我第一版就是这么算的,推出来是「变暗」,
+         方向正好反了 —— 这种事只能实测。
+       Opacity 走的是预乘合成,值一定单调,不可能出现这种过冲。
+    ★ 折叠态只留图标:Content 那一栏整个不画,靠 .icononly 切。 -->
   <Style Selector="RadioButton.nav">
     <Setter Property="Height" Value="38" />
     <Setter Property="Margin" Value="8,1" />
-    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="Padding" Value="10,0" />
     <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
     <Setter Property="HorizontalAlignment" Value="Stretch" />
     <Setter Property="Template">
       <ControlTemplate>
-        <Border Name="root" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
-          <ContentPresenter VerticalAlignment="Center"
-                            Content="{TemplateBinding Content}"
-                            TextBlock.Foreground="{TemplateBinding Foreground}" />
-        </Border>
+        <Panel>
+          <Border Name="sel" CornerRadius="8" Background="{DynamicResource AccentSoft}" Opacity="0" />
+          <Border Name="hov" CornerRadius="8" Background="{DynamicResource PanelAlt}" Opacity="0" />
+          <Border Name="root" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
+            <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+              <!-- 图标。折叠态下它是唯一还看得见的东西,所以宽度钉死 ——
+                   不钉的话不同字形宽窄不一,一列图标会左右错开。 -->
+              <TextBlock Name="icon" Text="{TemplateBinding Tag}" FontFamily="Segoe MDL2 Assets"
+                         FontSize="15" Width="18" TextAlignment="Center"
+                         Foreground="{TemplateBinding Foreground}" VerticalAlignment="Center" />
+              <ContentPresenter Name="label" VerticalAlignment="Center"
+                                Content="{TemplateBinding Content}"
+                                TextBlock.Foreground="{TemplateBinding Foreground}" />
+            </StackPanel>
+          </Border>
+        </Panel>
       </ControlTemplate>
     </Setter>
   </Style>
-  <Style Selector="RadioButton.nav:pointerover /template/ Border#root">
-    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+  <Style Selector="RadioButton.nav /template/ Border#hov">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.12" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
   </Style>
-  <Style Selector="RadioButton.nav:checked /template/ Border#root">
-    <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+  <Style Selector="RadioButton.nav /template/ Border#sel">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="Opacity" Duration="0:0:0.12" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="RadioButton.nav:pointerover /template/ Border#hov">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="RadioButton.nav:checked /template/ Border#sel">
+    <Setter Property="Opacity" Value="1" />
   </Style>
   <Style Selector="RadioButton.nav:checked">
     <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+  </Style>
+  <!-- 折叠态:文字整条不画,图标居中。★ 只改 IsVisible 不改宽度 ——
+       宽度是外面那条列宽在管,两处都改会打架。 -->
+  <Style Selector="RadioButton.nav.icononly /template/ ContentPresenter#label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="RadioButton.nav.icononly">
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="RadioButton.nav.icononly /template/ TextBlock#icon">
+    <Setter Property="Width" Value="56" />
+  </Style>
+
+  <!-- 侧栏底部那个「收起 / 展开」。和导航项同一套悬停手感,但它不是单选项。 -->
+  <Style Selector="Button.navbtn /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.navbtn:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
   </Style>
 
   <!-- 主按钮 -->
@@ -217,14 +281,6 @@
     <Setter Property="BorderBrush" Value="{DynamicResource LineStrong}" />
   </Style>
 
-  <Style Selector="RadioButton.nav /template/ Border#root">
-    <Setter Property="Transitions">
-      <Transitions>
-        <BrushTransition Property="Background" Duration="0:0:0.12" />
-      </Transitions>
-    </Setter>
-  </Style>
-
   <!-- 骨架屏。
     ★★ 「加载中…」那三个字**不占位**:内容回来的一瞬间页面高度从 20px 跳到 800px,
        滚动条、已经在看的那一段全被顶走。骨架要和真内容**同尺寸**,
@@ -247,17 +303,38 @@
       鼠标要瞄准才点得中 —— 而 OSD 三秒就收,瞄不中就得再晃一次鼠标。
   -->
   <Style Selector="Button.osd">
-    <Setter Property="Width" Value="40" />
-    <Setter Property="Height" Value="36" />
+    <!-- ★★ 44×40 而不是 40×36。符号本身只有十来像素,靠字形当热区的话鼠标要瞄准 ——
+         而 OSD 三秒就收,瞄不中就得再晃一次鼠标。44 是触控/鼠标通用的下限。 -->
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="40" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="White" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="8" />
-    <Setter Property="FontSize" Value="16" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
+    <Setter Property="FontSize" Value="15" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <!-- 主键(播放/暂停)大一号:它是这一排里唯一会被反复点的。 -->
+  <Style Selector="Button.osd.main">
+    <Setter Property="Width" Value="52" />
+    <Setter Property="Height" Value="48" />
+    <Setter Property="CornerRadius" Value="24" />
+    <Setter Property="FontSize" Value="19" />
+    <Setter Property="Background" Value="#26ffffff" />
+  </Style>
+  <Style Selector="Button.osd.main /template/ ContentPresenter">
+    <Setter Property="Background" Value="#26ffffff" />
+  </Style>
+  <Style Selector="Button.osd.main:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#4dffffff" />
+  </Style>
+  <!-- 开着的开关(字幕关掉了之类)要看得出来 -->
+  <Style Selector="Button.osd.on /template/ ContentPresenter">
+    <Setter Property="Background" Value="#5b8def" />
   </Style>
   <Style Selector="Button.osd /template/ ContentPresenter">
     <Setter Property="Transitions">

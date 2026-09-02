@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
@@ -42,6 +43,7 @@ public partial class MainWindow : Window
         Nav.Immersive = SetImmersive;
 
         this.FindControl<Button>("ServerChip")!.Click += (_, _) => GoServers();
+        this.FindControl<Button>("BtnCollapse")!.Click += (_, _) => ToggleSidebar();
         // ★ 需要 Emby 会话的页面统一走 Emby():账号是网盘 / 局域网源时 Nav.Session 是 null,
         //   页面里直接解引用会抛在 Task 里 —— 没提示、不崩、就是永远停在「加载中」。
         this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
@@ -192,6 +194,8 @@ public partial class MainWindow : Window
         SelfCheckMenu();
         SelfCheckCount();
         SelfCheckHero();
+        SelfCheckNavHover();
+        SelfCheckGlyphs();
         /* 自检:往 UI 线程上扔一个异常,验兜网。
            ★ 这个钩子是**必须留着**的:兜网本身没有任何外在表现 ——
              它没生效的唯一症状是「某天某个页面把进程打死了」,
@@ -446,13 +450,155 @@ public partial class MainWindow : Window
             Console.WriteLine($"[卡片计数] 视觉树里实例化了 {this.GetVisualDescendants().OfType<Card>().Count()} 张卡")));
     }
 
+    /// <summary>
+    /// 自检:<b>用到的每一个 MDL2 字形是不是真的存在</b>。
+    ///
+    /// <para>★★ 码位写错的表现是一个<b>空心方框</b>(.notdef) —— 而它编译绿、
+    /// 运行不报错、日志一个字都没有,只有真渲染 + 真看一眼才发现得了。
+    /// 而截图里一排图标中间夹一个方框,人眼很容易当成「这个图标就长这样」。
+    /// 所以这里直接问字体:<c>TryGetGlyph</c> 回 false 或者拿到 0 就是没有。</para>
+    /// </summary>
+    private static void SelfCheckGlyphs()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_GLYPH") != "1") return;
+        var face = new Typeface("Segoe MDL2 Assets");
+        if (!FontManager.Current.TryGetGlyphTypeface(face, out var gt))
+        {
+            Console.WriteLine("[字形自检] ✗ 系统里没有 Segoe MDL2 Assets 这个字体");
+            return;
+        }
+        var all = AllGlyphs();
+        var bad = 0;
+        foreach (var (name, glyph) in all)
+        {
+            var cp = (uint)char.ConvertToUtf32(glyph, 0);
+            var ok = gt.TryGetGlyph(cp, out var g) && g != 0;
+            if (!ok) { bad++; Console.WriteLine($"[字形自检] ✗ {name} U+{cp:X4} 字体里没有 —— 会画成方框"); }
+        }
+        Console.WriteLine(bad == 0
+            ? $"[字形自检] ✓ {all.Count} 个字形全都在"
+            : $"[字形自检] ✗ {bad} / {all.Count} 个字形缺失");
+    }
+
+    /// <summary>全站用到的 MDL2 字形。加了新图标要往这里加一行,不然它查不到。</summary>
+    private static List<(string Name, string Glyph)> AllGlyphs()
+    {
+        var outp = new List<(string, string)>
+        {
+            ("标题栏 最小化", ""), ("标题栏 最大化", ""), ("标题栏 关闭", ""),
+            ("侧栏 服务器", ""), ("侧栏 收起", ""), ("侧栏 展开", ""),
+            ("侧栏 首页", ""), ("侧栏 文件浏览", ""), ("侧栏 影视目录", ""),
+            ("侧栏 媒体库", ""), ("侧栏 搜索", ""), ("侧栏 收藏", ""),
+            ("侧栏 聚合视界", ""), ("侧栏 观看历史", ""), ("侧栏 下载", ""),
+            ("侧栏 排行榜", ""), ("侧栏 追剧日历", ""), ("侧栏 插件", ""),
+            ("侧栏 设置", ""),
+        };
+        foreach (var (n, g) in PlayerPage.Ico.All) outp.Add(("播放页 " + n, g));
+        return outp;
+    }
+
+    /// <summary>侧栏收起来了没有。</summary>
+    private bool _collapsed;
+
+    /// <summary>当前该多宽。折叠 72(Tokens 里的 SidebarCollapsedWidth),展开 212。</summary>
+    private double SidebarWidth => _collapsed ? 72 : 212;
+
+    /// <summary>
+    /// 收起 / 展开侧栏。
+    ///
+    /// <para>★ 折叠态<b>只留图标</b>,不是把整条藏掉 —— 藏掉的话导航就没了,
+    /// 用户得先展开才能换页,那不叫折叠,那叫隐藏。</para>
+    /// <para>★ 宽度用 GridLength 直接改,不做动画:这一列一变,右边整页要重排版
+    /// (网格要重算列数、轨道要重算能滚多远),按帧插值等于每帧全页重排。</para>
+    /// </summary>
+    private void ToggleSidebar()
+    {
+        _collapsed = !_collapsed;
+        this.FindControl<Grid>("BodyGrid")!.ColumnDefinitions[0].Width = new GridLength(SidebarWidth);
+        foreach (var rb in this.GetVisualDescendants().OfType<RadioButton>())
+            if (rb.Classes.Contains("nav")) rb.Classes.Set("icononly", _collapsed);
+        // 服务器卡和折叠键自己也要跟着收 —— 留着一行字在 72px 宽的列里会被裁掉半个字
+        this.FindControl<TextBlock>("ServerName")!.IsVisible = !_collapsed;
+        this.FindControl<TextBlock>("CollapseText")!.IsVisible = !_collapsed;
+        this.FindControl<TextBlock>("CollapseIcon")!.Text = _collapsed ? "" : "";
+        ToolTip.SetTip(this.FindControl<Button>("BtnCollapse")!, _collapsed ? "展开侧栏" : "收起侧栏");
+        var chip = this.FindControl<Button>("ServerChip")!;
+        chip.HorizontalContentAlignment = _collapsed ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+    }
+
+    /// <summary>
+    /// 自检:侧栏高亮退场<b>会不会闪一下</b>。
+    ///
+    /// <para>★★ 这个 bug 截图判不出来 —— 它只活在过渡的中间几帧。
+    /// 根因:原来的写法给 <c>Border#root</c> 的 Background 挂 BrushTransition,
+    /// 从 PanelAlt 插到 <c>Transparent</c>,而这条插值路径<b>中途会经过又亮又透的颜色</b>——
+    /// 实测合成亮度 35(悬停)→ <b>114</b>(中途)→ 26(静止),中途比两端亮三倍多。
+    /// 那就是用户说的「滑到下一个的时候上一个会闪亮一下」。</para>
+    ///
+    /// <para>★★ 判据<b>不是</b>「我自己算一遍合成亮度」—— 那一版实测<b>假绿</b>:
+    /// 注入旧写法之后它照样报 ✓,因为我算的合成和渲染器算的对不上。
+    /// 现在直接断言<b>机制</b>:退场时只许 Opacity 在动,
+    /// <c>root</c> 的底色<b>一动就是老写法</b>(而只要它在动,就一定会经过那个暗谷)。
+    /// 这条断言无法被「算错」,而且注入旧样式当场变红。</para>
+    /// </summary>
+    private void SelfCheckNavHover()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_NAVHOVER") != "1") return;
+        _ = Task.Delay(2000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var rb = this.FindControl<RadioButton>("NavLibrary")!;
+            var borders = rb.GetVisualDescendants().OfType<Border>().ToList();
+            var root = borders.FirstOrDefault(b => b.Name == "root");
+            var hov = borders.FirstOrDefault(b => b.Name == "hov");
+            if (root is null)
+            {
+                Console.WriteLine("[侧栏高亮] ✗ 模板里没有 Border#root,选择器八成写错了");
+                return;
+            }
+
+            static string Bg(Border? b) =>
+                (b?.Background as ISolidColorBrush)?.Color.ToString() ?? "无";
+
+            ((Avalonia.Controls.IPseudoClasses)rb.Classes).Set(":pointerover", true);
+            var rootBg = new List<string>();
+            var hovOp = new List<double>();
+            var n = 0;
+            void Sample(TimeSpan _)
+            {
+                rootBg.Add(Bg(root));
+                hovOp.Add(Math.Round(hov?.Opacity ?? -1, 2));
+                if (++n == 10) ((Avalonia.Controls.IPseudoClasses)rb.Classes).Set(":pointerover", false);
+                if (n < 30) TopLevel.GetTopLevel(rb)!.RequestAnimationFrame(Sample);
+                else Report();
+            }
+            void Report()
+            {
+                var outBg = rootBg.Skip(10).ToList();     // 退场那一段
+                var outOp = hovOp.Skip(10).ToList();
+                var bgMoved = outBg.Distinct().Count() > 1;
+                var opMoved = outOp.Distinct().Count() > 1;
+                Console.WriteLine($"[侧栏高亮] 退场 root 底色 {string.Join(" ", outBg.Distinct())}");
+                Console.WriteLine($"[侧栏高亮] 退场 hov 透明度 {string.Join(" ", outOp)}");
+                if (bgMoved)
+                    Console.WriteLine("[侧栏高亮] ✗ root 的底色在动 —— 那是插值到 Transparent 那条路,中途会比两端都暗(闪一下)");
+                else if (!opMoved)
+                    Console.WriteLine("[侧栏高亮] ✗ 退场时什么都没动 —— 悬停态压根没生效");
+                else
+                    Console.WriteLine("[侧栏高亮] ✓ 只有 Opacity 在动,底色纹丝不动 —— 预乘合成,不可能有暗谷");
+            }
+            TopLevel.GetTopLevel(rb)!.RequestAnimationFrame(Sample);
+        }));
+    }
+
     /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>
     private void SetImmersive(bool on)
     {
         var root = this.FindControl<Grid>("RootGrid")!;
         var body = this.FindControl<Grid>("BodyGrid")!;
         root.RowDefinitions[0].Height = on ? new GridLength(0) : new GridLength(36);
-        body.ColumnDefinitions[0].Width = on ? new GridLength(0) : new GridLength(212);
+        // ★ 退全屏要回到**当前的**侧栏宽度,不是写死的 212 ——
+        //   否则收着侧栏去看片,回来侧栏自己展开了。
+        body.ColumnDefinitions[0].Width = on ? new GridLength(0) : new GridLength(SidebarWidth);
         this.FindControl<Grid>("TitleBar")!.IsVisible = !on;
         this.FindControl<Border>("Sidebar")!.IsVisible = !on;
         WindowState = on ? WindowState.FullScreen : WindowState.Normal;
@@ -602,11 +748,11 @@ public partial class MainWindow : Window
 
         Dispatcher.UIThread.Post(() =>
         {
+            /* ★ 只写服务器名。用户名 2026-09-02 被点名去掉了 ——
+               「一台服务器一个账号」是常态,把用户名摆在侧栏等于每次都在
+               回答一个没人问的问题;真要确认是哪个账号,服务器页里写着。 */
             this.FindControl<TextBlock>("ServerName")!.Text =
                 active.TryGetProperty("name", out var n) ? n.GetString() : "服务器";
-            this.FindControl<TextBlock>("ServerSub")!.Text =
-                active.TryGetProperty("user_name", out var u) && !string.IsNullOrEmpty(u.GetString())
-                    ? u.GetString() : "已连接";
 
             /* ★★ 按账号类型显隐入口,而不是全都亮着。
                全亮的话:Emby 账号点「文件浏览」拿到「当前没有已登录的文件源」,

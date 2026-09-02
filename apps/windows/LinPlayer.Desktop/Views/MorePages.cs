@@ -50,11 +50,15 @@ public sealed class SearchPage : PageBase
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         var go = new Button { Classes = { "primary" }, Content = "搜索" };
-        // ★ 「包括集」默认**关**:开着的话搜一部剧会先刷出几十条「第 N 集」,
-        //   把剧本身挤到屏幕外。开关本身要有,不然找某一集就没法搜。
-        var withEps = new CheckBox
+        /* ★★ 这里原来是「包括分集」,2026-09-02 换成<b>聚合搜索</b>(用户点名)。
+           理由站得住:分集本来就不该混进片名搜索的结果里(一部剧能刷出几十条
+           「第 N 集」,把剧本身挤到屏幕外),而找某一集的正确入口是进剧的详情页;
+           而「这部片我到底存在哪台服务器上」是多服务器用户天天遇到、
+           **原来只能一台台切过去搜**的问题。
+           ★ 做成开关不是按钮:它要能关回来 —— 只搜当前这台仍然是默认动作。 */
+        var everywhere = new CheckBox
         {
-            Content = "包括分集", IsChecked = false,
+            Content = "聚合搜索(所有服务器)", IsChecked = false,
             VerticalAlignment = VerticalAlignment.Center,
         };
         var status = Dim("");
@@ -63,12 +67,12 @@ public sealed class SearchPage : PageBase
         var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
         Grid.SetColumn(box, 0);
         Grid.SetColumn(go, 1);
-        Grid.SetColumn(withEps, 2);
+        Grid.SetColumn(everywhere, 2);
         go.Margin = new Thickness(10, 0, 0, 0);
-        withEps.Margin = new Thickness(16, 0, 0, 0);
+        everywhere.Margin = new Thickness(16, 0, 0, 0);
         bar.Children.Add(box);
         bar.Children.Add(go);
-        bar.Children.Add(withEps);
+        bar.Children.Add(everywhere);
 
         Content = Scrolled(new StackPanel
         {
@@ -91,27 +95,47 @@ public sealed class SearchPage : PageBase
             var mine = ++_seq;
             status.Text = $"正在搜「{q}」…";
             host.Content = Skeleton.Grid(false, 12);
+            var all = everywhere.IsChecked == true;
             try
             {
-                var s = Nav.Session!;
-                // ★ types 必须**显式传**:关着「包括分集」时前端不传的话核心层会全要,
-                //   开关就成了摆设(Rust 版栽过,聚合那条也要一起带)。
-                var res = withEps.IsChecked == true
-                    ? await core.EmbySearch(new { s.server, s.token, s.user_id, s.device_id, query = q })
-                    : await core.EmbySearch(new
+                /* ★ types 必须**显式传**:不传的话核心层会连分集一起要,
+                   搜一部剧会先刷出几十条「第 N 集」(Rust 版栽过)。
+                   ★★ 聚合那条<b>也要带</b> —— 两条路各写一份筛选的话,
+                     漏掉的那条就是「只有聚合搜索会冒出一堆分集」。
+                     核心层的 aggregateSearch 默认就收敛到 Movie/Series,这里不必再传;
+                     但**别给它 include_episodes**。 */
+                if (all)
+                {
+                    var res = await core.EmbyAggregateSearch(new { query = q });
+                    if (mine != _seq) return;
+                    var groups = res.ValueKind == JsonValueKind.Array
+                        ? res.EnumerateArray().ToList() : [];
+                    var total = groups.Sum(g => g.TryGetProperty("items", out var it)
+                        && it.ValueKind == JsonValueKind.Array ? it.GetArrayLength() : 0);
+                    Dispatcher.UIThread.Post(() =>
                     {
-                        s.server, s.token, s.user_id, s.device_id, query = q,
-                        types = new[] { "Movie", "Series" },
+                        if (mine != _seq) return;
+                        status.Text = total == 0 ? "" : $"{groups.Count} 台服务器 · 共 {total} 条";
+                        host.Content = total == 0 ? NoHit(q, true) : Groups(core, groups);
                     });
+                    return;
+                }
+
+                var s = Nav.Session!;
+                var one = await core.EmbySearch(new
+                {
+                    s.server, s.token, s.user_id, s.device_id, query = q,
+                    types = new[] { "Movie", "Series" },
+                });
                 if (mine != _seq) return; // 过期结果,丢掉
-                var items = res.ValueKind == JsonValueKind.Array
-                    ? res.EnumerateArray().Select(CardItem.From).ToList() : [];
+                var items = one.ValueKind == JsonValueKind.Array
+                    ? one.EnumerateArray().Select(CardItem.From).ToList() : [];
                 Dispatcher.UIThread.Post(() =>
                 {
                     if (mine != _seq) return;
                     status.Text = items.Count == 0 ? "" : $"{items.Count} 条结果";
                     host.Content = items.Count == 0
-                        ? NoHit(q, withEps.IsChecked == true)
+                        ? NoHit(q, false)
                         : LibraryPage.Grid(core, s.server, items, false,
                             LibraryPage.OpenDetail(core, s.server));
                 });
@@ -122,6 +146,34 @@ public sealed class SearchPage : PageBase
                 status.Text = $"搜索失败:{LibraryPage.Advice(e)}";
                 host.Content = new StackPanel();
             }
+        }
+
+        /* ★★ 聚合结果<b>按服务器分组</b>,不是拌成一锅。
+           拌起来的话同一部片会出现三张一模一样的卡,而用户点哪张、
+           实际会从哪台服务器起播,界面上一个字都没说。 */
+        Control Groups(CoreClient c, List<JsonElement> groups)
+        {
+            var host2 = new StackPanel { Spacing = 18 };
+            foreach (var g in groups)
+            {
+                var srv = g.TryGetProperty("server_id", out var sv) ? sv.GetString() ?? "" : "";
+                var nm = g.TryGetProperty("server_name", out var nv) ? nv.GetString() ?? "" : "";
+                var items = g.TryGetProperty("items", out var iv) && iv.ValueKind == JsonValueKind.Array
+                    ? iv.EnumerateArray().Select(CardItem.From).ToList() : [];
+                if (items.Count == 0) continue;
+                host2.Children.Add(new StackPanel
+                {
+                    Spacing = 10,
+                    Children =
+                    {
+                        H2($"{(nm == "" ? srv : nm)} · {items.Count} 条"),
+                        /* ★ 点开的详情页要用**那一台**的地址,不是当前活跃的那台 ——
+                           拿当前会话去打另一台的 item_id,拿到的是 404 或者一条别的片。 */
+                        LibraryPage.Grid(c, srv, items, false, LibraryPage.OpenDetail(c, srv)),
+                    },
+                });
+            }
+            return host2;
         }
 
         /* 停手就搜。
@@ -147,8 +199,8 @@ public sealed class SearchPage : PageBase
             _typing?.Cancel();
             await Run();
         };
-        // 换了「包括分集」要重搜 —— 不重搜的话开关看着像没生效。
-        withEps.IsCheckedChanged += async (_, _) => { if ((box.Text ?? "") != "") await Run(); };
+        // 换了「聚合搜索」要重搜 —— 不重搜的话开关看着像没生效。
+        everywhere.IsCheckedChanged += async (_, _) => { if ((box.Text ?? "") != "") await Run(); };
 
         // ★ 打开就把光标放进输入框。必须等挂到可视树之后 —— 在构造函数里 Focus()
         //   是对着一个还没上屏的控件调,静默无效。
@@ -181,11 +233,11 @@ public sealed class SearchPage : PageBase
     /// <para>★ 这里<b>不放图标</b>:能表达「没找到」的表情在 Windows 上一律渲染成
     /// 一张古怪的脸,比不放更糟。空态的图标是给「还没开始」用的,不是给失败用的。</para>
     /// </summary>
-    private static Control NoHit(string q, bool withEps) => Frame(
+    private static Control NoHit(string q, bool everywhere) => Frame(
         "", $"没有搜到「{q}」",
-        withEps
-            ? "换个更短的词试试 —— 服务器按片名匹配,输全名反而更容易落空。"
-            : "换个更短的词试试。要找某一集的话,把上面的「包括分集」勾上再搜一次。");
+        everywhere
+            ? "所有连得上的服务器都问过了。换个更短的词试试 —— 服务器按片名匹配,输全名反而更容易落空。"
+            : "换个更短的词试试。或者勾上「聚合搜索」,把这个词发给所有服务器再找一遍。");
 
     private static Control Frame(string glyph, string title, string body) => new Border
     {

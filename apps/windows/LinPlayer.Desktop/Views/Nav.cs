@@ -62,6 +62,19 @@ public static class Nav
         Host?.Invoke(page);
     }
 
+    /// <summary>
+    /// 顶替栈顶那一页。「下一集」用。
+    ///
+    /// <para>★★ 不能用 <see cref="Push"/>:一路看下去会攒出一栈播放页,
+    /// 返回键要按十几下才回得到详情页 —— 而用户按返回的意图从来都是「回到剧」。</para>
+    /// </summary>
+    public static void Replace(Control page)
+    {
+        if (Stack.Count > 0) Stack.Pop();
+        Stack.Push(page);
+        Host?.Invoke(page);
+    }
+
     public static bool CanBack => Stack.Count > 1;
 
     public static void Back()

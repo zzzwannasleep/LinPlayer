@@ -31,12 +31,11 @@ public abstract class PageBase : UserControl
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         Content = new Border
         {
-            // ★ 正文封顶 1560 居中 + 左右水槽 18(§3.1)。
-            //   不封顶的话 4K 屏上一行能塞十几张卡,眼睛要横扫整块屏。
-            // ★ Stretch **不是** Center:Center 会让容器缩到内容宽,
-            //   内容窄的页(详情、设置)就整块飘到屏幕中间,和侧栏对不齐。
-            //   Stretch + MaxWidth 才是「撑满、但封顶 1560 后居中」。
-            MaxWidth = 1560,
+            /* ★★ <b>不封顶</b>(2026-09-02 用户点名:「媒体库页面右边有留白,
+               媒体库详情页也有…不需要这个留白」)。
+               原来是 MaxWidth=1560 + Stretch,也就是「撑满、超过 1560 就居中」——
+               在宽窗口上那就是左右各一条空边,而用户要的是内容铺满。
+               ★ 留下的只有 18 的水槽:贴着边画,卡片会被窗口边缘切齐,看着像裁掉了。 */
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 18, 18, 28),
             Child = content,

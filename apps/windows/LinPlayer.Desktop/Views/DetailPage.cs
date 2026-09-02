@@ -30,9 +30,6 @@ public sealed class DetailPage : PageBase
     private Task<List<CardItem>>? _episodesTask;
     private readonly ContentControl _episodesHost = new();
 
-    /// <summary>正文封顶宽度。和 <see cref="PageBase.Scrolled"/> 里那一档对齐。</summary>
-    private const double BodyMax = 1560;
-
     /// <summary>头图区(全宽出血)。</summary>
     private readonly ContentControl _heroHost = new();
 
@@ -78,7 +75,8 @@ public sealed class DetailPage : PageBase
                     _heroHost,
                     new Border
                     {
-                        MaxWidth = BodyMax, HorizontalAlignment = HorizontalAlignment.Stretch,
+                        // ★ 不封顶(和 PageBase.Scrolled 同一条口径,2026-09-02 用户点名去掉留白)
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
                         Padding = new Thickness(18, 18, 18, 28), Child = body,
                     },
                 },
@@ -377,7 +375,7 @@ public sealed class DetailPage : PageBase
         _back.Margin = new Thickness(0, 0, 0, 14);
         var inner = new Border
         {
-            MaxWidth = BodyMax, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 18, 18, 18),
             Child = new StackPanel { Spacing = 0, Children = { _back, headRow } },
         };
@@ -689,19 +687,36 @@ public sealed class DetailPage : PageBase
         var groups = episodes.GroupBy(e => e.SeasonNo).OrderBy(g => g.Key).ToList();
         var host = new StackPanel { Spacing = 14 };
         var gridHost = new ContentControl();
+        /* ★★ 集详情<b>就地展开</b>,不另开一页(用户 2026-09-02:
+           「剧详情页到集详情页这是一个固定的程序,不然就把集详情页的东西
+           放到剧详情页里面切换」)。
+           原来点一张分集卡是**直接起播** —— 那等于用户永远看不到这一集的简介、
+           时长和播出日期,而「这集讲什么、要不要跳过」正是选集时唯一要问的问题。
+           另开一页也不行:退回来会丢掉季选择和滚动位置,而选集是个连续动作。 */
+        var epHost = new ContentControl { IsVisible = false };
 
         /* ★ 分集卡 214 宽(默认 256)。
            256 的话 1920 窗口上一行只放得下 4 张,而分集列表是<b>用来找集的</b> ——
            一屏看得到的集越多越好,单张再大也提供不了更多信息(剧照都长一样)。 */
+        /* ★ 「下一集」按**整部剧**的顺序算,不是当前这一季 ——
+           一季的最后一集之后是下一季的第一集,按季算的话那儿就没有下一集了。 */
+        var ordered = episodes.OrderBy(e => e.SeasonNo).ThenBy(e => e.EpisodeNo).ToList();
+        CardItem? NextOf(CardItem cur)
+        {
+            var at = ordered.FindIndex(e => e.Id == cur.Id);
+            return at >= 0 && at + 1 < ordered.Count ? ordered[at + 1] : null;
+        }
+
         void ShowSeason(List<CardItem> list) => gridHost.Content = LibraryPage.Grid(
-            _core, _server, list, true,
-            it => Nav.Push(new PlayerPage(_core, it.Id, it.DisplayTitle, it.ResumeSecs)),
+            _core, _server, list, true, it => ShowEpisode(epHost, it, NextOf(it)),
             episodeStyle: true, width: 214);
 
         if (groups.Count <= 1)
         {
             host.Children.Add(H2($"剧集 · 共 {episodes.Count} 集"));
             ShowSeason(episodes);
+            SelfCheckOpenEpisode(epHost, episodes[0], NextOf(episodes[0]));
+            host.Children.Add(epHost);
             host.Children.Add(gridHost);
             return host;
         }
@@ -725,15 +740,163 @@ public sealed class DetailPage : PageBase
             {
                 for (var k = 0; k < bar.Children.Count; k++)
                     ((Button)bar.Children[k]).Classes.Set("on", k == idx);
+                // ★ 换季要把展开的那一集收掉:它属于上一季,留着就是「季换了、
+                //   上面还摆着另一季的某一集」—— 一眼看不出是 bug,但对不上。
+                epHost.IsVisible = false;
+                _openEpisode = "";
                 ShowSeason(groups[idx].ToList());
             };
             bar.Children.Add(chip);
         }
         ((Button)bar.Children[current]).Classes.Set("on", true);
         ShowSeason(groups[current].ToList());
+        SelfCheckOpenEpisode(epHost, groups[current].First(), NextOf(groups[current].First()));
         host.Children.Add(bar);
+        host.Children.Add(epHost);
         host.Children.Add(gridHost);
         return host;
+    }
+
+    /// <summary>
+    /// 自检:<c>LP_SELFCHECK_EPISODE=1</c> 直接把第一集的详情展开。
+    ///
+    /// <para>★★ 收起来的东西<b>截图里等于不存在</b> —— 这一块是这一版新加的,
+    /// 而它最容易错的地方(剧照比例、文字列有没有和剧照顶对齐、按钮排没排齐)
+    /// 全都只有展开之后才看得见。截图工具点不了卡片,所以要有这个钩子。</para>
+    /// </summary>
+    private void SelfCheckOpenEpisode(ContentControl slot, CardItem ep, CardItem? next)
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_EPISODE") != "1") return;
+        Dispatcher.UIThread.Post(() => ShowEpisode(slot, ep, next), DispatcherPriority.Background);
+    }
+
+    /// <summary>现在展开着的是哪一集。再点同一张卡就收起来。</summary>
+    private string _openEpisode = "";
+
+    /// <summary>
+    /// 就地展开一集的详情:剧照 + 集号 + 时长 / 播出日期 + 简介 + 播放。
+    ///
+    /// <para>★ 手里已经有的那几样(标题 / 集号 / 时长 / 进度)<b>先画出来</b> ——
+    /// 简介要再打一次服务器,为了它让整块面板晚半秒出现是本末倒置。
+    /// 这和详情页主按钮「不等分集就先出来」是同一条口径。</para>
+    /// </summary>
+    private void ShowEpisode(ContentControl slot, CardItem ep, CardItem? next)
+    {
+        // 再点同一张 = 收起来。没有这一下的话面板打开之后只能靠「收起」关,
+        // 而用户的直觉是「再点一次那张卡」。
+        if (_openEpisode == ep.Id && slot.IsVisible) { slot.IsVisible = false; _openEpisode = ""; return; }
+        _openEpisode = ep.Id;
+
+        var shot = new Border
+        {
+            Width = 300, Height = 169, CornerRadius = new CornerRadius(10), ClipToBounds = true,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+        };
+        if (ep.HasPrimary)
+        {
+            var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
+            shot.Child = im;
+            _ = Fill(im, Images.EmbyImageUrl(_server, ep.Id, "Primary"), 338);
+        }
+
+        /* ★ 分集<b>常常没有真标题</b> —— Emby 会把 Name 填成「第 N 集」。
+           无脑拼的话标题就成了「第 1 季 第 1 集 · 第 1 集」,同一件事说两遍。
+           所以名字和集号一样时只写集号。 */
+        var num = ep.SeasonNo > 0 && ep.EpisodeNo > 0
+            ? $"第 {ep.SeasonNo} 季 第 {ep.EpisodeNo} 集"
+            : ep.EpisodeNo > 0 ? $"第 {ep.EpisodeNo} 集" : "";
+        var plain = ep.Name == "" || ep.Name == $"第 {ep.EpisodeNo} 集" || ep.Name == num;
+        var head = num == "" ? ep.Name : plain ? num : $"{num} · {ep.Name}";
+        var meta = new List<string>();
+        if (ep.RuntimeLabel != "") meta.Add(ep.RuntimeLabel);
+        if (ep.ResumeSecs > 0) meta.Add($"已看到 {Clock(ep.ResumeSecs)}");
+        else if (ep.Played) meta.Add("已看完");
+
+        var metaLine = new TextBlock
+        {
+            Text = string.Join("  ·  ", meta), Classes = { "dim" }, FontSize = 12.5,
+            // ★ 没有元信息就整行不画:空一行等于这块面板每次高度都不一样
+            IsVisible = meta.Count > 0,
+        };
+        var overview = new TextBlock
+        {
+            Text = "", Classes = { "dim" }, FontSize = 13, LineHeight = 21,
+            TextWrapping = TextWrapping.Wrap, MaxLines = 5,
+            TextTrimming = TextTrimming.CharacterEllipsis, IsVisible = false,
+        };
+        _ = FillEpisodeOverview(ep.Id, overview);
+
+        var play = new Button
+        {
+            Classes = { "primary" },
+            Content = ep.ResumeSecs > 0 ? $"▶ 继续播放 · 已看到 {Clock(ep.ResumeSecs)}" : "▶ 播放",
+        };
+        play.Click += (_, _) =>
+            Nav.Push(new PlayerPage(_core, ep.Id, ep.DisplayTitle, ep.ResumeSecs, next: next));
+        var close = new Button { Classes = { "ghost" }, Content = "收起" };
+        close.Click += (_, _) => { slot.IsVisible = false; _openEpisode = ""; };
+
+        var text = new StackPanel
+        {
+            Spacing = 10, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(18, 0, 0, 0),
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = head, FontSize = 17, FontWeight = FontWeight.SemiBold,
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                metaLine, overview,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, Spacing = 10,
+                    Children = { play, close },
+                },
+            },
+        };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        Grid.SetColumn(shot, 0);
+        Grid.SetColumn(text, 1);
+        grid.Children.Add(shot);
+        grid.Children.Add(text);
+
+        slot.Content = new Border { Classes = { "card" }, Padding = new Thickness(16), Child = grid };
+        slot.IsVisible = true;
+    }
+
+    /// <summary>
+    /// 补这一集的简介(第二条命令)。
+    ///
+    /// <para>★ 拿不到就<b>整段不画</b>,不写「暂无简介」—— 相当一部分分集本来就没刮到简介,
+    /// 每集都顶着一句「暂无简介」比留空更像坏了。</para>
+    /// <para>★ 回来时要认一下<b>现在展开的还是不是这一集</b>:用户点得比网络快,
+    /// 不认的话上一集的简介会贴到这一集上。</para>
+    /// </summary>
+    private async Task FillEpisodeOverview(string id, TextBlock overview)
+    {
+        try
+        {
+            var s = Nav.Session!;
+            var d = await _core.EmbyItemDetail(new
+            {
+                s.server, s.token, s.user_id, s.device_id, item_id = id, with_children = false,
+            });
+            var text = Str(d, "overview");
+            /* ★ **没有首播日期这一项**。核心层的 ItemDetail 里根本没有 premiere_date
+               (Fields 里问了 PremiereDate,但结构体没往外透)——
+               照写的话拿到的永远是空串,而界面上只会表现成「这一栏怎么从来不出现」。
+               迁移期不动核心层的输出形状(会破坏差分对账基准),这一项就先不做。 */
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (_openEpisode != id) return;
+                if (text == "") return;
+                overview.Text = text;
+                overview.IsVisible = true;
+            });
+        }
+        catch { /* 简介是锦上添花,拿不到就没有 */ }
     }
 
     /// <summary>分集到了之后,把「第 N 季 · 第 M 集」补到主按钮上。</summary>
@@ -800,8 +963,11 @@ public sealed class DetailPage : PageBase
                 var eps = await _episodesTask;
                 play.IsEnabled = true;
                 if (eps.Count == 0) { play.Content = "没有可播的分集"; return; }
+                var ordered = eps.OrderBy(e => e.SeasonNo).ThenBy(e => e.EpisodeNo).ToList();
                 var next = NextEpisode(eps);
-                Nav.Push(new PlayerPage(_core, next.Id, next.DisplayTitle, next.ResumeSecs));
+                var at = ordered.FindIndex(e => e.Id == next.Id);
+                var after = at >= 0 && at + 1 < ordered.Count ? ordered[at + 1] : null;
+                Nav.Push(new PlayerPage(_core, next.Id, next.DisplayTitle, next.ResumeSecs, next: after));
             };
             row.Children.Add(play);
             // 分集到了就把集号补上去 —— 在此之前按钮已经可点了

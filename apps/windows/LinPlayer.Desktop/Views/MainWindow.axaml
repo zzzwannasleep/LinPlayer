@@ -40,42 +40,61 @@
     <!-- ══════ 主体 ══════ -->
     <Grid Name="BodyGrid" Grid.Row="1" ColumnDefinitions="212,*">
 
-      <!-- 侧栏 -->
+      <!-- 侧栏。★ 折叠态 72px 只留图标(Tokens 里的 SidebarCollapsedWidth)。 -->
       <Border Name="Sidebar" Grid.Column="0" Background="{DynamicResource Panel}"
               BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
         <DockPanel LastChildFill="True">
           <!-- 服务器切换器 -->
           <!-- ★ 这块是**可点的**:点开就是服务器管理。
-               没有入口的话登录一台之后就再也换不了服务器,而这是个多服务器播放器。 -->
-          <Button DockPanel.Dock="Top" Name="ServerChip" Margin="10,12,10,10" Padding="10,9"
+               没有入口的话登录一台之后就再也换不了服务器,而这是个多服务器播放器。
+               ★ 只写服务器名,不写用户名(用户 2026-09-02):一台服务器一个账号是常态,
+                 把用户名摆在这儿等于每次都在回答一个没人问的问题。 -->
+          <Button DockPanel.Dock="Top" Name="ServerChip" Margin="10,12,10,6" Padding="10,9"
                   Background="{DynamicResource PanelAlt}" BorderThickness="0" CornerRadius="10"
                   HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Cursor="Hand">
-            <StackPanel Spacing="2">
+            <StackPanel Orientation="Horizontal" Spacing="9">
+              <TextBlock Name="ServerIcon" Text="&#xE968;" FontFamily="Segoe MDL2 Assets"
+                         FontSize="14" Width="18" TextAlignment="Center"
+                         Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
               <TextBlock Name="ServerName" Text="未连接" FontSize="13" FontWeight="SemiBold"
-                         TextTrimming="CharacterEllipsis" />
-              <TextBlock Name="ServerSub" Classes="dim" Text="还没有添加服务器"
-                         FontSize="11" TextTrimming="CharacterEllipsis" />
+                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
             </StackPanel>
           </Button>
 
-          <!-- 底部:设置 -->
+          <!-- 底部:折叠 / 展开 + 设置 -->
           <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,10">
-            <RadioButton Classes="nav" Name="NavSettings" GroupName="nav" Content="设置" />
+            <RadioButton Classes="nav" Name="NavSettings" GroupName="nav" Content="设置" Tag="&#xE713;" />
+            <!-- ★★ 折叠开关放**底部**,和导航项同一套版式 ——
+                 摆在顶上的话它会和服务器卡抢「这一列最重要的东西」那个位置,
+                 而它是个一天点不了一次的东西。 -->
+            <Button Name="BtnCollapse" Classes="navbtn" Height="38" Margin="8,4,8,0"
+                    Padding="10,0" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Left" Background="Transparent"
+                    BorderThickness="0" CornerRadius="8" Cursor="Hand"
+                    Foreground="{DynamicResource Ink2}">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Name="CollapseIcon" Text="&#xE76B;" FontFamily="Segoe MDL2 Assets"
+                           FontSize="15" Width="18" TextAlignment="Center"
+                           Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
+                <TextBlock Name="CollapseText" Text="收起侧栏" FontSize="13"
+                           Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
           </StackPanel>
 
           <StackPanel Name="NavList" Spacing="0">
-            <RadioButton Classes="nav" Name="NavHome" GroupName="nav" Content="首页" IsChecked="True" />
-            <RadioButton Classes="nav" Name="NavBrowse" GroupName="nav" Content="文件浏览" IsVisible="False" />
-            <RadioButton Classes="nav" Name="NavCatalog" GroupName="nav" Content="影视目录" IsVisible="False" />
-            <RadioButton Classes="nav" Name="NavLibrary" GroupName="nav" Content="媒体库" />
-            <RadioButton Classes="nav" Name="NavSearch" GroupName="nav" Content="搜索" />
-            <RadioButton Classes="nav" Name="NavFavorites" GroupName="nav" Content="收藏" />
-            <RadioButton Classes="nav" Name="NavAggregate" GroupName="nav" Content="聚合视界" />
-            <RadioButton Classes="nav" Name="NavHistory" GroupName="nav" Content="观看历史" />
-            <RadioButton Classes="nav" Name="NavDownload" GroupName="nav" Content="下载" />
-            <RadioButton Classes="nav" Name="NavRanking" GroupName="nav" Content="排行榜" />
-            <RadioButton Classes="nav" Name="NavCalendar" GroupName="nav" Content="追剧日历" />
-            <RadioButton Classes="nav" Name="NavPlugins" GroupName="nav" Content="插件" />
+            <RadioButton Classes="nav" Name="NavHome" GroupName="nav" Content="首页" IsChecked="True" Tag="&#xE80F;" />
+            <RadioButton Classes="nav" Name="NavBrowse" GroupName="nav" Content="文件浏览" IsVisible="False" Tag="&#xE8B7;" />
+            <RadioButton Classes="nav" Name="NavCatalog" GroupName="nav" Content="影视目录" IsVisible="False" Tag="&#xE8A9;" />
+            <RadioButton Classes="nav" Name="NavLibrary" GroupName="nav" Content="媒体库" Tag="&#xE8F1;" />
+            <RadioButton Classes="nav" Name="NavSearch" GroupName="nav" Content="搜索" Tag="&#xE721;" />
+            <RadioButton Classes="nav" Name="NavFavorites" GroupName="nav" Content="收藏" Tag="&#xE734;" />
+            <RadioButton Classes="nav" Name="NavAggregate" GroupName="nav" Content="聚合视界" Tag="&#xE774;" />
+            <RadioButton Classes="nav" Name="NavHistory" GroupName="nav" Content="观看历史" Tag="&#xE81C;" />
+            <RadioButton Classes="nav" Name="NavDownload" GroupName="nav" Content="下载" Tag="&#xE896;" />
+            <RadioButton Classes="nav" Name="NavRanking" GroupName="nav" Content="排行榜" Tag="&#xE8CB;" />
+            <RadioButton Classes="nav" Name="NavCalendar" GroupName="nav" Content="追剧日历" Tag="&#xE787;" />
+            <RadioButton Classes="nav" Name="NavPlugins" GroupName="nav" Content="插件" Tag="&#xE71D;" />
           </StackPanel>
         </DockPanel>
       </Border>

@@ -92,6 +92,28 @@ public sealed class Card : Button
         var h = wide ? w * 9 / 16 : w * 3 / 2;
 
         var img = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
+        // 没有封面时才显示的占位文字(而不是一块空砖)
+        var ph = new TextBlock
+        {
+            Text = title ?? item.Name, FontSize = 12, Margin = new Thickness(10),
+            Foreground = PlaceholderInk,
+            TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            IsVisible = !item.HasPrimary,
+        };
+        /* ★★ <b>每张卡自己有骨架</b>(用户 2026-09-02:「所有卡片都没有做提前加载,
+           先加载一个骨架再加载出来图片比较好」)。
+           原来图没到的时候卡面是一块**静止的深色砖** —— 它和「这条目就是没有封面」
+           长得一模一样,用户分不清是在加载还是加载完了。会呼吸的骨架说的是
+           「还在路上」,而那正是这一秒里唯一要传达的事。
+           ★ 只在**确实有封面**时才铺:没有封面的条目铺骨架就成了永远在加载。
+           ★ 尺寸就是卡面本身,所以不存在换上真图时跳版。 */
+        var skel = new Border
+        {
+            Classes = { "skel" }, CornerRadius = new CornerRadius(10),
+            IsVisible = item.HasPrimary,
+        };
         var art = new Border
         {
             Width = w, Height = h,
@@ -99,23 +121,7 @@ public sealed class Card : Button
             ClipToBounds = true,
             Classes = { "art" },
             Background = ArtBackdrop,
-            Child = new Panel
-            {
-                Children =
-                {
-                    // 占位:没有封面时也要看得出这是什么(而不是一块空砖)
-                    new TextBlock
-                    {
-                        Text = title ?? item.Name, FontSize = 12, Margin = new Thickness(10),
-                        Foreground = PlaceholderInk,
-                        TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                    },
-                    img,
-                    Badges(item, w),
-                },
-            },
+            Child = new Panel { Children = { skel, ph, img, Badges(item, w) } },
         };
 
         var caption = new StackPanel { Spacing = 2 };
@@ -145,21 +151,27 @@ public sealed class Card : Button
         Cursor = HandCursor;
         if (onOpen is not null) Click += (_, _) => onOpen(item);
 
-        if (item.HasPrimary) _ = LoadArt(core, server, item, img, (int)(h * 2));
+        if (item.HasPrimary) _ = LoadArt(core, server, item, img, (int)(h * 2), skel, ph);
 
         // 右键动作:标记已看 / 收藏 / 屏蔽。**一处实现,所有卡片共用**(见 CardActions)
         CardActions.Attach(this, core, item);
     }
 
-    private static async Task LoadArt(CoreClient core, string server, CardItem item, Image target, int maxH)
+    private static async Task LoadArt(CoreClient core, string server, CardItem item, Image target,
+        int maxH, Control skel, Control placeholder)
     {
         var url = Images.EmbyImageUrl(server, item.Id, "Primary");
         var bmp = await Images.LoadAsync(core, url, maxH);
-        if (bmp is null) return;
-        // ★ 图到了再淡入(过渡挂在 Image.art 的样式上)。直接塞上去会「啪」地跳一下,
-        //   一屏几十张同时跳就是闪屏。
+        /* ★★ 不管成没成,<b>骨架都要收</b>。
+           只在成功那条路上收的话,取不到封面的条目会**永远呼吸下去** ——
+           而它其实早就失败了。这正是本仓最讨厌的那种失败:不报错、不崩、
+           只是一直在「加载中」。 */
         Dispatcher.UIThread.Post(() =>
         {
+            skel.IsVisible = false;
+            if (bmp is null) { placeholder.IsVisible = true; return; }
+            // ★ 图到了再淡入(过渡挂在 Image.art 的样式上)。直接塞上去会「啪」地跳一下,
+            //   一屏几十张同时跳就是闪屏。
             target.Source = bmp;
             target.Opacity = 1;
         });

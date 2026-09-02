@@ -49,8 +49,8 @@ public sealed class Hero : Border
     /// <summary>交叉淡入时长。</summary>
     private static readonly TimeSpan Fade = TimeSpan.FromMilliseconds(620);
 
-    /// <summary>正文封顶宽,和 <see cref="PageBase.Scrolled"/> 那一档对齐。</summary>
-    private const double BodyMax = 1560;
+    /// <summary>艺术字 / 标题那一格的固定高度。见 <see cref="RenderBody"/> 里那段。</summary>
+    private const double TitleSlot = 92;
 
     private readonly CoreClient _core;
     private readonly Action<CardItem>? _onOpen;
@@ -59,9 +59,37 @@ public sealed class Hero : Border
 
     private readonly Panel _art = new();
     private readonly Border _layerA, _layerB;
-    private readonly ImageBrush _brushA = NewBrush(), _brushB = NewBrush();
+    /* 每一层<b>一张图 + 一支画刷</b>:
+       ★★ <c>_sharp*</c> 是一个真的 <see cref="Image"/> 控件,<b>整张剧照一个像素都不裁</b>。
+         ☠ <b>别用 ImageBrush</b>:实测 <c>ImageBrush{Stretch=Uniform}</c> 当 Border 的
+         Background <b>什么都画不出来</b> —— 而且诊断打出来一切正常
+         (Source 1280×720、遮罩 0.467→0.648、层透明度 1.00),截图上就是一片空。
+         UniformToFill 那支(氛围底)倒是好好的,所以不是画刷本身的问题。
+         Image 控件走的是另一条渲染路,不吃这一下。
+         原来只有一支 UniformToFill:16:9 的剧照铺进 3.7:1 的槽里,上下**各切掉四分之一** ——
+         那就是用户说的「封面不全」。剧照是刮削器给的成品构图,裁掉一半是我们自己的损失。
+       ★★ <c>_wash*</c> 是同一张图的**极小尺寸**(h=64)拉满整块当氛围底。
+         放大九倍之后它本身就是一片糊的色块 —— 等于免费的高斯模糊,
+         而真上 BlurEffect 是每帧对整块 1560×420 重新做一次卷积。
+       ★ 完整图靠右:文字在左边,右边本来就是空的。 */
+    private readonly Image _sharpA = NewSharp(), _sharpB = NewSharp();
+    private readonly ImageBrush _washA = NewWash(), _washB = NewWash();
     /// <summary>两层各自的慢推方向。见 <see cref="GoCore"/> 里那段。</summary>
     private bool _zoomA, _zoomB;
+    /* 完整图左沿那道化开。★★ 停靠点<b>必须按图的真实几何算</b>,不能写死 ——
+       写死 0.34→0.66 的那一版实测出了一道**硬竖缝**:
+       Uniform 之后图的左沿落在 0.467,而遮罩在那儿已经是 0.40 不透明了,
+       于是图的边缘是从「什么都没有」直接跳到 40% —— 一条笔直的竖线。
+       现在两个停靠点跟着 Resize / 换图一起重算,起点永远压在图的左沿上。 */
+    private Border? _boxA, _boxB;
+    /// <summary>压暗层(盖在清晰图上面)。渐变按几何算,见 <see cref="SyncSeam"/>。</summary>
+    private readonly Border _dimA = new(), _dimB = new();
+    /// <summary>底边化开那一层。颜色跟主题走,见 <see cref="SyncBleed"/>。</summary>
+    private readonly Border _bleed = null!;
+    /// <summary>慢推挂在这一层(糊底)上,<b>不是整层</b>。见 <see cref="NewLayer"/>。</summary>
+    private Border? _washBoxA, _washBoxB;
+    /// <summary>两层各自的图片宽高比(宽/高)。0 = 还没有图。</summary>
+    private double _arA, _arB;
     private Border _front;              // 当前正显示的那一层
     private readonly Border _skel;
     private readonly StackPanel _body = new() { Spacing = 12 };
@@ -74,28 +102,29 @@ public sealed class Hero : Border
     private readonly Button _prev, _next;
 
     private readonly List<JsonElement> _items = [];
-    private Task<Bitmap?>[] _bg = [], _logo = [];
+    private Task<Bitmap?>[] _bg = [], _wash = [], _logo = [];
     private int _idx = -1;
 
     private bool _hover;
     private bool _alive;
     private bool _cycling;
+    /// <summary>自检钉住:停止自动翻页,让截图和日志说的是同一张。</summary>
+    private bool _pinned;
     private CancellationTokenSource? _tick;
 
     public Hero(CoreClient core, Action<CardItem>? onOpen)
     {
         _core = core; _onOpen = onOpen;
 
-        _layerA = NewLayer(_brushA);
-        _layerB = NewLayer(_brushB);
+        _layerA = NewLayer(_washA, _sharpA, _dimA, out _boxA, out _washBoxA);
+        _layerB = NewLayer(_washB, _sharpB, _dimB, out _boxB, out _washBoxB);
         _front = _layerB;   // 第一次 Go() 会切到 A
 
         _skel = new Border { Classes = { "skel" }, CornerRadius = new CornerRadius(0) };
 
-        /* ★★ 两道压暗都在<b>遮罩层里面</b>,不是盖在整块上。
-           左侧那道是给文字用的:剧照的画面重点通常在中右,压左边不吃掉它。
-           底部那道是给「无边框」用的 —— 全宽出血如果直接切断,
-           图和页面之间会留一条硬横线,那正是「有边框」的观感。 */
+        /* 左侧那道压暗是给文字用的:剧照的画面重点通常在中右,压左边不吃掉它。
+           ★ 它必须压在图**上面**(所以是 _art 的后一个孩子),
+             压在下面等于没压 —— 而这条只有真渲染看得出来。 */
         var scrimLeft = new Border
         {
             Background = new LinearGradientBrush
@@ -110,47 +139,23 @@ public sealed class Hero : Border
                 },
             },
         };
-        var scrimBottom = new Border
-        {
-            Background = new LinearGradientBrush
-            {
-                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-                GradientStops =
-                {
-                    new GradientStop(Color.Parse("#00000000"), 0.42),
-                    new GradientStop(Color.Parse("#66000000"), 0.82),
-                    new GradientStop(Color.Parse("#99000000"), 1),
-                },
-            },
-        };
+        /* ★★ 底边的化开从<b>遮罩</b>改成<b>渐变到页面底色</b>(2026-09-02)。
+           不是审美选择:这一版整块里<b>一个 OpacityMask 都不留</b>(见 NewLayer 里那段 ☠),
+           所以底边化开只能靠盖色。
+           ★ 代价是这一层要**知道页面底色**,而本仓有深浅两套皮 ——
+             所以底色从主题资源里现取,换皮时重算(见 SyncBleed)。 */
+        _bleed = new Border { VerticalAlignment = VerticalAlignment.Stretch };
 
         _art.Children.Add(_skel);
         _art.Children.Add(_layerA);
         _art.Children.Add(_layerB);
         _art.Children.Add(scrimLeft);
-        _art.Children.Add(scrimBottom);
-        /* ★ 底边<b>用遮罩化开</b>,不是盖一层页面底色的渐变 ——
-           盖色要知道当前主题的底色,而本仓有深浅两套皮,写死色号等于浅色主题下
-           头顶一道黑边。遮罩让页面底色自己透上来,换皮不用改这里。
-           ★ 只化开最后 12%:化太多的话文字会落到已经透明的那一段上,
-             浅色主题下白字压在米黄底上直接读不出来。 */
-        _art.OpacityMask = new LinearGradientBrush
-        {
-            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-            GradientStops =
-            {
-                new GradientStop(Colors.White, 0),
-                new GradientStop(Colors.White, 0.88),
-                new GradientStop(Color.FromArgb(0, 255, 255, 255), 1),
-            },
-        };
+        _art.Children.Add(_bleed);
 
         // 文字列:按 1560 对齐,和下面几条轨道排成一条竖线
         var content = new Border
         {
-            MaxWidth = BodyMax, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 0, 18, 0),
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 64),
@@ -158,7 +163,7 @@ public sealed class Hero : Border
         };
         var dotsHost = new Border
         {
-            MaxWidth = BodyMax, HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 0, 18, 0),
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 26),
@@ -202,6 +207,11 @@ public sealed class Hero : Border
              整块可点和悬停暂停会一起失灵。 */
         Background = Brushes.Transparent;
         Cursor = new Cursor(StandardCursorType.Hand);
+        /* ★★ <b>顶上留一条间隔</b>(用户 2026-09-02:「我说无边框,不代表要顶着顶部放」)。
+           「无边框」说的是<b>左右出血、不描边</b>;紧贴标题栏是另一回事 ——
+           那会让整块图看上去是从窗口的边缘长出来的,压迫感很强。
+           ★ 只留上边:左右一留就有边框了,下边和轨道之间靠遮罩化开。 */
+        Margin = new Thickness(0, 16, 0, 0);
         Height = 340;   // 数据没到之前也要占住位置,否则内容一来整页往下跳
         IsVisible = false;
 
@@ -222,8 +232,78 @@ public sealed class Hero : Border
            Nav.Back() 回到首页时**复用的是同一个 HomePage 实例** ——
            把轮播永久停掉的话,从详情页退回来 Hero 就再也不动了,而且不报错。
            挂 Attached / Detached 才能一停一起。 */
-        AttachedToVisualTree += (_, _) => { _alive = true; if (_items.Count > 0) Start(); };
+        SyncBleed();
+        // ★ 换皮时要重算:不重算的话浅色主题下底边是一条黑带(而且不报错)
+        ActualThemeVariantChanged += (_, _) => SyncBleed();
+        AttachedToVisualTree += (_, _) => { _alive = true; SyncBleed(); if (_items.Count > 0) Start(); };
         DetachedFromVisualTree += (_, _) => { _alive = false; _tick?.Cancel(); };
+    }
+
+    /// <summary>
+    /// 底边化开:从透明渐变到<b>页面底色</b>,最后一段完全等于底色 ——
+    /// 于是图和页面之间那条硬横线就不存在了(「无边框」要的就是这个)。
+    ///
+    /// <para>★★ 底色<b>从主题资源里现取</b>,不写死色号。写死的话深色下勉强能看,
+    /// <b>浅色主题下就是头顶一条黑带</b>。取不到就退回深色那一档 ——
+    /// 退回一个具体值总比画一块纯黑强。</para>
+    /// </summary>
+    private void SyncBleed()
+    {
+        var bg = Color.Parse("#0c0f14");
+        if (this.TryFindResource("Bg", ActualThemeVariant, out var v) && v is ISolidColorBrush sb)
+            bg = sb.Color;
+        _bleed.Background = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+            GradientStops =
+            {
+                new GradientStop(Color.FromArgb(0, bg.R, bg.G, bg.B), 0.55),
+                new GradientStop(Color.FromArgb(120, bg.R, bg.G, bg.B), 0.84),
+                new GradientStop(bg, 1),
+            },
+        };
+    }
+
+    /// <summary>
+    /// 把压暗层的渐变对到<b>图的真实左沿</b>上。
+    ///
+    /// <para>★★ Uniform 之后图的宽度 = 高 × 宽高比,右对齐,所以左沿在
+    /// <c>1 - imgW/blockW</c>。压暗必须<b>正好覆盖到那儿</b>再开始化开 ——
+    /// 早收一点,图的左沿就露出一条比旁边亮的边(那正是那道竖直硬缝);
+    /// 晚收一点,画面主体被压掉一大块。</para>
+    ///
+    /// <para>★ 化开占图宽的 34%:再窄还是看得出边,再宽会把主体也吃掉一半。</para>
+    /// </summary>
+    private void SyncSeam()
+    {
+        var w = Bounds.Width;
+        var h = Height;
+        if (w <= 1 || h <= 1) return;
+        Apply(_arA, _dimA, _washA);
+        Apply(_arB, _dimB, _washB);
+
+        void Apply(double ar, Border? dim, ImageBrush wash)
+        {
+            if (dim is null) return;
+            // 还没有图 → 整块都压暗(那会儿只有糊底,本来就该压)
+            var left = ar > 0 ? Math.Clamp(1 - h * ar / w, 0, 0.98) : 1;
+            var to = Math.Min(1, left + (1 - left) * 0.34);
+            var dark = Color.Parse("#73000000");
+            dim.Background = new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(dark, 0),
+                    new GradientStop(dark, left),
+                    new GradientStop(Color.FromArgb(0, 0, 0, 0), to),
+                },
+            };
+            // 氛围底的目标矩形 = 清晰图那一块。左边靠 FlipX 镜像补出去,缝上天然连续。
+            wash.DestinationRect = new RelativeRect(left, 0, 1 - left, 1, RelativeUnit.Relative);
+        }
     }
 
     /// <summary>
@@ -233,39 +313,95 @@ public sealed class Hero : Border
     /// </summary>
     private void Resize()
     {
-        var h = Math.Clamp(Bounds.Width * 0.27, 260, 420);
+        /* ★ 0.30 而不是 0.27:完整剧照是按<b>高度</b>去 fit 的(槽比 16:9 宽得多),
+           高一点右边那张图就大一圈,而这一块的主角就是那张图。 */
+        var h = Math.Clamp(Bounds.Width * 0.30, 280, 460);
         if (Math.Abs(h - Height) > 0.5) Height = h;
+        SyncSeam();
     }
 
-    private static ImageBrush NewBrush() => new()
+    /// <summary>完整剧照:<b>Uniform 不裁</b>,靠右摆(左边留给文字)。</summary>
+    private static Image NewSharp() => new()
     {
-        Stretch = Stretch.UniformToFill,
-        AlignmentY = AlignmentY.Center,
+        Stretch = Stretch.Uniform,
+        HorizontalAlignment = HorizontalAlignment.Right,
+        VerticalAlignment = VerticalAlignment.Stretch,
+    };
+
+    /// <summary>
+    /// 氛围底:<b>接着清晰图的左沿镜像延伸出去</b>。
+    ///
+    /// <para>★★ 这是那道竖缝真正的解法。原来氛围底是 UniformToFill 拉满整块 ——
+    /// 于是缝的左边显示的是原图 x≈47% 处的画面,右边是原图 x=0 处的画面,
+    /// <b>两边根本不是同一块内容</b>,压暗多少都对不上,那道竖线就是这么来的。
+    /// <c>TileMode=FlipX</c> + 目标矩形对齐清晰图之后,缝左边正好是 x=0 往回镜像,
+    /// 两侧在缝上<b>是同一个像素列</b> —— 数学上连续,不是「调到看不出来」。</para>
+    ///
+    /// <para>★ 目标矩形跟着几何走(见 <see cref="SyncSeam"/>),而且用的是 h=64 的小图:
+    /// 它被拉大九倍,本身就是糊的 —— 免费的模糊,不用 BlurEffect 每帧卷积一遍。</para>
+    /// </summary>
+    private static ImageBrush NewWash() => new()
+    {
+        Stretch = Stretch.Fill,
+        TileMode = TileMode.FlipX,
     };
 
     /// <summary>缩放量。<paramref name="v"/> = 1 就是原样。</summary>
     private static ITransform Zoom(double v) => TransformOperations.Parse($"scale({v})");
 
-    private static Border NewLayer(ImageBrush brush) => new()
+    /// <summary>
+    /// 一层。里面是「氛围底 + 压暗 + <b>完整剧照</b>」三块,外面这一层管透明度和慢推。
+    ///
+    /// <para>★★ 完整图和氛围底之间不能是一条竖直硬边 —— 那看上去就是
+    /// 「一张图贴在另一张图上」。解法见 <see cref="NewWash"/>(镜像延伸)和
+    /// <see cref="SyncSeam"/>(压暗渐变),<b>都不用 OpacityMask</b>。</para>
+    /// </summary>
+    private static Border NewLayer(ImageBrush wash, Image sharp, Border dim,
+        out Border box, out Border washBox)
     {
-        Background = brush,
-        Opacity = 0,
-        // ★ 起手就给一个 scale(1):从 null 变过去不会走过渡,第一张会「啪」地跳一下
-        RenderTransform = Zoom(1),
-        RenderTransformOrigin = RelativePoint.Center,
-        Transitions =
-        [
-            new DoubleTransition { Property = OpacityProperty, Duration = Fade, Easing = new CubicEaseInOut() },
-            /* 慢推:9 秒推 7%。★ 时长比停留时间(7s)长一截 ——
-               正好推完的话末尾会停住,而停住的那一下反而看得出来。
-               ★ 线性:缓动会让「起步一下、末尾一下」被看出来,而慢推的全部意义是看不出来。 */
-            new TransformOperationsTransition
-            {
-                Property = RenderTransformProperty,
-                Duration = TimeSpan.FromSeconds(9), Easing = new LinearEasing(),
-            },
-        ],
-    };
+        /* ★★ <b>压暗那一层盖在清晰图上面</b>,而且是一条<b>横向渐变</b>:
+           左边 45% 黑,到图的左沿之后逐渐化到 0。
+           这是「完整剧照贴在糊底上」那道竖直硬缝的解法 ——
+           而且它是<b>算出来的</b>,不是凑的:糊底和清晰图<b>是同一张画面</b>
+           (一张糊、一张清晰),同样压暗 45% 之后,缝两侧的亮度<b>数值上相等</b>,
+           台阶就不存在了;剩下的只有清晰度差异,而在一片同色区域里人眼看不出来。
+
+           ☠ <b>别用 OpacityMask 做这道化开</b> —— 实测 Border 挂了 OpacityMask 之后
+             <b>它的内容整个不画</b>(换成全白遮罩一样不画,说明不是停靠点算错),
+             而诊断打出来一切正常:Source 1280×720、盒 1068×321、层透明度 1.00。
+             这类失败编译绿、日志空,只有真渲染 + 数像素才抓得到。 */
+        box = new Border { Child = sharp };
+        /* ★★ 慢推(Ken Burns)只推<b>糊底这一层</b>,<b>不推清晰图</b>。
+           这是被实测逼出来的:整层一起推的话,1.07 倍会把图的边缘顶出裁剪框 ——
+           右边少 14px、上边少 4px。而这一块的全部意义就是「一个像素都不裁」,
+           为了动效再裁回去,等于把刚修好的问题原样搬了个地方。
+           糊底本来就是被 UniformToFill 裁过的氛围色块,推它不损失任何信息,
+           而画面「在动」这件事照样成立(光和色在缓慢流动)。
+           ★ 糊底推得比原来狠一点(1.00↔1.10):它是糊的,推小了根本看不出来。 */
+        washBox = new Border
+        {
+            Background = wash,
+            RenderTransform = Zoom(1),
+            RenderTransformOrigin = RelativePoint.Center,
+            Transitions =
+            [
+                new TransformOperationsTransition
+                {
+                    Property = RenderTransformProperty,
+                    Duration = TimeSpan.FromSeconds(9), Easing = new LinearEasing(),
+                },
+            ],
+        };
+        return new Border
+        {
+            Opacity = 0,
+            Child = new Panel { Children = { washBox, box, dim } },
+            Transitions =
+            [
+                new DoubleTransition { Property = OpacityProperty, Duration = Fade, Easing = new CubicEaseInOut() },
+            ],
+        };
+    }
 
     /// <summary>
     /// 先把位置占住(骨架)。
@@ -298,6 +434,9 @@ public sealed class Hero : Border
            Images 那层解好的位图是留着的,所以第二轮翻回来是零成本。 */
         _bg = _items.Select(it => Images.LoadAsync(_core,
             Images.EmbyImageUrl(_server, Id(it), "Backdrop"), 720)).ToArray();
+        // 氛围底只要 64px 高:它会被拉大九倍当糊底用,拉大图纯属白解码
+        _wash = _items.Select(it => Images.LoadAsync(_core,
+            Images.EmbyImageUrl(_server, Id(it), "Backdrop"), 64)).ToArray();
         /* ★ 艺术字(Logo)<b>没有 has_logo 这个字段可判</b>,只能拉了才知道有没有。
            拉不到返回 null → 回落成文字标题。旧 React 版也是这么做的(onError)。 */
         _logo = _items.Select(it => Images.LoadAsync(_core,
@@ -352,8 +491,22 @@ public sealed class Hero : Border
                 while (_hover && _alive) await Task.Delay(160);
                 continue;
             }
-            Jump(_idx + 1);
+            /* ★★ <b>图没到就不翻</b>(用户 2026-09-02:「切换之后没有显示还要等一会」)。
+               预取是在 Show() 里一起发的,但慢链路上第二张可能还在路上 ——
+               照翻的话交叉淡入淡到一半发现没东西可淡,那一下就是「切过去了但是空的」。
+               ★ 封顶 5 秒:一直等下去等于轮播被一张取不到的图卡死。 */
+            if (_pinned) { await Task.Delay(500); continue; }
+            var nxt = (_idx + 1) % _items.Count;
+            await Ready(nxt);
+            Jump(nxt);
         }
+    }
+
+    /// <summary>等第 <paramref name="i"/> 张的位图到位,最多等 5 秒。</summary>
+    private async Task Ready(int i)
+    {
+        if (i < 0 || i >= _bg.Length || _bg[i].IsCompleted) return;
+        await Task.WhenAny(_bg[i], Task.Delay(5000));
     }
 
     /// <summary>
@@ -416,7 +569,9 @@ public sealed class Hero : Border
         RenderBody(_items[i], _logo[i]);
 
         var back = ReferenceEquals(_front, _layerA) ? _layerB : _layerA;
-        var brush = ReferenceEquals(back, _layerA) ? _brushA : _brushB;
+        var toA = ReferenceEquals(back, _layerA);
+        var sharp = toA ? _sharpA : _sharpB;
+        var wash = toA ? _washA : _washB;
 
         var bmp = await _bg[i];
         // 翻得比图快:等这张图的时候用户已经翻走了,别把它硬塞上去
@@ -425,13 +580,23 @@ public sealed class Hero : Border
         {
             Console.WriteLine($"[Hero] 第 {i + 1} 张没有剧照,回退海报");
             /* ★ listRandom 只挑有剧照的条目(ImageTypes=Backdrop),但取图仍然可能失败。
-               退回海报 —— 比例不对(2:3 铺进 26:7)会裁得很凶,但总比一块空底强。 */
+               退回海报 —— 现在是 Uniform 不裁,2:3 的海报只会窄一点,不会被裁烂。 */
             bmp = await Images.LoadAsync(_core, Images.EmbyImageUrl(_server, Id(_items[i]), "Primary"), 720);
             if (bmp is null) Console.WriteLine($"[Hero] 第 {i + 1} 张连海报也取不到(server={_server})");
             if (_idx != i || bmp is null) return;
         }
+        // 氛围底取不到就拿大图顶上(它只是被拉糊当底色,清晰与否看不出来)
+        var washBmp = i < _wash.Length ? await _wash[i] : null;
+        if (_idx != i) return;
+        wash.Source = washBmp ?? bmp;
 
-        brush.Source = bmp;
+        sharp.Source = bmp;
+        /* ★ 记下这一张的宽高比,遮罩要按它对齐。
+           ★★ **不能假定 16:9**:取不到剧照时会回落海报(2:3),
+             按 16:9 算出来的左沿在海报上差着几百像素,那道缝会更明显。 */
+        var ar = bmp.PixelSize.Height > 0 ? (double)bmp.PixelSize.Width / bmp.PixelSize.Height : 16.0 / 9;
+        if (toA) _arA = ar; else _arB = ar;
+        SyncSeam();
         _skel.IsVisible = false;
         back.Opacity = 1;
         _front.Opacity = 0;
@@ -441,8 +606,9 @@ public sealed class Hero : Border
            下次轮到它就 1.07→1.00。每次都归零的话要先关掉过渡、设值、再打开,
            而关掉过渡的那一瞬间交叉淡入也在同一个 Transitions 里,会一起被掐掉。
            来回推还更好看:连着两张不会都往同一个方向涨。 */
-        if (ReferenceEquals(back, _layerA)) { _zoomA = !_zoomA; back.RenderTransform = Zoom(_zoomA ? 1.07 : 1.0); }
-        else { _zoomB = !_zoomB; back.RenderTransform = Zoom(_zoomB ? 1.07 : 1.0); }
+        var kb = toA ? _washBoxA : _washBoxB;
+        if (toA) _zoomA = !_zoomA; else _zoomB = !_zoomB;
+        if (kb is not null) kb.RenderTransform = Zoom((toA ? _zoomA : _zoomB) ? 1.10 : 1.0);
     }
 
     /// <summary>
@@ -456,7 +622,21 @@ public sealed class Hero : Border
     {
         _body.Children.Clear();
 
-        var title = new ContentControl { HorizontalAlignment = HorizontalAlignment.Left };
+        /* ★★ 艺术字这一格<b>高度是钉死的</b>,内容底对齐。
+           不钉的表现就是用户说的那句「艺术字和标签之间会有间隔,有些有有些没有」——
+           这一格的内容有三种高度:一行标题 42、两行标题 84、艺术字按原比例 40~88,
+           而 StackPanel 的 Spacing 是**加在内容下沿之后**的。内容一高一矮,
+           标签行的落点就跟着上下跳,看起来就成了「间隔时有时无」。
+           钉死之后标签行永远在同一条线上,而多出来的空白全在**上方**(看不见)。 */
+        var title = new ContentControl
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+        };
+        var titleSlot = new Border
+        {
+            Height = TitleSlot, HorizontalAlignment = HorizontalAlignment.Left, Child = title,
+        };
         // 先摆文字标题;艺术字取到了再换上去(取不到就一直是文字,不留空)
         title.Content = TitleText(ItemName(it));
         _ = SwapLogo(title, logo, Id(it));
@@ -464,15 +644,17 @@ public sealed class Hero : Border
         var tags = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var year = (int)Num(it, "year");
         if (year > 0) tags.Children.Add(Pill(year.ToString(), false));
-        if (TypeName(Str(it, "type_")) is { Length: > 0 } tn) tags.Children.Add(Pill(tn, false));
         var rating = Num(it, "rating");
         if (rating > 0) tags.Children.Add(Pill($"★ {rating:0.0}", true));
-        foreach (var g in Genres(it).Take(3)) tags.Children.Add(Pill(g, false));
+        /* ★★ <b>不显示「电影 / 剧集」</b>(用户 2026-09-02 点名)。
+           它对每一条都成立、而且看海报就知道 —— 一个恒真的标签占的是
+           一个真标签的位置。腾出来的位置给类型标签(多显示一个)。 */
+        foreach (var g in Genres(it).Take(4)) tags.Children.Add(Pill(g, false));
 
-        _body.Children.Add(title);
+        _body.Children.Add(titleSlot);
         if (tags.Children.Count > 0) _body.Children.Add(tags);
 
-        Enter(title, 0);
+        Enter(titleSlot, 0);
         if (tags.Children.Count > 0) Enter(tags, 90);
     }
 
@@ -520,7 +702,7 @@ public sealed class Hero : Border
         {
             Source = bmp,
             Stretch = Stretch.Uniform,
-            MaxHeight = 96, MaxWidth = 460,
+            MaxHeight = TitleSlot - 4, MaxWidth = 460,
             HorizontalAlignment = HorizontalAlignment.Left,
             Effect = Shadow(),
         });
@@ -642,15 +824,6 @@ public sealed class Hero : Border
         }
     }
 
-    private static string TypeName(string t) => t switch
-    {
-        "Movie" => "电影",
-        "Series" => "剧集",
-        "Season" => "季",
-        "Episode" => "剧集",
-        _ => "",
-    };
-
     private static string Id(JsonElement e) => Str(e, "id");
     private static string ItemName(JsonElement e) => Str(e, "name");
 
@@ -679,16 +852,45 @@ public sealed class Hero : Border
     internal void SelfCheckJump(int n)
     {
         if (n <= 0) { _ = Watch(); return; }
+        /* ★★ 采样式自检要<b>把轮播停住</b>。
+           不停的话诊断打在第 3.5 秒、截图拍在第 10 秒,中间它已经自己翻过一页 ——
+           于是「日志说的是第 1 张、截图上是第 2 张」,两边对不上账,
+           而这种对不上会让人把好的当成坏的查半天(2026-09-02 真栽了一轮)。 */
+        _pinned = true;
         Dispatcher.UIThread.Post(async () =>
         {
             Jump(n - 1);
+            await Task.Delay(900);
+            string Brush(object? src) => src is Bitmap bm
+                ? $"{bm.PixelSize.Width}x{bm.PixelSize.Height}" : "(空)";
+            static string Mask(Border? b) => b?.Background is LinearGradientBrush g && g.GradientStops.Count == 3
+                ? $"{g.GradientStops[1].Offset:0.000}->{g.GradientStops[2].Offset:0.000}" : "(无)";
+            Console.WriteLine($"[Hero 诊断] 块 {Bounds.Width:0}x{Height:0}  " +
+                              $"A层 透明度{_layerA.Opacity:0.00} 清晰图{Brush(_sharpA.Source)}@{_sharpA.Bounds.Width:0}x{_sharpA.Bounds.Height:0} 底图{Brush(_washA.Source)} " +
+                              $"比例{_arA:0.00} 压暗{Mask(_dimA)} | " +
+                              $"B层 透明度{_layerB.Opacity:0.00} 清晰图{Brush(_sharpB.Source)}@{_sharpB.Bounds.Width:0}x{_sharpB.Bounds.Height:0} 底图{Brush(_washB.Source)} " +
+                              $"比例{_arB:0.00} 压暗{Mask(_dimB)}");
+            /* ★★ 「整张剧照一个像素都没裁」的判据:
+               清晰图那一层<b>不许带缩放</b>,而且它的高度必须正好等于块高
+               (Uniform 之后按高度 fit,矮一点就是没铺满、被裁过或者比例算错了)。
+               这一条是被真事逼出来的:慢推挂在整层上时,1.07 倍把图的右边顶出去 14px ——
+               而截图上**完全看不出来**,渐变图少一条边和不少长得一模一样。 */
+            // ★ RenderTransform 为 null = 压根没有变换 = 1 倍,不是 0 倍。
+            //   写成 Scale()==1 的话这条断言永远报「被裁了」——那是**假红**,和假绿一样坏。
+            static bool NoZoom(Visual? v) =>
+                v?.RenderTransform is null || Math.Abs(v.RenderTransform.Value.M11 - 1) < 0.001;
+            var kept = NoZoom(_boxA) && NoZoom(_boxB) && Math.Abs(_sharpA.Bounds.Height - Height) < 2;
+            Console.WriteLine(kept
+                ? $"[Hero 完整度] ✓ 清晰图没有缩放,高 {_sharpA.Bounds.Height:0} ≈ 块高 {Height:0} —— 一个像素都没裁"
+                : $"[Hero 完整度] ✗ 被裁了:A无缩放={NoZoom(_boxA)} B无缩放={NoZoom(_boxB)} " +
+                  $"图高{_sharpA.Bounds.Height:0} 块高{Height:0}");
             Console.WriteLine($"[Hero 自检] 共 {_items.Count} 张,现在第 {_idx + 1} 张:{Cur()};" +
                               $"高 {Height:0}px,圆点 {_dots.Children.Count} 颗,骨架可见={_skel.IsVisible}");
             foreach (var at in new[] { 0, 220, 500, 1000, 2000 })
             {
                 if (at > 0) await Task.Delay(at - Prev(at));
-                Console.WriteLine($"[Hero 动效] +{at,4}ms  A 透明度 {_layerA.Opacity:0.00} 慢推 {Scale(_layerA):0.000}" +
-                                  $" | B 透明度 {_layerB.Opacity:0.00} 慢推 {Scale(_layerB):0.000}" +
+                Console.WriteLine($"[Hero 动效] +{at,4}ms  A 透明度 {_layerA.Opacity:0.00} 慢推 {Scale(_washBoxA):0.000}" +
+                                  $" | B 透明度 {_layerB.Opacity:0.00} 慢推 {Scale(_washBoxB):0.000}" +
                                   $" | 进度条 {Fill():0.00}");
             }
         });
@@ -710,7 +912,7 @@ public sealed class Hero : Border
     private string Cur() => _idx >= 0 && _idx < _items.Count ? ItemName(_items[_idx]) : "(空)";
 
     /// <summary>读出当前的慢推倍率。TransformOperations 折成矩阵,M11 就是横向缩放。</summary>
-    private static double Scale(Visual v) => v.RenderTransform?.Value.M11 ?? 0;
+    private static double Scale(Visual? v) => v?.RenderTransform?.Value.M11 ?? 0;
 
     /// <summary>读出当前那颗圆点的进度(0~1)。</summary>
     private double Fill() =>

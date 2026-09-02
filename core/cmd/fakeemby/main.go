@@ -334,6 +334,19 @@ func main() {
 			//   假服务器不造这个形状,详情页的大图就永远验不到。
 			d["BackdropImageTags"] = []string{"tag-bd"}
 			d["UserData"] = map[string]any{"PlaybackPositionTicks": 12000000000, "IsFavorite": false}
+			/* 章节 + 片头片尾。
+			   ★★ 不造这个形状的话,播放页的「章节」下拉和「跳过片头」条**一次都不会出现** ——
+			     而它们不出现和「这一版没做」长得一模一样。
+			   ★ 名字要能被 emby.isIntroName / isOutroName 认出来(片头 / 片尾),
+			     而且片头必须落在 runtime 的前 40%、片尾在后 25% —— 否则核心层会判成
+			     「误判的正片章节」直接不给区间。这里 runtime 是 7200 秒。 */
+			d["Chapters"] = []any{
+				map[string]any{"Name": "片头", "StartPositionTicks": int64(0)},
+				map[string]any{"Name": "第一章", "StartPositionTicks": int64(90 * 1e7)},
+				map[string]any{"Name": "第二章", "StartPositionTicks": int64(2400 * 1e7)},
+				map[string]any{"Name": "片尾", "StartPositionTicks": int64(6900 * 1e7)},
+				map[string]any{"Name": "预告", "StartPositionTicks": int64(7100 * 1e7)},
+			}
 			d["People"] = []any{
 				map[string]any{"Id": "p1", "Name": "某演员", "Role": "主角", "Type": "Actor",
 					"PrimaryImageTag": "tag-p1"},
@@ -619,7 +632,9 @@ func solid(id string, wide bool) image.Image {
 	}
 	iw, ih := 64, 96
 	if wide {
-		iw, ih = 192, 108
+		// ★ 横版给 480×270(16:9)。原来是 192×108 —— 首页 Hero 按 720 高解码,
+		//   等于把它放大将近七倍,糊到看不出裁没裁。
+		iw, ih = 480, 270
 	}
 	img := image.NewRGBA(image.Rect(0, 0, iw, ih))
 	c := color.RGBA{uint8(h>>16)/2 + 60, uint8(h>>8)/2 + 60, uint8(h)/2 + 60, 255}
@@ -635,16 +650,45 @@ func solid(id string, wide bool) image.Image {
 			img.Set(x, y, color.RGBA{f(c.R), f(c.G), f(c.B), 255})
 		}
 	}
+	if wide {
+		/* ★★ 四角画角标 + 正中画一个十字。
+		   这是「**这张图有没有被裁掉**」唯一看得见的判据 ——
+		   用户 2026-09-02 报的第一条就是首页 Hero「封面不全」,
+		   而在一张渐变图上,裁掉上下各四分之一是**看不出来**的:
+		   剩下的那条照样是一片渐变。四个角都在 = 一个像素都没裁。 */
+		mark := color.RGBA{255, 255, 255, 255}
+		const arm, thick, inset = 40, 4, 6
+		put := func(x, y int) {
+			if x >= 0 && x < iw && y >= 0 && y < ih {
+				img.Set(x, y, mark)
+			}
+		}
+		for _, cn := range [][2]int{{inset, inset}, {iw - inset - 1, inset},
+			{inset, ih - inset - 1}, {iw - inset - 1, ih - inset - 1}} {
+			dx, dy := 1, 1
+			if cn[0] > iw/2 {
+				dx = -1
+			}
+			if cn[1] > ih/2 {
+				dy = -1
+			}
+			for i := 0; i < arm; i++ {
+				for t := 0; t < thick; t++ {
+					put(cn[0]+dx*i, cn[1]+dy*t)
+					put(cn[0]+dx*t, cn[1]+dy*i)
+				}
+			}
+		}
+		for i := -arm / 2; i < arm/2; i++ {
+			for t := 0; t < thick; t++ {
+				put(iw/2+i, ih/2+t)
+				put(iw/2+t, ih/2+i)
+			}
+		}
+	}
 	return img
 }
 
-/*
-wordmark 造一张「艺术字」样的透明 PNG:几条长短不一的白色色块。
-
-	★ 不能拿 solid() 顶替 —— 那是一张**不透明的照片**,贴在 Hero 上会盖住背景,
-	  而真的 Logo 是透明底的字。用一张不透明图当 Logo 的话,
-	  「艺术字压在剧照上好不好看」这件事在自检里就永远是错的。
-*/
 func wordmark(id string) image.Image {
 	var h uint32 = 2166136261
 	for _, c := range []byte(id) {

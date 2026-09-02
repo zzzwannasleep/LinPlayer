@@ -138,6 +138,16 @@ JSON
 fi
 fi
 
+# ★★ **每次都清掉图片缓存**。
+#   核心层的 /img 通道把上游字节落盘缓存(userdata/cache/img),按 src 做键 ——
+#   而自检里 src 是固定的 http://127.0.0.1:18096/Items/xxx/Images/...。
+#   于是**改了假服务器画的图,界面上还是上一版那张**,而且一切正常:
+#   命令绿、日志绿、诊断打出来的位图尺寸也对(旧图被放大到目标高度而已)。
+#   2026-09-02 为此把「剧照没画出来」查了十几轮 —— 其实一直画着,只是画的是旧图。
+#   缓存本身是对的(它省的就是回源),但**自检要的是这一版的字节**。
+# LP_KEEPIMG=1:**不清**。量「第二次进首页有多快」时用 —— 清着量的永远是冷缓存。
+[ "${LP_KEEPIMG:-}" = "1" ] || rm -rf "$BIN/userdata/cache/img"
+
 echo "== 5/5 起 exe 截图 =="
 # ★ 排行榜的两个上游也指到假服务器上(它顺带假扮弹弹Play / TMDB)。
 #   没有这一步的话,排行榜只验得到「没凭据」那一半 —— 而**有数据时长什么样**
@@ -154,7 +164,7 @@ export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 # ★ 不指过去的话,市场页在没网的机器上只验得到「拉取失败」那一半 ——
 #   而**有插件时长什么样**(第三方徽章、跳过数提示、版本取最大)才是会出 bug 的那半。
 export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
-LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_EPISODE="${LP_EP:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 # LP_SHADER=all 要把 28 档挨个挂一遍(每档要等真渲染一帧才编译),得多给点时间
 # LP_WAIT=秒 覆盖等待时长(滚动扫描这类要跑几秒的自检用)

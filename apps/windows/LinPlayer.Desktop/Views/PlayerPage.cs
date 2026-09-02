@@ -100,7 +100,31 @@ public sealed class PlayerPage : UserControl
     private readonly ComboBox _audio = new() { Width = 210, MinHeight = 32 };
     private readonly ComboBox _subs = new() { Width = 210, MinHeight = 32 };
     private readonly ComboBox _quality = new() { Width = 210, MinHeight = 32 };
+    /// <summary>画面比例。核心层 <c>player.setAspectRatio</c> 早就在,UI 一直没接。</summary>
+    private readonly ComboBox _aspect = new() { Width = 210, MinHeight = 32 };
+    /// <summary>章节。选一个就跳过去。★ 没有章节的片子整行不画,不摆一个空下拉。</summary>
+    /// <summary>章节。★ 给占位文字 —— 没选中时空白一片会被当成「没加载出来」。</summary>
+    private readonly ComboBox _chapters = new()
+    {
+        Width = 210, MinHeight = 32, PlaceholderText = "跳到章节…",
+    };
+    /// <summary>字幕 / 音频延迟(秒)。字幕对不上口型时唯一能自救的东西。</summary>
+    private readonly Slider _subDelay = new() { Minimum = -10, Maximum = 10, Value = 0, Width = 150 };
+    private readonly Slider _audDelay = new() { Minimum = -10, Maximum = 10, Value = 0, Width = 150 };
+    private readonly TextBlock _subDelayText = Label("0.0s");
+    private readonly TextBlock _audDelayText = Label("0.0s");
+    /// <summary>倍速。按钮上直接写当前值 —— 一个图标说不出「现在是几倍速」。</summary>
+    private readonly Button _speed;
+    private double _speedValue = 1.0;
+    /// <summary>片头 / 片尾的跳过条。落在区间里才出现。</summary>
+    private readonly Button _skip;
+    private (double Start, double End)? _intro, _outro;
+    /// <summary>这一次已经跳过的那个区间,别反复弹。</summary>
+    private string _skipped = "";
+    private readonly string _itemId;
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
+    /// <summary>下一集。有就画「下一集」键,没有就不画(电影 / 最后一集)。</summary>
+    private readonly CardItem? _next;
 
     private double _duration;
     private bool _dragging;
@@ -145,21 +169,39 @@ public sealed class PlayerPage : UserControl
     /// <para>★ 详情页选了版本却不把它送下来的话,界面说在放 4K、实际在放 1080p ——
     /// 而且两边都不报错。这正是本仓「界面在撒谎:当前版本」那条教训的另一半。</para>
     /// </param>
+    /// <param name="next">
+    /// 下一集。给了就画「下一集」键。
+    /// <para>★ 让<b>调用方</b>算下一集,不是播放页自己去拉一遍分集表 ——
+    /// 详情页手里本来就有那张表,而且「接着看哪一集」的顺序它已经算过一次了
+    /// (<c>NextEpisode</c>)。播放页再算一份迟早和它指到不同的集上。</para>
+    /// </param>
     public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs,
-        bool isSource = false, object? sourceRaw = null, string mediaSourceId = "")
+        bool isSource = false, object? sourceRaw = null, string mediaSourceId = "",
+        CardItem? next = null)
     {
         _mediaSourceId = mediaSourceId;
         _core = core;
         _isSource = isSource;
         _sourceRaw = sourceRaw;
         _title = title;
+        _itemId = itemId;
+        _next = next;
 
-        _bar = new Slider { Minimum = 0, Maximum = 1, Value = 0, IsEnabled = false };
+        /* ★★ 进度条<b>加高到 28</b>。默认的 Slider 热区只有十几像素高,
+           而进度条是这一页被点得最多的东西 —— 瞄不准的代价是跳错位置,
+           然后还得再拖一次。用户说的「一点都不好点击」头一条就是它。 */
+        _bar = new Slider { Minimum = 0, Maximum = 1, Value = 0, IsEnabled = false, MinHeight = 28 };
         _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 110 };
-        /* ★ OSD 上的按钮统一走 <c>Button.osd</c>。
-           混着用的表现很具体:暂停和全屏带一圈边框、旁边四个不带,
-           一排按钮看着像是两批人做的。 */
-        _pause = new Button { Classes = { "osd" }, Content = "⏸" };
+
+        /* ★★ OSD 的图标全部换成 <b>Segoe MDL2 Assets</b>(样式 Button.osd 里设的字体)。
+           原来混着用 Unicode 杂符号(⏸ ⟲ ⟳ 🕪 ⚙ ⛶):
+             · 🕪 在 Windows 上走 Segoe UI Emoji,渲染成**彩色**图标,和旁边一排线条符号
+               完全不是一套东西;
+             · ⟲ / ⟳ 这些数学箭头字重比周围细一大截,看着像掉了一档。
+           MDL2 是系统自带的图标字体,一整排同源同粗细。
+           ★ 字形存不存在有自检兜着(LP_SELFCHECK_GLYPH),不然缺字形是一个个豆腐块,
+             而它编译绿、运行也不报错。 */
+        _pause = new Button { Classes = { "osd", "main" }, Content = Ico.Pause };
         ToolTip.SetTip(_pause, "播放 / 暂停(空格)");
 
         // 返回是**唯一**带字的按钮:它离开这一页,和旁边那排「就地调整」不是一类动作。
@@ -169,8 +211,9 @@ public sealed class PlayerPage : UserControl
         };
         back.Click += (_, _) => Leave();
 
-        var full = Glyph("⛶", "全屏(F)");
+        var full = Glyph(Ico.Full, "全屏(F)");
         full.Click += (_, _) => ToggleFullscreen();
+        _fullBtn = full;
 
         _pause.Click += (_, _) => _ = TogglePause();
         _vol.PropertyChanged += (_, e) =>
@@ -193,16 +236,14 @@ public sealed class PlayerPage : UserControl
             await SeekTo(_bar.Value);
         }, RoutingStrategies.Tunnel);
 
-        var back10 = Glyph("⟲", "后退 10 秒(←)");
+        var back10 = Glyph(Ico.Back, "后退 10 秒(←)");
         back10.Click += (_, _) => _ = SeekBy(-10);
-        var fwd10 = Glyph("⟳", "前进 10 秒(→)");
+        var fwd10 = Glyph(Ico.Fwd, "前进 10 秒(→)");
         fwd10.Click += (_, _) => _ = SeekBy(10);
 
-        /* ★★ 静音图标**不能用彩色 emoji**(🔊):Windows 拿 Segoe UI Emoji 渲染,
-           出来是一枚彩色图标,和旁边一排线条符号完全不是一套东西。
-           ★ 而且它得**跟着状态变** —— 图标不变的话按下去除了没声音之外
-             没有任何反馈,用户会以为按钮坏了。 */
-        _mute = Glyph("🕪", "静音(M)");
+        /* ★ 静音图标得**跟着状态变** —— 图标不变的话按下去除了没声音之外
+           没有任何反馈,用户会以为按钮坏了。 */
+        _mute = Glyph(Ico.Volume, "静音(M)");
         _mute.Click += (_, _) =>
         {
             _muted = !_muted;
@@ -210,11 +251,60 @@ public sealed class PlayerPage : UserControl
             _ = Send("player.setMute", new { mute = _muted });
         };
 
-        /* 音轨 / 字幕 / 画质收进一个抽屉。
+        /* 倍速。★★ 按钮上**直接写数字**,不放一个图标:
+           「现在是几倍速」是个有具体值的状态,图标表达不了它,
+           而 1.5 倍速忘了调回来是很常见的事(声音听着不对但说不出哪里不对)。
+           ★ 点一下轮转一档,右键回 1.0 —— 常用动作一次点击,不必开抽屉。 */
+        _speed = new Button
+        {
+            Classes = { "osd" }, Content = "1×", FontFamily = FontFamily.Default, FontSize = 13,
+            Width = 48,
+        };
+        ToolTip.SetTip(_speed, "倍速(点一下换一档,右键回 1×)");
+        _speed.Click += (_, _) => _ = CycleSpeed(+1);
+        _speed.AddHandler(PointerReleasedEvent, (_, e) =>
+        {
+            if (e.InitialPressMouseButton == MouseButton.Right) _ = SetSpeed(1.0);
+        }, RoutingStrategies.Tunnel);
+
+        // 截图。★ 核心层 player.screenshot 一直在,UI 从来没接 —— 又一条零调用命令。
+        var shot = Glyph(Ico.Camera, "截图(S)");
+        shot.Click += (_, _) => _ = Screenshot();
+
+        // 下一集。★ 没有下一集就**整个不画**,不摆一个灰着的按钮
+        var nextBtn = Glyph(Ico.Next, "下一集(N)");
+        nextBtn.Click += (_, _) => GoNext();
+
+        /* 音轨 / 字幕 / 画质 / 延迟 / 比例 / 章节 收进一个抽屉。
            ★★ 它们平铺在控制条上时,底下一整行都是下拉框和标签 —— 那是**设置面板**,
-             不是 OSD。看片时这三样基本不动,不该长期压着画面。
+             不是 OSD。看片时这几样基本不动,不该长期压着画面。
            ★ 抽屉贴右下角弹,不是居中弹窗:它是就地调整,不是一次决策,
              居中弹窗会把整块画面遮掉。 */
+        _subDelay.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != Slider.ValueProperty) return;
+            _subDelayText.Text = $"{_subDelay.Value:0.0}s";
+            _ = Send("player.setSubDelay", new { secs = _subDelay.Value });
+        };
+        _audDelay.PropertyChanged += (_, e) =>
+        {
+            if (e.Property != Slider.ValueProperty) return;
+            _audDelayText.Text = $"{_audDelay.Value:0.0}s";
+            _ = Send("player.setAudioDelay", new { secs = _audDelay.Value });
+        };
+        _aspect.ItemsSource = Aspects.Select(a => a.Label).ToList();
+        _aspect.SelectedIndex = 0;
+        _aspect.SelectionChanged += (_, _) =>
+            _ = Send("player.setAspectRatio", new { ratio = Aspects[Math.Max(0, _aspect.SelectedIndex)].Value });
+        _chapters.SelectionChanged += (_, _) =>
+        {
+            if (_chapters.SelectedItem is ChapterOption c) _ = SeekTo(c.At);
+        };
+
+        var chapterRow = Row("章节", _chapters);
+        chapterRow.IsVisible = false;   // 有章节才画,见 LoadChapters
+        _chapterRow = chapterRow;
+
         _settings = new Border
         {
             Background = new SolidColorBrush(Color.Parse("#f0161b24")),
@@ -222,7 +312,7 @@ public sealed class PlayerPage : UserControl
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(12),
             Padding = new Thickness(16),
-            Margin = new Thickness(0, 0, 20, 108),
+            Margin = new Thickness(0, 0, 20, 116),
             IsVisible = false,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Bottom,
@@ -232,11 +322,32 @@ public sealed class PlayerPage : UserControl
                 Children =
                 {
                     Row("音轨", _audio), Row("字幕", _subs), Row("画质", _quality),
+                    Row("比例", _aspect), chapterRow,
+                    Row("字幕延迟", Pair(_subDelay, _subDelayText)),
+                    Row("音频延迟", Pair(_audDelay, _audDelayText)),
                 },
             },
         };
-        var gear = Glyph("⚙", "音轨 / 字幕 / 画质(U)");
+        var gear = Glyph(Ico.Setting, "音轨 / 字幕 / 画质 / 延迟(U)");
         gear.Click += (_, _) => _settings.IsVisible = !_settings.IsVisible;
+
+        /* 跳过片头 / 片尾。
+           ★★ 这是<b>核心层早就算好、UI 从来没用过</b>的东西:player.chapterInfo
+             一次请求同时给章节表和 intro/outro 区间,而且开关关着时它自己返回 null ——
+             调用方不必再判一次开关。
+           ★ 按钮浮在右下角、只在区间里出现:常驻的话它在全片 95% 的时间里都是错的。 */
+        _skip = new Button
+        {
+            Classes = { "primary" }, Content = "跳过片头", IsVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 24, 132),
+        };
+        _skip.Click += (_, _) =>
+        {
+            if (_skipTo > 0) _ = SeekTo(_skipTo);
+            _skip.IsVisible = false;
+        };
 
         var progress = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         _time.Margin = new Thickness(0, 0, 12, 0);
@@ -250,14 +361,19 @@ public sealed class PlayerPage : UserControl
 
         var left = new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 4,
-            Children = { _pause, back10, fwd10, _mute, _vol },
+            Orientation = Orientation.Horizontal, Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { _pause, back10, fwd10 },
         };
+        if (_next is not null) left.Children.Add(nextBtn);
+        left.Children.Add(_mute);
+        left.Children.Add(_vol);
         var right = new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 4,
+            Orientation = Orientation.Horizontal, Spacing = 6,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Children = { gear, full },
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { _speed, shot, gear, full },
         };
         var controls = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(left, 0);
@@ -271,9 +387,9 @@ public sealed class PlayerPage : UserControl
         _bottom = new Border
         {
             Background = Scrim(false),
-            Padding = new Thickness(20, 34, 20, 14),
+            Padding = new Thickness(20, 34, 20, 16),
             VerticalAlignment = VerticalAlignment.Bottom,
-            Child = new StackPanel { Spacing = 4, Children = { progress, controls } },
+            Child = new StackPanel { Spacing = 6, Children = { progress, controls } },
         };
 
         _top = new Border
@@ -302,7 +418,7 @@ public sealed class PlayerPage : UserControl
         Content = new Panel
         {
             Background = Brushes.Black,
-            Children = { _view, _top, _bottom, _settings },
+            Children = { _view, _top, _bottom, _skip, _settings },
         };
 
         // ★ 键盘要能收到,控件得先能拿焦点 —— 不设 Focusable 按空格毫无反应,
@@ -328,6 +444,144 @@ public sealed class PlayerPage : UserControl
            绕开 UI 直接调命令的自检只能证明核心层活着,证明不了这个面板接对了。 */
         var lvl = Environment.GetEnvironmentVariable("LP_SELFCHECK_SHADER");
         if (!string.IsNullOrEmpty(lvl)) _ = SelfCheckPickQuality(lvl);
+        // 自检:LP_SELFCHECK_PLAYER_DRILL=3 把跳过条钉出来 —— 它平时只在片头那几十秒里出现,
+        // 截图永远抓不到,而它是这一版新加的东西里最容易画错位置的一个。
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "3")
+            _ = Task.Delay(7000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+            {
+                /* ★★ 灌的是**区间**,不是直接把按钮设可见 ——
+                   直接设可见的话下一次 Poll 里的 SyncSkip 会因为「不在任何区间里」
+                   立刻把它收回去,自检拍到的永远是没有按钮的那一帧。
+                   而且灌区间走的是真实那条路(SyncSkip 判定 → 显示 → 点了跳到 End),
+                   直接设可见只证明「这个控件存在」。
+                   ★ 核心层默认**关着**跳过片头(prefs.skip_intro=false,它会回 null),
+                     所以真机上这一块要用户开了开关才出现 —— 那是对的,不是 bug。 */
+                _intro = (0, 90);
+                _lastMove = DateTime.UtcNow.AddYears(1);
+                ShowOsd(true);
+            }));
+    }
+
+    /// <summary>抽屉里「章节」那一行。没有章节的片子整行不画。</summary>
+    private readonly Control _chapterRow;
+
+    /// <summary>跳过条按下去要跳到哪儿。</summary>
+    private double _skipTo;
+
+    /// <summary>画面比例档位。空串 = 交还给 mpv 自己判(-1)。</summary>
+    private static readonly (string Label, string Value)[] Aspects =
+    [
+        ("自动(跟随源)", "-1"),
+        ("16:9", "16:9"),
+        ("4:3", "4:3"),
+        ("21:9", "2.35"),
+        ("拉伸填满", "-2"),
+    ];
+
+    /// <summary>倍速档位。★ 0.5 以下没人用,2 以上听不清 —— 档位少一点选起来才快。</summary>
+    private static readonly double[] Speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+    private Task CycleSpeed(int step)
+    {
+        var at = Array.FindIndex(Speeds, x => Math.Abs(x - _speedValue) < 0.01);
+        if (at < 0) at = 2;
+        return SetSpeed(Speeds[((at + step) % Speeds.Length + Speeds.Length) % Speeds.Length]);
+    }
+
+    private async Task SetSpeed(double v)
+    {
+        _speedValue = v;
+        // ★ 1 倍速写成「1×」不是「1.00×」—— 一排数字里多两位小数会显得没对齐
+        _speed.Content = Math.Abs(v - 1.0) < 0.01 ? "1×" : $"{v:0.##}×";
+        _speed.Classes.Set("on", Math.Abs(v - 1.0) > 0.01);
+        await Send("player.setSpeed", new { speed = v });
+    }
+
+    /// <summary>
+    /// 截图。★ <b>不传目录</b> —— 核心层会用设置页里选的那个,传了反而把设置项架空。
+    /// </summary>
+    private async Task Screenshot()
+    {
+        try
+        {
+            var r = await _core.PlayerScreenshot(new { });
+            _msg.Text = "截图已存到 " + Str(r, "path");
+        }
+        catch (Exception e) { _msg.Text = "截图失败:" + LibraryPage.Advice(e); }
+    }
+
+    private void GoNext()
+    {
+        if (_next is null) return;
+        Stop();
+        _leaving = true;
+        // ★ 换成**替换**不是压栈:一路看下去会攒出一栈播放页,
+        //   返回键要按十几下才回得到详情页。
+        Nav.Replace(new PlayerPage(_core, _next.Id, _next.DisplayTitle, _next.ResumeSecs));
+    }
+
+    /// <summary>
+    /// 拉章节 + 片头片尾区间。
+    ///
+    /// <para>★★ 一次请求喂两个功能(核心层就是这么设计的)。开关关着时它自己回 null,
+    /// <b>调用方不必再判一次开关</b> —— 判两次早晚判岔,那就是「关了还在跳」。</para>
+    /// <para>★ 拉不到不报错:没刮章节的库返回空表,两个功能静默不工作,那是正常情况。</para>
+    /// </summary>
+    private async Task LoadChapters()
+    {
+        if (_isSource || _itemId == "") return;
+        try
+        {
+            var s = Nav.Session!;
+            var r = await _core.PlayerChapterInfo(new
+            {
+                s.server, s.token, s.user_id, s.device_id,
+                item_id = _itemId, runtime_secs = _duration,
+            });
+            var list = r.TryGetProperty("chapters", out var cs) && cs.ValueKind == JsonValueKind.Array
+                ? cs.EnumerateArray()
+                    .Select(c => new ChapterOption(Num(c, "start_secs"),
+                        Str(c, "name") is { Length: > 0 } n ? $"{Clock(Num(c, "start_secs"))}  {n}"
+                                                           : Clock(Num(c, "start_secs"))))
+                    .ToList()
+                : [];
+            _intro = RangeOf(r, "intro");
+            _outro = RangeOf(r, "outro");
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (list.Count == 0) return;
+                _chapters.ItemsSource = list;
+                _chapterRow.IsVisible = true;
+            });
+        }
+        catch { /* 没有章节是常态,不是错误 */ }
+    }
+
+    private static (double, double)? RangeOf(JsonElement r, string k) =>
+        r.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Object
+            ? (Num(v, "start"), Num(v, "end")) : null;
+
+    /// <summary>
+    /// 位置落进片头 / 片尾区间时把跳过条弹出来。
+    ///
+    /// <para>★ 同一个区间只弹一次:用户按了「不跳」(等它自己过去)之后又弹回来,
+    /// 那就成了骚扰。<c>_skipped</c> 记的就是这个。</para>
+    /// </summary>
+    private void SyncSkip(double pos)
+    {
+        (double Start, double End)? hit = null;
+        var which = "";
+        if (_intro is { } a && pos >= a.Start && pos < a.End) { hit = a; which = "intro"; }
+        else if (_outro is { } b && pos >= b.Start && pos < b.End) { hit = b; which = "outro"; }
+
+        if (hit is null || _skipped == which)
+        {
+            if (_skip.IsVisible && hit is null) _skip.IsVisible = false;
+            return;
+        }
+        _skipTo = hit.Value.End;
+        _skip.Content = which == "intro" ? "跳过片头" : "跳过片尾";
+        _skip.IsVisible = true;
     }
 
     /// <summary>
@@ -357,18 +611,61 @@ public sealed class PlayerPage : UserControl
         VerticalAlignment = VerticalAlignment.Center,
     };
 
+    /// <summary>
+    /// OSD 用到的 MDL2 字形。
+    ///
+    /// <para>★★ 集中一处写,是为了<b>能被自检逐个查一遍</b>(LP_SELFCHECK_GLYPH):
+    /// 字体里没有这个码位时 Windows 画的是一个空心方框,而它<b>编译绿、运行也不报错</b> ——
+    /// 只有真渲染 + 真看一眼才发现得了。散在各处写就没法查。</para>
+    /// </summary>
+    internal static class Ico
+    {
+        public const string Play = "\uE768";
+        public const string Pause = "\uE769";
+        public const string Back = "\uE72B";       // 后退 10 秒
+        public const string Fwd = "\uE72A";        // 前进 10 秒
+        public const string Next = "\uE893";       // 下一集
+        public const string Volume = "\uE767";
+        public const string Mute = "\uE74F";
+        public const string Camera = "\uE722";     // 截图
+        public const string Setting = "\uE713";
+        public const string Full = "\uE740";
+        public const string Windowed = "\uE73F";
+
+        /// <summary>自检用:全表。加了新图标要往这里加一行,不然它查不到。</summary>
+        public static readonly (string Name, string Glyph)[] All =
+        [
+            ("播放", Play), ("暂停", Pause), ("后退", Back), ("前进", Fwd), ("下一集", Next),
+            ("音量", Volume), ("静音", Mute), ("截图", Camera), ("设置", Setting),
+            ("全屏", Full), ("退出全屏", Windowed),
+        ];
+    }
+
     /// <summary>静音图标跟状态走。★ 轮询里也调一次 —— 键盘 M 和按钮是两条路。</summary>
-    private void SyncMute() => _mute.Content = _muted ? "🕨" : "🕪";
+    private void SyncMute()
+    {
+        _mute.Content = _muted ? Ico.Mute : Ico.Volume;
+        _mute.Classes.Set("on", _muted);
+    }
+
+    /// <summary>滑块 + 读数。★ 光有滑块的话用户不知道自己调到了多少。</summary>
+    private static Control Pair(Control slider, Control readout) => new StackPanel
+    {
+        Orientation = Orientation.Horizontal, Spacing = 8,
+        Children = { slider, readout },
+    };
 
     /// <summary>抽屉里的一行:标签 + 控件。标签宽度对齐,三行才排得整齐。</summary>
-    private static Control Row(string label, Control input) => new StackPanel
+    private static StackPanel Row(string label, Control input) => new()
     {
         Orientation = Orientation.Horizontal, Spacing = 10,
         Children =
         {
             new TextBlock
             {
-                Text = label, Width = 40, Foreground = Brushes.White, FontSize = 12.5,
+                // ★ 64 不是 40:最长的标签是「字幕延迟」四个字,40 只放得下两个 ——
+                //   截断之后成了「字幕延」,看着像写错字(实测截图上抓到)
+                Text = label, Width = 64, Foreground = Brushes.White, FontSize = 12.5,
                 VerticalAlignment = VerticalAlignment.Center,
             },
             input,
@@ -464,6 +761,11 @@ public sealed class PlayerPage : UserControl
                 _settings.IsVisible = true;
                 _quality.IsDropDownOpen = !_quality.IsDropDownOpen;
                 break;
+            // ★ 新加的功能都要有快捷键:OSD 三秒就收,而键盘永远在
+            case Key.S: _ = Screenshot(); break;
+            case Key.N: GoNext(); break;
+            case Key.OemPeriod: _ = CycleSpeed(+1); break;   // > 加速
+            case Key.OemComma: _ = CycleSpeed(-1); break;    // < 减速
             case Key.F or Key.Enter: ToggleFullscreen(); break;
             // ★ 全屏时 Esc 只退全屏,不退出播放 —— 看片时误按一下就把片关了很恼人
             case Key.Escape when _full: ToggleFullscreen(); break;
@@ -475,7 +777,7 @@ public sealed class PlayerPage : UserControl
 
     private async Task TogglePause()
     {
-        try { await _core.PlayerSetPause(new { paused = (string?)_pause.Content != "▶" }); }
+        try { await _core.PlayerSetPause(new { paused = (string?)_pause.Content != Ico.Play }); }
         catch { /* 状态轮询会纠正显示 */ }
     }
 
@@ -492,7 +794,15 @@ public sealed class PlayerPage : UserControl
     {
         _full = !_full;
         Nav.Immersive?.Invoke(_full);
+        // ★ 图标要跟着换:全屏之后按钮还画着「进入全屏」,用户会以为没生效
+        if (_fullBtn is not null)
+        {
+            _fullBtn.Content = _full ? Ico.Windowed : Ico.Full;
+            ToolTip.SetTip(_fullBtn, _full ? "退出全屏(F / Esc)" : "全屏(F)");
+        }
     }
+
+    private Button? _fullBtn;
 
     private void Leave()
     {
@@ -661,7 +971,25 @@ public sealed class PlayerPage : UserControl
 
         // 拿到时长才去问轨道表:loadfile 是异步的,早问回来的是空表,
         // 而空表会把两个下拉框永久固定成空的 —— 之后再没人重问。
-        if (!_tracksLoaded && dur > 0) { _tracksLoaded = true; _ = LoadTracks(); }
+        // ★ 章节同理:chapterInfo 要拿 runtime_secs 去算片头片尾,时长是 0 的时候算不出来。
+        if (!_tracksLoaded && dur > 0)
+        {
+            _tracksLoaded = true;
+            _duration = dur;
+            _ = LoadTracks();
+            _ = LoadChapters();
+        }
+
+        /* ★ 倍速可能被别处改(mpv.conf / 快捷键 / 上一次的粘连),
+           以状态里的为准 —— 按钮上写着 1× 而实际在放 1.5× 是「界面在撒谎」。 */
+        var sp = Num(st, "speed");
+        if (sp > 0 && Math.Abs(sp - _speedValue) > 0.01)
+        {
+            _speedValue = sp;
+            _speed.Content = Math.Abs(sp - 1.0) < 0.01 ? "1×" : $"{sp:0.##}×";
+            _speed.Classes.Set("on", Math.Abs(sp - 1.0) > 0.01);
+        }
+        SyncSkip(pos);
 
         if (DateTime.UtcNow - _lastMove > TimeSpan.FromSeconds(3) && !paused) ShowOsd(false);
 
@@ -680,7 +1008,7 @@ public sealed class PlayerPage : UserControl
         SyncMute();
         _time.Text = dur > 0 ? Clock(pos) : "加载中…";
         _total.Text = dur > 0 ? Clock(dur) : "";
-        _pause.Content = paused ? "▶" : "⏸";
+        _pause.Content = paused ? Ico.Play : Ico.Pause;
     }
 
     private async Task LoadTracks()
@@ -764,6 +1092,11 @@ public sealed class PlayerPage : UserControl
             ? v.GetString() ?? "" : "";
 
     private sealed record TrackOption(string Id, string Label)
+    {
+        public override string ToString() => Label;
+    }
+
+    private sealed record ChapterOption(double At, string Label)
     {
         public override string ToString() => Label;
     }

@@ -38,18 +38,16 @@ public sealed class HomePage : PageBase
     /// </summary>
     private const int HeroCount = 5;
 
-    /// <param name="title">页头。给当前服务器名 —— 见下面那段注释。</param>
+    /// <param name="title">保留形参:外壳按源类型算出来的名字,别的入口还在传。</param>
     public HomePage(CoreClient? core, Action<CardItem>? onOpen = null, string title = "首页")
     {
         _core = core;
         _onOpen = onOpen;
-        /* ★ 首页也要有页头:媒体库 / 搜索都有 H1,唯独首页没有,三页来回切的时候
-           首页会显得「上面缺了一块」。
-           ★ 写**服务器名**而不是干写「首页」:这是个多服务器播放器,
-             「我现在在看哪台」是真信息;「首页」两个字侧栏已经说过一遍了。
-           ★ 名字由外面传进来,不在这儿再拉一次账号表 —— 壳里已经拉过了
-             (UpdateServerChip),再拉一次就是每次进首页多一次往返。 */
-        _rows.Children.Add(H1(title));
+        /* ★★ <b>首页不写页头</b>(用户 2026-09-02:「继续观看上面的服务器名称也去掉」)。
+           原来这儿写的是当前服务器名 —— 但侧栏顶上那块卡片已经在说同一件事,
+           而且它一直在屏幕上;首页再写一遍,等于把 Hero 往下顶 40 多像素
+           去重复一条用户已经看得见的信息。 */
+        _ = title;
 
         /* ★★ 首页<b>不能整页塞进 1560 的水槽里</b> —— Hero 是全宽出血的,
            封进去就成了「一张居中的插图」,两侧留白、顶上一道描边。
@@ -67,7 +65,7 @@ public sealed class HomePage : PageBase
                     _hero,
                     new Border
                     {
-                        MaxWidth = 1560, HorizontalAlignment = HorizontalAlignment.Stretch,
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
                         Padding = new Thickness(18, 22, 18, 28), Child = _rows,
                     },
                 },
@@ -169,9 +167,12 @@ public sealed class HomePage : PageBase
                 var id = Str(lib, "id");
                 var name = Str(lib, "name");
                 if (id == "") continue;
-                _ = Track($"{name} · 最新",
+                /* ★ 标题只写库名,<b>不写「· 最新」</b>(用户 2026-09-02)——
+                   首页整段本来就是「最新加入」,每一条再重复一次是纯噪音。
+                   ★ 后面那个 › 点进这个库的网格页。 */
+                _ = Track(name,
                     () => Arr(core.EmbyListLatest(With(s, new { parent_id = id, limit = 16 }))),
-                    false, host: section);
+                    false, host: section, libraryId: id);
             }
         });
     }
@@ -233,8 +234,9 @@ public sealed class HomePage : PageBase
 
     /// <param name="onItems">数据到手时顺带回调一次(「各库最新」靠它拿库表)。</param>
     /// <param name="host">挂到哪儿。null = 挂到页面根上。</param>
+    /// <param name="libraryId">非空 = 标题后面画一个 <c>›</c>,点了进这个库的网格页。</param>
     private async Task Track(string title, Func<Task<List<JsonElement>>> load, bool wide,
-        Action<List<JsonElement>>? onItems = null, StackPanel? host = null)
+        Action<List<JsonElement>>? onItems = null, StackPanel? host = null, string? libraryId = null)
     {
         /* ★★ 占位用**骨架**,不是「加载中…」。
            三个字只有 20px 高,内容一回来这一行从 20px 撑到 280px,
@@ -242,7 +244,7 @@ public sealed class HomePage : PageBase
            骨架和真卡同尺寸,换上去是「填色」而不是「撑开」。 */
         var box = new StackPanel { Spacing = 10 };
         Control body = Skeleton.Strip(wide);
-        box.Children.Add(H2(title));
+        box.Children.Add(RowHead(title, libraryId));
         box.Children.Add(body);
         if (host is null) AddRow(box);
         else Dispatcher.UIThread.Post(() => host.Children.Add(box));
@@ -282,6 +284,42 @@ public sealed class HomePage : PageBase
         // 图区高度:翻页按钮要对齐图的中线,不是整张卡的中线(卡下面还有两行标题)
         var w = wide ? 256.0 : 158.0;
         return Carousel.Wrap(panel, wide ? w * 9 / 16 : w * 3 / 2);
+    }
+
+    /// <summary>
+    /// 一条轨道的标题行。<paramref name="libraryId"/> 非空时后面跟一个 <c>›</c>,
+    /// 点了直接进这个库的网格页。
+    ///
+    /// <para>★★ 首页每个库只出 16 条,而库里可能有几千条 —— 用户看完这一行之后
+    /// <b>没有任何入口</b>能就地进到这个库里,只能绕去侧栏的「媒体库」再点一次。
+    /// 那一步是白让人走的(用户 2026-09-02 点名要这个 ›)。</para>
+    ///
+    /// <para>★ 整行可点,不只是那个箭头:一个 12px 宽的箭头是个很难瞄的靶子。
+    /// 箭头只是<b>告诉用户这里能点</b>。</para>
+    /// </summary>
+    private Control RowHead(string title, string? libraryId)
+    {
+        var head = H2(title);
+        if (libraryId is null || _core is null) return head;
+
+        var arrow = new TextBlock
+        {
+            Text = "›", FontSize = 20, Margin = new Thickness(6, -2, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center, Classes = { "dim" },
+        };
+        var b = new Button
+        {
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            Padding = new Thickness(0), HorizontalAlignment = HorizontalAlignment.Left,
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children = { head, arrow },
+            },
+        };
+        b.Click += (_, _) => Nav.Push(new LibraryGridPage(_core, _server, libraryId, title));
+        return b;
     }
 
     private void AddRow(Control c) => Dispatcher.UIThread.Post(() => _rows.Children.Add(c));

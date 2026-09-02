@@ -57,23 +57,14 @@ public sealed class LibraryPage : PageBase
                 {
                     if (items.Count == 0) { Swap(Dim("这台服务器上没有媒体库。")); return; }
 
+                    /* ★★ 库卡上<b>不再写「140 项」</b>(用户 2026-09-02:「媒体库页里面
+                       显示的多少项也不需要,但是媒体库这个名字下面的那个统计还是需要的」)。
+                       顺带省掉的是**每个库一次额外请求** —— 三五个库就是三五次往返,
+                       全是为了一行会被无视的小字。顶上那条 128 部电影 · 42 部剧
+                       说的是同一件事,而且只要一次请求。 */
                     var wrap = new WrapPanel();
-                    var subs = new List<TextBlock>();
-                    foreach (var it in items)
-                    {
-                        /* 副标题先留一个占位,数目回来了再填。
-                           ★ 等它一起出现的话整块网格要多压一轮往返 ——
-                             为了一行小字让整页晚半秒,不划算。 */
-                        var sub = new TextBlock
-                        {
-                            Text = "", FontSize = 11.5, MaxLines = 1,
-                            Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
-                        };
-                        subs.Add(sub);
-                        wrap.Children.Add(Shelf(core, s.server, it, sub));
-                    }
+                    foreach (var it in items) wrap.Children.Add(Shelf(core, s.server, it));
                     Swap(wrap);
-                    _ = FillCounts(core, items, subs);
                     _ = FillSummary(core, summary);
                 });
             }
@@ -85,50 +76,13 @@ public sealed class LibraryPage : PageBase
         });
     }
 
-    /// <summary>
-    /// 一张库卡。用 <see cref="Card"/> 的横版版式,但副标题是**外面塞进来的一个活控件** ——
-    /// 项目数要再打一次服务器才知道,不能让整块网格等它。
-    /// </summary>
-    private static Control Shelf(CoreClient core, string server, CardItem it, TextBlock sub)
-    {
-        // titleLines: 1 —— 库名从来只有一行,留两行的话「140 项」会掉到空出来的那行下面。
-        var card = new Card(core, server, it, true, OpenDetail(core, server), ShelfWidth, titleLines: 1)
+    /// <summary>一张库卡。<see cref="Card"/> 的横版版式,标题一行、不带副标题。</summary>
+    private static Control Shelf(CoreClient core, string server, CardItem it) =>
+        // titleLines: 1 —— 库名从来只有一行。
+        new Card(core, server, it, true, OpenDetail(core, server), ShelfWidth, titleLines: 1)
         {
             Margin = new Thickness(0, 0, 16, 18),
         };
-        // Card 的副标题是静态字符串,这里要一个之后能改的 —— 直接挂到标题块下面。
-        if (card.Content is StackPanel sp && sp.Children.Count > 1 &&
-            sp.Children[1] is StackPanel caption) caption.Children.Add(sub);
-        return card;
-    }
-
-    /// <summary>
-    /// 各库的项目数。
-    ///
-    /// <para>★ 一库一次请求(<c>limit=1</c> 只要总数,不要条目)。库通常只有三五个,
-    /// 并发发出去,慢的那个不挡快的。</para>
-    /// <para>★ **拿不到就留空**,不写「? 项」也不报错 —— 有的 fork 不给总数,
-    /// 而项目数是锦上添花,不该让媒体库页整个变红。</para>
-    /// </summary>
-    private static async Task FillCounts(CoreClient core, List<CardItem> items, List<TextBlock> subs)
-    {
-        var s = Nav.Session!;
-        await Task.WhenAll(items.Select(async (it, i) =>
-        {
-            try
-            {
-                var page = await core.EmbyListItemsPage(new
-                {
-                    s.server, s.token, s.user_id, s.device_id,
-                    parent_id = it.Id, query = new { limit = 1 },
-                });
-                if (!page.TryGetProperty("total", out var t) || t.ValueKind != JsonValueKind.Number) return;
-                var n = t.GetInt32();
-                Dispatcher.UIThread.Post(() => subs[i].Text = n > 0 ? $"{n} 项" : "空的");
-            }
-            catch { /* 拿不到就留空 */ }
-        }));
-    }
 
     /// <summary>顶上那行「128 部电影 · 42 部剧 · 1580 集」。★ 这个端点在某些 fork 上是 404。</summary>
     private static async Task FillSummary(CoreClient core, TextBlock target)
@@ -260,7 +214,8 @@ public sealed class LibraryGridPage : PageBase
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             Content = new Border
             {
-                MaxWidth = 1560, HorizontalAlignment = HorizontalAlignment.Stretch,
+                // ★ 不封顶(和 PageBase.Scrolled 同一条口径,用户点名去掉留白)
+                HorizontalAlignment = HorizontalAlignment.Stretch,
                 Padding = new Thickness(18, 18, 18, 28), Child = body,
             },
         };
