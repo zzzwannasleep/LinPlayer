@@ -65,12 +65,61 @@ public sealed class HomePage : PageBase
             device_id = "linplayer-desktop",
         };
 
-        // ★ 各块并发发出去,各自渲染 —— 谁先回来谁先出现,不互相等
+        /* ★ 各块并发发出去,各自渲染 —— 谁先回来谁先出现,不互相等。
+           ★★ 但**位置是先占好的**:每条轨道在发请求之前就把自己那一块(骨架)挂上去,
+             所以屏幕上的顺序是固定的,不是「谁先回来谁排前面」。
+             不占位的话每次进首页轨道顺序都可能不一样。 */
         var resume = Track("继续观看", () => ResumeAndNextUp(core, s), true);
-        var views = Track("媒体库", () => Arr(core.EmbyViews(new { s.server, s.token, s.user_id, s.device_id })), true);
-        var latest = Track("最新加入", () => Arr(core.EmbyListLatest(new { s.server, s.token, s.user_id, s.device_id, limit = 16 })), false);
+
+        /* ★★ 「各库最新」这一段要**先占住位置**再去拉。
+           它依赖媒体库列表(得先知道有哪些库),比别的块晚一步;
+           不先占位的话它只能被追加到最后,于是「随便看看」会跑到各库最新的**上面**,
+           而且是等库表回来那一刻**当场跳一下**。 */
+        var libSection = new StackPanel { Spacing = 26 };
+        var libBusy = new StackPanel { Spacing = 10, Children = { H2("最新加入"), Skeleton.Strip(false) } };
+        libSection.Children.Add(libBusy);
+
+        var views = Track("媒体库",
+            () => Arr(core.EmbyViews(new { s.server, s.token, s.user_id, s.device_id })), true,
+            onItems: libs => LatestPerLibrary(core, s, libSection, libBusy, libs));
+        AddRow(libSection);
         var random = Track("随便看看", () => Arr(core.EmbyListRandom(new { s.server, s.token, s.user_id, s.device_id, limit = 8 })), false);
-        await Task.WhenAll(resume, views, latest, random);
+        await Task.WhenAll(resume, views, random);
+    }
+
+    /// <summary>
+    /// 各库最新:<b>每个库一条轨道</b>,不是一条全局的「最新加入」。
+    ///
+    /// <para>★★ 全局那一条的问题是**信息被稀释**:电影和剧集混在一起按时间排,
+    /// 一部剧更新几集就能把一整行占满,想看「电影有什么新的」根本看不到。
+    /// Emby 自己的首页也是按库分行的,旧 React 版同样(<c>libs.map</c>)。</para>
+    ///
+    /// <para>★ 一个库都没有(或者库表拉失败)时**回落成一条全局的** ——
+    /// 总比这一整段空着强。</para>
+    /// </summary>
+    private void LatestPerLibrary(CoreClient core, object s, StackPanel section,
+        Control busy, List<JsonElement> libs)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            section.Children.Remove(busy);
+            if (libs.Count == 0)
+            {
+                _ = Track("最新加入", () => Arr(core.EmbyListLatest(With(s, new { limit = 16 }))), false,
+                    host: section);
+                return;
+            }
+            // ★ 只取前 6 个库:库多的服务器(十几个)会把首页拉成一条竖直的目录
+            foreach (var lib in libs.Take(6))
+            {
+                var id = Str(lib, "id");
+                var name = Str(lib, "name");
+                if (id == "") continue;
+                _ = Track($"{name} · 最新",
+                    () => Arr(core.EmbyListLatest(With(s, new { parent_id = id, limit = 16 }))),
+                    false, host: section);
+            }
+        });
     }
 
     /// <summary>
@@ -128,29 +177,34 @@ public sealed class HomePage : PageBase
         return d;
     }
 
-    private async Task Track(string title, Func<Task<List<JsonElement>>> load, bool wide)
+    /// <param name="onItems">数据到手时顺带回调一次(「各库最新」靠它拿库表)。</param>
+    /// <param name="host">挂到哪儿。null = 挂到页面根上。</param>
+    private async Task Track(string title, Func<Task<List<JsonElement>>> load, bool wide,
+        Action<List<JsonElement>>? onItems = null, StackPanel? host = null)
     {
         /* ★★ 占位用**骨架**,不是「加载中…」。
            三个字只有 20px 高,内容一回来这一行从 20px 撑到 280px,
            下面几条轨道全被顶下去 —— 用户正看着的东西会跳走。
            骨架和真卡同尺寸,换上去是「填色」而不是「撑开」。 */
-        var host = new StackPanel { Spacing = 10 };
+        var box = new StackPanel { Spacing = 10 };
         Control body = Skeleton.Strip(wide);
-        host.Children.Add(H2(title));
-        host.Children.Add(body);
-        AddRow(host);
+        box.Children.Add(H2(title));
+        box.Children.Add(body);
+        if (host is null) AddRow(box);
+        else Dispatcher.UIThread.Post(() => host.Children.Add(box));
 
         void Swap(Control with) => Dispatcher.UIThread.Post(() =>
         {
-            var at = host.Children.IndexOf(body);
+            var at = box.Children.IndexOf(body);
             if (at < 0) return;
-            host.Children[at] = with;
+            box.Children[at] = with;
             body = with;
         });
 
         try
         {
             var items = await load();
+            onItems?.Invoke(items);
             // ★ 空态要说清「为什么空」,不是干放一句「暂无数据」(§6.4)
             Swap(items.Count == 0 ? Dim($"这台服务器上没有「{title}」的内容。") : Strip(items, wide));
         }
