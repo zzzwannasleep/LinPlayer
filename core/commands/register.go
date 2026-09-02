@@ -25,6 +25,7 @@ import (
 	"linplayer/core/prefs"
 	"linplayer/core/ranking"
 	"linplayer/core/sourcecmd"
+	"linplayer/core/translate"
 	lpsync "linplayer/core/sync"
 	"linplayer/core/system"
 )
@@ -47,4 +48,5 @@ func RegisterAll(version string) {
 	lpsync.RegisterCommands()
 	danmaku.RegisterCommands()
 	plugincmd.RegisterCommands(version)
+	translate.RegisterCommands()
 }

@@ -135,6 +135,10 @@ public sealed class SettingsPage : PageBase
                 var preload = await Safe(() => core.PrefsGetPreloadSettings(new { }));
                 var writeback = await Safe(() => core.PrefsGetWritebackSettings(new { }));
                 var update = await Safe(() => core.PrefsGetUpdateSettings(new { }));
+                string transErr = "";
+                JsonElement? trans;
+                try { trans = await core.PrefsGetTranslationSettings(new { }); }
+                catch (Exception te) { trans = null; transErr = LibraryPage.Advice(te); }
 
                 Dispatcher.UIThread.Post(() =>
                 {
@@ -151,6 +155,13 @@ public sealed class SettingsPage : PageBase
                     if (writeback is { } wb) Add(SettingsSections.Writeback(core, wb));
                     if (update is { } up) Add(SettingsSections.Update(core, up));
                     Add(SettingsSections.Blocked(core));
+                    /* ★ 翻译设置**拉不到也要出这一组**,只是里面写清楚原因。
+                       静默跳过的表现是「设置页里根本没有字幕翻译」——
+                       用户会以为这个版本没做这个功能,而不是「这次没拉到」。 */
+                    Add(trans is { } tr
+                        ? SettingsTranslate.Section(core, tr)
+                        : SettingsTranslate.Unavailable(transErr));
+                    if (trans is not null) Add(SettingsTranslate.Whisper(core));
                     Add(SettingsSections.CfSpeed(core));
                     Add(SettingsSections.Transfer(core));
                     Add(Storage(core, paths));

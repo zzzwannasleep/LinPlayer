@@ -270,3 +270,49 @@ func writeUserConf(text string) error {
 	}
 	return nil
 }
+
+// AddTranslatedSubtitle 挂一条翻译好的外挂字幕。
+//
+// ★ 翻译完**必须挂上**,只返回路径就是「摆了个按钮不接线」:用户点了「翻译字幕」、
+// 进度跑完,然后什么都没发生。
+//
+// ★★ secondary=true 时要**先挂再切次字幕轨**,而且切的是新挂那一条:
+// mpv 的 sub-add 会把新轨排在最后,所以挂完读一次 track-list 取最大的 sid。
+// 直接 `secondary-sid=1` 会切到内封第一条上 —— 表现是「次字幕出来了,但不是译文」。
+func AddTranslatedSubtitle(path string, secondary bool) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("翻译字幕路径为空")
+	}
+	flags := "select"
+	if secondary {
+		// 次字幕不能占掉主字幕位:auto = 挂上但不切主轨。
+		flags = "auto"
+	}
+	if err := command("sub-add", path, flags, "翻译字幕"); err != nil {
+		return fmt.Errorf("挂载翻译字幕失败: %w", err)
+	}
+	if !secondary {
+		return nil
+	}
+	sid := lastSubtitleTrackID()
+	if sid == "" {
+		return fmt.Errorf("挂上了但找不到新字幕轨,没法设为次字幕")
+	}
+	setProp("secondary-sid", sid)
+	return nil
+}
+
+// lastSubtitleTrackID 最后一条字幕轨的 id(刚 sub-add 进来的那条)。
+func lastSubtitleTrackID() string {
+	best := ""
+	bestN := -1
+	for _, t := range parseTracks(Prop("track-list")) {
+		if t.Kind != "sub" {
+			continue
+		}
+		if n, err := strconv.Atoi(t.ID); err == nil && n > bestN {
+			bestN, best = n, t.ID
+		}
+	}
+	return best
+}

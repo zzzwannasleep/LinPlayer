@@ -322,15 +322,15 @@
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [ ] | `translate.liveStart` | `translate_live_start` | `source_lang: Option<String>` | `Result<(), String>` | ❌ |
-| [ ] | `translate.liveStop` | `translate_live_stop` | `—` | `()` | ❌ |
-| [ ] | `translate.subtitle` | `translate_subtitle` | `item_id: String, media_source_id: String, index: i64, delivery_url: Option<String>, source_lang: Option<String>, secondary: Option<bool>` | `Result<String, String>` | ❌ |
-| [ ] | `translate.translationEngineStatus` | `translation_engine_status` | `—` | `HashMap<String, bool>` | ❌ |
-| [ ] | `translate.whisperDelete` | `whisper_delete` | `model: String` | `Result<(), String>` | ❌ |
-| [ ] | `translate.whisperDeps` | `whisper_deps` | `—` | `WhisperDeps` | ❌ |
-| [ ] | `translate.whisperDownload` | `whisper_download` | `model: String` | `Result<String, String>` | ❌ |
-| [ ] | `translate.whisperDownloadFfmpeg` | `whisper_download_ffmpeg` | `—` | `Result<String, String>` | ❌ |
-| [ ] | `translate.whisperModels` | `whisper_models` | `—` | `Vec<WhisperModelInfo>` | ❌ |
+| [x] | `translate.liveStart` | `translate_live_start` | `source_lang: Option<String>` | `Result<(), String>` | ❌ |
+| [x] | `translate.liveStop` | `translate_live_stop` | `—` | `()` | ❌ |
+| [x] | `translate.subtitle` | `translate_subtitle` | `item_id: String, media_source_id: String, index: i64, delivery_url: Option<String>, source_lang: Option<String>, secondary: Option<bool>` | `Result<String, String>` | ❌ |
+| [x] | `translate.translationEngineStatus` | `translation_engine_status` | `—` | `HashMap<String, bool>` | ❌ |
+| [x] | `translate.whisperDelete` | `whisper_delete` | `model: String` | `Result<(), String>` | ❌ |
+| [x] | `translate.whisperDeps` | `whisper_deps` | `—` | `WhisperDeps` | ❌ |
+| [x] | `translate.whisperDownload` | `whisper_download` | `model: String` | `Result<String, String>` | ❌ |
+| [x] | `translate.whisperDownloadFfmpeg` | `whisper_download_ffmpeg` | `—` | `Result<String, String>` | ❌ |
+| [x] | `translate.whisperModels` | `whisper_models` | `—` | `Vec<WhisperModelInfo>` | ❌ |
 
 ### 设置与偏好 · `prefs.*` — 25 条
 
@@ -347,7 +347,7 @@
 | [x] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
 | [x] | `prefs.getPreloadSettings` | `get_preload_settings` | `—` | `PreloadSettings` | ❌ |
 | [x] | `prefs.getProxy` | `get_proxy` | `—` | `linplayer_core::ProxyConfig` | ✅ |
-| [ ] | `prefs.getTranslationSettings` | `get_translation_settings` | `—` | `tr::TranslationSettings` | ❌ |
+| [x] | `prefs.getTranslationSettings` | `get_translation_settings` | `—` | `tr::TranslationSettings` | ❌ |
 | [x] | `prefs.getUpdateSettings` | `get_update_settings` | `—` | `UpdateSettings` | ✅ |
 | [x] | `prefs.getWritebackSettings` | `get_writeback_settings` | `—` | `WritebackSettings` | ✅ |
 | [x] | `prefs.iconLibrary` | `icon_library` | `—` | `()` | ✅ |
@@ -358,7 +358,7 @@
 | [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |
-| [ ] | `prefs.setTranslationSettings` | `set_translation_settings` | `settings: tr::TranslationSettings` | `Result<(), String>` | ❌ |
+| [x] | `prefs.setTranslationSettings` | `set_translation_settings` | `settings: tr::TranslationSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setUpdateSettings` | `set_update_settings` | `channel: linplayer_core::update::UpdateChannel, auto_check: bool` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setWritebackSettings` | `set_writeback_settings` | `settings: WritebackSettings` | `Result<(), String>` | ✅ |
 
