@@ -172,6 +172,7 @@ public partial class MainWindow : Window
            折线以下那两条轨道一次都没被看过。
            一个「设了没反应」的自检开关比没有更糟:它会让人以为已经验过了。 */
         SelfCheckScroll();
+        SelfCheckMenu();
         if (string.IsNullOrEmpty(want) || _core is null) return;
         var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";
         var srv = Nav.Session?.server ?? "";
@@ -350,6 +351,30 @@ public partial class MainWindow : Window
             KeyModifiers.None, new Vector(0, deltaY))
         { RoutedEvent = InputElement.PointerWheelChangedEvent };
         target.RaiseEvent(args);
+    }
+
+    /// <summary>
+    /// 自检:在第一张卡上真的发一次右键。
+    ///
+    /// <para>★★ 右键菜单改成<b>用时才建</b>之后,「菜单还出不出得来」这件事
+    /// 截图是验不到的 —— 截图点不了右键。而它坏掉的样子恰恰是「点了没反应」,
+    /// 不报错、不崩、编译全绿。本仓的老规矩:一个功能几套入口就得每套点一遍,
+    /// 点不了的那套就得让程序自己点。</para>
+    /// </summary>
+    private void SelfCheckMenu()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_MENU") != "1") return;
+        _ = Task.Delay(2500).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var card = this.GetVisualDescendants().OfType<Card>().FirstOrDefault();
+            if (card is null) { Console.WriteLine("[右键自检] 页面上一张卡都没有"); return; }
+            card.RaiseEvent(new ContextRequestedEventArgs { RoutedEvent = Control.ContextRequestedEvent });
+            Dispatcher.UIThread.Post(() =>
+                Console.WriteLine(card.ContextMenu is { } m
+                    ? $"[右键自检] 菜单建出来了,{m.ItemCount} 项,打开={m.IsOpen}"
+                    : "[右键自检] ✗ 右键之后仍然没有菜单"),
+                DispatcherPriority.Background);
+        }));
     }
 
     /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>
