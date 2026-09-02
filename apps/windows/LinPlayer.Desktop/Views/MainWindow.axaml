@@ -97,6 +97,22 @@
             <CrossFade Duration="0:0:0.18" />
           </TransitioningContentControl.PageTransition>
         </TransitioningContentControl>
+
+        <!-- 出错横幅。
+             ★★ 渲染里抛出的异常**原本会把整个进程打死** —— 没有对话框、没有日志窗口,
+               用户看到的是「点了一下,软件没了」。现在由 Dispatcher.UnhandledException
+               统一接住(见 App.axaml.cs)。
+             ★ 接住之后**必须让它看得见**。默默吞掉的话就变成了本仓最讨厌的那种失败:
+               不报错、不崩、只是这一块没画出来,而谁也不知道发生过什么。 -->
+        <Border Name="ErrorBar" IsVisible="False"
+                VerticalAlignment="Bottom" Margin="18" Padding="14,10"
+                CornerRadius="10" Background="#4a1d28" BorderBrush="#8a3346" BorderThickness="1">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <TextBlock Name="ErrorText" VerticalAlignment="Center" MaxWidth="900"
+                       TextWrapping="Wrap" Foreground="#ffd9de" />
+            <Button Name="ErrorClose" Classes="ghost" Content="知道了" />
+          </StackPanel>
+        </Border>
       </Panel>
     </Grid>
   </Grid>

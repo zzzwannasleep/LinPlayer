@@ -36,6 +36,15 @@ public sealed class DetailPage : PageBase
     /// <summary>头图区(全宽出血)。</summary>
     private readonly ContentControl _heroHost = new();
 
+    /// <summary>媒体信息 / 版本条的挂点(在播放按钮下面)。</summary>
+    private readonly StackPanel _mediaHost = new() { Spacing = 8 };
+
+    /// <summary>当前选中的版本 id。空 = 交给核心层按正则挑(preferred)。</summary>
+    private string _versionId = "";
+
+    /// <summary>主播放按钮 —— 换版本时要把它指向的版本一起换掉。</summary>
+    private Button? _play;
+
     public DetailPage(CoreClient core, string server, string itemId)
     {
         _core = core; _server = server;
@@ -349,6 +358,10 @@ public sealed class DetailPage : PageBase
         if (overview != "") head.Children.Add(Overview(overview));
 
         head.Children.Add(PlayRow(d, id, type));
+        /* ★★ 媒体信息 / 版本条。**异步补,不挡头部** ——
+           它要多打一次 PlaybackInfo,为了这一行让海报标题晚出来是本末倒置。 */
+        head.Children.Add(_mediaHost);
+        if (type is "Movie" or "Episode" or "Video" or "MusicVideo") _ = LoadMedia(id);
 
         var headRow = new StackPanel
         {
@@ -400,6 +413,163 @@ public sealed class DetailPage : PageBase
         };
         box.Children.Add(more);
         return box;
+    }
+
+    /// <summary>
+    /// 媒体信息 + 版本选择。
+    ///
+    /// <para>★★ 这是详情页<b>唯一还缺的信息</b>:用户点播放之前想知道
+    /// 「我要放的这个到底是什么货色」—— 分辨率、编码、多大、有几条音轨字幕。
+    /// 一个媒体播放器的详情页不写这些,就只是一张海报加一段简介。</para>
+    ///
+    /// <para>★ 旧 React 版这里有<b>四个</b>下拉:线路 / 版本 / 音轨 / 字幕。
+    /// 这一版只做<b>版本</b>,是想清楚的取舍,不是没做完:
+    /// <br/>· <b>线路</b>是服务器级设置,不该在每个条目页各摆一份;
+    /// <br/>· <b>音轨 / 字幕</b>播放页的抽屉里已经有了,而且那里才是真正会改它的时刻
+    ///   ——「放之前先在详情页选好字幕」不是一个真实的使用姿势。
+    /// 重复的入口不是多一个选择,是多一处会不一致的状态。</para>
+    ///
+    /// <para>★★ 版本条<b>只在多于一个版本时才画</b>。一个选项的选择器是纯噪音
+    /// (本仓已有的口径:源类型条、季条都这么处理)。</para>
+    /// </summary>
+    private async Task LoadMedia(string itemId)
+    {
+        List<JsonElement> vers;
+        try
+        {
+            var s = Nav.Session!;
+            var d = await _core.EmbyItemMedia(new
+            {
+                s.server, s.token, s.user_id, s.device_id, item_id = itemId,
+            });
+            vers = d.ValueKind == JsonValueKind.Array ? d.EnumerateArray().ToList() : [];
+        }
+        catch { return; } // ★ 拿不到就整块不画 —— 详情页主体已经在屏幕上了
+        if (vers.Count == 0) return;
+
+        /* ★ 默认落在**核心层挑中的那一条**(preferred),不是第一条。
+           落第一条的话:正则明明选对了版本,详情页却在说另一条 ——
+           「界面在撒谎」那个老坑就是这么来的。 */
+        var pick = vers.FindIndex(v => Bool(v, "preferred"));
+        if (pick < 0) pick = 0;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _mediaHost.Children.Clear();
+            var line = Dim("");
+            void Use(int i)
+            {
+                _versionId = Str(vers[i], "id");
+                line.Text = MediaLine(vers[i]);
+            }
+
+            if (vers.Count > 1)
+            {
+                var bar = new WrapPanel();
+                for (var i = 0; i < vers.Count; i++)
+                {
+                    var idx = i;
+                    var chip = new Button
+                    {
+                        Classes = { "chip" }, Margin = new Thickness(0, 0, 8, 0),
+                        Content = Str(vers[i], "name") is { Length: > 0 } n ? n : $"版本 {i + 1}",
+                    };
+                    chip.Click += (_, _) =>
+                    {
+                        for (var k = 0; k < bar.Children.Count; k++)
+                            ((Button)bar.Children[k]).Classes.Set("on", k == idx);
+                        Use(idx);
+                    };
+                    bar.Children.Add(chip);
+                }
+                ((Button)bar.Children[pick]).Classes.Set("on", true);
+                _mediaHost.Children.Add(bar);
+            }
+            Use(pick);
+            _mediaHost.Children.Add(line);
+        });
+    }
+
+    /// <summary>
+    /// 一行人话的媒体信息。
+    ///
+    /// <para>★ 只写<b>选片时真会看的</b>:分辨率、编码、大小、有几条音轨 / 字幕。
+    /// 码率、帧率、声道布局这些放进来会把这一行挤成一段技术参数表,
+    /// 而真要看的人会去看播放页的抽屉。</para>
+    /// </summary>
+    private static string MediaLine(JsonElement v)
+    {
+        var streams = Arr2(v, "streams");
+        var bits = new List<string>();
+
+        var video = streams.FirstOrDefault(x => Str(x, "type_") == "Video");
+        if (video.ValueKind == JsonValueKind.Object)
+        {
+            var h = (int)Num(video, "height");
+            // ★ 写 1080p 不写 1920×1080:高度才是大家用来说话的那个数
+            if (h > 0) bits.Add(h >= 2160 ? "4K" : $"{h}p");
+            if (Str(video, "codec") is { Length: > 0 } c) bits.Add(CodecName(c));
+            // HDR 值得单独标 —— 它决定要不要切软解(见杜比那条)
+            var range = Str(video, "video_range_type");
+            if (range != "" && !range.Equals("SDR", StringComparison.OrdinalIgnoreCase)) bits.Add(range);
+        }
+        if (Size(v) is { Length: > 0 } sz) bits.Add(sz);
+
+        var audio = streams.Count(x => Str(x, "type_") == "Audio");
+        var subs = streams.Count(x => Str(x, "type_") == "Subtitle");
+        if (audio > 0) bits.Add($"{audio} 条音轨");
+        // ★ 「0 条字幕」也要写:「这片没有字幕」是选片时的真信息,
+        //   不写的话用户以为是没加载出来。
+        bits.Add(subs > 0 ? $"{subs} 条字幕" : "无字幕");
+
+        return string.Join("  ·  ", bits);
+    }
+
+    /// <summary>
+    /// 编码的通用写法。
+    /// <para>★ 直接 <c>ToUpper</c> 会得到 <c>H264</c> / <c>HEVC</c> 混排 ——
+    /// 前者看着像打错了。认不出来的就原样大写,不硬编一张永远补不全的表。</para>
+    /// </summary>
+    private static string CodecName(string c) => c.ToLowerInvariant() switch
+    {
+        "h264" or "avc" => "H.264",
+        "hevc" or "h265" => "HEVC",
+        "av1" => "AV1",
+        "vp9" => "VP9",
+        "mpeg2video" => "MPEG-2",
+        _ => c.ToUpperInvariant(),
+    };
+
+    /// <summary>
+    /// 自检:选第 <paramref name="idx"/> 个版本,然后按播放。
+    ///
+    /// <para>★★ 「选了版本有没有真的播那一条」<b>看界面是看不出来的</b> ——
+    /// 版本条高亮了、按钮也点得动,而送下去的 media_source_id 可能根本没变。
+    /// 本仓栽过一次同款(正则选对了版本,详情页和播放器却全写死回落第一条),
+    /// 而它活了几个月。判据只有一个:<b>服务器实际被请求的是哪一条流</b>。</para>
+    /// </summary>
+    internal void SelfCheckPickVersion(int idx)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_mediaHost.Children.FirstOrDefault() is not WrapPanel bar || bar.Children.Count <= idx)
+            {
+                Console.WriteLine("[版本自检] 没有版本条(或者版本不够多)");
+                return;
+            }
+            ((Button)bar.Children[idx]).RaiseEvent(
+                new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Console.WriteLine($"[版本自检] 点了第 {idx + 1} 个版本,现在的 id = {_versionId}");
+            _play?.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        });
+    }
+
+    /// <summary>文件大小的人话。拿不到就空串 —— 整项不写,不写「未知」。</summary>
+    private static string Size(JsonElement v)
+    {
+        var b = Num(v, "size_bytes");
+        if (b <= 0) return "";
+        return b >= 1L << 30 ? $"{b / (double)(1L << 30):0.#} GB" : $"{b / (double)(1L << 20):0} MB";
     }
 
     /// <summary>
@@ -605,7 +775,10 @@ public sealed class DetailPage : PageBase
                 Classes = { "primary" },
                 Content = resume > 0 ? $"▶ 继续播放 · 已看到 {Clock(resume)}" : "▶ 播放",
             };
-            play.Click += (_, _) => Nav.Push(new PlayerPage(_core, id, name, resume));
+            // ★ 版本在 _versionId 里,**点的那一刻才读** —— 用户可能在按之前换过版本
+            play.Click += (_, _) =>
+                Nav.Push(new PlayerPage(_core, id, name, resume, mediaSourceId: _versionId));
+            _play = play;
             row.Children.Add(play);
         }
         else if (type is "Series" or "Season")

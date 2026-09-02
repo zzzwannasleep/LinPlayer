@@ -91,6 +91,23 @@ public partial class MainWindow : Window
            由被截的窗口**自己置顶**才是稳的。只在自检时开,不影响产品行为。 */
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK") == "1") Topmost = true;
 
+        /* ★★ 兜住渲染里抛出来的异常。
+           详情页那次是「一个控件同时挂两处」,它抛在 Dispatcher 回调里,
+           **整个进程当场退出**。这类错误一定还会有(每加一段渲染就多一次机会),
+           所以要有一个横切的接住点,而不是每页各写一个 try。
+           ★ 接住之后必须**显示出来**:默默吞掉就成了「不报错、不崩、只是没画出来」,
+             那是本仓最讨厌的失败形态。 */
+        var bar = this.FindControl<Border>("ErrorBar")!;
+        var barText = this.FindControl<TextBlock>("ErrorText")!;
+        this.FindControl<Button>("ErrorClose")!.Click += (_, _) => bar.IsVisible = false;
+        Dispatcher.UIThread.UnhandledException += (_, e) =>
+        {
+            e.Handled = true; // 不让它打死进程
+            Console.WriteLine("[UI 线程] 未捕获异常: " + e.Exception);
+            barText.Text = $"这一步出错了:{e.Exception.Message}";
+            bar.IsVisible = true;
+        };
+
         // 掉帧探针:只有 LP_PERF=1 时才真的挂上去
         Perf.WatchJank();
         Opened += async (_, _) =>
@@ -174,6 +191,13 @@ public partial class MainWindow : Window
         SelfCheckScroll();
         SelfCheckMenu();
         SelfCheckCount();
+        /* 自检:往 UI 线程上扔一个异常,验兜网。
+           ★ 这个钩子是**必须留着**的:兜网本身没有任何外在表现 ——
+             它没生效的唯一症状是「某天某个页面把进程打死了」,
+             而那一天不会有人想起来是这里坏的。 */
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_BOOM") == "1")
+            _ = Task.Delay(2500).ContinueWith(_ => Dispatcher.UIThread.Post(
+                () => throw new InvalidOperationException("自检:故意扔的异常")));
         if (string.IsNullOrEmpty(want) || _core is null) return;
         var arg = want.Contains(':') ? want[(want.IndexOf(':') + 1)..] : "";
         var srv = Nav.Session?.server ?? "";
@@ -237,7 +261,15 @@ public partial class MainWindow : Window
                 }
             case "icons": Nav.Push(new IconLibraryPage(_core, srv, () => { })); break;
             case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
-            case "detail": Nav.Push(new DetailPage(_core, srv, arg)); break;
+            case "detail":
+                Nav.Push(new DetailPage(_core, srv, arg));
+                /* 自检:选第 N 个版本再按播放。
+                   ★ 判据不在界面上,在**服务器实际被请求的那条流**里 ——
+                     看 fakeemby 日志里的 mediaSourceId。 */
+                if (Environment.GetEnvironmentVariable("LP_SELFCHECK_VERSION") is { Length: > 0 } vn
+                    && int.TryParse(vn, out var vi) && Nav.Current is DetailPage dvp)
+                    _ = Task.Delay(2000).ContinueWith(_ => dvp.SelfCheckPickVersion(vi - 1));
+                break;
             case "person": Nav.Push(new PersonPage(_core, srv, arg, "自检人物")); break;
             // 自检:进详情页 → 点「下载」 → 跳下载页。整条链一次走完
             case "dl":

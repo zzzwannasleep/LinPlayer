@@ -78,6 +78,8 @@ internal sealed class MpvGlView : OpenGlControlBase
 public sealed class PlayerPage : UserControl
 {
     private readonly CoreClient _core;
+    /// <summary>要播的版本(MediaSource id)。空 = 核心层按正则挑。</summary>
+    private readonly string _mediaSourceId = "";
     private readonly MpvGlView _view = new();
     private readonly Slider _bar;
     private readonly Slider _vol;
@@ -138,9 +140,15 @@ public sealed class PlayerPage : UserControl
     /// <para>★ 两条起播路的差别只在这一句上,别的(OSD、快捷键、进度、轨道)全共用 ——
     /// 另开一个「源播放页」等于把这些再实现一遍,还得再维护一遍。</para>
     /// </summary>
+    /// <param name="mediaSourceId">
+    /// 指定播哪一个版本(MediaSource)。空 = 交给核心层按版本正则挑。
+    /// <para>★ 详情页选了版本却不把它送下来的话,界面说在放 4K、实际在放 1080p ——
+    /// 而且两边都不报错。这正是本仓「界面在撒谎:当前版本」那条教训的另一半。</para>
+    /// </param>
     public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs,
-        bool isSource = false, object? sourceRaw = null)
+        bool isSource = false, object? sourceRaw = null, string mediaSourceId = "")
     {
+        _mediaSourceId = mediaSourceId;
         _core = core;
         _isSource = isSource;
         _sourceRaw = sourceRaw;
@@ -425,6 +433,7 @@ public sealed class PlayerPage : UserControl
                 {
                     s.server, s.token, s.user_id, s.device_id,
                     item_id = itemId, resume_secs = resumeSecs,
+                    media_source_id = _mediaSourceId,
                 });
             }
         }

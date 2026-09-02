@@ -91,7 +91,7 @@ func main() {
 	     不带的话「丢掉坏条目」那条判据在真渲染里根本走不到。 */
 	mux.HandleFunc("/icons.json", func(w http.ResponseWriter, r *http.Request) {
 		icons := []any{
-			map[string]any{"name": "", "url": ""},              // 空的:要被丢掉
+			map[string]any{"name": "", "url": ""},                 // 空的:要被丢掉
 			map[string]any{"name": "坏协议", "url": "ftp://x/y.png"}, // 非 http:要被丢掉
 		}
 		for i := 1; i <= 24; i++ {
@@ -385,17 +385,44 @@ func main() {
 		//   而「把相对路径拼在服务器根上」正是 Range 前缀那个坑的源头。
 		case len(parts) >= 3 && parts[2] == "PlaybackInfo":
 			id := parts[1]
+			/* ★★ **两个版本**,不是一个。
+			   只造一个的话「多版本选择」这个功能在自检里永远看不出对错 ——
+			   代码就算把版本写死成第一条也照样绿(2026-07-30 那次
+			   「界面在撒谎:当前版本」就是这么活了几个月的)。
+			   ★ 流也要造全:视频 / 音频 / **字幕** / 第二条音轨。
+			     只有一条音轨的话「几条音轨」这行永远是 1,数错了也看不出来。 */
+			src := func(msid, name, codec string, h int64, size, bitrate int64, extra []any) map[string]any {
+				streams := append([]any{
+					map[string]any{"Type": "Video", "Codec": codec, "Height": h, "Index": 0,
+						"VideoRangeType": map[bool]string{true: "HDR10", false: "SDR"}[h > 1080]},
+				}, extra...)
+				return map[string]any{
+					"Id": msid, "Name": name, "Container": "mkv",
+					"Size": size, "Bitrate": bitrate,
+					"SupportsDirectStream": true,
+					"DirectStreamUrl": "/Videos/" + id +
+						"/stream.mp4?static=true&mediaSourceId=" + msid,
+					"MediaStreams": streams,
+				}
+			}
 			writeJSON(w, map[string]any{
 				"PlaySessionId": "ps-selfcheck",
-				"MediaSources": []any{map[string]any{
-					"Id": "ms-1", "Name": "1080p", "Container": "mp4",
-					"SupportsDirectStream": true,
-					"DirectStreamUrl":      "/Videos/" + id + "/stream.mp4?static=true&mediaSourceId=ms-1",
-					"MediaStreams": []any{
-						map[string]any{"Type": "Video", "Codec": "h264", "Height": 1080, "Index": 0},
-						map[string]any{"Type": "Audio", "Codec": "aac", "Language": "jpn", "Index": 1},
-					},
-				}},
+				"MediaSources": []any{
+					src("ms-1", "1080p", "h264", 1080, 4_800_000_000, 6_500_000, []any{
+						map[string]any{"Type": "Audio", "Codec": "aac", "Language": "jpn",
+							"Index": 1, "Channels": 2, "DisplayTitle": "日语 AAC 2.0"},
+						map[string]any{"Type": "Subtitle", "Codec": "ass", "Language": "chi",
+							"Index": 2, "DisplayTitle": "简体中文"},
+					}),
+					src("ms-2", "2160p HDR", "hevc", 2160, 21_300_000_000, 28_000_000, []any{
+						map[string]any{"Type": "Audio", "Codec": "truehd", "Language": "eng",
+							"Index": 1, "Channels": 8, "DisplayTitle": "英语 TrueHD 7.1"},
+						map[string]any{"Type": "Audio", "Codec": "flac", "Language": "jpn",
+							"Index": 2, "Channels": 2, "DisplayTitle": "日语 FLAC 2.0"},
+						map[string]any{"Type": "Subtitle", "Codec": "ass", "Language": "chi",
+							"Index": 3, "DisplayTitle": "简体中文"},
+					}),
+				},
 			})
 
 		/* 下载:/Items/{id}/Download。支持 Range,回可预测内容(第 i 字节 = i%251)。
