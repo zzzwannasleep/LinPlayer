@@ -9,6 +9,7 @@ package player
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"linplayer/core/bus"
@@ -49,6 +50,68 @@ func proxyFor(ctx context.Context, upstreamURL string, p config.Prefs) *prefetch
 	}
 	sharedProxy = h
 	return h
+}
+
+// currentProxy 当前那个共享代理句柄(可能为 nil)。缩略图和进度条都要问它。
+func currentProxy() *prefetch.Handle {
+	proxyMu.Lock()
+	defer proxyMu.Unlock()
+	return sharedProxy
+}
+
+var (
+	playURLMu sync.Mutex
+	playURL   string
+)
+
+// setPlayURL 记下这次交给 mpv 的地址。由 loadWith 唯一调用。
+func setPlayURL(u string) {
+	playURLMu.Lock()
+	playURL = u
+	playURLMu.Unlock()
+}
+
+// localSource 这条流的**本地字节**从哪儿读、覆盖哪几段。
+//
+// ★★ 一处判定,两个调用方共用(缩略图取数 / 进度条画带子)。
+// 分两处写的下场是「带子说这儿有,点下去没有」—— 本仓的经验里这类不一致
+// 全都不报错,只是功能看起来时灵时不灵。
+//
+//	src   给第二个 mpv 的地址;空串 = 没有本地字节,缩略图整个不可用
+//	spans 已在本地的区间(占全片比例)
+//	kind  本地字节的来源:proxy(环形缓存)/ file(本地文件)/ none
+//
+// ★ kind 不是给用户看的措辞,是**判据**:「整片都已缓存」在本地文件上是常态,
+// 在代理流上却意味着有人把整部片子下下来了 —— 两者只有 kind 分得开。
+func localSource() (src string, spans [][2]float64, kind string) {
+	playURLMu.Lock()
+	p := playURL
+	playURLMu.Unlock()
+	if p == "" {
+		return "", nil, "none"
+	}
+	// 直传流走本地代理:只读缓存端点 + 环形缓存里真实躺着的区间
+	if h := currentProxy(); h != nil && p == h.URL {
+		return h.CachedURL, h.CachedSpans(), "proxy"
+	}
+	// 本地文件 / 下载好的文件:整条时间轴都能截
+	if !strings.Contains(p, "://") {
+		return p, [][2]float64{{0, 1}}, "file"
+	}
+	// 转码流、代理没起来:没有本地字节
+	return "", nil, "none"
+}
+
+// cachedSpans 进度条画「哪一段有缩略图」用的区间。
+func cachedSpans() [][2]float64 {
+	_, spans, _ := localSource()
+	return spans
+}
+
+// cachedKind 本地字节的来源。见 localSource。
+func cachedKind() string {
+	_, _, k := localSource()
+	return k
 }
 
 func closeSharedProxy() {

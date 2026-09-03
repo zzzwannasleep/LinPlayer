@@ -45,7 +45,15 @@ func loadWith(url string, startSec float64, headers map[string]string, ua string
 	if err := command(loadArgs(url, startSec)...); err != nil {
 		return fmt.Errorf("loadfile 失败: %w", err)
 	}
+	/* ★★ 把交给 mpv 的地址**自己记一份**,别回头去问 mpv 的 `path` 属性。
+	   实测它不可靠:同一次播放里,状态轮询读到的是完整地址(29 字符的代理 URL),
+	   而几百毫秒后另一条命令里读到的是**空串** —— 于是「这条流有没有本地缓存」
+	   一会儿说有一会儿说没有,进度条画着带子、点下去却没有图。
+	   我们本来就知道给出去的是什么,没有理由去问别人。 */
+	setPlayURL(url)
 	setProp("pause", "no")
+	// ★ 起播后把缩略图那个实例也开起来(理由见 thumb.go:「为什么要提前把文件打开」)。
+	warmThumber()
 	return nil
 }
 

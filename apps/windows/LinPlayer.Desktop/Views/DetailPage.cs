@@ -39,6 +39,31 @@ public sealed class DetailPage : PageBase
     /// <summary>当前选中的版本 id。空 = 交给核心层按正则挑(preferred)。</summary>
     private string _versionId = "";
 
+    /// <summary>这一页有没有发过预热。发两遍不会错,但会白起一次请求。</summary>
+    private bool _preloaded;
+
+    /// <summary>
+    /// 停在详情页时**提前把这一片的头部拉到本地**(<c>prefs.preloadItem</c>)。
+    ///
+    /// <para>☠☠ 这条命令核心层<b>一直都在,而 UI 从来没调过</b> —— 又一条零调用命令。
+    /// 后果有两个,都不报错:①「预加载了多少就吐多少出来」那条口径(用户 2026-08-02 定的)
+    /// 在这一端根本没生效,起播还是从零开始下;②<b>进度条缩略图整个用不了</b> ——
+    /// 缩略图只读本地已缓存的字节,而没有预热就没有本地代理、也就没有那份环形缓存。</para>
+    ///
+    /// <para>★ fire-and-forget:核心层那边立刻返回、后台慢慢热。等它 = 把一个纯优化
+    /// 做成了一个卡顿。</para>
+    /// </summary>
+    private void KickPreload(CoreClient core, Sess s, string itemId)
+    {
+        if (_preloaded) return;
+        _preloaded = true;
+        _ = core.PrefsPreloadItem(new
+        {
+            s.server, s.token, s.user_id, s.device_id,
+            item_id = itemId, media_source_id = _versionId,
+        });
+    }
+
     /// <summary>主播放按钮 —— 换版本时要把它指向的版本一起换掉。</summary>
     private Button? _play;
 
@@ -133,6 +158,7 @@ public sealed class DetailPage : PageBase
 
                 void Paint(JsonElement data)
                 {
+                    KickPreload(core, s, itemId);
                     body.Children.Remove(busy);
                     /* ★★ 渲染要有边界。这一页的渲染抛异常时**整个进程会当场退出** ——
                        没有对话框、没有日志窗口,用户看到的是「点了详情,软件没了」。
@@ -599,6 +625,23 @@ public sealed class DetailPage : PageBase
     /// 本仓栽过一次同款(正则选对了版本,详情页和播放器却全写死回落第一条),
     /// 而它活了几个月。判据只有一个:<b>服务器实际被请求的是哪一条流</b>。</para>
     /// </summary>
+    /// <summary>
+    /// 自检:直接按「播放」。
+    ///
+    /// <para>★★ 必须<b>经由详情页</b>起播,不能直接 push 播放页 —— 预热(<c>prefs.preloadItem</c>)
+    /// 是详情页发的,而本地代理和那份环形缓存是预热建起来的。跳过详情页去测缩略图,
+    /// 测的是一条<b>用户走不到</b>的路,而且必然是「一段缓存都没有」。</para>
+    /// </summary>
+    internal void SelfCheckPlay(int delayMs)
+    {
+        _ = Task.Delay(delayMs).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (_play is null) { Console.WriteLine("[自检起播] 详情页还没画出播放按钮"); return; }
+            Console.WriteLine("[自检起播] 点播放");
+            _play.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        }));
+    }
+
     internal void SelfCheckPickVersion(int idx)
     {
         Dispatcher.UIThread.Post(() =>

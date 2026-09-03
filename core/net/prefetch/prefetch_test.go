@@ -543,3 +543,83 @@ func TestC26_段被挤掉后能重拉不饿死(t *testing.T) {
 		t.Fatal("段被挤掉之后没人重拉 —— 那条连接饿死了(播放器侧 = 有流量、黑屏/永远缓冲)")
 	}
 }
+
+// getCached 从**只读缓存端点**拉一段。
+func getCached(t *testing.T, h *Handle, start, end int64) (int, http.Header, []byte) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, h.CachedURL, nil)
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("拉只读端点失败: %v", err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, b
+}
+
+// 判据:**只读缓存端点只吐已经在盘上的字节,一个上游请求都不发**。
+//
+// ★★ 这条端点是「缩略图只对已缓存的进度可用」那条规矩的**执行者**,不是它的说明书。
+// 规矩落在传输层之后,缩略图那边就不需要「先判断能不能用」—— 它只是取数失败而已,
+// 而取数失败这条路本来就得写。判断和事实分成两处写,迟早会对不上。
+//
+// ★ 「不碰上游」不是省流量那么简单:第二个读者一旦走普通端点,就会**自己开一个
+// stream + worker 去拉**,把环形缓存里正在播的那些段挤掉 —— 表现是用户拖一下
+// 进度条预览,正片这边开始卡。
+func TestC26_只读缓存端点不碰上游(t *testing.T) {
+	up := newUpstream(t)
+	h := startProxy(t, up, 2, testTotal)
+
+	// 先让「播放器」把前两段拉进环形缓存
+	code, _, b := getRange(t, h, 0, 2*ChunkSize-1)
+	if code != 206 || int64(len(b)) != 2*ChunkSize {
+		t.Fatalf("预热失败: code=%d len=%d", code, len(b))
+	}
+	assertBytes(t, 0, b)
+	before := up.requests.Load()
+
+	// 已缓存的区间:给得出,且上游一次都没被打
+	code, _, b = getCached(t, h, ChunkSize, ChunkSize+1023)
+	if code != 206 || len(b) != 1024 {
+		t.Fatalf("已缓存区间取不到: code=%d len=%d", code, len(b))
+	}
+	assertBytes(t, ChunkSize, b)
+	if n := up.requests.Load(); n != before {
+		t.Fatalf("只读端点碰了上游 %d 次 —— 它一个请求都不许发", n-before)
+	}
+
+	// 没缓存的区间:必须 416,而且照样不碰上游
+	code, _, b = getCached(t, h, 6*ChunkSize, 6*ChunkSize+1023)
+	if code != 416 {
+		t.Fatalf("没缓存的区间应当 416,实得 %d(%d 字节)", code, len(b))
+	}
+	if n := up.requests.Load(); n != before {
+		t.Fatalf("416 那条路也碰了上游 %d 次", n-before)
+	}
+}
+
+// 判据:**CachedSpans 报的区间要和真实缓存对得上**(UI 拿它画「这段有缩略图」)。
+//
+// ★ 报多了比报少了糟:用户划过去看见「有」却出不来图,那是坏了;
+//   报少了只是保守。所以断言卡的是**上界**必须贴着真实缓存。
+func TestC26_缓存区间报得准(t *testing.T) {
+	up := newUpstream(t)
+	h := startProxy(t, up, 2, testTotal)
+
+	if sp := h.CachedSpans(); len(sp) != 0 {
+		t.Fatalf("还没拉过就报出了 %v", sp)
+	}
+	code, _, _ := getRange(t, h, 0, 2*ChunkSize-1)
+	if code != 206 {
+		t.Fatalf("预热失败 code=%d", code)
+	}
+	sp := h.CachedSpans()
+	if len(sp) != 1 {
+		t.Fatalf("应当是一段连续的,实得 %v", sp)
+	}
+	// 前两段 = 总长的 2/8
+	if sp[0][0] != 0 || sp[0][1] < 0.24 || sp[0][1] > 0.26 {
+		t.Fatalf("区间不对: %v(期望 [0, 0.25])", sp[0])
+	}
+}

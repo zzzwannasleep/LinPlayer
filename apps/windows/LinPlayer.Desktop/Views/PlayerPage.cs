@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
 using Avalonia.Threading;
@@ -33,9 +34,6 @@ internal sealed class MpvGlView : OpenGlControlBase
 
     /// <summary>GL 就绪后调一次。起播动作放这里,顺序才是对的。</summary>
     public Action? OnReady;
-
-    /// <summary>进度条缩略图的帧库。null = 不采。</summary>
-    public Thumbs? Frames;
 
     public string? InitError { get; private set; }
 
@@ -66,11 +64,6 @@ internal sealed class MpvGlView : OpenGlControlBase
                 Native.lp_gl_render((uint)fb, w, h, 1);
                 // ★ 漏了 swapped 帧率控制就是瞎的(核心层不知道这一帧已经出去了)
                 Native.lp_gl_swapped();
-                /* ★★ 进度条缩略图就在这儿采(见 <see cref="Thumbs"/>)。
-                   ★ 必须排在 render <b>之后</b>:早了读到的是上一帧,而上一帧
-                     和进度条上那个位置对不上 —— 差一格,而且看不出来。
-                   ★ Thumbs 自己会判「这一格是不是已经有了」,绝大多数帧在这里直接返回。 */
-                Frames?.Capture(gl, fb, w, h);
             }
         }
         RequestNextFrameRendering();
@@ -105,7 +98,7 @@ public sealed class PlayerPage : UserControl
     /// <summary>缩略图框的尺寸。★ 和 <see cref="Thumbs"/> 存的 160×90 同比。</summary>
     private const double ThumbW = 160, ThumbH = 90;
     /// <summary>这一场播放采到的帧。换片要 Reset。</summary>
-    private readonly Thumbs _frames = new();
+    private readonly Thumbs _frames;
     /// <summary>页面顶层容器。气泡要按进度条的真实坐标挂在它上面。</summary>
     private Panel? _root;
     private readonly Slider _vol;
@@ -217,6 +210,11 @@ public sealed class PlayerPage : UserControl
         _title = title;
         _itemId = itemId;
         _next = next;
+        _frames = new Thumbs(core);
+        /* ★ 图是<b>异步</b>回来的:回来那一刻鼠标多半还停在原处,
+           得再跑一次预览回调把它摆上去 —— 不然用户看到的是「划过去只有时间,
+           动一下才出图」,而那一下动作纯属多余。 */
+        _frames.Changed = () => { if (_bar.HoverTime is { } t) _bar.Preview?.Invoke(t); };
 
         /* ★★ 进度条是<b>自绘</b>的(<see cref="PlayerBar"/>),不是 Slider。
            上一版把 Slider 的 MinHeight 拉到 28 来解决「不好点击」——
@@ -230,9 +228,10 @@ public sealed class PlayerPage : UserControl
             if (at is null) return;
             _bubbleText.Text = Clock(at.Value);
 
-            /* ★★ 有帧就把缩略图摆上去,没有就只留时间那一行。
+            /* ★★ 有图就把缩略图摆上去,没有就只留时间那一行。
                这一条<b>不是降级</b>,是用户点名的规则:
-               「缓存了的进度条能用,没缓存的不能用这个缩略图功能」。 */
+               「缓存了的进度条能用,没缓存的不能用这个缩略图功能」。
+               ★ At() <b>不阻塞</b> —— 手上没有的话它去要,回来再叫我们重画一次。 */
             var pic = _frames.At(at.Value);
             _thumb.Source = pic;
             if (_bubble.Child is StackPanel bs && bs.Children.Count > 0)
@@ -449,7 +448,6 @@ public sealed class PlayerPage : UserControl
            现代播放器(YouTube / Netflix / Bilibili / Plex)一律是整宽独占一行,
            时间读数挪到按钮那一排的左边。 */
         // ★ 帧库交给 GL 视图 —— 采帧只能在 GL 线程上、渲染之后做
-        _view.Frames = _frames;
 
         /* ☠☠ 气泡<b>不能挂在这一格里</b>。这一格高 50,而带缩略图的气泡要 117 ——
            实测它被箍成了 50(`气泡 171x50`),于是缩略图溢出去、时间那一行掉到按钮下面。
@@ -1035,45 +1033,180 @@ public sealed class PlayerPage : UserControl
     private void SelfCheckThumb()
     {
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_THUMB") != "1") return;
-        _ = Task.Delay(6000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        _ = Task.Run(async () =>
         {
-            var dur = _duration;
+            await Task.Delay(9000); // 等起播 + 核心层把缩略图实例开起来(它自己延迟 4s)
+            double dur = 0, inside = -1, outside = -1, cov0 = 0;
+            var kind = "none";
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                dur = _duration;
+                foreach (var (a, b) in _frames.Spans)
+                    if (b - a > 0.02) { inside = (a + b) / 2 * dur; break; }
+                // 找一个**不在**任何区间里的位置 —— 「没缓存不能用」那一半的对照组
+                for (var f = 0.99; f > 0; f -= 0.01)
+                    if (!_frames.Cached(f * dur)) { outside = f * dur; break; }
+                foreach (var (a, b) in _frames.Spans) cov0 += b - a;
+                kind = _frames.Kind;
+                Console.WriteLine($"[缩略图] 时长 {dur:0.0}s;来源 {kind};本地已有 {_frames.Spans.Count} 段 " +
+                                  $"({string.Join(" ", _frames.Spans.Select(x => $"{x.A:0.00}-{x.B:0.00}"))})");
+            });
             if (dur <= 0) { Console.WriteLine("[缩略图] ⚠ 还没拿到时长,这条不算数"); return; }
-            var have = 0;
-            for (var i = 0; i < Thumbs.Slots; i++) if (_frames.Has(i)) have++;
-            /* ★ 量的是**明确已经放过**的位置(播放头往回一半),不是播放头本身:
-               `_position` 是轮询来的,比真实渲染位置滞后一拍,而格子只有 duration/300 宽 ——
-               拿它去问「当前这一格有没有图」,问的其实是**正在填的那一格**,
-               会随机红。判据自己和被测对象抢时序,是假红/假绿的同一个来源。 */
-            var atNow = _frames.At(_position * 0.5);
-            // ★ 末尾那一格必定还没放到 —— 它就是「没缓存」那一半的对照
-            var atEnd = _frames.At(dur * 0.98);
-            Console.WriteLine($"[缩略图] 时长 {dur:0.0}s 位置 {_position:0.0}s;" +
-                              $"采到 {have}/{Thumbs.Slots} 格");
-            Console.WriteLine(atNow is not null
-                ? $"[缩略图] ✓ 放过的位置({_position * 0.5:0.0}s)有图 {atNow.PixelSize.Width}x{atNow.PixelSize.Height}"
-                : "[缩略图] ✗ 放过的位置也没有图 —— 采帧没工作");
-            /* ☠ 「有图」不等于「图是对的」。第一版每张都是全黑(忘了把目标 FBO 绑回来),
-               而上面那条断言照样绿 —— 尺寸对、对象非空。所以这一条量的是**亮度**。 */
-            Console.WriteLine(_frames.LastMean > 4
-                ? $"[缩略图] ✓ 帧不是全黑(亮度均值 {_frames.LastMean:0.0})"
-                : $"[缩略图] ✗ 读回来是全黑(亮度均值 {_frames.LastMean:0.0}) —— 多半是没把目标 FBO 绑回来");
-            Console.WriteLine(atEnd is null
-                ? "[缩略图] ✓ 没放到的位置没有图 —— 「没缓存不能用」这条规则是真的"
-                : "[缩略图] ✗ 没放到的位置竟然有图 —— 那这张图不是这个位置的");
+            if (inside < 0)
+            {
+                Console.WriteLine("[缩略图] ✗ 一段本地缓存都没有 —— 这条流没走本地代理,缩略图整个用不了");
+                return;
+            }
+
+            /* ★ 取数是异步的:问一次拿 null 是正常的(它这才去要),
+               所以这里轮询等它回来,而不是问一次就下结论。 */
+            Bitmap? pic = null;
+            for (var k = 0; k < 40 && pic is null; k++)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() => pic = _frames.At(inside));
+                if (pic is null) await Task.Delay(150);
+            }
+            Console.WriteLine(pic is not null
+                ? $"[缩略图] ✓ 已缓存的位置({inside:0.0}s)有图 {pic.PixelSize.Width}x{pic.PixelSize.Height}"
+                : $"[缩略图] ✗ 已缓存的位置({inside:0.0}s)取不到图 —— {_frames.LastWhy}");
+
+            /* ☠ 「有图」不等于「图是对的」。上一版每张都是全黑(GL 那条路忘了绑回目标 FBO),
+               而「有图 + 尺寸对」两条断言照样绿。所以必须量**亮度**。 */
+            if (pic is not null)
+            {
+                var mean = MeanLuma(pic);
+                Console.WriteLine(mean > 4
+                    ? $"[缩略图] ✓ 不是全黑(亮度均值 {mean:0.0})"
+                    : $"[缩略图] ✗ 全黑(亮度均值 {mean:0.0}) —— 解出来了但内容不对");
+            }
+
+            /* ★★ 对照组**直接问核心层**,不走 Thumbs.At()。
+               At() 自己会先看区间、没缓存就不发请求 —— 那是省一趟必然失败的往返,
+               但用它做判据的话,验的只是「UI 那个 if」,而真正的保证在传输层
+               (只读端点对没缓存的区间回 416)。判据要卡在保证上,不是卡在优化上。 */
+            if (outside >= 0)
+            {
+                var r = await _core.PlayerThumbnail(new { position = outside });
+                var ok = r.TryGetProperty("available", out var av2) && av2.ValueKind == JsonValueKind.True;
+                Console.WriteLine(!ok
+                    ? $"[缩略图] ✓ 没缓存的位置({outside:0.0}s)核心层也给不出 —— 「没缓存不能用」是传输层保证的"
+                    : $"[缩略图] ✗ 没缓存的位置({outside:0.0}s)竟然出了图 —— 那是从网上现拉的");
+            }
+            else
+            {
+                Console.WriteLine($"[缩略图] · 整条时间轴都在本地(来源 {kind}),没有对照组");
+            }
+
+            /* ☠ 「每张都有图」也可能全是**同一张**:seek 静默失败的话,
+               每次截的都是当前播放位置那一帧,而尺寸、亮度、非空全都对。 */
+            if (pic is not null)
+            {
+                var other = -1.0;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    foreach (var (a, b) in _frames.Spans)
+                        if (b - a > 0.02) { other = (a * 0.75 + b * 0.25) * dur; break; }
+                });
+                Bitmap? pic2 = null;
+                for (var k = 0; k < 40 && pic2 is null; k++)
+                {
+                    await Dispatcher.UIThread.InvokeAsync(() => pic2 = _frames.At(other));
+                    if (pic2 is null) await Task.Delay(150);
+                }
+                if (pic2 is null) Console.WriteLine($"[缩略图] ✗ 第二个位置({other:0.0}s)取不到图 —— {_frames.LastWhy}");
+                else
+                {
+                    /* ★ 比**逐像素**,不比亮度均值。自检片是彩条,两帧之间只有角上
+                       一小块时间码在变 —— 拿整帧均值去比,差值是 0.0,
+                       于是一条本来正确的实现被判成红的(判据选错了语料)。 */
+                    var d2 = DiffPct(pic, pic2);
+                    Console.WriteLine(d2 > 0.05
+                        ? $"[缩略图] ✓ 两个位置的图不一样(差异像素 {d2:0.00}%)—— seek 真的生效了"
+                        : $"[缩略图] ✗ 两个位置的图一模一样(差异像素 {d2:0.00}%)—— seek 没生效");
+                }
+            }
+
+            /* ★★ **取缩略图不许把本地缓存撑大**。
+               这是「没缓存的不能用」真正的分量所在:一旦缩略图走的是普通端点,
+               它会替用户**把整部片子下下来** —— 实测注入一次,本地区间当场
+               从「2 段」变成「整片 1 段」,而所有其它断言照样全绿
+               (每个位置都有图了嘛)。所以判据要卡在**缓存有没有变大**上。
+               ★ 正片自己在放,覆盖率本来就会慢慢涨:1800 秒的片子跑十几秒
+                 涨不到 1%,留 20% 的余量足够宽。 */
+            var cov1 = 0.0;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var (a, b) in _frames.Spans) cov1 += b - a;
+            });
+            /* ★ 基线本身也要判。第一版只比了「前后差值」,而注入验红时发现
+               **下载发生在采基线之前**(实例装载那一下就把整片拉完了),
+               于是 100% → 100%,差值为 0,一条本该红的判据绿了。 */
+            if (kind == "proxy" && cov0 > 0.98)
+                Console.WriteLine($"[缩略图] ✗ 才放了十几秒,整片({cov0 * 100:0.0}%)就都在本地了 —— 取图这条路在替用户下载");
+            else
+                Console.WriteLine(cov1 - cov0 < 0.2
+                    ? $"[缩略图] ✓ 取图没把本地缓存撑大(覆盖率 {cov0 * 100:0.0}% → {cov1 * 100:0.0}%)"
+                    : $"[缩略图] ✗ 取图把本地缓存撑大了({cov0 * 100:0.0}% → {cov1 * 100:0.0}%)—— 它在替用户下载");
 
             // 把气泡钉出来给截图看:悬停事件在自检里发不出去
-            _bar.Preview?.Invoke(_position * 0.5);
-            _bubble.IsVisible = true;
-            Dispatcher.UIThread.Post(() =>
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                ShowOsd(true); // ★ 不显式打开的话控制条早淡出了,带子就进不了截图
+                _bar.SelfCheckHover(_bar.Bounds.Width * inside / dur);
+                _bar.Preview?.Invoke(inside);
+                _bubble.IsVisible = true;
+                Console.WriteLine($"[缩略图] 进度条带子 {_bar.CachedSpans.Count} 段(悬停态已钉住,进截图)");
+            });
+            await Task.Delay(400);
+            await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 var box = _bubble.Child as StackPanel;
                 Console.WriteLine($"[缩略图] 气泡 {_bubble.Bounds.Width:0}x{_bubble.Bounds.Height:0} " +
                                   $"@ ({_bubble.Bounds.X:0},{_bubble.Bounds.Y:0});" +
                                   $"图框可见 {box?.Children[0].IsVisible} {box?.Children[0].Bounds.Height:0};" +
                                   $"文字 {(box?.Children[1] as TextBlock)?.Text}");
-            }, DispatcherPriority.Background);
-        }));
+            });
+        });
+    }
+
+    /// <summary>
+    /// 两张图有多少比例的像素不一样(0~100)。
+    ///
+    /// <para>★ 判「这两帧是不是同一帧」只能逐像素。均值/直方图这类整体量在
+    /// 静态画面上分辨不出来 —— 而缩略图最常见的错法正是**每张都是同一帧**。</para>
+    /// </summary>
+    private static double DiffPct(Bitmap a, Bitmap b)
+    {
+        if (a.PixelSize != b.PixelSize) return 100;
+        var pa = Pixels(a);
+        var pb = Pixels(b);
+        var diff = 0;
+        for (var i = 0; i < pa.Length; i += 4)
+            if (pa[i] != pb[i] || pa[i + 1] != pb[i + 1] || pa[i + 2] != pb[i + 2]) diff++;
+        return diff * 400.0 / pa.Length;
+    }
+
+    private static byte[] Pixels(Bitmap b)
+    {
+        var w = b.PixelSize.Width;
+        var h = b.PixelSize.Height;
+        var stride = w * 4;
+        var buf = new byte[stride * h];
+        var gc = System.Runtime.InteropServices.GCHandle.Alloc(buf,
+            System.Runtime.InteropServices.GCHandleType.Pinned);
+        try { b.CopyPixels(new PixelRect(0, 0, w, h), gc.AddrOfPinnedObject(), buf.Length, stride); }
+        finally { gc.Free(); }
+        return buf;
+    }
+
+    /// <summary>一张图的平均亮度。判「解出来了但内容不对」用 —— 全黑图的尺寸和对象都是对的。</summary>
+    private static double MeanLuma(Bitmap b)
+    {
+        var buf = Pixels(b);
+        long sum = 0;
+        var n = 0;
+        for (var i = 0; i + 2 < buf.Length; i += 4 * 37) { sum += buf[i] + buf[i + 1] + buf[i + 2]; n += 3; }
+        return n > 0 ? sum / (double)n : 0;
     }
 
     /// <summary>
@@ -1342,8 +1475,8 @@ public sealed class PlayerPage : UserControl
         /* ★ 帧库要知道「现在放到哪、一共多长」才能分格 —— 采帧那一侧在 GL 线程上,
            它不该自己去打命令(那是每一帧一次往返)。这里顺手喂,轮询本来就在跑。 */
         _frames.Duration = dur;
-        _frames.Position = _position;
-        _bar.HasThumb = _frames.Has;
+        _frames.SetSpans(st);
+        _bar.CachedSpans = _frames.Spans;
         SyncMute();
         // ★ 拖动中不要覆盖时间读数 —— 那会儿它显示的是**手指所在位置**,
         //   被轮询盖回当前播放位置的话,拖的时候数字纹丝不动

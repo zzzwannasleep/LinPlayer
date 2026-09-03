@@ -125,6 +125,7 @@ object LinPlayerCommandNames {
         "player.status",
         "player.stopPlayback",
         "player.takePending",
+        "player.thumbnail",
         "player.tracks",
         "player.validateTrackRegex",
         "player.windowClose",
@@ -429,7 +430,7 @@ suspend fun LinPlayerCommands.accountTestConnection(args: Map<String, Any?>? = n
 suspend fun LinPlayerCommands.accountUpdateAccount(args: Map<String, Any?>? = null): JsonElement =
     call("account.updateAccount", args)
 
-// ---- 播放器 · player.* (39 条) ----
+// ---- 播放器 · player.* (40 条) ----
 suspend fun LinPlayerCommands.playerAddSubtitle(args: Map<String, Any?>? = null): JsonElement =
     call("player.addSubtitle", args)
 suspend fun LinPlayerCommands.playerChapterInfo(args: Map<String, Any?>? = null): JsonElement =
@@ -500,6 +501,8 @@ suspend fun LinPlayerCommands.playerStopPlayback(args: Map<String, Any?>? = null
     call("player.stopPlayback", args)
 suspend fun LinPlayerCommands.playerTakePending(args: Map<String, Any?>? = null): JsonElement =
     call("player.takePending", args)
+suspend fun LinPlayerCommands.playerThumbnail(args: Map<String, Any?>? = null): JsonElement =
+    call("player.thumbnail", args)
 suspend fun LinPlayerCommands.playerTracks(args: Map<String, Any?>? = null): JsonElement =
     call("player.tracks", args)
 suspend fun LinPlayerCommands.playerValidateTrackRegex(args: Map<String, Any?>? = null): JsonElement =

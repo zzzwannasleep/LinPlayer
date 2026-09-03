@@ -1,84 +1,84 @@
-using System;
-using System.Runtime.InteropServices;
-using Avalonia;
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using Avalonia.Media.Imaging;
-using Avalonia.OpenGL;
-using Avalonia.Platform;
+using LinPlayer.Core;
+using LinPlayer.Desktop.Core;
 
 namespace LinPlayer.Desktop.Views;
 
 /// <summary>
-/// 进度条悬停缩略图的帧库。
+/// 进度条悬停缩略图的取数与缓存。
 ///
-/// <para>★★ 用户 2026-09-03:「做一个缩略图的功能,<b>缓存了的进度条能用,
-/// 没缓存的不能用这个缩略图功能</b>」。这条约束不是妥协,它直接决定了帧从哪儿来 ——
-/// 我们<b>没有</b>可以随便取任意时刻画面的东西:</para>
+/// <para>★★ <b>帧不是这一层产生的</b> —— 它向核心层要(<c>player.thumbnail</c>),
+/// 核心层用第二个 <c>vo=null</c> 的 mpv 实例、<b>只读本地已缓存的字节</b>解出来。
+/// 上一版是从我们自己渲染过的画面里留一份,那样只有<b>放过的</b>位置才有图;
+/// 而用户要的是「已缓存的进度」—— 缓存的恰恰是<b>前面还没放到</b>的那一段。</para>
 ///
-/// <list type="bullet">
-/// <item>服务端 trickplay(BIF)只有新版 Emby 才有,而本仓要伺候一堆 fork;</item>
-/// <item>让 mpv 跳过去截一张,会把正在放的画面拽走;</item>
-/// <item>另起一个 mpv 实例解码,是把播放器的复杂度翻一倍去换一张小图。</item>
-/// </list>
-///
-/// <para>所以帧来自<b>我们自己已经渲染过的那些</b>:每渲染一段就顺手把当前这一帧
-/// 缩成 160×90 收进来。于是「有缩略图的位置」= 「已经放过的位置」,
-/// 这正好就是用户说的那条规则,而且它是**真的**,不是我们承诺出来的。</para>
-///
-/// <para>★ 时间轴切成 <see cref="Slots"/> 格,按格存 —— 不按秒:
-/// 一部两小时的片子按秒存是 7200 张。格数固定之后,长片的格子粗、短片的细,
-/// 而内存占用是个常数(300 × 160×90×4 ≈ 17 MB)。</para>
-///
-/// <para>ponytail: 一次 glReadPixels 读的是整块 FBO(窗口大小,不是视频分辨率),
-/// 4K 窗口下单次约 33 MB —— 但它每格才发生一次(两小时的片子 ≈ 每 24 秒一次)。
-/// 真嫌重的话下一步是 BlitFramebuffer 先缩到 160×90 再读,那要求 GLES3。</para>
+/// <para>★ 「没缓存的不能用」这条规则<b>不在这里判</b>:核心层那条只读端点
+/// 对没缓存的区间直接回 416,取不到数就是取不到图。判断和事实分两处写,
+/// 迟早会对不上。</para>
 /// </summary>
-public sealed class Thumbs
+public sealed class Thumbs(CoreClient core)
 {
-    /// <summary>时间轴切几格。</summary>
+    /// <summary>时间轴分多少格。取图和缓存都按格走 —— 鼠标移动一个像素就发一次请求,
+    /// 那是几十次解码;而相邻两像素上的画面根本是同一帧。</summary>
     public const int Slots = 300;
 
-    /// <summary>缩略图尺寸。★ 16:9 —— 视频不是这个比例时按短边裁,不拉伸。</summary>
-    private const int TW = 160, TH = 90;
+    /// <summary>缓存多少张。320×180 解出来是 BGRA ≈ 230KB,不设上限的话
+    /// 一部长片划一圈就是 60MB 常驻。</summary>
+    private const int Keep = 60;
 
-    /// <summary>两次抓帧至少隔多久。★ 拖动进度条时会连续跨好几格,不限一下会连着读好几次。</summary>
-    private static readonly TimeSpan MinGap = TimeSpan.FromMilliseconds(400);
+    private readonly Dictionary<int, Bitmap?> _got = new(); // null = 问过了,那儿没有
+    private readonly Queue<int> _order = new();
+    private readonly HashSet<int> _busy = [];
 
-    private delegate void ReadPixelsFn(int x, int y, int w, int h, int fmt, int type, IntPtr data);
+    /// <summary>片长(秒)。0 = 还不知道,这时一律不取。</summary>
+    public double Duration;
 
-    private const int GL_RGBA = 0x1908, GL_UNSIGNED_BYTE = 0x1401;
-    private const int GL_FRAMEBUFFER = 0x8D40;
+    /// <summary>本地已有字节的区间(占全片的比例)。核心层 <c>player.status.cached</c> 给的。</summary>
+    public IReadOnlyList<(double A, double B)> Spans { get; private set; } = [];
 
-    private readonly Bitmap?[] _frames = new Bitmap?[Slots];
-    private ReadPixelsFn? _read;
-    private bool _probed;
-    private DateTime _last = DateTime.MinValue;
-    private byte[] _scratch = [];
+    /// <summary>本地字节的来源:<c>proxy</c>(环形缓存)/ <c>file</c>(本地文件)/ <c>none</c>。</summary>
+    public string Kind { get; private set; } = "none";
 
-    /// <summary>最近一次抓帧的亮度均值。<b>0 = 读到的是全黑</b>,见 <see cref="Capture"/> 里那段 ☠。</summary>
-    public double LastMean { get; private set; }
+    /// <summary>图到了要重画气泡 —— 取数是异步的,回来时鼠标还停在那儿。</summary>
+    public System.Action? Changed;
 
-    /// <summary>总时长。0 = 还不知道,这时候不抓(没有时长就分不出格)。</summary>
-    public double Duration { get; set; }
+    /// <summary>最近一次取不到图的原因。自检和日志用,不给用户看。</summary>
+    public string? LastWhy { get; private set; }
 
-    /// <summary>当前播放位置,由轮询喂进来。</summary>
-    public double Position { get; set; }
-
-    /// <summary>换片要清空 —— 不清的话新片的进度条上会飘出上一部片的画面。</summary>
-    public void Reset()
+    /// <summary>已经拿到手的张数(自检用)。</summary>
+    public int Have
     {
-        lock (_frames) Array.Clear(_frames);
-        Duration = 0;
-        Position = 0;
+        get { var n = 0; foreach (var v in _got.Values) if (v is not null) n++; return n; }
     }
 
-    /// <summary>这一格有没有帧。<see cref="PlayerBar"/> 画覆盖带用。</summary>
-    public bool Has(int slot) => slot >= 0 && slot < Slots && _frames[slot] is not null;
-
-    /// <summary>某个时间点的缩略图。没有就返回 null —— <b>调用方要能画出「只有时间」那一版</b>。</summary>
-    public Bitmap? At(double pos)
+    /// <summary>从 <c>player.status</c> 的 <c>cached</c> 字段更新区间。</summary>
+    public void SetSpans(JsonElement st)
     {
-        var i = SlotOf(pos);
-        return i < 0 ? null : _frames[i];
+        if (st.TryGetProperty("cached_kind", out var k) && k.GetString() is { } ks) Kind = ks;
+        if (!st.TryGetProperty("cached", out var c) || c.ValueKind != JsonValueKind.Array)
+        {
+            if (Spans.Count > 0) Spans = [];
+            return;
+        }
+        var list = new List<(double, double)>();
+        foreach (var sp in c.EnumerateArray())
+        {
+            if (sp.ValueKind != JsonValueKind.Array || sp.GetArrayLength() < 2) continue;
+            list.Add((sp[0].GetDouble(), sp[1].GetDouble()));
+        }
+        Spans = list;
+    }
+
+    /// <summary>这个时间点的字节在不在本地。进度条画「哪一段有缩略图」用它。</summary>
+    public bool Cached(double pos)
+    {
+        if (Duration <= 0) return false;
+        var f = pos / Duration;
+        foreach (var (a, b) in Spans) if (f >= a && f < b) return true;
+        return false;
     }
 
     public int SlotOf(double pos)
@@ -89,95 +89,58 @@ public sealed class Thumbs
     }
 
     /// <summary>
-    /// 渲染完一帧之后调。<b>只在「这一格还空着」时才真读</b>。
-    ///
-    /// <para>★ 必须在 GL 线程上、并且在这一帧画完之后调 —— 早了读到的是上一帧,
-    /// 而上一帧和进度条上那个位置对不上。</para>
+    /// 取这个位置的缩略图。<b>不阻塞</b>:手上有就给,没有就发一次请求,回来时叫 <see cref="Changed"/>。
     /// </summary>
-    public void Capture(GlInterface gl, int fb, int w, int h)
+    public Bitmap? At(double pos)
     {
-        if (Duration <= 0 || w < 16 || h < 16) return;
-        var slot = SlotOf(Position);
-        if (slot < 0 || _frames[slot] is not null) return;
-        var now = DateTime.UtcNow;
-        if (now - _last < MinGap) return;
-        _last = now;
-
-        if (!_probed)
-        {
-            _probed = true;
-            var p = gl.GetProcAddress("glReadPixels");
-            // ★ 取不到就<b>整个功能安静地不存在</b>:缩略图是锦上添花,
-            //   为它把播放页拖红是本末倒置。气泡那边本来就有「没有图只显示时间」那一版。
-            if (p != IntPtr.Zero) _read = Marshal.GetDelegateForFunctionPointer<ReadPixelsFn>(p);
-            else Console.WriteLine("[缩略图] 这套 GL 上拿不到 glReadPixels —— 只显示时间");
-        }
-        if (_read is null) return;
-
-        var need = w * h * 4;
-        if (_scratch.Length < need) _scratch = new byte[need];
-        try
-        {
-            /* ☠☠ <b>读之前必须自己把目标 FBO 绑回来</b>。
-               这个回调进来时 Avalonia 确实绑的是 fb,但中间 mpv 的 render 跑过了 ——
-               它内部会绑自己的 FBO,而**不保证还原**。不绑的话 glReadPixels
-               读的是另一块缓冲区,拿回来一片全黑:不报错、不崩,
-               只是每张缩略图都是黑的(第一版就是这么出来的)。 */
-            gl.BindFramebuffer(GL_FRAMEBUFFER, fb);
-            var pin = GCHandle.Alloc(_scratch, GCHandleType.Pinned);
-            try { _read(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pin.AddrOfPinnedObject()); }
-            finally { pin.Free(); }
-            _frames[slot] = Shrink(_scratch, w, h);
-            /* ★★ 顺手记一个**亮度均值**,给自检当判据。
-               ☠ 这不是锦上添花:第一版忘了把目标 FBO 绑回来(mpv 的 render 会绑走它、
-                 而且不还原),读回来是<b>整片全黑</b> —— 缩略图张张都有、尺寸也对、
-                 一个错都不报,只是全黑。「有没有图」这个判据照样绿。
-               ★ 隔 37 个像素采一个:够用,而且和图的内容无关(全黑就是 0)。 */
-            long sum = 0;
-            var n = 0;
-            for (var i = 0; i < need; i += 4 * 37) { sum += _scratch[i] + _scratch[i + 1] + _scratch[i + 2]; n += 3; }
-            LastMean = n > 0 ? sum / (double)n : 0;
-        }
-        catch (Exception e) { Console.WriteLine("[缩略图] 抓帧失败: " + e.Message); _read = null; }
+        var slot = SlotOf(pos);
+        if (slot < 0) return null;
+        if (_got.TryGetValue(slot, out var b)) return b;
+        // ★ 没缓存的位置连问都不问:那一趟必然失败,而失败要走一遍 mpv 的 seek 超时。
+        if (!Cached(pos) || !_busy.Add(slot)) return null;
+        _ = Fetch(slot, (slot + 0.5) / Slots * Duration);
+        return null;
     }
 
-    /// <summary>
-    /// 把整块像素缩成 160×90。
-    ///
-    /// <para>★ <b>行序要翻</b>:glReadPixels 的原点在左下,而位图的第一行是画面最上面那一行。
-    /// 不翻的结果是每张缩略图都上下颠倒,而它<b>不报错</b> —— 看着只是「这片子怎么倒着的」。</para>
-    /// <para>★ <b>通道要换</b>:读回来是 RGBA,而 Avalonia 的 Bgra8888 要的是 B,G,R,A。
-    /// 不换的话红蓝互调,人脸会变成蓝色。</para>
-    /// <para>★ 盒式取样(每个目标像素取源区域中心那一点)。做双线性对一张 160×90 的
-    /// 预览图没有可感知的收益,而它要多写三十行。</para>
-    /// </summary>
-    private static Bitmap Shrink(byte[] src, int w, int h)
+    private async System.Threading.Tasks.Task Fetch(int slot, double pos)
     {
-        var bmp = new WriteableBitmap(new PixelSize(TW, TH), new Vector(96, 96),
-            PixelFormat.Bgra8888, AlphaFormat.Opaque);
-        using var fb = bmp.Lock();
-        unsafe
+        Bitmap? bmp = null;
+        try
         {
-            var dst = (byte*)fb.Address;
-            for (var y = 0; y < TH; y++)
+            var r = await core.PlayerThumbnail(new { position = pos });
+            if (r.TryGetProperty("available", out var av) && av.ValueKind == JsonValueKind.True &&
+                r.TryGetProperty("jpeg", out var j) && j.GetString() is { Length: > 0 } b64)
             {
-                // ★ 翻行:目标第 0 行对应源最上面那一行 = glReadPixels 的最后一行
-                var sy = h - 1 - (int)((y + 0.5) / TH * h);
-                if (sy < 0) sy = 0;
-                if (sy >= h) sy = h - 1;
-                var row = dst + y * fb.RowBytes;
-                for (var x = 0; x < TW; x++)
-                {
-                    var sx = (int)((x + 0.5) / TW * w);
-                    if (sx >= w) sx = w - 1;
-                    var i = (sy * w + sx) * 4;
-                    row[x * 4 + 0] = src[i + 2];   // B
-                    row[x * 4 + 1] = src[i + 1];   // G
-                    row[x * 4 + 2] = src[i + 0];   // R
-                    row[x * 4 + 3] = 255;
-                }
+                using var ms = new MemoryStream(System.Convert.FromBase64String(b64));
+                bmp = new Bitmap(ms);
+            }
+            else if (r.TryGetProperty("why", out var why))
+            {
+                LastWhy = why.GetString();
             }
         }
-        return bmp;
+        catch (System.Exception e)
+        {
+            LastWhy = e.Message;
+        }
+        _got[slot] = bmp;
+        _order.Enqueue(slot);
+        while (_order.Count > Keep)
+        {
+            var old = _order.Dequeue();
+            if (old != slot) _got.Remove(old);
+        }
+        _busy.Remove(slot);
+        Changed?.Invoke();
+    }
+
+    /// <summary>换片了:手上这些图和新片没关系。</summary>
+    public void Reset()
+    {
+        _got.Clear();
+        _order.Clear();
+        _busy.Clear();
+        Spans = [];
+        LastWhy = null;
     }
 }

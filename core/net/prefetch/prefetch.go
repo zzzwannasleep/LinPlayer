@@ -100,9 +100,62 @@ type ResignFn func(ctx context.Context) string
 
 // Handle 一个运行中的代理。**Close 即停服**,放行所有连接的 worker 退出。
 type Handle struct {
-	URL    string
-	origin *origin
-	ln     net.Listener
+	URL string
+	// CachedURL **只读缓存端点**:只吐已经在盘上的字节,一个上游请求都不发。
+	//
+	// ★★ 给缩略图用。用户 2026-09-03 定的规矩是「缓存了的能用,没缓存的不能用」——
+	// 那条规矩落在这条 URL 上,不落在调用方的 if 里。
+	CachedURL string
+	origin    *origin
+	ln        net.Listener
+}
+
+// cachedPath 只读端点的路径;status416 「这段没有」的回应。
+const (
+	cachedPath = "/cached"
+	status416  = "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+)
+
+// CachedSpans 目前**已经在盘上**的区间,按占全片的比例给(0~1),按位置升序、不重叠。
+//
+// ★ 为什么给比例不给字节:调用方(进度条)要的是「哪一段有缩略图」,
+// 而它手上只有时长。字节→时间的换算这里做不了(需要码率曲线),
+// 线性折算的误差在一条 800px 的进度条上小于一个像素,不值得为它引一套索引。
+//
+// ★ 宁可报少不可报多:报多了 = 用户划过去看见「有」却出不来图,那是坏了;
+// 报少了只是保守。所以这里只认**整段就绪**,在飞的段一律不算。
+func (h *Handle) CachedSpans() [][2]float64 {
+	o := h.origin
+	if o.totalSize <= 0 {
+		return nil
+	}
+	total := float64(o.totalSize)
+	chunks := (o.totalSize + ChunkSize - 1) / ChunkSize
+	var out [][2]float64
+	run := int64(-1)
+	flush := func(endChunk int64) {
+		if run < 0 {
+			return
+		}
+		a := float64(run*ChunkSize) / total
+		b := float64(endChunk*ChunkSize) / total
+		if b > 1 {
+			b = 1
+		}
+		out = append(out, [2]float64{a, b})
+		run = -1
+	}
+	for c := int64(0); c < chunks; c++ {
+		if o.disk.has(c) {
+			if run < 0 {
+				run = c
+			}
+			continue
+		}
+		flush(c)
+	}
+	flush(chunks)
+	return out
 }
 
 // Upstream 这个代理正在代理哪条上游地址。预热复用要靠它比对。
@@ -191,8 +244,9 @@ func Start(ctx context.Context, upstreamURL string, threads int, cacheLimit int6
 	}
 	h := &Handle{
 		// 路径带扩展名:ffmpeg 会拿 URL 尾巴猜容器格式,白送的线索没理由不给
-		URL:    "http://" + ln.Addr().String() + "/stream",
-		origin: o, ln: ln,
+		URL:       "http://" + ln.Addr().String() + "/stream",
+		CachedURL: "http://" + ln.Addr().String() + cachedPath,
+		origin:    o, ln: ln,
 	}
 	go func() {
 		for {

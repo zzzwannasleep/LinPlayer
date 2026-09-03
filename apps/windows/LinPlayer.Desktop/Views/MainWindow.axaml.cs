@@ -301,6 +301,13 @@ public partial class MainWindow : Window
                     && int.TryParse(vn, out var vi) && Nav.Current is DetailPage dvp)
                     _ = Task.Delay(2000).ContinueWith(_ => dvp.SelfCheckPickVersion(vi - 1));
                 break;
+            /* ★ 「详情页停一会儿 → 按播放」。这是**用户真实走的那条路**:
+                 预热在详情页发出,本地代理和环形缓存靠它建起来,
+                 而进度条缩略图只读那份缓存。直接 push 播放页测不到。 */
+            case "play":
+                Nav.Push(new DetailPage(_core, srv, arg));
+                if (Nav.Current is DetailPage dpp) dpp.SelfCheckPlay(4000);
+                break;
             case "person": Nav.Push(new PersonPage(_core, srv, arg, "自检人物")); break;
             // 自检:进详情页 → 点「下载」 → 跳下载页。整条链一次走完
             case "dl":

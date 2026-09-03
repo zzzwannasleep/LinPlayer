@@ -275,10 +275,12 @@ func (s *stream) serve(conn net.Conn, start, end int64) error {
 // handle 处理播放器的一次 HTTP 请求(GET/HEAD,可带 Range)。
 // mpv 是唯一受控客户端,手写最小 HTTP/1.1。
 func (o *origin) handle(conn *net.TCPConn) error {
-	method, rangeStart, rangeEnd, hasRange, err := readRequest(conn)
+	method, path, rangeStart, rangeEnd, hasRange, err := readRequest(conn)
 	if err != nil {
 		return err
 	}
+	// 只读缓存端点(见 serveCached)。路径是普通端点和它唯一的区别。
+	cachedOnly := path == cachedPath
 
 	/* ★ 越界判定必须在**钳位之前**用原始 start:原来先 min 再判,那个分支就永远
 	   进不去(死代码),越界请求会被悄悄挪回最后一字节回一个 206 ——
@@ -297,6 +299,20 @@ func (o *origin) handle(conn *net.TCPConn) error {
 		if end < start {
 			end = start
 		}
+	}
+
+	/* 只读端点:能给多少**在这儿就定死**,给不出就 416。
+
+	   ★ 必须算在写响应头之前 —— Content-Length 说了多少就得吐多少;
+	     边吐边发现没了只能断流,而 ffmpeg 把提前断流当成**文件损坏**,
+	     不是「读到尾」。那会让缩略图这条路从「这个位置没有图」变成「这个文件坏了」。 */
+	if cachedOnly {
+		run := o.cachedRun(start, end)
+		if run <= 0 {
+			_, _ = conn.Write([]byte(status416))
+			return nil
+		}
+		end = start + run - 1
 	}
 
 	var head strings.Builder
@@ -327,6 +343,9 @@ func (o *origin) handle(conn *net.TCPConn) error {
 	if method == "HEAD" {
 		return nil
 	}
+	if cachedOnly {
+		return o.serveCached(conn, start, end)
+	}
 
 	first := start / ChunkSize
 	s := &stream{
@@ -350,25 +369,28 @@ func (o *origin) handle(conn *net.TCPConn) error {
 
 // readRequest 读 HTTP 请求头至 \r\n\r\n。
 // mpv 客户端行为可控,只解析所需(method + Range)。
-func readRequest(conn net.Conn) (method string, start, end int64, hasRange bool, err error) {
+func readRequest(conn net.Conn) (method, path string, start, end int64, hasRange bool, err error) {
 	br := bufio.NewReader(conn)
-	method, start, end = "GET", 0, -1
+	method, path, start, end = "GET", "/", 0, -1
 	first := true
 	for {
 		line, e := br.ReadString('\n')
 		if e != nil {
-			return method, start, end, hasRange, e
+			return method, path, start, end, hasRange, e
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if first {
-			if i := strings.Index(line, " "); i > 0 {
+			// "GET /cached HTTP/1.1"
+			if f := strings.Fields(line); len(f) >= 2 {
+				method, path = f[0], f[1]
+			} else if i := strings.Index(line, " "); i > 0 {
 				method = line[:i]
 			}
 			first = false
 			continue
 		}
 		if line == "" {
-			return method, start, end, hasRange, nil
+			return method, path, start, end, hasRange, nil
 		}
 		if k, v, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "range") {
 			if s, e2, ok := parseRange(strings.TrimSpace(v)); ok {
@@ -405,4 +427,59 @@ func parseRange(v string) (start, end int64, ok bool) {
 		}
 	}
 	return start, end, true
+}
+
+// cachedRun 从 start 起、**已经躺在盘上**的连续字节数(截到 end 为止)。
+func (o *origin) cachedRun(start, end int64) int64 {
+	var n int64
+	for pos := start; pos <= end; {
+		c := pos / ChunkSize
+		if !o.disk.has(c) {
+			break
+		}
+		segEnd := c*ChunkSize + int64(o.chunkLen(c)) - 1
+		if segEnd > end {
+			segEnd = end
+		}
+		n += segEnd - pos + 1
+		pos = segEnd + 1
+	}
+	return n
+}
+
+// serveCached 只读端点的供给:**只吐盘上已有的,一个字节都不去上游取**。
+//
+// ★★ 它存在的理由是缩略图那条路。取缩略图的那个 mpv 如果走普通端点,
+// 它会自己开一条 stream + 一组 worker 顺序拉数据,于是:
+//
+//	① 用户明明说了「没缓存的不能用」,它却会**替用户下**;
+//	② 更糟的是环形缓存**全连接共享**,它拉进来的段会把正在播的段挤掉 ——
+//	   表现是「拖一下进度条看预览,正片开始卡」,而且不报错。
+//
+// 所以这不是「普通端点加个开关」,而是一条**没有 worker 的**路。
+// 「没缓存的不能用」这条规矩因此落在了传输层:缩略图那边不需要先判断能不能用,
+// 它只是取数失败而已。判断和事实分成两处写,迟早会对不上。
+func (o *origin) serveCached(conn net.Conn, start, end int64) error {
+	for pos := start; pos <= end; {
+		c := pos / ChunkSize
+		b := o.disk.get(c, o.chunkLen(c))
+		// 刚才还在、这会儿被别的连接挤掉了(TOCTOU)。断流即可 ——
+		// 缩略图那边失败一次就是「这个位置没有图」,正是要的语义。
+		if b == nil {
+			return nil
+		}
+		within := int(pos - c*ChunkSize)
+		if within >= len(b) {
+			return nil
+		}
+		piece := b[within:]
+		if need := int(end - pos + 1); len(piece) > need {
+			piece = piece[:need]
+		}
+		if _, err := conn.Write(piece); err != nil {
+			return err
+		}
+		pos += int64(len(piece))
+	}
+	return nil
 }

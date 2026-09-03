@@ -155,6 +155,12 @@ fi
 #   一般规律:**凡是改了夹具产出的内容而不是它的地址,
 #   就得把中间所有按地址做键的缓存都清一遍**。现在是三层。
 [ "${LP_KEEPIMG:-}" = "1" ] || rm -rf "$BIN/userdata/cache/img" "$BIN/userdata/cache/icons" "$BIN/userdata/cache/meta"
+# ☠☠ 观看历史也要清。上一轮把自检片放到了片尾,history.json 就记着那个位置;
+#   下一轮从详情页起播时它被当成续播位置传给 mpv —— `loadfile ... start=<片长>` ——
+#   于是**起播即 EOF**:播放页当场判「播完」退出去,而这一切一条错都不报。
+#   排查这个花了六轮自检:表面症状是「缩略图取不到本地缓存」,
+#   真因是播放页退出时把本地代理一起收了。
+rm -f "$BIN/userdata/history.json"
 
 echo "== 5/5 起 exe 截图 =="
 # ★ 排行榜的两个上游也指到假服务器上(它顺带假扮弹弹Play / TMDB)。

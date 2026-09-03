@@ -254,6 +254,14 @@ func registerTransport() {
 			//   直接用这个值当右端。
 			// ★ 没有缓存(本地文件 / 属性拿不到)时是 0,UI 就当没有这一段,不画。
 			"buffered": propF("demuxer-cache-time"),
+			// cached 「哪几段的字节已经在本地」,占全片的比例。
+			//
+			// ★★ 和 buffered **不是一回事**:buffered 是 mpv 解复用缓存的前沿(一个数),
+			//   cached 是本地环形缓存里真实躺着的区间(可能好几段,而且能在播放头**后面**)。
+			//   进度条上「这段能看缩略图」画的是它 —— 因为缩略图正是从这些字节里解出来的。
+			"cached": cachedSpans(),
+			// cached_kind:proxy / file / none。见 localSource 的注释。
+			"cached_kind": cachedKind(),
 		}
 		if t != nil {
 			out["item_id"] = t.ItemID

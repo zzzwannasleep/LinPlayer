@@ -37,7 +37,7 @@
 |---|---|--:|--:|
 | Emby 浏览与详情 | `emby.*` | 40 | 38 |
 | 账号与线路 | `account.*` | 21 | 21 |
-| 播放器 | `player.*` | 39 | 32 |
+| 播放器 | `player.*` | 40 | 32 |
 | 媒体源(浏览型 / 影视目录) | `source.*` | 14 | 14 |
 | Ani-RSS 管理 | `anirss.*` | 51 | 51 |
 | 弹幕 | `danmaku.*` | 14 | 14 |
@@ -120,7 +120,7 @@
 | [x] | `account.testConnection` | `test_connection` | `server: String` | `Result<emby::ServerInfo, String>` | ✅ |
 | [x] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<(), String>` | ✅ |
 
-### 播放器 · `player.*` — 39 条
+### 播放器 · `player.*` — 40 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
@@ -159,6 +159,7 @@
 | [x] | `player.status` | `status` | `—` | `Result<Status, String>` | ✅ |
 | [x] | `player.stopPlayback` | `stop_playback` | `pos: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.takePending` | `player_take_pending` | `—` | `Option<serde_json::Value>` | ❌ |
+| [x] | `player.thumbnail` | `—` | `position: f64` | `Result<Thumbnail, String>` | ❌ |
 | [x] | `player.tracks` | `tracks` | `—` | `Result<Vec<Track>, String>` | ✅ |
 | [x] | `player.validateTrackRegex` | `validate_track_regex` | `pattern: String` | `Result<(), String>` | ✅ |
 | [x] | `player.windowClose` | `player_window_close` | `—` | `Result<(), String>` | ❌ |

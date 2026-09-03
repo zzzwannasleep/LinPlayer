@@ -287,11 +287,20 @@ func drainEvents(h unsafe.Pointer) {
 	}
 }
 
-// mpv 事件 id(client.h)。只列我们真的处理的两个。
+// mpv 事件 id(client.h)。
+//
+// ☠☠ **evFileLoaded 曾经写成 6,而 6 是 START_FILE,8 才是 FILE_LOADED。**
+// 后果:onFileLoaded 里的 sub-add 在文件还没打开时就发出去,mpv 回 -12,
+// 那条错只进日志 —— 外挂字幕「挂了等于没挂」,一句报错都没有。
+// 这正是仓库里 mpv-loadfile-async-subadd 那条经验写过的坑,换栈时又踩了一遍。
+//
+// ★ 实测顺序(ctypes 直打 libmpv):6 → 8 → 17 → 21。别照记忆写。
 const (
-	evLogMessage = 2
-	evFileLoaded = 6
-	evEndFile    = 7
+	evLogMessage      = 2
+	evStartFile       = 6
+	evEndFile         = 7
+	evFileLoaded      = 8
+	evPlaybackRestart = 21
 )
 
 // pumpStatus 4 Hz 推 player.status —— 高频状态事件,队列里会被原地合并(SPEC §5.11)。

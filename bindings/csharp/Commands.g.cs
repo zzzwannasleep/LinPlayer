@@ -135,6 +135,7 @@ public static class LinPlayerCommandNames
         "player.status",
         "player.stopPlayback",
         "player.takePending",
+        "player.thumbnail",
         "player.tracks",
         "player.validateTrackRegex",
         "player.windowClose",
@@ -441,7 +442,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> AccountUpdateAccount(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("account.updateAccount", args, ct);
 
-    // ---- 播放器 · player.* (39 条) ----
+    // ---- 播放器 · player.* (40 条) ----
     public static Task<JsonElement> PlayerAddSubtitle(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.addSubtitle", args, ct);
     public static Task<JsonElement> PlayerChapterInfo(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -512,6 +513,8 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("player.stopPlayback", args, ct);
     public static Task<JsonElement> PlayerTakePending(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.takePending", args, ct);
+    public static Task<JsonElement> PlayerThumbnail(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("player.thumbnail", args, ct);
     public static Task<JsonElement> PlayerTracks(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.tracks", args, ct);
     public static Task<JsonElement> PlayerValidateTrackRegex(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

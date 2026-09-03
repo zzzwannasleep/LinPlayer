@@ -142,16 +142,29 @@ public sealed class PlayerBar : Control
     /// <summary>预览气泡该画在哪个 x(播放页要拿它定位)。-1 = 不画。</summary>
     public double HoverX => _hover || _dragging ? _hoverX : -1;
 
-    /// <summary>
-    /// 第 i 格有没有缩略图。null = 这一场不采帧(缩略图功能不可用),那就整条带子都不画。
-    /// <para>★ 传的是<b>函数</b>不是一份快照:帧是边播边采的,快照发过来就已经旧了。</para>
-    /// </summary>
-    public Func<int, bool>? HasThumb;
+    /// <summary>鼠标当前悬停(或拖动)到的时间。null = 没在条上。</summary>
+    public double? HoverTime => _hover || _dragging ? At(_hoverX) : null;
 
-    /// <summary>和 <see cref="Thumbs.Slots"/> 同一个数。分两处写的下场是带子和实际有图的位置错开。</summary>
-    private const int ThumbSlots = Thumbs.Slots;
+    /// <summary>
+    /// 哪几段的字节**已经在本地**(占全片的比例)。缩略图只有这些段有,带子画的就是它。
+    /// <para>★ 空表 = 这条流没有本地缓存(转码流之类),整条带子都不画。</para>
+    /// </summary>
+    public IReadOnlyList<(double A, double B)> CachedSpans = [];
 
     private static readonly IBrush ThumbBandBrush = new SolidColorBrush(Color.Parse("#7a5b8def"));
+
+    /// <summary>
+    /// 自检:把悬停态钉住,好让「哪一段有缩略图」那条带子进截图。
+    ///
+    /// <para>★ 自检里发不出真的鼠标事件,而这条带子**只在悬停时画** ——
+    /// 不钉住的话截图里它永远不存在,等于这块没被看过一眼。</para>
+    /// </summary>
+    internal void SelfCheckHover(double x)
+    {
+        _hover = true;
+        _hoverX = x;
+        InvalidateVisual();
+    }
 
     public override void Render(DrawingContext ctx)
     {
@@ -199,17 +212,14 @@ public sealed class PlayerBar : Control
                既然是规则,就不能让用户靠试:划过去没图的时候,他分不清是
                「这儿没有」还是「这功能坏了」。一条 2px 的带子就说明白了。
                ★ 只在悬停时画:平时它是噪音,而平时也没人要用缩略图。 */
-            if (big && HasThumb is not null)
-            {
-                var band = new Rect(0, y + th + 3, 0, 2);
-                for (var i = 0; i < ThumbSlots; i++)
+            if (big)
+                foreach (var (a, b) in CachedSpans)
                 {
-                    if (!HasThumb(i)) continue;
-                    var x0 = w * i / ThumbSlots;
-                    ctx.FillRectangle(ThumbBandBrush,
-                        band.WithX(x0).WithWidth(Math.Max(1, w / ThumbSlots)));
+                    var x0 = w * Math.Clamp(a, 0, 1);
+                    var x1 = w * Math.Clamp(b, 0, 1);
+                    if (x1 - x0 < 0.5) continue;
+                    ctx.FillRectangle(ThumbBandBrush, new Rect(x0, y + th + 3, x1 - x0, 2));
                 }
-            }
 
             // 圆头只在悬停/拖动时出现。★ 常驻的话它会一直在画面上戳着,
             //   而进度条 95% 的时间只需要「看一眼到哪儿了」。
