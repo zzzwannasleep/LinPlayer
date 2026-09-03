@@ -42,6 +42,13 @@ func ProbeName(ctx context.Context, server string) string {
 	return strings.TrimSpace(info.Name)
 }
 
+// OnPlayedChanged 手动标记「已看 / 未看」成功之后的回调。
+//
+// ★ 存在的理由只有一个:**打破包依赖环**。`core/history` import 了本包
+// (它要 emby.Item 才折得出观看记录候选),所以本包不能反过来 import 它。
+// 由 history.RegisterCommands 在启动时填上。
+var OnPlayedChanged func(ctx context.Context, s *Session, itemID string, played bool)
+
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands(version string) {
 	defaultClient = NewClient(version)
@@ -167,10 +174,23 @@ func RegisterCommands(version string) {
 	})
 	list("emby.setPlayed", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		played, _ := a["played"].(bool)
-		if err := defaultClient.SetPlayed(ctx, s, str(a, "item_id"), played); err != nil {
+		itemID := str(a, "item_id")
+		if err := defaultClient.SetPlayed(ctx, s, itemID, played); err != nil {
 			return nil, err
 		}
-		return map[string]any{"item_id": str(a, "item_id"), "played": played}, nil
+		/* ★★ **本地观看记录也要跟着改。**
+
+		   不改的话,用户手动标了「已看」而本地记录还停在旧进度上 ——
+		   跨服续播会从那个旧位置起播、跨服回传会把旧进度写回**别人的服务器**。
+		   两条路都不报错,用户只会觉得「标了没用」。
+
+		   ★ 走回调而不是直接调:`core/history` 反过来 import 了 `core/emby`
+		     (candidate.go 要 emby.Item),这边再 import 它就成环了。
+		     槽由 history.RegisterCommands 填上;没填(比如只跑 emby 包的测试)就跳过。 */
+		if OnPlayedChanged != nil {
+			OnPlayedChanged(ctx, s, itemID, played)
+		}
+		return map[string]any{"item_id": itemID, "played": played}, nil
 	})
 
 	// ---- 管理员动作 ----

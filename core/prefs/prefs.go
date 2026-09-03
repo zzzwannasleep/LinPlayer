@@ -102,10 +102,24 @@ func RegisterCommands(version string) {
 		if acc := c.ActiveAccount(); acc != nil {
 			srv = acc.Server
 		}
+		/* ★★ **把每一台服务器都列出来**,不只是当前这台。
+		   用户 2026-09-03 要的是「可以按照不同服去定制」—— 只给当前那台的话,
+		   他在 A 服关掉、到 B 服看见还在,只能靠一台台切过去才知道自己设了什么。
+		   一个「按 X 定制」的开关,必须有一处能看到全部 X 的状态。 */
+		servers := []map[string]any{}
+		for _, acc := range c.AccountList {
+			servers = append(servers, map[string]any{
+				"server":  acc.Server,
+				"name":    acc.DisplayName(),
+				"enabled": p.CollectionsEnabledFor(acc.Server),
+				"active":  acc.Server == srv,
+			})
+		}
 		return map[string]any{
 			// ★ 连 server 一起回:UI 得能说清「这个开关管的是哪台服」。
 			"server":              srv,
 			"collections_enabled": srv == "" || p.CollectionsEnabledFor(srv),
+			"servers":             servers,
 		}, nil
 	})
 	bus.Register("prefs.setHomeSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -115,9 +129,17 @@ func RegisterCommands(version string) {
 			return nil, bus.NewErr(bus.EInvalid, "还没有登录的服务器,这个开关没有作用对象")
 		}
 		p := c.PrefsOf()
-		on, ok := sub(a, "settings")["collections_enabled"].(bool)
+		st := sub(a, "settings")
+		on, ok := st["collections_enabled"].(bool)
 		if !ok {
 			return nil, bus.NewErr(bus.EInvalid, "缺少 collections_enabled")
+		}
+		/* ★ 可以指定改**哪一台**(设置页那张多服列表用),不给就是当前登录那台。
+		   ★★ 但必须是**已知账号**:传一个不存在的服务器键会静默写进表里,
+		     而用户在界面上永远看不到那一条 —— 一个设了没反应的开关。 */
+		target := acc.Server
+		if v, _ := st["server"].(string); v != "" {
+			target = v
 		}
 		/* ★ 表里记的是**关掉的那几台**(黑名单)。重建时顺手把已经删掉的账号剔出去 ——
 		   留着的话,下次加一台同地址的服会「自己就是关着的」,而用户完全不知道为什么。 */
@@ -125,14 +147,17 @@ func RegisterCommands(version string) {
 		for _, x := range c.AccountList {
 			known[x.Server] = true
 		}
+		if !known[target] {
+			return nil, bus.NewErr(bus.EInvalid, "没有这台服务器: %s", target)
+		}
 		kept := []string{}
 		for _, srv := range p.HideCollectionServers {
-			if known[srv] && srv != acc.Server {
+			if known[srv] && srv != target {
 				kept = append(kept, srv)
 			}
 		}
 		if !on {
-			kept = append(kept, acc.Server)
+			kept = append(kept, target)
 		}
 		p.HideCollectionServers = kept
 		return p, save(c, p)

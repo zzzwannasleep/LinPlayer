@@ -278,6 +278,18 @@ type CaptureOpts struct {
 	// WatchedThresholdPercent 看过百分之多少算看完。
 	WatchedThresholdPercent int64
 	IncrementPlayCount      bool
+	/* ForcePlayed 直接指定「已看 / 未看」,不按阈值算。**只给手动标记那条路用。**
+
+	   ☠ 不能拿「位置 = 片长 + 阈值 100」去凑:片长未知(RunTimeTicks 为 nil)时
+	   isPlayed 恒为 false,于是「标记为已看」会**静默地什么都没标上** ——
+	   而服务器那边已经标上了,两边从此对不上。
+	   把意图写成字段,比把意图编码进两个参数的组合安全。
+
+	   ★ 位置不用额外处理:手动标记这条路本来就不传 PositionTicks,
+	     缺省 0 —— 标已看 / 标未看都会把旧进度覆盖掉,正是想要的。
+	     (试过加一条「标已看就把位置推到片尾」的分支,注入验红时发现
+	      它一条断言都影响不到 —— 死代码,删了。) */
+	ForcePlayed *bool
 	// Force 跳过节流。停播时要用 —— 那一下必须落盘,否则最后几秒的进度丢了。
 	Force bool
 }
@@ -312,6 +324,10 @@ func (s *Store) Capture(o CaptureOpts) *Record {
 	}
 	if pos > hi {
 		pos = hi
+	}
+	played := isPlayed(pos, o.Candidate.RunTimeTicks, o.WatchedThresholdPercent)
+	if o.ForcePlayed != nil {
+		played = *o.ForcePlayed
 	}
 
 	playCount := int64(0)
@@ -354,7 +370,7 @@ func (s *Store) Capture(o CaptureOpts) *Record {
 		Year:              o.Candidate.Year,
 		LastPositionTicks: pos,
 		RunTimeTicks:      o.Candidate.RunTimeTicks,
-		Played:            isPlayed(pos, o.Candidate.RunTimeTicks, o.WatchedThresholdPercent),
+		Played:            played,
 		PlayCount:         playCount,
 		LastPlayedAt:      now,
 		FirstPlayedAt:     &firstAt,
@@ -391,9 +407,15 @@ func (s *Store) shouldPersist(recordID string) bool {
 }
 
 // isPlayed 已看判定:看过 threshold% 即算看完。
+//
 // ★ **无时长 → 判不了,不算看完** —— 猜错的方向是「把没看完的标成看完」,那更糟。
+//
+// ☠ **阈值 ≤ 0 也一律不算看完。** 0 的字面含义是「位置 ≥ 0 就算看完」,
+// 也就是**每一条落进来的记录都是已看完** —— 而 0 从来不是谁的本意,
+// 它是「调用方忘了填这个字段」的样子(Go 的缺省是零值)。
+// 把「忘了填」翻译成「全都看完了」是这一层最贵的一种沉默。
 func isPlayed(positionTicks int64, runTimeTicks *int64, thresholdPercent int64) bool {
-	if runTimeTicks == nil || *runTimeTicks <= 0 {
+	if runTimeTicks == nil || *runTimeTicks <= 0 || thresholdPercent <= 0 {
 		return false
 	}
 	return float64(positionTicks)/float64(*runTimeTicks) >= float64(thresholdPercent)/100.0

@@ -149,6 +149,19 @@ else
 
 echo "== 4/5 灌一个账号(冷启动形态:配置里就有,本次会话没登录过)=="
 mkdir -p "$BIN/userdata"
+# ★★ LP_SRV2=1 再灌**第二台**服务器。
+#   「按服务器定制」这类开关,只有一台服的时候**验不出对错**:
+#   一行的列表和「只管当前那台」长得一模一样。
+#   第二台故意指一个打不通的地址 —— 设置页只列它,不需要它活着。
+SRV2=""
+# ★ LP_HIDEBOX=1 关掉当前这台;=2 关掉**第二台**(验「关的不是当前那台」也列得对)
+HIDEBOX=""
+case "${LP_HIDEBOX:-}" in
+  1) HIDEBOX="\"http://127.0.0.1:$PORT\"" ;;
+  2) HIDEBOX="\"http://127.0.0.1:1\"" ;;
+esac
+[ -n "${LP_SRV2:-}" ] && SRV2=',{ "server": "http://127.0.0.1:1", "token": "t2", "user_id": "u2",
+    "user_name": "第二个用户", "name": "自检用第二台", "lines": [], "active_line": 0 }'
 cat > "$BIN/userdata/config.json" <<JSON
 {
   "device_id": "linplayer-selfcheck",
@@ -160,7 +173,7 @@ cat > "$BIN/userdata/config.json" <<JSON
     "name": "自检用假服务器",
     "lines": [],
     "active_line": 0
-  }],
+  }$SRV2],
   "active": 0,
   "theme": "dark",
   "companion_enabled": true,
@@ -168,7 +181,7 @@ cat > "$BIN/userdata/config.json" <<JSON
   "prefs": {
     "watched_threshold_percent": ${LP_WATCHED:-90},
     "prefetch_cache_bytes": ${LP_RING:-67108864},
-    "hide_collection_servers": [${LP_HIDEBOX:+\"http://127.0.0.1:$PORT\"}]
+    "hide_collection_servers": [$HIDEBOX]
   }
 }
 JSON
@@ -215,7 +228,7 @@ export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 # ★ 不指过去的话,市场页在没网的机器上只验得到「拉取失败」那一半 ——
 #   而**有插件时长什么样**(第三方徽章、跳过数提示、版本取最大)才是会出 bug 的那半。
 export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
-LP_CORELOG="${LP_CORELOG:-}" LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_EPISODE="${LP_EP:-}" LP_SELFCHECK_COLLAPSE="${LP_COLLAPSE:-}" LP_SELFCHECK_FILL="${LP_FILL:-}" LP_SELFCHECK_SIDEBAR="${LP_SIDEBAR:-}" LP_SELFCHECK_SRVMENU="${LP_SRVMENU:-}" LP_SELFCHECK_RAIL="${LP_RAIL:-}" LP_SELFCHECK_CHROME="${LP_CHROME:-}" LP_SELFCHECK_OSDFADE="${LP_OSDFADE:-}" LP_SELFCHECK_RESUME="${LP_RESUME:-}" LP_SELFCHECK_RECLICK="${LP_RECLICK:-}" LP_SELFCHECK_SRVICON="${LP_SRVICON:-}" LP_SELFCHECK_THUMB="${LP_THUMB:-}" LP_SELFCHECK_HOME="${LP_HOME:-}" LP_SELFCHECK_WATCHED="${LP_WATCHED:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_CORELOG="${LP_CORELOG:-}" LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_EPISODE="${LP_EP:-}" LP_SELFCHECK_COLLAPSE="${LP_COLLAPSE:-}" LP_SELFCHECK_FILL="${LP_FILL:-}" LP_SELFCHECK_SIDEBAR="${LP_SIDEBAR:-}" LP_SELFCHECK_SRVMENU="${LP_SRVMENU:-}" LP_SELFCHECK_RAIL="${LP_RAIL:-}" LP_SELFCHECK_CHROME="${LP_CHROME:-}" LP_SELFCHECK_OSDFADE="${LP_OSDFADE:-}" LP_SELFCHECK_RESUME="${LP_RESUME:-}" LP_SELFCHECK_RECLICK="${LP_RECLICK:-}" LP_SELFCHECK_SRVICON="${LP_SRVICON:-}" LP_SELFCHECK_THUMB="${LP_THUMB:-}" LP_SELFCHECK_HOME="${LP_HOME:-}" LP_SELFCHECK_HOMESET="${LP_HOMESET:-}" LP_SELFCHECK_WATCHED="${LP_WATCHED:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 # LP_SHADER=all 要把 28 档挨个挂一遍(每档要等真渲染一帧才编译),得多给点时间
 # LP_WAIT=秒 覆盖等待时长(滚动扫描这类要跑几秒的自检用)

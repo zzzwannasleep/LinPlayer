@@ -265,3 +265,67 @@ func TestSettings嵌套与摊平都收(t *testing.T) {
 		t.Fatalf("摊平传的值没生效: %v %d", p.PreloadEnabled, p.PreloadHeadMB)
 	}
 }
+
+// 首页栏目开关:**改的是指定的那台服务器,不是当前登录的那台**。
+//
+// ☠☠ 设置页那张表里每台服务器一行,点第二行时送的是它自己的 server。
+// 少送这个字段(或者核心层不看它)的话,点哪一行改的都是当前那台 ——
+// 用户会看到「我关的是 B,结果 A 的合集栏没了」,而两台都没报错。
+//
+// ★ 另一半同样重要:**不认识的服务器键必须拒**。
+// 静默写进表里的话,那一条谁也看不到、谁也删不掉,而它一直在生效。
+func Test首页栏目开关改的是指定那台(t *testing.T) {
+	setup(t)
+	c := config.Current()
+	c.AccountList = []config.Account{
+		{Server: "https://a", UserID: "u", UserName: "甲"},
+		{Server: "https://b", UserID: "u", UserName: "乙"},
+	}
+	zero := 0
+	c.Active = &zero // 当前登录的是 a
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 关掉 **b**(不是当前那台)
+	r := call(t, 501, "prefs.setHomeSettings", map[string]any{
+		"settings": map[string]any{"server": "https://b", "collections_enabled": false},
+	})
+	if !r.OK {
+		t.Fatalf("关掉 b 应当成功,实得 %s %s", r.Code, r.Msg)
+	}
+	p := config.Current().PrefsOf()
+	if !p.CollectionsEnabledFor("https://a") {
+		t.Fatal("关的是 b,a 却被关掉了 —— 送过去的 server 没被采纳,改的是当前登录那台")
+	}
+	if p.CollectionsEnabledFor("https://b") {
+		t.Fatal("b 没被关掉")
+	}
+
+	// 读回来:两台都要在表里,状态各自对
+	g := call(t, 502, "prefs.getHomeSettings", nil)
+	if !g.OK {
+		t.Fatalf("读不回来: %s", g.Msg)
+	}
+	list, _ := g.Data["servers"].([]any)
+	if len(list) != 2 {
+		t.Fatalf("总览该列出 2 台服务器,实得 %d —— 只列当前那台的话,"+
+			"用户得一台台切过去才知道自己设了什么", len(list))
+	}
+	got := map[string]bool{}
+	for _, it := range list {
+		m, _ := it.(map[string]any)
+		en, _ := m["enabled"].(bool)
+		got[m["server"].(string)] = en
+	}
+	if !got["https://a"] || got["https://b"] {
+		t.Fatalf("总览里的状态不对:%v", got)
+	}
+
+	// 不认识的服务器键必须拒,不能静默写进表里
+	if bad := call(t, 503, "prefs.setHomeSettings", map[string]any{
+		"settings": map[string]any{"server": "https://never-added", "collections_enabled": false},
+	}); bad.OK {
+		t.Fatal("不认识的服务器键被静默收下了 —— 那一条谁也看不到、谁也删不掉,而它一直在生效")
+	}
+}

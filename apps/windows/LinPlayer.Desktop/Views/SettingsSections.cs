@@ -80,41 +80,69 @@ public static class SettingsSections
     /// <para>★★ 开着也不保证看得到:服务器上<b>没有</b>合集时那一栏整条不画。
     /// 所以这里的措辞必须是「有就显示」而不是「显示合集栏」——
     /// 后者会让用户在一台没有合集的服务器上打开开关,然后以为功能坏了。</para>
+    ///
+    /// <para>★ <b>每一台服务器一行</b>。一个「按 X 定制」的开关,
+    /// 必须有一处能看到全部 X 的状态 —— 否则用户只能靠一台台切过去才知道自己设了什么。</para>
     /// </summary>
     public static Control Home(CoreClient core, JsonElement h)
     {
         var hint = Hint();
-        var srv = Str(h, "server");
-        var on = new CheckBox
+        var rows = new StackPanel { Spacing = 8 };
+
+        /* ★★ **每一台服务器一行**,不只是当前登录的那台。
+           一个「按 X 定制」的开关,必须有一处能看到全部 X 的状态 ——
+           只给当前那台的话,用户在 A 服关掉、到 B 服看见还在,
+           只能靠一台台切过去才知道自己到底设了什么。 */
+        if (h.TryGetProperty("servers", out var list) && list.ValueKind == JsonValueKind.Array)
         {
-            Content = "显示合集栏(服务器上有合集时)",
-            // ★ 缺字段当**开着**:这是个隐藏栏目的开关,读不到时默认隐藏
-            //   会让用户看到「合集栏没了」而毫无线索。
-            IsChecked = !h.TryGetProperty("collections_enabled", out var v) || v.ValueKind != JsonValueKind.False,
-        };
-        on.IsCheckedChanged += async (_, _) =>
-        {
-            try
+            foreach (var it in list.EnumerateArray())
             {
-                await core.PrefsSetHomeSettings(new
+                var srv = Str(it, "server");
+                var active = it.TryGetProperty("active", out var ac) && ac.ValueKind == JsonValueKind.True;
+                var box = new CheckBox
                 {
-                    settings = new { collections_enabled = on.IsChecked == true },
-                });
-                hint.Text = "已保存,回首页生效。";
+                    // ★ 标出当前登录的那台 —— 一排服务器名里,用户得先认出自己在哪
+                    Content = Str(it, "name") + (active ? "(当前)" : ""),
+                    IsChecked = !it.TryGetProperty("enabled", out var en) || en.ValueKind != JsonValueKind.False,
+                };
+                box.IsCheckedChanged += async (_, _) =>
+                {
+                    try
+                    {
+                        // ★ 明着把 server 送过去。不送就是「改当前登录那台」,
+                        //   而这张表里点的可能是别的服 —— 那会改错人。
+                        await core.PrefsSetHomeSettings(new
+                        {
+                            settings = new { server = srv, collections_enabled = box.IsChecked == true },
+                        });
+                        hint.Text = "已保存,回首页生效。";
+                    }
+                    catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+                };
+                rows.Children.Add(box);
             }
-            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
-        };
+        }
+        if (rows.Children.Count == 0) rows.Children.Add(Note("还没有登录任何服务器。"));
+
+        /* 自检:把这张表打出来(LP_SELFCHECK_HOMESET=1)。
+           ★ 判据是**行数和每行的勾选态**,不是截图 —— 这一组排在设置页很靠下的位置,
+             一屏根本截不到,而「只画了当前那台」和「两台都画了」在截不到的地方
+             长得一模一样。 */
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_HOMESET") == "1")
+        {
+            var desc = rows.Children.OfType<CheckBox>()
+                .Select(b => $"{b.Content}={(b.IsChecked == true ? "开" : "关")}").ToList();
+            Console.WriteLine($"[首页栏目] {desc.Count} 台服务器:{string.Join(" | ", desc)}");
+        }
 
         return Group("首页栏目", new StackPanel
         {
             Spacing = 10,
             Children =
             {
-                // ★ 把作用对象写出来。不写的话用户在 A 服关掉、到 B 服看见还在,
-                //   会当成 bug —— 而那正是「按不同服定制」的本意。
-                Note(srv == "" ? "这个开关按服务器分别记。" : $"这个开关只管当前这台:{srv}"),
-                on,
-                Note("关掉之后连请求都不发。服务器上没有合集时,这一栏本来就不画。"),
+                Note("勾上 = 这台服务器有合集时显示合集栏。没有合集的服务器本来就不画这一栏。"),
+                rows,
+                Note("关掉之后连请求都不发。"),
                 hint,
             },
         });

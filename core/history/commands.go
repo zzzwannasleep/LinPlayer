@@ -28,9 +28,55 @@ func Shared() *Store {
 // SetShared 换掉进程级实例。**只给测试用。**
 func SetShared(s *Store) { store = s }
 
+// markPlayedLocally 用户在界面上手动标了「已看 / 未看」之后,把本地观看记录也改掉。
+//
+// ☠☠ **不改的后果是两条静默的错路**:
+//
+//	· 跨服续播:本地记录还停在旧进度上,换一台服务器接着看会从那个旧位置起播
+//	· 跨服回传:把那个旧进度写回**别人的服务器**
+//
+// 两条都不报错,用户只会觉得「标了没用」。
+//
+// ★ 要先把条目**带 HistoryFields 取回来**:少了 ProviderIds / PresentationUniqueKey / Path,
+//
+//	指纹会静默降级到「剧名+季集号」,记录落到一个和播放时不同的 canonicalKey 上 ——
+//	于是本地存了两条,而续播读的是另一条。
+//
+// ★ 取不到就**只写服务器不写本地**,并且留一条日志。悄悄失败的话,
+//
+//	本地和服务器从此对不上,而没有任何东西说过这件事。
+func markPlayedLocally(ctx context.Context, s *emby.Session, itemID string, played bool) {
+	it, err := emby.NewClient("").ItemForHistory(ctx, s, itemID)
+	if err != nil || it == nil {
+		bus.Logf("warn", "标记已看/未看:本地记录没跟上(取条目失败 item=%s): %v", itemID, err)
+		return
+	}
+	cand := CandidateFromItem(*it)
+	if _, ok := MediaKindFromItemType(cand.Type); !ok {
+		return // 剧 / 季 / 合集这类不落记录,和 Capture 的口径一致
+	}
+	Shared().Capture(CaptureOpts{
+		ScopeKey:     ScopeKey(s.Server, s.UserID),
+		Candidate:    cand,
+		SeriesTmdbID: seriesTmdbOf(ctx, s, cand),
+		Source:       SourceInternal,
+		ForcePlayed:  &played,
+		Force:        true, // 用户的动作,不许被 10 秒节流吃掉
+	})
+}
+
+// seriesTmdbOf 分集要带剧的 TMDB id,否则跨服匹配降级。取不到就算了(返回 nil)。
+func seriesTmdbOf(ctx context.Context, s *emby.Session, c Candidate) *string {
+	if c.SeriesID == nil || *c.SeriesID == "" {
+		return nil
+	}
+	return emby.NewClient("").SeriesTmdbID(ctx, s, *c.SeriesID)
+}
+
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands() {
 	store = Default()
+	emby.OnPlayedChanged = markPlayedLocally
 
 	// watchHistoryList 观看记录列表。
 	//
