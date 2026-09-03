@@ -124,6 +124,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -341,9 +342,25 @@ func prop(name string) string {
 	return s
 }
 
+// propF 读一个数值属性。
+//
+// ☠☠ **NaN / ±Inf 一律折成 0。**
+// mpv 在文件还没装好、或者流不可 seek 的时候会把 duration / time-pos 报成
+// `nan` —— 而 `encoding/json` 序列化 NaN 会**直接报错**,于是
+// `player.status` 那条事件整条发不出去(日志里只有一行
+// 「事件 player.status 序列化失败: json: unsupported value: NaN」,
+// 而 UI 那边只是「状态不更新」,没有任何别的迹象)。
+// 2026-09-03 真机自检里每秒刷一条这个错,而所有功能看起来都正常。
+//
+// ★ 折成 0 而不是 -1:调用方(进度条、时长、倍速)对 0 的处理本来就是
+//
+//	「还不知道,先不画」,而 -1 会被当成一个合法的负数位置。
 func propF(name string) float64 {
 	var f float64
 	_, _ = sscanFloat(prop(name), &f)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0
+	}
 	return f
 }
 

@@ -54,6 +54,37 @@ var noAvatar *bool
 // eps1 第 1 季的集数。验「上千集不卡死」时调大。
 var eps1 *int
 
+/*
+★★ 「这台服务器一个合集都没有」。**没有这个开关的话,合集栏那条
+
+	「没有就整条不画」的规则永远走不到** —— 假服务器只造得出「有 4 个合集」
+	一种形状,而 bug 恰恰藏在另一种形状里。
+*/
+var noBoxset *bool
+
+/*
+★★ 「服务器只肯给转码地址」。用户 2026-09-03 定了不做转码流,
+
+	而这条路上真正会坏的是**后果**:落到转码流上就没有本地字节,
+	预热 / 多线程加载 / 缩略图一起哑掉,还一条错都不报。
+	造得出这个形状,才验得了「就算服务器只给转码地址,我们照样直连、照样有缩略图」。
+*/
+var transcodeOnly *bool
+
+/*
+☠☠ **片长必须和 -clip 那个文件一致**。
+
+	夹具原来给电影写死 7200 秒,而真正吐出去的片子是 1800 秒 ——
+	于是**一切按百分比算的功能都在对着一个假数验**:
+	观看阈值(1200s 到底是 16.7% 还是 66.7%?)、进度条、片头片尾跳过。
+	2026-09-03 就是这么白跑了一轮:阈值设 60% 明明该越线,自检说没越。
+	假服务器可以造假东西,但**同一件事不能造两个互相矛盾的数**。
+*/
+var clipSecs *float64
+
+// clipKBps 视频流限速(KB/s)。0 = 不限。理由见 throttled。
+var clipKBps *int
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
 	clip = flag.String("clip", "", "起播时回放的本地视频文件")
@@ -67,6 +98,10 @@ func main() {
 	   而假服务器只造得出 12 集的话,虚拟化有没有生效**根本量不出来**:
 	   12 张卡不虚拟化也照样流畅。假服务器只能造出你想到的形状,想到了就得造。 */
 	eps1 = flag.Int("eps", 12, "第 1 季的集数(验虚拟化时调大)")
+	noBoxset = flag.Bool("no-boxset", false, "一个合集都没有(验首页合集栏整条不画)")
+	transcodeOnly = flag.Bool("transcode-only", false, "只给 TranscodingUrl(验我们照样不走转码)")
+	clipSecs = flag.Float64("clip-secs", 0, "-clip 那个文件的真实时长(秒)。0 = 用写死的假片长")
+	clipKBps = flag.Int("clip-kbps", 0, "视频流限速 KB/s(0=不限)。环回不限速会让「已缓存/没缓存」这个对比组造不出来")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -251,10 +286,10 @@ func main() {
 			ep["SeriesId"] = "s1"
 			ep["IndexNumber"] = 3
 			ep["ParentIndexNumber"] = 1
-			ep["RunTimeTicks"] = 14000000000
+			ep["RunTimeTicks"] = runtimeTicks(14000000000)
 			ep["UserData"] = map[string]any{"PlaybackPositionTicks": 5000000000}
 			mv := item("mv-1", "某部电影", "Movie")
-			mv["RunTimeTicks"] = 72000000000
+			mv["RunTimeTicks"] = runtimeTicks(72000000000)
 			mv["UserData"] = map[string]any{"PlaybackPositionTicks": 12000000000}
 			writeJSON(w, page(ep, mv))
 		case strings.HasSuffix(p, "/Items/Latest"):
@@ -284,7 +319,7 @@ func main() {
 				e["SeriesId"] = "s1"
 				e["IndexNumber"] = i
 				e["ParentIndexNumber"] = 1
-				e["RunTimeTicks"] = 14000000000
+				e["RunTimeTicks"] = runtimeTicks(14000000000)
 				favs = append(favs, e)
 			}
 			writeJSON(w, page(favs...))
@@ -296,7 +331,11 @@ func main() {
 		     UI 一次没调过(第五次撞上「后端领先前端」)。 */
 		case strings.Contains(p, "/Items") && r.URL.Query().Get("IncludeItemTypes") == "BoxSet":
 			sets := []map[string]any{}
-			for i := 1; i <= 4; i++ {
+			n := 4
+			if *noBoxset {
+				n = 0 // ★ 空表,不是 404 —— 真 Emby 上「没有合集」就是回一个空 Items
+			}
+			for i := 1; i <= n; i++ {
 				b := item(fmt.Sprintf("bs-%d", i), fmt.Sprintf("自检合集 %d", i), "BoxSet")
 				b["ChildCount"] = i * 3
 				sets = append(sets, b)
@@ -318,7 +357,7 @@ func main() {
 					e["SeriesId"] = "s1"
 					e["IndexNumber"] = i
 					e["ParentIndexNumber"] = sea.No
-					e["RunTimeTicks"] = 14000000000
+					e["RunTimeTicks"] = runtimeTicks(14000000000)
 					// 第 1 季前两集已看,第 3 集看了一半 —— 「继续观看 · 第 3 集」
 					// 挑集顺序要有真实数据才验得到。
 					switch {
@@ -403,7 +442,7 @@ func main() {
 				d["ParentIndexNumber"] = 1
 				d["Overview"] = "自检用分集简介。"
 				d["ProductionYear"] = 2023
-				d["RunTimeTicks"] = 14000000000
+				d["RunTimeTicks"] = runtimeTicks(14000000000)
 				d["PremiereDate"] = "2023-04-02T00:00:00.0000000Z"
 				d["UserData"] = map[string]any{"PlaybackPositionTicks": 5000000000}
 				writeJSON(w, d)
@@ -414,7 +453,7 @@ func main() {
 			d["ProductionYear"] = 2024
 			d["Genres"] = []string{"剧情", "科幻"}
 			d["CommunityRating"] = 8.4
-			d["RunTimeTicks"] = 72000000000
+			d["RunTimeTicks"] = runtimeTicks(72000000000)
 			d["OfficialRating"] = "PG-13"
 			d["Taglines"] = []string{"一句自检用的标语"}
 			// ★ 背景图挂在 **BackdropImageTags 数组**里,不在 ImageTags 里。
@@ -500,6 +539,13 @@ func main() {
 				items = append(items, it)
 			}
 			writeJSONRaw(w, map[string]any{"Items": items, "TotalRecordCount": total})
+		/* 标记已看 / 取消已看:POST|DELETE /Users/{uid}/PlayedItems/{id}
+		   ★★ 必须**单独一条 case**,不能靠下面那个 default 兜。
+		     default 对任何路径都回 200 —— 于是「客户端把这条路径拼错了」
+		     和「标记成功了」在日志和返回码上完全一样,自检永远绿。
+		     形状对不上就该 404,那才是真服务器的行为。 */
+		case strings.Contains(p, "/PlayedItems/"):
+			writeJSON(w, map[string]any{"Played": r.Method != http.MethodDelete})
 		default:
 			// /Users/{id} —— 管理员位
 			writeJSON(w, map[string]any{"Id": "u1", "Name": "自检用户",
@@ -555,7 +601,7 @@ func main() {
 					map[string]any{"Type": "Video", "Codec": codec, "Height": h, "Index": 0,
 						"VideoRangeType": map[bool]string{true: "HDR10", false: "SDR"}[h > 1080]},
 				}, extra...)
-				return map[string]any{
+				ms := map[string]any{
 					"Id": msid, "Name": name, "Container": "mkv",
 					"Size": size, "Bitrate": bitrate,
 					"SupportsDirectStream": true,
@@ -563,6 +609,16 @@ func main() {
 						"/stream.mp4?static=true&mediaSourceId=" + msid,
 					"MediaStreams": streams,
 				}
+				if *transcodeOnly {
+					// ★ 连 SupportsDirectStream 一起撤掉 —— 半吊子的形状会让
+					//   「我们到底为什么直连」这件事说不清:是真的不理转码,
+					//   还是碰巧 DirectStreamUrl 还在?
+					delete(ms, "DirectStreamUrl")
+					ms["SupportsDirectStream"] = false
+					ms["TranscodingUrl"] = "/videos/" + id +
+						"/master.m3u8?VideoCodec=h264&AudioCodec=aac&mediaSourceId=" + msid
+				}
+				return ms
 			}
 			writeJSON(w, map[string]any{
 				"PlaySessionId": "ps-selfcheck",
@@ -655,7 +711,7 @@ func main() {
 		ep["SeriesName"] = "某部剧"
 		ep["SeriesId"] = "s1"
 		ep["IndexNumber"] = 4
-		ep["RunTimeTicks"] = 14000000000
+		ep["RunTimeTicks"] = runtimeTicks(14000000000)
 		writeJSON(w, page(ep))
 	})
 
@@ -666,7 +722,7 @@ func main() {
 			http.Error(w, "自检没带 -clip,没有可播的文件", http.StatusNotFound)
 			return
 		}
-		http.ServeFile(w, r, *clip)
+		http.ServeFile(throttled(w), r, *clip)
 	})
 
 	// 播放上报。★ 三件套都得回 2xx:回错的话核心层会当成上报失败,
@@ -691,6 +747,45 @@ func main() {
 }
 
 // bootAt 进程启动时刻。日志里的毫秒数以它为准。
+// runtimeTicks 一个条目该报多长。给了 -clip-secs 就一律用它 ——
+// 界面上所有百分比都得和真正放出来的那个文件对得上。
+/* throttled 给视频流限速。
+
+   ☠☠ **不限速的假服务器是一台无限快的服务器**,而那会让一整类断言变成假的:
+   预取代理在环回上几秒钟就能把整片拉下来 —— 于是「已缓存 / 没缓存」这个
+   对比组根本造不出来,「取缩略图有没有替用户下载」也永远量不出增量
+   (本来就已经 100% 了)。2026-09-03 当场撞上:同一份代码,
+   自检等 12 秒是绿的、等 22 秒变红,而代码一行没改。
+
+   ★ 限的是**吐字节的速度**,不是延迟 —— 延迟慢的服务器和带宽小的服务器
+     暴露的是两类 bug,这里要的是后者。 */
+func throttled(w http.ResponseWriter) http.ResponseWriter {
+	if clipKBps == nil || *clipKBps <= 0 {
+		return w
+	}
+	return &slowWriter{ResponseWriter: w, bps: *clipKBps * 1024}
+}
+
+type slowWriter struct {
+	http.ResponseWriter
+	bps int
+}
+
+func (s *slowWriter) Write(b []byte) (int, error) {
+	n, err := s.ResponseWriter.Write(b)
+	if n > 0 {
+		time.Sleep(time.Duration(float64(n) / float64(s.bps) * float64(time.Second)))
+	}
+	return n, err
+}
+
+func runtimeTicks(fallback int64) int64 {
+	if clipSecs != nil && *clipSecs > 0 {
+		return int64(*clipSecs * 1e7)
+	}
+	return fallback
+}
+
 var bootAt = time.Now()
 
 // logged 请求日志。

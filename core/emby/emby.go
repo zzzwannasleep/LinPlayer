@@ -113,9 +113,12 @@ type rawMediaSource struct {
 	Bitrate      *int64  `json:"Bitrate"`
 	RunTimeTicks *int64  `json:"RunTimeTicks"`
 	// 取流那条路要的两条地址。DirectStreamUrl 常常是**相对路径**,见 playback.go 的长注释。
-	DirectStreamURL *string          `json:"DirectStreamUrl"`
-	TranscodingURL  *string          `json:"TranscodingUrl"`
-	MediaStreams    []rawMediaStream `json:"MediaStreams"`
+	DirectStreamURL *string `json:"DirectStreamUrl"`
+	// TranscodingURL 服务器给的转码地址。**我们从不用它**
+	// (见 playback.go 的 ResolveStream:不做转码流)。留着只为了诊断时看得到
+	// 「服务器到底想不想转码」。
+	TranscodingURL *string          `json:"TranscodingUrl"`
+	MediaStreams   []rawMediaStream `json:"MediaStreams"`
 }
 
 type rawMediaStream struct {
@@ -279,7 +282,7 @@ func NewClient(version string) *Client {
 		// ★ Transport 按 host 决定要不要放行自签名证书(见 net/tlspolicy)。
 		//   用默认 Transport 的话,用户勾了「允许自签名」也连不上自建服务器 ——
 		//   而报出来的是一句看不懂的 x509 英文。
-		HTTP: &http.Client{Timeout: 60 * time.Second, Transport: tlspolicy.Transport()},
+		HTTP:    &http.Client{Timeout: 60 * time.Second, Transport: tlspolicy.Transport()},
 		UA:      "LinPlayer/" + version,
 		Version: version,
 	}

@@ -239,7 +239,53 @@ func newDiskCache(total, cacheBytes int64, threads int) (*diskCache, error) {
 	return &diskCache{f: f, slots: map[int64]int64{}, ring: want, path: path, total: total}, nil
 }
 
-func (d *diskCache) off(c int64) int64 { return (c % d.ring) * ChunkSize }
+/*
+slotOf 分段号 → 槽位。
+
+		☠☠ **文件头和文件尾这两段是钉住的,永远不参与轮换。**
+
+		不钉住的后果只有一种形态,而且完全静默:环转一圈之后文件头被覆盖,
+		于是**任何要重新打开这条流的人都打不开了**。撞上的是进度条缩略图 ——
+		它用第二个 mpv 从只读缓存端点打开同一条流,而 mp4 的 moov 原子常常在
+		**文件末尾**(没跑过 faststart 的片子),mkv 的索引也在末尾。
+		头和尾少一个,`avformat_open_input` 就直接失败,
+		表现是「播了一会儿之后缩略图就没了」,一条错都不报。
+
+	   ★ 尾巴钉**两段**不是一段:moov 的大小跟帧数走,两小时的片子常有 5~10MB,
+	     只钉最后 4MB 的话大 moov 会被腰斩,而症状和完全没钉一模一样。
+	   ★ 代价是三个槽位(12MB)。相比之下,原来那个绕法是让缩略图实例
+	     **从起播就一直开着别关**,拿一个常驻解码器换这三个槽 —— 那贵得多。
+	   ★ 槽位不够五个时不钉:那种尺寸下环本来就装不下几段,再扣三个只会更糟。
+*/
+func (d *diskCache) slotOf(c int64) int64 {
+	if d.ring < 5 || d.total <= 0 {
+		return c % d.ring
+	}
+	last := (d.total+ChunkSize-1)/ChunkSize - 1
+	switch c {
+	case 0:
+		return d.ring - 3
+	case last - 1:
+		return d.ring - 2
+	case last:
+		return d.ring - 1
+	}
+	return c % (d.ring - 3)
+}
+
+// pinned 这一段是不是钉住的(文件头 / 文件尾那两段)。见 slotOf。
+//
+// ★ 供给端要用它来决定「残段要不要落盘」:钉住的这几段是**别人重新打开这条流
+// 唯一的依据**,拿不到就整个打不开,所以它们哪怕只被读了一小截也要整段存下来。
+func (d *diskCache) pinned(c int64) bool {
+	if d.ring < 5 || d.total <= 0 {
+		return false
+	}
+	last := (d.total+ChunkSize-1)/ChunkSize - 1
+	return c == 0 || c == last || c == last-1
+}
+
+func (d *diskCache) off(c int64) int64 { return d.slotOf(c) * ChunkSize }
 
 // has 该段是否就绪(槽位没被别的段覆盖掉)。
 //
@@ -250,7 +296,7 @@ func (d *diskCache) off(c int64) int64 { return (c % d.ring) * ChunkSize }
 func (d *diskCache) has(c int64) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	v, ok := d.slots[c%d.ring]
+	v, ok := d.slots[d.slotOf(c)]
 	return ok && v == c
 }
 
@@ -267,7 +313,7 @@ func (d *diskCache) has(c int64) bool {
 func (d *diskCache) put(c int64, data []byte) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	slot := c % d.ring
+	slot := d.slotOf(c)
 	delete(d.slots, slot) // 写到一半被读走 = 脏数据,先失效
 	if _, err := d.f.WriteAt(data, d.off(c)); err != nil {
 		return false
@@ -284,7 +330,7 @@ func (d *diskCache) put(c int64, data []byte) bool {
 func (d *diskCache) get(c int64, length int) []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if v, ok := d.slots[c%d.ring]; !ok || v != c {
+	if v, ok := d.slots[d.slotOf(c)]; !ok || v != c {
 		return nil // 已被挤掉
 	}
 	buf := make([]byte, length)

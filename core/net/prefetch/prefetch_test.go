@@ -301,6 +301,9 @@ func TestC26_环形槽位的先失效再写(t *testing.T) {
 		t.Fatal("空槽位不该把 chunk 0 判成就绪 —— 会读回一整块稀疏零")
 	}
 
+	/* ★ 这里的环只有 4 个槽,**在钉头尾那条规则的门槛(5 槽)以下** ——
+	   走的是纯 `c % ring` 那条路,于是 chunk 0 和 chunk 4 仍然同槽。
+	   头尾钉住之后的行为由 TestC27_头尾两段永远不被挤掉 单独验。 */
 	seg := bodyAt(0, int(ChunkSize))
 	if !d.put(0, seg) {
 		t.Fatal("写不进去")
@@ -308,7 +311,6 @@ func TestC26_环形槽位的先失效再写(t *testing.T) {
 	if !d.has(0) || d.get(0, int(ChunkSize)) == nil {
 		t.Fatal("写完该命中")
 	}
-	// 同槽的另一段覆盖进来(ring=4,chunk 4 与 chunk 0 同槽)
 	if !d.put(4, bodyAt(4*ChunkSize, int(ChunkSize))) {
 		t.Fatal("写不进去")
 	}
@@ -602,7 +604,8 @@ func TestC26_只读缓存端点不碰上游(t *testing.T) {
 // 判据:**CachedSpans 报的区间要和真实缓存对得上**(UI 拿它画「这段有缩略图」)。
 //
 // ★ 报多了比报少了糟:用户划过去看见「有」却出不来图,那是坏了;
-//   报少了只是保守。所以断言卡的是**上界**必须贴着真实缓存。
+//
+//	报少了只是保守。所以断言卡的是**上界**必须贴着真实缓存。
 func TestC26_缓存区间报得准(t *testing.T) {
 	up := newUpstream(t)
 	h := startProxy(t, up, 2, testTotal)

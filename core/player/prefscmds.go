@@ -139,7 +139,8 @@ func registerPrefsCommands(version string) {
 			"hwdec": p.Hwdec, "default_speed": p.DefaultSpeed,
 			"skip_intro": p.SkipIntro, "skip_outro": p.SkipOutro,
 			"preview_thumbs": p.PreviewThumbs, "dolby_auto_sw": p.DolbyAutoSW,
-			"external_player": p.ExternalPlayer,
+			"external_player":           p.ExternalPlayer,
+			"watched_threshold_percent": p.WatchedThresholdPercent,
 		}, nil
 	})
 	bus.Register("player.setPlaybackPrefs", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -185,6 +186,18 @@ func registerPrefsCommands(version string) {
 		}
 		if v, ok := s["dolby_auto_sw"].(bool); ok {
 			p.DolbyAutoSW = v
+		}
+		/* ★ 观看阈值。**拒而不是夹** —— 静默夹紧的话用户设 10% 看到的是
+		   「已保存」,实际生效 50%。
+		   ★ 下限 50 不是随手定的:再低就不是「看完」,看一半退出会被标已看完,
+		     而那等于**把续播位置丢掉**(下次从头放)。 */
+		if v, ok := s["watched_threshold_percent"].(float64); ok {
+			n := int64(v)
+			if n < config.WatchedMinPercent || n > 100 {
+				return nil, bus.NewErr(bus.EInvalid,
+					"观看阈值只支持 %d~100%%,实得 %d", config.WatchedMinPercent, n)
+			}
+			p.WatchedThresholdPercent = n
 		}
 		return p, savePrefs(c, p)
 	})

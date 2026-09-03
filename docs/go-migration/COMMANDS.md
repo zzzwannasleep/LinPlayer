@@ -45,7 +45,7 @@
 | 下载 | `download.*` | 8 | 7 |
 | 同步(Trakt / Bangumi / 日历) | `sync.*` | 15 | 15 |
 | 字幕翻译 / Whisper(桌面独占) | `translate.*` | 9 | 0 |
-| 设置与偏好 | `prefs.*` | 25 | 19 |
+| 设置与偏好 | `prefs.*` | 27 | 19 |
 | 系统 | `system.*` | 13 | 6 |
 | **合计** | | **271** | **237** |
 
@@ -333,7 +333,7 @@
 | [x] | `translate.whisperDownloadFfmpeg` | `whisper_download_ffmpeg` | `—` | `Result<String, String>` | ❌ |
 | [x] | `translate.whisperModels` | `whisper_models` | `—` | `Vec<WhisperModelInfo>` | ❌ |
 
-### 设置与偏好 · `prefs.*` — 25 条
+### 设置与偏好 · `prefs.*` — 27 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
@@ -345,6 +345,7 @@
 | [x] | `prefs.configExportQr` | `config_export_qr` | `—` | `String` | ✅ |
 | [x] | `prefs.configImportQr` | `config_import_qr` | `payload: String` | `Result<usize, String>` | ✅ |
 | [x] | `prefs.getPrefetchSettings` | `get_prefetch_settings` | `—` | `PrefetchSettings` | ✅ |
+| [x] | `prefs.getHomeSettings` | `—` | `—` | `HomeSettings` | ❌ |
 | [x] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
 | [x] | `prefs.getPreloadSettings` | `get_preload_settings` | `—` | `PreloadSettings` | ❌ |
 | [x] | `prefs.getProxy` | `get_proxy` | `—` | `linplayer_core::ProxyConfig` | ✅ |
@@ -356,6 +357,7 @@
 | [x] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setPrefetchSettings` | `set_prefetch_settings` | `settings: PrefetchSettings` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setHomeSettings` | `—` | `settings: HomeSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |

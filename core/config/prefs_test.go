@@ -159,3 +159,69 @@ func TestSkipIntroOutro是两个开关(t *testing.T) {
 		t.Fatalf("只开片头时片尾必须还是关的: intro=%v outro=%v", p.SkipIntro, p.SkipOutro)
 	}
 }
+
+// 老配置里**没有** watched_threshold_percent 这个键时,解出来必须是 90 而不是 0。
+//
+// ☠☠ 0 的含义是「放第一帧就算看完」—— 每一集刚起播就被标已看完,
+// 续播位置全部作废,而且配置文件看上去一点问题都没有。
+// 这正是本文件头写的那类坑:Go 的缺字段是零值,不是 Rust 的 serde default。
+func Test老配置没有观看阈值时回默认(t *testing.T) {
+	// 这一条守的是「ParsePrefs 从 DefaultPrefs 起手」那条规矩(见 prefs.go 文件头)
+	p := ParsePrefs([]byte(`{"sub_enabled":true,"hwdec":"auto-safe"}`))
+	if p.WatchedThresholdPercent != 90 {
+		t.Fatalf("缺字段时观看阈值应当是 90,实得 %d —— 0 等于「起播即看完」",
+			p.WatchedThresholdPercent)
+	}
+	/* 这一条守的是 Clamped():**越界值也要回默认**。
+	   0 或 5 存进配置(手改 / 老版本 / 导入别人的配置)的含义是
+	   「放几秒就算看完」—— 每一集刚起播就被标已看完,续播位置全部作废,
+	   而配置文件看上去一点问题都没有。 */
+	if got := ParsePrefs([]byte(`{"watched_threshold_percent":5}`)).WatchedThresholdPercent; got != 90 {
+		t.Fatalf("低于下限的阈值应当回 90,实得 %d", got)
+	}
+	if got := ParsePrefs([]byte(`{"watched_threshold_percent":85}`)).WatchedThresholdPercent; got != 85 {
+		t.Fatalf("合法值应当原样留着,实得 %d", got)
+	}
+}
+
+// WatchedAt:算不算看完。
+//
+// ★ 片长未知(0)时**必须**返回 false —— 猜一个的下场是「刚起播就标已看完」。
+func Test看完判定(t *testing.T) {
+	p := DefaultPrefs() // 90%
+	for _, c := range []struct {
+		pos, runtime float64
+		want         bool
+		why          string
+	}{
+		{0, 1000, false, "还没开始"},
+		{100, 1000, false, "才 10%"},
+		{899, 1000, false, "89.9% 差一点"},
+		{900, 1000, true, "刚好 90%,含等号"},
+		{1000, 1000, true, "放到结尾"},
+		{500, 0, false, "片长未知就不许判 —— 猜一个等于起播即看完"},
+		{0, 0, false, "两个都不知道"},
+	} {
+		if got := p.WatchedAt(c.pos, c.runtime); got != c.want {
+			t.Errorf("WatchedAt(%.0f/%.0f)=%v,想要 %v(%s)", c.pos, c.runtime, got, c.want, c.why)
+		}
+	}
+}
+
+// 合集栏是**黑名单**:表里没有 = 显示。
+//
+// ★ 反过来(白名单)的话,新加的服务器默认不显示合集栏,而用户完全不知道
+// 有这么个开关 —— 他只会以为「这台服没有合集」。
+func Test合集栏默认显示(t *testing.T) {
+	p := DefaultPrefs()
+	if !p.CollectionsEnabledFor("https://never-seen") {
+		t.Fatal("没在表里的服务器应当显示合集栏 —— 存的是黑名单不是白名单")
+	}
+	p.HideCollectionServers = []string{"https://a"}
+	if p.CollectionsEnabledFor("https://a") {
+		t.Fatal("表里记着的服务器应当不显示")
+	}
+	if !p.CollectionsEnabledFor("https://b") {
+		t.Fatal("别的服务器不该被牵连 —— 这个开关的粒度就是服务器")
+	}
+}

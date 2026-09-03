@@ -96,8 +96,19 @@ func (s *stream) worker(ctx context.Context) {
 		s.inFlight[c] = true
 		s.mu.Unlock()
 
-		// 首段若不对齐,只拉播放器真正要的那截(残段),挂在本连接上不进共享登记处
-		partial := c == s.firstChunk && s.headWithin > 0
+		/* 首段若不对齐,只拉播放器真正要的那截(残段),挂在本连接上不进共享登记处。
+
+		   ☠☠ **但钉住的那几段例外 —— 它们必须整段拉、必须落盘。**
+
+		   播放器打开一个 moov 在末尾的 mp4 时,发的正是
+		   `Range: bytes=<文件尾附近>-` —— 从块中间开始,于是走这条残段路径,
+		   于是**索引那一段永远进不了环形缓存**。后果:任何人想重新打开这条流
+		   (进度条缩略图就是)都会失败,而现象只有一句「打不开」。
+		   2026-09-03 为此查了四轮:头明明缓存着,spans 也报着 75%,就是开不了。
+
+		   ★ 代价是这一次读要多拉不到 4MB,而且只发生在文件头/尾那两三段上 ——
+		     换掉的是「这个功能在半数片子上根本不工作」。 */
+		partial := c == s.firstChunk && s.headWithin > 0 && !s.o.disk.pinned(c)
 		var l *live
 		registered := false
 		if partial {

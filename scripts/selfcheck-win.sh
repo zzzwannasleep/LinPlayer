@@ -14,6 +14,14 @@
 #                                                              装一个真插件跑起来
 #   LP_SHADER=ak_sharp LP_DRILL=1 bash scripts/selfcheck-win.sh quality player <片子>
 #                                                              画质档位面板(真选下拉项)
+#   LP_HOME=1 bash scripts/selfcheck-win.sh home                首页合集栏(有合集)
+#   LP_HOME=1 LP_NOBOXSET=1 bash scripts/selfcheck-win.sh home-nobox
+#                                                              没有合集 -> 整条不画
+#   LP_WATCHED=60 LP_THUMB=1 bash scripts/selfcheck-win.sh w play:mv-1 <片子>
+#                                                              看完阈值:续播 1200s/1800s=66.7%
+#                                                              越线 -> 必须从头放
+#   LP_TRANSCODE=1 LP_THUMB=1 bash scripts/selfcheck-win.sh tc play:mv-1 <片子>
+#                                                              服务器只给转码地址 -> 我们照样直连
 #   LP_CATDETAIL=1 bash scripts/selfcheck-win.sh catalog #       "plugincatalog:$PWD/scripts/fixtures/selfcheck-plugin"
 #                                                              影视目录 + 详情盖层
 #     ↑ 这条走的是**最长的一条链**:JS 引擎 → 贡献点 → 源分派表 →
@@ -36,6 +44,24 @@ PORT=18096
 
 source "$ROOT/scripts/env.sh"
 
+# ☠☠ 把 -clip 那个文件的**真实时长**告诉假服务器。
+#   不告诉的话它报的是写死的假片长(电影 7200 秒),而真正放出来的是 1800 秒 ——
+#   于是一切按百分比算的功能都在对着一个假数验:观看阈值、进度条、片头片尾跳过。
+#   为此白跑过一轮:阈值设 60% 明明该越线,自检说没越。
+# ☠☠ 环形缓存钉在**下限 64MB**,而自检片是 83MB —— 于是它**永远装不下整片**。
+#   这不是抠内存,是为了让「已缓存 / 没缓存」这个对比组**一直存在**:
+#   缓存装得下整片的话,跑够久就全都在本地了,缩略图那几条断言当场失去对照
+#   (2026-09-03 实测:同一份代码等 12 秒绿、等 22 秒红,代码一行没改)。
+#   真实比例也是这样的 —— 512MB 的环 vs 一部 4GB 的电影。LP_RING=字节 覆盖。
+#
+# ★ 顺带给视频流限速(默认 2MB/s)。环回是无限快的 ——
+#   不限速的话预取代理几秒就把整片拉完,「已缓存 / 没缓存」这个对比组
+#   根本造不出来,而缩略图那几条断言全靠它。LP_KBPS=0 关掉。
+CLIPSECS=""
+if [ -n "$CLIP" ] && command -v ffprobe >/dev/null 2>&1; then
+  CLIPSECS="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$CLIP" 2>/dev/null || true)"
+fi
+
 # ★ 默认开 gzip:**真 Emby 默认就是压的**。不压的假服务器曾让
 #   「手动设 Accept-Encoding 导致 Go 不自动解压」这个洞本地全绿。
 GZ="-gzip"; [ "${LP_NOGZIP:-}" = "1" ] && GZ=""
@@ -45,7 +71,13 @@ bash "$ROOT/scripts/build-core.sh" "$BIN" >/dev/null
 echo "   lpcore.dll $(stat -c%s "$BIN/lpcore.dll") 字节"
 
 echo "== 2/5 编壳 =="
-( cd "$APP" && dotnet build -c "$CONF" -v q --nologo >/dev/null )
+# ☠ **编不过就地停**。2026-09-03 栽过一次:壳编译失败但脚本继续往下跑,
+#   于是起的是**上一次**编出来的 exe —— 自检全绿,而改的那行代码根本没进去。
+#   `set -e` 管得住这一句,但报错被 >/dev/null 吞了,只剩一个没有上下文的退出。
+if ! ( cd "$APP" && dotnet build -c "$CONF" -v q --nologo ); then
+  echo "!! 壳编译失败 —— 停在这里。再往下跑的话起的是上一次那个 exe,自检结果不算数。" >&2
+  exit 1
+fi
 
 echo "== 3/5 起假 Emby =="
 # ★ 先杀干净。两个 LinPlayer 一起跑的时候截图会拍到上一个(旧界面),
@@ -53,7 +85,7 @@ echo "== 3/5 起假 Emby =="
 powershell -NoProfile -Command "Get-Process LinPlayer,fakeemby -EA SilentlyContinue | Stop-Process -Force" || true
 go build -o "$ROOT/build/fakeemby.exe" ./core/cmd/fakeemby 2>/dev/null || \
   ( cd "$ROOT/core" && go build -o "$ROOT/build/fakeemby.exe" ./cmd/fakeemby )
-"$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" -clip "$CLIP" $GZ ${LP_NOAVATAR:+-no-avatar} ${LP_EPS:+-eps $LP_EPS} > "$ROOT/build/fakeemby.log" 2>&1 &
+"$ROOT/build/fakeemby.exe" -addr "127.0.0.1:$PORT" -clip "$CLIP" $GZ ${LP_NOAVATAR:+-no-avatar} ${LP_EPS:+-eps $LP_EPS} ${LP_NOBOXSET:+-no-boxset} ${LP_TRANSCODE:+-transcode-only} ${CLIPSECS:+-clip-secs $CLIPSECS} -clip-kbps "${LP_KBPS:-2048}" > "$ROOT/build/fakeemby.log" 2>&1 &
 FAKE=$!
 trap 'kill $FAKE 2>/dev/null || true' EXIT
 # ★★ 等它起来。判据必须是 **curl 的退出码**,而且要能读懂 gzip:
@@ -132,7 +164,12 @@ cat > "$BIN/userdata/config.json" <<JSON
   "active": 0,
   "theme": "dark",
   "companion_enabled": true,
-  "plugin_official_enabled": true
+  "plugin_official_enabled": true,
+  "prefs": {
+    "watched_threshold_percent": ${LP_WATCHED:-90},
+    "prefetch_cache_bytes": ${LP_RING:-67108864},
+    "hide_collection_servers": [${LP_HIDEBOX:+\"http://127.0.0.1:$PORT\"}]
+  }
 }
 JSON
 fi
@@ -178,7 +215,7 @@ export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 # ★ 不指过去的话,市场页在没网的机器上只验得到「拉取失败」那一半 ——
 #   而**有插件时长什么样**(第三方徽章、跳过数提示、版本取最大)才是会出 bug 的那半。
 export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
-LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_EPISODE="${LP_EP:-}" LP_SELFCHECK_COLLAPSE="${LP_COLLAPSE:-}" LP_SELFCHECK_FILL="${LP_FILL:-}" LP_SELFCHECK_SIDEBAR="${LP_SIDEBAR:-}" LP_SELFCHECK_SRVMENU="${LP_SRVMENU:-}" LP_SELFCHECK_RAIL="${LP_RAIL:-}" LP_SELFCHECK_CHROME="${LP_CHROME:-}" LP_SELFCHECK_OSDFADE="${LP_OSDFADE:-}" LP_SELFCHECK_RESUME="${LP_RESUME:-}" LP_SELFCHECK_RECLICK="${LP_RECLICK:-}" LP_SELFCHECK_SRVICON="${LP_SRVICON:-}" LP_SELFCHECK_THUMB="${LP_THUMB:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_CORELOG="${LP_CORELOG:-}" LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_EPISODE="${LP_EP:-}" LP_SELFCHECK_COLLAPSE="${LP_COLLAPSE:-}" LP_SELFCHECK_FILL="${LP_FILL:-}" LP_SELFCHECK_SIDEBAR="${LP_SIDEBAR:-}" LP_SELFCHECK_SRVMENU="${LP_SRVMENU:-}" LP_SELFCHECK_RAIL="${LP_RAIL:-}" LP_SELFCHECK_CHROME="${LP_CHROME:-}" LP_SELFCHECK_OSDFADE="${LP_OSDFADE:-}" LP_SELFCHECK_RESUME="${LP_RESUME:-}" LP_SELFCHECK_RECLICK="${LP_RECLICK:-}" LP_SELFCHECK_SRVICON="${LP_SRVICON:-}" LP_SELFCHECK_THUMB="${LP_THUMB:-}" LP_SELFCHECK_HOME="${LP_HOME:-}" LP_SELFCHECK_WATCHED="${LP_WATCHED:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 # LP_SHADER=all 要把 28 档挨个挂一遍(每档要等真渲染一帧才编译),得多给点时间
 # LP_WAIT=秒 覆盖等待时长(滚动扫描这类要跑几秒的自检用)
@@ -192,6 +229,26 @@ powershell -NoProfile -Command "
   \$p = Get-Process LinPlayer -EA SilentlyContinue
   if (\$p) { \$null = \$p.CloseMainWindow(); if (-not \$p.WaitForExit(8000)) { \$p.Kill(); Write-Output '!! 8 秒没退干净,只能 kill' } }
 " || true
+
+# ☠☠ **播放上报三件套**只在服务器那边看得见。
+#   缺哪一件都是「看一半退出续播不落地」,而客户端一切正常:
+#   Playing(起播) / Progress(播放中,原来**一次都没发过**) / Stopped(停播)。
+if [ -n "$CLIP" ]; then
+  for ep in Playing Playing/Progress Playing/Stopped; do
+    n="$(grep -c "POST /Sessions/$ep " "$ROOT/build/fakeemby.log" || true)"
+    if [ "${n:-0}" -gt 0 ]; then echo "[播放上报] ✓ $ep × $n"
+    else echo "[播放上报] ✗ $ep 一次都没收到 —— 这一件缺了就是「看一半退出续播不落地」"; fi
+  done
+fi
+
+# ★ 「标记已观看」这一半只在服务器那边看得见 —— 客户端日志里没有它。
+if [ -n "${LP_WATCHED:-}" ]; then
+  if grep -q "PlayedItems" "$ROOT/build/fakeemby.log"; then
+    echo "[观看阈值] ✓ 服务器收到了标记已观看(PlayedItems)"
+  else
+    echo "[观看阈值] ✗ 服务器一次 PlayedItems 都没收到 —— 阈值只管了续播,没管标记"
+  fi
+fi
 
 echo
 echo "假 Emby 收到的请求:"

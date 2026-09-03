@@ -14,7 +14,22 @@ package player
 //	③ 从我们自己渲染过的帧里留一份(上一版就是这么做的):只有**放过的**位置有图,
 //	   而用户要的是「已缓存的进度」—— 缓存的是**前面还没放到**的那一段。
 //
-// 所以起第二个实例,`vo=null` 无窗口解码。实测单张 9~12ms(320x180 JPEG 约 7.8KB)。
+// 所以起第二个实例,`vo=null` 无窗口解码。实测单张 9~12ms。
+//
+// ## 为什么不另外带一个 FFmpeg
+//
+// 用户 2026-09-03 提过「FFMPEG 实时出图就行了,搭配 FFmpeg.Skia」。查过之后没走那条路,
+// 三个数摆在这儿(调研出处见 docs/lessons/ui-desktop.md「缩略图为什么不另带 FFmpeg」):
+//
+//	· NuGet 上**没有** FFmpeg.Skia 这个包。最接近的几个(FFMpegCore /
+//	  FFMediaToolkit / Xabe.FFmpeg)本身都不含解码器,要另配原生 FFmpeg dll;
+//	· 那套 dll(avcodec/avformat/avutil/swscale/swresample)**20~30MB**;
+//	  换成 ffmpeg.exe 静态构建是 100~160MB。包现在总共才 99.7MB;
+//	· 起进程跑一次 `ffmpeg -ss … -frames:v 1` 是**百毫秒量级**,
+//	  而这条路实测 9~12ms —— 差一个数量级,而缩略图是**跟着鼠标走**的。
+//
+// 关键在于:`libmpv-2.dll` 里**本来就是 FFmpeg**(它静态链了 avcodec/avformat)。
+// 所以这条路并不是「不用 FFmpeg」,而是**用已经在包里的那一份**,一个字节不多带。
 //
 // ## 它绝不碰网络
 //
@@ -23,12 +38,19 @@ package player
 // 是**传输层执行的事实**,不是这一层的一句 if —— 这里连判断都不需要写,
 // 取不到数就是取不到图。
 //
-// ## 为什么要提前把文件打开
+// ## 实例是**用到才开**的
 //
-// 环形缓存是**环**:512MB 上限、4MB 一段 = 128 个槽,放到 20 分钟左右文件头那几段
-// 就被覆盖了。等用户划进度条时才打开文件,ffmpeg 读不到头(和 MKV 末尾的索引),
-// 这个功能会在播了一会儿之后**静默失效**。所以起播后主动开一次并**一直开着** ——
-// 头解析完就在内存里了,之后只要目标那几段在盘上就够。
+// 上一版是起播 4 秒后就把它开起来并一直开着,理由是环形缓存会把文件头挤掉 ——
+// 环转一圈之后 `avformat_open_input` 就打不开这条流了,功能**静默失效**。
+// 那是拿一个常驻解码器去绕一个缓存 bug。
+//
+// 现在环形缓存自己把**文件头和文件尾**钉住了(见 core/net/prefetch/cache.go
+// 的 slotOf),两段永不轮换,所以任何时候都开得开。于是这里改成
+// **第一次要缩略图时才创建,停播就销毁** —— 用户不碰进度条就一个实例都没有。
+//
+// ★ 尾巴那一段和头一样重要:mp4 的 moov 原子常在**文件末尾**(没跑过 faststart 的片子),
+//   mkv 的索引也在末尾。少了它照样打不开 —— 2026-09-03 自检当场撞上,
+//   现象是「已缓存的位置也取不到图」,而核心层只说一句「打不开」。
 
 /*
 #cgo LDFLAGS: -L${SRCDIR}/../../crates/mpv/libmpv -lmpv
@@ -63,9 +85,14 @@ import (
 	"linplayer/core/paths"
 )
 
-// 缩略图规格。320 宽是「够清楚 + 一张不到 8KB」的折中;高度让 mpv 按比例算,
-// 写死高度会把 2.35:1 的片子压变形。
-const thumbWidth = 320
+// 缩略图规格。**140 宽**是用户 2026-09-03 点的名(「140x80 就够大了 占用会更小」)。
+//
+// 高度让 mpv 按比例算(`-2`),**不写死 80**:写死的话 2.35:1 的片子会被压变形,
+// 而 4:3 的老片会被拉扁 —— 气泡里那张图是给人看构图的,比例错了就没用了。
+//
+// 一张的代价(实测见 docs/lessons/ui-desktop.md):JPEG 约 2KB,
+// 解成 BGRA 约 45KB —— 整条时间轴 300 格全缓存下来也就 13MB。
+const thumbWidth = 140
 
 // thumber 缩略图实例。**全进程一个**,请求靠 mu 串行 —— 单张 10ms,排队排不出问题,
 // 而两个请求同时进一个 mpv 句柄是未定义行为。
@@ -99,7 +126,7 @@ func (t *thumber) ensure(src string) error {
 			{"sub-auto", "no"},        // 别去扫同目录的字幕文件
 			{"audio-file-auto", "no"}, // 同上
 			{"vd-lavc-fast", "yes"},
-			{"vd-lavc-skiploopfilter", "all"}, // 缩到 320 宽,去环滤波看不出来
+			{"vd-lavc-skiploopfilter", "all"}, // 缩到 140 宽,去环滤波一个像素都看不出来
 			{"vd-lavc-threads", "2"},
 			{"vf", "scale=" + strconv.Itoa(thumbWidth) + ":-2"},
 			{"screenshot-format", "jpg"},
@@ -240,23 +267,6 @@ func (t *thumber) close() {
 		t.h = nil
 	}
 	t.src = ""
-}
-
-// warmThumber 起播后把文件先打开(理由见文件头「为什么要提前把文件打开」)。
-//
-// ★ 延迟几秒:起播那一刻文件头刚被正片这一路拉进环形缓存,早于它去开等于开不到。
-func warmThumber() {
-	time.AfterFunc(4*time.Second, func() {
-		src, _, _ := localSource()
-		if src == "" {
-			return
-		}
-		thumbs.mu.Lock()
-		defer thumbs.mu.Unlock()
-		if err := thumbs.ensure(src); err != nil {
-			bus.Logf("info", "缩略图实例没开成(不影响播放): %v", err)
-		}
-	})
 }
 
 // inCache 这个时间点的字节在不在本地。

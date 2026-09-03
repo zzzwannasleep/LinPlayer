@@ -637,6 +637,7 @@ public sealed class PlayerPage : UserControl
         if (!string.IsNullOrEmpty(lvl)) _ = SelfCheckPickQuality(lvl);
         SelfCheckOsdFade();
         SelfCheckThumb();
+        SelfCheckWatched();
         // 自检:LP_SELFCHECK_PLAYER_DRILL=3 把跳过条钉出来 —— 它平时只在片头那几十秒里出现,
         // 截图永远抓不到,而它是这一版新加的东西里最容易画错位置的一个。
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "3")
@@ -1030,6 +1031,46 @@ public sealed class PlayerPage : UserControl
     /// </list>
     /// <para>★ 顺便把气泡钉在屏幕上 —— 收起来的东西在截图里等于不存在。</para>
     /// </summary>
+    /// <summary>
+    /// 自检:<b>看完的片再点播放,从头开始</b>(<c>LP_SELFCHECK_WATCHED=阈值%</c>)。
+    ///
+    /// <para>★★ 这条验的是用户 2026-09-03 点名的那件事。夹具怎么摆的:
+    /// 假服务器给 <c>mv-1</c> 的续播位置是 1200 秒,自检片 1800 秒 —— 66.7%。
+    /// 自检脚本把阈值设成 60,于是它落在阈值**之上**,必须从 0 起播。</para>
+    ///
+    /// <para>★ 判据是 <b>mpv 真实的播放位置</b>,不是我们传给核心层的那个数 ——
+    /// 「传了 0 但 mpv 停在 1200」和「传了 1200」在界面上长得一模一样,
+    /// 而后者正是上一轮那个「起播即 EOF」的形态。</para>
+    ///
+    /// <para>★ 阈值同时也管「标记已观看」:那一半在 fakeemby 的请求日志里验
+    /// (<c>PlayedItems</c>),这里不重复。</para>
+    /// </summary>
+    private void SelfCheckWatched()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_WATCHED") is not { Length: > 0 } th) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(9000);
+            double pos = 0, dur = 0;
+            await Dispatcher.UIThread.InvokeAsync(() => { pos = _position; dur = _duration; });
+            if (dur <= 0) { Console.WriteLine("[观看阈值] ⚠ 还没拿到时长,这条不算数"); return; }
+            /* 起播之后正片一直在走,所以不能断言「等于 0」。
+               给 120 秒的窗口:自检等了 9 秒 + 起播那几秒,离 1200 秒差着一个数量级。 */
+            Console.WriteLine(pos < 120
+                ? $"[观看阈值] ✓ 阈值 {th}%,续播位置 1200s(66.7%)越线 —— 从 {pos:0.0}s 开始放,没接着片尾"
+                : $"[观看阈值] ✗ 停在 {pos:0.0}s / {dur:0.0}s —— 越过阈值了还在续播,下一步就是起播即 EOF");
+
+            /* ★★ 阈值的**另一半**:看到这儿就得告诉服务器「已观看」。
+               这一半只能在服务器那边验(假 Emby 的请求日志里有没有 PlayedItems),
+               所以这里只负责把播放位置推过阈值,然后让退出流程去跑 Stop()。
+               ★ 不能只验「从头放」那一半:那一半靠的是**读**阈值,
+                 这一半靠的是**写**给服务器 —— 两条路完全不同,
+                 只验读的话「设了阈值但从来不标已看完」会一路绿。 */
+            await SeekTo(dur * 0.97);
+            Console.WriteLine($"[观看阈值] 已跳到 {dur * 0.97:0.0}s(97%),退出时该向服务器标「已观看」");
+        });
+    }
+
     private void SelfCheckThumb()
     {
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_THUMB") != "1") return;
@@ -1060,15 +1101,41 @@ public sealed class PlayerPage : UserControl
 
             /* ★ 取数是异步的:问一次拿 null 是正常的(它这才去要),
                所以这里轮询等它回来,而不是问一次就下结论。 */
+            /* ★ 第一张要等的是**开文件**那一趟(loadfile + 等 PLAYBACK_RESTART),
+               不是解一帧的 10ms。实例现在是用到才开的,所以这里的窗口要给够 ——
+               给窄了会把「开得有点慢」误判成「取不到图」。 */
             Bitmap? pic = null;
-            for (var k = 0; k < 40 && pic is null; k++)
+            for (var k = 0; k < 90 && pic is null; k++)
             {
                 await Dispatcher.UIThread.InvokeAsync(() => pic = _frames.At(inside));
                 if (pic is null) await Task.Delay(150);
             }
-            Console.WriteLine(pic is not null
-                ? $"[缩略图] ✓ 已缓存的位置({inside:0.0}s)有图 {pic.PixelSize.Width}x{pic.PixelSize.Height}"
-                : $"[缩略图] ✗ 已缓存的位置({inside:0.0}s)取不到图 —— {_frames.LastWhy}");
+            if (pic is null)
+            {
+                /* ★ 取不到图时**必须说清是哪一种取不到**,不能只回一句空的 why:
+                     · 核心层拒了(有 why)—— 那是功能问题
+                     · UI 自己没发请求(位置已经不在缓存区间里了)—— 那是环境变了
+                   两者的现象一模一样,而结论完全相反。上一轮就在这儿卡过。 */
+                var stillCached = false;
+                await Dispatcher.UIThread.InvokeAsync(() => stillCached = _frames.Cached(inside));
+                Console.WriteLine($"[缩略图] ✗ 已缓存的位置({inside:0.0}s)取不到图 —— " +
+                                  $"核心层说「{_frames.LastWhy ?? "(没说话)"}」;这个位置现在还算缓存着吗:{stillCached}");
+            }
+            else
+            {
+                Console.WriteLine($"[缩略图] ✓ 已缓存的位置({inside:0.0}s)有图 {pic.PixelSize.Width}x{pic.PixelSize.Height}");
+            }
+            /* ★ 尺寸要**钉住**。用户 2026-09-03 点的是 140×80 ——
+               核心层那个 `vf=scale=140:-2` 改错了(或者被 mpv.conf 顶掉了)的话,
+               上面那条「有图」照样绿,只是每张图从 2KB 变回 8KB、内存占用翻五倍,
+               而屏幕上**一点都看不出来**(气泡本来就把图缩着画)。
+               ★ 只钉宽:高是按片子比例算的,钉死会把 2.35:1 的片子判成红的。 */
+            if (pic is not null)
+            {
+                Console.WriteLine(pic.PixelSize.Width == 140
+                    ? "[缩略图] ✓ 宽度是 140(用户点名的规格)"
+                    : $"[缩略图] ✗ 宽度是 {pic.PixelSize.Width},不是 140 —— 一张图的体积会差好几倍");
+            }
 
             /* ☠ 「有图」不等于「图是对的」。上一版每张都是全黑(GL 那条路忘了绑回目标 FBO),
                而「有图 + 尺寸对」两条断言照样绿。所以必须量**亮度**。 */
@@ -1088,9 +1155,20 @@ public sealed class PlayerPage : UserControl
             {
                 var r = await _core.PlayerThumbnail(new { position = outside });
                 var ok = r.TryGetProperty("available", out var av2) && av2.ValueKind == JsonValueKind.True;
-                Console.WriteLine(!ok
-                    ? $"[缩略图] ✓ 没缓存的位置({outside:0.0}s)核心层也给不出 —— 「没缓存不能用」是传输层保证的"
-                    : $"[缩略图] ✗ 没缓存的位置({outside:0.0}s)竟然出了图 —— 那是从网上现拉的");
+                /* ☠ **问完要再看一眼那个位置现在缓存了没有**。
+                   正片一直在放,预取一直在填 —— 挑对照组和真去问它之间隔着几秒,
+                   那几秒里它完全可能已经被缓存进来了。不复查的话,
+                   一个**完全正确**的实现会被判成「竟然出了图」(实测撞过一次)。
+                   ★ 这不是把断言放水:变没变是可以查清的事实,查清了再下结论
+                     才叫判据;查不清就报红,那是拿环境噪音当 bug。 */
+                var still = false;
+                await Dispatcher.UIThread.InvokeAsync(() => still = !_frames.Cached(outside));
+                Console.WriteLine((ok, still) switch
+                {
+                    (false, _) => $"[缩略图] ✓ 没缓存的位置({outside:0.0}s)核心层也给不出 —— 「没缓存不能用」是传输层保证的",
+                    (true, false) => $"[缩略图] · 对照组({outside:0.0}s)在这几秒里被预取填上了,这一条这次不算数",
+                    _ => $"[缩略图] ✗ 没缓存的位置({outside:0.0}s)竟然出了图 —— 那是从网上现拉的",
+                });
             }
             else
             {
@@ -1131,8 +1209,11 @@ public sealed class PlayerPage : UserControl
                它会替用户**把整部片子下下来** —— 实测注入一次,本地区间当场
                从「2 段」变成「整片 1 段」,而所有其它断言照样全绿
                (每个位置都有图了嘛)。所以判据要卡在**缓存有没有变大**上。
-               ★ 正片自己在放,覆盖率本来就会慢慢涨:1800 秒的片子跑十几秒
-                 涨不到 1%,留 20% 的余量足够宽。 */
+               ★★ 这一条能成立的前提是**环形缓存装不下整片**(自检把它钉在下限
+                 64MB,片子 83MB)。装得下的话跑够久就是 100%,基线和终值都顶格,
+                 这条判据什么也证明不了 —— 而且**不报错**,只是永远绿。
+               ★ 真正把「只读端点不碰上游」钉死的是核心层那条单测
+                 (TestC26_只读缓存端点不碰上游,注入验过红);这里是端到端的复核。 */
             var cov1 = 0.0;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -1418,6 +1499,37 @@ public sealed class PlayerPage : UserControl
 
     // ---------------------------------------------------------------- 轮询
 
+    private double _reportedAt = -1;
+
+    /// <summary>
+    /// 播放中定时向服务器上报进度(每 10 秒)。
+    ///
+    /// <para>☠☠ <b><c>emby.reportProgress</c> 原来全仓零调用</b> —— 命令注册着、
+    /// 绑定生成着、核心层三件套齐着,就是没有一个调用点。
+    /// 后果:服务器上的续播位置<b>整场播放期间一次都不更新</b>,
+    /// 别的客户端看到的是「还没开始看」,而这边一切正常。
+    /// 这是本仓第七次撞上「后端领先前端」。</para>
+    ///
+    /// <para>★ 10 秒一次是照核心层的节流来的(<c>captureHistory</c> 内部就是 10 秒),
+    /// 发更密只是白打服务器 —— 那边也不会更准。</para>
+    /// <para>★ 暂停也要报一次:Emby 靠 <c>IsPaused</c> 决定「正在播放」那一栏怎么显示。
+    /// 所以判据是<b>位置或暂停态变了</b>,不是「位置前进了 10 秒」。</para>
+    /// <para>★ 源播放(网盘 / 局域网 / 本地)没有 Emby 会话,不报。</para>
+    /// </summary>
+    private void ReportProgress(double pos, bool paused)
+    {
+        if (_isSource || _leaving || Nav.Session is not { } s) return;
+        if (_reportedAt >= 0 && Math.Abs(pos - _reportedAt) < 10 && paused == _reportedPaused) return;
+        _reportedAt = pos;
+        _reportedPaused = paused;
+        // ★ 不 await:上报是记账,播放是主线。失败了核心层自己写 warn 日志,
+        //   往用户脸上弹红字的话每 10 秒一次就是刷屏。
+        try { _ = _core.EmbyReportProgress(new { s.server, s.token, s.user_id, s.device_id, pos, paused }); }
+        catch { /* 同上 */ }
+    }
+
+    private bool _reportedPaused;
+
     private async Task Poll()
     {
         JsonElement st;
@@ -1433,6 +1545,8 @@ public sealed class PlayerPage : UserControl
         // ★★ keep-open=yes 之下 END_FILE **永远不发**(文件不卸载),
         //    判「播完了」只能读 eof-reached。这是「播完不同步进度」的根因。
         if (eof && !_leaving) { Leave(); return; }
+
+        ReportProgress(pos, paused);
 
         // 拿到时长才去问轨道表:loadfile 是异步的,早问回来的是空表,
         // 而空表会把两个下拉框永久固定成空的 —— 之后再没人重问。
@@ -1548,10 +1662,34 @@ public sealed class PlayerPage : UserControl
         catch (Exception e) { _msg.Text = $"跳转失败:{LibraryPage.Advice(e)}"; }
     }
 
+    /// <summary>
+    /// 离页 / 退出时停播。
+    ///
+    /// <para>☠☠ <b>会话和位置都必须带上。</b>原来这里发的是 <c>new { }</c> ——
+    /// 核心层 <c>sessionFrom</c> 拿不到会话,于是走「没有会话也要能停」那条兜底,
+    /// 只调了一句 mpv <c>stop</c> 就返回了。后果全是静默的:</para>
+    /// <list type="bullet">
+    /// <item>不发 <c>ReportStopped</c> —— 服务器上的续播进度停在最后一次定时上报;</item>
+    /// <item>不 force 落本地观看记录 —— 最后那段进度丢掉;</item>
+    /// <item>不按阈值标「已观看」—— 设置页那个开关只管了一半。</item>
+    /// </list>
+    /// <para>★ 这就是本仓那条老经验「看一半退出续播不落地」的第三次现形,
+    /// 而这一次是**壳这边**把参数丢了,核心层三件套一直是好的。</para>
+    ///
+    /// <para>★ 源播放(网盘 / 局域网 / 本地)没有 Emby 会话,只停不报 ——
+    /// 硬塞 <c>Nav.Session</c> 会在那边抛,而抛在退出路径上等于没人看得见。</para>
+    /// </summary>
     private void Stop()
     {
         _poll.Stop();
-        try { _ = _core.PlayerStopPlayback(new { }); } catch { /* 退出路径不该因为停播失败卡住 */ }
+        try
+        {
+            object arg = new { };
+            if (!_isSource && Nav.Session is { } s)
+                arg = new { s.server, s.token, s.user_id, s.device_id, pos = _position };
+            _ = _core.PlayerStopPlayback(arg);
+        }
+        catch { /* 退出路径不该因为停播失败卡住 */ }
     }
 
     private static string Clock(double s) =>

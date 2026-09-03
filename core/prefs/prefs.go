@@ -88,6 +88,56 @@ func RegisterCommands(version string) {
 		return p, save(c, p)
 	})
 
+	// ---- 首页栏目(按服务器)----
+	//
+	// ★★ 粒度是**服务器**,不是全局:一台服有几百个合集、另一台一个都没有,
+	//   用户 2026-09-03 明确要「可以按照不同服去定制」。
+	// ★ 作用的服务器是**当前登录的那台**,不让调用方传 —— 传一个不存在的
+	//   服务器键会静默写进表里,而用户在界面上永远看不到那一条(第 7 次
+	//   「设了没反应」都是这么来的)。
+	bus.Register("prefs.getHomeSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
+		c := config.Current()
+		p := c.PrefsOf()
+		srv := ""
+		if acc := c.ActiveAccount(); acc != nil {
+			srv = acc.Server
+		}
+		return map[string]any{
+			// ★ 连 server 一起回:UI 得能说清「这个开关管的是哪台服」。
+			"server":              srv,
+			"collections_enabled": srv == "" || p.CollectionsEnabledFor(srv),
+		}, nil
+	})
+	bus.Register("prefs.setHomeSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
+		c := config.Current()
+		acc := c.ActiveAccount()
+		if acc == nil {
+			return nil, bus.NewErr(bus.EInvalid, "还没有登录的服务器,这个开关没有作用对象")
+		}
+		p := c.PrefsOf()
+		on, ok := sub(a, "settings")["collections_enabled"].(bool)
+		if !ok {
+			return nil, bus.NewErr(bus.EInvalid, "缺少 collections_enabled")
+		}
+		/* ★ 表里记的是**关掉的那几台**(黑名单)。重建时顺手把已经删掉的账号剔出去 ——
+		   留着的话,下次加一台同地址的服会「自己就是关着的」,而用户完全不知道为什么。 */
+		known := map[string]bool{}
+		for _, x := range c.AccountList {
+			known[x.Server] = true
+		}
+		kept := []string{}
+		for _, srv := range p.HideCollectionServers {
+			if known[srv] && srv != acc.Server {
+				kept = append(kept, srv)
+			}
+		}
+		if !on {
+			kept = append(kept, acc.Server)
+		}
+		p.HideCollectionServers = kept
+		return p, save(c, p)
+	})
+
 	// ---- 预加载 ----
 	bus.Register("prefs.getPreloadSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		p := config.Current().PrefsOf()

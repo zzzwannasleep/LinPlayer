@@ -72,6 +72,54 @@ public static class SettingsSections
         });
     }
 
+    // ---------------------------------------------------------------- 首页栏目
+
+    /// <summary>
+    /// 首页要画哪几条栏目。<b>按服务器</b>存,作用对象是当前登录的那台。
+    ///
+    /// <para>★★ 开着也不保证看得到:服务器上<b>没有</b>合集时那一栏整条不画。
+    /// 所以这里的措辞必须是「有就显示」而不是「显示合集栏」——
+    /// 后者会让用户在一台没有合集的服务器上打开开关,然后以为功能坏了。</para>
+    /// </summary>
+    public static Control Home(CoreClient core, JsonElement h)
+    {
+        var hint = Hint();
+        var srv = Str(h, "server");
+        var on = new CheckBox
+        {
+            Content = "显示合集栏(服务器上有合集时)",
+            // ★ 缺字段当**开着**:这是个隐藏栏目的开关,读不到时默认隐藏
+            //   会让用户看到「合集栏没了」而毫无线索。
+            IsChecked = !h.TryGetProperty("collections_enabled", out var v) || v.ValueKind != JsonValueKind.False,
+        };
+        on.IsCheckedChanged += async (_, _) =>
+        {
+            try
+            {
+                await core.PrefsSetHomeSettings(new
+                {
+                    settings = new { collections_enabled = on.IsChecked == true },
+                });
+                hint.Text = "已保存,回首页生效。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        };
+
+        return Group("首页栏目", new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                // ★ 把作用对象写出来。不写的话用户在 A 服关掉、到 B 服看见还在,
+                //   会当成 bug —— 而那正是「按不同服定制」的本意。
+                Note(srv == "" ? "这个开关按服务器分别记。" : $"这个开关只管当前这台:{srv}"),
+                on,
+                Note("关掉之后连请求都不发。服务器上没有合集时,这一栏本来就不画。"),
+                hint,
+            },
+        });
+    }
+
     // ---------------------------------------------------------------- 预加载
 
     public static Control Preload(CoreClient core, JsonElement s)

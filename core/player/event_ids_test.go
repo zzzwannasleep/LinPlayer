@@ -10,7 +10,8 @@ import "testing"
 // 错误只进日志 —— 用户看到的是「外挂字幕挂了等于没挂」,一句报错都没有。
 //
 // ★ 期望值是**实测**出来的,不是抄文档:ctypes 直打 build/core/libmpv-2.dll,
-//   loadfile 之后事件依次是 6 → 8 → 17 → 21。
+//
+//	loadfile 之后事件依次是 6 → 8 → 17 → 21。
 func Test事件id和clienth对得上(t *testing.T) {
 	for _, c := range []struct {
 		name      string

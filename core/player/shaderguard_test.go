@@ -98,14 +98,13 @@ func TestFirstLine截断(t *testing.T) {
 	}
 }
 
-
 // 留下的那一条**必须是说清楚哪里错了的那行**,不是表头。
 //
 // ★ 真机 2026-09-02:第一版只留第一条,于是截图上写着
 // 「mpv 的原话:fragment shader source:」—— 等于什么都没说。
 func Test着色器错误_要升级到真正的诊断行(t *testing.T) {
 	clearShaderErr()
-	noteMpvLog("fragment shader source:")                                        // 表头,先到
+	noteMpvLog("fragment shader source:")                                          // 表头,先到
 	noteMpvLog("ERROR: 0:58: 'linearize' : no matching overloaded function found") // 真话,后到
 	noteMpvLog("ERROR: 0:59: 'x' : field selection requires structure")            // 再后到的不许覆盖
 

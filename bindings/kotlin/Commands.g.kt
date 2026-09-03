@@ -271,6 +271,7 @@ object LinPlayerCommandNames {
         "prefs.configExportQr",
         "prefs.configImportQr",
         "prefs.getPrefetchSettings",
+        "prefs.getHomeSettings",
         "prefs.getPrefs",
         "prefs.getPreloadSettings",
         "prefs.getProxy",
@@ -282,6 +283,7 @@ object LinPlayerCommandNames {
         "prefs.preloadItem",
         "prefs.setDetailBlur",
         "prefs.setPrefetchSettings",
+        "prefs.setHomeSettings",
         "prefs.setPrefs",
         "prefs.setPreloadSettings",
         "prefs.setProxy",
@@ -792,7 +794,7 @@ suspend fun LinPlayerCommands.translateWhisperDownloadFfmpeg(args: Map<String, A
 suspend fun LinPlayerCommands.translateWhisperModels(args: Map<String, Any?>? = null): JsonElement =
     call("translate.whisperModels", args)
 
-// ---- 设置与偏好 · prefs.* (25 条) ----
+// ---- 设置与偏好 · prefs.* (27 条) ----
 suspend fun LinPlayerCommands.prefsApplyPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.applyPrefs", args)
 suspend fun LinPlayerCommands.prefsCfProxyDisable(args: Map<String, Any?>? = null): JsonElement =
@@ -809,6 +811,8 @@ suspend fun LinPlayerCommands.prefsConfigImportQr(args: Map<String, Any?>? = nul
     call("prefs.configImportQr", args)
 suspend fun LinPlayerCommands.prefsGetPrefetchSettings(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.getPrefetchSettings", args)
+suspend fun LinPlayerCommands.prefsGetHomeSettings(args: Map<String, Any?>? = null): JsonElement =
+    call("prefs.getHomeSettings", args)
 suspend fun LinPlayerCommands.prefsGetPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.getPrefs", args)
 suspend fun LinPlayerCommands.prefsGetPreloadSettings(args: Map<String, Any?>? = null): JsonElement =
@@ -831,6 +835,8 @@ suspend fun LinPlayerCommands.prefsSetDetailBlur(args: Map<String, Any?>? = null
     call("prefs.setDetailBlur", args)
 suspend fun LinPlayerCommands.prefsSetPrefetchSettings(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setPrefetchSettings", args)
+suspend fun LinPlayerCommands.prefsSetHomeSettings(args: Map<String, Any?>? = null): JsonElement =
+    call("prefs.setHomeSettings", args)
 suspend fun LinPlayerCommands.prefsSetPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setPrefs", args)
 suspend fun LinPlayerCommands.prefsSetPreloadSettings(args: Map<String, Any?>? = null): JsonElement =

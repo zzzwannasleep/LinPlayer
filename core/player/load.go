@@ -52,8 +52,10 @@ func loadWith(url string, startSec float64, headers map[string]string, ua string
 	   我们本来就知道给出去的是什么,没有理由去问别人。 */
 	setPlayURL(url)
 	setProp("pause", "no")
-	// ★ 起播后把缩略图那个实例也开起来(理由见 thumb.go:「为什么要提前把文件打开」)。
-	warmThumber()
+	/* ★ 换片了,缩略图那个实例装的还是上一片 —— 收掉它。
+	   它是**用到才开**的(见 thumb.go),这里不需要提前开;
+	   不收的话下一次取图会先花一趟 loadfile 去换文件,而那趟是在鼠标底下发生的。 */
+	thumbs.close()
 	return nil
 }
 

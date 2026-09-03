@@ -233,3 +233,41 @@ func TestAbsURL(t *testing.T) {
 		t.Errorf("已有 api_key 不该重复补: %s", got)
 	}
 }
+
+// 服务器只给转码地址时,**不许用它**。
+//
+// ★★ 这条不是洁癖。转码 URL 是分段流,套不了字节代理 —— 落到它身上的后果是
+// 预热作废、多线程加载作废、**进度条缩略图整个不可用**,而且一条错都不报。
+// 用户 2026-09-03:「我们不做转码流 也不会去请求转码流」。
+//
+// ★ 断言要卡在**两处**:play_method 得是 DirectStream,而且地址里**不能**出现
+// 服务器那条转码路径 —— 只断言前者的话,把 URL 照抄成转码地址、只把标签改成
+// DirectStream 也能过,那正是「界面在撒谎」那一类。
+func Test只给转码地址也不走转码(t *testing.T) {
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"MediaSources":[{"Id":"ms-9","Container":"mkv",` +
+			`"TranscodingUrl":"/videos/it1/master.m3u8?VideoCodec=h264&AudioCodec=aac"}]}`))
+	}))
+	defer up.Close()
+	ResetRangePrefixCache()
+
+	c := NewClient("test")
+	s := &Session{Server: up.URL, Token: "t", UserID: "u", DeviceID: "d"}
+	got, err := c.ResolveStream(context.Background(), s, "it1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PlayMethod != "DirectStream" {
+		t.Fatalf("play_method 应当是 DirectStream,实得 %q —— 我们不做转码流", got.PlayMethod)
+	}
+	if strings.Contains(got.URL, "master.m3u8") || strings.Contains(got.URL, "VideoCodec=") {
+		t.Fatalf("播放地址用上了服务器那条转码地址:%s", got.URL)
+	}
+	// 兜底那条必须是**可 Range 的原流**,否则代理和缩略图仍然没有本地字节可读
+	if !strings.Contains(got.URL, "static=true") {
+		t.Fatalf("兜底地址不是 static=true 的原流:%s —— 那样仍然套不了字节代理", got.URL)
+	}
+	if !strings.Contains(got.URL, "mediaSourceId=ms-9") {
+		t.Fatalf("兜底地址没带上真实的 mediaSourceId:%s(会放成默认版本)", got.URL)
+	}
+}

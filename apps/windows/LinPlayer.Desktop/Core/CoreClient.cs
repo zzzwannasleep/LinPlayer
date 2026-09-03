@@ -107,6 +107,9 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
     /// <summary>主动事件(player.status / log / localserve.ready …)。在事件线程上触发。</summary>
     public event Action<string, JsonElement>? OnEvent;
 
+    private static readonly bool _coreLog =
+        Environment.GetEnvironmentVariable("LP_CORELOG") == "1";
+
     /// <summary>本地数据通道的基址与 token(核心层起完服务后由首个事件送来)。</summary>
     public string LocalBaseUrl { get; private set; } = "";
     public string LocalToken { get; private set; } = "";
@@ -212,6 +215,15 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
                         LocalBaseUrl = Str(data, "baseUrl") ?? "";
                         LocalToken = Str(data, "token") ?? "";
                     }
+                    /* ☠☠ **核心层的日志原来一个字都没往外走。**
+                       bus.Logf 推的是 name="log" 的事件,而壳这边没人订阅 ——
+                       于是核心层里每一句 `bus.Logf("warn", ...)` 都只是进了队列然后被丢掉。
+                       排查「缩略图取不到图」时因此完全是瞎的:核心层明明在报原因,
+                       app.log 里一行都没有。
+                       ★ 默认**不开**(LP_CORELOG=1 才打):它每几秒就有几条,
+                         平时刷屏会把自检那几行断言淹掉。 */
+                    if (name == "log" && _coreLog)
+                        Console.WriteLine($"[核心层:{Str(data, "level")}] {Str(data, "msg")}");
                     OnEvent?.Invoke(name, data);
                     return;
                 }

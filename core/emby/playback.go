@@ -72,7 +72,8 @@ var deviceProfile = map[string]any{
 	},
 }
 
-// ResolveStream 解析播放地址:POST PlaybackInfo → 用服务器给的 DirectStreamUrl/TranscodingUrl。
+// ResolveStream 解析播放地址:POST PlaybackInfo → 用服务器给的 DirectStreamUrl。
+// ★ **不用 TranscodingUrl** —— 本项目不做转码流,理由写在下面那个 switch 上。
 //
 // mediaSourceID 选哪个版本。空 = 服务器返回的第一条(或版本正则命中的那条)。
 // ★ **指定了却找不到就报错,不静默回落第一条** —— 那会让用户以为在看 4K,
@@ -132,13 +133,19 @@ func (c *Client) ResolveStream(ctx context.Context, s *Session, itemID, mediaSou
 		ExternalSubs:  externalSubs(s, ms, itemID, msID),
 	}
 
+	/* ★★ **永远不走转码流**。用户 2026-09-03 定的口径:
+	   「我们不做转码流 也不会去请求转码流」。
+
+	   这不只是口味。转码 URL 是**分段流**,套不了字节代理 —— 一旦落到那条分支:
+	     预热作废、多线程加载作废、**进度条缩略图整个不可用**
+	     (localSource 拿不到本地字节,直接返回 none)。而且一条错都不报。
+
+	   没有 DirectStreamUrl 就直拼 `static=true` 的原流 —— 就是下面那个兜底分支。
+	   服务器真放不了时宁可报错,也不静默降级成转码。 */
 	switch {
 	case nonEmpty(ms.DirectStreamURL) != nil:
 		target.URL = absURL(s, c.seekablePath(ctx, s, *ms.DirectStreamURL))
 		target.PlayMethod = "DirectStream"
-	case nonEmpty(ms.TranscodingURL) != nil:
-		target.URL = absURL(s, *ms.TranscodingURL)
-		target.PlayMethod = "Transcode"
 	default:
 		// 兜底:用真实 mediaSourceId + container 直拼
 		ext := ""

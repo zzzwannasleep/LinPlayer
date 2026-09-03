@@ -9,6 +9,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
 
@@ -90,6 +91,7 @@ public sealed class HomePage : PageBase
         //   折线以下的轨道一开始就在屏幕上,而那时候一次滚动事件都还没发生过。
         _sv.ScrollChanged += (_, _) => PumpLazy();
         _rows.LayoutUpdated += (_, _) => PumpLazy();
+        SelfCheckHome();
         Content = _sv;
         if (core is not null) _ = LoadAsync(core);
     }
@@ -131,10 +133,19 @@ public sealed class HomePage : PageBase
         /* ★★ 合集。<b><c>emby.listCollections</c> 早就注册着,UI 一次没调过</b> ——
            这是本仓第五次撞上「后端领先前端」。
            ★ 一条**懒**轨道:合集是锦上添花,不该和继续观看抢首屏那次往返。
-           ★ 没有合集的服务器很常见,那就整条不画(Track 的空态会说清是「没有」)。 */
-        var boxsets = Track("合集", () => Arr(core.EmbyListCollections(
-                new { s.server, s.token, s.user_id, s.device_id })), false,
-            key: MetaCache.Key("emby.listCollections", new { s.server, s.user_id }), lazy: true);
+           ★★ 没有合集的服务器很常见,那就**整条不画**(hideWhenEmpty)——
+             不是画一行「这台服务器上没有合集」。用户 2026-09-03 定的:
+             「如果该 Emby 没有 那么就不显示」。空态提示对**用户点进来的**页面
+             有意义(他在找那个东西),对首页上一条他没要求过的轨道只是噪音。
+           ★ 另有一个**按服务器**的开关(设置页「首页栏目」),关了就连请求都不发。 */
+        /* ★ 按服务器关掉的话**连请求都不发** —— 只把结果丢掉的话,
+           每次进首页仍然白打一次服务器,而用户以为自己关掉了这个东西。 */
+        var boxsets = await CollectionsOn(core)
+            ? Track("合集", () => Arr(core.EmbyListCollections(
+                    new { s.server, s.token, s.user_id, s.device_id })), false,
+                key: MetaCache.Key("emby.listCollections", new { s.server, s.user_id }),
+                lazy: true, hideWhenEmpty: true)
+            : Task.CompletedTask;
 
         /* ★★ 「各库最新」这一段要**先占住位置**再去拉。
            它依赖媒体库列表(得先知道有哪些库),比别的块晚一步;
@@ -152,6 +163,62 @@ public sealed class HomePage : PageBase
            它在页面最顶上,晚出现一次就把**整页**往下顶一次。 */
         _hero.Reserve();
         await Task.WhenAll(resume, boxsets, views, HeroItems(core, s));
+    }
+
+    /// <summary>
+    /// 自检:<b>首页上有没有「合集」这一栏</b>(<c>LP_SELFCHECK_HOME=1</c>)。
+    ///
+    /// <para>★★ 判据是<b>整条轨道在不在</b>,不是「有没有合集卡片」。
+    /// 用户 2026-09-03:「如果该 Emby 没有 那么就不显示」—— 而上一版的空态是
+    /// 画一行「这台服务器上没有合集的内容。」,那也是**显示了**。
+    /// 只数卡片的话,两种行为都是 0 张卡,自检分不出来。</para>
+    ///
+    /// <para>★ 所以要同时报「标题行在不在」和「那句空态文案在不在」:
+    /// 后者出现就说明 hideWhenEmpty 没生效,而它是这一版新加的唯一变化。</para>
+    /// </summary>
+    private void SelfCheckHome()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_HOME") != "1") return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(5000);
+            Dispatcher.UIThread.Post(() =>
+            {
+                var titles = new List<string>();
+                var emptyNote = false;
+                foreach (var t in _rows.GetVisualDescendants().OfType<TextBlock>())
+                {
+                    var s2 = t.Text ?? "";
+                    if (s2.Contains("没有「合集」")) emptyNote = true;
+                    if (s2.Length is > 0 and < 12) titles.Add(s2);
+                }
+                var has = titles.Contains("合集");
+                Console.WriteLine($"[合集栏] 轨道标题:{string.Join(" / ", titles.Distinct().Take(12))}");
+                Console.WriteLine(has
+                    ? "[合集栏] 有「合集」这一栏"
+                    : "[合集栏] 没有「合集」这一栏");
+                Console.WriteLine(emptyNote
+                    ? "[合集栏] ✗ 还画着「这台服务器上没有合集」那行空态 —— 用户要的是整条不画"
+                    : "[合集栏] ✓ 没有空态文案");
+            });
+        });
+    }
+
+    /// <summary>
+    /// 这台服务器的首页要不要画合集栏(设置页「首页栏目」里按服务器定的)。
+    ///
+    /// <para>★ 拉不到就当<b>开着</b>。这是个「隐藏某个栏目」的开关 ——
+    /// 读取失败时默认隐藏的话,用户看到的是「合集栏没了」,而他什么都没改过,
+    /// 也没有任何提示告诉他为什么。宁可多画一条。</para>
+    /// </summary>
+    private static async Task<bool> CollectionsOn(CoreClient core)
+    {
+        try
+        {
+            var r = await core.PrefsGetHomeSettings(new { });
+            return !r.TryGetProperty("collections_enabled", out var v) || v.ValueKind != JsonValueKind.False;
+        }
+        catch { return true; }
     }
 
     /// <summary>
@@ -298,7 +365,7 @@ public sealed class HomePage : PageBase
     /// <param name="lazy">true = 先只占位,滚到跟前了再真去拉。</param>
     private async Task Track(string title, Func<Task<List<JsonElement>>> load, bool wide,
         Action<List<JsonElement>>? onItems = null, StackPanel? host = null, string? libraryId = null,
-        string? key = null, bool lazy = false)
+        string? key = null, bool lazy = false, bool hideWhenEmpty = false)
     {
         /* ★★ 占位用**骨架**,不是「加载中…」。
            三个字只有 20px 高,内容一回来这一行从 20px 撑到 280px,
@@ -310,6 +377,16 @@ public sealed class HomePage : PageBase
         box.Children.Add(body);
         if (host is null) AddRow(box);
         else Dispatcher.UIThread.Post(() => host.Children.Add(box));
+
+        /* 整条轨道消失(标题行一起)。
+           ★ 从**它实际挂进去的那个容器**里摘 —— host 给了就是 host,没给才是 _rows。
+             写死 _rows 的话,挂在「最新加入」小节里的轨道摘不掉,而且**不报错**:
+             Remove 一个不在表里的元素返回 false,谁也不会去看那个返回值。 */
+        void Vanish() => Dispatcher.UIThread.Post(() =>
+        {
+            Core.Perf.Log($"轨道「{title}」<- 0 条,整条不画");
+            (host ?? _rows).Children.Remove(box);
+        });
 
         void Swap(Control with) => Dispatcher.UIThread.Post(() =>
         {
@@ -324,7 +401,8 @@ public sealed class HomePage : PageBase
         if (hit is not null)
         {
             Core.Perf.Log($"轨道「{title}」<- 缓存 {hit.Count} 条(零往返)");
-            Swap(hit.Count == 0 ? Dim($"这台服务器上没有「{title}」的内容。") : Strip(hit, wide));
+            if (hit.Count == 0 && hideWhenEmpty) Vanish();
+            else Swap(hit.Count == 0 ? Dim($"这台服务器上没有「{title}」的内容。") : Strip(hit, wide));
         }
 
         async Task Run()
@@ -337,7 +415,10 @@ public sealed class HomePage : PageBase
                 if (key is not null) MetaCache.PutList(key, items);
                 onItems?.Invoke(items);
                 // ★ 空态要说清「为什么空」,不是干放一句「暂无数据」(§6.4)
-                Swap(items.Count == 0 ? Dim($"这台服务器上没有「{title}」的内容。") : Strip(items, wide));
+                // ★★ hideWhenEmpty 的轨道例外:它整条消失,连标题都不留 ——
+                //   首页上一条用户没要求过的空轨道,写什么都是噪音。
+                if (items.Count == 0 && hideWhenEmpty) Vanish();
+                else Swap(items.Count == 0 ? Dim($"这台服务器上没有「{title}」的内容。") : Strip(items, wide));
             }
             /* ★ 已经用缓存画出内容之后再失败(离线 / 服务器挂了),<b>不要把内容换成一行红字</b> ——
                屏幕上那批旧数据仍然是用户能用的东西,擦掉它换成「加载失败」是纯粹的损失。 */

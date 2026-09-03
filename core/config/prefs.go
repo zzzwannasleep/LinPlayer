@@ -38,6 +38,10 @@ const (
 	// PreloadHeadMBMax 预热头部量上限(MB)。0 = 只热尾部索引;
 	// 上限 512,再大就不是「预热」是「下载」了。
 	PreloadHeadMBMax int64 = 512
+
+	// WatchedMinPercent 观看阈值的下限。低于它就不是「看完」了 ——
+	// 看一半退出会被标成已看完,而那意味着续播位置直接丢掉。
+	WatchedMinPercent int64 = 50
 )
 
 // Prefs 播放与全局偏好。
@@ -127,11 +131,34 @@ type Prefs struct {
 	// 而不是跟着下载一起塞进 userdata/(那儿翻起来费劲)。
 	ScreenshotDir *string `json:"screenshot_dir"`
 
+	// ---- 首页合集栏 ----
+	// HideCollectionServers 哪几台服务器**不显示**首页的合集栏。
+	// 存 Account.server(归一化身份键),空表 = 全部显示。
+	//
+	// ★★ 存的是**黑名单**而不是白名单。白名单的话新加的服务器默认不显示,
+	// 而用户完全不知道有这个开关 —— 他只会看到「这台服没有合集」。
+	// 默认开、想关才记一笔,是这类「隐藏某个栏目」开关唯一安全的存法。
+	//
+	// ★ 开着也不保证看得到:服务器上**没有**合集时那一栏整条不画
+	// (用户 2026-09-03:「如果该 Emby 没有 那么就不显示」)。
+	HideCollectionServers []string `json:"hide_collection_servers"`
+
 	// ---- 更新 ----
 	// 更新渠道。默认 "stable" —— 不能让普通用户默认吃到每次推 main 的构建。
 	UpdateChannel string `json:"update_channel"`
 	// 启动时自动检查更新。关掉之后只剩设置页里的手动检查。默认 true。
 	UpdateAutoCheck bool `json:"update_auto_check"`
+
+	// WatchedThresholdPercent 看到百分之多少算「已观看」。默认 90。
+	//
+	// ★★ 它同时是**续播的上界**:进度越过这条线之后再点播放,
+	// 从头开始而不是接着片尾放(用户 2026-09-03:「以后再看这集
+	// 就直接从头开始播放即可」)。两件事用**同一个**阈值 ——
+	// 分两个的话会出现「标了已看完却仍从 97% 续播」这种自相矛盾的状态。
+	//
+	// ★ 下限 50:再小就不是「看完」了，看一半退出会被当成看完，
+	// 而那意味着**续播位置直接丢掉**。
+	WatchedThresholdPercent int64 `json:"watched_threshold_percent"`
 
 	// 详情页背景图的模糊强度,0~100。默认 40。
 	// 归 Prefs 是因为它是**观感偏好**不是主题 —— 换主题不该把它重置。
@@ -160,7 +187,9 @@ func DefaultPrefs() Prefs {
 		UpdateChannel:                "stable",
 		UpdateAutoCheck:              true,
 		DetailBlur:                   40,
+		WatchedThresholdPercent:      90,
 		PrefetchServers:              []string{},
+		HideCollectionServers:        []string{},
 		rest:                         map[string]json.RawMessage{},
 	}
 }
@@ -267,6 +296,15 @@ func (p Prefs) Clamped() Prefs {
 	if p.PrefetchServers == nil {
 		p.PrefetchServers = []string{} // 空切片不是 nil:前端 .map() 拿到 null 会抛错
 	}
+	if p.HideCollectionServers == nil {
+		p.HideCollectionServers = []string{}
+	}
+	/* ★ 观看阈值。老配置里**没有这个键**,解出来是 0 ——
+	   而 0 的含义是「放第一帧就算看完」:每一集刚起播就被标已看完,
+	   续播位置全部作废。所以 0 必须回默认值,不能当成用户的选择。 */
+	if p.WatchedThresholdPercent < WatchedMinPercent || p.WatchedThresholdPercent > 100 {
+		p.WatchedThresholdPercent = 90
+	}
 	return p
 }
 
@@ -281,6 +319,29 @@ func (c *AppConfig) SetPrefs(p Prefs) error {
 	}
 	c.Prefs = b
 	return nil
+}
+
+// CollectionsEnabledFor 这台服务器的首页要不要画合集栏。
+//
+// ★ 默认**开**:表里记的是「关掉的那几台」。理由见 HideCollectionServers 的注释。
+// ★ 它只管「用户想不想看」,不管「服务器有没有」—— 没有合集时那一栏由 UI 整条不画。
+func (p Prefs) CollectionsEnabledFor(server string) bool {
+	for _, s := range p.HideCollectionServers {
+		if s == server {
+			return false
+		}
+	}
+	return true
+}
+
+// WatchedAt 位置 pos(秒)在片长 runtime(秒)里算不算「已经看完」。
+//
+// ★ 片长不知道时一律返回 false —— 猜一个的下场是「刚起播就被标已看完」。
+func (p Prefs) WatchedAt(pos, runtime float64) bool {
+	if runtime <= 0 || pos <= 0 {
+		return false
+	}
+	return pos/runtime*100 >= float64(p.WatchedThresholdPercent)
 }
 
 // PrefetchEnabledFor 这台服务器开了多线程加载吗。

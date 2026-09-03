@@ -119,6 +119,24 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 			whCtx.seriesTmdbID, &remote, whCtx.candidate.Played, prefs.CrossServerResume); t != nil {
 			resumeSecs = float64(*t) / float64(history.TicksPerSec)
 		}
+		/* ☆☆ **看完了的片再点播放,从头开始**(用户 2026-09-03)。
+
+		   不做这一步的表现很难归因:服务器把进度停在 99%,卸载时又没清,
+		   于是 `loadfile ... start=<几乎片长>` —— mpv 当场 EOF。
+		   播放页判「播完了」直接退出去,看起来像「点了播放没反应」,
+		   而且全程一条错不报。上一轮自检就是被它卡了六轮。
+
+		   ★ 判据用的是用户那条阈值,不是「等于片长」。
+		     它得和「算不算已观看」完全一致:两处分开写就会出现
+		     「标了已看完却仍从 97% 续播」这种自相矛盾的状态。 */
+		if rt := whCtx.candidate.RunTimeTicks; rt != nil && *rt > 0 {
+			runtime := float64(*rt) / float64(history.TicksPerSec)
+			if prefs.WatchedAt(resumeSecs, runtime) {
+				bus.Logf("info", "这一集已经看到 %.0f%%(阈值 %d%%),从头放",
+					resumeSecs/runtime*100, prefs.WatchedThresholdPercent)
+				resumeSecs = 0
+			}
+		}
 	}
 	currentMu.Lock()
 	currentCtx = whCtx
@@ -256,11 +274,24 @@ func captureHistory(posSecs float64, force bool) {
 		ScopeKey: c.scope, Candidate: c.candidate, SeriesTmdbID: c.seriesTmdbID,
 		PositionTicks: int64(posSecs * float64(history.TicksPerSec)),
 		Source:        history.SourceInternal,
-		// ponytail: 阈值应当来自服务器的用户配置(Emby 默认 90%)。
-		// 先写死 90 —— 与 Rust 版调用点一致。
-		WatchedThresholdPercent: 90,
+		// ★ 阈值由用户定(设置页「看完多少算已观看」)。
+		//   它和「下次从头放」用的是**同一个**值 —— 见 config.Prefs.WatchedAt。
+		WatchedThresholdPercent: config.Current().PrefsOf().WatchedThresholdPercent,
 		Force:                   force,
 	})
+}
+
+// watchedNow 停在 pos 秒算不算「已经看完」。**调用方必须已经持有 currentMu**。
+//
+// ★ 片长从当前这次播放的观看记录判据里取,不问 mpv ——
+// stop 之后 mpv 的 duration 立刻变 0,在那儿读到的是「片长未知」,
+// 于是永远判不出看完(而且不报错)。
+func watchedNow(pos float64) bool {
+	if currentCtx == nil || currentCtx.candidate.RunTimeTicks == nil {
+		return false
+	}
+	runtime := float64(*currentCtx.candidate.RunTimeTicks) / float64(history.TicksPerSec)
+	return config.Current().PrefsOf().WatchedAt(pos, runtime)
 }
 
 // Stop 停播并上报。pos 是停在哪一秒。
@@ -272,14 +303,29 @@ func Stop(ctx context.Context, s *emby.Session, pos float64) error {
 	currentMu.Unlock()
 	_ = command("stop")
 	closeSharedProxy() // 停播就把代理停掉:端口、goroutine、缓存文件一起收
+	thumbs.close()     // 缩略图那个实例也收掉:它装的是这一片
 	// ★ 停播这一下**必须落盘**(force):不 force 的话会被 10 秒节流吃掉,
 	//   最后那段进度就丢了 —— 而用户下次进来看到的正是那个旧位置。
 	captureHistory(pos, true)
 	currentMu.Lock()
+	watched := watchedNow(pos)
 	currentCtx = nil
 	currentMu.Unlock()
 	if t == nil {
 		return nil
+	}
+	/* ★★ 越过用户那条阈值就**明着告诉服务器已看完**。
+
+	   不能只靠 ReportStopped:服务器按**它自己**的阈值判(Emby 默认 90,
+	   fork 各改各的),于是设置页里那个数字对用户看到的「已观看」标记
+	   毫无影响 —— 一个设了没反应的开关。
+	   ★ 只往「已看完」一个方向写,不写 false:没到阈值不代表用户想取消已看标记。 */
+	if watched {
+		if err := prefsClient.SetPlayed(ctx, s, t.ItemID, true); err != nil {
+			bus.Logf("warn", "标记已观看失败(不影响播放): %v", err)
+		} else {
+			bus.Logf("info", "看到 %.0fs 越过阈值,已标记为看完 item=%s", pos, t.ItemID)
+		}
 	}
 	// ★ 上报失败不该让「停止播放」这个动作看起来失败了
 	if err := prefsClient.ReportStopped(ctx, s, t, pos); err != nil {

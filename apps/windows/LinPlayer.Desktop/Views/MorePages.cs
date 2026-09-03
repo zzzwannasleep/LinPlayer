@@ -351,6 +351,7 @@ public sealed class SettingsPage : PageBase
                 var paths = await core.SystemDataPaths(new { });
                 var prefetch = await Safe(() => core.PrefsGetPrefetchSettings(new { }));
                 var preload = await Safe(() => core.PrefsGetPreloadSettings(new { }));
+                var home = await Safe(() => core.PrefsGetHomeSettings(new { }));
                 var writeback = await Safe(() => core.PrefsGetWritebackSettings(new { }));
                 var update = await Safe(() => core.PrefsGetUpdateSettings(new { }));
                 string transErr = "";
@@ -368,6 +369,7 @@ public sealed class SettingsPage : PageBase
                     }
                     Add(TrackPrefs(core, p));
                     Add(Playback(core, p));
+                    if (home is { } hm) Add(SettingsSections.Home(core, hm));
                     if (prefetch is { } pf) Add(SettingsSections.Prefetch(core, pf));
                     // ★ 下线的分组一并不画。开关表在 Features.cs,这里只查表。
                     if (Features.On("set.preload") && preload is { } pl) Add(SettingsSections.Preload(core, pl));
@@ -502,12 +504,45 @@ public sealed class SettingsPage : PageBase
         };
         clearExt.Click += async (_, _) => await SetExt("");
 
+        /* 观看阈值。**一个数字管两件事**:
+             ① 看到这里就标「已观看」(明着调 emby.setPlayed,不靠服务器自己那条线 ——
+                服务器各 fork 的阈值不一样,只靠它的话这个设置等于没有);
+             ② 下次再点这一集,**从头放**而不是接着片尾。
+           ★ 两件事共用一个值是刻意的:分成两个的话会出现「标了已看完
+             却仍然从 97% 续播」这种自相矛盾的状态,而且没人看得出是哪儿设错了。
+           ★ 下限 50 是核心层定的,这里只给到 70 —— 再低的档位没有实际用处,
+             而列出来就会有人选,选完丢的是自己的续播位置。 */
+        var watchedVals = new[] { 70, 80, 85, 90, 95, 100 };
+        var watched = new ComboBox
+        {
+            Width = 220,
+            ItemsSource = watchedVals.Select(v => v == 100 ? "100%(必须放到结尾)" : $"{v}%").ToList(),
+        };
+        var curWatched = (int)Num(p, "watched_threshold_percent");
+        if (curWatched <= 0) curWatched = 90;
+        watched.SelectedIndex = Math.Max(0, Array.FindIndex(watchedVals, v => v >= curWatched));
+        watched.SelectionChanged += async (_, _) =>
+        {
+            if (watched.SelectedIndex < 0) return;
+            try
+            {
+                await core.PlayerSetPlaybackPrefs(new
+                {
+                    settings = new { watched_threshold_percent = watchedVals[watched.SelectedIndex] },
+                });
+                hint.Text = "已保存。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        };
+
         return Card("播放", new StackPanel
         {
             Spacing = 10,
             Children =
             {
                 Field("硬件解码", hw),
+                Field("已观看阈值", watched),
+                Dim("看到这个比例就标记为「已观看」;下次再点这一集会从头开始放,不接着片尾。"),
                 Field("外部播放器", new StackPanel
                 {
                     Orientation = Orientation.Horizontal, Spacing = 8,
@@ -588,4 +623,7 @@ public sealed class SettingsPage : PageBase
             ? v.GetString() ?? "" : "";
     private static bool Bool(JsonElement e, string k) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.True;
+    private static double Num(JsonElement e, string k) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetDouble() : 0;
 }

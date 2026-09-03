@@ -11,7 +11,8 @@ namespace LinPlayer.Desktop.Views;
 /// 进度条悬停缩略图的取数与缓存。
 ///
 /// <para>★★ <b>帧不是这一层产生的</b> —— 它向核心层要(<c>player.thumbnail</c>),
-/// 核心层用第二个 <c>vo=null</c> 的 mpv 实例、<b>只读本地已缓存的字节</b>解出来。
+/// 核心层用第二个 <c>vo=null</c> 的 mpv 实例、<b>只读本地已缓存的字节</b>解出来
+/// (140×80,单张实测 9~12ms)。
 /// 上一版是从我们自己渲染过的画面里留一份,那样只有<b>放过的</b>位置才有图;
 /// 而用户要的是「已缓存的进度」—— 缓存的恰恰是<b>前面还没放到</b>的那一段。</para>
 ///
@@ -25,13 +26,28 @@ public sealed class Thumbs(CoreClient core)
     /// 那是几十次解码;而相邻两像素上的画面根本是同一帧。</summary>
     public const int Slots = 300;
 
-    /// <summary>缓存多少张。320×180 解出来是 BGRA ≈ 230KB,不设上限的话
-    /// 一部长片划一圈就是 60MB 常驻。</summary>
-    private const int Keep = 60;
+    /// <summary>缓存多少张。<b>整条时间轴全留</b> —— 用户 2026-09-03 的口径是
+    /// 「缓存在内存里面」。140×80 解出来是 BGRA ≈ 45KB,300 格全满也就 13MB;
+    /// 上一版 320×180 一张就 230KB,才不得不设 60 张的上限。
+    ///
+    /// <para>★ 全留的意义不是省内存,是<b>划回去不用重解</b>:设了上限的话
+    /// 用户来回拖两趟就把前面的挤掉了,每次都要重新等一趟解码。</para></summary>
+    private const int Keep = Slots;
 
-    private readonly Dictionary<int, Bitmap?> _got = new(); // null = 问过了,那儿没有
+    private readonly Dictionary<int, Bitmap> _got = new();
     private readonly Queue<int> _order = new();
     private readonly HashSet<int> _busy = [];
+
+    /* ☠☠ 失败**只记一小会儿,不永久记**。
+       原来失败也往 _got 里塞一个 null,于是那一格从此再也不问了 ——
+       而失败最常见的原因恰恰是**暂时性**的:那一段刚好还没缓存到本地、
+       第一次开文件慢了一点。结果是用户早划了一下,那一格就永远没有图了,
+       哪怕十秒后整段都在本地。2026-09-03 自检当场撞上(一次超时之后,
+       后面每一次轮询都立刻返回 null,连请求都不再发)。
+       ★ 又不能完全不记:不记的话鼠标停在一个真的取不到的位置上,
+         每一帧都会去发一次必然失败的请求。所以记 5 秒。 */
+    private readonly Dictionary<int, long> _failedAt = new();
+    private const int RetryAfterMs = 5000;
 
     /// <summary>片长(秒)。0 = 还不知道,这时一律不取。</summary>
     public double Duration;
@@ -51,7 +67,7 @@ public sealed class Thumbs(CoreClient core)
     /// <summary>已经拿到手的张数(自检用)。</summary>
     public int Have
     {
-        get { var n = 0; foreach (var v in _got.Values) if (v is not null) n++; return n; }
+        get => _got.Count;
     }
 
     /// <summary>从 <c>player.status</c> 的 <c>cached</c> 字段更新区间。</summary>
@@ -98,6 +114,12 @@ public sealed class Thumbs(CoreClient core)
         if (_got.TryGetValue(slot, out var b)) return b;
         // ★ 没缓存的位置连问都不问:那一趟必然失败,而失败要走一遍 mpv 的 seek 超时。
         if (!Cached(pos) || !_busy.Add(slot)) return null;
+        if (_failedAt.TryGetValue(slot, out var t) &&
+            System.Environment.TickCount64 - t < RetryAfterMs)
+        {
+            _busy.Remove(slot);
+            return null;
+        }
         _ = Fetch(slot, (slot + 0.5) / Slots * Duration);
         return null;
     }
@@ -123,12 +145,20 @@ public sealed class Thumbs(CoreClient core)
         {
             LastWhy = e.Message;
         }
-        _got[slot] = bmp;
-        _order.Enqueue(slot);
-        while (_order.Count > Keep)
+        if (bmp is null)
         {
-            var old = _order.Dequeue();
-            if (old != slot) _got.Remove(old);
+            _failedAt[slot] = System.Environment.TickCount64;
+        }
+        else
+        {
+            _failedAt.Remove(slot);
+            _got[slot] = bmp;
+            _order.Enqueue(slot);
+            while (_order.Count > Keep)
+            {
+                var old = _order.Dequeue();
+                if (old != slot) _got.Remove(old);
+            }
         }
         _busy.Remove(slot);
         Changed?.Invoke();
@@ -140,6 +170,7 @@ public sealed class Thumbs(CoreClient core)
         _got.Clear();
         _order.Clear();
         _busy.Clear();
+        _failedAt.Clear();
         Spans = [];
         LastWhy = null;
     }
