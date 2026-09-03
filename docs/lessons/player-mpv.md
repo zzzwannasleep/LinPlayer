@@ -32,6 +32,8 @@
 - 超分失效根因+toast统一位置 — `superres-and-toast.md`
 - Dolby auto decode — `dolby-auto-decode.md`
 - FFmpeg magicyuv CVE — `ffmpeg-magicyuv-cve.md`
+- ☠☠ `evFileLoaded = 6` —— 6 是 START_FILE，8 才是 FILE_LOADED — 2026-09-03
+- 无窗口取一帧：`screenshot-to-file` 能用，`screenshot-raw` 不能 — 2026-09-03
 
 ---
 
@@ -1089,6 +1091,46 @@ CVE-2026-8461 "PixelSmash":libavcodec `magicyuv` 解码器堆越界写(恶意 sl
 **How to apply:** 新增/换播放器内核时,确认走 [File-browse sources](sources.md) 的播放路径仍带 `vd=-magicyuv`;升级 Windows libmpv 钉版后该兜底仍可保留(无害)。
 
 ---
+
+### ☠☠ `evFileLoaded = 6` —— 6 是 START_FILE,8 才是 FILE_LOADED
+
+Go 版把 mpv 事件 id 抄错了一个数,于是 `onFileLoaded()`(里面挂**外挂字幕**)
+在文件还没打开的时候就被调用,`sub-add` 回 -12,而那条错只进日志 ——
+表现是**外挂字幕挂了等于没挂,一句报错都没有**。
+
+这正是本文件 `loadfile 异步吞掉 sub-add` 那一条记过的坑,换栈时又踩了一遍,
+只不过这次的形态是**常量写错**而不是时序写错。
+
+实测(ctypes 直打 `build/core/libmpv-2.dll`,`loadfile` 之后的事件顺序):
+
+```
+[6, 8, 17, 17, 21]   START_FILE → FILE_LOADED → VIDEO_RECONFIG ×2 → PLAYBACK_RESTART
+```
+
+已加一条钉子测试 `core/player/event_ids_test.go`,期望值是**实测**来的不是抄文档的;
+注入改回 6 → `MPV_EVENT_FILE_LOADED 应当是 8,实得 6`。
+
+★ 一般化:**照抄的常量表要有一条钉子**。这类错编译期看不出来、运行期不报错,
+只是某个功能默默不工作。
+
+### 无窗口取一帧:`screenshot-to-file` 能用,`screenshot-raw` 在这版上不能
+
+给进度条做缩略图要起第二个 mpv 实例、无窗口解一帧出来。实测(mpv v0.41.0-744):
+
+| 做法 | 结果 |
+|---|---|
+| `vo=null` + `screenshot-raw [video\|subtitles\|video bgr0\|无参]` | **四种全部回 -4** |
+| `vo=null` + `screenshot-to-file <path> video` | **可用**,174KB PNG |
+| 再加 `vf=scale=320:-2` + `screenshot-format=jpg` + `screenshot-jpeg-quality=80` | 320×180、**7.8KB、单张 9~12ms** |
+
+配套要点:
+
+- `seek <t> absolute+keyframes`,**不要 exact** —— exact 要从前一个关键帧解到目标帧,
+  慢一个数量级,而缩略图差几秒没人看得出来;
+- 截图前**先删目标文件**:不删的话截图失败时读到的是**上一张**,而它长得完全正常;
+- 收到 `PLAYBACK_RESTART` **不代表跳到了**,还要读 `time-pos` 核对落点(见 ui-desktop.md);
+- 这个实例的选项要带 `config=no` / `load-scripts=no`:否则会吃到用户的 `mpv.conf`,
+  里面可能带 `vo` 或滤镜。
 
 ## 跨域交叉引用
 

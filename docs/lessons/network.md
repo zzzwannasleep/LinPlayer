@@ -25,6 +25,7 @@
 - UA 三分口径 — `ua-policy-three-lanes.md`
 - 同步线路=emby_ext_domains — `sync-lines-ext-domains.md`
 - 跨服请求生命周期 — `cross-server-request-lifecycle.md`
+- 预取代理多了一条**只读缓存端点** `/cached` — 2026-09-03
 
 ---
 
@@ -625,6 +626,28 @@ mpv 侧形态:`Stream opened successfully` → duration=0、一帧不出、0 条
 **How to apply:** 新增任何跨服/后台联网 provider,默认套这套:无上限+CancelToken离页杀+展示走轻量元数据。参见 [File-browse sources](sources.md) [网盘/strm 播放两大坑](player-mpv.md)。
 
 ---
+
+### 预取代理多了一条**只读缓存端点** `/cached`
+
+`prefetch.Handle` 现在给两个地址:
+
+| | 用途 | 行为 |
+|---|---|---|
+| `URL`(`/stream`) | 播放器取流 | 缺哪段拉哪段,起 worker,会往环形缓存里写 |
+| `CachedURL`(`/cached`) | 进度条缩略图 | **只吐盘上已有的**,缺了直接 416,**不起 worker、不碰上游** |
+
+为什么必须分成两条路,而不是给普通端点加个开关:第二个读者一旦走普通端点,
+它会自己开一条 stream + 一组 worker 顺序拉数据 —— 而环形缓存是**全连接共享**的,
+它拉进来的段会**把正在播的段挤掉**。表现是「拖一下进度条看预览,正片开始卡」,
+而且不报错。所以这条路是一条**没有 worker 的**路。
+
+配套:`Handle.CachedSpans()` 报「哪几段已经在盘上」(按占全片的比例),
+UI 拿它画「这一段有缩略图」。**宁可报少不可报多** —— 报多了是「看见有却出不来」,
+那是坏了;报少了只是保守。所以只认**整段就绪**,在飞的段一律不算。
+
+☠ 既有用例的 `testTotal = 8 * ChunkSize` **永远整除**,
+「最后一段是残段」这条路一次都没被走过 —— 而真实视频文件几乎不可能整除。
+已补 `TestC26_总长不是整段倍数也要一字不差`(9 段零 12345 字节,全量 + 尾部各校验一次)。
 
 ## 跨域交叉引用
 
