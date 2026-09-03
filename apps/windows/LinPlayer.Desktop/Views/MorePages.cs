@@ -295,7 +295,27 @@ public sealed class FavoritesPage : PageBase
                 {
                     rows.Children.Remove(busy);
                     if (items.Count == 0) { rows.Children.Add(Dim("还没有收藏。详情页点「收藏」就会出现在这里。")); return; }
-                    rows.Children.Add(LibraryPage.Grid(core, s.server, items, false));
+
+                    /* ★★ <b>分集单独一栏,横版</b>(接着 2026-09-03 那条
+                       「集封面和海报封面/季封面是不一样的,集封面是横着的」)。
+                       收藏里电影、剧、分集是混着的,而一个网格只能有一种比例 ——
+                       把分集塞进 2:3 的格子里再 UniformToFill,等于左右各裁掉三分之一,
+                       <b>而且画面是满的,不报错</b>。
+                       ★ 分成两栏而不是按条目各画各的比例:同一行里高矮不一会让整页参差,
+                         而「一行对齐」正是网格存在的理由。旧栈当年也是这么分的。 */
+                    var eps = items.Where(i => i.Type == "Episode").ToList();
+                    var rest = items.Where(i => i.Type != "Episode").ToList();
+                    if (rest.Count > 0)
+                    {
+                        if (eps.Count > 0) rows.Children.Add(H2($"影片与剧集 · {rest.Count}"));
+                        rows.Children.Add(LibraryPage.Grid(core, s.server, rest, false));
+                    }
+                    if (eps.Count > 0)
+                    {
+                        rows.Children.Add(H2($"分集 · {eps.Count}"));
+                        rows.Children.Add(LibraryPage.Grid(core, s.server, eps, true,
+                            LibraryPage.OpenDetail(core, s.server), episodeStyle: true, width: 214));
+                    }
                 });
             }
             catch (Exception e)

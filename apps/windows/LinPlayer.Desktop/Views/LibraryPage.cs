@@ -26,6 +26,13 @@ public sealed class LibraryPage : PageBase
         rows.Children.Add(summary);
         Control busy = Skeleton.Grid(true, 4, ShelfWidth);
         rows.Children.Add(busy);
+        /* ★★ 库卡下面还得有东西。
+           用户 2026-09-03 之前三轮都没点名,但这一页的形状摆在那儿:
+           一台服务器通常只有三五个库,画完一行就到底了,<b>下面三分之二是空的</b>。
+           填的不能是装饰,得是这一页真该有的内容 —— 「合集」和「最近加入」
+           都是"从库这一层往下看"的自然下一步,而且两条命令核心层早就有。 */
+        var extra = new StackPanel { Spacing = 22, Margin = new Thickness(0, 10, 0, 0) };
+        rows.Children.Add(extra);
         Content = Scrolled(rows);
 
         /* ★★ Swap **只能在 UI 线程上调**。
@@ -88,6 +95,9 @@ public sealed class LibraryPage : PageBase
                     Swap(Grid(core, s.server, items, true, OpenDetail(core, s.server),
                         width: ShelfWidth, titleLines: 1));
                     _ = FillSummary(core, summary);
+                    // ★ 只画一次:SWR 第二遍(内容真变了)才会走到这儿,那时候 extra 得先清空
+                    extra.Children.Clear();
+                    _ = FillExtra(core, s, extra);
                 }
             }
             catch (Exception e)
@@ -96,6 +106,68 @@ public sealed class LibraryPage : PageBase
                 Dispatcher.UIThread.Post(() => Swap(Dim($"加载失败:{why}")));
             }
         });
+    }
+
+    /// <summary>
+    /// 库卡下面那两段:合集 + 最近加入。
+    ///
+    /// <para>★ <b>各自失败各自空</b> —— 合集端点在某些 fork 上是 404,
+    /// 不能因此把「最近加入」也弄没。</para>
+    /// <para>★ 一条命令没结果就<b>整段不画</b>,不摆一个写着「暂无」的空标题。</para>
+    /// </summary>
+    private static async Task FillExtra(CoreClient core, Sess s, StackPanel host)
+    {
+        async Task One(string title, Func<Task<JsonElement>> load, bool wide, string key)
+        {
+            List<CardItem> items;
+            var hit = MetaCache.PeekList(key);
+            if (hit is { Count: > 0 })
+            {
+                items = hit.Select(CardItem.From).ToList();
+                Dispatcher.UIThread.Post(() => Paint(core, s.server, title, items, wide, host));
+            }
+            try
+            {
+                var r = await load();
+                var raw = r.ValueKind == JsonValueKind.Array ? r.EnumerateArray().ToList() : [];
+                MetaCache.PutList(key, raw);
+                if (hit is { Count: > 0 } && string.Concat(hit.Select(x => x.GetRawText()))
+                    == string.Concat(raw.Select(x => x.GetRawText()))) return;
+                items = raw.Select(CardItem.From).ToList();
+            }
+            catch { return; }   // 端点 404 / 这一段就不出现
+            Dispatcher.UIThread.Post(() => Paint(core, s.server, title, items, wide, host));
+        }
+
+        // ★★ emby.listCollections 早就注册着,UI 一次没调过 —— 又一条零调用命令
+        await Task.WhenAll(
+            One("合集", () => core.EmbyListCollections(new { s.server, s.token, s.user_id, s.device_id }),
+                false, MetaCache.Key("emby.listCollections", new { s.server, s.user_id })),
+            One("最近加入", () => core.EmbyListLatest(new { s.server, s.token, s.user_id, s.device_id, limit = 24 }),
+                false, MetaCache.Key("library.latest", new { s.server, s.user_id })));
+    }
+
+    /// <summary>把一段画进去。★ 同名的先摘掉 —— SWR 第二遍会再画一次。</summary>
+    private static void Paint(CoreClient core, string server, string title,
+        List<CardItem> items, bool wide, StackPanel host)
+    {
+        for (var i = host.Children.Count - 1; i >= 0; i--)
+            if ((string?)host.Children[i].Tag == title) host.Children.RemoveAt(i);
+        if (items.Count == 0) return;
+
+        var block = new StackPanel
+        {
+            Tag = title, Spacing = 10,
+            Children = { H2($"{title} · {items.Count}") },
+        };
+        /* ★ 横向轨道,不是网格:这一页的主角是上面那排库卡,
+           这两段再铺成网格会把库卡推到看不见的地方 —— 那是把一个空页面
+           换成了一个主次颠倒的页面。 */
+        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        foreach (var it in items.Take(40))
+            panel.Children.Add(new Card(core, server, it, wide, OpenDetail(core, server)));
+        block.Children.Add(Carousel.Wrap(panel, wide ? 256.0 * 9 / 16 : 158.0 * 3 / 2));
+        host.Children.Add(block);
     }
 
     /// <summary>顶上那行「128 部电影 · 42 部剧 · 1580 集」。★ 这个端点在某些 fork 上是 404。</summary>

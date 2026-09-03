@@ -34,6 +34,9 @@ internal sealed class MpvGlView : OpenGlControlBase
     /// <summary>GL 就绪后调一次。起播动作放这里,顺序才是对的。</summary>
     public Action? OnReady;
 
+    /// <summary>进度条缩略图的帧库。null = 不采。</summary>
+    public Thumbs? Frames;
+
     public string? InitError { get; private set; }
 
     protected override void OnOpenGlInit(GlInterface gl)
@@ -63,6 +66,11 @@ internal sealed class MpvGlView : OpenGlControlBase
                 Native.lp_gl_render((uint)fb, w, h, 1);
                 // ★ 漏了 swapped 帧率控制就是瞎的(核心层不知道这一帧已经出去了)
                 Native.lp_gl_swapped();
+                /* ★★ 进度条缩略图就在这儿采(见 <see cref="Thumbs"/>)。
+                   ★ 必须排在 render <b>之后</b>:早了读到的是上一帧,而上一帧
+                     和进度条上那个位置对不上 —— 差一格,而且看不出来。
+                   ★ Thumbs 自己会判「这一格是不是已经有了」,绝大多数帧在这里直接返回。 */
+                Frames?.Capture(gl, fb, w, h);
             }
         }
         RequestNextFrameRendering();
@@ -89,7 +97,17 @@ public sealed class PlayerPage : UserControl
     private readonly TextBlock _bubbleText = new()
     {
         Foreground = Brushes.White, FontSize = 12.5,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        Margin = new Thickness(4, 0, 4, 1),
     };
+    /// <summary>气泡里那张缩略图。</summary>
+    private readonly Image _thumb = new() { Stretch = Stretch.UniformToFill };
+    /// <summary>缩略图框的尺寸。★ 和 <see cref="Thumbs"/> 存的 160×90 同比。</summary>
+    private const double ThumbW = 160, ThumbH = 90;
+    /// <summary>这一场播放采到的帧。换片要 Reset。</summary>
+    private readonly Thumbs _frames = new();
+    /// <summary>页面顶层容器。气泡要按进度条的真实坐标挂在它上面。</summary>
+    private Panel? _root;
     private readonly Slider _vol;
     /// <summary>音量滑块的外壳。★ 悬停才展开 —— 常驻的话它白占一条控制栏。</summary>
     private readonly Border _volBox;
@@ -211,23 +229,60 @@ public sealed class PlayerPage : UserControl
             _bubble.IsVisible = at is not null && _duration > 0;
             if (at is null) return;
             _bubbleText.Text = Clock(at.Value);
-            // ★ 气泡跟着指针走,但**不许跑出两端** —— 跑出去的话它会被 Panel 裁掉一半,
-            //   而片头片尾正是最常拖的两个位置。
-            var half = 34.0;
-            var x = Math.Clamp(_bar.HoverX - half, 0, Math.Max(0, _bar.Bounds.Width - half * 2));
-            _bubble.Margin = new Thickness(x, 0, 0, 0);
+
+            /* ★★ 有帧就把缩略图摆上去,没有就只留时间那一行。
+               这一条<b>不是降级</b>,是用户点名的规则:
+               「缓存了的进度条能用,没缓存的不能用这个缩略图功能」。 */
+            var pic = _frames.At(at.Value);
+            _thumb.Source = pic;
+            if (_bubble.Child is StackPanel bs && bs.Children.Count > 0)
+                bs.Children[0].IsVisible = pic is not null;
+
+            /* ★ 气泡跟着指针走,但**不许跑出进度条两端** —— 跑出去会被裁掉一半,
+               而片头片尾正是最常拖的两个位置。
+               ★ 宽高都跟着「这会儿有没有图」走:只有时间的时候气泡窄得多、也矮得多。
+               ★★ 坐标<b>问进度条自己要</b>,不写死 —— 控制条的行高会随按钮尺寸变,
+                 写死的偏移量今天对、下次调按钮就错,而且错了不报错。 */
+            var w = pic is not null ? ThumbW + 10 : 66.0;
+            var h = (pic is not null ? ThumbH + 3 : 0) + 26;
+            var barAt = _bar.TranslatePoint(default, _root!) ?? default;
+            var x = Math.Clamp(_bar.HoverX - w / 2, 0, Math.Max(0, _bar.Bounds.Width - w));
+            _bubble.Margin = new Thickness(barAt.X + x, barAt.Y - h - 6, 0, 0);
         };
+        /* ★★ 悬停气泡 = <b>缩略图在上、时间在下</b>(用户 2026-09-03:
+           「鼠标放到进度条的位置,显示时间放到上面…缩略图的下面是时间」)。
+           ★ 没有缩略图的位置就<b>只剩时间那一行</b>,气泡自己缩回去 ——
+             留一个空画框比没有画框更像坏了。 */
         _bubble = new Border
         {
             IsVisible = false,
             Background = new SolidColorBrush(Color.Parse("#e6000000")),
-            CornerRadius = new CornerRadius(6),
-            Padding = new Thickness(8, 3),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(4),
+            BorderBrush = new SolidColorBrush(Color.Parse("#33ffffff")),
+            BorderThickness = new Thickness(1),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 0, 0),
             IsHitTestVisible = false,
-            Child = _bubbleText,
+            Child = new StackPanel
+            {
+                Spacing = 3,
+                Children =
+                {
+                    // 缩略图框。★ 尺寸钉死 —— 有图没图气泡的宽度都一样,
+                    //   否则鼠标横着划过去的时候气泡会一格一格地胖瘦变化。
+                    new Border
+                    {
+                        Name = "thumbBox", Width = ThumbW, Height = ThumbH,
+                        CornerRadius = new CornerRadius(5), ClipToBounds = true,
+                        IsVisible = false,
+                        Background = new SolidColorBrush(Color.Parse("#1b212c")),
+                        Child = _thumb,
+                    },
+                    _bubbleText,
+                },
+            },
         };
         _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 0, Opacity = 0 };
         /* ★★ 音量条<b>悬停才展开</b>(现代播放器的通行做法)。
@@ -393,13 +448,22 @@ public sealed class PlayerPage : UserControl
            想拖到最开头就得先瞄准那个缩进后的起点。
            现代播放器(YouTube / Netflix / Bilibili / Plex)一律是整宽独占一行,
            时间读数挪到按钮那一排的左边。 */
+        // ★ 帧库交给 GL 视图 —— 采帧只能在 GL 线程上、渲染之后做
+        _view.Frames = _frames;
+
+        /* ☠☠ 气泡<b>不能挂在这一格里</b>。这一格高 50,而带缩略图的气泡要 117 ——
+           实测它被箍成了 50(`气泡 171x50`),于是缩略图溢出去、时间那一行掉到按钮下面。
+           所以气泡挂到**页面顶层**,位置按进度条的真实屏幕坐标算(见 Preview)。
+           ★ 别改成「把这一格加高 120」:那 120px 是从画面上切走的,而气泡一秒钟都不出现的时候
+             它也一直占着。 */
         var barRow = new Panel
         {
             Height = PlayerBar.HitHeight + 26,
-            Children = { _bubble, _bar },
+            Children = { _bar },
         };
         _bar.VerticalAlignment = VerticalAlignment.Bottom;
-        _bubble.Margin = new Thickness(0, 0, 0, PlayerBar.HitHeight + 2);
+        _bubble.HorizontalAlignment = HorizontalAlignment.Left;
+        _bubble.VerticalAlignment = VerticalAlignment.Top;
 
         _time.Margin = new Thickness(6, 0, 0, 0);
         _total.Margin = new Thickness(0, 0, 0, 0);
@@ -499,11 +563,14 @@ public sealed class PlayerPage : UserControl
         _top.Transitions = FadeIn();
         _bottom.Transitions = FadeIn();
 
-        Content = new Panel
+        var root = new Panel
         {
             Background = Brushes.Black,
-            Children = { _view, _top, _bottom, _skip, _settings },
+            // ★ 气泡排在 _bottom <b>之后</b> —— 它要画在控制条上面,而不是被压在下面
+            Children = { _view, _top, _bottom, _skip, _settings, _bubble },
         };
+        _root = root;
+        Content = root;
 
         // ★ 键盘要能收到,控件得先能拿焦点 —— 不设 Focusable 按空格毫无反应,
         //   而用户只会觉得「这播放器连暂停都没有」。
@@ -571,6 +638,7 @@ public sealed class PlayerPage : UserControl
         var lvl = Environment.GetEnvironmentVariable("LP_SELFCHECK_SHADER");
         if (!string.IsNullOrEmpty(lvl)) _ = SelfCheckPickQuality(lvl);
         SelfCheckOsdFade();
+        SelfCheckThumb();
         // 自检:LP_SELFCHECK_PLAYER_DRILL=3 把跳过条钉出来 —— 它平时只在片头那几十秒里出现,
         // 截图永远抓不到,而它是这一版新加的东西里最容易画错位置的一个。
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "3")
@@ -953,6 +1021,62 @@ public sealed class PlayerPage : UserControl
     }
 
     /// <summary>
+    /// 自检:进度条缩略图。
+    ///
+    /// <para>★★ 这条要同时钉住<b>两半</b>,少一半都是假绿:</para>
+    /// <list type="number">
+    /// <item><b>放过的位置有图</b> —— 否则功能压根没工作;</item>
+    /// <item><b>没放过的位置没有图,而且气泡只剩时间</b> —— 这才是用户点名的规则
+    /// 「缓存了的能用,没缓存的不能用」。只验第一半的话,一个「随便给张图」的
+    /// 实现也照样绿。</item>
+    /// </list>
+    /// <para>★ 顺便把气泡钉在屏幕上 —— 收起来的东西在截图里等于不存在。</para>
+    /// </summary>
+    private void SelfCheckThumb()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_THUMB") != "1") return;
+        _ = Task.Delay(6000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var dur = _duration;
+            if (dur <= 0) { Console.WriteLine("[缩略图] ⚠ 还没拿到时长,这条不算数"); return; }
+            var have = 0;
+            for (var i = 0; i < Thumbs.Slots; i++) if (_frames.Has(i)) have++;
+            /* ★ 量的是**明确已经放过**的位置(播放头往回一半),不是播放头本身:
+               `_position` 是轮询来的,比真实渲染位置滞后一拍,而格子只有 duration/300 宽 ——
+               拿它去问「当前这一格有没有图」,问的其实是**正在填的那一格**,
+               会随机红。判据自己和被测对象抢时序,是假红/假绿的同一个来源。 */
+            var atNow = _frames.At(_position * 0.5);
+            // ★ 末尾那一格必定还没放到 —— 它就是「没缓存」那一半的对照
+            var atEnd = _frames.At(dur * 0.98);
+            Console.WriteLine($"[缩略图] 时长 {dur:0.0}s 位置 {_position:0.0}s;" +
+                              $"采到 {have}/{Thumbs.Slots} 格");
+            Console.WriteLine(atNow is not null
+                ? $"[缩略图] ✓ 放过的位置({_position * 0.5:0.0}s)有图 {atNow.PixelSize.Width}x{atNow.PixelSize.Height}"
+                : "[缩略图] ✗ 放过的位置也没有图 —— 采帧没工作");
+            /* ☠ 「有图」不等于「图是对的」。第一版每张都是全黑(忘了把目标 FBO 绑回来),
+               而上面那条断言照样绿 —— 尺寸对、对象非空。所以这一条量的是**亮度**。 */
+            Console.WriteLine(_frames.LastMean > 4
+                ? $"[缩略图] ✓ 帧不是全黑(亮度均值 {_frames.LastMean:0.0})"
+                : $"[缩略图] ✗ 读回来是全黑(亮度均值 {_frames.LastMean:0.0}) —— 多半是没把目标 FBO 绑回来");
+            Console.WriteLine(atEnd is null
+                ? "[缩略图] ✓ 没放到的位置没有图 —— 「没缓存不能用」这条规则是真的"
+                : "[缩略图] ✗ 没放到的位置竟然有图 —— 那这张图不是这个位置的");
+
+            // 把气泡钉出来给截图看:悬停事件在自检里发不出去
+            _bar.Preview?.Invoke(_position * 0.5);
+            _bubble.IsVisible = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                var box = _bubble.Child as StackPanel;
+                Console.WriteLine($"[缩略图] 气泡 {_bubble.Bounds.Width:0}x{_bubble.Bounds.Height:0} " +
+                                  $"@ ({_bubble.Bounds.X:0},{_bubble.Bounds.Y:0});" +
+                                  $"图框可见 {box?.Children[0].IsVisible} {box?.Children[0].Bounds.Height:0};" +
+                                  $"文字 {(box?.Children[1] as TextBlock)?.Text}");
+            }, DispatcherPriority.Background);
+        }));
+    }
+
+    /// <summary>
     /// 自检:上下两条<b>是渐隐的,不是一刀切</b>(用户 2026-09-03 点名)。
     ///
     /// <para>★★ 判据必须是<b>逐帧采到的 Opacity</b>。
@@ -1215,6 +1339,11 @@ public sealed class PlayerPage : UserControl
         _position = Math.Clamp(pos, 0, dur > 0 ? dur : 1);
         // buffered = 已缓冲到哪一秒(核心层读的是 mpv demuxer-cache-time,本地文件是 0)
         _bar.Sync(_position, dur, Num(st, "buffered"));
+        /* ★ 帧库要知道「现在放到哪、一共多长」才能分格 —— 采帧那一侧在 GL 线程上,
+           它不该自己去打命令(那是每一帧一次往返)。这里顺手喂,轮询本来就在跑。 */
+        _frames.Duration = dur;
+        _frames.Position = _position;
+        _bar.HasThumb = _frames.Has;
         SyncMute();
         // ★ 拖动中不要覆盖时间读数 —— 那会儿它显示的是**手指所在位置**,
         //   被轮询盖回当前播放位置的话,拖的时候数字纹丝不动

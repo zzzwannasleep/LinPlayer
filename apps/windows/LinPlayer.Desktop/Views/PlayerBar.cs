@@ -142,6 +142,17 @@ public sealed class PlayerBar : Control
     /// <summary>预览气泡该画在哪个 x(播放页要拿它定位)。-1 = 不画。</summary>
     public double HoverX => _hover || _dragging ? _hoverX : -1;
 
+    /// <summary>
+    /// 第 i 格有没有缩略图。null = 这一场不采帧(缩略图功能不可用),那就整条带子都不画。
+    /// <para>★ 传的是<b>函数</b>不是一份快照:帧是边播边采的,快照发过来就已经旧了。</para>
+    /// </summary>
+    public Func<int, bool>? HasThumb;
+
+    /// <summary>和 <see cref="Thumbs.Slots"/> 同一个数。分两处写的下场是带子和实际有图的位置错开。</summary>
+    private const int ThumbSlots = Thumbs.Slots;
+
+    private static readonly IBrush ThumbBandBrush = new SolidColorBrush(Color.Parse("#7a5b8def"));
+
     public override void Render(DrawingContext ctx)
     {
         var w = Bounds.Width;
@@ -181,6 +192,23 @@ public sealed class PlayerBar : Control
                 if (c <= 0 || c >= _duration) continue;
                 var cx = w * (c / _duration);
                 ctx.DrawRectangle(NotchBrush, null, new Rect(cx - 1, y, 2, th));
+            }
+
+            /* ★★ <b>哪一段能看缩略图</b>,画一条细带说清楚。
+               用户 2026-09-03 定的规则是「缓存了的能用,没缓存的不能用」——
+               既然是规则,就不能让用户靠试:划过去没图的时候,他分不清是
+               「这儿没有」还是「这功能坏了」。一条 2px 的带子就说明白了。
+               ★ 只在悬停时画:平时它是噪音,而平时也没人要用缩略图。 */
+            if (big && HasThumb is not null)
+            {
+                var band = new Rect(0, y + th + 3, 0, 2);
+                for (var i = 0; i < ThumbSlots; i++)
+                {
+                    if (!HasThumb(i)) continue;
+                    var x0 = w * i / ThumbSlots;
+                    ctx.FillRectangle(ThumbBandBrush,
+                        band.WithX(x0).WithWidth(Math.Max(1, w / ThumbSlots)));
+                }
             }
 
             // 圆头只在悬停/拖动时出现。★ 常驻的话它会一直在画面上戳着,

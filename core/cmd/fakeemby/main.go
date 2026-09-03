@@ -268,6 +268,41 @@ func main() {
 			writeJSON(w, map[string]any{
 				"MovieCount": 128, "SeriesCount": 42, "EpisodeCount": 1580, "BoxSetCount": 6,
 			})
+		/* 收藏:/Users/{uid}/Items?Filters=IsFavorite
+		   ★★ 必须是**混着的**:电影 + 剧 + 分集。原来这条请求掉进通用列表分支,
+		     回来清一色的电影 —— 于是「分集单独一栏横版」这条在自检里
+		     <b>永远走不到</b>,而它绿不绿全看夹具有没有分集。假绿五类里的「夹具不真实」。 */
+		case r.URL.Query().Get("Filters") == "IsFavorite":
+			favs := []map[string]any{
+				item("mv-1", "某部电影", "Movie"),
+				item("mv-2", "另一部电影", "Movie"),
+				item("s1", "某部剧", "Series"),
+			}
+			for i := 1; i <= 3; i++ {
+				e := item(fmt.Sprintf("s1e%d", i), fmt.Sprintf("第 %d 集", i), "Episode")
+				e["SeriesName"] = "某部剧"
+				e["SeriesId"] = "s1"
+				e["IndexNumber"] = i
+				e["ParentIndexNumber"] = 1
+				e["RunTimeTicks"] = 14000000000
+				favs = append(favs, e)
+			}
+			writeJSON(w, page(favs...))
+
+		/* 合集:/Users/{uid}/Items?IncludeItemTypes=BoxSet
+		   ★★ 夹具原来没有这个形状,请求打过来会掉进下面某个兜底分支 ——
+		     于是「合集」这条轨道**永远是空的**,而空态和「这台服务器没有合集」
+		     长得一模一样。核心层的 emby.listCollections 早就在,
+		     UI 一次没调过(第五次撞上「后端领先前端」)。 */
+		case strings.Contains(p, "/Items") && r.URL.Query().Get("IncludeItemTypes") == "BoxSet":
+			sets := []map[string]any{}
+			for i := 1; i <= 4; i++ {
+				b := item(fmt.Sprintf("bs-%d", i), fmt.Sprintf("自检合集 %d", i), "BoxSet")
+				b["ChildCount"] = i * 3
+				sets = append(sets, b)
+			}
+			writeJSON(w, page(sets...))
+
 		// 剧的分集:/Users/{uid}/Items?ParentId=s1&IncludeItemTypes=Episode
 		case strings.Contains(p, "/Items") && r.URL.Query().Get("IncludeItemTypes") == "Episode":
 			/* ★★ **两季**,不是一季。

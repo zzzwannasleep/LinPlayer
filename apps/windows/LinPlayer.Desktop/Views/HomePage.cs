@@ -128,6 +128,14 @@ public sealed class HomePage : PageBase
         var resume = Track("继续观看", () => ResumeAndNextUp(core, s), true,
             key: MetaCache.Key("home.resume", s));
 
+        /* ★★ 合集。<b><c>emby.listCollections</c> 早就注册着,UI 一次没调过</b> ——
+           这是本仓第五次撞上「后端领先前端」。
+           ★ 一条**懒**轨道:合集是锦上添花,不该和继续观看抢首屏那次往返。
+           ★ 没有合集的服务器很常见,那就整条不画(Track 的空态会说清是「没有」)。 */
+        var boxsets = Track("合集", () => Arr(core.EmbyListCollections(
+                new { s.server, s.token, s.user_id, s.device_id })), false,
+            key: MetaCache.Key("emby.listCollections", new { s.server, s.user_id }), lazy: true);
+
         /* ★★ 「各库最新」这一段要**先占住位置**再去拉。
            它依赖媒体库列表(得先知道有哪些库),比别的块晚一步;
            不先占位的话它只能被追加到最后,而且是等库表回来那一刻**当场跳一下**。 */
@@ -143,7 +151,7 @@ public sealed class HomePage : PageBase
         /* ★ 确认是 Emby 了就先把 Hero 的位置占住(骨架)。
            它在页面最顶上,晚出现一次就把**整页**往下顶一次。 */
         _hero.Reserve();
-        await Task.WhenAll(resume, views, HeroItems(core, s));
+        await Task.WhenAll(resume, boxsets, views, HeroItems(core, s));
     }
 
     /// <summary>
