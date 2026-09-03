@@ -13,8 +13,9 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>媒体库总览:一屏列出所有库,点进去是网格。</summary>
 public sealed class LibraryPage : PageBase
 {
-    /// <summary>库卡的宽度。★ 比条目卡大一圈是故意的:一台服务器通常只有三五个库,
-    /// 用条目卡的尺寸画出来就是「屏幕上方三张小卡 + 下面一大片空白」。</summary>
+    /// <summary>库卡<b>最少</b>多宽。★ 比条目卡大一圈是故意的:一台服务器通常只有三五个库,
+    /// 用条目卡的尺寸画出来就是「屏幕上方三张小卡 + 下面一大片空白」。
+    /// 实宽由 <see cref="MediaGrid"/> 按行宽均分算出来,右边不留余数。</summary>
     private const double ShelfWidth = 320;
 
     public LibraryPage(CoreClient core)
@@ -47,13 +48,31 @@ public sealed class LibraryPage : PageBase
                 // ★ include_blocked=true:媒体库页是**唯一**能把被屏蔽的库找回来的地方,
                 //   这里也滤掉的话屏蔽就成了单向门(Rust 版栽过)。
                 var s = Nav.Session!;
+                // ★ 缓存先行:库表是这一页的全部内容,而它几乎从不变 ——
+                //   每次进来等一次往返只为了拿回同样的三五行。
+                var key = MetaCache.Key("emby.views", new { s.server, s.user_id, blocked = true });
+                var cachedRaw = "";
+                if (MetaCache.PeekList(key) is { Count: > 0 } hit)
+                {
+                    cachedRaw = string.Concat(hit.Select(x => x.GetRawText()));
+                    Dispatcher.UIThread.Post(() => Paint(hit.Select(CardItem.From).ToList()));
+                }
+
                 var views = await core.EmbyViews(new
                 {
                     s.server, s.token, s.user_id, s.device_id, include_blocked = true,
                 });
-                var items = views.ValueKind == JsonValueKind.Array
-                    ? views.EnumerateArray().Select(CardItem.From).ToList() : [];
-                Dispatcher.UIThread.Post(() =>
+                var raw = views.ValueKind == JsonValueKind.Array
+                    ? views.EnumerateArray().ToList() : [];
+                MetaCache.PutList(key, raw);
+                // ★ 一个字没变就不重画 —— 重画一次整页网格会当场闪一下
+                if (cachedRaw.Length > 0 && cachedRaw == string.Concat(raw.Select(x => x.GetRawText())))
+                    return;
+                var items = raw.Select(CardItem.From).ToList();
+                Dispatcher.UIThread.Post(() => Paint(items));
+                return;
+
+                void Paint(List<CardItem> items)
                 {
                     if (items.Count == 0) { Swap(Dim("这台服务器上没有媒体库。")); return; }
 
@@ -62,11 +81,14 @@ public sealed class LibraryPage : PageBase
                        顺带省掉的是**每个库一次额外请求** —— 三五个库就是三五次往返,
                        全是为了一行会被无视的小字。顶上那条 128 部电影 · 42 部剧
                        说的是同一件事,而且只要一次请求。 */
-                    var wrap = new WrapPanel();
-                    foreach (var it in items) wrap.Children.Add(Shelf(core, s.server, it));
-                    Swap(wrap);
+                    /* ★★ 库卡改走 <see cref="MediaGrid"/>(用户 2026-09-03 第二次点名右边留白)。
+                       原来是 WrapPanel + 写死 320 宽:1400 的区域放得下 4 张(4×320+3×16=1328),
+                       <b>右边必然剩 72px</b>。WrapPanel 只会换行,它没有「把这一行铺满」的概念。 */
+                    // ★ titleLines:1 —— 库名从来只有一行,留两行会让每张卡白高 17px
+                    Swap(Grid(core, s.server, items, true, OpenDetail(core, s.server),
+                        width: ShelfWidth, titleLines: 1));
                     _ = FillSummary(core, summary);
-                });
+                }
             }
             catch (Exception e)
             {
@@ -75,14 +97,6 @@ public sealed class LibraryPage : PageBase
             }
         });
     }
-
-    /// <summary>一张库卡。<see cref="Card"/> 的横版版式,标题一行、不带副标题。</summary>
-    private static Control Shelf(CoreClient core, string server, CardItem it) =>
-        // titleLines: 1 —— 库名从来只有一行。
-        new Card(core, server, it, true, OpenDetail(core, server), ShelfWidth, titleLines: 1)
-        {
-            Margin = new Thickness(0, 0, 16, 18),
-        };
 
     /// <summary>顶上那行「128 部电影 · 42 部剧 · 1580 集」。★ 这个端点在某些 fork 上是 404。</summary>
     private static async Task FillSummary(CoreClient core, TextBlock target)
@@ -106,14 +120,11 @@ public sealed class LibraryPage : PageBase
     internal static string Advice(Exception e) => e is CoreException c ? c.Advice : e.Message;
 
     /// <summary>
-    /// 自动铺满的网格。<b>卡自己有固定宽</b>,所以用 WrapPanel 就够,不必算列数。
+    /// 自动铺满的网格。
     ///
     /// <para><paramref name="episodeStyle"/>:分集版式。剧集详情页里剧名是已知的,
     /// 每张卡再写一遍「某部剧 · 第 3 集」等于把仅有的两行标题位浪费掉一行半 ——
     /// 那一行要留给<b>时长</b>,那才是选集时真会看的东西。</para>
-    /// </summary>
-    /// <summary>
-    /// 自动铺满的网格。
     ///
     /// <para>★★ 交给 <see cref="MediaGrid"/> —— 它<b>按行虚拟化</b>。
     /// 原来是 WrapPanel 一次性把所有条目 new 成卡片:140 条 = 一千四百个控件,
@@ -123,10 +134,11 @@ public sealed class LibraryPage : PageBase
     /// 改在这儿四处一起受益 —— 各处各写一份网格的话,虚拟化只会做在想起来的那一处。</para>
     /// </summary>
     internal static Control Grid(CoreClient core, string server, List<CardItem> items, bool wide,
-        Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null)
+        Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null,
+        int titleLines = 2)
     {
         using var _ = Core.Perf.Measure($"铺 {items.Count} 条(虚拟化网格)");
-        var g = new MediaGrid(core, server, wide, onOpen, episodeStyle, width);
+        var g = new MediaGrid(core, server, wide, onOpen, episodeStyle, width, titleLines);
         g.Append(items);
         return g;
     }

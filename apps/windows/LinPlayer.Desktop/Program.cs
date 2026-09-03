@@ -29,6 +29,9 @@ internal static class Program
            这里只把根传给核心层,**路径的唯一出口在 core/paths**,UI 侧不自己拼。 */
         var dataDir = Path.Combine(exeDir, "userdata");
         var dll = Path.Combine(exeDir, "lpcore.dll");
+        // ★ 元数据缓存和核心层共用一个数据根。它必须在任何页面构造之前就绪 ——
+        //   晚一步的话首屏那几条读命令全部落空,而「首屏」正是它唯一要救的那一屏。
+        MetaCache.Init(dataDir);
 
         try
         {

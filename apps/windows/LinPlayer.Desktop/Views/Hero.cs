@@ -71,19 +71,20 @@ public sealed class Hero : Border
        ★★ <c>_wash*</c> 是同一张图的**极小尺寸**(h=64)拉满整块当氛围底。
          放大九倍之后它本身就是一片糊的色块 —— 等于免费的高斯模糊,
          而真上 BlurEffect 是每帧对整块 1560×420 重新做一次卷积。
-       ★ 完整图靠右:文字在左边,右边本来就是空的。 */
+       ★ 完整图<b>居中</b>,两条边各做一段羽化(见 SyncFeather)—— 2026-09-03 用户点名。 */
     private readonly Image _sharpA = NewSharp(), _sharpB = NewSharp();
     private readonly ImageBrush _washA = NewWash(), _washB = NewWash();
     /// <summary>两层各自的慢推方向。见 <see cref="GoCore"/> 里那段。</summary>
     private bool _zoomA, _zoomB;
-    /* 完整图左沿那道化开。★★ 停靠点<b>必须按图的真实几何算</b>,不能写死 ——
-       写死 0.34→0.66 的那一版实测出了一道**硬竖缝**:
-       Uniform 之后图的左沿落在 0.467,而遮罩在那儿已经是 0.40 不透明了,
-       于是图的边缘是从「什么都没有」直接跳到 40% —— 一条笔直的竖线。
-       现在两个停靠点跟着 Resize / 换图一起重算,起点永远压在图的左沿上。 */
+    /// <summary>装清晰图的盒子。★ 自检要读它有没有被缩放(判「一个像素都没裁」)。</summary>
     private Border? _boxA, _boxB;
-    /// <summary>压暗层(盖在清晰图上面)。渐变按几何算,见 <see cref="SyncSeam"/>。</summary>
-    private readonly Border _dimA = new(), _dimB = new();
+    /// <summary>
+    /// 羽化层:压在清晰图<b>左右两条边</b>上的一叠竖条,每条画的都是同一张糊底、
+    /// 透明度由外到内从 1 走到 0。见 <see cref="SyncFeather"/>。
+    /// </summary>
+    private readonly Panel _featherA = new(), _featherB = new();
+    /// <summary>糊底那张位图。羽化条的画刷要用它,所以得留一份句柄。</summary>
+    private Bitmap? _washBmpA, _washBmpB;
     /// <summary>底边化开那一层。颜色跟主题走,见 <see cref="SyncBleed"/>。</summary>
     private readonly Border _bleed = null!;
     /// <summary>慢推挂在这一层(糊底)上,<b>不是整层</b>。见 <see cref="NewLayer"/>。</summary>
@@ -116,8 +117,10 @@ public sealed class Hero : Border
     {
         _core = core; _onOpen = onOpen;
 
-        _layerA = NewLayer(_washA, _sharpA, _dimA, out _boxA, out _washBoxA);
-        _layerB = NewLayer(_washB, _sharpB, _dimB, out _boxB, out _washBoxB);
+        BuildStrips(_featherA);
+        BuildStrips(_featherB);
+        _layerA = NewLayer(_washA, _sharpA, _featherA, out _boxA, out _washBoxA);
+        _layerB = NewLayer(_washB, _sharpB, _featherB, out _boxB, out _washBoxB);
         _front = _layerB;   // 第一次 Go() 会切到 A
 
         _skel = new Border { Classes = { "skel" }, CornerRadius = new CornerRadius(0) };
@@ -266,43 +269,78 @@ public sealed class Hero : Border
     }
 
     /// <summary>
-    /// 把压暗层的渐变对到<b>图的真实左沿</b>上。
+    /// 羽化:让「清晰」和「模糊」之间<b>没有那条线</b>。
     ///
-    /// <para>★★ Uniform 之后图的宽度 = 高 × 宽高比,右对齐,所以左沿在
-    /// <c>1 - imgW/blockW</c>。压暗必须<b>正好覆盖到那儿</b>再开始化开 ——
-    /// 早收一点,图的左沿就露出一条比旁边亮的边(那正是那道竖直硬缝);
-    /// 晚收一点,画面主体被压掉一大块。</para>
+    /// <para>★★ 原理是一句算术。清晰图 Uniform 之后宽 <c>imgW = 块高 × 宽高比</c>,
+    /// <b>居中</b>摆放,左沿在 <c>(块宽 - imgW) / 2</c>。糊底铺满整块 ——
+    /// 也就是说清晰图<b>正下方</b>压着的就是同一张画面的糊版本,
+    /// 同一个 x 上两者内容完全一致,只差清晰度。
+    /// 于是只要在图的两条边内侧各铺一叠<b>画着糊底的竖条</b>,
+    /// 透明度由外到内 1 → 0,过去的就是一段真正的「由糊到清」的渐变,
+    /// 而不是一条边。</para>
     ///
-    /// <para>★ 化开占图宽的 34%:再窄还是看得出边,再宽会把主体也吃掉一半。</para>
+    /// <para>★★ 每条竖条的画刷都是同一张糊图,但 <c>DestinationRect</c> 用
+    /// <b>绝对坐标并往左推 x</b> —— 这样每条显示的正好是它所在位置的那一小片,
+    /// 而不是把整张图挤进一条 5px 宽的缝里。这一步是整个做法成立的关键;
+    /// 不推的话每条竖条都是一张被压扁的完整剧照,看着像一排彩色噪声。</para>
+    ///
+    /// <para>★ 羽化带宽取图宽的 12%,并夹在 [48, 160] 之间:
+    /// 太窄仍然看得出边,太宽会把画面主体也糊掉一大块。</para>
+    ///
+    /// <para>☠ <b>不能用 OpacityMask 做这件事</b>(那是最直接的写法):
+    /// 实测 Border 挂了 OpacityMask 之后<b>它的内容整个不画</b>,
+    /// 换成全白遮罩一样不画,而诊断打出来一切正常。见 lessons。</para>
     /// </summary>
-    private void SyncSeam()
+    private void SyncFeather()
     {
         var w = Bounds.Width;
         var h = Height;
         if (w <= 1 || h <= 1) return;
-        Apply(_arA, _dimA, _washA);
-        Apply(_arB, _dimB, _washB);
+        Apply(_arA, _featherA, _washBmpA, _washA);
+        Apply(_arB, _featherB, _washBmpB, _washB);
 
-        void Apply(double ar, Border? dim, ImageBrush wash)
+        void Apply(double ar, Panel host, Bitmap? bmp, ImageBrush wash)
         {
-            if (dim is null) return;
-            // 还没有图 → 整块都压暗(那会儿只有糊底,本来就该压)
-            var left = ar > 0 ? Math.Clamp(1 - h * ar / w, 0, 0.98) : 1;
-            var to = Math.Min(1, left + (1 - left) * 0.34);
-            var dark = Color.Parse("#73000000");
-            dim.Background = new LinearGradientBrush
+            if (host.Children.Count < Strips * 2) return;
+            // 还没有图 → 整叠收起来(那会儿只有糊底,本来就没有边要化)
+            if (ar <= 0 || bmp is null)
             {
-                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
-                GradientStops =
+                foreach (var c in host.Children) c.IsVisible = false;
+                return;
+            }
+            var imgW = Math.Min(h * ar, w);
+            var left = (w - imgW) / 2;
+            _ = wash;   // 糊底铺满整块,不需要按几何摆(理由见 NewWash 里那段实测)
+            var right = left + imgW;
+            var band = Math.Clamp(imgW * 0.12, 48, 160);
+            var step = band / Strips;
+
+            for (var i = 0; i < Strips; i++)
+            {
+                // 左边那叠:最外那条几乎全糊(透明度 ~1),最里那条几乎全透
+                Put(host.Children[i], left + i * step, 1 - (i + 0.5) / Strips);
+                // 右边那叠反过来
+                Put(host.Children[Strips + i], right - band + i * step, (i + 0.5) / Strips);
+            }
+
+            void Put(Control c, double x, double op)
+            {
+                c.IsVisible = true;
+                c.Opacity = op;
+                c.Margin = new Thickness(x, 0, 0, 0);
+                c.Width = step + 1;   // ★ +1:相邻两条要**压着**,留缝的话缝里透出清晰图,成了细竖线
+                if (c is Border b && b.Background is ImageBrush ib)
                 {
-                    new GradientStop(dark, 0),
-                    new GradientStop(dark, left),
-                    new GradientStop(Color.FromArgb(0, 0, 0, 0), to),
-                },
-            };
-            // 氛围底的目标矩形 = 清晰图那一块。左边靠 FlipX 镜像补出去,缝上天然连续。
-            wash.DestinationRect = new RelativeRect(left, 0, 1 - left, 1, RelativeUnit.Relative);
+                    ib.Source = bmp;
+                    /* ★★ 目标矩形 = <b>整块糊底往左推 x</b>(和 washBox 用同一套几何:
+                       满宽满高、UniformToFill)。推的是「整块的位置」,
+                       不是「把整张图塞进这条 6px 的缝」—— 后者画出来是一排
+                       被压扁的完整剧照,像彩色噪声。
+                       这样这一条显示的正是它盖住的那一小片糊底,和背景严丝合缝,
+                       而它和<b>清晰图</b>之间的差别就是这 12 条要抹掉的东西。 */
+                    ib.DestinationRect = new RelativeRect(-x, 0, w, h, RelativeUnit.Absolute);
+                }
+            }
         }
     }
 
@@ -317,67 +355,76 @@ public sealed class Hero : Border
            高一点右边那张图就大一圈,而这一块的主角就是那张图。 */
         var h = Math.Clamp(Bounds.Width * 0.30, 280, 460);
         if (Math.Abs(h - Height) > 0.5) Height = h;
-        SyncSeam();
+        SyncFeather();
     }
 
-    /// <summary>完整剧照:<b>Uniform 不裁</b>,靠右摆(左边留给文字)。</summary>
+    /// <summary>
+    /// 完整剧照:<b>Uniform 不裁</b>,<b>居中</b>摆。
+    /// <para>★ 2026-09-03 从靠右改成居中(用户点名)。靠右的版本只有一条边要处理,
+    /// 居中之后左右各一条 —— 但两条对称的软边看着是「一张照片浮在模糊的底上」,
+    /// 而一条硬边看着是「两张图拼在一起」。</para>
+    /// </summary>
     private static Image NewSharp() => new()
     {
         Stretch = Stretch.Uniform,
-        HorizontalAlignment = HorizontalAlignment.Right,
+        HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Stretch,
     };
 
     /// <summary>
-    /// 氛围底:<b>接着清晰图的左沿镜像延伸出去</b>。
+    /// 糊底:<b>铺满整块</b>,清晰图就浮在它上面。
     ///
-    /// <para>★★ 这是那道竖缝真正的解法。原来氛围底是 UniformToFill 拉满整块 ——
-    /// 于是缝的左边显示的是原图 x≈47% 处的画面,右边是原图 x=0 处的画面,
-    /// <b>两边根本不是同一块内容</b>,压暗多少都对不上,那道竖线就是这么来的。
-    /// <c>TileMode=FlipX</c> + 目标矩形对齐清晰图之后,缝左边正好是 x=0 往回镜像,
-    /// 两侧在缝上<b>是同一个像素列</b> —— 数学上连续,不是「调到看不出来」。</para>
+    /// <para>★★ <b>老老实实铺满,不要对齐清晰图 + FlipX 镜像</b>。
+    /// 我推理过一版「对齐 + 镜像」:糊底的目标矩形对准清晰图那一块,
+    /// 两侧靠 <c>TileMode=FlipX</c> 镜像补出去 —— 这样缝两侧是同一个像素列,
+    /// 「数学上连续」。<b>实测把缝做坏了</b>:</para>
+    /// <code>
+    /// 铺满   左缝 …61 61 62 62 64 63 65…   右缝 …77 78 78 79 79 78…   平滑
+    /// 镜像   左缝 …44 44 45 [69] 69 69…    右缝 …69 69 [103] 104…     跳 24 / 34
+    /// </code>
+    /// <para>缝左边显示的是原图<b>右端</b>的颜色,也就是说 Avalonia 在这条路上
+    /// <b>没有真的翻转</b>,行为等同于 <c>TileMode.Tile</c>(平铺)——
+    /// 于是「镜像连续」这个前提整个不成立,反而制造了一道 30 级的硬边。</para>
     ///
-    /// <para>★ 目标矩形跟着几何走(见 <see cref="SyncSeam"/>),而且用的是 h=64 的小图:
-    /// 它被拉大九倍,本身就是糊的 —— 免费的模糊,不用 BlurEffect 每帧卷积一遍。</para>
+    /// <para>★★ 教训不是「镜像不好」,是<b>我又一次拿推理当了结论</b>:
+    /// 上一版靠镜像消掉的那道缝底下还压着一层压暗渐变,它把这个错遮住了;
+    /// 这一版压暗撤掉,错就露出来了。判据永远是量出来的剖面,不是推导。</para>
+    ///
+    /// <para>★ 用的是 h=64 的小图:它被拉大九倍,本身就是糊的 ——
+    /// 免费的模糊,不用 BlurEffect 每帧对整块 1560×420 卷积一遍。</para>
     /// </summary>
     private static ImageBrush NewWash() => new()
     {
-        Stretch = Stretch.Fill,
-        TileMode = TileMode.FlipX,
+        Stretch = Stretch.UniformToFill,
     };
 
     /// <summary>缩放量。<paramref name="v"/> = 1 就是原样。</summary>
     private static ITransform Zoom(double v) => TransformOperations.Parse($"scale({v})");
 
     /// <summary>
-    /// 一层。里面是「氛围底 + 压暗 + <b>完整剧照</b>」三块,外面这一层管透明度和慢推。
+    /// 一层。里面是「糊底 + <b>完整剧照(居中)</b> + 两条边的羽化」三块,
+    /// 外面这一层管透明度和慢推。
     ///
-    /// <para>★★ 完整图和氛围底之间不能是一条竖直硬边 —— 那看上去就是
-    /// 「一张图贴在另一张图上」。解法见 <see cref="NewWash"/>(镜像延伸)和
-    /// <see cref="SyncSeam"/>(压暗渐变),<b>都不用 OpacityMask</b>。</para>
+    /// <para>★★ 2026-09-03 改成<b>居中 + 双边羽化</b>(用户:「旁边模糊的部分
+    /// 不是和封面对立的方向,而是做成那种蒙版模糊然后居中就行了,
+    /// 不要有模糊和清晰的界限,看着有点割裂」)。
+    /// 上一版是「清晰图靠右 + 糊底往左镜像延伸」,颜色接得上,但<b>清晰度接不上</b> ——
+    /// 一条竖直的「这边是清的、那边是糊的」的分界线,那就是他说的割裂。</para>
+    ///
+    /// <para>★★ 解法不是「把颜色调得更像」,是<b>在那条线上做真正的过渡</b>:
+    /// 见 <see cref="SyncFeather"/>。</para>
     /// </summary>
-    private static Border NewLayer(ImageBrush wash, Image sharp, Border dim,
+    private static Border NewLayer(ImageBrush wash, Image sharp, Panel feather,
         out Border box, out Border washBox)
     {
-        /* ★★ <b>压暗那一层盖在清晰图上面</b>,而且是一条<b>横向渐变</b>:
-           左边 45% 黑,到图的左沿之后逐渐化到 0。
-           这是「完整剧照贴在糊底上」那道竖直硬缝的解法 ——
-           而且它是<b>算出来的</b>,不是凑的:糊底和清晰图<b>是同一张画面</b>
-           (一张糊、一张清晰),同样压暗 45% 之后,缝两侧的亮度<b>数值上相等</b>,
-           台阶就不存在了;剩下的只有清晰度差异,而在一片同色区域里人眼看不出来。
-
-           ☠ <b>别用 OpacityMask 做这道化开</b> —— 实测 Border 挂了 OpacityMask 之后
-             <b>它的内容整个不画</b>(换成全白遮罩一样不画,说明不是停靠点算错),
-             而诊断打出来一切正常:Source 1280×720、盒 1068×321、层透明度 1.00。
-             这类失败编译绿、日志空,只有真渲染 + 数像素才抓得到。 */
         box = new Border { Child = sharp };
         /* ★★ 慢推(Ken Burns)只推<b>糊底这一层</b>,<b>不推清晰图</b>。
            这是被实测逼出来的:整层一起推的话,1.07 倍会把图的边缘顶出裁剪框 ——
            右边少 14px、上边少 4px。而这一块的全部意义就是「一个像素都不裁」,
            为了动效再裁回去,等于把刚修好的问题原样搬了个地方。
-           糊底本来就是被 UniformToFill 裁过的氛围色块,推它不损失任何信息,
-           而画面「在动」这件事照样成立(光和色在缓慢流动)。
-           ★ 糊底推得比原来狠一点(1.00↔1.10):它是糊的,推小了根本看不出来。 */
+           糊底本来就是被 UniformToFill 裁过的氛围色块,推它不损失任何信息。
+           ☠ 羽化条画的是**没被推过的**糊底,所以慢推**只能**挂在 washBox 上;
+             挂到整层上的话糊底在动、羽化条不动,缝会随着慢推一起呼吸。 */
         washBox = new Border
         {
             Background = wash,
@@ -395,12 +442,33 @@ public sealed class Hero : Border
         return new Border
         {
             Opacity = 0,
-            Child = new Panel { Children = { washBox, box, dim } },
+            Child = new Panel { Children = { washBox, box, feather } },
             Transitions =
             [
                 new DoubleTransition { Property = OpacityProperty, Duration = Fade, Easing = new CubicEaseInOut() },
             ],
         };
+    }
+
+    /// <summary>羽化用多少条。★ 条数就是过渡的台阶数 —— 少了会看出一格一格的带。</summary>
+    private const int Strips = 12;
+
+    /// <summary>
+    /// 把羽化条先建出来(空的)。位置 / 画刷 / 透明度由 <see cref="SyncFeather"/> 每次填。
+    ///
+    /// <para>★★ <b>建一次,之后只改属性</b>。拖窗口时 SizeChanged 每帧都发,
+    /// 每帧 new 24 个 Border + 24 支画刷就是每帧一次垃圾风暴。</para>
+    /// </summary>
+    private static void BuildStrips(Panel host)
+    {
+        for (var i = 0; i < Strips * 2; i++)
+            host.Children.Add(new Border
+            {
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                IsHitTestVisible = false,
+                Background = new ImageBrush { Stretch = Stretch.UniformToFill },
+            });
     }
 
     /// <summary>
@@ -428,6 +496,12 @@ public sealed class Hero : Border
         _items.AddRange(items);
         if (_items.Count == 0) { IsVisible = false; return; }
         IsVisible = true;
+        /* ★★ 换了一批数据必须<b>复位下标</b>。
+           不复位的话 <see cref="Start"/> 里那句 <c>if (_idx &lt; 0)</c> 不成立,
+           它就<b>不会去画第一张</b> —— 而 <c>_items</c> 已经换成新的了。
+           表现:屏幕上还是上一批里的那张图,圆点却按新的一批画。
+           2026-09-03 加「缓存先画一批、真数据回来再画一批」之后当场会踩到。 */
+        _idx = -1;
 
         /* ★★ 几张图<b>一起预取</b>。翻页时才去拉的话,每翻一张都要等一次网络 ——
            交叉淡入淡到一半发现下一张还没到,就成了「淡出到一片空白再淡回来」。
@@ -589,6 +663,9 @@ public sealed class Hero : Border
         var washBmp = i < _wash.Length ? await _wash[i] : null;
         if (_idx != i) return;
         wash.Source = washBmp ?? bmp;
+        // ★ 羽化条要拿同一张糊图去画。少了这一句羽化层是空的 ——
+        //   不报错,只是那条缝又回来了。
+        if (toA) _washBmpA = washBmp ?? bmp; else _washBmpB = washBmp ?? bmp;
 
         sharp.Source = bmp;
         /* ★ 记下这一张的宽高比,遮罩要按它对齐。
@@ -596,7 +673,7 @@ public sealed class Hero : Border
              按 16:9 算出来的左沿在海报上差着几百像素,那道缝会更明显。 */
         var ar = bmp.PixelSize.Height > 0 ? (double)bmp.PixelSize.Width / bmp.PixelSize.Height : 16.0 / 9;
         if (toA) _arA = ar; else _arB = ar;
-        SyncSeam();
+        SyncFeather();
         _skel.IsVisible = false;
         back.Opacity = 1;
         _front.Opacity = 0;
@@ -863,13 +940,19 @@ public sealed class Hero : Border
             await Task.Delay(900);
             string Brush(object? src) => src is Bitmap bm
                 ? $"{bm.PixelSize.Width}x{bm.PixelSize.Height}" : "(空)";
-            static string Mask(Border? b) => b?.Background is LinearGradientBrush g && g.GradientStops.Count == 3
-                ? $"{g.GradientStops[1].Offset:0.000}->{g.GradientStops[2].Offset:0.000}" : "(无)";
+            // 羽化条报「几条在画 / 带宽多少」——空的话那条缝还在,而截图上很难一眼看出
+            static string Feather(Panel p)
+            {
+                var on = p.Children.Count(c => c.IsVisible && c.Opacity > 0.01);
+                if (on == 0) return "(无)";
+                var xs = p.Children.Where(c => c.IsVisible).Select(c => c.Margin.Left).ToList();
+                return $"{on}条 {xs.Min():0}~{xs.Max():0}px";
+            }
             Console.WriteLine($"[Hero 诊断] 块 {Bounds.Width:0}x{Height:0}  " +
                               $"A层 透明度{_layerA.Opacity:0.00} 清晰图{Brush(_sharpA.Source)}@{_sharpA.Bounds.Width:0}x{_sharpA.Bounds.Height:0} 底图{Brush(_washA.Source)} " +
-                              $"比例{_arA:0.00} 压暗{Mask(_dimA)} | " +
+                              $"比例{_arA:0.00} 羽化{Feather(_featherA)} | " +
                               $"B层 透明度{_layerB.Opacity:0.00} 清晰图{Brush(_sharpB.Source)}@{_sharpB.Bounds.Width:0}x{_sharpB.Bounds.Height:0} 底图{Brush(_washB.Source)} " +
-                              $"比例{_arB:0.00} 压暗{Mask(_dimB)}");
+                              $"比例{_arB:0.00} 羽化{Feather(_featherB)}");
             /* ★★ 「整张剧照一个像素都没裁」的判据:
                清晰图那一层<b>不许带缩放</b>,而且它的高度必须正好等于块高
                (Uniform 之后按高度 fit,矮一点就是没铺满、被裁过或者比例算错了)。
@@ -884,6 +967,29 @@ public sealed class Hero : Border
                 ? $"[Hero 完整度] ✓ 清晰图没有缩放,高 {_sharpA.Bounds.Height:0} ≈ 块高 {Height:0} —— 一个像素都没裁"
                 : $"[Hero 完整度] ✗ 被裁了:A无缩放={NoZoom(_boxA)} B无缩放={NoZoom(_boxB)} " +
                   $"图高{_sharpA.Bounds.Height:0} 块高{Height:0}");
+            /* ★★ 羽化到底有没有画出来,<b>截图上极难判</b> ——
+               没有羽化时是一条竖直的清晰/模糊分界,而在一张渐变测试图上
+               那条线本来就不显眼。所以这里量三件事:
+               条数、透明度是不是从 ~1 单调走到 ~0、以及它们盖住的那一段
+               是不是正好落在清晰图的两条边上。 */
+            var fa = _featherA.Children.Where(c => c.IsVisible).ToList();
+            if (fa.Count == 0)
+            {
+                Console.WriteLine("[Hero 羽化] ✗ 一条羽化都没画 —— 清晰图和糊底之间是一条硬边");
+            }
+            else
+            {
+                var ops = fa.Take(Strips).Select(c => Math.Round(c.Opacity, 2)).ToList();
+                var mono = ops.Zip(ops.Skip(1), (x, y) => x > y).All(x => x);
+                var imgW = Math.Min(Height * _arA, Bounds.Width);
+                var expectLeft = (Bounds.Width - imgW) / 2;
+                var gotLeft = fa.Take(Strips).Min(c => c.Margin.Left);
+                Console.WriteLine($"[Hero 羽化] 左侧 {ops.Count} 条 透明度 {string.Join(" ", ops)};" +
+                                  $" 起点 {gotLeft:0} 应在 {expectLeft:0}");
+                Console.WriteLine(mono && Math.Abs(gotLeft - expectLeft) < 2
+                    ? "[Hero 羽化] ✓ 由外到内单调化开,而且正压在清晰图的左沿上"
+                    : $"[Hero 羽化] ✗ 单调={mono} 起点偏了 {Math.Abs(gotLeft - expectLeft):0.0}px");
+            }
             Console.WriteLine($"[Hero 自检] 共 {_items.Count} 张,现在第 {_idx + 1} 张:{Cur()};" +
                               $"高 {Height:0}px,圆点 {_dots.Children.Count} 颗,骨架可见={_skel.IsVisible}");
             foreach (var at in new[] { 0, 220, 500, 1000, 2000 })

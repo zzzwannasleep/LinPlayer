@@ -125,6 +125,18 @@
   <Style Selector="Button.navbtn:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
   </Style>
+  <!-- 侧栏服务器列表里「使用中」那一台。
+       ★ 底色和导航项的选中态用<b>同一个</b> AccentSoft —— 两块紧挨着,
+         用两种「选中」的画法会让人以为它们是两种不同的状态。 -->
+  <Style Selector="Button.navbtn.on /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+  </Style>
+  <Style Selector="Button.navbtn.on">
+    <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+  </Style>
+  <Style Selector="Button.navbtn.on:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+  </Style>
 
   <!-- 主按钮 -->
   <Style Selector="Button.primary">
@@ -303,16 +315,21 @@
       鼠标要瞄准才点得中 —— 而 OSD 三秒就收,瞄不中就得再晃一次鼠标。
   -->
   <Style Selector="Button.osd">
-    <!-- ★★ 44×40 而不是 40×36。符号本身只有十来像素,靠字形当热区的话鼠标要瞄准 ——
-         而 OSD 三秒就收,瞄不中就得再晃一次鼠标。44 是触控/鼠标通用的下限。 -->
-    <Setter Property="Width" Value="44" />
-    <Setter Property="Height" Value="40" />
+    <!-- ★★ 46×46 正方 + 20px 字形(2026-09-03,用户:「播放页的 UI 有点小了,放大一点」)。
+         上一版 44×40 / 15px:热区够了,但**图标本身**只有十来像素,
+         在 1080p 全屏下小得像一排灰点。
+         这一组数是照现代播放器的实测区间取的(热区 40~48、图标 20~24,
+         见 docs/research/modern-player-ui.md §2)——
+         44×40 那个长方形也一并改成正方:圆角 23 的圆形底在长方形上是个胶囊,
+         而所有现代播放器的悬停底都是正圆。 -->
+    <Setter Property="Width" Value="46" />
+    <Setter Property="Height" Value="46" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="White" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="CornerRadius" Value="23" />
     <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
-    <Setter Property="FontSize" Value="15" />
+    <Setter Property="FontSize" Value="20" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
@@ -320,10 +337,10 @@
   </Style>
   <!-- 主键(播放/暂停)大一号:它是这一排里唯一会被反复点的。 -->
   <Style Selector="Button.osd.main">
-    <Setter Property="Width" Value="52" />
-    <Setter Property="Height" Value="48" />
-    <Setter Property="CornerRadius" Value="24" />
-    <Setter Property="FontSize" Value="19" />
+    <Setter Property="Width" Value="58" />
+    <Setter Property="Height" Value="58" />
+    <Setter Property="CornerRadius" Value="29" />
+    <Setter Property="FontSize" Value="26" />
     <Setter Property="Background" Value="#26ffffff" />
   </Style>
   <Style Selector="Button.osd.main /template/ ContentPresenter">

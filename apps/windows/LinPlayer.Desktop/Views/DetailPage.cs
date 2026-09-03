@@ -97,23 +97,51 @@ public sealed class DetailPage : PageBase
                    现在拆成两条:头部先画(一次小请求),分集自己在后面补。
                    这正是本仓已经写过的那条教训 —— 「不秒加载」的根因是加载结构里的屏障,
                    不是渲染慢。首页早就是各轨道各自渲染了,详情页这里漏了。 */
+                /* ★★ <b>缓存先行</b>(用户 2026-09-03:「各个页面的封面、简介、元数据
+                   都是可以缓存的,这样下次打开就很快了…其他页面也一样」)。
+                   详情页是全站被反复进出最多的一页 —— 看完一集退出来再点进去,
+                   海报、简介、标签这些**一个字都没变**,却要再等一次完整往返。 */
+                var key = MetaCache.Key("emby.itemDetail", new { s.server, item_id = itemId });
+                var cached = MetaCache.Peek(key);
+                if (cached is { ValueKind: JsonValueKind.Object } c0)
+                {
+                    if (Str(c0, "type_") is "Series" or "Season") _episodesTask = LoadEpisodes(itemId);
+                    Dispatcher.UIThread.Post(() => Paint(c0));
+                    if (_episodesTask is not null) _ = FillEpisodes();
+                }
+
                 var d = await core.EmbyItemDetail(new
                 {
                     s.server, s.token, s.user_id, s.device_id,
                     item_id = itemId, with_children = false,
                 });
+                MetaCache.Put(key, d);
+                /* ★★ 内容一个字没变就<b>不要重画</b>。
+                   重画一次这一页要重建海报、按钮、分集网格 —— 用户看到的是
+                   「刚出来的页面当场闪一下又变回同样的样子」,那看着像 bug。
+                   ★ 比的是整段原文,不是挑几个字段:挑字段就得跟着核心层的输出走,
+                     漏一个就成了「改了不刷新」。 */
+                if (cached is { } c1 && c1.GetRawText() == d.GetRawText()) return;
+
                 // 是剧 / 季才有分集。★ 在渲染之前就发出去,让它和布局并行跑。
                 var type = Str(d, "type_");
                 if (type is "Series" or "Season") _episodesTask = LoadEpisodes(itemId);
 
-                Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(() => Paint(d));
+                if (_episodesTask is not null) await FillEpisodes();
+                return;
+
+                void Paint(JsonElement data)
                 {
                     body.Children.Remove(busy);
                     /* ★★ 渲染要有边界。这一页的渲染抛异常时**整个进程会当场退出** ——
                        没有对话框、没有日志窗口,用户看到的是「点了详情,软件没了」。
                        (刚刚就撞上了一次:一个控件同时挂两处。)
                        Rust 版为此有 PageBoundary,这边一直没有对应的东西。 */
-                    try { Render(body, d); }
+                    // ★ 重画之前先清干净:缓存那一版已经把整页画出来了,
+                    //   不清的话真数据会**再叠一份**上去(标题海报按钮全出现两遍)。
+                    body.Children.Clear();
+                    try { Render(body, data); }
                     catch (Exception re)
                     {
                         body.Children.Clear();
@@ -121,8 +149,7 @@ public sealed class DetailPage : PageBase
                         body.Children.Add(Dim($"这一页画不出来:{re.Message}"));
                         Console.WriteLine("[详情页] 渲染失败: " + re);
                     }
-                });
-                if (_episodesTask is not null) await FillEpisodes();
+                }
             }
             catch (Exception e)
             {
@@ -148,6 +175,7 @@ public sealed class DetailPage : PageBase
         try
         {
             var s = Nav.Session!;
+            var key = MetaCache.Key("emby.seasonEpisodes", new { s.server, parent_id = itemId });
             while (true)
             {
                 var page = await _core.EmbySeasonEpisodes(new
@@ -164,8 +192,19 @@ public sealed class DetailPage : PageBase
                     ? t.GetInt32() : all.Count;
                 if (all.Count >= total) break;
             }
+            MetaCache.PutList(key, all.Select(CardItem.ToJson).ToList());
         }
-        catch { /* ★ 分集拉不动**不该让整页失败** —— 头部已经在屏幕上了 */ }
+        /* ★ 分集拉不动**不该让整页失败** —— 头部已经在屏幕上了。
+           ★★ 而且这时候要<b>回落到缓存</b>:离线 / 服务器抽风时,
+             上一次拉到的分集表仍然是能看的东西,给一张空表等于白白丢掉它。 */
+        catch
+        {
+            var s2 = Nav.Session;
+            if (s2 is not null && MetaCache.PeekList(
+                    MetaCache.Key("emby.seasonEpisodes", new { s2.server, parent_id = itemId }))
+                is { Count: > 0 } old)
+                return old.Select(CardItem.From).ToList();
+        }
         return all;
     }
 

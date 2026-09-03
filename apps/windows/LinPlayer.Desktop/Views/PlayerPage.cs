@@ -81,8 +81,19 @@ public sealed class PlayerPage : UserControl
     /// <summary>要播的版本(MediaSource id)。空 = 核心层按正则挑。</summary>
     private readonly string _mediaSourceId = "";
     private readonly MpvGlView _view = new();
-    private readonly Slider _bar;
+    /// <summary>进度条。★ 自绘,不是 Slider —— 理由见 <see cref="PlayerBar"/> 的注释。</summary>
+    private readonly PlayerBar _bar = new();
+    /// <summary>悬停/拖动时浮在进度条上方的时间气泡。</summary>
+    private readonly Border _bubble;
+    private readonly TextBlock _bubbleText = new()
+    {
+        Foreground = Brushes.White, FontSize = 12.5,
+    };
     private readonly Slider _vol;
+    /// <summary>音量滑块的外壳。★ 悬停才展开 —— 常驻的话它白占一条控制栏。</summary>
+    private readonly Border _volBox;
+    /// <summary>当前播放位置(秒)。原来是从 <c>_bar.Value</c> 读的,自绘之后要自己记。</summary>
+    private double _position;
     private readonly TextBlock _time = new() { Foreground = Brushes.White, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
     /// <summary>总时长,画在进度条右端。★ 和已播时间**分列进度条两侧** ——
     /// 挤在一起写成 <c>12:30 / 1:45:00</c> 时,眼睛得先找到那个斜杠才知道读到哪儿了。</summary>
@@ -127,7 +138,8 @@ public sealed class PlayerPage : UserControl
     private readonly CardItem? _next;
 
     private double _duration;
-    private bool _dragging;
+    /// <summary>鼠标是不是停在控制条上。停着就不收 OSD(见构造函数里那段)。</summary>
+    private bool _osdHover;
     private bool _full;
     private bool _tracksLoaded;
     private bool _leaving;
@@ -187,11 +199,46 @@ public sealed class PlayerPage : UserControl
         _itemId = itemId;
         _next = next;
 
-        /* ★★ 进度条<b>加高到 28</b>。默认的 Slider 热区只有十几像素高,
-           而进度条是这一页被点得最多的东西 —— 瞄不准的代价是跳错位置,
-           然后还得再拖一次。用户说的「一点都不好点击」头一条就是它。 */
-        _bar = new Slider { Minimum = 0, Maximum = 1, Value = 0, IsEnabled = false, MinHeight = 28 };
-        _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 110 };
+        /* ★★ 进度条是<b>自绘</b>的(<see cref="PlayerBar"/>),不是 Slider。
+           上一版把 Slider 的 MinHeight 拉到 28 来解决「不好点击」——
+           那只是把**同一个控件**加高,画出来的仍然是一条粗线加一个常驻圆点。
+           现代播放器是「静止 4px 细线 / 悬停 7px + 圆头 / 底下 24px 透明热区」,
+           外加已缓冲段、章节缺口、时间气泡 —— 这些 Slider 一个都给不了。 */
+        _bar.Seek = to => _ = SeekTo(to);
+        _bar.Preview = at =>
+        {
+            _bubble.IsVisible = at is not null && _duration > 0;
+            if (at is null) return;
+            _bubbleText.Text = Clock(at.Value);
+            // ★ 气泡跟着指针走,但**不许跑出两端** —— 跑出去的话它会被 Panel 裁掉一半,
+            //   而片头片尾正是最常拖的两个位置。
+            var half = 34.0;
+            var x = Math.Clamp(_bar.HoverX - half, 0, Math.Max(0, _bar.Bounds.Width - half * 2));
+            _bubble.Margin = new Thickness(x, 0, 0, 0);
+        };
+        _bubble = new Border
+        {
+            IsVisible = false,
+            Background = new SolidColorBrush(Color.Parse("#e6000000")),
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(8, 3),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 0),
+            IsHitTestVisible = false,
+            Child = _bubbleText,
+        };
+        _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 0, Opacity = 0 };
+        /* ★★ 音量条<b>悬停才展开</b>(现代播放器的通行做法)。
+           常驻 110px 的话它在控制栏左半边一直占着位置,而音量是个一次调好、
+           之后几乎不动的东西。展开靠 Width + Opacity 两条过渡一起走 ——
+           只动 Width 的话它会「从一条竖线长出来」,像被压扁了。 */
+        foreach (var pr in new[] { Slider.WidthProperty, Slider.OpacityProperty })
+            (_vol.Transitions ??= []).Add(new Avalonia.Animation.DoubleTransition
+            {
+                Property = pr, Duration = TimeSpan.FromMilliseconds(160),
+                Easing = new Avalonia.Animation.Easings.CubicEaseOut(),
+            });
 
         /* ★★ OSD 的图标全部换成 <b>Segoe MDL2 Assets</b>(样式 Button.osd 里设的字体)。
            原来混着用 Unicode 杂符号(⏸ ⟲ ⟳ 🕪 ⚙ ⛶):
@@ -225,16 +272,6 @@ public sealed class PlayerPage : UserControl
         _subs.SelectionChanged += (_, _) => _ = PickTrack("sub", _subs);
         _quality.SelectionChanged += (_, _) => _ = PickQuality();
         _ = LoadQualityLevels();
-
-        // ★ 拖拽的抬手事件挂在**外层**,不是 Slider 自己身上 ——
-        //   挂在自己身上的话拖出控件再松手收不到,进度条会永久钉住(Rust 版栽过)。
-        _bar.AddHandler(PointerPressedEvent, (_, _) => _dragging = true, RoutingStrategies.Tunnel);
-        AddHandler(PointerReleasedEvent, async (_, _) =>
-        {
-            if (!_dragging) return;
-            _dragging = false;
-            await SeekTo(_bar.Value);
-        }, RoutingStrategies.Tunnel);
 
         var back10 = Glyph(Ico.Back, "后退 10 秒(←)");
         back10.Click += (_, _) => _ = SeekBy(-10);
@@ -349,28 +386,64 @@ public sealed class PlayerPage : UserControl
             _skip.IsVisible = false;
         };
 
-        var progress = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-        _time.Margin = new Thickness(0, 0, 12, 0);
-        _total.Margin = new Thickness(12, 0, 0, 0);
-        Grid.SetColumn(_time, 0);
-        Grid.SetColumn(_bar, 1);
-        Grid.SetColumn(_total, 2);
-        progress.Children.Add(_time);
-        progress.Children.Add(_bar);
-        progress.Children.Add(_total);
+        /* ★★ 版式换成<b>「整条进度条独占一行 + 底下一排按钮」</b>。
+           原来是「已播时间 | 进度条 | 总时长」挤在一行里 ——
+           那让进度条两端各缩进 60 多像素,而<b>片头和片尾恰好在那两端</b>,
+           想拖到最开头就得先瞄准那个缩进后的起点。
+           现代播放器(YouTube / Netflix / Bilibili / Plex)一律是整宽独占一行,
+           时间读数挪到按钮那一排的左边。 */
+        var barRow = new Panel
+        {
+            Height = PlayerBar.HitHeight + 26,
+            Children = { _bubble, _bar },
+        };
+        _bar.VerticalAlignment = VerticalAlignment.Bottom;
+        _bubble.Margin = new Thickness(0, 0, 0, PlayerBar.HitHeight + 2);
+
+        _time.Margin = new Thickness(6, 0, 0, 0);
+        _total.Margin = new Thickness(0, 0, 0, 0);
+        var clock = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 4,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                _time,
+                new TextBlock
+                {
+                    Text = "/", Foreground = Brushes.White, Opacity = 0.45, FontSize = 12.5,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                _total,
+            },
+        };
+
+        // 音量:图标 + 悬停才展开的滑块。整组一起接悬停,不然从图标滑到滑块的路上它会收回去。
+        _volBox = new Border
+        {
+            Background = Brushes.Transparent,
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 4,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children = { _mute, _vol },
+            },
+        };
+        _volBox.PointerEntered += (_, _) => { _vol.Width = 92; _vol.Opacity = 1; };
+        _volBox.PointerExited += (_, _) => { _vol.Width = 0; _vol.Opacity = 0; };
 
         var left = new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 6,
+            Orientation = Orientation.Horizontal, Spacing = 4,
             VerticalAlignment = VerticalAlignment.Center,
             Children = { _pause, back10, fwd10 },
         };
         if (_next is not null) left.Children.Add(nextBtn);
-        left.Children.Add(_mute);
-        left.Children.Add(_vol);
+        left.Children.Add(_volBox);
+        left.Children.Add(clock);
         var right = new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 6,
+            Orientation = Orientation.Horizontal, Spacing = 4,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
             Children = { _speed, shot, gear, full },
@@ -380,6 +453,7 @@ public sealed class PlayerPage : UserControl
         Grid.SetColumn(right, 2);
         controls.Children.Add(left);
         controls.Children.Add(right);
+        var progress = barRow;
 
         /* ★★ 上下两条都用**渐变蒙版**,不是一块实心黑条。
            实心条是一条硬边压在画面上,边缘那一行像素会突兀地断掉;
@@ -387,9 +461,10 @@ public sealed class PlayerPage : UserControl
         _bottom = new Border
         {
             Background = Scrim(false),
-            Padding = new Thickness(20, 34, 20, 16),
+            // ★ 左右 16:整条进度条要贴得住两端,内缩太多的话片头片尾又不好瞄了
+            Padding = new Thickness(16, 40, 16, 10),
             VerticalAlignment = VerticalAlignment.Bottom,
-            Child = new StackPanel { Spacing = 6, Children = { progress, controls } },
+            Child = new StackPanel { Spacing = 0, Children = { progress, controls } },
         };
 
         _top = new Border
@@ -427,6 +502,34 @@ public sealed class PlayerPage : UserControl
         AttachedToVisualTree += (_, _) => Focus();
         KeyDown += OnKey;
         PointerMoved += (_, _) => { _lastMove = DateTime.UtcNow; ShowOsd(true); };
+
+        /* ★★ <b>鼠标停在控制条上就不收 OSD</b>。
+           不判这一下的话:用户把鼠标移到音量条上停三秒调音量,整条 OSD 当场消失 ——
+           而他的手还按在滑块上。所有现代播放器都有这一条。 */
+        foreach (var b in new[] { _top, _bottom })
+        {
+            b.PointerEntered += (_, _) => _osdHover = true;
+            b.PointerExited += (_, _) => _osdHover = false;
+        }
+
+        /* 滚轮调音量 —— 事实标准(YouTube / Bilibili / mpv / VLC 都是)。
+           ★ 一格 5:一格 1 要滚二十下才从静音到满,一格 10 又太粗。 */
+        PointerWheelChanged += (_, e) =>
+        {
+            SetVolume(_vol.Value + (e.Delta.Y > 0 ? 5 : -5));
+            _lastMove = DateTime.UtcNow;
+            ShowOsd(true);
+            e.Handled = true;
+        };
+        /* 点画面 = 播放/暂停,双击 = 全屏。也是事实标准。
+           ★ 挂在 <see cref="MpvGlView"/> 上而不是整页 —— 挂整页的话点控制条上的
+             空白处也会暂停,而那儿用户的意图是「什么都不做」。 */
+        _view.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(_view).Properties.IsLeftButtonPressed && e.ClickCount == 1)
+                _ = TogglePause();
+        };
+        _view.DoubleTapped += (_, _) => ToggleFullscreen();
 
         // ★ 起播排在 GL 就绪之后。发出去就行,不等结果 —— 等结果会把渲染线程堵住。
         _view.OnReady = () => Dispatcher.UIThread.Post(() => _ = Start(itemId, resumeSecs));
@@ -552,6 +655,9 @@ public sealed class PlayerPage : UserControl
                 if (list.Count == 0) return;
                 _chapters.ItemsSource = list;
                 _chapterRow.IsVisible = true;
+                // ★ 进度条上切缺口。现代播放器都有这一下 ——
+                //   它把「这片子有几段」直接画在了用户要拖的那条线上。
+                _bar.Chapters = list.Select(c => c.At).ToList();
             });
         }
         catch { /* 没有章节是常态,不是错误 */ }
@@ -748,6 +854,14 @@ public sealed class PlayerPage : UserControl
             case Key.Space or Key.K: _ = TogglePause(); break;
             case Key.Left: _ = SeekBy(-10); break;
             case Key.Right: _ = SeekBy(10); break;
+            // J / L = ±10 秒。★ YouTube 起的头,现在是事实标准 ——
+            //   手不用离开 J/K/L 三个键就能倒、停、进。
+            case Key.J: _ = SeekBy(-10); break;
+            case Key.L: _ = SeekBy(10); break;
+            // 数字键跳到百分之几。★ 也是事实标准(0=开头,5=一半)。
+            case >= Key.D0 and <= Key.D9 when _duration > 0:
+                _ = SeekTo(_duration * (e.Key - Key.D0) / 10.0);
+                break;
             case Key.Up: SetVolume(_vol.Value + 5); break;
             case Key.Down: SetVolume(_vol.Value - 5); break;
             case Key.M:
@@ -784,7 +898,7 @@ public sealed class PlayerPage : UserControl
     private async Task SeekBy(double delta)
     {
         if (_duration <= 0) return;
-        await SeekTo(Math.Clamp(_bar.Value + delta, 0, _duration));
+        await SeekTo(Math.Clamp(_position + delta, 0, _duration));
     }
 
     // 只改滑块,命令由 PropertyChanged 统一发 —— 两处各发一次就会打架
@@ -991,7 +1105,11 @@ public sealed class PlayerPage : UserControl
         }
         SyncSkip(pos);
 
-        if (DateTime.UtcNow - _lastMove > TimeSpan.FromSeconds(3) && !paused) ShowOsd(false);
+        /* 3 秒不动就收。★ 两个例外,都是现代播放器的通行做法:
+           ①<b>暂停时不收</b> —— 暂停就是「我要看清楚这一帧 / 我要操作」;
+           ②<b>鼠标停在控制条上不收</b> —— 手还在滑块上,条却没了。 */
+        if (DateTime.UtcNow - _lastMove > TimeSpan.FromSeconds(3) && !paused && !_osdHover)
+            ShowOsd(false);
 
         // ★ 闩和**目标**比,不和上一次读到的位置比(见字段上的注释)
         if (_seekTarget >= 0)
@@ -999,14 +1117,14 @@ public sealed class PlayerPage : UserControl
             if (Math.Abs(pos - _seekTarget) < 1.5) _seekTarget = -1;
             else return;
         }
-        if (_dragging) return;
-
         _duration = dur;
-        _bar.IsEnabled = dur > 0;
-        _bar.Maximum = dur > 0 ? dur : 1;
-        _bar.Value = Math.Clamp(pos, 0, _bar.Maximum);
+        _position = Math.Clamp(pos, 0, dur > 0 ? dur : 1);
+        // buffered = 已缓冲到哪一秒(核心层读的是 mpv demuxer-cache-time,本地文件是 0)
+        _bar.Sync(_position, dur, Num(st, "buffered"));
         SyncMute();
-        _time.Text = dur > 0 ? Clock(pos) : "加载中…";
+        // ★ 拖动中不要覆盖时间读数 —— 那会儿它显示的是**手指所在位置**,
+        //   被轮询盖回当前播放位置的话,拖的时候数字纹丝不动
+        if (!_bubble.IsVisible) _time.Text = dur > 0 ? Clock(pos) : "加载中…";
         _total.Text = dur > 0 ? Clock(dur) : "";
         _pause.Content = paused ? Ico.Play : Ico.Pause;
     }

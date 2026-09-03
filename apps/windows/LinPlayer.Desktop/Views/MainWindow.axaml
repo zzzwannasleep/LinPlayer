@@ -38,41 +38,38 @@
     </Grid>
 
     <!-- ══════ 主体 ══════ -->
-    <Grid Name="BodyGrid" Grid.Row="1" ColumnDefinitions="212,*">
+    <!-- ★★ 列宽是 <b>Auto</b>,真实宽度在侧栏自己的 Width 上 ——
+         GridLength **不可动画**,而用户 2026-09-03 点名要收放动效。
+         把宽度挪到 Border.Width 上之后,一条 DoubleTransition 就够了。 -->
+    <Grid Name="BodyGrid" Grid.Row="1" ColumnDefinitions="Auto,*">
 
-      <!-- 侧栏。★ 折叠态 72px 只留图标(Tokens 里的 SidebarCollapsedWidth)。 -->
-      <Border Name="Sidebar" Grid.Column="0" Background="{DynamicResource Panel}"
+      <!-- 侧栏。★ 折叠态 72px 只留图标(Tokens 里的 SidebarCollapsedWidth)。
+           ★ ClipToBounds:收起过程中里面的文字比列还宽,不裁的话会漏到内容区上。 -->
+      <Border Name="Sidebar" Grid.Column="0" Width="212" ClipToBounds="True"
+              Background="{DynamicResource Panel}"
               BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
+        <Border.Transitions>
+          <Transitions>
+            <!-- 220ms:比换页那 180 稍长一点 —— 这一下是「布局在变形」,
+                 太快会看成闪动;再长会挡住用户下一步操作。 -->
+            <DoubleTransition Property="Width" Duration="0:0:0.22" Easing="CubicEaseInOut" />
+          </Transitions>
+        </Border.Transitions>
         <DockPanel LastChildFill="True">
-          <!-- 服务器切换器 -->
-          <!-- ★ 这块是**可点的**:点开就是服务器管理。
-               没有入口的话登录一台之后就再也换不了服务器,而这是个多服务器播放器。
-               ★ 只写服务器名,不写用户名(用户 2026-09-02):一台服务器一个账号是常态,
-                 把用户名摆在这儿等于每次都在回答一个没人问的问题。 -->
-          <Button DockPanel.Dock="Top" Name="ServerChip" Margin="10,12,10,6" Padding="10,9"
-                  Background="{DynamicResource PanelAlt}" BorderThickness="0" CornerRadius="10"
-                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Cursor="Hand">
-            <StackPanel Orientation="Horizontal" Spacing="9">
-              <TextBlock Name="ServerIcon" Text="&#xE968;" FontFamily="Segoe MDL2 Assets"
-                         FontSize="14" Width="18" TextAlignment="Center"
-                         Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
-              <TextBlock Name="ServerName" Text="未连接" FontSize="13" FontWeight="SemiBold"
-                         TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-            </StackPanel>
-          </Button>
 
-          <!-- 底部:折叠 / 展开 + 设置 -->
+          <!-- 底部:设置 + 折叠 / 展开 -->
           <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,10">
             <RadioButton Classes="nav" Name="NavSettings" GroupName="nav" Content="设置" Tag="&#xE713;" />
-            <!-- ★★ 折叠开关放**底部**,和导航项同一套版式 ——
-                 摆在顶上的话它会和服务器卡抢「这一列最重要的东西」那个位置,
-                 而它是个一天点不了一次的东西。 -->
+            <!-- ★★ 折叠开关放**底部**,和导航项同一套版式。
+                 ★ 折叠态下图标要和上面那一列**对齐到同一条竖线**(用户 2026-09-03 点名:
+                   「收起/展开没有和其他图标一样居中」)。导航项靠 .icononly 把图标撑成 56 宽,
+                   这一个是 Button、吃不到那条选择器 —— 所以在 ToggleSidebar 里手动同步。 -->
             <Button Name="BtnCollapse" Classes="navbtn" Height="38" Margin="8,4,8,0"
                     Padding="10,0" HorizontalAlignment="Stretch"
                     HorizontalContentAlignment="Left" Background="Transparent"
                     BorderThickness="0" CornerRadius="8" Cursor="Hand"
                     Foreground="{DynamicResource Ink2}">
-              <StackPanel Orientation="Horizontal" Spacing="10">
+              <StackPanel Name="CollapseBox" Orientation="Horizontal" Spacing="10">
                 <TextBlock Name="CollapseIcon" Text="&#xE76B;" FontFamily="Segoe MDL2 Assets"
                            FontSize="15" Width="18" TextAlignment="Center"
                            Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
@@ -80,6 +77,24 @@
                            Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
+          </StackPanel>
+
+          <!--
+            服务器区。
+            ★★ 2026-09-03 用户点名:「侧边栏下面那些位置可以放服务器,
+              只需要鼠标往左边点点就可以切换服务器;同时把服务器页的那些功能
+              做成右键点击服务器就出现的功能;添加服务器做成在这些服务器的上面 ——
+              这样就省略了服务器页和添加服务器页了」。
+            ★ 所以顶上原来那块「服务器卡」没了:它只是一个**通往服务器页的入口**,
+              而现在服务器本身就在侧栏里,那个入口没有存在的理由。
+            ★ 内容由 C# 填(账号表是运行期才知道的),见 UpdateServerChip。
+          -->
+          <StackPanel DockPanel.Dock="Bottom" Name="ServerSection" Margin="0,10,0,6">
+            <Border Height="1" Margin="12,0,12,8" Background="{DynamicResource Line}" />
+            <TextBlock Name="ServerSectionTitle" Text="服务器" Margin="18,0,0,4"
+                       FontSize="11" FontWeight="SemiBold"
+                       Foreground="{DynamicResource Ink3}" />
+            <StackPanel Name="ServerList" Spacing="0" />
           </StackPanel>
 
           <StackPanel Name="NavList" Spacing="0">

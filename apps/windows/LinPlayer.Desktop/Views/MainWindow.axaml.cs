@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Controls.Presenters;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -42,7 +43,6 @@ public partial class MainWindow : Window
         Nav.Host = Show;
         Nav.Immersive = SetImmersive;
 
-        this.FindControl<Button>("ServerChip")!.Click += (_, _) => GoServers();
         this.FindControl<Button>("BtnCollapse")!.Click += (_, _) => ToggleSidebar();
         // ★ 需要 Emby 会话的页面统一走 Emby():账号是网盘 / 局域网源时 Nav.Session 是 null,
         //   页面里直接解引用会抛在 Task 里 —— 没提示、不崩、就是永远停在「加载中」。
@@ -196,6 +196,9 @@ public partial class MainWindow : Window
         SelfCheckHero();
         SelfCheckNavHover();
         SelfCheckGlyphs();
+        SelfCheckFill();
+        SelfCheckSidebar();
+        SelfCheckServerMenu();
         /* 自检:把侧栏收起来。
            ★ 折叠态是这一版新加的,而它<b>收着的时候才是新形态</b> ——
              不主动收一次,截图永远拍的是展开态,图标有没有对齐、
@@ -262,6 +265,10 @@ public partial class MainWindow : Window
                 if (arg.Length > 0 && Nav.Current is RankingPage rp) rp.SelfCheckGroup(arg);
                 break;
             case "servers": GoServers(); break;
+            /* 自检:右键菜单那条路 —— **只编辑当前这一台**,抽屉直接拉开。
+               ★ 和 servers: 是两页不同的版式(有没有全表、有没有「添加」按钮),
+                 只截前者的话「定点编辑」这一版从来没被看过。 */
+            case "serveredit": GoServers(srv, arg.Length > 0 ? arg : "edit"); break;
             // 自检:批量添加页(带参数时把那段文本填进去并解析)
             case "batch":
                 {
@@ -498,9 +505,155 @@ public partial class MainWindow : Window
             ("侧栏 聚合视界", ""), ("侧栏 观看历史", ""), ("侧栏 下载", ""),
             ("侧栏 排行榜", ""), ("侧栏 追剧日历", ""), ("侧栏 插件", ""),
             ("侧栏 设置", ""),
+            // 服务器右键菜单 / 侧栏服务器行(2026-09-03 新增)。
+            // ★ 加了新图标**必须**往这里加一行 —— 字体里没有那个码位时
+            //   Windows 画的是一个空心方框,而它编译绿、运行不报错。
+            ("菜单 添加服务器", "\uE710"),
+            ("菜单 编辑信息", "\uE70F"),
+            ("菜单 编辑线路", "\uE774"),
+            ("菜单 编辑图标", "\uE91B"),
+            ("菜单 重新登录", "\uE72C"),
+            ("菜单 测线路", "\uE9D9"),
         };
         foreach (var (n, g) in PlayerPage.Ico.All) outp.Add(("播放页 " + n, g));
         return outp;
+    }
+
+    /// <summary>
+    /// 自检:网格<b>右边到底还剩多少空</b>。
+    ///
+    /// <para>★★ 这一条是被用户点名<b>两轮</b>逼出来的。第一轮我去掉了
+    /// <c>MaxWidth=1560</c> 那道封顶,以为就是它;第二轮用户说「右边还是有留空」——
+    /// 真因是卡片宽度**写死 158**,而 (可用宽 + 间距) 除不尽 (卡宽 + 间距),
+    /// <b>余数必然留在右边</b>。这是一道算术题,不是审美题。</para>
+    ///
+    /// <para>★★ 判据必须量<b>真卡片的右沿</b>,不能拿 <c>_cardWidth × 列数</c> 去算 ——
+    /// 那只证明我算对了,证明不了 <see cref="Card"/> 真的按这个宽度画出来了。
+    /// (本仓「算得对但画得不对」栽过:ImageBrush 尺寸全对、屏幕上一片空。)</para>
+    /// </summary>
+    private void SelfCheckFill()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_FILL") != "1") return;
+        _ = Task.Delay(3500).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var grid = this.GetVisualDescendants().OfType<MediaGrid>().FirstOrDefault();
+            if (grid is null) { Console.WriteLine("[网格铺满] ✗ 这一页上没有 MediaGrid"); return; }
+            var cards = grid.GetVisualDescendants().OfType<Card>().ToList();
+            if (cards.Count == 0) { Console.WriteLine("[网格铺满] ✗ 一张卡都没画出来"); return; }
+
+            var w = grid.Bounds.Width;
+            double right = 0, left = w;
+            foreach (var c in cards)
+            {
+                var p0 = c.TranslatePoint(default, grid);
+                if (p0 is null) continue;
+                left = Math.Min(left, p0.Value.X);
+                right = Math.Max(right, p0.Value.X + c.Bounds.Width);
+            }
+            var gap = w - right;
+            Console.WriteLine($"[网格铺满] 容器宽 {w:0}  卡片 {cards.Count} 张  " +
+                              $"最左 {left:0}  最右 {right:0}  右边剩 {gap:0.0}px");
+            // ★ 2px 是取整的余量(列宽用了 Math.Floor)。再多就是真的没铺满。
+            Console.WriteLine(gap <= 2.5 && left <= 0.5
+                ? "[网格铺满] ✓ 卡片铺到了容器右沿 —— 没有留白"
+                : $"[网格铺满] ✗ 右边空着 {gap:0.0}px(左边 {left:0.0}px)—— 那是除不尽的余数,不是设计");
+        }));
+    }
+
+    /// <summary>
+    /// 自检:侧栏收放的<b>动效</b>和折叠态的<b>图标对齐</b>。
+    ///
+    /// <para>★★ 「有没有动效」<b>截图判不出来</b> —— 收起前和收起后各一张,
+    /// 中间是瞬移还是插值完全看不出。所以这里按帧采样 <c>Sidebar.Width</c>:
+    /// 中间读到过 72 和 212 <b>以外</b>的值 = 真的在插值。
+    /// 这正是上一版漏掉这条需求的方式:代码里写着「宽度用 GridLength 直接改,不做动画」,
+    /// 而 GridLength 压根<b>没有动画器</b>,想加也加不上 —— 得先把宽度挪到
+    /// <c>Border.Width</c> 上(见 <see cref="ToggleSidebar"/>)。</para>
+    ///
+    /// <para>★★ 对齐那一条量的是<b>屏幕坐标</b>:折叠键的图标中心和导航项图标中心
+    /// 必须落在同一条竖线上。用户 2026-09-03 原话「收起/展开没有和其他图标一样居中」。
+    /// 只看 <c>HorizontalContentAlignment</c> 是查不出来的 ——
+    /// 那一版它已经是 Center 了,偏出去的是 Padding 和图标宽度。</para>
+    /// </summary>
+    private void SelfCheckSidebar()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_SIDEBAR") != "1") return;
+        _ = Task.Delay(2200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var bar = this.FindControl<Border>("Sidebar")!;
+            var seen = new List<double>();
+            var n = 0;
+            ToggleSidebar();
+            void Sample(TimeSpan _)
+            {
+                seen.Add(Math.Round(bar.Width, 1));
+                if (++n < 26) TopLevel.GetTopLevel(bar)!.RequestAnimationFrame(Sample);
+                else Report();
+            }
+            void Report()
+            {
+                var mid = seen.Where(v => v is > 73 and < 211).ToList();
+                Console.WriteLine($"[侧栏动效] 采到的宽度 {string.Join(" ", seen.Distinct())}");
+                Console.WriteLine(mid.Count > 0
+                    ? $"[侧栏动效] ✓ 中间经过了 {mid.Count} 个插值宽度 —— 是在动,不是瞬移"
+                    : "[侧栏动效] ✗ 只有 212 和 72 两个值 —— 宽度是瞬间跳过去的,没有动效");
+                Align();
+            }
+            void Align()
+            {
+                var icon = this.FindControl<TextBlock>("CollapseIcon")!;
+                var navIcon = this.FindControl<RadioButton>("NavHome")!
+                    .GetVisualDescendants().OfType<TextBlock>().FirstOrDefault(t => t.Name == "icon");
+                if (navIcon is null) { Console.WriteLine("[折叠图标] ✗ 找不到导航项的图标"); return; }
+                double? Mid(Visual v) =>
+                    v.TranslatePoint(new Point(v.Bounds.Width / 2, 0), bar)?.X;
+                var a = Mid(icon); var b = Mid(navIcon);
+                if (a is null || b is null) { Console.WriteLine("[折叠图标] ✗ 量不到坐标"); return; }
+                Console.WriteLine($"[折叠图标] 折叠键中心 {a:0.0}  导航图标中心 {b:0.0}  侧栏宽 {bar.Width:0}");
+                Console.WriteLine(Math.Abs(a.Value - b.Value) < 1.5
+                    ? "[折叠图标] ✓ 和上面那一列落在同一条竖线上"
+                    : $"[折叠图标] ✗ 偏了 {Math.Abs(a.Value - b.Value):0.0}px —— 折叠态下它没和别的图标居中对齐");
+            }
+            TopLevel.GetTopLevel(bar)!.RequestAnimationFrame(Sample);
+        }));
+    }
+
+    /// <summary>
+    /// 自检:把侧栏里第一台服务器的<b>右键菜单</b>弹出来。
+    ///
+    /// <para>★★ 这一版把服务器页那四组编辑动作全搬进了右键菜单 ——
+    /// 而<b>收起来的东西在截图里等于不存在</b>:菜单有几项、图标是不是方框、
+    /// 文字排没排齐,不弹一次就永远没人看过。上一版「四组抽屉」也是这么补的自检。</para>
+    /// </summary>
+    private void SelfCheckServerMenu()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_SRVMENU") != "1") return;
+        _ = Task.Delay(2600).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var list = this.FindControl<StackPanel>("ServerList")!;
+            // 第 0 个是「添加服务器」,第 1 个才是第一台服务器
+            var row = list.Children.OfType<Button>().Skip(1).FirstOrDefault();
+            if (row?.ContextMenu is null)
+            {
+                Console.WriteLine("[服务器菜单] ✗ 侧栏里没有服务器行,或者那一行没挂右键菜单");
+                return;
+            }
+            /* ★★ 弹之前要把置顶摘掉。
+               自检模式下主窗是 Topmost(防止截到别的程序),而 Avalonia 在 Windows 上
+               把右键菜单画在**另一个顶层窗口**里 —— 那个窗口不是 Topmost,
+               于是它被主窗压在下面,**截图里什么都没有而日志报「已弹出」**。
+               这一条本身就是个「自检说绿、屏幕上没有」的典型:
+               第一次跑就是这么白拍了一张。 */
+            Topmost = false;
+            /* ★★ 还得把摆放方式从「跟着指针」改成「贴着这一行」。
+               ContextMenu 默认 Placement=Pointer —— 自检里<b>鼠标在哪儿是不确定的</b>
+               (多半根本不在窗口上),于是菜单弹在屏幕的某个角落,
+               截窗口那块区域自然什么都截不到,而日志照样报「已弹出」。
+               ★ 这是**自检专用**的改动:真用户是右键点出来的,指针位置天然就是对的。 */
+            row.ContextMenu.Placement = PlacementMode.RightEdgeAlignedTop;
+            row.ContextMenu.Open(row);
+            Console.WriteLine($"[服务器菜单] ✓ 已弹出,{row.ContextMenu.Items.Count} 项");
+        }));
     }
 
     /// <summary>侧栏收起来了没有。</summary>
@@ -514,22 +667,59 @@ public partial class MainWindow : Window
     ///
     /// <para>★ 折叠态<b>只留图标</b>,不是把整条藏掉 —— 藏掉的话导航就没了,
     /// 用户得先展开才能换页,那不叫折叠,那叫隐藏。</para>
-    /// <para>★ 宽度用 GridLength 直接改,不做动画:这一列一变,右边整页要重排版
-    /// (网格要重算列数、轨道要重算能滚多远),按帧插值等于每帧全页重排。</para>
+    ///
+    /// <para>★★ 宽度写在 <c>Sidebar.Width</c> 上而<b>不是列宽</b>(列宽已改成 Auto)——
+    /// <c>GridLength</c> 没有动画器,挂 Transition 无声不生效。
+    /// 用户 2026-09-03:「侧边栏收起/展开没有动效」。</para>
+    ///
+    /// <para>★★ 折叠态下这个按钮的图标要和上面那一列<b>落在同一条竖线上</b>
+    /// (用户同一轮点名)。导航项靠 <c>.icononly</c> 把图标撑成 56 宽 + Padding 0,
+    /// 而这一个是 <see cref="Button"/>,那条选择器是 <c>RadioButton.nav.icononly</c>,
+    /// <b>选不中它</b> —— 所以这里手动同步同一组数。
+    /// 一开始只改了 <c>HorizontalContentAlignment</c>,那治不了:
+    /// 外面还有 10px 的 Padding 和 18px 的图标宽,居中的是「图标+空文字」这一整块。</para>
     /// </summary>
     private void ToggleSidebar()
     {
         _collapsed = !_collapsed;
-        this.FindControl<Grid>("BodyGrid")!.ColumnDefinitions[0].Width = new GridLength(SidebarWidth);
+        this.FindControl<Border>("Sidebar")!.Width = SidebarWidth;
         foreach (var rb in this.GetVisualDescendants().OfType<RadioButton>())
             if (rb.Classes.Contains("nav")) rb.Classes.Set("icononly", _collapsed);
-        // 服务器卡和折叠键自己也要跟着收 —— 留着一行字在 72px 宽的列里会被裁掉半个字
-        this.FindControl<TextBlock>("ServerName")!.IsVisible = !_collapsed;
+        SyncCollapsed();
+    }
+
+    /// <summary>
+    /// 把「折叠态」这件事同步到那几个不吃 <c>.icononly</c> 的控件上。
+    /// <para>★ 单独抽出来是因为**服务器行是运行期建的** —— 建完之后
+    /// 还得再按当前折叠态收一次,不然收着侧栏切服务器,新建的行是展开版式。</para>
+    /// </summary>
+    private void SyncCollapsed()
+    {
+        var icon = this.FindControl<TextBlock>("CollapseIcon")!;
+        var box = this.FindControl<StackPanel>("CollapseBox")!;
+        var btn = this.FindControl<Button>("BtnCollapse")!;
         this.FindControl<TextBlock>("CollapseText")!.IsVisible = !_collapsed;
-        this.FindControl<TextBlock>("CollapseIcon")!.Text = _collapsed ? "" : "";
-        ToolTip.SetTip(this.FindControl<Button>("BtnCollapse")!, _collapsed ? "展开侧栏" : "收起侧栏");
-        var chip = this.FindControl<Button>("ServerChip")!;
-        chip.HorizontalContentAlignment = _collapsed ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        // ★ 56 / Padding 0 —— 和 RadioButton.nav.icononly 那条样式里的数**必须一样**,
+        //   差一个像素这一个图标就比上面那一列偏出去
+        icon.Width = _collapsed ? 56 : 18;
+        box.Spacing = _collapsed ? 0 : 10;
+        btn.Padding = new Thickness(_collapsed ? 0 : 10, 0);
+        icon.Text = _collapsed ? "" : "";   // › / ‹
+        ToolTip.SetTip(btn, _collapsed ? "展开侧栏" : "收起侧栏");
+
+        // 服务器区:标题和每行的名字在折叠态下收掉,只留图标
+        this.FindControl<TextBlock>("ServerSectionTitle")!.IsVisible = !_collapsed;
+        foreach (var row in this.FindControl<StackPanel>("ServerList")!.Children.OfType<Button>())
+            if (row.Content is StackPanel sp)
+            {
+                sp.Spacing = _collapsed ? 0 : 10;
+                row.Padding = new Thickness(_collapsed ? 0 : 10, 0);
+                foreach (var c in sp.Children)
+                {
+                    if (c is TextBlock t && (string?)t.Tag == "name") t.IsVisible = !_collapsed;
+                    else c.Width = _collapsed ? 56 : 18;
+                }
+            }
     }
 
     /// <summary>
@@ -604,21 +794,39 @@ public partial class MainWindow : Window
         root.RowDefinitions[0].Height = on ? new GridLength(0) : new GridLength(36);
         // ★ 退全屏要回到**当前的**侧栏宽度,不是写死的 212 ——
         //   否则收着侧栏去看片,回来侧栏自己展开了。
-        body.ColumnDefinitions[0].Width = on ? new GridLength(0) : new GridLength(SidebarWidth);
+        // ★ 列宽现在是 Auto,宽度在 Sidebar 自己身上(为了能做收放动效)
+        _ = body;
+        this.FindControl<Border>("Sidebar")!.Width = on ? 0 : SidebarWidth;
         this.FindControl<Grid>("TitleBar")!.IsVisible = !on;
         this.FindControl<Border>("Sidebar")!.IsVisible = !on;
         WindowState = on ? WindowState.FullScreen : WindowState.Normal;
     }
 
-    /// <summary>进服务器管理。★ 顺手把侧栏的选中态摘掉 —— 不摘的话
-    /// 界面在说「你在首页」,而实际在服务器页,用户会以为点了没反应。</summary>
-    private void GoServers()
+    /// <summary>
+    /// 打开服务器编辑器。
+    ///
+    /// <para>★★ 2026-09-03 之后它<b>不再是一个导航目的地</b> —— 侧栏里已经能直接
+    /// 切服务器,而编辑动作全在右键菜单上。这个方法只剩两个调用者:
+    /// 右键菜单(带 <paramref name="focus"/> / <paramref name="drawer"/> 定点打开)
+    /// 和自检台。用户原话:「这样就省略了服务器页和添加服务器页了」。</para>
+    ///
+    /// <para>★ 顺手把侧栏的选中态摘掉 —— 不摘的话界面在说「你在首页」,
+    /// 而实际在编辑器上,用户会以为点了没反应。</para>
+    /// </summary>
+    private void GoServers(string? focus = null, string? drawer = null)
     {
         if (_core is null) return;
         foreach (var n in new[] { "NavHome", "NavLibrary", "NavSearch", "NavFavorites",
                                   "NavAggregate", "NavHistory", "NavSettings" })
             this.FindControl<RadioButton>(n)!.IsChecked = false;
-        Nav.Root(new ServersPage(_core, OnServerSwitched));
+        Nav.Root(new ServersPage(_core, OnServerSwitched, focus, drawer));
+    }
+
+    /// <summary>添加服务器。★ 侧栏「＋ 添加服务器」和首登闸口走的是同一页。</summary>
+    private void GoAddServer()
+    {
+        if (_core is null) return;
+        Nav.Push(new AddServerPage(_core, () => { OnServerSwitched(); Nav.Back(); }));
     }
 
     /// <summary>需要 Emby 会话的页面。没会话就落到防崩页,别让它自己去解引用 null。</summary>
@@ -662,6 +870,9 @@ public partial class MainWindow : Window
                    和摆一个必定失败的按钮是同一个毛病(详情页的外部播放器那条已经这么处理了)。
                    ★ 设置留着:代理配错了连不上服务器,那是首登时真的要改的东西。 */
                 this.FindControl<StackPanel>("NavList")!.IsVisible = false;
+                // ★ 服务器区也要一起藏:一台都没有的时候它只剩一条分隔线和「服务器」两个字,
+                //   看着像没加载出来。而这一屏本来就整页都是「添加服务器」。
+                this.FindControl<StackPanel>("ServerSection")!.IsVisible = false;
                 Show(new AddServerPage(_core, OnLoggedIn));
                 return;
             }
@@ -725,6 +936,7 @@ public partial class MainWindow : Window
         catch { /* 服务器名没刷新不影响用 */ }
         try { Nav.Session = Sess.From(await _core!.EmbyCurrentSession()); } catch { /* 同上 */ }
         this.FindControl<StackPanel>("NavList")!.IsVisible = true;
+        this.FindControl<StackPanel>("ServerSection")!.IsVisible = true;
         this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
         Nav.Root(Home());
         // 真机自检:登录成功之后再跳到指定页面(LP_SELFCHECK_PAGE 那会儿装的是 login:...)
@@ -734,13 +946,15 @@ public partial class MainWindow : Window
     /// <summary>当前源的显示名。文件浏览页的面包屑根节点用它。</summary>
     private string _sourceName = "";
 
+    /// <summary>
+    /// 刷新侧栏的服务器区 + 按账号类型开关导航入口。
+    /// </summary>
     private void UpdateServerChip(JsonElement accounts)
     {
         if (accounts.ValueKind != JsonValueKind.Array) return;
-        var active = accounts.EnumerateArray()
-            .FirstOrDefault(a => a.TryGetProperty("active", out var v) && v.GetBoolean());
-        if (active.ValueKind != JsonValueKind.Object)
-            active = accounts.EnumerateArray().FirstOrDefault();
+        var rows = accounts.EnumerateArray().ToList();
+        var active = rows.FirstOrDefault(a => a.TryGetProperty("active", out var v) && v.GetBoolean());
+        if (active.ValueKind != JsonValueKind.Object) active = rows.FirstOrDefault();
         if (active.ValueKind != JsonValueKind.Object) return;
 
         /* 浏览型源(网盘 / 局域网 / 本地)和 Emby 的可用页面是**两套**。
@@ -754,11 +968,7 @@ public partial class MainWindow : Window
 
         Dispatcher.UIThread.Post(() =>
         {
-            /* ★ 只写服务器名。用户名 2026-09-02 被点名去掉了 ——
-               「一台服务器一个账号」是常态,把用户名摆在侧栏等于每次都在
-               回答一个没人问的问题;真要确认是哪个账号,服务器页里写着。 */
-            this.FindControl<TextBlock>("ServerName")!.Text =
-                active.TryGetProperty("name", out var n) ? n.GetString() : "服务器";
+            BuildServerList(rows);
 
             /* ★★ 按账号类型显隐入口,而不是全都亮着。
                全亮的话:Emby 账号点「文件浏览」拿到「当前没有已登录的文件源」,
@@ -779,4 +989,201 @@ public partial class MainWindow : Window
                 this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true;
         });
     }
+
+    /// <summary>
+    /// 侧栏那一段服务器列表。
+    ///
+    /// <para>★★ 用户 2026-09-03:「只需要鼠标往左边点点,就可以切换服务器了」——
+    /// 所以<b>左键就是切换</b>,不是「打开一个能切换的页面」。
+    /// 少一层跳转,这一条才成立。</para>
+    ///
+    /// <para>★ 「＋ 添加服务器」在列表<b>上面</b>(用户点名的位置)。
+    /// 放下面的话服务器越多它越往下跑,而它的位置应当是固定的。</para>
+    /// </summary>
+    private void BuildServerList(List<JsonElement> rows)
+    {
+        var list = this.FindControl<StackPanel>("ServerList")!;
+        list.Children.Clear();
+
+        var add = NavRow("\uE710", "添加服务器", null);
+        add.Click += (_, _) => GoAddServer();
+        list.Children.Add(add);
+
+        foreach (var a in rows)
+        {
+            var server = Str(a, "server");
+            var name = Str(a, "name") is { Length: > 0 } n ? n : server;
+            var on = a.TryGetProperty("active", out var v) && v.ValueKind == JsonValueKind.True;
+            // \uE968 = 一台服务器的通用图标。真图标随后由 account.icon 换上去(见 FillServerIcon)
+            var row = NavRow("\uE968", name, on ? "on" : null);
+            ToolTip.SetTip(row, on ? $"{name}(使用中) —— 右键有编辑 / 线路 / 图标 / 重新登录"
+                                   : $"切到 {name} —— 右键有编辑 / 线路 / 图标 / 重新登录");
+            row.Click += async (_, _) =>
+            {
+                if (on) return;
+                try
+                {
+                    await _core!.AccountSetActiveServer(new { server_id = server });
+                    OnServerSwitched();
+                    // ★ 切完必须**换页**:留在原来那一页的话,页面上还是上一台服务器的内容,
+                    //   而侧栏已经把新的那台标成使用中了 —— 那是界面在撒谎。
+                    this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
+                    Nav.Root(Home());
+                }
+                catch (Exception e) { Console.WriteLine("[切服务器] " + e.Message); }
+            };
+            row.ContextMenu = ServerMenu(server, name);
+            list.Children.Add(row);
+            _ = FillServerIcon(row, server);
+        }
+        SyncCollapsed();
+    }
+
+    /// <summary>
+    /// 右键菜单:把原来服务器页上那四组编辑动作搬过来。
+    ///
+    /// <para>★ 删除单独列在分隔线下面,并且**它自己再确认一次** ——
+    /// 设置页整体是「零二次确认」的,但删账号不可逆,这一条是例外。</para>
+    /// </summary>
+    private ContextMenu ServerMenu(string server, string name)
+    {
+        MenuItem Item(string header, string glyph, Action go)
+        {
+            var mi = new MenuItem
+            {
+                Header = header,
+                Icon = new TextBlock
+                {
+                    Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"), FontSize = 13,
+                },
+            };
+            mi.Click += (_, _) => go();
+            return mi;
+        }
+
+        var del = new MenuItem { Header = "删除这台服务器" };
+        del.Click += async (_, _) =>
+        {
+            // 第一次点变成「确认删除?」,再点一次才真删
+            if ((string?)del.Header != "确认删除?") { del.Header = "确认删除?"; return; }
+            try
+            {
+                await _core!.AccountRemoveAccount(new { server_id = server });
+                OnServerSwitched();
+            }
+            catch (Exception e) { Console.WriteLine("[删服务器] " + e.Message); }
+        };
+
+        return new ContextMenu
+        {
+            ItemsSource = new List<Control>
+            {
+                new MenuItem { Header = name, IsEnabled = false },
+                new Separator(),
+                Item("编辑信息", "\uE70F", () => GoServers(server, "edit")),
+                Item("编辑线路", "\uE774", () => GoServers(server, "lines")),
+                Item("编辑图标", "\uE91B", () => GoServers(server, "icon")),
+                Item("重新登录", "\uE72C", () => GoServers(server, "relogin")),
+                new Separator(),
+                Item("测线路", "\uE9D9", () => GoServers(server, "probe")),
+                new Separator(),
+                del,
+            },
+        };
+    }
+
+    /// <summary>侧栏里一行(图标 + 文字)。和导航项同一套版式,但它不是单选项。</summary>
+    private static Button NavRow(string glyph, string text, string? extraClass)
+    {
+        var sp = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = glyph, FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                    FontSize = 14, Width = 18, TextAlignment = TextAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                new TextBlock
+                {
+                    // ★ Tag 标成 name:折叠态要按这个把文字收掉(见 SyncCollapsed)
+                    Tag = "name", Text = text, FontSize = 13,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+            },
+        };
+        var b = new Button
+        {
+            Classes = { "navbtn" }, Height = 38, Margin = new Thickness(8, 1),
+            Padding = new Thickness(10, 0),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            Background = Brushes.Transparent, BorderThickness = new Thickness(0),
+            CornerRadius = new CornerRadius(8), Cursor = new Cursor(StandardCursorType.Hand),
+            Content = sp,
+        };
+        if (extraClass is not null) b.Classes.Add(extraClass);
+        return b;
+    }
+
+    /// <summary>
+    /// 换上这台服务器的真图标。
+    ///
+    /// <para>★★ 用户 2026-09-03:「获取服务器图标,一个是官方 API,一个是从用户头像获取,
+    /// 这两个都是 Emby 服常见的服图标获取方式,这样就不需要做一些奇奇怪怪的图标代替了」。
+    /// 两条路<b>核心层早就都实现了</b>(<c>account.icon</c>:登录时按用户头像建地址,
+    /// 没头像退回 <c>/web/touchicon.png</c>)—— 缺的只是 UI 从来没调过它。
+    /// 又一条零调用命令。</para>
+    ///
+    /// <para>★ 取不到就保持那个 MDL2 通用图标,不报错:没设过头像、
+    /// 官方图标 404,都是很常见的情况。</para>
+    /// </summary>
+    private async Task FillServerIcon(Button row, string server)
+    {
+        if (_core is null) return;
+        string uri;
+        try
+        {
+            var r = await _core.AccountIcon(new { server_id = server });
+            uri = Str(r, "data_uri");
+        }
+        catch { return; }
+        if (!uri.StartsWith("data:", StringComparison.Ordinal)) return;
+        var at = uri.IndexOf("base64,", StringComparison.Ordinal);
+        if (at < 0) return;
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(uri[(at + 7)..]); }
+        catch { return; }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            try
+            {
+                using var ms = new MemoryStream(bytes);
+                var img = new Avalonia.Media.Imaging.Bitmap(ms);
+                if (row.Content is not StackPanel sp || sp.Children.Count == 0) return;
+                sp.Children[0] = new Border
+                {
+                    Width = sp.Children[0].Width, Height = 18,
+                    CornerRadius = new CornerRadius(4), ClipToBounds = true,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Child = new Image
+                    {
+                        Source = img, Width = 18, Height = 18,
+                        Stretch = Avalonia.Media.Stretch.UniformToFill,
+                    },
+                };
+            }
+            // 图标解不开不该把整条侧栏拖红(某些服务器返回的是 SVG,Avalonia 解不了)
+            catch (Exception e) { Console.WriteLine("[服务器图标] " + e.Message); }
+        });
+    }
+
+    private static string Str(JsonElement e, string k) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() ?? "" : "";
 }

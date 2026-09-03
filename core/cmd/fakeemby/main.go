@@ -48,12 +48,17 @@ var useTLS *bool
 // useGzip JSON 响应压缩。
 var useGzip *bool
 
+// noAvatar 用户头像回 404 —— 验「图标回退到官方那条」。
+var noAvatar *bool
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
 	clip = flag.String("clip", "", "起播时回放的本地视频文件")
 	reject = flag.Bool("reject", false, "登录一律回 401(验错误提示用)")
 	useTLS = flag.Bool("tls", false, "用自签名证书起 https")
 	useGzip = flag.Bool("gzip", false, "JSON 响应用 gzip 压缩(真 Emby 默认就是压的)")
+	// ★ 验「头像被删了要退回官方图标」那条路。不给开关的话它永远走不到。
+	noAvatar = flag.Bool("no-avatar", false, "用户头像回 404(验图标回退官方那条)")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -183,6 +188,24 @@ func main() {
 		_ = png.Encode(w, solid(strings.TrimPrefix(r.URL.Path, "/rankimg/"), false))
 	})
 
+	/* 服务器图标的两条路(用户 2026-09-03 点名的那两种)。
+	   ★★ 两条都得有,而且**颜色要不一样** ——
+	     只有颜色不同,截图上才分得清 UI 到底走的是哪一条;
+	     两条画成一样的话,「头像挂了自动退官方图标」这件事永远验不了。 */
+	mux.HandleFunc("/Users/u1/Images/Primary", func(w http.ResponseWriter, r *http.Request) {
+		if *noAvatar {
+			// -no-avatar:模拟「用户把头像删了」,验核心层会不会接着试官方那条
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_ = png.Encode(w, solid("avatar", false))
+	})
+	mux.HandleFunc("/web/touchicon.png", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_ = png.Encode(w, solid("touchicon", false))
+	})
+
 	// 探测(登录前,「测试连接」用)
 	mux.HandleFunc("/System/Info/Public", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ServerName": "自检用假服务器", "Version": "4.9.5", "Id": "fake-1"})
@@ -197,7 +220,10 @@ func main() {
 		}
 		writeJSON(w, map[string]any{
 			"AccessToken": "fake-token",
-			"User":        map[string]any{"Id": "u1", "Name": "自检用户"},
+			// ★ PrimaryImageTag 必须给:核心层拿它拼服务器图标地址
+			//   (serverbatch.BuildIconURL)。不给的话直接退官方图标那条,
+			//   于是「从用户头像取图标」这条路在自检里一次都跑不到。
+			"User": map[string]any{"Id": "u1", "Name": "自检用户", "PrimaryImageTag": "tag1"},
 		})
 	})
 

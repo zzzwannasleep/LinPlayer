@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -37,6 +38,26 @@ public sealed record CardItem(
 
     /// <summary>时长的人话。不足一分钟就是空串 —— <b>「0 分钟」比不写更糟</b>。</summary>
     public string RuntimeLabel => RuntimeSecs < 60 ? "" : $"{(int)(RuntimeSecs / 60)} 分钟";
+
+    /// <summary>
+    /// 转回 JSON,给 <see cref="Core.MetaCache"/> 存。
+    ///
+    /// <para>★ 字段名<b>必须和核心层的输出一模一样</b> —— 存进去的东西
+    /// 之后要用 <see cref="From"/> 读回来,名字对不上就是「缓存命中但全是空的」,
+    /// 而它不报错。</para>
+    /// </summary>
+    public static JsonElement ToJson(CardItem c)
+    {
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            id = c.Id, name = c.Name, type_ = c.Type, series_name = c.SeriesName,
+            has_primary = c.HasPrimary, played = c.Played,
+            unplayed_item_count = c.UnplayedCount,
+            runtime_secs = c.RuntimeSecs, resume_secs = c.ResumeSecs,
+            season_no = c.SeasonNo, episode_no = c.EpisodeNo,
+        }));
+        return doc.RootElement.Clone();
+    }
 
     private static string Str(JsonElement e, string k) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String

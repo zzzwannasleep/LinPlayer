@@ -29,37 +29,61 @@ public sealed class ServersPage : PageBase
     /// <summary>切服务器之后要让外壳重拉会话和侧栏 —— 不然整个应用还在用旧 token。</summary>
     private readonly Action _onSwitched;
 
-    public ServersPage(CoreClient core, Action onSwitched)
+    /// <summary>只显示这一台(右键菜单进来的)。空 = 全表。</summary>
+    private readonly string? _focus;
+
+    /// <summary>进来就把这个抽屉拉开(edit / lines / icon / relogin / probe)。</summary>
+    private readonly string? _drawer;
+
+    /// <param name="focus">
+    /// 只编辑这一台。
+    /// <para>★★ 2026-09-03 之后<b>这一页不再是导航目的地</b> —— 服务器已经排在侧栏里,
+    /// 编辑动作从右键菜单进来,而右键点的是**某一台**。
+    /// 这时候再列出全表,用户还得在里面重新找一遍自己刚点的那台。</para>
+    /// </param>
+    /// <param name="drawer">进来就拉开哪个抽屉。右键菜单点的是哪一项就是哪一个。</param>
+    public ServersPage(CoreClient core, Action onSwitched, string? focus = null, string? drawer = null)
     {
         _core = core; _onSwitched = onSwitched;
+        _focus = string.IsNullOrEmpty(focus) ? null : focus;
+        _drawer = string.IsNullOrEmpty(drawer) ? null : drawer;
 
-        var add = new Button { Classes = { "primary" }, Content = "＋ 添加服务器" };
-        add.Click += (_, _) => Nav.Push(new AddServerPage(core, () =>
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+        if (_focus is null)
         {
-            _onSwitched();
-            Nav.Back();
-        }));
+            var add = new Button { Classes = { "primary" }, Content = "＋ 添加服务器" };
+            add.Click += (_, _) => Nav.Push(new AddServerPage(core, () =>
+            {
+                _onSwitched();
+                Nav.Back();
+            }));
 
-        // 批量添加:贴一段开通信息 / 一条 linplayer:// 链接。
-        var batch = new Button { Classes = { "ghost" }, Content = "批量添加 / 深链" };
-        batch.Click += (_, _) => Nav.Push(new BatchAddPage(core, () =>
+            // 批量添加:贴一段开通信息 / 一条 linplayer:// 链接。
+            var batch = new Button { Classes = { "ghost" }, Content = "批量添加 / 深链" };
+            batch.Click += (_, _) => Nav.Push(new BatchAddPage(core, () =>
+            {
+                _onSwitched();
+                Nav.Back();
+            }));
+            head.Children.Add(H1("服务器"));
+            head.Children.Add(add);
+            head.Children.Add(batch);
+        }
+        else
         {
-            _onSwitched();
-            Nav.Back();
-        }));
+            // 定点编辑:标题写「编辑服务器」,并给一个回首页的出口 ——
+            // ★ 这一页现在是从右键菜单进来的,Nav.Root 清了栈,没有返回键就出不去了。
+            var back = new Button { Classes = { "ghost" }, Content = "← 完成" };
+            back.Click += (_, _) => Nav.Root(new HomePage(core,
+                Nav.Session is null ? null : LibraryPage.OpenDetail(core, Nav.Session.server)));
+            head.Children.Add(H1("编辑服务器"));
+            head.Children.Add(back);
+        }
 
         Content = Scrolled(new StackPanel
         {
             Spacing = 16,
-            Children =
-            {
-                new StackPanel
-                {
-                    Orientation = Orientation.Horizontal, Spacing = 14,
-                    Children = { H1("服务器"), add, batch },
-                },
-                _hint, _list,
-            },
+            Children = { head, _hint, _list },
         });
         _ = Reload();
     }
@@ -71,21 +95,33 @@ public sealed class ServersPage : PageBase
         catch (Exception e) { _hint.Text = LibraryPage.Advice(e); return; }
 
         var rows = accounts.ValueKind == JsonValueKind.Array ? accounts.EnumerateArray().ToList() : [];
+        if (_focus is not null) rows = rows.Where(a => Str(a, "server") == _focus).ToList();
         Dispatcher.UIThread.Post(() =>
         {
             _list.Children.Clear();
             _openDrawer.Clear();
-            if (rows.Count == 0) { _hint.Text = "还没有添加服务器。"; return; }
+            _autoProbe = null;
+            if (rows.Count == 0)
+            {
+                _hint.Text = _focus is null ? "还没有添加服务器。" : "这台服务器已经不在账号表里了。";
+                return;
+            }
             _hint.Text = "";
             foreach (var a in rows) _list.Children.Add(Row(a));
-            // 真机自检:自动点一下「测线路」—— 这条链路不点就永远没被跑过
-            var want = Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE") ?? "";
-            if (want == "servers:probe") _autoProbe?.Invoke();
-            /* 真机自检:servers:edit / servers:lines / servers:relogin 直接把对应抽屉拉开。
+
+            /* 进来就拉开指定的抽屉。两个来源:
+               ①右键菜单点的那一项(<see cref="_drawer"/>);
+               ②真机自检 LP_SELFCHECK_PAGE=servers:lines 之类。
                ★ 收起来的东西**截图里等于不存在** —— 四组编辑排没排齐、
                  线路表那一行四个控件会不会挤成一团,不拉开一次就永远没人看过。 */
-            if (want.StartsWith("servers:") && _openDrawer.TryGetValue(want["servers:".Length..], out var open))
-                open();
+            var want = _drawer;
+            if (want is null)
+            {
+                var env = Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE") ?? "";
+                if (env.StartsWith("servers:")) want = env["servers:".Length..];
+            }
+            if (want == "probe") _autoProbe?.Invoke();
+            else if (want is not null && _openDrawer.TryGetValue(want, out var open)) open();
         });
     }
 

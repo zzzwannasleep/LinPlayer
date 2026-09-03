@@ -1,6 +1,9 @@
 package account
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +96,61 @@ func TestIcon_落盘往返(t *testing.T) {
 	IconClear(id)
 	if _, err := os.Stat(iconPath(id)); err == nil {
 		t.Fatal("清了却还在")
+	}
+}
+
+// ★★ 用户 2026-09-03:「获取服务器图标,一个是官方 API,一个是从用户头像获取,
+// 这两个都是 Emby 服常见的服图标获取方式」。
+//
+// 核心层原本只试**一条**地址(登录那一刻算出来的那条:有头像就是头像,
+// 没头像才退 touchicon)。问题是那条地址会**后来失效** ——
+// 用户把头像删了 / 换了,icon_url 还指着旧的头像地址,一个 404 之后就再没有图标了,
+// 而「官方那条」明明还好好的。
+//
+// 判据:第一条 404 时必须接着试后面几条,而不是直接放弃。
+func TestIconGetAny_第一条挂了要接着试后面的(t *testing.T) {
+	// ★ 用完就清 —— 图标缓存落在真的数据根下（paths.Root），
+	//   不清的话第二次跑会**直接命中缓存**，一次 HTTP 都不发 ——
+	//   那时候 hit 是空的，断言会失败得莫名其妙。
+	defer IconClear("https://icon-fallback.example")
+
+	var hit []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = append(hit, r.URL.Path)
+		if r.URL.Path == "/web/touchicon.png" {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nfake"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	uri, err := IconGetAny(context.Background(), "https://icon-fallback.example",
+		srv.URL+"/Users/u1/Images/Primary", // 头像:已经被删了 → 404
+		srv.URL+"/web/touchicon.png",       // 官方图标:还在
+	)
+	if err != nil {
+		t.Fatalf("两条里有一条是通的,不该整体失败: %v (试过 %v)", err, hit)
+	}
+	if !strings.HasPrefix(uri, "data:image/png;base64,") {
+		t.Fatalf("应当是 PNG 的 data URI,实得 %.40q", uri)
+	}
+	if len(hit) != 2 {
+		t.Fatalf("应当依次试两条,实际试了 %v", hit)
+	}
+}
+
+// ★ 全都不通时要如实报错,不能返回一个空的 data URI ——
+// 那会让 UI 画出一个碎图标,而且查都没处查。
+func TestIconGetAny_全不通要报错(t *testing.T) {
+	defer IconClear("https://icon-none.example")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	if _, err := IconGetAny(context.Background(), "https://icon-none.example",
+		srv.URL+"/a.png", srv.URL+"/b.png"); err == nil {
+		t.Fatal("全不通时必须报错")
 	}
 }

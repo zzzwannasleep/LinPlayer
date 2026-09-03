@@ -247,6 +247,13 @@ func registerTransport() {
 			"volume":   propF("volume"),
 			"mute":     Prop("mute") == "yes",
 			"hwdec":    Prop("hwdec-current"),
+			// buffered 已缓冲到哪一秒(绝对位置,不是「还剩多少」)。
+			//
+			// ★★ demuxer-cache-time 给的是**缓冲前沿的绝对时间**,而不是长度 ——
+			//   写成 position + 它 会算出双倍。进度条上那条浅色的「已缓冲」段
+			//   直接用这个值当右端。
+			// ★ 没有缓存(本地文件 / 属性拿不到)时是 0,UI 就当没有这一段,不画。
+			"buffered": propF("demuxer-cache-time"),
 		}
 		if t != nil {
 			out["item_id"] = t.ItemID

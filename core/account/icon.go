@@ -75,10 +75,58 @@ func toDataURI(b []byte) string {
 	return "data:" + sniffMime(b) + ";base64," + base64.StdEncoding.EncodeToString(b)
 }
 
-// IconGet 取图标:缓存命中直接返回;未命中则从 url 下载并缓存。
+// IconGetAny 按顺序试多条地址，头一条拿到图就算。
 //
-// ★ 取不到返回 error —— 由 UI 决定回退内置图标。在这儿假装成功返回空串的话,
-// UI 会显示成碎图标,而且查都没处查。
+// ★★ 为什么是多条（用户 2026-09-03）：“获取服务器图标，
+// 一个是官方 API，一个是从用户头像获取”。
+// 登录那一刻算出来的 icon_url 只能二选一，而它会**后来失效** ——
+// 用户把头像删了，icon_url 还指着旧头像地址，一个 404 之后就再没有图标，
+// 而官方那条明明还好好的。只试一条是把“两种方式”写成了“一次选择”。
+//
+// ★ 全部不通才报错，报的是**最后一条**的原因 ——
+// 回一句“都不行”等于没说。
+func IconGetAny(ctx context.Context, serverID string, urls ...string) (string, error) {
+	// ★ 缓存命中就不必试任何一条
+	if b, err := os.ReadFile(iconPath(serverID)); err == nil && len(b) > 0 {
+		return toDataURI(b), nil
+	}
+	var last error
+	for _, u := range urls {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		uri, err := IconGet(ctx, serverID, u)
+		if err == nil {
+			return uri, nil
+		}
+		last = err
+	}
+	if last == nil {
+		return "", fmt.Errorf("该服务器没有图标地址")
+	}
+	return "", last
+}
+
+// OfficialIconURLs 官方图标的候选地址（Emby / Jellyfin 都是这几条）。
+//
+// ★ 不只一条：各 fork 的 web 目录不一样，有的只有 favicon。
+// 它们都是**免登录**的静态文件，不需要 api_key。
+func OfficialIconURLs(server string) []string {
+	b := strings.TrimRight(strings.TrimSpace(server), "/")
+	if b == "" {
+		return nil
+	}
+	return []string{
+		b + "/web/touchicon.png",
+		b + "/web/touchicon144.png",
+		b + "/web/favicon.ico",
+	}
+}
+
+// IconGet 取图标：缓存命中直接返回；未命中则从 url 下载并缓存。
+//
+// ★ 取不到返回 error —— 由 UI 决定回退内置图标。在这儿假装成功返回空串的话，
+// UI 会显示成碎图标，而且查都没处查。
 func IconGet(ctx context.Context, serverID, url string) (string, error) {
 	p := iconPath(serverID)
 	if b, err := os.ReadFile(p); err == nil && len(b) > 0 {
@@ -165,11 +213,18 @@ func registerIconCommands() {
 		if id == "" {
 			return nil, bus.NewErr(bus.EInvalid, "缺少 server_id")
 		}
-		url := ""
+		/* ★★ 两条路一起给（用户 2026-09-03 点名）：
+		   ① icon_url —— 登录时算好的，通常就是**用户头像**
+		     （很多 Emby 服把品牌 logo 直接设成用户头像），
+		     用户上传过本地图的话这里是一个本地路径；
+		   ② 官方静态图标 —— /web/touchicon.png 那几条。
+		   原来只试①，而①会后来失效（头像被删）—— 那之后就永远没图标了。 */
+		var cands []string
 		if acc := config.Current().Find(id); acc != nil && acc.IconURL != nil {
-			url = *acc.IconURL
+			cands = append(cands, *acc.IconURL)
 		}
-		uri, err := IconGet(ctx, id, url)
+		cands = append(cands, OfficialIconURLs(id)...)
+		uri, err := IconGetAny(ctx, id, cands...)
 		if err != nil {
 			return nil, bus.NewErr(bus.ENotFound, "%v", err)
 		}
