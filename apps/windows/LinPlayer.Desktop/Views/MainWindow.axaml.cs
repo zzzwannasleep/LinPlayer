@@ -12,6 +12,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using Avalonia.LogicalTree;
 using Avalonia.VisualTree;
 using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
@@ -26,6 +27,12 @@ public partial class MainWindow : Window
     {
         using var _ = Perf.Measure("MainWindow 构造");
         InitializeComponent();
+
+        /* ★★ 窗口图标 —— 用户 2026-09-03:「软件没有图标,以前有的,用回以前那个就行」。
+           <c>ApplicationIcon</c>(csproj)只管 exe 文件在资源管理器里的样子;
+           **任务栏、Alt-Tab、窗口左上角是另一回事**,得在运行期给 Window.Icon 赋值。
+           两处都得有,少哪个哪个是空的,而且都不报错。 */
+        SetAppIcon();
 
         var drag = this.FindControl<Border>("DragArea")!;
         // ★ 自绘标题栏必须自己接拖拽与双击最大化 —— 不接的话窗口拖不动,
@@ -42,6 +49,8 @@ public partial class MainWindow : Window
 
         Nav.Host = Show;
         Nav.Immersive = SetImmersive;
+        Nav.Fullscreen = SetFullscreen;
+        WireNavReclick();
 
         this.FindControl<Button>("BtnCollapse")!.Click += (_, _) => ToggleSidebar();
         // ★ 需要 Emby 会话的页面统一走 Emby():账号是网盘 / 局域网源时 Nav.Session 是 null,
@@ -199,6 +208,10 @@ public partial class MainWindow : Window
         SelfCheckFill();
         SelfCheckSidebar();
         SelfCheckServerMenu();
+        SelfCheckRail();
+        SelfCheckChrome();
+        SelfCheckReclick();
+        SelfCheckServerIcon();
         /* 自检:把侧栏收起来。
            ★ 折叠态是这一版新加的,而它<b>收着的时候才是新形态</b> ——
              不主动收一次,截图永远拍的是展开态,图标有没有对齐、
@@ -272,7 +285,7 @@ public partial class MainWindow : Window
             // 自检:批量添加页(带参数时把那段文本填进去并解析)
             case "batch":
                 {
-                    var batchPage = new BatchAddPage(_core, OnServerSwitched);
+                    var batchPage = new BatchAddPage(_core, () => _ = OnServerSwitched());
                     Nav.Push(batchPage);
                     if (arg.Length > 0) _ = batchPage.LoadDeepLink(arg);
                     break;
@@ -294,7 +307,15 @@ public partial class MainWindow : Window
                 Nav.Push(new DetailPage(_core, srv, arg));
                 _ = SelfCheckDownload();
                 break;
-            case "player": Nav.Push(new PlayerPage(_core, arg, "自检片", 0)); break;
+            /* ★★ 续播位置从 <c>LP_SELFCHECK_RESUME</c> 来,默认 0。
+               这不是可有可无的开关:<b>带 <c>start=</c> 的那条 loadfile 和不带的是两条路</b>,
+               而 2026-09-03 那个「继续观看点了就 loadfile 失败」的 bug
+               **只在带 start= 的那条上**。一直传 0 的自检永远照不到它。 */
+            case "player":
+                Nav.Push(new PlayerPage(_core, arg, "自检片",
+                    double.TryParse(Environment.GetEnvironmentVariable("LP_SELFCHECK_RESUME"),
+                        out var rs) ? rs : 0));
+                break;
         }
     }
 
@@ -619,6 +640,119 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 自检:分集轨道<b>真的在虚拟化</b>。
+    ///
+    /// <para>☠☠ 这一条量的不是「排成了一行」——排成一行是<b>版式</b>,
+    /// 而用户要的是「上千集不一下子卡死」,那是<b>造了几个控件</b>。
+    /// 两者毫无关系:一行一千张卡照样卡死。
+    /// 所以判据是「条目数 vs 真造出来的容器数」,不是「有没有换行」。</para>
+    ///
+    /// <para>★ 配 <c>fakeemby -eps 1200</c> 用。12 集的夹具上这条测试<b>必然绿</b>,
+    /// 因为 12 张卡不虚拟化也全在屏幕上 —— 夹具不真实的假绿,本仓栽过。</para>
+    /// </summary>
+    private void SelfCheckRail()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_RAIL") != "1") return;
+        _ = Task.Delay(3600).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var vsp = this.GetVisualDescendants().OfType<VirtualizingStackPanel>()
+                .FirstOrDefault(v => v.Orientation == Orientation.Horizontal);
+            if (vsp is null)
+            {
+                Console.WriteLine("[分集轨道] ✗ 一个横向虚拟化面板都没找到 —— 它不在轨道上");
+                return;
+            }
+            // ★ VirtualizingStackPanel 的<b>直接父级是 ItemsPresenter</b>,不是 ItemsControl ——
+            //   直接 `Parent as ItemsControl` 恒为 null,量出来是 -1。
+            var total = vsp.FindAncestorOfType<ItemsControl>()?.ItemCount ?? -1;
+            var made = vsp.Children.Count;
+            Console.WriteLine($"[分集轨道] 条目 {total} 条,真造出来的卡 {made} 张");
+            if (total < 200)
+                Console.WriteLine("[分集轨道] ⚠ 夹具只有这么几条,这条断言证明不了什么 —— 要 fakeemby -eps 1200");
+            else if (made > 0 && made < total / 10)
+                Console.WriteLine($"[分集轨道] ✓ 只造了 {made}/{total} —— 虚拟化生效,上千集不会卡死");
+            else
+                Console.WriteLine($"[分集轨道] ✗ 造了 {made}/{total} —— 全量实例化,上千集必卡");
+        }));
+    }
+
+    /// <summary>
+    /// 自检:服务器图标<b>在重建那一帧就在</b>,不会闪回默认图。
+    ///
+    /// <para>☠ 判据是「重建之后<b>同一个 tick</b> 里第一个子元素是不是图片」。
+    /// 等一帧再看的话必然绿 —— 而用户看到的那个「闪」正好就是那一帧。
+    /// 用户 2026-09-03:「切换服务器的时候服务器图标会闪现回到软件自己的默认图」。</para>
+    /// </summary>
+    private void SelfCheckServerIcon()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_SRVICON") != "1") return;
+        _ = Task.Delay(3000).ContinueWith(async _ =>
+        {
+            var rows = await _core!.AccountListAccounts();
+            Dispatcher.UIThread.Post(() =>
+            {
+                var list = this.FindControl<StackPanel>("ServerList")!;
+                bool HasIcon() => list.Children.OfType<Button>().Skip(1).FirstOrDefault()
+                    is { Content: StackPanel sp } && sp.Children.Count > 0 && sp.Children[0] is Border;
+                Console.WriteLine($"[服务器图标] 重建之前:图标在位 {HasIcon()}");
+                // ★ 就是切服务器时走的那一句 —— 整列重建
+                BuildServerList(rows.EnumerateArray().ToList());
+                Console.WriteLine(HasIcon()
+                    ? "[服务器图标] ✓ 重建后同一帧图标就在 —— 不会闪回默认图"
+                    : "[服务器图标] ✗ 重建后这一帧是默认字形 —— 用户会看到闪一下");
+            });
+        });
+    }
+
+    /// <summary>
+    /// 自检:侧栏项已经选中时再点一次,要回到这一大类的根。
+    /// <para>★ 判据是<b>栈深和当前页</b>,不是「有没有触发处理器」——
+    /// 触发了但导航到了同一张详情页,用户感觉不到任何区别。</para>
+    /// </summary>
+    private void SelfCheckReclick()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_RECLICK") != "1") return;
+        _ = Task.Delay(3200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var home = this.FindControl<RadioButton>("NavHome")!;
+            Console.WriteLine($"[侧栏回根] 点之前:栈深 {Nav.Depth} 当前页 {Nav.Current?.GetType().Name} " +
+                              $"首页项选中 {home.IsChecked}");
+            if (Nav.Depth <= 1) { Console.WriteLine("[侧栏回根] ⚠ 没钻进任何页,这条不算数"); return; }
+            if (home.IsChecked != true) { Console.WriteLine("[侧栏回根] ⚠ 首页项没亮着,这条不算数"); return; }
+            home.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.Post(() =>
+            {
+                Console.WriteLine($"[侧栏回根] 点之后:栈深 {Nav.Depth} 当前页 {Nav.Current?.GetType().Name}");
+                Console.WriteLine(Nav.Depth == 1 && Nav.Current is HomePage
+                    ? "[侧栏回根] ✓ 回到了首页"
+                    : "[侧栏回根] ✗ 点了没反应 —— 已经选中的侧栏项点不动");
+            }, DispatcherPriority.Background);
+        }));
+    }
+
+    /// <summary>
+    /// 自检:播放页把外壳收掉了(用户点名「播放页不应该有侧边栏」)。
+    /// <para>★ 判据是<b>侧栏的可见性与宽度</b>,不是「有没有调过那个方法」——
+    /// 调了但被别处覆盖回来,是本仓最常见的一类失效。</para>
+    /// </summary>
+    private void SelfCheckChrome()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_CHROME") != "1") return;
+        _ = Task.Delay(4200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var bar = this.FindControl<Border>("Sidebar")!;
+            var tb = this.FindControl<Grid>("TitleBar")!;
+            var onPlayer = Nav.Current is PlayerPage;
+            Console.WriteLine($"[播放页外壳] 当前页 {Nav.Current?.GetType().Name}  " +
+                              $"侧栏可见 {bar.IsVisible} 宽 {bar.Width:0}  标题栏可见 {tb.IsVisible}");
+            if (!onPlayer) { Console.WriteLine("[播放页外壳] ⚠ 没落在播放页,这条不算数"); return; }
+            Console.WriteLine(!bar.IsVisible && bar.Width <= 0.5 && !tb.IsVisible
+                ? "[播放页外壳] ✓ 侧栏和标题栏都收掉了 —— 画面铺满"
+                : "[播放页外壳] ✗ 播放页上还留着外壳");
+        }));
+    }
+
+    /// <summary>
     /// 自检:把侧栏里第一台服务器的<b>右键菜单</b>弹出来。
     ///
     /// <para>★★ 这一版把服务器页那四组编辑动作全搬进了右键菜单 ——
@@ -786,7 +920,12 @@ public partial class MainWindow : Window
         }));
     }
 
-    /// <summary>全屏/退出全屏。行高列宽一起归零,否则画面会被挤在偏右下的框里。</summary>
+    /// <summary>
+    /// 收起 / 放回外壳(标题栏 + 侧栏)。行高列宽一起归零,否则画面会被挤在偏右下的框里。
+    ///
+    /// <para>★★ 这里<b>不再动窗口状态</b> —— 全屏拆成了 <see cref="SetFullscreen"/>。
+    /// 绑在一起时「播放页不要侧栏」只能靠强制全屏来实现,而那是另一件事。</para>
+    /// </summary>
     private void SetImmersive(bool on)
     {
         var root = this.FindControl<Grid>("RootGrid")!;
@@ -799,7 +938,15 @@ public partial class MainWindow : Window
         this.FindControl<Border>("Sidebar")!.Width = on ? 0 : SidebarWidth;
         this.FindControl<Grid>("TitleBar")!.IsVisible = !on;
         this.FindControl<Border>("Sidebar")!.IsVisible = !on;
-        WindowState = on ? WindowState.FullScreen : WindowState.Normal;
+    }
+
+    /// <summary>窗口全屏。★ 退出时回 Normal 而不是 Maximized —— 记住进来之前那个状态。</summary>
+    private WindowState _beforeFull = WindowState.Normal;
+
+    private void SetFullscreen(bool on)
+    {
+        if (on) _beforeFull = WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState;
+        WindowState = on ? WindowState.FullScreen : _beforeFull;
     }
 
     /// <summary>
@@ -819,14 +966,54 @@ public partial class MainWindow : Window
         foreach (var n in new[] { "NavHome", "NavLibrary", "NavSearch", "NavFavorites",
                                   "NavAggregate", "NavHistory", "NavSettings" })
             this.FindControl<RadioButton>(n)!.IsChecked = false;
-        Nav.Root(new ServersPage(_core, OnServerSwitched, focus, drawer));
+        Nav.Root(new ServersPage(_core, () => _ = OnServerSwitched(), focus, drawer));
     }
 
     /// <summary>添加服务器。★ 侧栏「＋ 添加服务器」和首登闸口走的是同一页。</summary>
     private void GoAddServer()
     {
         if (_core is null) return;
-        Nav.Push(new AddServerPage(_core, () => { OnServerSwitched(); Nav.Back(); }));
+        Nav.Push(new AddServerPage(_core, () => _ = AfterServerChange()));
+    }
+
+    /// <summary>
+    /// 侧栏项<b>已经选中时再点一次,要回到这一大类的根</b>。
+    ///
+    /// <para>☠☠ 这是用户 2026-09-03 说的「整个软件的交互是有问题的…等等交互问题,
+    /// 你可以自己去探索,很多」里我自己找到的一条,而且它每天都会撞上:</para>
+    ///
+    /// <para>从首页点进一部片的详情页 —— 侧栏的「首页」<b>仍然亮着</b>(它确实还是首页那一支),
+    /// 这时候点它,<c>RadioButton</c> 的 <c>Checked</c> <b>不会再发一次</b>
+    /// (它本来就已经是选中态)。表现是<b>点侧栏毫无反应</b>,
+    /// 而界面上唯一的出路是详情页左上角那个「返回」。
+    /// 每一个能往下钻的入口(首页 / 媒体库 / 搜索 / 收藏 / 聚合)都有这个毛病。</para>
+    ///
+    /// <para>★ 挂 <c>Click</c> 而不是改成用 Click 驱动导航:<c>Checked</c> 那条路还有
+    /// 程序化的调用者(切完服务器 <c>NavHome.IsChecked = true</c>),
+    /// 两条并存就会导航两次。这里只补「已经选中」那一种情况。</para>
+    /// </summary>
+    private void WireNavReclick()
+    {
+        // ★ 侧栏是在 XAML 里摆好的,而这个方法在构造函数里跑 —— 那会儿控件还没长出来。
+        //   所以挂到 Loaded 上;Loaded 可能不止发一次,拿一个集合去重。
+        var wired = new HashSet<RadioButton>();
+        Loaded += (_, _) =>
+        {
+            foreach (var n in new[] { "NavHome", "NavLibrary", "NavSearch", "NavFavorites",
+                                      "NavAggregate", "NavBrowse", "NavCatalog", "NavHistory",
+                                      "NavDownload", "NavRanking", "NavCalendar", "NavPlugins",
+                                      "NavSettings" })
+            {
+                // ★ 别拿 Tag 做「挂过了」的标记 —— 那一格装的是这一项的图标字形。
+                if (this.FindControl<RadioButton>(n) is not { } rb || !wired.Add(rb)) continue;
+                rb.Click += (_, _) =>
+                {
+                    // ★ 只在「本来就选中 + 已经钻进去过」时才动。
+                    //   Depth <= 1 说明就在根上,再导航一次是白重建一页。
+                    if (rb.IsChecked == true && Nav.Depth > 1) { rb.IsChecked = false; rb.IsChecked = true; }
+                };
+            }
+        };
     }
 
     /// <summary>需要 Emby 会话的页面。没会话就落到防崩页,别让它自己去解引用 null。</summary>
@@ -904,7 +1091,7 @@ public partial class MainWindow : Window
         {
             var r = await _core.AccountStartupDeepLink(new { });
             if (r.ValueKind != JsonValueKind.String) return;
-            var page = new BatchAddPage(_core, () => { OnServerSwitched(); Nav.Back(); });
+            var page = new BatchAddPage(_core, () => _ = AfterServerChange());
             Nav.Push(page);
             await page.LoadDeepLink(r.GetString() ?? "");
         }
@@ -917,14 +1104,41 @@ public partial class MainWindow : Window
     /// <para>★ 只刷侧栏不刷会话的话,整个应用还在拿旧 token 打新服务器 ——
     /// 表现是切完之后每一页都 401,而侧栏显示的是新服务器的名字。</para>
     /// </summary>
-    private async void OnServerSwitched()
+    /// <summary>
+    /// 账号表变动之后的统一收尾:换会话 → 回首页。
+    ///
+    /// <para>★★ 用户 2026-09-03:「切换服务器的时候首页也应该跟着一起切换,
+    /// 而不是等用户自己点击了首页再切换」。「添加完」「删除完」是同一件事的另外两个入口 ——
+    /// 原来它们只是 <c>Nav.Back()</c>,退回去的是一张<b>上一台服务器</b>的页面。</para>
+    /// </summary>
+    private async Task AfterServerChange()
+    {
+        await OnServerSwitched();
+        this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
+        Nav.Root(Home());
+    }
+
+    /// <summary>
+    /// 切完服务器:刷侧栏 + <b>换掉全局会话</b>。
+    ///
+    /// <para>☠☠ 这个方法原来是 <c>async void</c>,调用点<b>等不了它</b>。
+    /// 于是切服务器那条路是:<c>AccountSetActiveServer</c> → 发射后不管 →
+    /// 立刻 <c>Nav.Root(Home())</c> —— 而 <see cref="Home"/> 读的是
+    /// <see cref="Nav.Session"/>,那会儿它还是**上一台服务器的会话**。
+    /// 表现就是用户说的「切换服务器的时候首页没有跟着一起切换」:
+    /// 新首页确实建出来了,只是拿旧服务器的凭据去拉的内容。</para>
+    ///
+    /// <para>★ 改成 <c>Task</c> 不是风格问题 —— <c>async void</c> 在这里
+    /// 是**语言层面**把「等它」这个选项拿掉了。</para>
+    /// </summary>
+    private async Task OnServerSwitched()
     {
         try
         {
             UpdateServerChip(await _core!.AccountListAccounts());
             Nav.Session = Sess.From(await _core.EmbyCurrentSession());
         }
-        catch { /* 非 Emby 账号没有会话 */ }
+        catch { Nav.Session = null; /* 非 Emby 账号没有会话 —— 但也不能留着上一台的 */ }
     }
 
     private async void OnLoggedIn()
@@ -1015,7 +1229,14 @@ public partial class MainWindow : Window
             var name = Str(a, "name") is { Length: > 0 } n ? n : server;
             var on = a.TryGetProperty("active", out var v) && v.ValueKind == JsonValueKind.True;
             // \uE968 = 一台服务器的通用图标。真图标随后由 account.icon 换上去(见 FillServerIcon)
+            /* ★★ <b>先查内存里那份</b>,查到就在建行的这一刻直接贴上去。
+               用户 2026-09-03:「切换服务器的时候服务器图标会闪现回到软件自己的默认图,
+               应该一直保持获取到的图标,做好持久化」——
+               根因不是没缓存(核心层按 server_id 落盘缓存着呢),是**这一列每次都重建**,
+               而换图那一步排在 await 后面:重建 → 画默认图标 → 一帧之后才换回真图标。
+               那一帧就是用户看到的「闪回默认图」。 */
             var row = NavRow("\uE968", name, on ? "on" : null);
+            if (_serverIcons.TryGetValue(server, out var known)) PaintIcon(row, known);
             ToolTip.SetTip(row, on ? $"{name}(使用中) —— 右键有编辑 / 线路 / 图标 / 重新登录"
                                    : $"切到 {name} —— 右键有编辑 / 线路 / 图标 / 重新登录");
             row.Click += async (_, _) =>
@@ -1024,7 +1245,9 @@ public partial class MainWindow : Window
                 try
                 {
                     await _core!.AccountSetActiveServer(new { server_id = server });
-                    OnServerSwitched();
+                    // ★★ **必须等**:Home() 读的是 Nav.Session,而它是在这里面换的。
+                    //   不等的话新首页拿旧服务器的凭据去拉内容(见 OnServerSwitched 的注释)。
+                    await OnServerSwitched();
                     // ★ 切完必须**换页**:留在原来那一页的话,页面上还是上一台服务器的内容,
                     //   而侧栏已经把新的那台标成使用中了 —— 那是界面在撒谎。
                     this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
@@ -1069,7 +1292,8 @@ public partial class MainWindow : Window
             try
             {
                 await _core!.AccountRemoveAccount(new { server_id = server });
-                OnServerSwitched();
+                // ★ 删掉的可能正是当前那台 —— 会话跟着换了,页面也得跟着换
+                await AfterServerChange();
             }
             catch (Exception e) { Console.WriteLine("[删服务器] " + e.Message); }
         };
@@ -1165,22 +1389,76 @@ public partial class MainWindow : Window
             {
                 using var ms = new MemoryStream(bytes);
                 var img = new Avalonia.Media.Imaging.Bitmap(ms);
-                if (row.Content is not StackPanel sp || sp.Children.Count == 0) return;
-                sp.Children[0] = new Border
-                {
-                    Width = sp.Children[0].Width, Height = 18,
-                    CornerRadius = new CornerRadius(4), ClipToBounds = true,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Child = new Image
-                    {
-                        Source = img, Width = 18, Height = 18,
-                        Stretch = Avalonia.Media.Stretch.UniformToFill,
-                    },
-                };
+                // ★ 解好的位图**留住**:下次重建这一列时不必再走一遍 await(见 BuildServerList)
+                _serverIcons[server] = img;
+                PaintIcon(row, img);
             }
             // 图标解不开不该把整条侧栏拖红(某些服务器返回的是 SVG,Avalonia 解不了)
             catch (Exception e) { Console.WriteLine("[服务器图标] " + e.Message); }
         });
+    }
+
+    /// <summary>
+    /// 已解好的服务器图标,按 server_id 记着。
+    ///
+    /// <para>★ 这一层<b>不是</b>为了省下载 —— 核心层早就把图标落盘缓存了。
+    /// 它省的是「解码 + 一次 await」,而那一次 await 就是用户看到的那一帧默认图标。</para>
+    /// <para>★ 不设上限:服务器是个位数,而且每张位图只有 18×18。</para>
+    /// </summary>
+    private readonly Dictionary<string, Avalonia.Media.Imaging.Bitmap> _serverIcons = new();
+
+    /// <summary>把图标贴到一行上(替换掉那个 MDL2 通用字形)。</summary>
+    private static void PaintIcon(Button row, Avalonia.Media.Imaging.Bitmap img)
+    {
+        if (row.Content is not StackPanel sp || sp.Children.Count == 0) return;
+        sp.Children[0] = new Border
+        {
+            // ★ 外框宽度**照抄被换掉的那一个**:折叠态下它是 56(撑成一整格才居中),展开态 18。
+            //   写死 18 的话折叠时这一行的图标会往左偏,和上面那一列对不齐 ——
+            //   而对齐这件事正是用户上一轮点名过的。
+            Width = sp.Children[0].Width, Height = 18,
+            VerticalAlignment = VerticalAlignment.Center,
+            // 圆角裁切放在**内层** 18×18 上:裁在外框上的话折叠态那 56 宽会被一起圆掉
+            Child = new Border
+            {
+                Width = 18, Height = 18,
+                CornerRadius = new CornerRadius(4), ClipToBounds = true,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = new Image
+                {
+                    Source = img, Width = 18, Height = 18,
+                    Stretch = Avalonia.Media.Stretch.UniformToFill,
+                },
+            },
+        };
+    }
+
+    /// <summary>
+    /// 窗口图标 + 标题栏左上角那一枚。
+    ///
+    /// <para>★ 标题栏原来画的是一块纯色圆角方块 —— 那是占位,不是图标。
+    /// 有真图标就该用真的:用户在任务栏上认的是这一枚。</para>
+    /// <para>★ 取不到就保持原样(那块纯色方块),不抛 —— 图标没有不该让程序起不来。</para>
+    /// </summary>
+    private void SetAppIcon()
+    {
+        try
+        {
+            using var s = Avalonia.Platform.AssetLoader.Open(
+                new Uri("avares://LinPlayer/Assets/icon.ico"));
+            var bmp = new Avalonia.Media.Imaging.Bitmap(s);
+            Icon = new WindowIcon(bmp);
+            if (this.FindControl<Border>("BrandDot") is { } dot)
+            {
+                dot.Background = null;
+                dot.Child = new Image
+                {
+                    Source = bmp, Width = 16, Height = 16,
+                    Stretch = Avalonia.Media.Stretch.Uniform,
+                };
+            }
+        }
+        catch (Exception e) { Console.WriteLine("[图标] " + e.Message); }
     }
 
     private static string Str(JsonElement e, string k) =>

@@ -38,12 +38,27 @@ public static class Nav
     public static Sess? Session;
 
     /// <summary>
-    /// 沉浸模式:收起标题栏和侧栏,窗口进全屏。播放页用。
+    /// 收起外壳:标题栏 + 侧栏。<b>播放页一进去就调</b>。
+    ///
+    /// <para>★★ 用户 2026-09-03:「整个软件的交互是有问题的,比如播放页不应该有侧边栏,
+    /// 还是有了」。原来只有<b>按 F 进全屏</b>才收侧栏 —— 也就是说不全屏看片时,
+    /// 左边一直杵着一条导航栏,而那上面每一个入口点下去都会把正在放的片子扔掉。</para>
     ///
     /// <para>★ 收起不能只 IsVisible=false —— 那样 36px 的行和 212px 的列还在,
     /// 画面会被挤在一个偏右下的框里。行高列宽要一起归零。</para>
     /// </summary>
     public static Action<bool>? Immersive;
+
+    /// <summary>
+    /// 真·全屏(窗口状态)。
+    ///
+    /// <para>★★ 和 <see cref="Immersive"/> <b>拆开</b>:这两件事原来绑在一起,
+    /// 于是「播放页不要侧栏」这个诉求没法单独满足 —— 一收侧栏就把窗口也拽进全屏了。</para>
+    /// </summary>
+    public static Action<bool>? Fullscreen;
+
+    /// <summary>栈里压了几层。1 = 就在这一大类的根上,&gt;1 = 从根上又点进去过。</summary>
+    public static int Depth => Stack.Count;
 
     /// <summary>换根:侧栏切页用。清栈 —— 换了大类之后「返回」回到上一大类是错的。</summary>
     public static void Root(Control page)

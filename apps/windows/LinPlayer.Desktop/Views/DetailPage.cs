@@ -243,74 +243,80 @@ public sealed class DetailPage : PageBase
         }
 
         // ---- 演职人员 ----
+        /* ★★ 一行,左右滑(用户 2026-09-03:「演职人员信息一样,可以左右滑动,
+           不需要按钮查询了就」—— 即:要滑动,但不要季/集那两个下拉)。
+           ★ 原来是 WrapPanel + `Take(24)`:折成三四行占掉半屏,而且**第 25 位之后
+             的人根本看不到**,还没有任何东西说明它被截断了。
+             改成横轨之后全表都在,而虚拟化保证只造屏幕上那几张。 */
         var people = Arr2(d, "people");
         if (people.Count > 0)
         {
-            body.Children.Add(H2("演职人员"));
-            var wrap = new WrapPanel();
-            foreach (var p in people.Take(24))
-            {
-                var av = new Border
-                {
-                    Width = 84, Height = 84, CornerRadius = new CornerRadius(42), ClipToBounds = true,
-                    Background = new SolidColorBrush(Color.Parse("#1b212c")),
-                };
-                if (Bool(p, "has_primary"))
-                {
-                    var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
-                    av.Child = im;
-                    _ = Fill(im, Images.EmbyImageUrl(_server, Str(p, "id"), "Primary"), 168);
-                }
-                else
-                {
-                    /* ★ 没有头像时放姓氏,不留一个空圆。
-                       演职员表里**大半都没有头像**(刮削器很少刮全),
-                       一排空圆看着像加载失败,而它其实已经加载完了。 */
-                    av.Child = new TextBlock
-                    {
-                        Text = Str(p, "name") is { Length: > 0 } nm ? nm[..1] : "?",
-                        FontSize = 30, FontWeight = FontWeight.SemiBold,
-                        Foreground = new SolidColorBrush(Color.Parse("#4a5464")),
-                        HorizontalAlignment = HorizontalAlignment.Center,
-                        VerticalAlignment = VerticalAlignment.Center,
-                    };
-                }
-                // ★ 头像可点 → 人物详情。做成 Button 而不是给 Border 挂 PointerPressed:
-                //   Button 自带 hover / focus / 键盘可达,手写那三样迟早漏一个。
-                var pid = Str(p, "id");
-                var pname = Str(p, "name");
-                var cell = new Button
-                {
-                    Background = Brushes.Transparent,
-                    BorderThickness = new Thickness(0),
-                    Padding = new Thickness(0),
-                    Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-                };
-                cell.Click += (_, _) => Nav.Push(new PersonPage(_core, _server, pid, pname));
-                cell.Content = new StackPanel
-                {
-                    Width = 100, Spacing = 6, Margin = new Thickness(0, 0, 10, 14),
-                    Children =
-                    {
-                        av,
-                        new TextBlock
-                        {
-                            Text = Str(p, "name"), FontSize = 12, MaxLines = 2,
-                            TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
-                        },
-                        new TextBlock
-                        {
-                            Text = Str(p, "role"), FontSize = 11, MaxLines = 1,
-                            TextTrimming = TextTrimming.CharacterEllipsis,
-                            TextAlignment = TextAlignment.Center,
-                            Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
-                        },
-                    },
-                };
-                wrap.Children.Add(cell);
-            }
-            body.Children.Add(wrap);
+            body.Children.Add(H2($"演职人员 · {people.Count} 人"));
+            body.Children.Add(Carousel.Rail(people, PersonCell, 84, out _));
         }
+    }
+
+    /// <summary>演职人员一格:圆头像 + 姓名 + 角色。</summary>
+    private Control PersonCell(JsonElement p)
+    {
+        var av = new Border
+        {
+            Width = 84, Height = 84, CornerRadius = new CornerRadius(42), ClipToBounds = true,
+            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+        };
+        if (Bool(p, "has_primary"))
+        {
+            var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
+            av.Child = im;
+            _ = Fill(im, Images.EmbyImageUrl(_server, Str(p, "id"), "Primary"), 168);
+        }
+        else
+        {
+            /* ★ 没有头像时放姓氏,不留一个空圆。
+               演职员表里**大半都没有头像**(刮削器很少刮全),
+               一排空圆看着像加载失败,而它其实已经加载完了。 */
+            av.Child = new TextBlock
+            {
+                Text = Str(p, "name") is { Length: > 0 } nm ? nm[..1] : "?",
+                FontSize = 30, FontWeight = FontWeight.SemiBold,
+                Foreground = new SolidColorBrush(Color.Parse("#4a5464")),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        // ★ 头像可点 → 人物详情。做成 Button 而不是给 Border 挂 PointerPressed:
+        //   Button 自带 hover / focus / 键盘可达,手写那三样迟早漏一个。
+        var pid = Str(p, "id");
+        var pname = Str(p, "name");
+        var cell = new Button
+        {
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+        };
+        cell.Click += (_, _) => Nav.Push(new PersonPage(_core, _server, pid, pname));
+        cell.Content = new StackPanel
+        {
+            Width = 100, Spacing = 6, Margin = new Thickness(0, 0, 10, 4),
+            Children =
+            {
+                av,
+                new TextBlock
+                {
+                    Text = pname, FontSize = 12, MaxLines = 2,
+                    TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
+                },
+                new TextBlock
+                {
+                    Text = Str(p, "role"), FontSize = 11, MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    TextAlignment = TextAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
+                },
+            },
+        };
+        return cell;
     }
 
 
@@ -324,9 +330,17 @@ public sealed class DetailPage : PageBase
     /// </summary>
     private Control Hero(JsonElement d, string id, string type, string name, string series)
     {
+        /* ★★ <b>集封面是横的,海报是竖的 —— 两种图不能塞进同一个槽</b>
+           (用户 2026-09-03:「集封面和海报封面/季封面是不一样的,集封面是横着的」)。
+           Emby 给分集的 Primary 是一张 16:9 的**剧照**;塞进 220×330 的 2:3 槽里
+           再 UniformToFill,等于把左右各裁掉三分之一 —— 人脸经常就在被裁掉的那一侧。
+           而且它**不报错**:画面是满的,只是内容错了。
+           ★ 392×220 是同一个 16:9,高度比海报矮一截 —— 分集本来也没有那么多头部信息要配。 */
+        var still = type is "Episode";
         var poster = new Border
         {
-            Width = 220, Height = 330, CornerRadius = new CornerRadius(12), ClipToBounds = true,
+            Width = still ? 392 : 220, Height = still ? 220 : 330,
+            CornerRadius = new CornerRadius(12), ClipToBounds = true,
             VerticalAlignment = VerticalAlignment.Top,
             Background = new SolidColorBrush(Color.Parse("#1b212c")),
         };
@@ -334,7 +348,7 @@ public sealed class DetailPage : PageBase
         {
             var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
             poster.Child = im;
-            _ = Fill(im, Images.EmbyImageUrl(_server, id, "Primary"), 660);
+            _ = Fill(im, Images.EmbyImageUrl(_server, id, "Primary"), still ? 440 : 660);
         }
 
         var head = new StackPanel { Spacing = 12 };
@@ -725,18 +739,12 @@ public sealed class DetailPage : PageBase
     {
         var groups = episodes.GroupBy(e => e.SeasonNo).OrderBy(g => g.Key).ToList();
         var host = new StackPanel { Spacing = 14 };
-        var gridHost = new ContentControl();
+        var railHost = new ContentControl();
         /* ★★ 集详情<b>就地展开</b>,不另开一页(用户 2026-09-02:
            「剧详情页到集详情页这是一个固定的程序,不然就把集详情页的东西
-           放到剧详情页里面切换」)。
-           原来点一张分集卡是**直接起播** —— 那等于用户永远看不到这一集的简介、
-           时长和播出日期,而「这集讲什么、要不要跳过」正是选集时唯一要问的问题。
-           另开一页也不行:退回来会丢掉季选择和滚动位置,而选集是个连续动作。 */
+           放到剧详情页里面切换」)。 */
         var epHost = new ContentControl { IsVisible = false };
 
-        /* ★ 分集卡 214 宽(默认 256)。
-           256 的话 1920 窗口上一行只放得下 4 张,而分集列表是<b>用来找集的</b> ——
-           一屏看得到的集越多越好,单张再大也提供不了更多信息(剧照都长一样)。 */
         /* ★ 「下一集」按**整部剧**的顺序算,不是当前这一季 ——
            一季的最后一集之后是下一季的第一集,按季算的话那儿就没有下一集了。 */
         var ordered = episodes.OrderBy(e => e.SeasonNo).ThenBy(e => e.EpisodeNo).ToList();
@@ -746,54 +754,130 @@ public sealed class DetailPage : PageBase
             return at >= 0 && at + 1 < ordered.Count ? ordered[at + 1] : null;
         }
 
-        void ShowSeason(List<CardItem> list) => gridHost.Content = LibraryPage.Grid(
-            _core, _server, list, true, it => ShowEpisode(epHost, it, NextOf(it)),
-            episodeStyle: true, width: 214);
+        // 当前这一季的集表 + 它的滚动容器(「跳到第 N 集」要滚它)
+        var shown = new List<CardItem>();
+        ScrollViewer? rail = null;
 
-        if (groups.Count <= 1)
+        /* ★★ 一行,虚拟化,左右翻页(用户 2026-09-03:
+           「做成一行的,可以点击左右的按钮滑动展示的」)。
+           ☠ 光「做成一行」治不了「上千集卡死」—— 一行一千张卡还是一千张卡。
+             真正救命的是 Carousel.Rail 里那个 VirtualizingStackPanel。 */
+        void ShowSeason(List<CardItem> list)
         {
-            host.Children.Add(H2($"剧集 · 共 {episodes.Count} 集"));
-            ShowSeason(episodes);
-            SelfCheckOpenEpisode(epHost, episodes[0], NextOf(episodes[0]));
-            host.Children.Add(epHost);
-            host.Children.Add(gridHost);
-            return host;
+            shown.Clear();
+            shown.AddRange(list);
+            railHost.Content = Carousel.Rail(list,
+                it => new Card(_core, _server, it, true,
+                    x => ShowEpisode(epHost, x, NextOf(x)),
+                    width: EpisodeCardWidth, subtitle: it.RuntimeLabel, title: it.Name, titleLines: 1),
+                EpisodeCardWidth * 9 / 16, out var sv);
+            rail = sv;
         }
 
-        host.Children.Add(H2($"剧集 · {groups.Count} 季 · 共 {episodes.Count} 集"));
-        var bar = new WrapPanel();
+        // ── 季 / 集 两个下拉 ────────────────────────────────────────
+        /* ★★ 用户 2026-09-03:「同时给两个按钮,点击出现列表,滑动浏览季度/集数」。
+           原来季是一排**平铺的按钮**:三季还行,而《海贼王》那种二十几季会折成四五行,
+           把分集整个推到折线以下。集更没法平铺 —— 它本来就有上千个。
+           下拉里的列表自己是滚动的,这正是「滑动浏览」要的东西。 */
+        var seasonBtn = new Button { Classes = { "chip" }, Margin = new Thickness(0, 0, 8, 0) };
+        var epBtn = new Button { Classes = { "chip" } };
+        var current = 0;
+
+        void Pick(int idx)
+        {
+            current = idx;
+            var g = groups[idx];
+            seasonBtn.Content = (g.Key > 0 ? $"第 {g.Key} 季" : "其它") + $" · {g.Count()} 集  ▾";
+            // ★ 换季要把展开的那一集收掉:它属于上一季,留着就是「季换了、
+            //   上面还摆着另一季的某一集」—— 一眼看不出是 bug,但对不上。
+            epHost.IsVisible = false;
+            _openEpisode = "";
+            ShowSeason(g.ToList());
+            epBtn.Content = $"跳到某一集  ▾";
+        }
+
+        seasonBtn.Click += (_, _) => Flyout(seasonBtn, groups.Select((g, i) =>
+            ((g.Key > 0 ? $"第 {g.Key} 季" : "其它") + $" · {g.Count()} 集", (Action)(() => Pick(i)))).ToList());
+
+        epBtn.Click += (_, _) => Flyout(epBtn, shown.Select((e, i) =>
+            (e.DisplayTitle, (Action)(() => JumpTo(i)))).ToList());
+
+        /* 跳到第 N 集:滚过去 + 就地展开它。
+           ★ 只滚不展开的话,用户在一千集里选中的那一集会**混在一排卡里**,
+             他还得再找一遍自己刚点的是哪个。 */
+        void JumpTo(int i)
+        {
+            if (i < 0 || i >= shown.Count) return;
+            var it = shown[i];
+            ShowEpisode(epHost, it, NextOf(it));
+            // 虚拟化面板不能按控件求位置(那一张多半还没造出来),按**卡宽**算
+            if (rail is not null)
+                rail.Offset = rail.Offset.WithX(Math.Max(0,
+                    i * (EpisodeCardWidth + 12) - rail.Viewport.Width / 2 + EpisodeCardWidth / 2));
+        }
+
+        host.Children.Add(H2(groups.Count <= 1
+            ? $"剧集 · 共 {episodes.Count} 集"
+            : $"剧集 · {groups.Count} 季 · 共 {episodes.Count} 集"));
+
+        // ★ 默认落在**接着看的那一季**,不是第一季。追到第三季的人每次进来
+        //   都得先点一下第三季,那这个默认值等于没有。
         var next = NextEpisode(episodes);
-        var current = groups.FindIndex(g => g.Key == next.SeasonNo);
-        if (current < 0) current = 0;
+        var at0 = groups.FindIndex(g => g.Key == next.SeasonNo);
+        Pick(at0 < 0 ? 0 : at0);
 
-        for (var i = 0; i < groups.Count; i++)
-        {
-            var idx = i;
-            var g = groups[i];
-            var chip = new Button
-            {
-                Classes = { "chip" }, Margin = new Thickness(0, 0, 8, 0),
-                Content = g.Key > 0 ? $"第 {g.Key} 季 · {g.Count()} 集" : $"其它 · {g.Count()} 集",
-            };
-            chip.Click += (_, _) =>
-            {
-                for (var k = 0; k < bar.Children.Count; k++)
-                    ((Button)bar.Children[k]).Classes.Set("on", k == idx);
-                // ★ 换季要把展开的那一集收掉:它属于上一季,留着就是「季换了、
-                //   上面还摆着另一季的某一集」—— 一眼看不出是 bug,但对不上。
-                epHost.IsVisible = false;
-                _openEpisode = "";
-                ShowSeason(groups[idx].ToList());
-            };
-            bar.Children.Add(chip);
-        }
-        ((Button)bar.Children[current]).Classes.Set("on", true);
-        ShowSeason(groups[current].ToList());
-        SelfCheckOpenEpisode(epHost, groups[current].First(), NextOf(groups[current].First()));
+        // ★ 只有一季就不画季按钮:一个只有一个选项的选择器是纯噪音
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
+        if (groups.Count > 1) bar.Children.Add(seasonBtn);
+        bar.Children.Add(epBtn);
         host.Children.Add(bar);
+
+        SelfCheckOpenEpisode(epHost, shown[0], NextOf(shown[0]));
         host.Children.Add(epHost);
-        host.Children.Add(gridHost);
+        host.Children.Add(railHost);
         return host;
+    }
+
+    /// <summary>
+    /// 分集卡宽。
+    /// <para>★ 214(默认 256):分集列表是<b>用来找集的</b>,一屏看得到的越多越好 ——
+    /// 单张再大也提供不了更多信息(同一部剧的剧照长得都差不多)。</para>
+    /// </summary>
+    private const double EpisodeCardWidth = 214;
+
+    /// <summary>
+    /// 挂在按钮下面的一列可选项。
+    ///
+    /// <para>★ 列表自己滚动并封顶 420 高 —— 上千集的话不封顶就是一条比屏幕还长的菜单,
+    /// 顶端和底端都点不到。</para>
+    /// <para>★ 每次点开<b>重建</b>:季一换,集表就换了。留着上一次那份是「换了季、
+    /// 跳集列表还是上一季的」,而它不报错。</para>
+    /// </summary>
+    private static void Flyout(Button anchor, List<(string Label, Action Go)> items)
+    {
+        var list = new StackPanel { Spacing = 2 };
+        var fly = new Flyout
+        {
+            Placement = PlacementMode.BottomEdgeAlignedLeft,
+            Content = new ScrollViewer
+            {
+                MaxHeight = 420, MaxWidth = 380,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = list,
+            },
+        };
+        foreach (var (label, go) in items)
+        {
+            var b = new Button
+            {
+                Content = label, Classes = { "ghost" },
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+            };
+            b.Click += (_, _) => { fly.Hide(); go(); };
+            list.Children.Add(b);
+        }
+        fly.ShowAt(anchor);
     }
 
     /// <summary>

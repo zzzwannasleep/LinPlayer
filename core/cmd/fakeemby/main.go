@@ -51,6 +51,9 @@ var useGzip *bool
 // noAvatar 用户头像回 404 —— 验「图标回退到官方那条」。
 var noAvatar *bool
 
+// eps1 第 1 季的集数。验「上千集不卡死」时调大。
+var eps1 *int
+
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8096", "监听地址")
 	clip = flag.String("clip", "", "起播时回放的本地视频文件")
@@ -59,6 +62,11 @@ func main() {
 	useGzip = flag.Bool("gzip", false, "JSON 响应用 gzip 压缩(真 Emby 默认就是压的)")
 	// ★ 验「头像被删了要退回官方图标」那条路。不给开关的话它永远走不到。
 	noAvatar = flag.Bool("no-avatar", false, "用户头像回 404(验图标回退官方那条)")
+	/* ★★ 第 1 季有多少集。默认 12,自检验「上千集不卡死」时调到 1200。
+	   用户 2026-09-03:「遇到那些上千集的不一下子卡死了」——
+	   而假服务器只造得出 12 集的话,虚拟化有没有生效**根本量不出来**:
+	   12 张卡不虚拟化也照样流畅。假服务器只能造出你想到的形状,想到了就得造。 */
+	eps1 = flag.Int("eps", 12, "第 1 季的集数(验虚拟化时调大)")
 	flag.Parse()
 
 	mux := http.NewServeMux()
@@ -267,7 +275,7 @@ func main() {
 			   分组代码就算把季号写死成 1 也照样绿。假服务器只能造出你想到的形状,
 			   想到了就得造(2026-09-02 做季分组时补的)。 */
 			eps := []map[string]any{}
-			for _, sea := range []struct{ No, Count int }{{1, 12}, {2, 8}} {
+			for _, sea := range []struct{ No, Count int }{{1, *eps1}, {2, 8}} {
 				for i := 1; i <= sea.Count; i++ {
 					e := item(fmt.Sprintf("s%de%d", sea.No, i),
 						fmt.Sprintf("第 %d 集", i), "Episode")
@@ -345,6 +353,24 @@ func main() {
 				d["CommunityRating"] = 8.9
 				d["BackdropImageTags"] = []string{"tag-s1-bd"}
 				d["UserData"] = map[string]any{"IsFavorite": true}
+				writeJSON(w, d)
+				return
+			}
+			/* ★★ <b>分集详情是一张不同的页</b>(用户 2026-09-03:
+			   「集封面和海报封面/季封面是不一样的,集封面是横着的」)。
+			   夹具里所有 id 一律回 Movie 的话,详情页的分集版式**一次都跑不到** ——
+			   而那正是这一条要验的东西。假绿五类里的「夹具不真实」。 */
+			if strings.HasPrefix(id, "s") && strings.Contains(id, "e") {
+				d := item(id, "第 1 集", "Episode")
+				d["SeriesName"] = "某部剧"
+				d["SeriesId"] = "s1"
+				d["IndexNumber"] = 1
+				d["ParentIndexNumber"] = 1
+				d["Overview"] = "自检用分集简介。"
+				d["ProductionYear"] = 2023
+				d["RunTimeTicks"] = 14000000000
+				d["PremiereDate"] = "2023-04-02T00:00:00.0000000Z"
+				d["UserData"] = map[string]any{"PlaybackPositionTicks": 5000000000}
 				writeJSON(w, d)
 				return
 			}

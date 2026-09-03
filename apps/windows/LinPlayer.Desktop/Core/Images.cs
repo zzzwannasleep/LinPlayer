@@ -58,7 +58,7 @@ public static class Images
         if (string.IsNullOrEmpty(core.LocalBaseUrl) || string.IsNullOrEmpty(upstreamUrl))
             return Task.FromResult<Bitmap?>(null);
 
-        var url = $"{core.LocalBaseUrl}/img?src={Uri.EscapeDataString(upstreamUrl)}&h={maxHeight}";
+        var url = $"{core.LocalBaseUrl}/img?src={Uri.EscapeDataString(upstreamUrl)}&h={Ladder(maxHeight)}";
 
         // ★ 命中已解码的:**同步返回**,一次 await 都不排。翻回上一页时整屏封面当场就在。
         lock (CacheLock)
@@ -72,6 +72,31 @@ public static class Images
 
         // 同一张图并发请求合流:一屏几十张卡里同一部剧可能出现好几次
         return Inflight.GetOrAdd(url, u => Fetch(core, u, maxHeight));
+    }
+
+    /// <summary>
+    /// 解码高度<b>归档</b>。
+    ///
+    /// <para>☠☠ 缓存键里带着 <c>h=</c>,而 <c>h</c> 是从**卡片实宽**算出来的 ——
+    /// 自从卡片改成「按行宽均分」(2026-09-03),这个宽度就是个连续量了:
+    /// 收一下侧栏,158 变成 172,<c>h</c> 从 474 变成 516,<b>缓存键当场不认</b>,
+    /// 整屏封面重新取一遍、重新解一遍。用户 2026-09-03 说的
+    /// 「收起/展开侧边栏的时候图片都要重新加载」就是这一下。</para>
+    ///
+    /// <para>★ 所以按一张<b>粗档位表</b>取整:相邻档差约 35%,
+    /// 侧栏收放引起的那点宽度变化落不出一档去。
+    /// 代价是最多多解 35% 的像素 —— 比重下一遍便宜得多。</para>
+    /// <para>★ 档位<b>只能往上取</b>:往下取会解出一张比显示尺寸还小的图,
+    /// 拉大之后是糊的,而且不报错。</para>
+    /// </summary>
+    private static readonly int[] Rungs = [120, 180, 240, 330, 450, 600, 800, 1080, 1440, 1920];
+
+    internal static int Ladder(int h)
+    {
+        if (h <= 0) return 0;
+        foreach (var r in Rungs)
+            if (h <= r) return r;
+        return Rungs[^1];
     }
 
     private static async Task<Bitmap?> Fetch(CoreClient core, string url, int maxHeight)
@@ -104,7 +129,7 @@ public static class Images
                画在 158×237 的槽里,白解了 40 倍的像素,还占着 6 MB 内存。
                而 maxHeight 是给上游的**建议**:实测某 fork 完全无视 maxWidth,
                所以「服务器会帮我们缩」这件事**不能当前提**,自己这一刀必须落。 */
-            var bmp = DecodeToHeight(ms, maxHeight);
+            var bmp = DecodeToHeight(ms, Ladder(maxHeight));
             if (Perf.On)
                 Perf.Log($"图 取{t1 - t0:0}ms 解码{Perf.Ms - t1:0}ms {ms.Length / 1024}KB " +
                          $"→{bmp.PixelSize.Width}x{bmp.PixelSize.Height} " +

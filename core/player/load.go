@@ -42,15 +42,37 @@ func loadWith(url string, startSec float64, headers map[string]string, ua string
 	}
 	setProp("user-agent", ua)
 
-	args := []string{"loadfile", url, "replace"}
-	if startSec > 1 {
-		args = append(args, "start="+strconv.FormatFloat(startSec, 'f', 3, 64))
-	}
-	if err := command(args...); err != nil {
+	if err := command(loadArgs(url, startSec)...); err != nil {
 		return fmt.Errorf("loadfile 失败: %w", err)
 	}
 	setProp("pause", "no")
 	return nil
+}
+
+// loadArgs 拼 loadfile 的参数表。
+//
+// ☠☠ **`replace` 后面那个位置是 `index`,不是选项**(mpv 0.38 起插进来的一个参数)。
+// 这里原来直接把 `start=…` 拼在 `replace` 后面,mpv 当场回 -4(invalid parameter),
+// 而调用方把它包成「loadfile 失败」抛给 UI。
+//
+// ★★ 它的表现极具迷惑性:**从头看的片子好好的,只有「继续观看」里的点不动** ——
+// 因为只有带进度的条目才会拼出第 4 段。用户 2026-09-03 的原话就是
+// 「继续观看里面的影片看不了,点击就是 loadfile 失败」。
+//
+// 实测(本仓 build/core 里的 libmpv,client api 2.5):
+//
+//	loadfile x.mkv replace                    → 0  success
+//	loadfile x.mkv replace start=123.000      → -4 invalid parameter
+//	loadfile x.mkv replace -1 start=123.000   → 0  success
+//
+// -1 = 追加到播放列表末尾。replace 模式下这个位置具体填什么不影响结果,
+// 但**必须占住** —— 空着的话选项就滑到 index 那一格上去了。
+func loadArgs(url string, startSec float64) []string {
+	args := []string{"loadfile", url, "replace"}
+	if startSec > 1 {
+		args = append(args, "-1", "start="+strconv.FormatFloat(startSec, 'f', 3, 64))
+	}
+	return args
 }
 
 // joinHeaders 把头表拼成 mpv 认的 `K: V,K: V` 形式。

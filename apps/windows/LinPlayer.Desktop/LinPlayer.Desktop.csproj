@@ -24,7 +24,19 @@
          每次开机都要现编一遍。R2R 把它提前编好,代价是包大一些。
          这是发布专用属性,dotnet build 不受影响。 -->
     <PublishReadyToRun>true</PublishReadyToRun>
+
+    <!-- ★★ exe 自己的图标。用户 2026-09-03:「软件没有图标,以前有的,用回以前那个就行」。
+         ★ **不在这儿复制一份**:仓库里 LinPlayer 的图标只应该有一处正本
+           (apps/desktop/icons/,6f986a97 那次专门找回来的)。
+           复制过来的后果是两处各自演化,而不一致时谁也不报错。 -->
+    <ApplicationIcon>..\..\desktop\icons\icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 同一个文件再进一次资源:exe 图标(上面那条)管的是**文件在资源管理器里的样子**,
+         窗口图标(任务栏 / Alt-Tab / 标题栏)得由代码在运行期设,见 MainWindow 构造函数。 -->
+    <AvaloniaResource Include="..\..\desktop\icons\icon.ico" Link="Assets/icon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.11" />

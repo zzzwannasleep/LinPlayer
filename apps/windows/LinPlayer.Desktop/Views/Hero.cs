@@ -93,7 +93,14 @@ public sealed class Hero : Border
     private double _arA, _arB;
     private Border _front;              // 当前正显示的那一层
     private readonly Border _skel;
-    private readonly StackPanel _body = new() { Spacing = 12 };
+    /// <summary>
+    /// 文字列:艺术字 + 标签行。
+    ///
+    /// <para>★ <c>Spacing = 6</c>(原来 12)。用户 2026-09-03:「艺术字和标签之间的空隙比较大,
+    /// 缩小」。艺术字那一格是**底对齐**的(见 <see cref="RenderBody"/>),
+    /// 所以这个数就是两行之间肉眼看到的全部距离。</para>
+    /// </summary>
+    private readonly StackPanel _body = new() { Spacing = 6 };
     private readonly StackPanel _dots = new()
     {
         Orientation = Orientation.Horizontal, Spacing = 7,
@@ -161,7 +168,9 @@ public sealed class Hero : Border
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Padding = new Thickness(18, 0, 18, 0),
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(0, 0, 0, 64),
+            /* ★ 离底 40(原来 64)。用户 2026-09-03:「艺术字和标签往下放一点,现在放的太高」。
+               下限由圆点那一行定:它在 26,高 14 —— 40 正好压在它上沿,再低就叠上去了。 */
+            Margin = new Thickness(0, 0, 0, 40),
             Child = _body,
         };
         var dotsHost = new Border

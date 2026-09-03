@@ -172,17 +172,45 @@ public sealed class Card : Button
         Cursor = HandCursor;
         if (onOpen is not null) Click += (_, _) => onOpen(item);
 
-        if (item.HasPrimary) _ = LoadArt(core, server, item, img, (int)(h * 2), skel, ph);
+        if (item.HasPrimary) StartArt(core, server, item, img, (int)(h * 2), skel, ph);
 
         // 右键动作:标记已看 / 收藏 / 屏蔽。**一处实现,所有卡片共用**(见 CardActions)
         CardActions.Attach(this, core, item);
     }
 
-    private static async Task LoadArt(CoreClient core, string server, CardItem item, Image target,
+    /// <summary>
+    /// 开始取封面。
+    ///
+    /// <para>☠☠ <b>已经解好的位图要在这一刻就贴上去,一个 await 都不能排。</b>
+    /// 用户 2026-09-03:「媒体库页和媒体库详情页在我收起/展开侧边栏的时候,
+    /// 图片都要重新加载或者闪一下」。收放侧栏会让网格的列数变化,列数一变整批卡片重建 ——
+    /// 而原来这条路无论缓存命中与否都要走一次 <c>Dispatcher.Post</c>,
+    /// 于是每张卡都必然有<b>一帧</b>是「骨架 + 透明的图」,下一帧才淡入。
+    /// 一屏几十张同时这么来一下,就是那个「闪」。</para>
+    ///
+    /// <para>★ 命中时连淡入都不做:淡入是给「刚从网络回来」用的,
+    /// 而这张图上一帧还在屏幕上,给它做入场动画本身就是错的。</para>
+    /// </summary>
+    private static void StartArt(CoreClient core, string server, CardItem item, Image target,
         int maxH, Control skel, Control placeholder)
     {
         var url = Images.EmbyImageUrl(server, item.Id, "Primary");
-        var bmp = await Images.LoadAsync(core, url, maxH);
+        var t = Images.LoadAsync(core, url, maxH);
+        // ★ 缓存命中时 LoadAsync 返回的是一个**已完成**的 Task(它自己就是同步查表的)
+        if (t.IsCompletedSuccessfully && t.Result is { } cached)
+        {
+            skel.IsVisible = false;
+            target.Source = cached;
+            target.Opacity = 1;
+            return;
+        }
+        _ = LoadArt(t, target, skel, placeholder);
+    }
+
+    private static async Task LoadArt(Task<Bitmap?> pending, Image target,
+        Control skel, Control placeholder)
+    {
+        var bmp = await pending;
         /* ★★ 不管成没成,<b>骨架都要收</b>。
            只在成功那条路上收的话,取不到封面的条目会**永远呼吸下去** ——
            而它其实早就失败了。这正是本仓最讨厌的那种失败:不报错、不崩、

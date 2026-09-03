@@ -2,6 +2,7 @@ using System;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
+using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -490,6 +491,14 @@ public sealed class PlayerPage : UserControl
             },
         };
 
+        /* ★★ 上下两条的淡入淡出(用户 2026-09-03:「播放页的上下栏不会渐隐渐显」)。
+           ★ 出场 160 / 退场 260:出来要跟手(用户刚动了鼠标,他在等界面),
+             收回去要慢一点(那是「让开」,不是「消失」)。同一个数会让退场显得突兀。
+           ★ 过渡挂在控件上而不是样式表里:这两条是这一页独有的,
+             进样式表就得起个类名,而那个类名只会有一个使用者。 */
+        _top.Transitions = FadeIn();
+        _bottom.Transitions = FadeIn();
+
         Content = new Panel
         {
             Background = Brushes.Black,
@@ -499,7 +508,21 @@ public sealed class PlayerPage : UserControl
         // ★ 键盘要能收到,控件得先能拿焦点 —— 不设 Focusable 按空格毫无反应,
         //   而用户只会觉得「这播放器连暂停都没有」。
         Focusable = true;
-        AttachedToVisualTree += (_, _) => Focus();
+        AttachedToVisualTree += (_, _) =>
+        {
+            Focus();
+            /* ★★ 用户 2026-09-03:「播放页不应该有侧边栏,还是有了」。
+               原来只有按 F 进全屏才收 —— 不全屏看片时左边一直杵着导航栏,
+               而那上面每一个入口点下去都会把正在放的片子扔掉。 */
+            Nav.Immersive?.Invoke(true);
+        };
+        // ★ 离场必须放回来。只在 Leave() 里放的话,用 Alt+← / 侧栏返回等别的路
+        //   退出播放页时外壳再也不出现 —— 那就是「软件的导航没了」。
+        DetachedFromVisualTree += (_, _) =>
+        {
+            if (_full) { _full = false; Nav.Fullscreen?.Invoke(false); }
+            Nav.Immersive?.Invoke(false);
+        };
         KeyDown += OnKey;
         PointerMoved += (_, _) => { _lastMove = DateTime.UtcNow; ShowOsd(true); };
 
@@ -547,6 +570,7 @@ public sealed class PlayerPage : UserControl
            绕开 UI 直接调命令的自检只能证明核心层活着,证明不了这个面板接对了。 */
         var lvl = Environment.GetEnvironmentVariable("LP_SELFCHECK_SHADER");
         if (!string.IsNullOrEmpty(lvl)) _ = SelfCheckPickQuality(lvl);
+        SelfCheckOsdFade();
         // 自检:LP_SELFCHECK_PLAYER_DRILL=3 把跳过条钉出来 —— 它平时只在片头那几十秒里出现,
         // 截图永远抓不到,而它是这一版新加的东西里最容易画错位置的一个。
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "3")
@@ -907,7 +931,8 @@ public sealed class PlayerPage : UserControl
     private void ToggleFullscreen()
     {
         _full = !_full;
-        Nav.Immersive?.Invoke(_full);
+        // ★ 侧栏已经在进页时收掉了(见构造函数),这里只管窗口状态
+        Nav.Fullscreen?.Invoke(_full);
         // ★ 图标要跟着换:全屏之后按钮还画着「进入全屏」,用户会以为没生效
         if (_fullBtn is not null)
         {
@@ -927,16 +952,85 @@ public sealed class PlayerPage : UserControl
         Nav.Back();
     }
 
-    /// <summary>OSD 收放。三秒不动就收起来 —— 一直压着画面就不是看片了。</summary>
+    /// <summary>
+    /// 自检:上下两条<b>是渐隐的,不是一刀切</b>(用户 2026-09-03 点名)。
+    ///
+    /// <para>★★ 判据必须是<b>逐帧采到的 Opacity</b>。
+    /// 只断言「收起后 Opacity==0」的话,一刀切也照样绿 —— 那正是改之前的行为。
+    /// 要证明的是「中间经过了别的值」,和侧栏动效那条同一个道理。</para>
+    /// </summary>
+    private void SelfCheckOsdFade()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_OSDFADE") != "1") return;
+        _ = Task.Delay(3000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var seen = new List<double>();
+            var n = 0;
+            ShowOsd(false);
+            void Sample(TimeSpan _)
+            {
+                seen.Add(Math.Round(_bottom.Opacity, 2));
+                if (++n < 24) TopLevel.GetTopLevel(this)!.RequestAnimationFrame(Sample);
+                else
+                {
+                    var mid = seen.Where(v => v is > 0.02 and < 0.98).ToList();
+                    Console.WriteLine($"[OSD 渐隐] 采到 {string.Join(" ", seen.Distinct())}");
+                    Console.WriteLine(mid.Count > 0
+                        ? $"[OSD 渐隐] ✓ 中间经过了 {mid.Count} 个过渡值 —— 是淡出,不是瞬间消失"
+                        : "[OSD 渐隐] ✗ 只有 1 和 0 两个值 —— 一刀切,没有渐隐");
+                    Console.WriteLine(_bottom.IsHitTestVisible
+                        ? "[OSD 渐隐] ✗ 收起后还在吃鼠标事件 —— 画面上下两头会点不动"
+                        : "[OSD 渐隐] ✓ 收起后不吃鼠标事件了");
+                }
+            }
+            TopLevel.GetTopLevel(this)!.RequestAnimationFrame(Sample);
+        }));
+    }
+
+    /// <summary>OSD 那两条的过渡。出场快、退场慢。</summary>
+    private static Transitions FadeIn() =>
+    [
+        new DoubleTransition
+        {
+            Property = OpacityProperty,
+            Duration = TimeSpan.FromMilliseconds(200),
+            Easing = new Avalonia.Animation.Easings.CubicEaseOut(),
+        },
+    ];
+
+    /// <summary>
+    /// OSD 收放。三秒不动就收起来 —— 一直压着画面就不是看片了。
+    ///
+    /// <para>★★ <b>淡入淡出,不是直接消失</b>(用户 2026-09-03:「播放页的上下栏
+    /// 不会渐隐渐显」)。原来这里翻的是 <c>IsVisible</c> —— 那是一刀切:
+    /// 一条压着画面的黑渐变条**整块凭空出现 / 凭空没了**,在暗场景里尤其扎眼。
+    /// 所有现代播放器这一下都是淡的。</para>
+    ///
+    /// <para>☠ 淡出<b>不能只降 Opacity</b>:透明的控件照样吃鼠标事件,
+    /// 收起来之后画面上会有两条看不见的横带点不动 ——
+    /// 而用户点的是画面(暂停),表现是「上下两头点了没反应」。
+    /// 所以 <c>IsHitTestVisible</c> 必须跟着一起翻。</para>
+    ///
+    /// <para>★ 收起时<b>不</b>把 <c>IsVisible</c> 置 false:那样过渡还没跑完就被摘掉了,
+    /// 等于没有动画。让它透明地待着就行 —— 一个 Opacity=0 的控件不产生绘制成本。</para>
+    /// </summary>
     private void ShowOsd(bool on)
     {
-        if (_top.IsVisible == on) return;
-        _top.IsVisible = _bottom.IsVisible = on;
+        if (_osdOn == on) return;
+        _osdOn = on;
+        foreach (var b in new[] { _top, _bottom })
+        {
+            b.Opacity = on ? 1 : 0;
+            b.IsHitTestVisible = on;
+        }
         // ★ 抽屉要跟着收。留着的话 OSD 收了之后画面上孤零零飘着一块面板,
         //   而且它下面那条控制条已经没了,看着像画错了。
         if (!on) _settings.IsVisible = false;
         Cursor = new Cursor(on ? StandardCursorType.Arrow : StandardCursorType.None);
     }
+
+    /// <summary>OSD 当前是不是亮着。★ 不能再拿 <c>_top.IsVisible</c> 当判据 —— 它恒真了。</summary>
+    private bool _osdOn = true;
 
     /// <summary>
     /// 画质档位(<c>UI_PC.md</c> §7 底部第七个面板,快捷键 <c>U</c>)。

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -35,7 +36,9 @@ public static class Carousel
     /// 按钮要对齐**图的中线**,不是整张卡的中线(卡片下面还有两行标题,
     /// 按整张卡居中的话按钮会偏低,看着像没对准)。
     /// </summary>
-    public static Control Wrap(Control row, double artHeight)
+    public static Control Wrap(Control row, double artHeight) => Wrap(row, artHeight, out _);
+
+    public static Control Wrap(Control row, double artHeight, out ScrollViewer scroller)
     {
         var sv = new ScrollViewer
         {
@@ -87,7 +90,36 @@ public static class Carousel
         }
         sv.LayoutUpdated += First;
 
+        scroller = sv;
         return new Panel { Children = { sv, left, right } };
+    }
+
+    /// <summary>
+    /// 会虚拟化的横向轨道:一排卡 + 两侧翻页按钮。
+    ///
+    /// <para>★★ 用户 2026-09-03:「详情页里面的集数显示和演职人员的显示,
+    /// 不要一口气全显示出来,遇到那些上千集的不一下子卡死了,
+    /// 做成一行的,可以点击左右的按钮滑动展示」。</para>
+    ///
+    /// <para>☠ 「做成一行」本身<b>解决不了卡死</b> —— 一行一千张卡还是一千张卡,
+    /// 只是从纵向排成了横向。真正省下来的是 <see cref="VirtualizingStackPanel"/>:
+    /// 屏幕上放得下几张就只造几张。所以这里是 <c>ItemsControl</c> + 虚拟化面板,
+    /// 不是往 StackPanel 里 foreach。</para>
+    ///
+    /// <para>★ <paramref name="scroller"/> 传出去给调用方:「跳到第 N 集」要滚这个容器。</para>
+    /// </summary>
+    public static Control Rail<T>(IReadOnlyList<T> items, Func<T, Control> make,
+        double artHeight, out ScrollViewer scroller)
+    {
+        var list = new ItemsControl
+        {
+            // ★ 这一行就是虚拟化的开关。不设的话默认 StackPanel,全量实例化。
+            ItemsPanel = new FuncTemplate<Panel?>(() =>
+                new VirtualizingStackPanel { Orientation = Orientation.Horizontal }),
+            ItemTemplate = new FuncDataTemplate<T>((it, _) => make(it), true),
+            ItemsSource = items,
+        };
+        return Wrap(list, artHeight, out scroller);
     }
 
     /// <summary>
