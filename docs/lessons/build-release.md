@@ -22,6 +22,8 @@
 - Linux 选外部播放器列不出文件 — `linux-executable-picker-filter.md`
 - PowerShell GBK/UTF-8 坑 — `powershell-gbk-utf8-corruption.md`
 - Bash 别用 PS heredoc — `bash-no-powershell-heredoc.md`
+- 删掉一整个技术栈:连带点清单 — 2026-09-04
+- Windows CI 的 Python 按 cp1252 输出 — 2026-09-04
 
 ---
 
@@ -320,6 +322,24 @@ libmpv soname)。凡是「发布链路 / 版本比较 / 平台依赖」的假设
 
 ---
 
+##### 3. 第三次发作(2026-09-04):换栈时权威文件没了
+
+删 Rust 栈时 `apps/desktop/tauri.conf.json` 一并删除 —— **CI 无处取版本**。
+而接棒的 C# 宿主 `Program.cs` 里写死 `"0.1.0-go"`,线上当时已发到 `v1.0.0-build684`。
+照那样发布,更新检查判「已是最新」,**静默**卡死所有老用户 —— 和第 1 次一模一样。
+
+还有第三层:仓库计划清空重建,**GitHub 的 `run_number` 会归 1**,
+`1.0.0-build1` 比线上 `1.0.0-build684` 小,同一个坑会第三次发作。
+
+**处置**:立仓库根的 `VERSION` 为唯一权威(见 `docs/VERSIONING.md`),
+基线取 `1.1.0` —— 无论 build 号多小都稳压线上一头。三处读它:
+CI(`cat VERSION`)、C#(`dotnet publish -p:Version=`)、Go(`-ldflags -X …system.Version=`)。
+
+**这条坑三次发作的共同形状**:**版本权威搬家/替换时没有回读**。
+所以纪律不是「别写死版本」,是**「改完版本权威,必须和 `gh release list --limit 1` 对一眼」**。
+
+---
+
 ### CI 漏传编译期凭据
 
 > 原记忆:`ci-missing-compiletime-secrets.md` · 类型:`project`
@@ -546,6 +566,66 @@ $b=[IO.File]::ReadAllBytes($p); $b[0..2]            # EF BB BF 才是有 BOM
 **Why:** `@'...'@` 只在 PowerShell 里是 here-string；Bash 里 `@` 是普通字符。
 
 **How to apply:** Bash 工具里多行 message 用 `$'line1\nline2'`（ANSI-C 转义）或普通 heredoc（`git commit -F -  <<'EOF' ... EOF`）。只有 PowerShell 工具才用 `@'...'@`。清理已污染的历史：`git rebase <base> --exec 'git commit --amend -m "$(git log --format=%B -1 | sed "/^@\$/d")" >/dev/null'`（删掉所有单独成行的 `@`），再 `push --force-with-lease`。相关：[Git workflow](methodology.md)。
+
+---
+
+### 删掉一整个技术栈:连带点清单
+
+> 2026-09-04 · 类型:`project`
+
+删 Rust + React/Tauri 栈(`crates/` `apps/desktop` `apps/android` `ui/`,共 −129710 行)。
+**代码本身好删,难的是那些"删完才发现"的连带点** —— 每一个不修都会静默坏掉。
+下次再砍一个栈,照这张表逐条过:
+
+| 连带点 | 症状 | 这次怎么处理 |
+|---|---|---|
+| **原生库的链接路径** | `cgo LDFLAGS` 和 3 个脚本硬编码 `crates/mpv/libmpv`;删完 cgo 链不上 | 迁到 `third_party/libmpv/`,连 `client.h`/`mpv.lib`/`mpv.def`/`mpv.exp` 一起(它们**在索引里**,`git rm -rf crates` 会连工作区一起删掉) |
+| **代码生成器的数据源** | `gen-commands.py` 从 8 个 `.rs` 抽命令签名;删完它没有输入了 | `COMMANDS.md` 从「生成物」转为**手维护真源**,生成器退役。正确性改由门禁的双向比对守 |
+| **借来的构建工具** | Kotlin 关借 `apps/android/gen/android/gradlew`;删完那关直接红 | **趁旧栈还在**先给 `bindings/kotlin` 生成独立 wrapper 并验证可用 |
+| **门禁的识别模式** | 凭据闸门只认 `tauri build` 步骤;删完 `checked == 0`,闸门判自己失效 | 改认 `pack-win.sh`/`build-core.sh`,变量顺带从 3 个扩到 9 个 |
+| **跨栈借的资源** | C# 端 `<ApplicationIcon>` 指向 `apps/desktop/icons/`;删完当场编不过,**且报在 Avalonia 的资源生成任务里**,乍看不像图标的事 | 图标正本迁进 `apps/windows/.../Assets/`。**资源不跨栈借** |
+| **版本号权威** | 权威是 `apps/desktop/tauri.conf.json`;删完 CI 无处取版本 | 立仓库根的 `VERSION`,见 `docs/VERSIONING.md` |
+| **CI** | 三个 job 全是 Tauri | 重写成单端(949 → 196 行),顺带把四道门禁接进去 |
+| **发布契约** | `publish.yml` 按 `LinPlayer-Windows-v$VER.zip` 捞资产,而新打包脚本吐的是别的名字 | 产物名对齐。**名字是发布契约的一部分**,改名要三处一起改 |
+
+**方法论**:别指望一次列全。有效的顺序是 **先删 → 让编译器/门禁把断口一个个报出来 → 逐个修**,
+Rust 的 `cargo check`、TS 的 `tsc --noEmit`、门禁脚本都是免费的引用查找器。
+但**"删完能编过"不等于做完了** —— 上表里的凭据闸门、发布契约、版本权威这三条,
+编译器一个都照不到,全靠人想起来。
+
+---
+
+### Windows CI 的 Python 按 cp1252 输出
+
+> 2026-09-04 · 类型:`project`
+
+新 CI 第一次跑就红:`check-ffi-contract.py` 打「SPEC §5.1 声明 N 个」时抛
+`UnicodeEncodeError: 'charmap' codec can't encode characters`。
+
+**根因**:GitHub 的 windows runner 上 Python 默认按 **cp1252**(西欧)输出,
+编码不了中文。而本地开发机是 GBK/UTF-8 —— **中文能编码,所以复现不出来**。
+这个脚本以前只在本地跑,是这次把它接进 CI 才暴露的。
+
+**修法**:让脚本**自己** reconfigure,不靠环境变量。
+
+```python
+import sys as _sys
+for _s in (_sys.stdout, _sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+```
+
+★ **别只设 `PYTHONUTF8=1`**:`PYTHONIOENCODING` 的优先级比它高,
+谁在 CI 上设了后者就把 UTF-8 模式顶掉了。实测 `PYTHONIOENCODING=cp1252 PYTHONUTF8=1`
+照样崩。内联 heredoc 里的 python 没法加 shim,那就在 shell 里 `export PYTHONIOENCODING=utf-8`。
+
+**怎么本地复现**:`PYTHONIOENCODING=cp1252 python scripts/xxx.py` —— 修前必崩,修后必过。
+这也是「测试必须先红」在这条上的落法。
+
+**失效条件**:脚本不打非 ASCII 就碰不到;Linux runner 默认 UTF-8 也碰不到 ——
+所以它只在「Windows job + 中文输出」的交叉点上发作。
 
 ---
 

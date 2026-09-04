@@ -19,6 +19,9 @@
 - 别过度解读需求 — `dont-over-interpret-requests.md`
 - 做完所有再交付 — `finish-all-before-handoff.md`
 - Git workflow — `git-workflow.md`
+- 空数据源被判「通过」:门禁的第二类假绿 — 2026-09-04
+- 按文件名猜用途 = 误删 — 2026-09-04
+- 正则改注释:别碰「只有 // 的那一行」 — 2026-09-04
 
 ---
 
@@ -365,6 +368,90 @@ User works directly on `main` — commit and push straight to `main`, do NOT cre
 **Why:** Solo/personal workflow on this repo; branch+PR overhead is unwanted.
 
 **How to apply:** When work is done and the user asks to commit/push (or has pre-authorized), commit on `main` and `git push origin main`. Still end commit messages with the Co-Authored-By trailer.
+
+---
+
+### 空数据源被判「通过」:门禁的第二类假绿
+
+> 2026-09-04 · 类型:`project`
+
+`check-bindings.sh` 第 4 关拿 Go 注册表和 `COMMANDS.md` 比,判「有没有野命令」:
+
+```bash
+ORPHAN="$(comm -23 "$TMP/go.txt" "$TMP/md.txt" | grep -v '^debug\.')"
+[ -z "$ORPHAN" ] && echo "无野命令"      # ← 空集也走这里
+```
+
+libmpv 搬家后 cgo 链不上,`go run ./cmd/listcommands` **一条都没吐出来**。
+`comm` 拿空集去比,结果当然是空 —— 门禁报**「全部通过」**。
+**编译失败被伪装成了绿灯**,这比直接红危险得多。
+
+日志里其实有线索(两行「找不到 mpv.lib」+ 一行 `Go:0 / 218 条已注册`),
+但结论行写着「全部通过」,不逐行读就过去了。
+
+**教训**:凡是「拿一个外部命令的输出去比对」的门禁,
+**必须先判输出非空**,不许把空集当成「没有差异」。同类写法值得全仓 grep 一遍。
+
+这和「测试必须先红」里的假绿五类是同一族,但**成因不同**:
+那五类是断言本身写歪了,这一类是**数据源没了而断言恒真**。
+
+修完按规矩做了反向注入:把 `go run ./cmd/listcommands` 换成 `true`(不输出),
+门禁必须红 —— 实测确实红了,还原后恢复绿。
+
+---
+
+### 按文件名猜用途 = 误删
+
+> 2026-09-04 · 类型:`feedback`
+
+删 Rust 栈时清理 `scripts/`,**看名字**就把这几个删了:
+
+| 文件 | 我以为 | 实际 |
+|---|---|---|
+| `pack-win.sh` | Tauri 的 Windows 打包 | **C# 端**打包(`dotnet publish apps/windows`) |
+| `selfcheck-win.sh` | Tauri 真机自检 | **C# 端**自检 |
+| `shot-window.ps1` | Tauri 截图 | 通用截图,被 `selfcheck-real.sh` 调 |
+| `dump-command-names.py` | Rust 命令导出 | 从 **COMMANDS.md** 提命令名,门禁第 4 关在用 |
+| `report-wiring.py` | Rust 接线报告 | 查 **C# 宿主**有没有调核心层命令 |
+
+五个全是**当前技术栈**的工具,`-win` 只是「Windows 平台」的意思,不是「Tauri」。
+删完门禁当场报 `can't open file 'dump-command-names.py'`。
+
+**Why**:文件名是**给人读的标签**,不是依赖声明。同一个词在不同年代指不同东西。
+
+**How to apply**:删任何一个文件之前,**读它的头几行**(这个仓库每个脚本开头都有说明),
+再 `grep -rn '<文件名>' .` 看谁在调它。两步都是秒级的,而误删的代价是门禁静默失效。
+这是 `CLAUDE.md` 常犯错误表里「复用一个函数前没读它」的同一个毛病,换了个场景。
+
+---
+
+### 正则改注释:别碰「只有 `//` 的那一行」
+
+> 2026-09-04 · 类型:`feedback`
+
+清理 `core/**` 里 57 处「移植自 `crates/…`」的溯源注释,顺手加了一条收尾规则:
+
+```python
+s = re.sub(r'^// *\n', '', s, flags=re.M)   # 想删「删空后剩下的空注释行」
+```
+
+结果它删掉了**全仓所有只含 `//` 的行** —— 那是 Go 文档注释的**段落分隔符**:
+
+```go
+// Handler 是一条命令的实现。
+//                          ← 这一行被删了,上下两段粘成一坨
+// 约定:
+```
+
+波及 **192 个文件、1147 行**,而 `go build` / `go test` 全绿 ——
+**注释排版坏了编译器一声不吭**。是 `git diff --stat` 的数字(−1302 行,而目标只有 57 处)
+不对劲才发现的。
+
+**How to apply**:
+- 改注释的正则,**作用域限定在刚被自己改过的那一段**,别开全文件 `re.M`
+- 改完先看 `git diff --numstat` 的**量级**:删除行数远超预期条目数 = 规则误伤了
+- 恢复靠 `difflib` 以 HEAD 为参照,只把「HEAD 有、当前没有、且 strip 后 == `//`」的行插回原位 ——
+  比整个 checkout 精确,不会连带丢掉同一批文件里的其它改动
 
 ---
 
