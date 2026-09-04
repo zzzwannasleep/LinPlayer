@@ -10,10 +10,10 @@
 
 ## 目录结构
 
-实现全在 `crates/core/src/plugins/`（平台无关，桌面与安卓共用）：
+实现全在 `core/plugin/`（平台无关，各端共用）：
 
 ```
-crates/core/src/plugins/
+core/plugin/
 ├── mod.rs             # 对外入口
 ├── manifest.rs        # manifest.json 解析与校验
 ├── permission.rs      # 权限定义 / 授予 / 校验
@@ -30,7 +30,7 @@ crates/core/src/plugins/
 ├── convert.rs / assets.rs / hello_it.rs
 ```
 
-宿主侧接线：`apps/desktop/src/lib.rs`（`plugins_host::make_host` + Tauri 命令），
+宿主侧接线：`core/plugincmd/`（命令注册）与 `apps/windows/`（UI 接线），
 前端在 `ui/desktop/pages/`。
 
 ### 插件放在哪
@@ -48,9 +48,9 @@ crates/core/src/plugins/
 | Windows / Linux（压缩包分发） | `userdata/data/plugins`，即 **exe 同级的 userdata 里** | 删掉应用文件夹即清理 |
 | Android | 应用私有目录（沙盒内） | ✅ 系统卸载时随沙盒一并删除 |
 
-> 桌面端**不要**用 Tauri 的 `app_config_dir()`：那是由 `tauri.conf.json` 的 identifier
+> **不要**用系统的「应用配置目录」API：那类路径由系统 identifier
 > 推出来的另一个根，会在 `%APPDATA%` 下再开一份，而且改 identifier 就让已装插件静默失联。
-> 所有数据的唯一出口是 `crates/core/src/paths.rs`。
+> 所有数据的唯一出口是 `core/paths`。
 
 ## manifest.json
 
@@ -108,7 +108,7 @@ crates/core/src/plugins/
 - 静态：在 manifest 的 `contributes` 里声明；
 - 动态：运行时 `ctx.extensions.register(kind, descriptor)`。
 
-宿主侧由 `ContributionRegistry`（`crates/core/src/plugins/contributions.rs`）收集，前端读它渲染。
+宿主侧由 `ContributionRegistry`（`core/plugin/contributions.rs`）收集，前端读它渲染。
 
 > ⚠️ **v1 的 8 个老扩展点名（`sidebarItems` / `mediaSources` / `eventListeners` /
 > `settingsPages` / `homeStats` / `playerOverlays` / `contextMenus` / `actions`平级版）
@@ -128,7 +128,7 @@ crates/core/src/plugins/
   **内存上限 64MB**；插件 JS 崩溃/栈溢出只毁自己，宿主始终响应。
 - **网络**：仅 HTTPS，且受 `httpAllowedHosts` 白名单约束 —— **fail-closed**：不写 =
   拒绝所有出网（不是放行）。支持 `*.example.com` 子域通配（不覆盖主域本身，裸 `*`
-  不算通配）。重定向后的最终 host 也要在白名单内。实现见 `crates/core/src/plugins/state.rs`。
+  不算通配）。重定向后的最终 host 也要在白名单内。实现见 `core/plugin/state.rs`。
 - **无文件系统**：不暴露 fs / 模块加载（`import` 被拒绝）。
 - **空转看门狗**：用 QuickJS 的 **interrupt handler**（真 CPU 中断，不是墙钟兜底）。
   它**只在 JS 真跑字节码时触发**，等宿主 UI/网络的 `await` 期间不触发 ——
@@ -147,11 +147,11 @@ crates/core/src/plugins/
 
 ## 依赖说明
 
-- **`rquickjs`（`crates/core/Cargo.toml`）** —— QuickJS 的纯 Rust 绑定，可交叉编译到安卓。
+- **`goja`（`github.com/dop251/goja`）** —— 纯 Go 的 ES5.1+ 解释器，无 cgo，跨平台无障碍。
   启用 `macro`（`async_with!`）+ `futures`（AsyncRuntime）。
   **不启 `parallel`**：QuickJS runtime 本就单线程，我们让每个插件钉在自己的 worker 线程上
   （`worker.rs`），从不跨线程共享 runtime。
-  安卓无预生成的 FFI bindings，构建期用 `bindgen` 现生成（cargo-ndk 会喂 sysroot）；桌面走预生成。
+  纯 Go 实现，不需要为各平台准备 FFI bindings。
 - **`zip`** —— 插件包解压（只启 `deflate`）。
 
 > 历史：Flutter 时代用的是 vendored `flutter_qjs`（pub 上的 0.3.7 在 Dart 3.x 下编不过，

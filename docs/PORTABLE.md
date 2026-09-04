@@ -1,25 +1,25 @@
 # 桌面便携包:干净、隔离、可覆盖更新
 
-LinPlayer 的 Windows / Linux 压缩包是**便携包**(绿色包):所有应用数据都写在**程序目录**内,
+LinPlayer 的 Windows 压缩包是**便携包**(绿色包):所有应用数据都写在**程序目录**内,
 不往系统目录乱丢文件。每份解压目录是一套独立环境 —— 互不影响,适合「同机并存多版本」
 或「本地构建 vs. GitHub 构建对照测试」。
 
 > 便携**不是可选项,是默认且唯一的正常路径**。落盘路径只有一个出口:
-> `crates/core/src/paths.rs`。别在别处自己拼 `dirs::xxx().join("LinPlayer")`。
+> 核心层的 `core/paths` 包。别在别处自己拼用户目录。
 
 ## 解压后的目录结构
 
 ```
 LinPlayer/
-├─ LinPlayer.exe            ← 程序本体(Linux 上是无扩展名的 LinPlayer)
-├─ libmpv-2.dll             ← 仅 Windows:内置完整版 libmpv(含 PGS/SUP 图形字幕解码器)
+├─ LinPlayer.exe            ← 程序本体(C# / Avalonia,self-contained,用户机器不装 .NET)
+├─ lpcore.dll               ← Go 核心层(业务全在这)
+├─ libmpv-2.dll             ← 完整版 libmpv(含 PGS/SUP 图形字幕解码器)
 └─ userdata/                ← 你的全部身家 ★更新时保留★,删掉它=卸载干净
    ├─ config.json           ← 设置 / 服务器列表 / 凭据
    ├─ translation.json
    ├─ data/                 ← 用户数据:删了真会丢东西(观看记录、插件、whisper 模型)
    ├─ cache/                ← 纯缓存:随便删,能重建(封面、shader-cache、翻译)
    ├─ temp/                 ← 进程 TEMP/TMP 重定向到这里(连第三方库的临时文件也跑不掉)
-   ├─ webview2/             ← WebView 的 profile,**含前端 localStorage,不能当缓存删**
    ├─ logs/
    └─ downloads/            ← 应用内下载
 ```
@@ -31,12 +31,9 @@ LinPlayer/
 
 1. **干净**:不写 `%APPDATA%` / `%LOCALAPPDATA%`(Windows)、不写 `~/.config` 与
    `~/.local/share`(Linux)、不进系统钥匙串。删掉解压文件夹 = 彻底清除。
-   > 尤其按住了**浏览器内核自己**建的 profile:建窗时显式传 `data_directory`,
-   > **两端都有效** —— Windows 给 WebView2(不给就自己在 `%LOCALAPPDATA%` 建,实测 126MB),
-   > Linux 由 wry 转成 WebKitGTK `WebsiteDataManager` 的 `base_data`/`base_cache_directory`。
-   >
-   > 唯一有意落在包外的是 Linux 的 `~/.local/share/applications/linplayer.desktop` ——
-   > 深链协议注册,桌面环境必须扫得到(和 Windows 那个 HKCU 注册表键同理)。
+   > ★ 旧的 Tauri 栈还得额外按住**浏览器内核自己**建的 profile(WebView2 不给
+   > `data_directory` 就在 `%LOCALAPPDATA%` 建一个,实测 126MB)。
+   > C# / Avalonia 栈没有内嵌浏览器,这条负担随 2026-09-04 删 Rust 栈一起消失了。
 2. **隔离**:每份解压目录只读写**自己的 `userdata/`**。解压两份分别跑 GitHub 包和
    本地包,配置互不串改 —— 可以放心对照测试整个安装流程。
 3. **可覆盖更新**:更新包(zip)只含程序文件,**不含 `userdata/`**。
@@ -49,52 +46,11 @@ LinPlayer/
 
 ### Linux(x86_64)
 
-Linux 上的「便携」只覆盖**数据**,不覆盖**运行库**。二进制对系统库是硬依赖
-(`readelf -d` 实测 15 条 `DT_NEEDED`),这一点必须说在前面 —— 缺了哪个,报的是
-`libxxx.so.N: cannot open shared object file`,跟播放器设置一点关系没有。
+**暂无 Linux 版。** 2026-09-04 删除 Rust/Tauri 栈时,Linux 端的唯一实现一并删除,
+而 Go 版的 Linux UI 还没写(进度见 `go-migration/TODO.md`)。
 
-- **必需的桌面运行库**(Tauri 在 Linux 上就是 GTK3 + WebKitGTK,不是自带内核):
-
-  | 发行版 | 安装 |
-  |:--|:--|
-  | Debian / Ubuntu | `sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0` |
-  | Fedora | `sudo dnf install webkit2gtk4.1 gtk3 libsoup3` |
-  | Arch | `sudo pacman -S webkit2gtk-4.1 gtk3 libsoup3` |
-
-  > ⚠️ 必须是 **webkit2gtk 4.1**(配 libsoup3),不是 4.0。这条决定了**系统下限**:
-  > Ubuntu ≥ 22.04 / Debian ≥ 12 / Fedora ≥ 36。更老的发行版只有 4.0,本包起不来。
-  > 桌面环境装齐的机器上这些一般都在,但**最小化安装 / 服务器 / 精简 WM 的机器上不一定**。
-
-- **需要系统 libmpv**(包里不自带):
-  | 发行版 | 安装 |
-  |:--|:--|
-  | Debian / Ubuntu | `sudo apt install libmpv2`（旧版本叫 `libmpv1`） |
-  | Fedora | `sudo dnf install mpv-libs` |
-  | Arch | `sudo pacman -S mpv` |
-
-  > 为什么不打包进去:构建机那份 libmpv 会连带一串特定版本的 ffmpeg/libass 依赖,
-  > 而二进制里写了 `$ORIGIN` rpath —— **自带的那份会永远优先于系统的**。
-  > 在别的发行版上,那就从「用系统上好好的库」变成「用一个依赖对不上的库」,反而更坏。
-  >
-  > 想自带某个版本:把 `libmpv.so.2` 放进解压目录即可,rpath 已经给你留好了这条路。
-
-  libmpv 是**运行时 dlopen** 的,编译期不绑任何 soname,按 `libmpv.so.2` → `libmpv.so.1`
-  → `libmpv.so` 的顺序尝试。所以**新旧发行版同一个包通吃**:Ubuntu 22.04 的
-  `libmpv.so.1`(mpv 0.34)和 24.04/Fedora/Arch 的 `libmpv.so.2`(mpv 0.36+)都认。
-
-  > 这不是锦上添花,是必需的:发行版之间 libmpv 的 soname 是分裂的,链接期绑死哪一个
-  > 都会让另一半系统直接起不来 —— 绑 `.so.1` 则新系统「找不到库」,绑 `.so.2` 就得换更新的
-  > 构建机,glibc 随之抬到 2.39,又反过来砍掉老系统。两条路都是死的。
-  >
-  > 一个字都找不到 libmpv 时,App 会明确告诉你装哪个包,而不是丢一句「mpv_create 失败」。
-
-- **需要 X11**。Wayland 会话下会自动经 XWayland 运行(启动时设 `GDK_BACKEND=x11`)。
-  这不是偷懒:视频是一个由程序**自己定位**的独立顶层窗口(垫在透明 UI 窗口正下方),
-  而 Wayland 协议根本不提供「应用定位自己的顶层窗口」这种能力,mpv 的 `wid` 在
-  Wayland 上也不受支持。
-- 需要**合成器**(现代桌面环境默认都开)。没有合成的裸 WM 下,UI 窗口的透明区域不会
-  真的透出下面的视频。
-- 解压后记得 `chmod +x LinPlayer`(zip 格式不保存 Unix 权限位)。
+历史版本仍可在 Releases 里下载 —— 那是 Tauri 版,依赖 webkit2gtk 4.1 + GTK3 + libsoup3,
+系统下限 Ubuntu ≥ 22.04 / Debian ≥ 12。具体依赖清单见 `git show rust-final:docs/PORTABLE.md`。
 
 ## 边界情况
 
