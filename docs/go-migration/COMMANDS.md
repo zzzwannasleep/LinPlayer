@@ -7,7 +7,7 @@
 > ★ 那么「表和事实分家」谁来守?`scripts/check-bindings.sh` **第 4 关**:
 >   它拿本文件和 Go 注册表做**双向**比对 —— 本文件有而 Go 没注册、
 >   Go 注册了而本文件没有,两个方向都红。加命令必须同时改这里。
-> 重新生成:`python scripts/gen-commands.py` · 校验:`python scripts/gen-commands.py --check`
+> 三端绑定:`python scripts/gen-bindings.py` · 校验(含与 Go 注册表双向比对):`bash scripts/check-bindings.sh`
 > 架构见 `SPEC.md` §5.6。
 
 ## 这份文档怎么用

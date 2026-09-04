@@ -80,6 +80,6 @@ TV 焦点矩形膨胀、Tauri capabilities 漏配全黑不报错、前端各持�
   写在哪边的判据是「换个 UI 框架它还成不成立」:成立的进 `SPEC.md`,不成立的进 `UI_PC.md`。
 - `COMMANDS.md` 的表格段**自动生成**,别手改:
   ```
-  python scripts/gen-commands.py           # 重新生成
-  python scripts/gen-commands.py --check   # CI 校验
+  python scripts/gen-bindings.py           # 从 COMMANDS.md 生成三端绑定
+  bash   scripts/check-bindings.sh         # 门禁:产物最新 / C# / Kotlin / 四方比对
   ```
