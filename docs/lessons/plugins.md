@@ -24,7 +24,7 @@
 > 原记忆:`plugin-v2-market-ui.md` · 类型:`project`
 
 **插件市场 + 声明式 UI 已接入 PC 端(2026-07-23)**。侧栏「插件」独立入口(不在设置里),
-三页签:发现 / 已安装 / 插件源。规格与偏离见 `docs/PLUGINS_V2_PLAN.md` 的 P1 段。
+三页签:发现 / 已安装 / 插件源。规格与偏离见 `git show rust-final:docs/PLUGINS_V2_PLAN.md` 的 P1 段。
 
 **外观口径**(调研 VSCode/JetBrains/Obsidian/Raycast/Figma/Jellyfin/Kodi/HACS 后定):
 - 卡片网格发现 + 密列表已装(HACS:已装置顶)

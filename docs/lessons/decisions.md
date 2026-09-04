@@ -64,11 +64,11 @@ Go 版回放 diff。单测只证明 Go 版自洽,证明不了它和 Rust 版一�
 
 用户 2026-07-14 起讨论把 LinPlayer 从 Flutter 重构。评估→拍板全程:
 
-**1. 先否决 RN**:8 子agent逐域清点(功能全清单落 `docs/MIGRATION_RN_PLAN.md` §1,防遗忘底账)+ RN生态调研,结论 RN 不行——Linux无官方支持、mpv/PGS/超分主流RN库全缺、CF反代socket做不了、桌面原生UI无等价物、插件单VM卡死。
+**1. 先否决 RN**:8 子agent逐域清点(功能全清单落 `git show rust-final:docs/MIGRATION_RN_PLAN.md` §1,防遗忘底账)+ RN生态调研,结论 RN 不行——Linux无官方支持、mpv/PGS/超分主流RN库全缺、CF反代socket做不了、桌面原生UI无等价物、插件单VM卡死。
 
 **2. 用户核心诉求逐步澄清**:① 已受够 Flutter 的 Win 端(media_kit陈旧+切UI闪屏「mediakit-texture-flash-swtexture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废),根因=视频过Skia/ANGLE合成器当纹理,结构性无解);② 只做 **Android(手机+TV)+Win+Linux**,无苹果设备;③ 前端要**华丽/动效/流畅**(前端不是薄层,是产品的脸);④ 体积尽量小;⑤ 信 TS 生态,起初怕 Rust(嫌先进/以为Win10不支持/嫌生态弱——均已纠正:Rust在Win10好好的,后端/网络/mpv生态很硬)。
 
-**3. 已锁定技术栈**(方案落 `docs/RUST_MIGRATION_PLAN.md`):
+**3. 已锁定技术栈**(方案落 `git show rust-final:docs/RUST_MIGRATION_PLAN.md`):
 - 前端 UI = **React + TypeScript**(web,跑webview;React⟺TS不可分,想华丽就得用它)
 - 桌面壳 = **Tauri v2**(小体积,系统WebView2,Win10✅)
 - 后端/核心 = **Rust**(单核,原生无运行时最省体积,交叉编译桌面+安卓两吃;socket钉IP+SNI/mpv是主场)
@@ -103,7 +103,7 @@ Go 版回放 diff。单测只证明 Go 版自洽,证明不了它和 Rust 版一�
 
 ##### ⚠️ 2026-07-15 大翻车:「Phase X ✅」全是虚的,别信
 
-**根因:`docs/RUST_MIGRATION_PLAN.md` 的颗粒度停在「模块」,没有「能力清单」** → 照它勾 ✅,实际大面积漏搬。用户原话:「为什么会有接口缺少 移植文档里面没写吗」。
+**根因:`git show rust-final:docs/RUST_MIGRATION_PLAN.md` 的颗粒度停在「模块」,没有「能力清单」** → 照它勾 ✅,实际大面积漏搬。用户原话:「为什么会有接口缺少 移植文档里面没写吗」。
 
 **实锤**(拿旧 Dart 逐方法对出来的):
 - **Phase 2「播放完整度」✅ → 实为 ◑**:旧契约 `lib/core/services/video_player_service.dart` 有 30+ 能力,新栈只搬了 10 个(load/pause/seek/track)。**倍速/音量/截图/画面比例/音频延迟/字幕延迟/字幕样式/次字幕/外挂字幕/超分/mpv属性直通 全漏** → UI 上一排「点了没反应」的死按钮。**而它自己列的「片头跳」当时也没做。**(现已补齐 18 个命令 + `src-tauri/src/shaders.rs` Anime4K)

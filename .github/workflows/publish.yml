@@ -116,13 +116,9 @@ jobs:
 
             ### 说明
             - Windows 端内置完整版 libmpv（支持 PGS/SUP 图形字幕）。
-            - Linux 端的便携只覆盖**数据**，不覆盖**运行库**。需要系统已装：
-              - `libwebkit2gtk-4.1-0` + `libgtk-3-0` + `libsoup-3.0-0`（Tauri 在 Linux 上就是 GTK3 + WebKitGTK）。
-                必须是 **4.1** 不是 4.0 —— 这决定系统下限：**Ubuntu ≥ 22.04 / Debian ≥ 12 / Fedora ≥ 36**。
-              - `libmpv2`（Debian/Ubuntu，旧版叫 `libmpv1`）/ `mpv-libs`（Fedora）/ `mpv`（Arch）。
-                两个 soname 都认（运行时 dlopen）；想自带可把 `libmpv.so.2` 放进解压目录（已配 `$ORIGIN` rpath，同级优先）。
-            - Linux 端需要 X11；Wayland 会话下自动经 XWayland 运行（视频窗口须由程序自行定位，Wayland 不提供该能力）。
-            - 两端绿色包的全部数据（账号/缓存/下载）都写在主程序同级的 `userdata/`，
+            - **Linux / 安卓 / Android TV 暂无可用版本**：2026-09-04 删除 Rust/Tauri 栈时，
+              这几端的唯一实现一并删除，Go 版的 UI 还没写。历史版本仍可在更早的 Release 里下载。
+            - 绿色包的全部数据（账号/缓存/下载）都写在主程序同级的 `userdata/`，
               整个文件夹拷走即完成迁移；删掉文件夹即卸载干净。
 
       - name: Delete Pre-release

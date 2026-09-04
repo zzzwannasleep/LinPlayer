@@ -1,11 +1,11 @@
 # LinPlayer 插件系统
 
-一个基于 **QuickJS**（Rust 绑定 [`rquickjs`](https://github.com/DelSkayn/rquickjs)）的插件系统：
-每个插件跑在自己的专用 worker 线程上，通过受权限控制的 `ctx` API 与宿主交互，
+一个基于 **[goja](https://github.com/dop251/goja)**（纯 Go 的 ECMAScript 引擎）的插件系统：
+每个插件跑在自己的专用 goroutine 上，通过受权限控制的 `ctx` API 与宿主交互，
 并可向预定义的扩展点挂载自定义功能。
 
 > 本文讲的是**插件运行时与契约**。市场（安装源/列表页/权限弹窗/声明式 UI 槽位）
-> 的设计与落地进度见 [PLUGINS_V2_PLAN.md](./PLUGINS_V2_PLAN.md)。
+> 当时的设计文档随 Rust 栈一起删除,要看走 `git show rust-final:docs/PLUGINS_V2_PLAN.md`。
 > 目前插件**只在 PC 端可用**。
 
 ## 目录结构
@@ -14,28 +14,28 @@
 
 ```
 core/plugin/
-├── mod.rs             # 对外入口
-├── manifest.rs        # manifest.json 解析与校验
-├── permission.rs      # 权限定义 / 授予 / 校验
-├── engine.rs          # rquickjs 引擎
-├── worker.rs          # 每插件一条专用线程(QuickJS runtime 单线程,不跨线程)
-├── ctx.rs             # 宿主侧 ctx.* 分发器(权限检查在这)
-├── host.rs            # PluginHost trait —— 平台能力(UI/播放器/网络)由各壳实现
-├── state.rs           # 运行时状态 + 出网白名单
-├── storage.rs         # 每插件独立存储(有配额)
-├── manager.rs         # 扫描/安装/启用/禁用/卸载/触发
-├── installer.rs       # 插件包解压与校验
-├── contributions.rs   # 扩展点收集
-├── registry_index.rs  # 插件市场索引
-├── convert.rs / assets.rs / hello_it.rs
+├── manifest.go        # manifest.json 解析与校验
+├── permission.go      # 权限定义 / 授予 / 校验
+├── engine.go          # goja 引擎 + 每插件一条专用 goroutine + 空转看门狗
+├── ctx.go             # Host 接口 + 宿主侧 ctx.* 分发器(权限检查在这)
+├── ctxhttp.go         # ctx.http.* 的落地
+├── netpolicy.go       # 出网准入判定(白名单 / $sourceServer 令牌展开)
+├── state.go           # 运行时状态
+├── storage.go         # 每插件独立存储(有配额)
+├── manager.go         # 扫描/安装/启用/禁用/卸载/触发
+├── installer.go       # 插件包解压与校验
+├── contributions.go   # 扩展点收集
+├── registryindex.go   # 插件市场索引
+├── market.go          # 插件源
+├── convert.go / assets.go
 ```
 
-宿主侧接线：`core/plugincmd/`（命令注册）与 `apps/windows/`（UI 接线），
-前端在 `ui/desktop/pages/`。
+宿主侧接线：`core/plugincmd/`（`commands.go` 命令注册 + `host.go` 宿主能力），
+UI 在 `apps/windows/`。
 
 ### 插件放在哪
 
-`PluginManager::new(base_dir, host)` 在 `base_dir` 下建两个目录：
+`plugin.NewManager(host)` 在 base 目录下建两个目录（要自定路径走 `NewManagerAt`）：
 
 - `plugins/<id>/` —— 安装后的插件文件（重装整体覆盖该子目录）
 - `plugin_data/<id>/` —— 插件存储，**与插件目录分离**，所以升级/重装不丢数据
@@ -108,11 +108,11 @@ core/plugin/
 - 静态：在 manifest 的 `contributes` 里声明；
 - 动态：运行时 `ctx.extensions.register(kind, descriptor)`。
 
-宿主侧由 `ContributionRegistry`（`core/plugin/contributions.rs`）收集，前端读它渲染。
+宿主侧由 `plugin.Registry`（`core/plugin/contributions.go`）收集，前端读它渲染。
 
 > ⚠️ **v1 的 8 个老扩展点名（`sidebarItems` / `mediaSources` / `eventListeners` /
 > `settingsPages` / `homeStats` / `playerOverlays` / `contextMenus` / `actions`平级版）
-> 一律不再识别**，`contributions.rs` 里有条测试专门钉这件事 —— 认了会让 v1 插件
+> 一律不再识别**，`core/plugin/manifest_test.go:25` 有条测试逐个钉这 7 个名字 —— 认了会让 v1 插件
 > 半死不活地跑起来。`eventListeners` 被直接删掉：它本来就该是运行时的
 > `ctx.player.on()`，声明成扩展点是概念错位。
 
@@ -124,15 +124,17 @@ core/plugin/
 ## 安全模型
 
 - **权限声明制**：启用前弹窗征得用户同意，同意结果落 `plugins_state.json`。
-- **隔离**：每个插件一个 QuickJS 引擎（`AsyncRuntime` + `AsyncContext`），钉在自己的 worker 线程上，
-  **内存上限 64MB**；插件 JS 崩溃/栈溢出只毁自己，宿主始终响应。
+- **隔离**：每个插件一个 goja 引擎，钉在自己的一条 goroutine 上（goja 的 Runtime 不是并发安全的，
+  所有对 VM 的触碰都投进 jobs 通道串行执行）；插件 JS 崩溃/栈溢出只毁自己，宿主始终响应。
+  ⚠️ **没有内存上限** —— rquickjs 版靠 `set_memory_limit(64MB)`，goja 没有对应能力，
+  所以 `MaxEnabled = 16` 那道闸在 Go 版只剩「限数」，不再等于「限内存」（`core/plugin/manager.go:16`）。
 - **网络**：仅 HTTPS，且受 `httpAllowedHosts` 白名单约束 —— **fail-closed**：不写 =
   拒绝所有出网（不是放行）。支持 `*.example.com` 子域通配（不覆盖主域本身，裸 `*`
-  不算通配）。重定向后的最终 host 也要在白名单内。实现见 `core/plugin/state.rs`。
+  不算通配）。重定向后的最终 host 也要在白名单内。实现见 `core/plugin/netpolicy.go`。
 - **无文件系统**：不暴露 fs / 模块加载（`import` 被拒绝）。
-- **空转看门狗**：用 QuickJS 的 **interrupt handler**（真 CPU 中断，不是墙钟兜底）。
-  它**只在 JS 真跑字节码时触发**，等宿主 UI/网络的 `await` 期间不触发 ——
-  所以「弹个表单等用户填」这种交互式流程不会被误杀，而纯 JS 死循环在 30s 无宿主交互后被中断。
+- **空转看门狗**：`vm.Interrupt`，墙钟 30 秒（`WatchdogMS`）。判据是**无任何宿主交互**的时长 ——
+  每次触碰宿主都把 deadline 往后推，所以「弹个表单等用户填」不会被误杀，
+  而纯 JS 死循环在 30s 后被中断。
 
 ## 打包与安装（.lpk）
 
@@ -147,12 +149,12 @@ core/plugin/
 
 ## 依赖说明
 
-- **`goja`（`github.com/dop251/goja`）** —— 纯 Go 的 ES5.1+ 解释器，无 cgo，跨平台无障碍。
-  启用 `macro`（`async_with!`）+ `futures`（AsyncRuntime）。
-  **不启 `parallel`**：QuickJS runtime 本就单线程，我们让每个插件钉在自己的 worker 线程上
-  （`worker.rs`），从不跨线程共享 runtime。
-  纯 Go 实现，不需要为各平台准备 FFI bindings。
-- **`zip`** —— 插件包解压（只启 `deflate`）。
+- **`goja`（`github.com/dop251/goja`）** —— 纯 Go 的 ECMAScript 解释器，无 cgo，
+  三端交叉编译不用为各平台准备 FFI binding。这是核心层**唯一**的第三方依赖
+  （见 `core/go.mod` 顶部注释）。
+- **`archive/zip`（标准库）** —— 插件包解压。
+  ⚠️ Go 的 `archive/zip` **不做**路径逃逸检查（Rust 的 zip crate 有 `enclosed_name`），
+  所以那道校验是我们自己在 `installer.go` 里补的。
 
 > 历史：Flutter 时代用的是 vendored `flutter_qjs`（pub 上的 0.3.7 在 Dart 3.x 下编不过，
 > 打了补丁放在 `third_party/`）。那套连同整个 Dart 栈已于 2026-07 删除，这里只留一句免得考古。

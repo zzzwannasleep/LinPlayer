@@ -83,7 +83,7 @@ Windows job 先跑完且绿,红的是后面的 Linux job,**只看一个平台绿
 
 ##### 已作废的记忆
 
-Flutter 时代的这些条目现在只有历史价值,**别照着它们找文件**:「desktop-native-ui-architecture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、[Android libmpv LFS in CI](android.md)、[Android R8 JNI keep](android.md)、[Android mpv subtitle fonts](player-mpv.md)、「android-storage-and-mpv-logs」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「windows-libmpv-clean-build-gotcha」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「windows-gradle-cross-drive-fix」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「mediakit-texture-flash-swtexture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「tv-mobile-look-refactor」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「tdesign-integration」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「motion-system」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)。安卓/TV 端 UI 要重建时,功能清单仍看 `docs/MIGRATION_RN_PLAN.md`,但实现路径一律作废。
+Flutter 时代的这些条目现在只有历史价值,**别照着它们找文件**:「desktop-native-ui-architecture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、[Android libmpv LFS in CI](android.md)、[Android R8 JNI keep](android.md)、[Android mpv subtitle fonts](player-mpv.md)、「android-storage-and-mpv-logs」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「windows-libmpv-clean-build-gotcha」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「windows-gradle-cross-drive-fix」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「mediakit-texture-flash-swtexture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「tv-mobile-look-refactor」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「tdesign-integration」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、「motion-system」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)。安卓/TV 端 UI 要重建时,功能清单仍看 `git show rust-final:docs/MIGRATION_RN_PLAN.md`,但实现路径一律作废。
 
 ##### 踩过的坑(重构当天)
 
@@ -394,7 +394,7 @@ CI(`cat VERSION`)、C#(`dotnet publish -p:Version=`)、Go(`-ldflags -X …system
 
 **How to apply:** 以后凡是决定资产托管在哪（图标、安装包、更新源、字体、CDN），先问，别默认"CF 更快"。
 静态资源能内联就内联，内联是唯一不受任何网络环境影响的方案。
-插件系统的完整规划见 `docs/PLUGINS_V2_PLAN.md` 的 D9 和 6.4 节；相关见 「cf-proxy-architecture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、Stremio 插件协议源(本地 sources.md,未入公开库)。
+插件系统的完整规划见 `git show rust-final:docs/PLUGINS_V2_PLAN.md` 的 D9 和 6.4 节；相关见 「cf-proxy-architecture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、Stremio 插件协议源(本地 sources.md,未入公开库)。
 
 ---
 

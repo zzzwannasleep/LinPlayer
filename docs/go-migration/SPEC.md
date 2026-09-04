@@ -957,7 +957,8 @@ v0.1 写的是"现有实现有两条渲染路径,主路是 ASS 交 `secondary-si
 
 - ASS 那条路**已于 2026-07-27 整条删除**(commit `108965f6`,`danmaku/ass.rs` 360 行连同 mod 入口一起拔掉)
 - 删除理由是用户拍板:**次字幕位只有一个,弹幕占了就开不了双语字幕**。用户原话「删掉就行了 那个没必要留」
-- **现在唯一的渲染路径是前端 Canvas**(`ui/shared/Danmaku.tsx`)
+- **唯一的渲染路径是前端 Canvas**(当时在 `ui/shared/Danmaku.tsx`,Go 版的取数/过滤在 `core/danmaku`,
+  绘制仍归各端 UI)
 - `crates/core/src/danmaku/local.rs` 里剩下的 `parse_ass` / `parse_ass_time` 是**解析器**
   —— 读 `.ass` 文件当弹幕导入源,不是渲染用的生成器
 - `crates/mpv/src/lib.rs` 里的 `secondary-sid` 现在服务于**外挂字幕 / 双语字幕**,

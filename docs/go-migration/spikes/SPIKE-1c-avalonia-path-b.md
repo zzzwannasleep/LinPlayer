@@ -24,14 +24,13 @@ mpv 侧「渲进纹理 FBO」在 SPIKE-1a / 1b 已实测通过(含 PGS 图形字
 > 它改成**只用 SPEC §5.1 的 13 个契约导出**驱动 Go 核心。
 > 本报告的数据是改造前测的,**结论不受影响**(Go 核心上四条判据同样全过,
 > 性能同量级,见 `SPIKE-2-go-ffi.md` §4.4)。
-> `lpcore-stub/`(Rust)保留作为当时的实验记录,已不再被探针使用。
+> 那个 Rust 桩(`lpcore-stub/`)2026-09-04 随 Rust 栈一起删除 —— 它早已不被探针使用,
+> 要看当时的源码:`git show rust-final:docs/go-migration/spikes/s1-2/lpcore-stub/src/lib.rs`。
 
 ### 3.1 工程
 
 ```
 docs/go-migration/spikes/s1-2/
-  lpcore-stub/        Rust cdylib -> lpcore.dll。只实现 SPEC §5.1 第 3 组的 5 个 lp_gl_*
-                      + 4 个 SPIKE 专用取数口子(lp_spike_*,不在契约里)
   AvaloniaProbe/      Avalonia 工程。UI 全在 Program.cs 里用代码搭,不用 XAML
   mkclip.py           用 libmpv 自己的 encode 模式造 H.264 语料
   swap-ab.py          从 spike-1b-glbackend.py 派生,唯一改动是 report_swap 变环境变量门控
@@ -65,11 +64,11 @@ mpv 回调进来是野指针。
 ```bash
 cd docs/go-migration/spikes/s1-2
 python mkclip.py clip1080p60.mp4 1920 1080 60 15      # 语料不入库,现造
-(cd lpcore-stub && cargo build --release)
+bash ../../../../scripts/build-core.sh                # 出 build/core/lpcore.dll
 (cd AvaloniaProbe && dotnet build -c Release -p:NoWarn=CA1416)
 
 P=./AvaloniaProbe/bin/Release/net10.0/AvaloniaProbe.exe
-C=lpcore-stub/target/release/lpcore.dll
+C=../../../../build/core/lpcore.dll
 $P --clip clip1080p60.mp4 --core $C --out out --tag final --gl angle --no-decorations \
    --seconds 12 --shots 6
 ```

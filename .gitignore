@@ -12,7 +12,6 @@ dist-ssr/
 # 绿色包产物(scripts/pack-portable.ps1 的输出):exe + 114MB libmpv + zip,共 240MB+。
 # `dist` 只匹配同名条目,匹配不到这个目录 —— 自家脚本产出的东西必须自家忽略掉。
 dist-portable/
-target/
 *.local
 packaging/
 
@@ -117,31 +116,13 @@ skills-lock.json
 *.orig
 *.rej
 
-# --- Android 构建产物(用户红线:不必要的不进仓库)-------------------------------
-# gen/android 是 `tauri android init` 生成的 Gradle 工程。
-# ★ 工程骨架**要入库**(CI 里有 TV manifest 的 LEANBACK 断言,而且改了 manifest
-#   不入库的话每次 init 都会被覆盖回去);但它下面的构建产物一个都不要。
-apps/android/gen/android/app/build/
-apps/android/gen/android/build/
-apps/android/gen/android/.gradle/
-apps/android/gen/android/local.properties
-apps/android/gen/android/keystore.properties
-apps/android/gen/android/app/src/main/jniLibs/
+# --- 安卓产物与签名材料 -------------------------------------------------------
+# 安卓端 2026-09-04 随 Rust 栈一起删除,重建时这几条仍然要挡住 ——
+# keystore / jks 是签名私钥,按全局红线**永远**不进版本库。
 **/*.apk
 **/*.aab
 **/*.keystore
 **/*.jks
-
-# apps/android 在**宿主**平台上编译时(`cargo test -p linplayer-android` 的命令对账
-# 单测就是这么跑的,CI 亦然)tauri-build 会顺手吐出宿主平台的 schema。安卓包一个字节
-# 都用不到,纯噪音 —— 只留 android/mobile 两个。
-apps/android/gen/schemas/desktop-schema.json
-apps/android/gen/schemas/windows-schema.json
-apps/android/gen/schemas/linux-schema.json
-apps/android/gen/schemas/macos-schema.json
-
-# 手机端自检脚本的截图产出(node ui/mobile/check-shell.mjs)
-ui/mobile/check-shots/
 
 # 资源站接口地址清单(vod.json 之类)。里面是一串站点域名 —— 按全局红线,
 # 这类东西不进版本库,插件也不内置它:VOD 资源站插件只留一个地址输入框,用户自己填。

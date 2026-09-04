@@ -142,7 +142,7 @@ internal static partial class Core
 internal sealed class Opts
 {
     public string Clip;
-    public string CoreDll = "../lpcore-stub/target/release/lpcore.dll";
+    public string CoreDll = "../../../../../build/core/lpcore.dll";
     public string Hwdec = "auto";
     public string OutDir = "out";
     public string GlBackend = "default";   // default | wgl | angle

@@ -98,7 +98,7 @@
   (`ui/desktop/components/PluginHost.tsx:12-14`)。所以前端关弹窗必须显式回 `null`
   (`PluginHost.tsx:124-128`)。**Go 侧必须保留这条约束或补超时,但补超时是行为变更,要单独立 issue。**
 - `openPage` 在 v2 **未实现**,前端如实提示一句而不是静默吞掉(`PluginHost.tsx:112-116`;
-  已知限制清单 `docs/PLUGINS_V2_PLAN.md:615`)。
+  已知限制清单 `git show rust-final:docs/PLUGINS_V2_PLAN.md` 第 615 行)。
 
 ### 1.6 Emby `ctx.emby`
 
@@ -341,7 +341,7 @@ ACTION_CONTEXTS = global | item | player   (缺省 global)
 | `dataSources` | `id`, `name`, `icon`, `auth` | 有 `auth` 时 `auth.fields` 必须是数组,每项必须有非空 `id` | `manifest.rs:297-310` |
 
 `auth.fields` 每项形如 `{id, label, type, placeholder, required}`,由前端**通用表单**渲染,
-产物存进既有的 `SourceServer`(`ui/shared/api.ts:1631-1637`;规划口径 `docs/PLUGINS_V2_PLAN.md:154-156`)。
+产物存进既有的 `SourceServer`(`git show rust-final:ui/shared/api.ts` 第 1631-1637 行;规划口径同 tag 下 `docs/PLUGINS_V2_PLAN.md` 第 154-156 行)。
 `base_url` / `username` / `password` 是核层认得的三个专用槽,其余字段一股脑塞 `extra`
 (`ui/desktop/pages/sources/sourceForms.tsx:268-287`)。
 

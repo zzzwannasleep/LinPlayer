@@ -1,7 +1,7 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <!--
-    设计 token —— **值逐个照抄 ui/shared/tokens.css**(UI_PC §1.1)。
+    设计 token —— **值逐个照抄 `git show rust-final:ui/shared/tokens.css`**(UI_PC §1.1)。
     那份是被用户调过多轮的成品,别在这里「顺手调好看一点」。
 
     设计语言:影院沉浸式 —— 分层表面 + 极细发丝线 + 三级墨色 + 单一强调蓝。

@@ -245,5 +245,5 @@ LinPlayer 还能导入两种旧格式(当前**不再产出**它们):
 - 默认免密格式:`core/config/account.go`(Account/ServerLine 结构体)+ `core/config/transfer.go`(编解码与 merge)。
 - AES-256-CBC 加解密:`core/config/transfer.go`。
 - 导出/导入命令:`core/config` 注册的 `config.exportQr` / `config.importQr`(见 COMMANDS.md)。
-- 导出/导入 UI:`ui/desktop/pages/SettingsPage.tsx`。
+- 导出/导入 UI:`apps/windows/LinPlayer.Desktop/Views/SettingsSections.cs`。
 - 命令契约:`docs/go-migration/COMMANDS.md`(三端绑定从它生成)。

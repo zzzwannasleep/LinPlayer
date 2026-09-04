@@ -7,9 +7,9 @@
   <a href="https://github.com/zzzwannasleep/LinPlayer/releases"><img src="https://img.shields.io/github/downloads/zzzwannasleep/LinPlayer/total?label=downloads&color=green&logo=github" alt="Downloads"></a>
   <a href="https://linplayer.sentry.io"><img src="https://img.shields.io/endpoint?url=https://linplayeroaproxy.pages.dev/sentry/users" alt="Active Users"></a>
   <a href="https://github.com/zzzwannasleep/LinPlayer/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zzzwannasleep/LinPlayer" alt="License"></a>
-  <img src="https://img.shields.io/badge/Rust-1.80+-000000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
-  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri">
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/C%23-.NET%2010-512BD4?logo=dotnet&logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Avalonia-11-8B44AC" alt="Avalonia">
   <a href="https://github.com/zzzwannasleep/LinPlayer/actions"><img src="https://img.shields.io/github/actions/workflow/status/zzzwannasleep/LinPlayer/build.yml?branch=main&label=build&logo=github" alt="Build"></a>
   <a href="https://t.me/MikudesuChannels"><img src="https://img.shields.io/badge/Telegram-MikudesuChannels-26A5E4?logo=telegram&logoColor=white" alt="Telegram"></a>
 </p>
@@ -20,19 +20,22 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
-**LinPlayer** is a third-party Emby client targeting **Windows / Linux / Android / Android TV**.
+**LinPlayer** is a third-party Emby client targeting **Windows / Linux / Android / Android TV**. Right now **only Windows is usable**.
 
 > ### 🚧 Under reconstruction (2026-07)
 >
-> The project has migrated from Flutter to a **Rust core + React/TypeScript UI + Tauri shell**.
+> The project is migrating from a **Rust core + React/Tauri** stack to a **Go core + native UI on every platform**.
+> The old Rust/Tauri stack was deleted from the repository on 2026-09-04.
 >
-> - **Desktop (Windows / Linux)** — working, shipping normally.
-> - **Android / Android TV** — UI being rebuilt; no new builds for now.
+> - **Windows** — working, shipping normally. Portable zip; all data lives in `userdata/` next to the executable.
+> - **Linux / Android / Android TV** — **no builds available**: the Go-side UI for these has not been written yet,
+>   and the old Rust implementation went away with this refactor. Older builds are still on the Releases page.
 > - **Apple platforms (iOS / macOS / tvOS)** — no longer supported, removed from the repo.
 >
-> The complete Flutter-era code is preserved at tag [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final).
+> The complete Flutter-era code is preserved at tag [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final);
+> the Rust/Tauri stack at tag [`rust-final`](https://github.com/zzzwannasleep/LinPlayer/tree/rust-final).
 
-Business logic (data sources, networking, playback control, sync, downloads) lives in a **single Rust crate shared by every platform**; each platform only writes its own UI. So a 🔨 below does not mean "not built yet" — it means **the core is ready and waiting for UI wiring**.
+Business logic (Emby protocol, networking, playback control, sync, downloads, plugins) lives in a **single Go core shared by every platform**, built as the `lpcore` shared library; each platform only writes its own UI in its own idiom. So a 🔨 below does not mean "not built yet" — it means **the core is ready and waiting for UI wiring**.
 
 ## Features
 
@@ -137,10 +140,13 @@ Repository layout, local development & builds, and the tech stack — see the **
 
 ### About Anonymous Telemetry & Privacy
 
-- To continuously improve stability, LinPlayer integrates [Sentry](https://sentry.io) for **crash/error reporting** and **anonymous active-usage statistics** (used only to understand crashes and rough usage scale).
-- We **never collect any information that can identify you personally**: no accounts, passwords, cookies, tokens, server addresses, library contents, watch history, or IP addresses. **No screen recording, no behavior tracking.**
-- Reported data contains only **anonymous crash stack traces, app version, and platform/OS type** and similar technical info, with devices distinguished by a random anonymous identifier (counting heads, not identities).
-- We **never sell, share, or use this data for advertising or any commercial purpose**. The configuration is publicly auditable: [`ui/desktop/telemetry.ts`](../ui/desktop/telemetry.ts) and [`apps/desktop/src/telemetry.rs`](../apps/desktop/src/telemetry.rs).
+- **The current Windows build (Go core + C#/Avalonia shell) ships no telemetry and no crash reporting.**
+  The Sentry integration was removed together with the Rust/Tauri stack on 2026-09-04 — `git grep -i sentry`
+  finds nothing under `core/`, `apps/` or `bindings/`.
+- We **never collect any information that can identify you personally**: no accounts, passwords, cookies,
+  tokens, server addresses, library contents, watch history, or IP addresses. **No screen recording, no behavior tracking.**
+- If anonymous crash reporting is ever reintroduced, this section will state exactly what is collected, and we
+  **will never sell, share, or use that data for advertising or any commercial purpose**.
 
 ## License
 
@@ -161,9 +167,8 @@ LinPlayer stands on the shoulders of these open-source projects, media services 
 
 ### UI & Framework
 
-- [Rust](https://www.rust-lang.org/) / [Tokio](https://tokio.rs) / [reqwest](https://github.com/seanmonstar/reqwest) — the business core shared by every platform
-- [Tauri 2](https://tauri.app) — desktop shell (windowing / IPC / packaging)
-- [React 19](https://react.dev) / [TypeScript](https://www.typescriptlang.org) / [Vite](https://vite.dev) — per-platform UI
+- [Go](https://go.dev) — the business core shared by every platform (built as the `lpcore` shared library, called through a C ABI)
+- [.NET 10](https://dotnet.microsoft.com) / [Avalonia](https://avaloniaui.net) — the Windows shell and UI
 
 ### Services & Data Sources
 

@@ -7,9 +7,9 @@
   <a href="https://github.com/zzzwannasleep/LinPlayer/releases"><img src="https://img.shields.io/github/downloads/zzzwannasleep/LinPlayer/total?label=downloads&color=green&logo=github" alt="Downloads"></a>
   <a href="https://linplayer.sentry.io"><img src="https://img.shields.io/endpoint?url=https://linplayeroaproxy.pages.dev/sentry/users" alt="Active Users"></a>
   <a href="https://github.com/zzzwannasleep/LinPlayer/blob/main/LICENSE"><img src="https://img.shields.io/github/license/zzzwannasleep/LinPlayer" alt="License"></a>
-  <img src="https://img.shields.io/badge/Rust-1.80+-000000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
-  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri">
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/C%23-.NET%2010-512BD4?logo=dotnet&logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Avalonia-11-8B44AC" alt="Avalonia">
   <a href="https://github.com/zzzwannasleep/LinPlayer/actions"><img src="https://img.shields.io/github/actions/workflow/status/zzzwannasleep/LinPlayer/build.yml?branch=main&label=build&logo=github" alt="Build"></a>
   <a href="https://t.me/MikudesuChannels"><img src="https://img.shields.io/badge/Telegram-MikudesuChannels-26A5E4?logo=telegram&logoColor=white" alt="Telegram"></a>
 </p>
@@ -20,19 +20,22 @@
   <b>日本語</b>
 </p>
 
-**LinPlayer** は **Windows / Linux / Android / Android TV** を対象とした Emby サードパーティクライアントです。
+**LinPlayer** は **Windows / Linux / Android / Android TV** を対象とした Emby サードパーティクライアントです。現時点では **Windows のみ利用可能**です。
 
 > ### 🚧 再構築中（2026-07）
 >
-> 本プロジェクトは Flutter から **Rust コア + React/TypeScript UI + Tauri シェル** へ全面移行しました。
+> 本プロジェクトは **Rust コア + React/Tauri** から **Go コア + 各プラットフォームのネイティブ UI** へ移行中です。
+> 旧 Rust/Tauri スタックは 2026-09-04 にリポジトリから削除されました。
 >
-> - **デスクトップ（Windows / Linux）** —— 利用可能、通常どおり配布中。
-> - **Android / Android TV** —— UI を再構築中。現時点で新しいビルドはありません。
+> - **Windows** —— 利用可能、通常どおり配布中。インストール不要の ZIP で、データはすべて実行ファイルと同じ階層の `userdata/` に入ります。
+> - **Linux / Android / Android TV** —— **利用可能なビルドはありません**：Go 版のこれらの UI はまだ書かれておらず、
+>   旧 Rust 実装は今回のリファクタで削除されました。過去のビルドは Releases から入手できます。
 > - **Apple 系（iOS / macOS / tvOS）** —— サポート終了、リポジトリから削除済みです。
 >
-> Flutter 時代の完全なコードはタグ [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final) に保存されています。
+> Flutter 時代の完全なコードはタグ [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final)、
+> Rust/Tauri スタックはタグ [`rust-final`](https://github.com/zzzwannasleep/LinPlayer/tree/rust-final) に保存されています。
 
-ビジネスロジック（データソース / ネットワーク / 再生制御 / 同期 / ダウンロード）は**全プラットフォーム共通の単一 Rust クレート**にまとまっており、各プラットフォームは自分の UI だけを書きます。したがって下表の 🔨 は「未着手」ではなく、**コアは完成済みで UI の配線待ち**という意味です。
+ビジネスロジック（Emby プロトコル / ネットワーク / 再生制御 / 同期 / ダウンロード / プラグイン）は**全プラットフォーム共通の単一 Go コア**にまとまっており、`lpcore` 共有ライブラリとしてビルドされます。各プラットフォームは自分の UI だけを、それぞれの流儀で書きます。したがって下表の 🔨 は「未着手」ではなく、**コアは完成済みで UI の配線待ち**という意味です。
 
 ## 機能
 
@@ -137,10 +140,13 @@
 
 ### 匿名テレメトリとプライバシーについて
 
-- 安定性を継続的に改善するため、LinPlayer は [Sentry](https://sentry.io) を用いた**クラッシュ／エラー報告**と**匿名のアクティブ利用統計**（クラッシュ状況とおおよその利用規模の把握のみに使用）を組み込んでいます。
-- 私たちは**個人を特定できる情報を一切収集しません**。アカウント、パスワード、Cookie、トークン、サーバーアドレス、ライブラリの内容、視聴履歴、IP アドレスは収集せず、**画面録画も行動追跡も行いません**。
-- 報告されるデータは、**匿名のクラッシュスタックトレース、アプリのバージョン、プラットフォーム／OS の種類**などの技術情報のみで、ランダムな匿名識別子で端末を区別します（人数を数えるだけで、身元は特定しません）。
-- 私たちはこのデータを**販売・共有したり、広告その他いかなる商業目的にも使用しません**。設定は公開されており検証可能です：[`ui/desktop/telemetry.ts`](../ui/desktop/telemetry.ts) と [`apps/desktop/src/telemetry.rs`](../apps/desktop/src/telemetry.rs)。
+- **現行の Windows 版（Go コア + C#/Avalonia シェル）にはテレメトリもクラッシュ報告も一切含まれていません。**
+  組み込まれていた Sentry は 2026-09-04 の Rust/Tauri スタック削除と同時に取り除かれました ——
+  `git grep -i sentry` は `core/`・`apps/`・`bindings/` のいずれにもヒットしません。
+- 私たちは**個人を特定できる情報を一切収集しません**：アカウント、パスワード、Cookie、トークン、
+  サーバーアドレス、ライブラリの内容、視聴履歴、IP アドレスのいずれも収集せず、**画面録画も行動追跡も行いません**。
+- 将来的に匿名のクラッシュ報告を再導入する場合は、収集範囲を本節に明記したうえで、
+  **販売・共有したり、広告その他いかなる商業目的にも使用しません**。
 
 ## ライセンス
 
@@ -161,9 +167,8 @@ LinPlayer は以下のオープンソースプロジェクト、メディアサ�
 
 ### UI とフレームワーク
 
-- [Rust](https://www.rust-lang.org/) / [Tokio](https://tokio.rs) / [reqwest](https://github.com/seanmonstar/reqwest) — 全プラットフォーム共通のビジネスコア
-- [Tauri 2](https://tauri.app) — デスクトップシェル（ウィンドウ / IPC / パッケージング）
-- [React 19](https://react.dev) / [TypeScript](https://www.typescriptlang.org) / [Vite](https://vite.dev) — 各プラットフォームの UI
+- [Go](https://go.dev) — 全プラットフォーム共通のビジネスコア（`lpcore` 共有ライブラリとしてビルドし、C ABI 経由で各端から呼び出す）
+- [.NET 10](https://dotnet.microsoft.com) / [Avalonia](https://avaloniaui.net) — Windows のシェルと UI
 
 ### サービスとデータソース
 

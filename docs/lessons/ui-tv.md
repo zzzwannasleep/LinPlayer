@@ -22,7 +22,7 @@
 
 **2026-07-20 定**。TV 端 UI 从零起版，落在 `ui/tv/`（原先只有 README 占位）。
 产品形态**对齐 PC 侧栏 8 项**（搜索/首页/媒体库/收藏/下载/排行榜/日历 + 服务器/设置），
-不用 `docs/TV_DESIGN.md` 里那份 Flutter 时代的 4 项导航 —— 那是产品还没长出来时定的，
+不用 `git show rust-final:docs/TV_DESIGN.md` 里那份 Flutter 时代的 4 项导航 —— 那是产品还没长出来时定的，
 该文档的**视觉/交互决策仍可参考，实现路径（Flutter/Riverpod/GoRouter/tvOS）全部作废**。
 
 ##### 焦点库：@noriginmedia/norigin-spatial-navigation
