@@ -1,5 +1,17 @@
 # LinPlayer 安全审计报告
 
+> ## 📦 历史文档(2026-09-04 归档)
+>
+> **本文描述的是已删除的 Rust + React/Tauri 栈**,其中的文件路径、命令、构建方式
+> 在当前仓库里**都不存在了**。当前技术栈是 Go 核心层 + C#(Avalonia) Windows 外壳。
+>
+> 保留它是因为**决策理由**仍有参考价值(为什么这么选、当时排除了什么)。
+> 要看它描述的代码:`git show rust-final:<路径>`。
+>
+> ⚠️ **别照着本文动手** —— 先对当前仓库的实际结构(见 `AGENTS.md` §1)。
+
+
+
 > 生成日期：2026-06-20 · 方式：本地静态审计 + 关键路径人工复核 + npm audit 联网校验
 > 范围：Flutter/Dart 主应用、Android/TV、Windows/macOS/Linux 原生壳、Apple TV Swift 客户端、OAuth proxy/site、插件系统与发布脚本。
 > 限制：未做真实设备动态渗透、未执行 MITM/PoC 攻击、`flutter pub outdated --json` 未能返回结果（疑似网络/工具卡住），因此 Dart/Flutter 依赖 CVE 需后续单独复跑。

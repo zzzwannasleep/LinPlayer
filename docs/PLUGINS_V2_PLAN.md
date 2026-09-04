@@ -1,5 +1,17 @@
 # 插件系统 v2 重构规划
 
+> ## 📦 历史文档(2026-09-04 归档)
+>
+> **本文描述的是已删除的 Rust + React/Tauri 栈**,其中的文件路径、命令、构建方式
+> 在当前仓库里**都不存在了**。当前技术栈是 Go 核心层 + C#(Avalonia) Windows 外壳。
+>
+> 保留它是因为**决策理由**仍有参考价值(为什么这么选、当时排除了什么)。
+> 要看它描述的代码:`git show rust-final:<路径>`。
+>
+> ⚠️ **别照着本文动手** —— 先对当前仓库的实际结构(见 `AGENTS.md` §1)。
+
+
+
 > 2026-07-23 定稿。范围：`crates/core/src/plugins` + `apps/desktop` + `ui/` + 独立仓库 `LinplayerPluginsRepository`。
 > 本轮只做桌面（Win/Linux）。安卓/TV 下一轮。
 
