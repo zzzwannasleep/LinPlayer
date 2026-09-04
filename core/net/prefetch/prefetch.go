@@ -184,7 +184,12 @@ type origin struct {
 	// 不缓存最终地址,就是**每 4MB 重走一遍 302**。实测 0.67s/段,占单段 TTFB(1.4s)
 	// 的一半,并行省下的时间全赔在建连上:3 线程 4.0MB/s 反而**慢于**单连接 4.3MB/s,
 	// 多线程加载成了负优化。原版 Emby 无重定向,此字段恒为空,零影响。
-	resolved       string
+	resolved string
+	// resolvedExp 落点的到期时刻(已扣掉 resolveMargin)。零值 = 上游没声明有效期,不过期。
+	//
+	// ★ 值从 302 的 `Cache-Control: max-age` 来,见 resolve.go ——
+	//   服主要的「请求直链的间隔」就落在这里:签名多久换一次,我们就多久打一次后端。
+	resolvedExp    time.Time
 	resignDisabled bool
 
 	totalSize       int64
@@ -223,7 +228,9 @@ func Start(ctx context.Context, upstreamURL string, threads int, cacheLimit int6
 		// ★ 预取拉上游用 LinPlayerPreload 这条 UA 道(SPEC §14.1):
 		//   服主要能把「替 mpv 提前拉的旁路请求」和「用户正在看的那一路」在日志里分开。
 		// ★ 走 tlspolicy:不走的话自签名服务器上「多线程加载」一开就取不到流
-		client:    &http.Client{Transport: tlspolicy.Transport()},
+		// ★ CheckRedirect 不是为了拦跳转,是为了**顺路把 302 的 Cache-Control 收下来**
+		//   —— 直链落点能缓存多久,只有那一跳自己知道。见 resolve.go。
+		client:    &http.Client{Transport: tlspolicy.Transport(), CheckRedirect: captureRedirectTTL},
 		onInvalid: onInvalid,
 		liveMap:   map[int64]*live{},
 	}
@@ -270,6 +277,7 @@ const preloadUA = "LinPlayerPreload/"
 func (o *origin) probe(ctx context.Context, u string) error {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
+	ctx, slot := withTTLSlot(ctx)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
@@ -283,10 +291,8 @@ func (o *origin) probe(ctx context.Context, u string) error {
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
 
-	// 探测本来就跟完了 302,顺手把落点记下来给 worker 用(只在真发生跳转时存)
-	if final := resp.Request.URL.String(); final != u {
-		o.resolved = final
-	}
+	// 探测本来就跟完了 302,顺手把落点**和它声明的有效期**一起记下来给 worker 用
+	o.noteResolved(u, resp.Request.URL.String(), slot.ttl())
 	o.contentType = resp.Header.Get("Content-Type")
 	if o.contentType == "" {
 		o.contentType = "video/mp4"
@@ -365,12 +371,7 @@ func (o *origin) fetchChunk(ctx context.Context, c int64, l *live) []byte {
 	want := l.cap
 
 	for attempt := 0; attempt < 3; attempt++ {
-		o.upMu.Lock()
-		u, usedResolved := o.url, false
-		if o.resolved != "" {
-			u, usedResolved = o.resolved, true
-		}
-		o.upMu.Unlock()
+		u, usedResolved := o.upstreamURL()
 
 		badAddr, retry := o.fetchOnce(ctx, u, start, end, l)
 		if !badAddr && !retry && l.len() == want {
@@ -386,9 +387,7 @@ func (o *origin) fetchChunk(ctx context.Context, c int64, l *live) []byte {
 			     只需重走一次 302 就能拿到新落点 —— 这时候去调重签回调(重走取流)
 			     是杀鸡用牛刀,还平白给服务端加一次接口压力。 */
 			if usedResolved {
-				o.upMu.Lock()
-				o.resolved = ""
-				o.upMu.Unlock()
+				o.dropResolved()
 			} else {
 				o.refreshUpstream(ctx)
 			}
@@ -409,6 +408,7 @@ func (o *origin) fetchOnce(ctx context.Context, u string, start, end int64, l *l
 	o.probes.Add(1)
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	reqCtx, slot := withTTLSlot(reqCtx)
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u, nil)
 	if err != nil {
 		return true, false
@@ -437,6 +437,8 @@ func (o *origin) fetchOnce(ctx context.Context, u string, start, end int64, l *l
 	if resp.StatusCode != http.StatusPartialContent && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
 		return true, false
 	}
+	// 打的是 Emby 直链、又真跳转了 = 拿到一个新落点,连同新的有效期一起换上
+	o.noteResolved(u, resp.Request.URL.String(), slot.ttl())
 
 	/* 收体:**每来一块就重置计时**,只有真的停止吐字节才判死。
 	   ★ 收到就 feed —— 这就是「边收边吐」:供给端不再等整段落盘。
@@ -492,7 +494,7 @@ func (o *origin) refreshUpstream(ctx context.Context) {
 		return
 	}
 	o.url = fresh
-	o.resolved = ""
+	o.resolved, o.resolvedExp = "", time.Time{}
 }
 
 func max64(a, b int64) int64 {

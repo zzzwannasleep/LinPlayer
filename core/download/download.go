@@ -506,18 +506,71 @@ func (m *Manager) runSegment(id string, index int, cancel, segCancel chan struct
 	seg := it.Segments[index]
 	part := it.partPath(index)
 
-	// 已经下了多少 —— 看**文件**,不看索引
-	var existing int64
-	if st, err := os.Stat(part); err == nil {
-		existing = st.Size()
+	fails, rounds := 0, 0
+	for {
+		// 每一轮都重新按 **part 文件的实际大小**定续传点 —— 不看索引,也不信上一轮
+		// 自己记的数:上一轮是被掐断的,它记到哪儿不一定等于盘上真躺着多少。
+		var existing int64
+		if st, err := os.Stat(part); err == nil {
+			existing = st.Size()
+		}
+		if seg.End >= 0 && existing > seg.length() {
+			existing = seg.length()
+		}
+		m.updateDownloaded(id, index, existing)
+		if seg.End >= 0 && existing >= seg.length() {
+			return nil // 这一段早就完了
+		}
+
+		wrote, err := m.fetchSegment(id, index, it, seg, part, existing, cancel, segCancel)
+		if err == nil {
+			return nil
+		}
+		if isPermanent(err) {
+			return err
+		}
+
+		rounds++
+		if wrote > 0 {
+			/* ★★ 这一轮**真下到了字节** —— 重试预算清零。
+			   不清零的话,一部要下几小时的片遇上「30 分钟就换一次」的鉴权直链
+			   (115 那类前后端分离的服),第 10 次换签名时预算就烧光了,
+			   而它每一次其实都下成了。判据是「有没有前进」,不是「失败了几次」。 */
+			fails = 0
+		} else {
+			fails++
+		}
+		if fails >= maxSegmentRetries || rounds >= maxSegmentRounds {
+			return err
+		}
+
+		if !it.SupportsRange {
+			/* 不支持 Range = 续不上,只能从头再来。
+			   ★ 必须先把已写的清掉:part 是 O_APPEND 打开的,不清就是把第二遍的字节
+			     接在第一遍屁股后面 —— 而 assemble 只做拼接**不校验长度**,
+			     出来的是一个长度不对却一句错都不报的坏文件。 */
+			// ★ 文件还没建出来是**正常情况**(上一轮在建连阶段就挂了),那就是已经是 0。
+			//   不放过 ENOENT 的话,用户看到的错误会是一句 "The system cannot find the
+			//   file specified.",把真正的网络错误盖掉 —— 这条是靠反向注入撞出来的。
+			if terr := os.Truncate(part, 0); terr != nil && !os.IsNotExist(terr) {
+				return terr
+			}
+			m.updateDownloaded(id, index, 0)
+		}
+
+		select {
+		case <-cancel:
+			return errors.New("已暂停")
+		case <-segCancel:
+			return errors.New("已取消")
+		case <-time.After(retryBackoff(fails)):
+		}
 	}
-	if seg.End >= 0 && existing > seg.length() {
-		existing = seg.length()
-	}
-	m.updateDownloaded(id, index, existing)
-	if seg.End >= 0 && existing >= seg.length() {
-		return nil // 这一段早就完了
-	}
+}
+
+// fetchSegment 拉一次。返回**这一轮写下去的字节数** —— 上层靠它判断「有没有前进」。
+func (m *Manager) fetchSegment(id string, index int, it *Item, seg Segment, part string,
+	existing int64, cancel, segCancel chan struct{}) (int64, error) {
 
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
@@ -531,9 +584,12 @@ func (m *Manager) runSegment(id string, index int, cancel, segCancel chan struct
 		stop() // 掐断正在进行的读
 	}()
 
+	/* ★ 重试打的是 it.URL(Emby 直链),不是上一轮跟到的那条落点 ——
+	   前后端分离的服会在这里重新发一次 302,换回一条**新签名**的直链。
+	   「下到一半签名过期,整条任务死掉」正是靠这一点修好的。 */
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, it.URL, nil)
 	if err != nil {
-		return err
+		return 0, permanent(err)
 	}
 	if it.SupportsRange {
 		if seg.End >= 0 {
@@ -544,45 +600,72 @@ func (m *Manager) runSegment(id string, index int, cancel, segCancel chan struct
 	}
 	resp, err := m.client.Do(req)
 	if err != nil {
-		return friendlyErr(err, cancel, segCancel)
+		return 0, friendlyErr(err, cancel, segCancel)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return statusErr(resp.StatusCode)
+		return 0, statusErr(resp.StatusCode)
 	}
 
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return err
+		return 0, permanent(err)
 	}
 	defer f.Close()
 
 	buf := make([]byte, 256*1024)
 	downloaded := existing
+	var wrote int64
 	for {
 		select {
 		case <-cancel:
-			return errors.New("已暂停")
+			return wrote, permanent(errors.New("已暂停"))
 		case <-segCancel:
-			return errors.New("已取消")
+			return wrote, permanent(errors.New("已取消"))
 		default:
 		}
-		nr, err := resp.Body.Read(buf)
+		nr, rerr := resp.Body.Read(buf)
 		if nr > 0 {
-			if _, werr := f.Write(buf[:nr]); werr != nil {
-				return werr
+			if werr := writeAll(f, buf[:nr]); werr != nil {
+				return wrote, permanent(werr) // 盘写不进去,重试十次也一样
 			}
 			downloaded += int64(nr)
+			wrote += int64(nr)
 			m.updateDownloaded(id, index, downloaded)
 		}
-		if err == io.EOF {
-			return nil
+		if rerr == io.EOF {
+			/* ★★ 干净的 EOF **不等于这一段下完了**。
+			   反代无视 Range 回一个更短的 Content-Length、CDN 提前收尾,都会产出
+			   「读到头了但字节不够」的响应。老代码在这里直接 return nil ——
+			   而 assemble 只拼接不校验,结果是一个**短了却报成功**的文件,
+			   播到一半就没了,一句错都不报。
+			   有确定长度就自己核对;核不上按可重试的错抛出去,下一轮从断点续。 */
+			if seg.End >= 0 && downloaded < seg.length() {
+				return wrote, fmt.Errorf("上游提前断流(还差 %d 字节)", seg.length()-downloaded)
+			}
+			return wrote, nil
 		}
-		if err != nil {
-			return friendlyErr(err, cancel, segCancel)
+		if rerr != nil {
+			return wrote, friendlyErr(rerr, cancel, segCancel)
 		}
 	}
 }
+
+// writeAll 把整块写进去。
+//
+// ★ os.File.Write 短写时**一定**返回错误,所以这里只是把「写了多少」这件事
+// 收成一个判据 —— 别把 n < len(p) 当成正常情况静默放过。
+func writeAll(f *os.File, p []byte) error {
+	n, err := f.Write(p)
+	if err != nil {
+		return err
+	}
+	if n < len(p) {
+		return fmt.Errorf("写盘只写进 %d/%d 字节", n, len(p))
+	}
+	return nil
+}
+
 
 // ---------------------------------------------------------------------------
 // 小工具
@@ -777,28 +860,39 @@ func deleteFiles(it *Item) {
 func friendlyErr(err error, cancel, segCancel chan struct{}) error {
 	select {
 	case <-cancel:
-		return errors.New("已暂停")
+		return permanent(errors.New("已暂停"))
 	default:
 	}
 	select {
 	case <-segCancel:
-		return errors.New("已取消")
+		return permanent(errors.New("已取消"))
 	default:
 	}
+	if errors.Is(err, context.Canceled) {
+		return permanent(errors.New("已取消"))
+	}
+	// ★ 超时和「下载出错」都**不包**成 permanent:签名过期、反代掐连接、网抖
+	//   全落在这两条上,而它们正是重试能救回来的那一类。
 	if errors.Is(err, context.DeadlineExceeded) {
 		return errors.New("连接超时")
-	}
-	if errors.Is(err, context.Canceled) {
-		return errors.New("已取消")
 	}
 	return errors.New("下载出错")
 }
 
+// statusErr HTTP 状态码翻成人话,顺带定「这错值不值得重试」。
+//
+// ★ 4xx 里只有 408(请求超时)和 429(太频繁)是「等会儿再来」,其余是
+// 「这个请求本身不对」—— 重试也不会变对。不分这一类就是**把 401 重试十遍**:
+// 用户等一分钟才看到「无下载权限」,而服务器白挨十次。
 func statusErr(code int) error {
 	if code == 401 || code == 403 {
-		return errors.New("无下载权限")
+		return permanent(errors.New("无下载权限"))
 	}
-	return fmt.Errorf("服务器错误(%d)", code)
+	err := fmt.Errorf("服务器错误(%d)", code)
+	if code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests {
+		return permanent(err)
+	}
+	return err
 }
 
 // SafeName 文件名净化。
