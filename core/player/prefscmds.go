@@ -27,8 +27,29 @@ var prefsClient *emby.Client
 func registerPrefsCommands(version string) {
 	prefsClient = emby.NewClient(version)
 
+	/* shaderLevels 档位表。
+
+	   ★★ 2026-09-04 起**每一档都带 will_run** —— 用户原话:「不生效的选项直接删掉,
+	     不要展示出来,只保留生效的(目前很多选中了却不生效)」。
+	     此前的口径是「会不会真跑由 WillRun 在**点击时**如实告知,不在列表里预标」,
+	     那条被推翻了:放大那几族在窗口模式下**一档都不会跑**,而它们占了列表的 5/8,
+	     用户挨个点一遍、每次收到一句「这档不会生效」,那不是告知,是让他做无用功。
+	   ★ 判据和 setShaderLevel 用的是**同一个** shaders.WillRun + 同一份尺寸,
+	     不另写一套 —— 两份判断迟早会说不一样的话。
+	   ★ 尺寸未知(没在播)时**不给这个字段**,UI 那边就全都显示。
+	     猜一个 false 会让「还没起播时打开抽屉」看到一张空表。 */
 	bus.Register("player.shaderLevels", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
-		return shaders.Levels(), nil
+		vw, vh := propF("video-params/w"), propF("video-params/h")
+		ow, oh := propF("osd-dimensions/w"), propF("osd-dimensions/h")
+		out := make([]map[string]any, 0, len(shaders.Levels()))
+		for _, l := range shaders.Levels() {
+			m := map[string]any{"id": l.ID, "name": l.Name, "group": l.Group}
+			if run, ok := shaders.WillRun(l.ID, vw, vh, ow, oh); ok {
+				m["will_run"] = run
+			}
+			out = append(out, m)
+		}
+		return out, nil
 	})
 
 	// setShaderLevel 应用一个画质档位。

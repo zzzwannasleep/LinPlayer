@@ -20,7 +20,21 @@ func registerLocalCommands() {
 		if m == nil {
 			return nil, bus.NewErr(bus.EInternal, "下载模块没起来")
 		}
-		path := m.CompletedPath(id)
+		/* ☠☠ <b>id 两种都收</b>:下载**任务**的 id,或者 Emby 的**条目** id。
+		   CompletedPath 只按 ItemID 找 —— 而下载页手里天然拿着的是任务 id
+		   (列表里每条的主键就是它)。只按 ItemID 找的话,下载页照着列表传下来
+		   一个任务 id,这里一句「还没下载完成」,而那条明明是已完成的。
+		   这条命令从注册那天起就没有调用方,所以这个错配一直没人撞上。 */
+		path := ""
+		for _, it := range m.List() {
+			if it.Status != download.StatusCompleted {
+				continue
+			}
+			if it.ID == id || it.ItemID == id {
+				path = it.FilePath
+				break
+			}
+		}
 		if path == "" {
 			return nil, bus.NewErr(bus.ENotFound, "这个条目还没下载完成")
 		}

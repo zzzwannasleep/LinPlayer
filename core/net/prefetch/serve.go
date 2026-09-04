@@ -121,11 +121,43 @@ func (s *stream) worker(ctx context.Context) {
 
 		/* ★ 在飞的请求也要能取消。只靠循环顶部的 over() 判断,是「这一段拉完了才发现
 		   连接早没了」—— 播放器跳一次进度条,每条被丢下的连接还要把 threads 段(12MB)
-		   拉完才罢休,纯烧用户流量。 */
-		fetchCtx, cancel := context.WithCancel(ctx)
+		   拉完才罢休,纯烧用户流量。
+
+		   ☠☠☠ **但钉住的那几段例外:下到一半也不许取消。**
+
+		   这是「已缓存的位置取不到图」剩下的那一半根因(2026-09-04 才逮到)。
+		   上一半是「首段不对齐时只拉残段」,已经用 pinned() 挡在上面了;
+		   这一半是**连接活得比这一段短**:
+
+		     ffmpeg 打开一个 mp4,先发 `Range: bytes=0-` 读文件头,
+		     只读几百 KB 认出 moov 的位置,**就把这条连接关了**,
+		     另开一条从 moov 处读。而我们这边正在为它拉整个 4MB 的分段 0 ——
+		     连接一关 s.done 就闭,fetchCtx 当场取消,分段 0 **半途而废、不落盘**。
+
+		   后果:环形缓存里从此没有文件头。正片照放(它自己那条连接边拉边吐),
+		   但**任何人想重新打开这条流都失败** —— 进度条缩略图那个 mpv 实例
+		   拿到的就是一句「打不开」,而 spans 显示 30% 已缓存,看着完全正常。
+		   实测复现:spans = 0.70-1.00(整条时间轴没有头),缩略图全程不可用。
+
+		   ★ 代价:被丢下的连接最多多拉这几段(≤3 段 = 12MB),而且**每条流只发生一次**
+		     (第二次 disk.has(c) 就直接跳过了)。换掉的是「缩略图在半数片子上不工作」。
+		   ★ 仍然听 origin 的关闭(o.stop):换片 / 停播时缓存文件会被删,
+		     那时候还在写盘就是写一个已经不存在的文件。 */
+		pin := s.o.disk.pinned(c)
+		base := ctx
+		if pin {
+			base = context.Background()
+		}
+		fetchCtx, cancel := context.WithCancel(base)
 		go func() {
+			var connGone <-chan struct{}
+			if !pin {
+				connGone = s.done
+			}
 			select {
-			case <-s.done:
+			case <-connGone: // pin 时恒为 nil channel,永远不会被选中
+				cancel()
+			case <-s.o.stop.wait():
 				cancel()
 			case <-fetchCtx.Done():
 			}
