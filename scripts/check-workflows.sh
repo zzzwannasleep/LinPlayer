@@ -21,6 +21,11 @@ cd "$(dirname "$0")/.."
 # ★ 不能只靠 `command -v` 挑解释器。Windows 上 `python3` 会命中微软商店的**空壳**
 #   (WindowsApps 里那个),它什么都不干、直接退出 49 —— 而 command -v 认为它存在。
 #   所以逐个**实跑一下**,谁真能执行用谁。CI(ubuntu)上是 python3,本地是 python。
+# ★ 内联 python 打的是中文。Windows runner 上 Python 默认按 cp1252 输出,
+#   遇到中文当场 UnicodeEncodeError,而本地(GBK/UTF-8)复现不出来 ——
+#   2026-09-04 新 CI 第一次跑就栽在同一个坑上(那次是 check-ffi-contract.py)。
+#   PYTHONIOENCODING 的优先级比 PYTHONUTF8 高,所以直接钉它。
+export PYTHONIOENCODING=utf-8
 PY_BIN=""
 for c in python3 python; do
   if command -v "$c" >/dev/null 2>&1 && "$c" -c "import yaml" >/dev/null 2>&1; then

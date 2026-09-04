@@ -17,6 +17,18 @@ import re
 import sys
 import os
 
+# ★ Windows 的 CI runner 上 Python 默认按 cp1252 输出,打中文当场
+#   UnicodeEncodeError —— 而本地开发机(GBK/UTF-8)复现不出来。
+#   2026-09-04 新 CI 第一次跑就栽在这。不靠环境变量:PYTHONIOENCODING
+#   优先级比 PYTHONUTF8 高,CI 上谁设了它就把 UTF-8 模式顶掉了。
+import sys as _sys
+for _s in (_sys.stdout, _sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC = os.path.join(ROOT, "docs", "go-migration", "SPEC.md")
 HEADER = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build", "core", "lpcore.h")
