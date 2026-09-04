@@ -10,6 +10,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <!-- 本地开发的回落版本;发布时由 CI 用 -p:Version= 覆盖。
+         唯一权威是仓库根的 VERSION 文件,见 docs/VERSIONING.md。 -->
+    <Version>1.1.0-dev</Version>
     <AssemblyName>LinPlayer</AssemblyName>
     <RootNamespace>LinPlayer.Desktop</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -26,16 +29,19 @@
     <PublishReadyToRun>true</PublishReadyToRun>
 
     <!-- ★★ exe 自己的图标。用户 2026-09-03:「软件没有图标,以前有的,用回以前那个就行」。
-         ★ **不在这儿复制一份**:仓库里 LinPlayer 的图标只应该有一处正本
-           (apps/desktop/icons/,6f986a97 那次专门找回来的)。
-           复制过来的后果是两处各自演化,而不一致时谁也不报错。 -->
-    <ApplicationIcon>..\..\desktop\icons\icon.ico</ApplicationIcon>
+         ★ 正本现在在 **Assets/**。2026-09-04 删 Rust 栈之前它在 apps/desktop/icons/,
+           C# 端跨栈引它 —— 那边一删,这边当场编不过(FileNotFoundException,
+           而且报在 Avalonia 的资源生成任务里,乍看不像是图标的事)。
+           「只留一处正本」的原则没变,只是正本跟着唯一还活着的端走。 -->
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- 同一个文件再进一次资源:exe 图标(上面那条)管的是**文件在资源管理器里的样子**,
          窗口图标(任务栏 / Alt-Tab / 标题栏)得由代码在运行期设,见 MainWindow 构造函数。 -->
-    <AvaloniaResource Include="..\..\desktop\icons\icon.ico" Link="Assets/icon.ico" />
+    <!-- 图标。2026-09-04 之前这里指向 ..\..\desktop\icons\(Tauri 端的资源) ——
+         Rust 栈一删,C# 端当场编不过。资源不跨栈借,自己这份放 Assets/。 -->
+    <AvaloniaResource Include="Assets\icon.ico" />
   </ItemGroup>
 
   <ItemGroup>

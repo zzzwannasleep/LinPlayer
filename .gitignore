@@ -17,7 +17,7 @@ target/
 packaging/
 
 # libmpv 大二进制(117MB dll):本地构建输入,不入普通库;CI 现拉(见 .github/workflows/build.yml)
-crates/mpv/libmpv/*.dll
+third_party/libmpv/*.dll
 
 # 绿色包运行时数据(exe 同级 userdata/);跑 dev 构建时会出现在 target/ 下,别入库
 userdata/
@@ -160,3 +160,15 @@ apps/windows/**/obj/
 
 # 自检 / 冒烟用的临时可执行文件(scripts/selfcheck-win.sh 会在 core/ 下兜底编一份)
 core/*.exe
+
+# --- 逆向细节文档(2026-09-04 用户拍板:仓库转公开,这批不进库)---------------
+# 里面是 189 RSA/AES-HMAC、139 Authorization 自算、飞牛 authx 签名、115 m115 模幂、
+# 夸克 Cookie 轮换的完整算法与端点。公开出去等于发布一本网盘逆向手册,
+# 而且 lessons/sources.md 里还记着「某实例 IP 应视为已泄露」这类事故细节。
+# ★ 文件本身留在本地磁盘(CLAUDE.md §4 要求 agent 能 grep 到),只是不进版本控制。
+docs/lessons/sources.md
+docs/go-migration/knowledge/SOURCES.md
+docs/code-lore.md
+
+# 手机端草稿(与 desktop-drafts / tv-drafts 同性质:本地工作材料,不入库)
+docs/mobile-drafts/

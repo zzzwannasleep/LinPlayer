@@ -1,7 +1,7 @@
 package cf
 
-// CF 优选测速引擎。移植自 `crates/core/src/net/cf/speedtest.rs`。
 //
+// CF 优选测速引擎。
 // 流程对标 XIU2/CloudflareSpeedTest:
 //  1. 随机抽样 CF 边缘 IP
 //  2. TCP 握手延迟 + 丢包筛选排序

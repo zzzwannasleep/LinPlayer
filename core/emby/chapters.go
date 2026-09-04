@@ -2,9 +2,6 @@ package emby
 
 // 章节:「跳过片头/片尾」与「进度条缩略图预览」共用同一份数据。
 //
-// 移植自 `crates/core/src/emby.rs`(chapters / name_hits / is_intro_name /
-// is_outro_name / intro_range / outro_range)。
-//
 // 为什么这两个功能合并成一次请求:Emby 的章节既带时间点(拿来判片头片尾区间),
 // 又带 ImageTag(拿来当进度条悬停缩略图)。分两条链路去打服务器纯属重复劳动。
 //

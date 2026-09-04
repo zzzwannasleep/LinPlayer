@@ -1,7 +1,6 @@
 // Package config 读写 AppConfig。
 //
-// ★★ 这个包存在的**全部理由**是一条真故障(见 crates/core/src/config.rs:458 的注释):
-//
+// ★★ 这个包存在的**全部理由**是一条真故障:
 //	Rust 版有三个字段没标 serde(default) —— 配置文件里少任意一个,整份 JSON
 //	反序列化失败 → load() 的 .ok() 把错误吞掉 → unwrap_or_default() 退回空配置
 //	→ **用户所有服务器账号一次性消失,而且不报错。**

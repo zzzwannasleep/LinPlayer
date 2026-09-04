@@ -67,21 +67,15 @@ jobs:
       - name: Verify assets (informational)
         run: |
           VER="${{ steps.resolve.outputs.version }}"
-          # 只列**真的会被构建出来**的产物(苹果全线不做,所以不列)。
-          # 把不存在的平台留在这儿只会让每次发布刷一串假「缺少 xxx」,久了没人看这段输出。
+          # 只列**真的会被构建出来**的产物。把不存在的平台留在这儿只会让每次发布
+          # 刷一串假「缺少 xxx」,久了没人看这段输出。
           #
-          # 安卓是 4 个包:TV / 手机各出 arm64 和 arm32。
-          # TV 和手机是**两个不同的包**,不是同一个文件换名字 —— 壳打开哪套 UI
-          # 在出包时就定死了(见 build.yml 的 build-android 矩阵)。
-          # arm32 留着是为了老盒子和老手机;新旗舰 SoC(8 Gen 4 / 天玑 9400 这一代)
-          # 已经没有 AArch32,只能装 arm64 那个。
+          # ★ 2026-09-04:Rust/Tauri 栈删除后 Linux 与 Android 暂时没有可构建的端
+          #   (Go 版那两端的 UI 还没写,见 docs/go-migration/TODO.md),所以这里
+          #   只剩 Windows 一条。等它们回来时**记得加回来** —— 漏加的表现是
+          #   发布成功、用户却下不到包,而这段检查一声不吭。
           EXPECTED=(
             "LinPlayer-Windows-v$VER.zip"
-            "LinPlayer-Linux-v$VER.zip"
-            "LinPlayer-TV-v$VER-arm64.apk"
-            "LinPlayer-TV-v$VER-arm32.apk"
-            "LinPlayer-Phone-v$VER-arm64.apk"
-            "LinPlayer-Phone-v$VER-arm32.apk"
           )
           MISSING=0
           for f in "${EXPECTED[@]}"; do
@@ -119,7 +113,6 @@ jobs:
 
             ### 下载
             - **Windows**：`LinPlayer-Windows-v${{ steps.resolve.outputs.version }}.zip`（免安装绿色包，解压即用）
-            - **Linux (x86_64)**：`LinPlayer-Linux-v${{ steps.resolve.outputs.version }}.zip`（免安装绿色包，解压后 `./LinPlayer`）
 
             ### 说明
             - Windows 端内置完整版 libmpv（支持 PGS/SUP 图形字幕）。

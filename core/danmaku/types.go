@@ -2,7 +2,6 @@ package danmaku
 
 // 弹幕的公共类型 + 源配置。
 //
-// 移植自 `crates/core/src/danmaku/mod.rs`。
 
 import (
 	"encoding/json"

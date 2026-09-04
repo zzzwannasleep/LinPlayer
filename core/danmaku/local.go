@@ -2,7 +2,6 @@ package danmaku
 
 // 本地弹幕文件解析:XML(B 站导出)/ JSON(弹弹Play 导出)。
 //
-// 移植自 `crates/core/src/danmaku/local.rs`。
 
 import (
 	"encoding/json"

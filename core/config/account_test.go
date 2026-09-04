@@ -171,11 +171,11 @@ func TestSourceKind线上小写(t *testing.T) {
 	if a.SourceKind() != "emby" || a.IsFileBrowse() {
 		t.Fatalf("没有 source_kind 键时应是 emby,实得 %q", a.SourceKind())
 	}
-	if err := json.Unmarshal([]byte(`{"server":"https://s","source_kind":"quark"}`), &a); err != nil {
+	if err := json.Unmarshal([]byte(`{"server":"https://s","source_kind":"local"}`), &a); err != nil {
 		t.Fatal(err)
 	}
-	if a.SourceKind() != "quark" || !a.IsFileBrowse() {
-		t.Fatalf("quark 应判成浏览型源,实得 %q", a.SourceKind())
+	if a.SourceKind() != "local" || !a.IsFileBrowse() {
+		t.Fatalf("local 应判成浏览型源,实得 %q", a.SourceKind())
 	}
 }
 
@@ -193,7 +193,7 @@ func TestAccount未接的键不丢(t *testing.T) {
       "token": "PLACEHOLDER-TOKEN",
       "user_id": "PLACEHOLDER-USER",
       "user_name": "someone",
-      "source_kind": "quark",
+      "source_kind": "local",
       "source": {"cookie": "PLACEHOLDER-COOKIE", "root": "/"}
     }
   ]
@@ -225,7 +225,7 @@ func TestAccount未接的键不丢(t *testing.T) {
 func TestUpsert不冲掉未接的键(t *testing.T) {
 	c := defaults()
 	var old Account
-	if err := json.Unmarshal([]byte(`{"server":"https://s","source_kind":"quark","source":{"cookie":"PLACEHOLDER"}}`), &old); err != nil {
+	if err := json.Unmarshal([]byte(`{"server":"https://s","source_kind":"local","source":{"cookie":"PLACEHOLDER"}}`), &old); err != nil {
 		t.Fatal(err)
 	}
 	c.Upsert(old)

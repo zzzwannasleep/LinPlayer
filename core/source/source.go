@@ -1,7 +1,6 @@
 // Package source 是文件浏览型数据源的后端抽象(网盘 / 局域网 / 聚合 / 资源站)。
 //
-// 移植自 `crates/core/src/source/mod.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // 三件事:列目录 / 搜索(可降级)/ 把文件解析成可播 URL(含逐流 headers)。
 //
 // ★★ **网盘是文件树,资源站是影视目录,这是两种东西。**
@@ -31,34 +30,19 @@ import (
 type Kind string
 
 // 内置源。**顺序即枚举顺序**,给需要穷举的地方(跨语言契约测试)用。
+// ★ 2026-09-04 范围裁剪:网盘(阿里/百度/115/189/139/夸克)、局域网源(SMB/WebDAV/FTP)、
+//   资源站与 Ani-rss 全部**不做了** —— 本项目只做 Emby。资源站(VOD)将来只以**插件**
+//   形式出现,走 `plugin:<插件id>/<源id>` 那条开放键通道,不再有内置后端。
+//   开放键机制本身保留:它正是给插件源用的。
 const (
-	KindEmby        Kind = "emby"
-	KindOpenList    Kind = "openlist"
-	KindQuark       Kind = "quark"
-	KindAniRSS      Kind = "anirss"
-	KindFeiniu      Kind = "feiniu"
-	KindAliyunDrive Kind = "aliyundrive"
-	KindBaidu       Kind = "baidu"
-	KindPan115      Kind = "pan115"
-	KindPan189      Kind = "pan189"
-	KindPan139      Kind = "pan139"
-	// 局域网 / 自建文件源。这三个**不是网盘**:没有厂商 API、没有账号体系,
-	// 只有一个地址加一对账号密码,连的是用户自己那台 NAS 或路由器上的硬盘。
-	KindSMB    Kind = "smb"
-	KindWebDAV Kind = "webdav"
-	KindFTP    Kind = "ftp"
-	// KindLocal 本机文件夹(用户用系统选择器挑的那个目录)。
+	KindEmby Kind = "emby"
+	// KindLocal 本机文件夹(用户用系统选择器挑的那个目录)。不是网盘 —— 拖个
+	// 文件进来就能看,是播放器的基础能力,故在裁剪中保留。
 	KindLocal Kind = "local"
 )
 
 // Builtin 全部内置源,顺序固定。
-var Builtin = []Kind{
-	KindEmby, KindOpenList, KindQuark,
-	KindAniRSS, KindFeiniu,
-	KindAliyunDrive, KindBaidu, KindPan115,
-	KindPan189, KindPan139,
-	KindSMB, KindWebDAV, KindFTP, KindLocal,
-}
+var Builtin = []Kind{KindEmby, KindLocal}
 
 // pluginPrefix 插件贡献的源统一形如 `plugin:com.example.foo/mysrc`。
 const pluginPrefix = "plugin:"
@@ -231,33 +215,7 @@ type MediaDetail struct {
 }
 
 // ---------------------------------------------------------------------------
-// 扫码登录
-// ---------------------------------------------------------------------------
-
-// QrStart 扫码登录:开始。
 //
-// Image 既可能是 data URI(自己画的二维码 PNG),也可能是一个图片 URL(网盘直接给图)。
-type QrStart struct {
-	Image string `json:"image"`
-	// Ctx 轮询要用的上下文(uuid/sign/sid…),JSON 字符串,前端不解读只回传。
-	Ctx string `json:"ctx"`
-}
-
-// QrPoll 扫码登录:轮询一次的结果。state = pending | confirmed | expired。
-type QrPoll struct {
-	State string `json:"state"`
-	// Credentials 只在 confirmed 时有。直接并进新建 Server 的 Extra 后落盘。
-	Credentials map[string]string `json:"credentials,omitempty"`
-}
-
-// QrPending / QrExpired / QrConfirmed 三个构造。
-func QrPending() QrPoll { return QrPoll{State: "pending"} }
-func QrExpired() QrPoll { return QrPoll{State: "expired"} }
-func QrConfirmed(creds map[string]string) QrPoll {
-	return QrPoll{State: "confirmed", Credentials: creds}
-}
-
-// ---------------------------------------------------------------------------
 // 错误
 // ---------------------------------------------------------------------------
 

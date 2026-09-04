@@ -1,7 +1,0 @@
-<resources>
-    <!-- 启动器上显示的名字。用回旧版安卓端的 "0Player"(见删 Flutter 之前的
-         android/app/src/main/AndroidManifest.xml 里的 android:label),
-         不用 Tauri 按 productName 生成的 "LinPlayer TV"。 -->
-    <string name="app_name">0Player</string>
-    <string name="main_activity_title">0Player</string>
-</resources>

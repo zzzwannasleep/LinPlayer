@@ -1,67 +1,36 @@
-# 全端(Rust + React + Tauri)构建 → Windows/Linux 绿色包 + 4 个 Android APK
-# (TV / 手机 × arm64 / arm32)→ 预发布。
+# 构建 · Go 核心层 + C# (Avalonia) Windows 外壳
 #
-# 这个文件曾经叫 "Build Flutter",构建 Android 手机/TV 两个 APK。现在 PC 端已迁到
-# Rust 栈,苹果全线不做 —— 那两个 job 连同它们依赖的 build-libmpv-pgs.yml 一起删了。
-#
-# 2026-07-19 全面重构:Flutter/Dart 全删、原 native-poc/ 提到仓库根(apps/ + ui/ +
-# crates/),那批自建的 jniLibs/*.so 也一并删除(要翻旧账:git tag flutter-final)。
-# 2026-07-20 加回安卓:apps/android 建起来了,job 在下面 build-android。
-# ★ 它跑 **ubuntu** 而不是 windows —— scripts/build-android.sh 里那一大堆
-#   libclang/resource-dir/vcvars 的折腾全是 **Windows 宿主特有**的(rquickjs-sys 要现生成
-#   FFI bindings,而 libclang 当 DLL 加载时找不到自己的 builtin 头)。Linux 上交叉编译
-#   安卓没这些坑,runner 还便宜一半。别照着那个脚本往 windows runner 上搬。
-#
-# 发布链路:本 workflow 出 v<ver>-pre 预发布(= App 内的「预览版」渠道),
-# publish.yml 手动把它提升成正式 Release(= 「稳定版」渠道)。两个渠道的定义
-# 就落在这两个文件上,别在别处再造一套。
+# 2026-09-04 重写:Rust/Tauri 栈整体删除后,原来的 build-windows / build-linux /
+# build-android 三个 job 连同它们依赖的 cargo / node / tauri 步骤一起没了。
+# 现在只有 Windows 一个端 —— Linux 与 Android 的 Go 版 UI 还没写(见
+# docs/go-migration/TODO.md 的进度表),没有可构建的东西,所以**不留空 job**:
+# 留着的话它们要么恒绿(什么都没干)要么恒红,两种都是噪音。
 name: Build
 
 on:
   push:
-    branches: [ main, master ]
-    # 只有 PC 端的东西改了才值得烧一个 windows runner(计费 2 倍)。
-    # 原 native-poc/ 已于 2026-07-19 提到仓库根;这里只列 PC 端真正的构建输入。
+    branches: [main]
     paths:
-      - 'apps/desktop/**'
-      - 'apps/android/**'
-      - 'crates/**'
-      - 'ui/**'
-      - 'public/**'
+      - 'core/**'
+      - 'apps/windows/**'
+      - 'bindings/**'
       - 'scripts/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'index.html'
-      - 'index-tv.html'
-      - 'index-mobile.html'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
+      - 'third_party/**'
+      - 'VERSION'
       - '.github/workflows/build.yml'
   pull_request:
-    branches: [ main, master ]
     paths:
-      - 'apps/desktop/**'
-      - 'apps/android/**'
-      - 'crates/**'
-      - 'ui/**'
-      - 'public/**'
+      - 'core/**'
+      - 'apps/windows/**'
+      - 'bindings/**'
       - 'scripts/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'index.html'
-      - 'index-tv.html'
-      - 'index-mobile.html'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
+      - 'third_party/**'
+      - 'VERSION'
       - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号(如 1.0.0)。留空=取 tauri.conf.json 的 version + -build<run_number>'
+        description: '版本号(留空则取 VERSION 文件 + -build<run_number>)'
         required: false
         type: string
 
@@ -69,10 +38,6 @@ permissions:
   contents: write
 
 jobs:
-  # 版本号单独算一次,Windows 和 Linux 两个 job 都引用它。
-  # ★ 不让两端各算一遍:那样 run_number 虽同,但只要哪天算法改了一半就会打出两个
-  #   版本号不一致的包,而更新器是按版本号比大小的 —— 这种漂移不会报错,只会让
-  #   某一端永远检测不到新版本。唯一权威只能有一个。
   version:
     name: Determine version
     runs-on: ubuntu-latest
@@ -80,23 +45,22 @@ jobs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      # 版本口径:tauri.conf.json 是 PC 端版本的唯一权威(打包脚本拿它命名 zip,
-      # build.rs 拿它注入 Sentry release,vite 拿它做 sourcemap release)。
-      # 加 -build<run_number> 是为了让**每次预发布都比上一次大** —— App 内的更新
-      # 比较逻辑正是按 major.minor.patch.build 逐级比的,不加就永远检测不到新预览版。
+
       # ★ 校验每个 `run:` 块的 shell 语法。yaml 合法 ≠ 脚本合法:
       #   用脚本批量改 workflow 时把某步的 if/then 切断,YAML 照样解析得过,
       #   要等 runner 跑到那一步才报 "syntax error: unexpected end of file"。
-      #   本仓已经这样烧过两轮 CI(一次回车符混进脚本,一次切多了行),所以设成闸门。
-      #   放在 version job 里:它最先跑、最便宜,坏了就别开另外三个 runner 了。
+      #   本仓已经这样烧过两轮 CI。放在最先跑、最便宜的 job 里:坏了就别开 runner 了。
       - name: Check workflow shell syntax
         run: bash scripts/check-workflows.sh
 
+      # 版本口径见 docs/VERSIONING.md。唯一权威是仓库根的 VERSION 一行。
+      # 加 -build<run_number> 是为了让**每次预发布都比上一次大** —— App 的更新
+      # 比较逻辑按 major.minor.patch.build 逐级比,不加就永远检测不到新预览版。
       - id: v
         run: |
           V="${{ inputs.version }}"
           if [ -z "$V" ]; then
-            BASE=$(node -p "require('./apps/desktop/tauri.conf.json').version")
+            BASE=$(tr -d '[:space:]' < VERSION)
             V="$BASE-build${{ github.run_number }}"
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
@@ -106,35 +70,28 @@ jobs:
     name: Build Windows portable
     needs: version
     runs-on: windows-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        # 不需要 lfs:LFS 里放的是 Android 的 libmpv.so,PC 端一个字节都不用。
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo + target
-        uses: Swatinem/rust-cache@v2
+      # 项目级工具链(Go + zig)。版本与 sha256 钉在 fetch 脚本里 ——
+      # 和本地开发用的是**同一份**,免得「我这儿能编、CI 编不过」。
+      - name: Cache toolchain
+        uses: actions/cache@v4
         with:
-          workspaces: .
+          path: .toolchain
+          key: toolchain-${{ runner.os }}-${{ hashFiles('scripts/fetch-toolchain.sh') }}
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Fetch toolchain (Go + zig)
+        shell: bash
+        run: bash scripts/fetch-toolchain.sh
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          # ★ 不能降到 22 以下:下面那步 `npm run check:telemetry` 是让 node 直接跑
-          # src/telemetry.check.ts(类型擦除,换来「零测试框架」)。Node 20 不支持,
-          # 报 ERR_UNKNOWN_FILE_EXTENSION ".ts" —— 本次就是这么红的第一轮。
-          # 类型擦除在 22.18+ 默认开、24 默认开;这里钉 24,和本地验证过的大版本一致。
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
+          dotnet-version: '10.0.x'
 
-      # 完整版 libmpv。100MB+,不进仓库(.gitignore),所以每次构建现拉。
-      # 这段逻辑原先住在 build-libmpv-pgs.yml 的 assemble-windows-libmpv job 里,
-      # 那个 workflow 删了,逻辑搬到这儿 —— 少一次跨 workflow 的产物传递,也少一个
-      # 「上游 workflow 半年没跑过、libmpv-latest 早就过期」的失败面。
+      # 完整版 libmpv。100MB+,不进仓库(.gitignore),每次构建现拉。
       #
       # 为什么必须是 shinchiro 的完整构建:自带完整 ffmpeg,含 PGS/SUP 图形字幕解码器
       # (hdmv_pgs_subtitle)。精简版 libmpv 能编译、能播放、蓝光字幕一片空白。
@@ -154,795 +111,83 @@ jobs:
           7z x mpv-dev.7z -ompv-dev | Out-Null
           $dll = Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll | Select-Object -First 1
           if (-not $dll) { throw "压缩包里没有 libmpv-2.dll" }
-          Copy-Item $dll.FullName crates/mpv/libmpv/libmpv-2.dll -Force
-          $size = (Get-Item crates/mpv/libmpv/libmpv-2.dll).Length
+          Copy-Item $dll.FullName third_party/libmpv/libmpv-2.dll -Force
+          $size = (Get-Item third_party/libmpv/libmpv-2.dll).Length
           Write-Host "libmpv-2.dll size: $size"
           if ($size -lt 60MB) { throw "libmpv-2.dll 只有 $size 字节,不是完整版" }
 
-      # 把本次构建的版本号写回 tauri.conf.json。不写的话 Sentry 上所有构建都挤在
-      # linplayer-pc@0.1.0 一个 release 下,符号/sourcemap 互相覆盖;App 内的
-      # 「当前版本」也永远显示 0.1.0,更新检查一律认为自己是最新的。
-      - name: Stamp version into tauri.conf.json
-        shell: pwsh
-        run: |
-          $p = "apps/desktop/tauri.conf.json"
-          $c = (Get-Content $p -Raw) -replace '("version"\s*:\s*")[^"]*(")', '${1}${{ needs.version.outputs.version }}${2}'
-          Set-Content $p -Value $c -NoNewline -Encoding utf8NoBOM
-          Select-String -Path $p -Pattern '"version"'
+      - name: Core gate (go vet / test / FFI 契约 / 差分对账)
+        shell: bash
+        run: bash scripts/check-core.sh
 
-      - name: Install frontend deps
-        run: npm ci
+      - name: Bindings gate (COMMANDS.md ↔ Go ↔ C# ↔ Kotlin)
+        shell: bash
+        run: bash scripts/check-bindings.sh
 
-      - name: Check telemetry redaction
-        run: npm run check:telemetry
-
-      - name: Rust tests
-        run: cargo test --workspace
-
-      # 前端 sourcemap 由 @sentry/vite-plugin 在 beforeBuildCommand 里顺手上传
-      # (它自己读 SENTRY_AUTH_TOKEN;没 token 就整个不挂,有 token 而传失败则构建红)。
-      - name: Build
+      # ★★ 编译期凭据。一个都不配也编得出来 —— 对应功能会**明说「这个构建没配」**,
+      #   而不是装作没数据。但发行版这九个全都要配:漏了用户看到的是
+      #   「弹幕搜不到 / 排行榜空白 / Trakt 登不上」,而 CI 全绿。
+      #   全表与漏配后果见 docs/go-migration/BUILD-SECRETS.md。
+      #   scripts/check-workflows.sh 的凭据闸门盯着这一步。
+      - name: Pack Windows portable
+        shell: bash
         env:
+          LP_VERSION: ${{ needs.version.outputs.version }}
           DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
           DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        # ★ 必须 cd 进 apps/desktop:仓库里现在有**两个** tauri.conf.json
-        #   (apps/desktop 和 apps/android),从仓库根跑 `npx tauri build` 时 CLI
-        #   会挑中安卓那个,然后去找一个根本不存在的 linplayer-android.exe:
-        #   "failed to rename app binary ... linplayer-android.exe"。
-        #   报错完全不提「配置选错了」,极难反推。在哪个目录跑就用哪个配置。
-        run: cd apps/desktop && npx tauri build
+          LP_SYNC_PROXY_BASE: ${{ secrets.LP_SYNC_PROXY_BASE }}
+          LP_SYNC_PROXY_KEY: ${{ secrets.LP_SYNC_PROXY_KEY }}
+          LP_BANGUMI_REDIRECT_URI: ${{ secrets.LP_BANGUMI_REDIRECT_URI }}
+          LP_AFDIAN_SPONSOR_URL: ${{ secrets.LP_AFDIAN_SPONSOR_URL }}
+          LP_ICON_LIBRARY_SOURCES: ${{ secrets.LP_ICON_LIBRARY_SOURCES }}
+          LP_CF_TEST_URL: ${{ secrets.LP_CF_TEST_URL }}
+        run: bash scripts/pack-win.sh "$GITHUB_WORKSPACE/release"
 
-      # Rust 侧的符号。前端那半上面已经传了,但 MSVC 的函数名/行号在 app.pdb 里,
-      # 而发行包只装 exe —— 不传的话用户机器上的 panic 回来就是一列十六进制地址。
-      # ★ 判断写在脚本里,不写成 `if: ${{ secrets.X != '' }}` —— GitHub 不给 step 的
-      #   if: 表达式访问 secrets 上下文,那样写会直接跳过或报错(本仓上次接 Sentry 踩过)。
-      - name: Upload Rust debug symbols to Sentry
-        shell: pwsh
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+      # ★ 出包了不等于包是对的。少一个 DLL 用户双击才发现,而 CI 早就绿了。
+      - name: Verify package contents
+        shell: bash
         run: |
-          if (-not $env:SENTRY_AUTH_TOKEN) {
-            Write-Host "::notice::SENTRY_AUTH_TOKEN 未设置,跳过符号上传(崩溃堆栈将无法符号化)"
-            exit 0
-          }
-          $cli = "node_modules/@sentry/cli-win32-x64/bin/sentry-cli.exe"
-          if (-not (Test-Path $cli)) { throw "sentry-cli 不在,npm ci 装漏了?" }
-          # project 必须是 DSN 所指的那个(slug 叫 flutter,历史原因:移动端先建的)。
-          # 传到别的项目**两边都不报错**,symbolication 却永远不发生。
-          # 不加 --include-sources:那会把 Rust 源码上传到 Sentry,与 Dart 侧
-          # upload_sources: false 保持同一条口径。
-          & $cli debug-files upload --org linplayer --project flutter `
-            target/release/app.pdb target/release/LinPlayer.exe
-          if ($LASTEXITCODE -ne 0) { throw "符号上传失败(exit $LASTEXITCODE)" }
-
-      # 自己组包,**不复用本地的 scripts/pack-portable.ps1** —— 那个脚本被
-      # .gitignore 明确排除(用户 2026-07-15 定的「本地工作材料不入库」),
-      # CI 检出的树里根本没有它。它做的也多半是开发环路的事(读 hjbl.env、解压到
-      # 测试目录、保留 userdata),CI 只需要「exe + dll → zip」这一步。
-      #
-      # ★ 发行包内容改动时,这里和 pack-portable.ps1 要一起改 —— 下面的清单断言
-      #   保证 CI 这半至少不会静默少装文件。
-      - name: Pack portable zip
-        shell: pwsh
-        run: |
-          $rel = "target/release"
-          # mainBinaryName 已让 tauri 直接产出 LinPlayer.exe(crate 名仍是 app,故 pdb 还叫 app.pdb)。
-          $exe = "$rel/LinPlayer.exe"
-          $dll = "$rel/libmpv-2.dll"   # build.rs 会把它从 crates/mpv/libmpv/ 拷过来
-          foreach ($f in @($exe, $dll)) {
-            if (-not (Test-Path $f)) { throw "缺少产物 $f" }
-          }
-          $stage = "pack/LinPlayer"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          # 应用内更新的 applier 按 LinPlayer.exe 这个名字找主程序。
-          Copy-Item $exe "$stage/LinPlayer.exe" -Force
-          Copy-Item $dll "$stage/libmpv-2.dll" -Force
-
-          $want = @("LinPlayer.exe", "libmpv-2.dll")
-          $got  = (Get-ChildItem $stage -File | ForEach-Object Name | Sort-Object)
-          if (Compare-Object $want ($got) ) {
-            throw "发行包内容对不上。期望 $($want -join ', ');实得 $($got -join ', ')"
-          }
-
-          # 命名必须让 App 的更新器认得出来:它按小写子串 "windows" 挑资产。
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          $zip = "release/LinPlayer-Windows-v${{ needs.version.outputs.version }}.zip"
-          Compress-Archive -Path (Get-ChildItem -LiteralPath $stage).FullName -DestinationPath $zip -CompressionLevel Optimal
-          "zip: $zip  $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB"
-
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-windows
-          path: release/*.zip
-          retention-days: 7
-
-  build-linux:
-    name: Build Linux portable
-    needs: version
-    # ★ 钉 22.04,不用 ubuntu-latest。glibc 是**向后兼容、不向前兼容**的:在 24.04
-    #   (glibc 2.39)上链出来的二进制,拿到 Debian 12 / Ubuntu 22.04 上就是
-    #   `GLIBC_2.38 not found`,起都起不来。用老的构建 = 覆盖面更广。
-    runs-on: ubuntu-22.04
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Tauri v2 在 Linux 上是 GTK3 + WebKitGTK 4.1(不是 4.0,别装错包名)。
-      #
-      # ★ 这里**故意不装 libmpv-dev**:libmpv 是运行时 dlopen 的(见 crates/mpv/src/lib.rs
-      #   的 `mod ffi`)。装了反而有害 —— 一旦哪天有人给 build.rs 加回 link-lib,
-      #   构建机上有 .so 就会「碰巧编过」,而 ELF 里被钉进一条 libmpv.so.1 的 DT_NEEDED,
-      #   包发到 Ubuntu 24.04(只有 libmpv.so.2)上直接起不来。让构建机没有这个库,
-      #   这类回归就不可能悄悄溜过去。
-      - name: Install system deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            librsvg2-dev \
-            libayatana-appindicator3-dev \
-            libxrandr-dev
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo + target
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Stamp version into tauri.conf.json
-        run: |
-          node -e '
-            const fs = require("fs"), p = "apps/desktop/tauri.conf.json";
-            const c = JSON.parse(fs.readFileSync(p, "utf8"));
-            c.version = "${{ needs.version.outputs.version }}";
-            fs.writeFileSync(p, JSON.stringify(c, null, 2));
-          '
-          grep '"version"' apps/desktop/tauri.conf.json
-
-      - name: Install frontend deps
-        run: npm ci
-
-      - name: Rust tests
-        run: cargo test --workspace
-
-      # 诊断步骤,**不是闸门**(continue-on-error):拿真凭据打一次弹弹Play 排行榜,
-      # 把服务端原话打进日志。2026-07-21「弹弹榜单没数据」就是卡在本地没凭据、
-      # 而线上又把错误吞成空数组,只能靠这一步看清是签名被拒、限流、还是接口改版。
-      # 弹弹抽风不该拦发版,所以失败只留日志。
-      - name: Dandanplay 排行榜连通性(诊断)
-        continue-on-error: true
-        env:
-          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
-          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
-        run: cargo test -p linplayer-core --lib ranking::tests::dandan_trending_smoke -- --ignored --nocapture
-
-      - name: Build
-        env:
-          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
-          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        # ★ 必须 cd 进 apps/desktop:仓库里现在有**两个** tauri.conf.json
-        #   (apps/desktop 和 apps/android),从仓库根跑 `npx tauri build` 时 CLI
-        #   会挑中安卓那个,然后去找一个根本不存在的 linplayer-android.exe:
-        #   "failed to rename app binary ... linplayer-android.exe"。
-        #   报错完全不提「配置选错了」,极难反推。在哪个目录跑就用哪个配置。
-        run: cd apps/desktop && npx tauri build
-
-      # 和 Windows 那半同一条口径:不传符号的话,Linux 用户回来的 panic 就是一列
-      # 十六进制地址,遥测等于白接。根 Cargo.toml 的 debug="line-tables-only" 在 ELF 上
-      # 是把行号表放进二进制本身,所以直接把二进制交给 sentry-cli 就够了(不像 MSVC 要另找 pdb)。
-      # ★ 判断写在脚本里,不写成 `if: ${{ secrets.X != '' }}` —— GitHub 不给 step 的
-      #   if: 表达式访问 secrets 上下文。
-      - name: Upload Rust debug symbols to Sentry
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${SENTRY_AUTH_TOKEN:-}" ]; then
-            echo "::notice::SENTRY_AUTH_TOKEN 未设置,跳过符号上传(崩溃堆栈将无法符号化)"
-            exit 0
-          fi
-          CLI=node_modules/@sentry/cli-linux-x64/bin/sentry-cli
-          test -x "$CLI" || { echo "sentry-cli 不在,npm ci 装漏了?"; exit 1; }
-          # project 必须是 DSN 所指的那个(slug 叫 flutter,历史原因:移动端先建的)。
-          # 传到别的项目**两边都不报错**,symbolication 却永远不发生。
-          # 产物名跟 tauri.conf.json 的 mainBinaryName 走(= LinPlayer),不是 crate 名 app。
-          "$CLI" debug-files upload --org linplayer --project flutter target/release/LinPlayer
-
-      # 打包成 **zip**(不是 Linux 更习惯的 tar.gz):应用内更新器解包走的是
-      # core/update.rs 的 extract_zip,喂它 tar.gz 会当场失败。格式必须和更新链路一致。
-      # 资产名必须含小写子串 "linux" —— update.rs 的 asset_keywords() 就按这个挑。
-      #
-      # 不打包 libmpv.so:构建机那份会连带一串特定版本的 ffmpeg/libass 依赖,而
-      # build.rs 写的 `$ORIGIN` rpath 会让**自带的那份永远优先于系统的**。在别的发行版上
-      # 那就从「用系统上好好的库」变成「用一个依赖对不上的库」,反而更坏。
-      # 用户想自带,把 libmpv.so.2 丢进解压目录即可 —— rpath 已经给他留好了这条路。
-      - name: Pack portable zip
-        run: |
-          set -euo pipefail
-          # ★ 名字来自 tauri.conf.json 的 mainBinaryName,**不是** crate 名(app)。
-          #   d9a24706 加 mainBinaryName 时只同步了 Windows job,这里漏了 —— Windows 绿、
-          #   Linux 在打包步骤炸「缺少产物」(还在找 crate 名那个)。
-          #   有 cargo test ci_binary_paths_match_main_binary_name 钉住两边一致。
-          BIN=target/release/LinPlayer
-          test -f "$BIN" || { echo "缺少产物 $BIN"; exit 1; }
-
-          # ★ strip 必须排在上面那步 Sentry 符号上传**之后**:调试信息已经传走了,
-          #   符号化靠 build-id 匹配,和本地这份二进制里还留不留调试段无关。
-          #   不 strip 的代价是实的 —— 根 Cargo.toml 的 debug="line-tables-only" 那句注释
-          #   「exe 体积不变」只对 MSVC 成立(它的调试信息全在独立的 .pdb 里),
-          #   ELF 是把调试段**塞进二进制本身**的。实测未 strip 191MB。
-          echo "strip 前: $(du -h "$BIN" | cut -f1)"
-          strip --strip-debug "$BIN"
-          echo "strip 后: $(du -h "$BIN" | cut -f1)"
-          # 回读 rpath,确认 build.rs 那条 $ORIGIN 真的写进 ELF 了(写不进去不会报错,
-          # 只是用户自带 libmpv 的那条路静默失效)。
-          readelf -d "$BIN" | grep -E 'RUNPATH|RPATH' || echo "::warning::ELF 里没有 RUNPATH"
-
-          # ★ 反向断言:libmpv **绝不能**出现在 DT_NEEDED 里。
-          #   出现了就说明有人把它变回了链接期依赖,而那会把某个具体 soname
-          #   (构建机上是 libmpv.so.1)钉死进 ELF —— 包在 Ubuntu 24.04 等只有
-          #   libmpv.so.2 的系统上一启动就死,而 CI 全绿、本机也照跑。必须在这儿拦住。
-          if readelf -d "$BIN" | grep -q 'NEEDED.*libmpv'; then
-            echo "libmpv 被链成了硬依赖(DT_NEEDED),应当是运行时 dlopen"; exit 1
-          fi
-          # 正向断言:dlopen 的候选名确实编进了二进制。
-          grep -q 'libmpv\.so\.2' "$BIN" || { echo "二进制里找不到 dlopen 候选名"; exit 1; }
-
-          # 把硬依赖清单打进日志。这不是装饰:发行包的「系统下限」完全由这张表决定
-          # (libwebkit2gtk-4.1 那条就把下限钉在 Ubuntu 22.04 / Debian 12)。
-          # 谁哪天引入了新的 DT_NEEDED,这里一眼可见,不用等用户报「装了却起不来」。
-          echo "--- DT_NEEDED(运行时硬依赖,决定系统下限) ---"
-          readelf -d "$BIN" | sed -n 's/.*NEEDED.*\[\(.*\)\]/  \1/p'
-          # webkit 是 Tauri 在 Linux 的地基,没有它说明构建方式变了,必须当场知道。
-          readelf -d "$BIN" | grep -q 'libwebkit2gtk-4\.1' || {
-            echo "::warning::没有链接 libwebkit2gtk-4.1,发行说明里的系统下限可能已过时"; }
-
-          STAGE=pack/LinPlayer
-          mkdir -p "$STAGE"
-          cp "$BIN" "$STAGE/LinPlayer"
-          chmod +x "$STAGE/LinPlayer"
-          cat > "$STAGE/README.txt" <<'EOF'
-          LinPlayer(Linux 免安装版 x86_64)
-
-          运行:./LinPlayer      (若提示没有权限:chmod +x LinPlayer)
-
-          ── 系统依赖 ────────────────────────────────────────────────
-          「免安装」指的是**数据**全在本目录,不是自带全部运行库。
-          本程序对系统库是硬依赖,缺哪个就报 "libxxx.so.N: cannot open shared
-          object file",跟播放器设置无关。
-
-          1) 桌面运行库(Tauri 在 Linux 上就是 GTK3 + WebKitGTK):
-             Debian/Ubuntu : sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 libsoup-3.0-0
-             Fedora        : sudo dnf install webkit2gtk4.1 gtk3 libsoup3
-             Arch          : sudo pacman -S webkit2gtk-4.1 gtk3 libsoup3
-
-             ⚠ 必须是 webkit2gtk 4.1(配 libsoup3),不是 4.0。
-               这决定了系统下限:Ubuntu >= 22.04 / Debian >= 12 / Fedora >= 36。
-
-          2) libmpv(本包不自带):
-             Debian/Ubuntu : sudo apt install libmpv2      (旧版本叫 libmpv1)
-             Fedora        : sudo dnf install mpv-libs
-             Arch          : sudo pacman -S mpv
-
-             运行时 dlopen,libmpv.so.2 / .so.1 都认。想自带某个版本,把
-             libmpv.so.2 放进本目录即可(已配 $ORIGIN rpath,同级优先于系统库)。
-
-          ── 显示服务器 ──────────────────────────────────────────────
-          需要 X11 且需要合成器(现代桌面环境默认都开)。
-          Wayland 会话下自动经 XWayland 运行 —— 视频窗口须由程序自己定位,
-          而 Wayland 协议不提供该能力。
-
-          ── 数据 ────────────────────────────────────────────────────
-          全部保存在本目录的 userdata/ 下,删除整个文件夹即完成卸载。
-          EOF
-
-          mkdir -p release
-          ZIP="$PWD/release/LinPlayer-Linux-v${{ needs.version.outputs.version }}.zip"
-          (cd pack && zip -r -9 "$ZIP" LinPlayer)
-          ls -lh "$ZIP"
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-linux
-          path: release/*.zip
-          retention-days: 7
-
-  # ---------------------------------------------------------------------------
-  # Android APK —— **4 个包**:TV / 手机 × arm64 / arm32。
-  #
-  # ★ TV 和手机是两个 APK,不是一个包运行时分流。
-  #   2026-07-27 之前是「一个 APK + index-android.html 按 UA 标 location.replace」,
-  #   已删:**设备类型判不准**。大屏平板、投屏一体机、模拟器都可能被判成电视,
-  #   而判反的表现不是小 bug,是用户拿到**另一端的整套界面**。
-  #   现在壳打开哪个 html 在出包时定死:TV 用 apps/android/tauri.conf.json 的默认
-  #   入口,手机用 --config tauri.phone.conf.json 覆盖成 index-mobile.html。
-  #
-  # ★ 两个包的 applicationId 仍是同一个 xyz.linplayer.app,**故意的**:
-  #   一台设备只会装其中一个,包名一致才保得住老用户的覆盖升级(build.yml 下面
-  #   的身份断言把它钉死了)。副作用只有「手机包装到盒子上会顶掉 TV 包」,
-  #   那本来也是用户主动选的。
-  #
-  # ★ arm64 是 2026-07-27 新加的。在那之前只出 armeabi-v7a —— 盒子无所谓
-  #   (32 位包能跑在 64 位设备上),但手机端不行:8 Gen 4 / 天玑 9400 这一代
-  #   SoC 已经彻底砍掉 AArch32,32 位包装上去直接起不来。
-  #
-  # ★ 跑 ubuntu 不跑 windows:见文件头的说明,交叉编译安卓的那堆 libclang 坑是
-  #   Windows 宿主特有的,Linux 上没有,而且 windows runner 计费 2 倍。
-  # ★ 版本号跟 PC 用**同一个** version job 的输出 —— 安卓有自己的 tauri.conf.json,
-  #   不从同一个源头盖进去的话,两端会打出版本号不一致的包。更新器按版本号比大小,
-  #   这种漂移不报错,只会让某一端永远收不到更新(PC 端已经栽过一次)。
-  # ---------------------------------------------------------------------------
-  build-android:
-    name: Build Android ${{ matrix.flavor_label }} APK (${{ matrix.abi }})
-    needs: version
-    runs-on: ubuntu-latest
-
-    strategy:
-      # 一个组合挂掉别把另外三个一起掐了 —— ABI 相关的失败经常只影响一个 ABI,
-      # 全掐了就看不出到底是哪一半坏了。
-      fail-fast: false
-      # 用 include 逐条列全,不用 flavor × abi 叉乘:YAML 的矩阵没法按维度查表,
-      # 叉乘写法要在 shell 里再写一遍 if/case 把 abi 翻译成 ELF 魔数/jniLibs 目录名,
-      # 那才是真正会漏改的地方。四行摆在这里,改 ABI 时一眼看得全。
-      matrix:
-        include:
-          # ---- Android TV(入口 index-tv.html,即 tauri.conf.json 的默认值)----
-          - flavor: tv
-            flavor_label: TV
-            config_arg: ''
-            entry: index-tv.html
-            abi: arm64
-            tauri_target: aarch64
-            rust_target: aarch64-linux-android
-            jni_abi: arm64-v8a
-            elf_class: '02'
-            elf_machine: 'b7 00'
-          - flavor: tv
-            flavor_label: TV
-            config_arg: ''
-            entry: index-tv.html
-            abi: arm32
-            tauri_target: armv7
-            rust_target: armv7-linux-androideabi
-            jni_abi: armeabi-v7a
-            elf_class: '01'
-            elf_machine: '28 00'
-          # ---- 手机(入口 index-mobile.html,靠 --config 覆盖窗口 url)----
-          - flavor: phone
-            flavor_label: Phone
-            config_arg: '--config tauri.phone.conf.json'
-            entry: index-mobile.html
-            abi: arm64
-            tauri_target: aarch64
-            rust_target: aarch64-linux-android
-            jni_abi: arm64-v8a
-            elf_class: '02'
-            elf_machine: 'b7 00'
-          - flavor: phone
-            flavor_label: Phone
-            config_arg: '--config tauri.phone.conf.json'
-            entry: index-mobile.html
-            abi: arm32
-            tauri_target: armv7
-            rust_target: armv7-linux-androideabi
-            jni_abi: armeabi-v7a
-            elf_class: '01'
-            elf_machine: '28 00'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # ★ 安卓 job 也要装 Linux 的 GTK/webkit 开发包。
-      #   反直觉但必须:APK 是交叉编译到安卓目标的,**不需要**这些;
-      #   但下面的 `cargo test -p linplayer-android` 是编到**宿主**(x86_64 linux)跑的,
-      #   而 tauri 在 Linux 宿主上要链 glib/gtk/webkit。
-      #   不装的表现是 `failed to run custom build command for glib-sys` ——
-      #   报错指向 glib,和"安卓"三个字毫无关系,很容易往交叉编译上瞎找。
-      #   (Windows 本地不报:那边的 tauri 不需要 GTK。典型的本地过 ≠ CI 过。)
-      #
-      # ★ 只在一个组合上装。这套包**唯一的用途**就是那个宿主侧的命令注册测试,
-      #   而那个测试和 ABI / TV-手机 都无关,四个 job 各跑一遍纯属烧钱(每次 ~1.5 分钟)。
-      #   装包和跑测试挂的是同一个 if,改的时候两个要一起改。
-      - name: Install system deps
-        if: matrix.flavor == 'tv' && matrix.abi == 'arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y             libwebkit2gtk-4.1-dev             libgtk-3-dev             librsvg2-dev             libayatana-appindicator3-dev             libxrandr-dev
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      # NDK:ubuntu runner 自带若干版本,ANDROID_NDK_LATEST_HOME 指向最新的那个。
-      # 不写死版本号 —— 写死了 runner 镜像一升级就找不到目录,而且报错很难看懂。
-      - name: Resolve NDK
-        run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "NDK = $ANDROID_NDK_LATEST_HOME"
-          ls "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin" | head -3
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
-
-      # ★ shared-key 而不是 key:同一个 ABI 的 TV / 手机两个 job 编的是**一模一样**
-      #   的 Rust(两者只差壳打开哪个 html,那是配置不是代码),让它们共用一份缓存。
-      #   按 flavor 分开的话第二个 job 会从零编一遍,白烧十几分钟。
-      #   反过来 ABI 必须分开 —— 不同 target 的产物不能互相当缓存用。
-      - name: Cache cargo + target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: android-${{ matrix.abi }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-
-      - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
-
-      # 版本号盖进安卓自己的 tauri.conf.json(权威仍是 version job 的输出)。
-      - name: Stamp version into android tauri.conf.json
-        run: |
-          node -e '
-            const fs = require("fs"), p = "apps/android/tauri.conf.json";
-            const c = JSON.parse(fs.readFileSync(p, "utf8"));
-            c.version = "${{ needs.version.outputs.version }}";
-            fs.writeFileSync(p, JSON.stringify(c, null, 2));
-          '
-          grep '"version"' apps/android/tauri.conf.json
-
-      - name: Install frontend deps
-        run: npm ci
-
-      # 前端必须先出 dist —— 安卓壳的 frontendDist 指向它。
-      # ★ 本 job 要的那个入口必须在。vite 的 rollupOptions.input 漏列哪个,
-      #   那个就**静默产不出来**,而构建 exit 0 —— 装到设备上打开是一片空白,CI 却全绿。
-      #   (dist 是三端共用的一份,所以手机包里也躺着 index-tv.html,反之亦然。
-      #    多出来的那几百 KB 不值得为它拆两次 vite build。)
-      - name: Build frontend
-        run: |
-          npm run build
-          test -f "dist/${{ matrix.entry }}" \
-            || { echo "::error::dist/${{ matrix.entry }} 不存在 —— 检查 vite.config.ts 的 rollupOptions.input 是否漏列"; exit 1; }
-
-      # 签名密钥是可选的。
-      # ★ 不能把 secrets 写进 step 的 if: —— 那个上下文里读不到 secrets,条件恒假,
-      #   步骤会被静默跳过(本仓库在 Sentry 那次已经踩过一模一样的坑)。
-      #   正确做法是在 run 里读 env,把结果写成 output 供后续步骤判断。
-      - name: Detect signing key
-        id: signing
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KEYSTORE" ]; then echo "have=yes" >> "$GITHUB_OUTPUT"; echo "有签名密钥 → 出 release APK";
-          else echo "have=no" >> "$GITHUB_OUTPUT"; echo "无签名密钥 → 出 debug APK(debug 签名,可直接安装)"; fi
-
-      # gen/android 入库的话就跳过 init;没入库则现生成。两种都能跑。
-      - name: Android init (if needed)
-        run: |
-          if [ ! -d apps/android/gen/android ]; then
-            (cd apps/android && npx tauri android init --skip-targets-install)
-          else
-            echo "gen/android 已在仓库中,跳过 init"
-          fi
-
-      # ★ libmpv.so 不入库(仓库红线:脚本能拉的别入库),jniLibs/ 整个是 gitignore 的。
-      #   所以**这一步不跑就没有播放器** —— APK 照常构建、照常绿,装上去按播放才报
-      #   「APK 里没有 libmpv.so」。下面有校验兜底,别把它删了当优化。
-      #
-      # ★ ABI 由矩阵给,不再写死。改 ABI 时**四处要一起改**:矩阵里的 jni_abi/
-      #   elf_class/elf_machine、rust_target(dtolnay 那步)、tauri_target(下面 --target)、
-      #   产物文件名。漏一处的表现是「APK 里的 .so 和代码不是同一个 ABI」→
-      #   装得上,一播放就 UnsatisfiedLinkError。矩阵里一行摆全就是为了不漏。
-      #
-      #   来源与版本:media-kit/libmpv-android-video-build v1.1.11 的 full 变体。
-      #   选 full 不选 default:full 才带 PGS 图形字幕(旧 Flutter 版就是为这个换的,
-      #   见历史 commit 35a81e1e)。jar 里那个 libmediakitandroidhelper.so 是
-      #   media_kit(Flutter)专用胶水,我们不用,只取 libmpv.so。
-      - name: Fetch libmpv (${{ matrix.jni_abi }})
-        run: |
-          set -euo pipefail
-          VER="v1.1.11"
-          ABI="${{ matrix.jni_abi }}"
-          DEST="apps/android/gen/android/app/src/main/jniLibs/$ABI"
-          mkdir -p "$DEST"
-          curl -fsSL -o /tmp/libmpv.jar             "https://github.com/media-kit/libmpv-android-video-build/releases/download/$VER/full-$ABI.jar"
-          unzip -o -j /tmp/libmpv.jar "lib/$ABI/libmpv.so" -d "$DEST"
-          ls -lh "$DEST/libmpv.so"
-          # ★ 校验它确实是本 job 要的那个 ABI,而不是 LFS 指针/错误页/**拿错 ABI**。
-          #   旧仓库在这条上栽过:APK 里是文本指针,运行时 UnsatisfiedLinkError
-          #   报 "bad ELF magic 76657273"(那其实是 "vers"),构建全程是绿的。
-          #   拿错 ABI 同样是构建绿、装得上、一播放就炸,所以 class/machine 一起验:
-          #     e_ident[4] class   01=32位  02=64位
-          #     e_machine (16..17) 28 00=ARM   b7 00=AArch64(小端)
-          # ★ 不要写成 `... | grep -q ...`。本步开头是 set -o pipefail,而 grep -q 命中后
-          #   会立刻退出并关掉管道,上游进程吃 SIGPIPE 非零退出 → **命中反而判失败**。
-          #   下面那条符号校验就是这么红过一次(符号明明在)。一律先落盘再 grep。
-          HDR=$(head -c 20 "$DEST/libmpv.so" | od -An -tx1 | tr -s ' ')
-          echo "ELF header: $HDR"
-          case "$HDR" in
-            *"7f 45 4c 46 ${{ matrix.elf_class }}"*) ;;
-            *) echo "::error::libmpv.so 的 ELF class 不是 ${{ matrix.elf_class }}(01=32位 02=64位),header=$HDR"; exit 1 ;;
-          esac
-          case "$HDR" in
-            *"${{ matrix.elf_machine }}"*) ;;
-            *) echo "::error::libmpv.so 的 e_machine 不是 ${{ matrix.elf_machine }}(28 00=ARM32 b7 00=AArch64),header=$HDR"; exit 1 ;;
-          esac
-          # ★ 这个二进制没有 JNI_OnLoad,靠 av_jni_set_java_vm 登记 JavaVM
-          #   (Rust 侧 crates/mpv 的 set_android_java_vm 依赖它)。换版本/换 ABI 时这条会先红。
-          #   armeabi-v7a 那份已实测同样满足(8066 个导出符号,有 av_jni_set_java_vm、无 JNI_OnLoad)。
-          NM=$(find "$ANDROID_NDK_ROOT" "$ANDROID_NDK_HOME" -name 'llvm-nm' -type f 2>/dev/null | head -1)
-          if [ -n "$NM" ]; then
-            "$NM" -D --defined-only "$DEST/libmpv.so" > /tmp/mpv-syms.txt
-            echo "导出符号数: $(wc -l < /tmp/mpv-syms.txt)"
-            if grep -q ' av_jni_set_java_vm$' /tmp/mpv-syms.txt; then
-              echo "av_jni_set_java_vm 存在 OK"
-            else
-              echo "::error::libmpv.so 没有 av_jni_set_java_vm —— 换版本了?看 crates/mpv 的 set_android_java_vm 注释"
-              echo "--- 实际的 jni 相关符号 ---"; grep -i jni /tmp/mpv-syms.txt || echo "(一个都没有)"
+          STAGE="$GITHUB_WORKSPACE/release/LinPlayer"
+          # ★ exe 名是 LinPlayer.exe(csproj 的 AssemblyName),不是项目名
+          #   LinPlayer.Desktop.exe —— 写错了这步会红,而它本身就是防漏的那道闸。
+          for f in LinPlayer.exe lpcore.dll libmpv-2.dll; do
+            if [ ! -f "$STAGE/$f" ]; then
+              echo "发行包里缺 $f"
+              ls -la "$STAGE" | head -30
               exit 1
             fi
-          else
-            echo "::warning::找不到 llvm-nm,跳过符号校验"
-          fi
+          done
+          echo "关键产物齐全:"
+          ls -la "$STAGE"/LinPlayer.exe "$STAGE"/lpcore.dll "$STAGE"/libmpv-2.dll
 
-
-      # keystore.properties 只是**输入**;真正让它生效的是
-      # gen/android/app/build.gradle.kts 里的 signingConfigs(2026-07-21 补上)。
-      # 这条注释以前写着「仓库没有 ANDROID_KEYSTORE_BASE64」—— 早就有了,注释过时了,
-      # 于是 gradle 那半一直没人补,连发了几个装不上的包。别再让注释替代校验:
-      # 成品有没有签名由下面的「Assert APK is signed」说了算。
-      # 字段名和 build.gradle.kts 里读的必须一字不差。
-      - name: Write keystore
-        if: steps.signing.outputs.have == 'yes'
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          mkdir -p apps/android/gen/android
-          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/lp.keystore"
-          cat > apps/android/gen/android/keystore.properties <<EOF
-          storeFile=$RUNNER_TEMP/lp.keystore
-          storePassword=$KS_PASS
-          keyAlias=$KEY_ALIAS
-          password=$KEY_PASS
-          EOF
-          echo "keystore.properties 已写入"
-
-      # ★ 命令对账:tv-commands.txt × generate_handler! × ui/shared/api.ts 三方比对。
-      #   漏注册一个命令,构建照样绿,用户走到那个页面才报 command not found ——
-      #   这条测试把那种失败提前到 CI。(本地反向验证过:注释掉 list_favorites 立刻红。)
-      #   宿主侧测试,和 ABI / TV-手机都无关 —— 只在一个组合上跑(和上面 apt 那步同一个 if)。
-      - name: Command registration test
-        if: matrix.flavor == 'tv' && matrix.abi == 'arm64'
-        run: cargo test -p linplayer-android
-
-      - name: Build APK
-        env:
-          # ★ 关掉行号表,只对安卓这次构建生效。
-          #   根 Cargo.toml 的 [profile.release] debug="line-tables-only" 是为 Windows 上的
-          #   Sentry 加的 —— MSVC 把调试信息全放进独立 .pdb,exe 体积**不变**,那笔账划算。
-          #   ELF 不是:调试信息留在 .so 里一起进 APK。实测 105MB → 21MB。
-          #   用 CARGO_PROFILE_* 而不改 Cargo.toml:那是全 workspace 的,改了会把桌面的
-          #   崩溃报告打回「只知道在哪个函数」。cargo profile 没有 per-target 覆盖,
-          #   只能在调用侧按住 —— scripts/build-android-apk.sh 里是同一条,改要一起改。
-          CARGO_PROFILE_RELEASE_DEBUG: "false"
-          # ★★ 榜单凭据。**漏了这三行 = TV 端排行榜整页空白,而构建全程绿灯。**
-          #   crates/core/build.rs 在编译期读这三个环境变量、把密钥加密进二进制;
-          #   读不到就不注入,运行时 available_categories() 返回空数组 —— 前端诚实显示
-          #   「未注入凭据」,看起来像功能没做,实际是打包时把密钥落下了。
-          #   Windows / Linux 两个 job 早就有这段(见各自的 Build 步骤),
-          #   安卓 job 从建起来那天就漏了。三个 job 必须**一起**改。
-          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
-          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        run: |
-          # ★ rquickjs-sys 在安卓要现跑 bindgen 生成 FFI —— 必须显式给 NDK sysroot,
-          #   否则 bindgen 拿**宿主的 /usr/include** 去编安卓目标,报
-          #   "bits/libc-header-start.h file not found"(指向 glibc 多架构头,
-          #   和"安卓"三个字毫无关系,极易往别处找)。
-          #   我一开始以为 scripts/build-android.sh 里那套 sysroot 折腾是 Windows 特有的
-          #   —— 错了:**只有 libclang 定位那部分是**,sysroot 这条两个平台都要。
-          SYSROOT="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-          test -d "$SYSROOT" || { echo "::error::NDK sysroot 不存在: $SYSROOT"; exit 1; }
-          # ★ 带连字符的变量名 **bash 不能 export**(不是合法标识符,报
-          #   "not a valid identifier")。只能用 `env NAME=VAL cmd` 前缀传给子进程。
-          #   scripts/build-android.sh 里原样写着这条,我照样撞了一次 —— 别再撞第三次。
-          #   两种写法都传:bindgen 查 target 变量时连字符版和下划线版都认,
-          #   但不同版本偏好不同,一起给最省事。
-          T="${{ matrix.rust_target }}"
-          ENVV=(
-            "BINDGEN_EXTRA_CLANG_ARGS_$T=--sysroot=$SYSROOT"
-            "BINDGEN_EXTRA_CLANG_ARGS_${T//-/_}=--sysroot=$SYSROOT"
-          )
-          echo "sysroot = $SYSROOT / target = $T"
-          # ★ 必须 cd 进 apps/android:仓库里现在有**两个** tauri.conf.json
-          #   (apps/desktop 和 apps/android),CLI 自动发现会挑到哪个不确定。
-          #   在哪个目录跑就用哪个配置,这是唯一不含糊的写法。
-          #
-          # ★ config_arg 是手机包和 TV 包**唯一**的区别:
-          #     TV   = 空,用 tauri.conf.json 的默认入口 index-tv.html
-          #     手机 = --config tauri.phone.conf.json,把窗口 url 覆盖成 index-mobile.html
-          #   不加引号地展开是故意的(要它拆成两个参数),空串时展开成零个参数。
-          cd apps/android
-          if [ "${{ steps.signing.outputs.have }}" = "yes" ]; then
-            env "${ENVV[@]}" npx tauri android build --apk --target ${{ matrix.tauri_target }} ${{ matrix.config_arg }}
-          else
-            env "${ENVV[@]}" npx tauri android build --apk --debug --target ${{ matrix.tauri_target }} ${{ matrix.config_arg }}
-          fi
-
-      # 产物路径在 tauri 版本之间变过,不写死 —— 找出来再改名,找不到就明确报错,
-      # 而不是让后面的 upload 拿着空 glob 静默成功。
-      - name: Collect APK
-        run: |
-          mkdir -p release
-          # ★ 不能用 `find | head -1`:gradle 同时留着 universal / debug 等变体时,
-          #   head -1 挑到哪个纯看目录序,而下面**无条件**把它命名成 -arm32 ——
-          #   发出去的可能是另一个变体的包,构建全绿、文件名还理直气壮。
-          #   改成:必须**恰好一个**候选,多于一个就报出来让人看清再决定。
-          mapfile -t APKS < <(find apps/android/gen/android -name "*.apk" -type f)
-          if [ "${#APKS[@]}" -eq 0 ]; then
-            echo "::error::没找到 APK 产物"; find apps/android/gen/android -name "*.apk" -o -name "*.aab" | head -20; exit 1
-          fi
-          if [ "${#APKS[@]}" -gt 1 ]; then
-            echo "::error::找到多个 APK,不知道该发哪个:"; printf '  %s\n' "${APKS[@]}"; exit 1
-          fi
-          APK="${APKS[0]}"
-          cp "$APK" "release/LinPlayer-${{ matrix.flavor_label }}-v${{ needs.version.outputs.version }}-${{ matrix.abi }}.apk"
-          ls -lh release/
-          # ★ 体积闸门。上面那个 CARGO_PROFILE_RELEASE_DEBUG 一旦失效(改错、被别处覆盖),
-          #   APK 会悄悄涨回 100MB 以上 —— 构建照样绿,只有用户下载时才发现。
-          #   2026-07-27 本地实测:arm64 45MB(其中 libmpv.so 就占 16MB),arm32 略小。
-          #   闸门 60MB:兜得住"调试信息回来了"那个量级(100MB+),又留了 15MB 余量。
-          #   ⚠️ 别看到 45MB 就顺手把闸门调低到贴着现值 —— 那样加一个功能就红一次。
-          SZ=$(stat -c%s release/*.apk)
-          echo "APK 体积: $((SZ/1024/1024)) MB"
-          if [ "$SZ" -gt 62914560 ]; then
-            echo "::error::APK $((SZ/1024/1024))MB 超过 60MB 闸门 —— 多半是 CARGO_PROFILE_RELEASE_DEBUG 没生效,调试信息又被打进 .so 了"
-            exit 1
-          fi
-
-      # ★★ 入口闸门 —— 这是拆包之后**唯一的新失败模式**,而且是静默的:
-      #   `--config` 一旦没生效(路径写错、tauri 改了合并语义、参数被引号吞掉),
-      #   出来的手机包会照样构建成功、照样签名、照样装得上,打开却是**整套 TV 界面**。
-      #   源码里看不出来,只有装到手机上才发现。
-      #   查法:tauri CLI 把合并后的配置写进 APK 的 assets/tauri.conf.json,
-      #   直接读它比对窗口 url。(TV 包用默认配置,这条同样能兜住「谁把默认入口改了」。)
-      - name: Assert APK entry point
-        run: |
-          APK=$(ls release/*.apk)
-          unzip -p "$APK" assets/tauri.conf.json > /tmp/apk-conf.json \
-            || { echo "::error::APK 里没有 assets/tauri.conf.json —— tauri 版本变了?这条闸门要重写"; exit 1; }
-          URL=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/apk-conf.json","utf8")).app.windows[0].url)')
-          echo "窗口入口 = $URL(期望 ${{ matrix.entry }})"
-          [ "$URL" = "${{ matrix.entry }}" ] \
-            || { echo "::error::${{ matrix.flavor_label }} 包的入口是 $URL,不是 ${{ matrix.entry }} —— 装上去会进错界面"; exit 1; }
-
-      # ★ Android TV 专属校验:没有 LEANBACK_LAUNCHER,应用**在 TV launcher 上根本不出现**
-      #   ——「装上了但找不到」是最难自查的一类失败,所以在 CI 里硬断言。
-      # ★★ 签名闸门。2026-07-21 事故:CI 全绿、日志还打「有签名密钥 → 出 release APK」,
-      #   发出去的却是 app-universal-release-unsigned.apk —— 用户装的时候报「安装包无效」。
-      #   根因是 gen/android/app/build.gradle.kts 里 release 变体没有 signingConfig
-      #   (keystore.properties 写了但没人读)。**写了配置 ≠ 用了配置**,所以这里验成品,
-      #   不验中间状态:直接检查 APK 里有没有真的签名。
-      - name: Assert APK is signed
-        run: |
-          APK=$(ls release/*.apk)
-          echo "校验 $APK"
-          # 首选 apksigner(权威,能报出签名方案版本)
-          SIGNER=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1 || true)
-          if [ -n "$SIGNER" ]; then
-            if ! "$SIGNER" verify --verbose "$APK"; then
-              echo "::error::APK 未签名或签名无效 —— Android 会拒装并报「安装包无效」。"
-              echo "::error::检查 gen/android/app/build.gradle.kts 的 signingConfigs 是否被 release 变体引用。"
-              exit 1
-            fi
-          else
-            # 没有 apksigner 时的兜底:v1 看 META-INF 里的 .RSA/.SF,v2/v3 看签名块魔数。
-            echo "::warning::找不到 apksigner,改用结构检查"
-            V1=$(unzip -l "$APK" | grep -cE 'META-INF/[^/]+\.(RSA|DSA|EC)$' || true)
-            V2=$(grep -c "APK Sig Block 42" "$APK" || true)
-            echo "v1 证书条目=$V1  v2/v3 签名块=$V2"
-            if [ "$V1" -eq 0 ] && [ "$V2" -eq 0 ]; then
-              echo "::error::APK 三种签名方案一个都没有 —— 装不上"; exit 1
-            fi
-          fi
-          echo "签名校验通过"
-
-      # 包名/应用名/图标/banner 一起验成品。2026-07-21 之前发出去的包是
-      # xyz.linplayer.tv + "LinPlayer TV" + Tauri 默认图标 —— 三样全不是要的,
-      # 而这些都只在**装到设备上**才看得出来,源码里改没改肉眼审不出。
-      - name: Assert APK identity
-        run: |
-          APK=$(ls release/*.apk)
-          AAPT=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/aapt2 2>/dev/null | sort -V | tail -1)
-          [ -n "$AAPT" ] || { echo "::error::找不到 aapt2"; exit 1; }
-          BADGING=$("$AAPT" dump badging "$APK")
-          echo "$BADGING" | grep -E "^package:|^application:"
-          echo "$BADGING" | grep -q "package: name='xyz.linplayer.app'" \
-            || { echo "::error::包名不是 xyz.linplayer.app —— 换了包名老用户就收不到覆盖升级"; exit 1; }
-          echo "$BADGING" | grep -q "application: label='0Player'" \
-            || { echo "::error::应用名不是 0Player"; exit 1; }
-          echo "$BADGING" | grep -q "banner=" \
-            || { echo "::error::没有 android:banner —— Android TV 桌面上是块空白磁贴"; exit 1; }
-          # ★ ABI 也在成品上验。上面只验了 libmpv.so 那一个文件的 ELF 头,
-          #   而 Rust 那个 .so 的 ABI 由 --target 决定 —— 两者分属两条链路,
-          #   对不上的表现是装得上、一播放就 UnsatisfiedLinkError。
-          echo "$BADGING" | grep -q "native-code: '${{ matrix.jni_abi }}'" \
-            || { echo "::error::APK 的 native-code 不是 ${{ matrix.jni_abi }}:$(echo "$BADGING" | grep native-code)"; exit 1; }
-          echo "身份校验通过"
-
-      - name: Assert Android TV manifest
-        run: |
-          M=apps/android/gen/android/app/src/main/AndroidManifest.xml
-          grep -q "LEANBACK_LAUNCHER" "$M" || { echo "::error::AndroidManifest 缺 LEANBACK_LAUNCHER,APK 装上后不会出现在 TV 桌面"; exit 1; }
-          grep -q "android.software.leanback" "$M" || { echo "::error::AndroidManifest 缺 leanback uses-feature"; exit 1; }
-          grep -q "android.hardware.touchscreen" "$M" || { echo "::error::AndroidManifest 没声明 touchscreen 非必需,TV 设备会被 Play 判为不兼容"; exit 1; }
-          echo "TV manifest 校验通过"
-
-      # 名字必须带矩阵变量:同名 artifact 在 v4 里是**报错**而不是合并,
-      # 四个 job 抢一个名字会红在这一步。下面 create-prerelease 用 release-* 通配
-      # + merge-multiple 把四份合到一起。
-      - name: Upload Android artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-android-${{ matrix.flavor }}-${{ matrix.abi }}
-          path: release/*.apk
-          retention-days: 7
+          name: LinPlayer-win-x64
+          path: release/*.zip
+          if-no-files-found: error
 
   create-prerelease:
     name: Create Pre-release
-    needs: [version, build-windows, build-linux, build-android]
+    needs: [version, build-windows]
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
-
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: release-*
-          path: ./artifacts/
+          path: ./artifacts
           merge-multiple: true
 
       - name: List release artifacts
         run: ls -lah ./artifacts/
 
-      # App 的更新器下载完会拿这个文件校验 SHA256(找不到就跳过校验,所以它必须在)。
       - name: Generate SHA256 checksums
         run: |
           cd ./artifacts
-          rm -f SHA256SUMS
-          for f in *; do [ -f "$f" ] && sha256sum "$f"; done > SHA256SUMS
-          echo "Generated SHA256SUMS:"; cat SHA256SUMS
+          sha256sum ./*.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Create Pre-release
         uses: softprops/action-gh-release@v2
@@ -951,4 +196,3 @@ jobs:
           name: v${{ needs.version.outputs.version }} (Pre-release)
           prerelease: true
           files: ./artifacts/*
-          generate_release_notes: true

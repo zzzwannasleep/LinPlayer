@@ -2,8 +2,6 @@ package sync
 
 // Trakt:设备码登录 / 刷新 / scrobble / 放送表。
 //
-// 移植自 `crates/core/src/sync/trakt.rs`。
-//
 // ★ 所有需要 client_secret 的那几步(换 token / 刷新)都经**自建代理**,
 // 客户端不持有 secret。代理地址与共享密钥是编译期注入的(见 sync.go 顶部)。
 

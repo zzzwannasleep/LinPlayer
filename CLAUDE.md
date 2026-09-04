@@ -86,20 +86,25 @@
 
 `AGENTS.md` §5 讲了要做什么,这里是怎么做:
 
-- **桌面**:`npm run pack:fast` 出测试目录 → 起 exe 时带 WebView2 远程调试端口 → CDP 连上去读真 DOM、
-  `document.elementFromPoint(x,y)` 查谁盖住了谁、直接调 `__TAURI_INTERNALS__.invoke` 分清前后端
-- **手机端布局**:CDP `Emulation.setDeviceMetricsOverride`。**不要用 `--window-size`**(实测 390 会变成 504)
-- **视频层**:CDP 截不到。用 Win32 `EnumWindows` 找窗口类 `lpvid` 量位置和可见性
-- **前端纯逻辑**:可以用 `node` 直跑真模块(Node 24 原生剥类型),**但必须 import 本尊,不许抄副本**
-  —— 抄副本测的是副本,永远绿,本仓栽过两次
+- **Windows 端**:`bash scripts/selfcheck-win.sh` —— 编核心 → 编壳 → 起假 Emby → 灌账号 → 起 exe → 截图。
+  截图用 `scripts/shot-window.ps1`(先 SetProcessDPIAware,否则 PerMonitorV2 的窗口会截偏)
+- **视频层**:截图截不到。用 Win32 `EnumWindows` 找窗口类量位置和可见性
+- **核心层纯逻辑**:`go test`(记得 `PATH` 里带 `third_party/libmpv`,否则 cgo 起不来报 0xc0000135)
+- ⚠️ **CDP / WebView2 / `__TAURI_INTERNALS__` 那一整套自检手法随 Rust 栈一起没了**。
+  老经验里凡是提到它们的,只在 `git show rust-final:` 里还成立
 
 ## 6. 迁移期的特殊约定
 
-见 [`docs/go-migration/README.md`](docs/go-migration/README.md)。三条硬规矩:
+见 [`docs/go-migration/README.md`](docs/go-migration/README.md)。
 
-1. **现有 Rust 版是黄金实现。** 不许顺手优化、顺手改行为 —— 那会破坏差分对账基准
-2. **Rust 版功能冻结。** 新功能只在 Go 版做
-3. **新测试必须先红**
+**2026-09-04 起 Rust 栈已从仓库删除**,前两条(黄金实现 / 功能冻结)随之作废 ——
+`crates/` `apps/desktop` `apps/android` `ui/` 都不在了,要查旧实现走 `git show rust-final:<路径>`。
+
+仍然成立的:
+
+1. **新测试必须先红** —— 反向注入真 bug 看它红,不红的门禁等于没有门禁
+2. **差分对账语料还在**(`core/cmd/diffcheck/corpus/`,18 条)。它们录的是黄金实现的**输出**,
+   代码删了语料照样有效 —— 改 emby 相关逻辑时 `check-core.sh` 第 5 关会拿它们对账
 
 写迁移文档时:引用的章节号、文件名必须真实存在。`docs/go-migration/` 里有交叉引用自检的做法,别留悬空引用。
 
@@ -109,9 +114,9 @@
 
 | 错误 | 正确做法 |
 |---|---|
-| 报"编译通过"就收工 | 桌面端必须 `npm run pack` 出 exe |
-| 只跑 `cargo check -p app` 就推 | 它只编 Windows。推前跑 `scripts/check-android.sh` |
-| 改了功能只在一个入口验证 | 桌面/手机/TV × 右键/长按/按钮,每套都点 |
+| 报"编译通过"就收工 | Windows 端必须 `bash scripts/pack-win.sh` 出 exe |
+| 只跑 `go build` 就推 | 推前跑 `check-core.sh` + `check-bindings.sh` |
+| 改了功能只在一个入口验证 | 同一功能常有几套入口,每套都点 |
 | 写"待接"/"核层暂无"这类注释 | **后端常常领先前端**。先 grep 命令表 + 读真实签名再下判断 |
 | 复用一个函数前没读它 | 先读完再用。透明窗口下渲染抛错 = 一片黑,不报错 |
 | 大文档硬塞 bash heredoc | 用文件写入工具 |

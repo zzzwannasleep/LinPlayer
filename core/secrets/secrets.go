@@ -1,6 +1,6 @@
 // Package secrets 是编译期注入凭据的运行时解密。
 //
-// 移植自 `crates/core/src/secrets.rs` + `crates/core/build.rs`。**Rust 版是黄金实现**,
+// **Rust 版是黄金实现**,
 // 加密方案(AES-256-CBC/PKCS7,IV = key[0:16],base64)与混淆口令**逐字节照抄** ——
 // 换掉的话 CI 里现有的 Secret 全部作废,而且失败方式是「静默拿到空密钥」。
 //

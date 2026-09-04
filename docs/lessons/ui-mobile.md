@@ -72,7 +72,7 @@ WebView UA 尾巴加 ` LinPlayerTV`(放 `post{}` 里就晚了,那时 shim 已经
 
 - **不装** Framer Motion / react-router / react-virtuoso(见 README 的依赖表)
 - 登录闸口复用 `ui/desktop/pages/sources/sourceForms`,**不抄第二份**(抄了新增源类型
-  就会改一处漏一处,而两边都不报错) —— 见 [首登闸口+源表单共用](sources.md)
+  就会改一处漏一处,而两边都不报错) —— 见 首登闸口+源表单共用(本地 sources.md,未入公开库)
 - 会话闸口必须**同时**问 `currentSession` 和 `currentSource`,只判前者 = 网盘用户永远进不了门
 - 底栏/toast/sheet 是 `position:fixed`,**不能被带 `transform`/`will-change` 的祖先包住** ——
   见 [transform 关键帧毁 fixed 定位](ui-desktop.md)
@@ -267,7 +267,7 @@ APK 里按 zip 条目找 `index-mobile.html` **一个都找不到** —— 差�
 ##### 草稿两处历史错误(已修)
 - **`SOURCE_KINDS` 整套 id 是错的**:`aliyun`→`aliyundrive` / `p115`→`pan115` /
   `tianyi`→`pan189` / `mobile139`→`pan139`,且 **Jellyfin 不是独立 kind**(和 emby 共用)。
-  同 [SourceKind 线上是小写](sources.md)。`check-settings.mjs` 钉了正反两条断言
+  同 SourceKind 线上是小写(本地 sources.md,未入公开库)。`check-settings.mjs` 钉了正反两条断言
 - **曾有两套 `linesPage`**:`p-aggregate.js` 一套只读切换器(首页顶栏进) +
   我新写的管理页。已合并到 `p-settings.js`,旧的删掉,首页入口改成带当前服务器 id
 
@@ -479,5 +479,5 @@ PC 端(desktop/pages/sources/sourceForms.tsx)一直是加完补一刀 `update_ac
 - [安卓资源限定符优先级](android.md) — 开屏/深色主题那半在安卓资源限定符上
 - [起播不露视频窗](player-mpv.md) — 手机端起播后只 back() 不导航到播放页 = 只有声音
 - [正则筛选前端接线](ui-desktop.md) — 手机端「高级筛选规则」保存从没落库
-- [首登闸口+源表单共用](sources.md) — 登录闸口复用 PC 的 sourceForms,不抄第二份
+- 首登闸口+源表单共用(本地 sources.md,未入公开库) — 登录闸口复用 PC 的 sourceForms,不抄第二份
 - [VOD 资源站插件](plugins.md) — 手机端网盘/插件源用户进不去浏览页的宿主 bug

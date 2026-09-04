@@ -2,7 +2,6 @@ package danmaku
 
 // 弹幕源的请求层:鉴权推导、签名、解析、五个端点。
 //
-// 移植自 `crates/core/src/danmaku/mod.rs`。
 
 import (
 	"context"

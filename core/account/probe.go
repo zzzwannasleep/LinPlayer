@@ -1,6 +1,6 @@
 package account
 
-// 线路测速。移植自 `apps/desktop/src/lib.rs` 的 probe_one / probe_lines / probe_line。
+// 线路测速。
 
 import (
 	"context"

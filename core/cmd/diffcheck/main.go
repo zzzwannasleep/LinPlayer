@@ -19,7 +19,7 @@
 // # 期望值从哪来(provenance)
 //
 // 每条用例**必须**写清 `provenance`。现在的来源是 Rust 版自己的测试语料
-// (`crates/core/src/emby.rs` 里那些带 mock server 的用例)—— 也就是黄金实现的行为,
+// (黄金实现里那些带 mock server 的用例)—— 也就是黄金实现的行为,
 // 只是手工搬过来的。D1 做完之后改成从 Rust 侧自动生成。
 //
 // **没有 provenance 的用例等于没有对账** —— 那只是在断言「Go 等于我以为的 Go」。

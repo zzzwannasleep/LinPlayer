@@ -2,9 +2,6 @@ package emby
 
 // 取流:把一个条目变成一条 mpv 打得开的地址。
 //
-// 移植自 `crates/core/src/emby.rs`(resolve_stream / abs_url / seekable_path /
-// supports_range / emby_prefixed / choose_prefix / subtitle_path)。
-//
 // **这条链路上每一处怪写法都对应一个真故障**,注释是从 Rust 侧逐字搬来的。
 
 import (

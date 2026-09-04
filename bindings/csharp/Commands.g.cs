@@ -146,65 +146,9 @@ public static class LinPlayerCommandNames
         "source.listDir",
         "source.login",
         "source.mediaDetail",
-        "source.passwordLogin",
         "source.play",
-        "source.qrPoll",
-        "source.qrStart",
-        "source.quarkScanPoll",
-        "source.quarkScanStart",
         "source.search",
         "source.watchdog",
-        "anirss.about",
-        "anirss.addAni",
-        "anirss.aniBt",
-        "anirss.aniBtGroup",
-        "anirss.animeGardenGroup",
-        "anirss.animeGardenList",
-        "anirss.batchEnable",
-        "anirss.batchScrape",
-        "anirss.clearCache",
-        "anirss.clearLogs",
-        "anirss.clearToken",
-        "anirss.deleteAni",
-        "anirss.downloadLoginTest",
-        "anirss.downloadLogs",
-        "anirss.downloadPath",
-        "anirss.exportConfigUrl",
-        "anirss.getAniBySubjectId",
-        "anirss.getBgmTitle",
-        "anirss.getConfig",
-        "anirss.getEmbyViews",
-        "anirss.getSubtitles",
-        "anirss.getThemoviedbGroup",
-        "anirss.getThemoviedbName",
-        "anirss.importConfig",
-        "anirss.listAni",
-        "anirss.logs",
-        "anirss.meBgm",
-        "anirss.mikan",
-        "anirss.mikanGroup",
-        "anirss.newNotification",
-        "anirss.ping",
-        "anirss.playList",
-        "anirss.previewAni",
-        "anirss.previewItems",
-        "anirss.proxyImageUrl",
-        "anirss.rate",
-        "anirss.refreshAll",
-        "anirss.refreshAni",
-        "anirss.refreshCover",
-        "anirss.rssToAni",
-        "anirss.scrape",
-        "anirss.searchBgm",
-        "anirss.serverUpdate",
-        "anirss.setAni",
-        "anirss.setConfig",
-        "anirss.setRate",
-        "anirss.stop",
-        "anirss.testIpWhitelist",
-        "anirss.testProxy",
-        "anirss.torrentsInfos",
-        "anirss.updateTotalEpisodeNumber",
         "danmaku.autoLoad",
         "danmaku.cacheClear",
         "danmaku.cacheSize",
@@ -280,8 +224,8 @@ public static class LinPlayerCommandNames
         "prefs.cfSpeedTest",
         "prefs.configExportQr",
         "prefs.configImportQr",
-        "prefs.getPrefetchSettings",
         "prefs.getHomeSettings",
+        "prefs.getPrefetchSettings",
         "prefs.getPrefs",
         "prefs.getPreloadSettings",
         "prefs.getProxy",
@@ -292,8 +236,8 @@ public static class LinPlayerCommandNames
         "prefs.preloadCancel",
         "prefs.preloadItem",
         "prefs.setDetailBlur",
-        "prefs.setPrefetchSettings",
         "prefs.setHomeSettings",
+        "prefs.setPrefetchSettings",
         "prefs.setPrefs",
         "prefs.setPreloadSettings",
         "prefs.setProxy",
@@ -526,7 +470,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> PlayerWindowOpen(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.windowOpen", args, ct);
 
-    // ---- 媒体源(浏览型 / 影视目录) · source.* (14 条) ----
+    // ---- 媒体源(浏览型 / 影视目录) · source.* (9 条) ----
     public static Task<JsonElement> SourceCatalog(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.catalog", args, ct);
     public static Task<JsonElement> SourceCategories(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -539,126 +483,12 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("source.login", args, ct);
     public static Task<JsonElement> SourceMediaDetail(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.mediaDetail", args, ct);
-    public static Task<JsonElement> SourcePasswordLogin(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("source.passwordLogin", args, ct);
     public static Task<JsonElement> SourcePlay(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.play", args, ct);
-    public static Task<JsonElement> SourceQrPoll(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("source.qrPoll", args, ct);
-    public static Task<JsonElement> SourceQrStart(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("source.qrStart", args, ct);
-    public static Task<JsonElement> SourceQuarkScanPoll(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("source.quarkScanPoll", args, ct);
-    public static Task<JsonElement> SourceQuarkScanStart(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("source.quarkScanStart", args, ct);
     public static Task<JsonElement> SourceSearch(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.search", args, ct);
     public static Task<JsonElement> SourceWatchdog(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.watchdog", args, ct);
-
-    // ---- Ani-RSS 管理 · anirss.* (51 条) ----
-    public static Task<JsonElement> AnirssAbout(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.about", args, ct);
-    public static Task<JsonElement> AnirssAddAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.addAni", args, ct);
-    public static Task<JsonElement> AnirssAniBt(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.aniBt", args, ct);
-    public static Task<JsonElement> AnirssAniBtGroup(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.aniBtGroup", args, ct);
-    public static Task<JsonElement> AnirssAnimeGardenGroup(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.animeGardenGroup", args, ct);
-    public static Task<JsonElement> AnirssAnimeGardenList(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.animeGardenList", args, ct);
-    public static Task<JsonElement> AnirssBatchEnable(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.batchEnable", args, ct);
-    public static Task<JsonElement> AnirssBatchScrape(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.batchScrape", args, ct);
-    public static Task<JsonElement> AnirssClearCache(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.clearCache", args, ct);
-    public static Task<JsonElement> AnirssClearLogs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.clearLogs", args, ct);
-    public static Task<JsonElement> AnirssClearToken(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.clearToken", args, ct);
-    public static Task<JsonElement> AnirssDeleteAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.deleteAni", args, ct);
-    public static Task<JsonElement> AnirssDownloadLoginTest(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.downloadLoginTest", args, ct);
-    public static Task<JsonElement> AnirssDownloadLogs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.downloadLogs", args, ct);
-    public static Task<JsonElement> AnirssDownloadPath(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.downloadPath", args, ct);
-    public static Task<JsonElement> AnirssExportConfigUrl(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.exportConfigUrl", args, ct);
-    public static Task<JsonElement> AnirssGetAniBySubjectId(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getAniBySubjectId", args, ct);
-    public static Task<JsonElement> AnirssGetBgmTitle(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getBgmTitle", args, ct);
-    public static Task<JsonElement> AnirssGetConfig(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getConfig", args, ct);
-    public static Task<JsonElement> AnirssGetEmbyViews(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getEmbyViews", args, ct);
-    public static Task<JsonElement> AnirssGetSubtitles(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getSubtitles", args, ct);
-    public static Task<JsonElement> AnirssGetThemoviedbGroup(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getThemoviedbGroup", args, ct);
-    public static Task<JsonElement> AnirssGetThemoviedbName(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.getThemoviedbName", args, ct);
-    public static Task<JsonElement> AnirssImportConfig(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.importConfig", args, ct);
-    public static Task<JsonElement> AnirssListAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.listAni", args, ct);
-    public static Task<JsonElement> AnirssLogs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.logs", args, ct);
-    public static Task<JsonElement> AnirssMeBgm(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.meBgm", args, ct);
-    public static Task<JsonElement> AnirssMikan(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.mikan", args, ct);
-    public static Task<JsonElement> AnirssMikanGroup(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.mikanGroup", args, ct);
-    public static Task<JsonElement> AnirssNewNotification(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.newNotification", args, ct);
-    public static Task<JsonElement> AnirssPing(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.ping", args, ct);
-    public static Task<JsonElement> AnirssPlayList(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.playList", args, ct);
-    public static Task<JsonElement> AnirssPreviewAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.previewAni", args, ct);
-    public static Task<JsonElement> AnirssPreviewItems(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.previewItems", args, ct);
-    public static Task<JsonElement> AnirssProxyImageUrl(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.proxyImageUrl", args, ct);
-    public static Task<JsonElement> AnirssRate(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.rate", args, ct);
-    public static Task<JsonElement> AnirssRefreshAll(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.refreshAll", args, ct);
-    public static Task<JsonElement> AnirssRefreshAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.refreshAni", args, ct);
-    public static Task<JsonElement> AnirssRefreshCover(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.refreshCover", args, ct);
-    public static Task<JsonElement> AnirssRssToAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.rssToAni", args, ct);
-    public static Task<JsonElement> AnirssScrape(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.scrape", args, ct);
-    public static Task<JsonElement> AnirssSearchBgm(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.searchBgm", args, ct);
-    public static Task<JsonElement> AnirssServerUpdate(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.serverUpdate", args, ct);
-    public static Task<JsonElement> AnirssSetAni(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.setAni", args, ct);
-    public static Task<JsonElement> AnirssSetConfig(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.setConfig", args, ct);
-    public static Task<JsonElement> AnirssSetRate(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.setRate", args, ct);
-    public static Task<JsonElement> AnirssStop(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.stop", args, ct);
-    public static Task<JsonElement> AnirssTestIpWhitelist(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.testIpWhitelist", args, ct);
-    public static Task<JsonElement> AnirssTestProxy(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.testProxy", args, ct);
-    public static Task<JsonElement> AnirssTorrentsInfos(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.torrentsInfos", args, ct);
-    public static Task<JsonElement> AnirssUpdateTotalEpisodeNumber(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("anirss.updateTotalEpisodeNumber", args, ct);
 
     // ---- 弹幕 · danmaku.* (14 条) ----
     public static Task<JsonElement> DanmakuAutoLoad(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -821,10 +651,10 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("prefs.configExportQr", args, ct);
     public static Task<JsonElement> PrefsConfigImportQr(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.configImportQr", args, ct);
-    public static Task<JsonElement> PrefsGetPrefetchSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("prefs.getPrefetchSettings", args, ct);
     public static Task<JsonElement> PrefsGetHomeSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.getHomeSettings", args, ct);
+    public static Task<JsonElement> PrefsGetPrefetchSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("prefs.getPrefetchSettings", args, ct);
     public static Task<JsonElement> PrefsGetPrefs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.getPrefs", args, ct);
     public static Task<JsonElement> PrefsGetPreloadSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -845,10 +675,10 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("prefs.preloadItem", args, ct);
     public static Task<JsonElement> PrefsSetDetailBlur(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.setDetailBlur", args, ct);
-    public static Task<JsonElement> PrefsSetPrefetchSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
-        => c.CallAsync("prefs.setPrefetchSettings", args, ct);
     public static Task<JsonElement> PrefsSetHomeSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.setHomeSettings", args, ct);
+    public static Task<JsonElement> PrefsSetPrefetchSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("prefs.setPrefetchSettings", args, ct);
     public static Task<JsonElement> PrefsSetPrefs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.setPrefs", args, ct);
     public static Task<JsonElement> PrefsSetPreloadSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

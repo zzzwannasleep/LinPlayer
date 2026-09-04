@@ -1927,5 +1927,5 @@ UI 那边只是「状态不更新」,没有任何别的迹象。`propF` 现在�
 - [播放窗标题栏 + 换片黑屏](player-mpv.md) — 播放窗常驻标题栏与换片黑屏
 - [本周看板定案+PC视觉自检](methodology.md) — 无头 Edge 渲染真 DOM 的视觉自检法
 - [挂真机 CDP 调试](methodology.md) — 挂真实 exe 用 CDP 验证,别拿合成 DOM 当证据
-- [首登闸口+源表单共用](sources.md) — 首登闸口与数据源表单共用一份实现
+- 首登闸口+源表单共用(本地 sources.md,未入公开库) — 首登闸口与数据源表单共用一份实现
 - [PC 绿色包单一数据根](build-release.md) — PC 是绿色包,落盘路径唯一出口是 paths.rs

@@ -2,8 +2,6 @@ package emby
 
 // 搜索 / 相似推荐 / 演职员。
 //
-// 移植自 `crates/core/src/emby.rs`(search / filter_types / search_url /
-// similar / person_detail / person_items)。
 
 import (
 	"context"

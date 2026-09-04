@@ -2,7 +2,6 @@ package emby
 
 // 服务器公开信息 / 备用线路。登录前后各一条,都不走列表那套解析。
 //
-// 移植自 `crates/core/src/emby.rs`(server_info / ext_domains)。
 
 import (
 	"context"

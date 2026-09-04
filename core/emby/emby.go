@@ -1,6 +1,6 @@
 // Package emby 是 Emby 客户端。
 //
-// 移植自 `crates/core/src/emby.rs`。**Rust 版是黄金实现** —— 这里的每一处行为
+// **Rust 版是黄金实现** —— 这里的每一处行为
 // 都要和它逐字对齐,包括那些看起来像 bug 的地方(它们多半是修过的坑)。
 // 差分对账(`tools/diffcheck`)就是用来钉住这件事的。
 package emby

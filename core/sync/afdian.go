@@ -1,7 +1,7 @@
 package sync
 
-// 爱发电付费校验。移植自 `crates/core/src/sync/mod.rs` 的 afdian_verify。
 //
+// 爱发电付费校验。
 // ★ 订单号发给自建代理(代理持 afdian token 调 query-order),**客户端不接触 token**。
 //   软锁 —— 只抬高门槛,别指望防破解。
 

@@ -1,7 +1,7 @@
 package config
 
-// 播放与全局偏好。移植自 `crates/core/src/config.rs` 的 `Prefs`。
 //
+// 播放与全局偏好。
 // ★★ **这个文件最大的坑是「默认值不是零值」。**
 //
 // Rust 那边一半字段带 `#[serde(default = "…")]`,缺字段时拿到的是 true / 1.0 /

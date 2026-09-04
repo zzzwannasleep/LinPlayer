@@ -2,7 +2,6 @@ package emby
 
 // 媒体库详情的筛选分面(类型 / 标签 / 年份 / 出品方 / 分级)。
 //
-// 移植自 `crates/core/src/emby.rs`(filters / facet / year_range)。
 
 import (
 	"context"

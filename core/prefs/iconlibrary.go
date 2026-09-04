@@ -2,8 +2,6 @@ package prefs
 
 // 网络图标库:拉聚合源 → 解析成(名字, 链接)→ **落盘缓存 + TTL**,不每次拉。
 //
-// 移植自 `crates/core/src/icon_library.rs`。
-//
 // 用户 2026-07-15:「我提供四个聚合图标链接 你解析出来名字和链接 然后下载到本地
 // 持久化缓存 不要每次都拉取」。源统一格式 `{name, description, icons:[{name, url, category?}]}`,
 // 共约 1468 个图标。

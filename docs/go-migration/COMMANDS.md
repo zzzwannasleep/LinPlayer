@@ -1,6 +1,12 @@
 # 命令契约 · COMMANDS
 
-> 状态:**自动生成**,勿手改表格段 · 源:`apps/desktop/src/lib.rs` 与 `apps/android/src/lib.rs` 的注册表
+> 状态:**手维护真源**(2026-09-04 起)。三端 FFI 绑定由 `scripts/gen-bindings.py` 从本文件生成。
+>
+> ★ 以前它是从 Tauri 注册表**自动生成**的。Rust 栈删除后数据源没了 ——
+>   Go 的 handler 是 `map[string]any -> any`,没有静态签名可抽,签名列生成不出来。
+> ★ 那么「表和事实分家」谁来守?`scripts/check-bindings.sh` **第 4 关**:
+>   它拿本文件和 Go 注册表做**双向**比对 —— 本文件有而 Go 没注册、
+>   Go 注册了而本文件没有,两个方向都红。加命令必须同时改这里。
 > 重新生成:`python scripts/gen-commands.py` · 校验:`python scripts/gen-commands.py --check`
 > 架构见 `SPEC.md` §5.6。
 
@@ -24,8 +30,8 @@
 
 ## 待办:本文档自身
 
-- [x] 生成器脚本 `scripts/gen-commands.py`
-- [ ] 生成器接进 CI(`--check`)
+- [x] 绑定生成器 `scripts/gen-bindings.py`(从本文件生成三端绑定)
+- [x] 生成器接进门禁(`scripts/check-bindings.sh` 第 1 关)
 - [ ] 每条命令补一句语义说明(现在只有签名)
 - [ ] 新契约的 JSON 形状随移植回填
 - [ ] `system.capabilities` 的返回结构定稿(见 `SPEC.md` §5.6)
@@ -38,8 +44,7 @@
 | Emby 浏览与详情 | `emby.*` | 40 | 38 |
 | 账号与线路 | `account.*` | 21 | 21 |
 | 播放器 | `player.*` | 40 | 32 |
-| 媒体源(浏览型 / 影视目录) | `source.*` | 14 | 14 |
-| Ani-RSS 管理 | `anirss.*` | 51 | 51 |
+| 媒体源(浏览型 / 影视目录) | `source.*` | 9 | 9 |
 | 弹幕 | `danmaku.*` | 14 | 14 |
 | 插件 | `plugin.*` | 22 | 20 |
 | 下载 | `download.*` | 8 | 7 |
@@ -47,7 +52,7 @@
 | 字幕翻译 / Whisper(桌面独占) | `translate.*` | 9 | 0 |
 | 设置与偏好 | `prefs.*` | 27 | 19 |
 | 系统 | `system.*` | 13 | 6 |
-| **合计** | | **271** | **237** |
+| **合计** | | **218** | **181** |
 
 ### Emby 浏览与详情 · `emby.*` — 40 条
 
@@ -159,13 +164,13 @@
 | [x] | `player.status` | `status` | `—` | `Result<Status, String>` | ✅ |
 | [x] | `player.stopPlayback` | `stop_playback` | `pos: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.takePending` | `player_take_pending` | `—` | `Option<serde_json::Value>` | ❌ |
-| [x] | `player.thumbnail` | `—` | `position: f64` | `Result<Thumbnail, String>` | ❌ |
+| [x] | `player.thumbnail` | **新增** | `position: f64` | `Result<Thumbnail, String>` | — | <!-- 进度条某一点的缩略图。从**本地已缓存的字节**解,走只读缓存端点 + 第二个 mpv 实例 -->
 | [x] | `player.tracks` | `tracks` | `—` | `Result<Vec<Track>, String>` | ✅ |
 | [x] | `player.validateTrackRegex` | `validate_track_regex` | `pattern: String` | `Result<(), String>` | ✅ |
 | [x] | `player.windowClose` | `player_window_close` | `—` | `Result<(), String>` | ❌ |
 | [x] | `player.windowOpen` | `player_window_open` | `payload: serde_json::Value` | `Result<(), String>` | ❌ |
 
-### 媒体源(浏览型 / 影视目录) · `source.*` — 14 条
+### 媒体源(浏览型 / 影视目录) · `source.*` — 9 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
@@ -175,70 +180,9 @@
 | [x] | `source.listDir` | `source_list_dir` | `dir_id: Option<String>` | `Result<Vec<SourceEntry>, String>` | ✅ |
 | [x] | `source.login` | `source_login` | `kind: SourceKind, base_url: String, username: String, password: String, cookie: Option<String>, // 令牌系源用它带 refresh_token(也可走 cookie)与可选的 oplist 地址/driver 覆盖。 // additive:老调用不传即空, 行为不变。 extra: Option<HashMap<String, String>>` | `Result<(), String>` | ✅ |
 | [x] | `source.mediaDetail` | `source_media_detail` | `id: String` | `Result<linplayer_core::source::MediaDetail, String>` | ✅ |
-| [x] | `source.passwordLogin` | `source_password_login` | `kind: SourceKind, username: String, password: String` | `Result<HashMap<String, String>, String>` | ✅ |
 | [x] | `source.play` | `source_play` | `entry_id: String, entry_name: String, resume_secs: f64, raw: Option<serde_json::Value>` | `Result<f64, String>` | ✅ |
-| [x] | `source.qrPoll` | `source_qr_poll` | `kind: SourceKind, ctx: String` | `Result<QrPoll, String>` | ✅ |
-| [x] | `source.qrStart` | `source_qr_start` | `kind: SourceKind` | `Result<QrStart, String>` | ✅ |
-| [x] | `source.quarkScanPoll` | `quark_scan_poll` | `device_id: String, query_token: String` | `Result<bool, String>` | ✅ |
-| [x] | `source.quarkScanStart` | `quark_scan_start` | `—` | `Result<QuarkScan, String>` | ✅ |
 | [x] | `source.search` | `source_search` | `query: String` | `Result<Vec<SourceEntry>, String>` | ✅ |
 | [x] | `source.watchdog` | `source_watchdog` | `pos: f64` | `Result<bool, String>` | ✅ |
-
-### Ani-RSS 管理 · `anirss.*` — 51 条
-
-| 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
-|:--:|---|---|---|---|:--:|
-| [ ] | `anirss.about` | `anirss_about` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.addAni` | `anirss_add_ani` | `ani: Json` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.aniBt` | `anirss_ani_bt` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.aniBtGroup` | `anirss_ani_bt_group` | `bgm_id: String` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.animeGardenGroup` | `anirss_anime_garden_group` | `bgm_id: String` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.animeGardenList` | `anirss_anime_garden_list` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.batchEnable` | `anirss_batch_enable` | `ids: Vec<String>, value: bool` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.batchScrape` | `anirss_batch_scrape` | `ids: Vec<String>, force: bool` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.clearCache` | `anirss_clear_cache` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.clearLogs` | `anirss_clear_logs` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.clearToken` | `anirss_clear_token` | `server_id: String` | `()` | ✅ |
-| [ ] | `anirss.deleteAni` | `anirss_delete_ani` | `ids: Vec<String>, delete_files: bool` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.downloadLoginTest` | `anirss_download_login_test` | `config: Json` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.downloadLogs` | `anirss_download_logs` | `—` | `Result<String, String>` | ✅ |
-| [ ] | `anirss.downloadPath` | `anirss_download_path` | `ani: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.exportConfigUrl` | `anirss_export_config_url` | `—` | `Result<String, String>` | ✅ |
-| [ ] | `anirss.getAniBySubjectId` | `anirss_get_ani_by_subject_id` | `id: String` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.getBgmTitle` | `anirss_get_bgm_title` | `ani: Json` | `Result<String, String>` | ✅ |
-| [ ] | `anirss.getConfig` | `anirss_get_config` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.getEmbyViews` | `anirss_get_emby_views` | `notification_config: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.getSubtitles` | `anirss_get_subtitles` | `filename: String` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.getThemoviedbGroup` | `anirss_get_themoviedb_group` | `ani: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.getThemoviedbName` | `anirss_get_themoviedb_name` | `ani: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.importConfig` | `anirss_import_config` | `bytes: Vec<u8>, filename: String` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.listAni` | `anirss_list_ani` | `—` | `Result<Vec<Json>, String>` | ✅ |
-| [ ] | `anirss.logs` | `anirss_logs` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.meBgm` | `anirss_me_bgm` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.mikan` | `anirss_mikan` | `text: String, season: Option<Json>` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.mikanGroup` | `anirss_mikan_group` | `url: String` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.newNotification` | `anirss_new_notification` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.ping` | `anirss_ping` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.playList` | `anirss_play_list` | `ani: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.previewAni` | `anirss_preview_ani` | `ani: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.previewItems` | `anirss_preview_items` | `preview: Json` | `Vec<Json>` | ✅ |
-| [ ] | `anirss.proxyImageUrl` | `anirss_proxy_image_url` | `img_url: String` | `Result<String, String>` | ✅ |
-| [ ] | `anirss.rate` | `anirss_rate` | `ani: Json` | `Result<i64, String>` | ✅ |
-| [ ] | `anirss.refreshAll` | `anirss_refresh_all` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.refreshAni` | `anirss_refresh_ani` | `id: String` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.refreshCover` | `anirss_refresh_cover` | `ani: Json` | `Result<String, String>` | ✅ |
-| [ ] | `anirss.rssToAni` | `anirss_rss_to_ani` | `url: String, kind: String, bgm_url: Option<String>, subgroup: String, enable: bool` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.scrape` | `anirss_scrape` | `ani: Json, force: bool` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.searchBgm` | `anirss_search_bgm` | `name: String` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.serverUpdate` | `anirss_server_update` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.setAni` | `anirss_set_ani` | `ani: Json` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.setConfig` | `anirss_set_config` | `config: Json` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.setRate` | `anirss_set_rate` | `ani: Json` | `Result<i64, String>` | ✅ |
-| [ ] | `anirss.stop` | `anirss_stop` | `status: i64` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.testIpWhitelist` | `anirss_test_ip_whitelist` | `—` | `Result<(), String>` | ✅ |
-| [ ] | `anirss.testProxy` | `anirss_test_proxy` | `url: String, config: Json` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.torrentsInfos` | `anirss_torrents_infos` | `—` | `Result<Json, String>` | ✅ |
-| [ ] | `anirss.updateTotalEpisodeNumber` | `anirss_update_total_episode_number` | `ids: Vec<String>, force: bool` | `Result<(), String>` | ✅ |
 
 ### 弹幕 · `danmaku.*` — 14 条
 
@@ -344,8 +288,8 @@
 | [x] | `prefs.cfSpeedTest` | `cf_speed_test` | `validate_host: Option<String>, test_url: Option<String>` | `Result<Vec<linplayer_core::net::cf::CfTestResult>, String>` | ✅ |
 | [x] | `prefs.configExportQr` | `config_export_qr` | `—` | `String` | ✅ |
 | [x] | `prefs.configImportQr` | `config_import_qr` | `payload: String` | `Result<usize, String>` | ✅ |
+| [x] | `prefs.getHomeSettings` | **新增** | `-` | `HomeSettings` | — | <!-- 首页栏目设置(合集栏按服开关等) -->
 | [x] | `prefs.getPrefetchSettings` | `get_prefetch_settings` | `—` | `PrefetchSettings` | ✅ |
-| [x] | `prefs.getHomeSettings` | `—` | `—` | `HomeSettings` | ❌ |
 | [x] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
 | [x] | `prefs.getPreloadSettings` | `get_preload_settings` | `—` | `PreloadSettings` | ❌ |
 | [x] | `prefs.getProxy` | `get_proxy` | `—` | `linplayer_core::ProxyConfig` | ✅ |
@@ -356,8 +300,8 @@
 | [x] | `prefs.preloadCancel` | `preload_cancel` | `—` | `()` | ❌ |
 | [x] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setHomeSettings` | **新增** | `settings: HomeSettings` | `Result<(), String>` | — | <!-- 写回首页栏目设置 -->
 | [x] | `prefs.setPrefetchSettings` | `set_prefetch_settings` | `settings: PrefetchSettings` | `Result<(), String>` | ✅ |
-| [x] | `prefs.setHomeSettings` | `—` | `settings: HomeSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |

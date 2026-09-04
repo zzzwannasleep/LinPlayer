@@ -2,8 +2,6 @@ package player
 
 // 真正的起播链:取流 → 应用播放偏好 → loadfile → 挂外挂字幕 → 上报 start。
 //
-// 移植自 `apps/desktop/src/lib.rs` 的 `play()` 与 `apply_playback_defaults()`。
-//
 // ★ 这里**只做已经移植好的那几段**。还没移植的子系统在下面各有一条 `ponytail:`
 // 说明「缺什么、缺了会怎样」—— 写「待接」而不说清后果,下一个人只会照着继续拖。
 

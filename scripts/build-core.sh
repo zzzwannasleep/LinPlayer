@@ -33,12 +33,18 @@ if [ -n "$SEAL" ]; then
 fi
 
 echo "== 编 $LIB =="
-( cd "$ROOT/core" && go build -buildmode=c-shared -ldflags "-s -w $SEAL" -o "$OUT/$LIB" ./ffi )
+# 版本号注进核心层(system.Version,更新检查拿它和线上比)。
+# 唯一权威是仓库根的 VERSION,见 docs/VERSIONING.md ——
+# 写死字面量会让老用户静默收不到更新,本仓踩过三次。
+LP_VER="${LP_VERSION:-$(tr -d '[:space:]' < "$ROOT/VERSION")-dev}"
+VER_FLAG="-X linplayer/core/system.Version=$LP_VER"
+echo "  版本: $LP_VER"
+( cd "$ROOT/core" && go build -buildmode=c-shared -ldflags "-s -w $SEAL $VER_FLAG" -o "$OUT/$LIB" ./ffi )
 
 # libmpv 得在 DLL 搜索路径上。Windows 拷一份到产物旁边;
 # Linux **不拷** —— 那边依赖系统安装的 libmpv(SPEC §15.4)。
 if [ "$(go env GOOS)" = "windows" ]; then
-  cp -f "$ROOT/crates/mpv/libmpv/libmpv-2.dll" "$OUT/" 2>/dev/null || \
+  cp -f "$ROOT/third_party/libmpv/libmpv-2.dll" "$OUT/" 2>/dev/null || \
     echo "  !! 没找到 libmpv-2.dll,运行时会起不来"
 fi
 

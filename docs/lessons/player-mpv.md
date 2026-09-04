@@ -592,7 +592,7 @@ print(m.mpv_get_property_string(h, b"property-list"))   # ← 全部属性,别�
 **How to apply**:动 mpv 字幕/属性前先跑上面那段拉 `property-list`;换 libmpv 版本后结论要重验。
 ⚠️ `secondary-sub-ass-override=scale`(保留原样式)可能让次字幕按 ASS 自带定位画 → 压到主字幕上、`secondary-sub-pos` 推不动。已做成开关让用户自己切,默认 scale,待真机验证。
 
-相关:[Android mpv subtitle fonts](player-mpv.md)(libass 缺字体)、[「待接」多半是谎](methodology.md)(别信「核层没有」的注释)、[夸克二维码是图不是文本](sources.md)(观察和推理冲突时先打真接口)
+相关:[Android mpv subtitle fonts](player-mpv.md)(libass 缺字体)、[「待接」多半是谎](methodology.md)(别信「核层没有」的注释)、夸克二维码是图不是文本(本地 sources.md,未入公开库)(观察和推理冲突时先打真接口)
 
 ---
 
@@ -1088,7 +1088,7 @@ CVE-2026-8461 "PixelSmash":libavcodec `magicyuv` 解码器堆越界写(恶意 sl
 - **残留**:tvOS(`apple_tv/`)用 **MDK**(非 mpv),无 mpv 式 per-codec 排除,待 MDK 自带 ffmpeg 升级;`windows/scripts/upgrade_libmpv_for_pgs.ps1` 的 shinchiro 钉版 `20260610` 早于修复,**待 shinchiro 发布 ≥20260618 构建后把 DownloadUrl 升上去**(脚本注释已标)。
 
 **Why:** 预编译 libmpv 自带旧 ffmpeg,无法在本仓库重编;运行时拉黑单个冷门解码器是最快、跨端、零依赖的根除手段。
-**How to apply:** 新增/换播放器内核时,确认走 [File-browse sources](sources.md) 的播放路径仍带 `vd=-magicyuv`;升级 Windows libmpv 钉版后该兜底仍可保留(无害)。
+**How to apply:** 新增/换播放器内核时,确认走 File-browse sources(本地 sources.md,未入公开库) 的播放路径仍带 `vd=-magicyuv`;升级 Windows libmpv 钉版后该兜底仍可保留(无害)。
 
 ---
 

@@ -374,7 +374,7 @@ libmpv soname)。凡是「发布链路 / 版本比较 / 平台依赖」的假设
 
 **How to apply:** 以后凡是决定资产托管在哪（图标、安装包、更新源、字体、CDN），先问，别默认"CF 更快"。
 静态资源能内联就内联，内联是唯一不受任何网络环境影响的方案。
-插件系统的完整规划见 `docs/PLUGINS_V2_PLAN.md` 的 D9 和 6.4 节；相关见 「cf-proxy-architecture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、[Stremio 插件协议源](sources.md)。
+插件系统的完整规划见 `docs/PLUGINS_V2_PLAN.md` 的 D9 和 6.4 节；相关见 「cf-proxy-architecture」(该条不在本库,多为 Flutter 时代的旧记忆,已作废)、Stremio 插件协议源(本地 sources.md,未入公开库)。
 
 ---
 

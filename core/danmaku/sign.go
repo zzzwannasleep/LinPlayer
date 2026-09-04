@@ -1,6 +1,5 @@
 // Package danmaku 弹幕。本文件先只放**签名** —— 排行榜和弹幕搜索共用它。
 //
-// 移植自 `crates/core/src/danmaku/mod.rs`。
 package danmaku
 
 import (

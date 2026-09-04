@@ -203,7 +203,7 @@ func TestAggregateOverview浏览型源(t *testing.T) {
 	defer up.Close()
 
 	var acc config.Account
-	if err := json.Unmarshal([]byte(`{"server":"`+up.URL+`","source_kind":"quark","user_id":"u"}`), &acc); err != nil {
+	if err := json.Unmarshal([]byte(`{"server":"`+up.URL+`","source_kind":"local","user_id":"u"}`), &acc); err != nil {
 		t.Fatal(err)
 	}
 	c.Upsert(acc)
@@ -213,7 +213,7 @@ func TestAggregateOverview浏览型源(t *testing.T) {
 
 	var cards []SourceOverview
 	call(t, 501, "emby.aggregateOverview", nil, &cards)
-	if len(cards) != 1 || !cards[0].IsFileBrowse || cards[0].SourceKind != "quark" {
+	if len(cards) != 1 || !cards[0].IsFileBrowse || cards[0].SourceKind != "local" {
 		t.Fatalf("浏览型源的卡不对: %+v", cards)
 	}
 	if hit {

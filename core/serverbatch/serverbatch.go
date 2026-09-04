@@ -1,7 +1,5 @@
 // Package serverbatch 把「分享文本」和 `linplayer://` 深链解析成结构化账号块。
 //
-// 移植自 `crates/core/src/server_batch.rs`。
-//
 // 本包是**平台无关纯逻辑**:不碰配置存盘、不发网络请求、不弹确认框。
 // 登录(逐线路试)/落盘/用户确认全归调用方(core/account)编排。
 //

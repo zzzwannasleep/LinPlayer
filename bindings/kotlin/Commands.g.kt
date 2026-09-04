@@ -136,65 +136,9 @@ object LinPlayerCommandNames {
         "source.listDir",
         "source.login",
         "source.mediaDetail",
-        "source.passwordLogin",
         "source.play",
-        "source.qrPoll",
-        "source.qrStart",
-        "source.quarkScanPoll",
-        "source.quarkScanStart",
         "source.search",
         "source.watchdog",
-        "anirss.about",
-        "anirss.addAni",
-        "anirss.aniBt",
-        "anirss.aniBtGroup",
-        "anirss.animeGardenGroup",
-        "anirss.animeGardenList",
-        "anirss.batchEnable",
-        "anirss.batchScrape",
-        "anirss.clearCache",
-        "anirss.clearLogs",
-        "anirss.clearToken",
-        "anirss.deleteAni",
-        "anirss.downloadLoginTest",
-        "anirss.downloadLogs",
-        "anirss.downloadPath",
-        "anirss.exportConfigUrl",
-        "anirss.getAniBySubjectId",
-        "anirss.getBgmTitle",
-        "anirss.getConfig",
-        "anirss.getEmbyViews",
-        "anirss.getSubtitles",
-        "anirss.getThemoviedbGroup",
-        "anirss.getThemoviedbName",
-        "anirss.importConfig",
-        "anirss.listAni",
-        "anirss.logs",
-        "anirss.meBgm",
-        "anirss.mikan",
-        "anirss.mikanGroup",
-        "anirss.newNotification",
-        "anirss.ping",
-        "anirss.playList",
-        "anirss.previewAni",
-        "anirss.previewItems",
-        "anirss.proxyImageUrl",
-        "anirss.rate",
-        "anirss.refreshAll",
-        "anirss.refreshAni",
-        "anirss.refreshCover",
-        "anirss.rssToAni",
-        "anirss.scrape",
-        "anirss.searchBgm",
-        "anirss.serverUpdate",
-        "anirss.setAni",
-        "anirss.setConfig",
-        "anirss.setRate",
-        "anirss.stop",
-        "anirss.testIpWhitelist",
-        "anirss.testProxy",
-        "anirss.torrentsInfos",
-        "anirss.updateTotalEpisodeNumber",
         "danmaku.autoLoad",
         "danmaku.cacheClear",
         "danmaku.cacheSize",
@@ -270,8 +214,8 @@ object LinPlayerCommandNames {
         "prefs.cfSpeedTest",
         "prefs.configExportQr",
         "prefs.configImportQr",
-        "prefs.getPrefetchSettings",
         "prefs.getHomeSettings",
+        "prefs.getPrefetchSettings",
         "prefs.getPrefs",
         "prefs.getPreloadSettings",
         "prefs.getProxy",
@@ -282,8 +226,8 @@ object LinPlayerCommandNames {
         "prefs.preloadCancel",
         "prefs.preloadItem",
         "prefs.setDetailBlur",
-        "prefs.setPrefetchSettings",
         "prefs.setHomeSettings",
+        "prefs.setPrefetchSettings",
         "prefs.setPrefs",
         "prefs.setPreloadSettings",
         "prefs.setProxy",
@@ -514,7 +458,7 @@ suspend fun LinPlayerCommands.playerWindowClose(args: Map<String, Any?>? = null)
 suspend fun LinPlayerCommands.playerWindowOpen(args: Map<String, Any?>? = null): JsonElement =
     call("player.windowOpen", args)
 
-// ---- 媒体源(浏览型 / 影视目录) · source.* (14 条) ----
+// ---- 媒体源(浏览型 / 影视目录) · source.* (9 条) ----
 suspend fun LinPlayerCommands.sourceCatalog(args: Map<String, Any?>? = null): JsonElement =
     call("source.catalog", args)
 suspend fun LinPlayerCommands.sourceCategories(args: Map<String, Any?>? = null): JsonElement =
@@ -527,126 +471,12 @@ suspend fun LinPlayerCommands.sourceLogin(args: Map<String, Any?>? = null): Json
     call("source.login", args)
 suspend fun LinPlayerCommands.sourceMediaDetail(args: Map<String, Any?>? = null): JsonElement =
     call("source.mediaDetail", args)
-suspend fun LinPlayerCommands.sourcePasswordLogin(args: Map<String, Any?>? = null): JsonElement =
-    call("source.passwordLogin", args)
 suspend fun LinPlayerCommands.sourcePlay(args: Map<String, Any?>? = null): JsonElement =
     call("source.play", args)
-suspend fun LinPlayerCommands.sourceQrPoll(args: Map<String, Any?>? = null): JsonElement =
-    call("source.qrPoll", args)
-suspend fun LinPlayerCommands.sourceQrStart(args: Map<String, Any?>? = null): JsonElement =
-    call("source.qrStart", args)
-suspend fun LinPlayerCommands.sourceQuarkScanPoll(args: Map<String, Any?>? = null): JsonElement =
-    call("source.quarkScanPoll", args)
-suspend fun LinPlayerCommands.sourceQuarkScanStart(args: Map<String, Any?>? = null): JsonElement =
-    call("source.quarkScanStart", args)
 suspend fun LinPlayerCommands.sourceSearch(args: Map<String, Any?>? = null): JsonElement =
     call("source.search", args)
 suspend fun LinPlayerCommands.sourceWatchdog(args: Map<String, Any?>? = null): JsonElement =
     call("source.watchdog", args)
-
-// ---- Ani-RSS 管理 · anirss.* (51 条) ----
-suspend fun LinPlayerCommands.anirssAbout(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.about", args)
-suspend fun LinPlayerCommands.anirssAddAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.addAni", args)
-suspend fun LinPlayerCommands.anirssAniBt(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.aniBt", args)
-suspend fun LinPlayerCommands.anirssAniBtGroup(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.aniBtGroup", args)
-suspend fun LinPlayerCommands.anirssAnimeGardenGroup(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.animeGardenGroup", args)
-suspend fun LinPlayerCommands.anirssAnimeGardenList(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.animeGardenList", args)
-suspend fun LinPlayerCommands.anirssBatchEnable(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.batchEnable", args)
-suspend fun LinPlayerCommands.anirssBatchScrape(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.batchScrape", args)
-suspend fun LinPlayerCommands.anirssClearCache(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.clearCache", args)
-suspend fun LinPlayerCommands.anirssClearLogs(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.clearLogs", args)
-suspend fun LinPlayerCommands.anirssClearToken(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.clearToken", args)
-suspend fun LinPlayerCommands.anirssDeleteAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.deleteAni", args)
-suspend fun LinPlayerCommands.anirssDownloadLoginTest(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.downloadLoginTest", args)
-suspend fun LinPlayerCommands.anirssDownloadLogs(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.downloadLogs", args)
-suspend fun LinPlayerCommands.anirssDownloadPath(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.downloadPath", args)
-suspend fun LinPlayerCommands.anirssExportConfigUrl(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.exportConfigUrl", args)
-suspend fun LinPlayerCommands.anirssGetAniBySubjectId(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getAniBySubjectId", args)
-suspend fun LinPlayerCommands.anirssGetBgmTitle(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getBgmTitle", args)
-suspend fun LinPlayerCommands.anirssGetConfig(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getConfig", args)
-suspend fun LinPlayerCommands.anirssGetEmbyViews(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getEmbyViews", args)
-suspend fun LinPlayerCommands.anirssGetSubtitles(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getSubtitles", args)
-suspend fun LinPlayerCommands.anirssGetThemoviedbGroup(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getThemoviedbGroup", args)
-suspend fun LinPlayerCommands.anirssGetThemoviedbName(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.getThemoviedbName", args)
-suspend fun LinPlayerCommands.anirssImportConfig(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.importConfig", args)
-suspend fun LinPlayerCommands.anirssListAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.listAni", args)
-suspend fun LinPlayerCommands.anirssLogs(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.logs", args)
-suspend fun LinPlayerCommands.anirssMeBgm(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.meBgm", args)
-suspend fun LinPlayerCommands.anirssMikan(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.mikan", args)
-suspend fun LinPlayerCommands.anirssMikanGroup(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.mikanGroup", args)
-suspend fun LinPlayerCommands.anirssNewNotification(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.newNotification", args)
-suspend fun LinPlayerCommands.anirssPing(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.ping", args)
-suspend fun LinPlayerCommands.anirssPlayList(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.playList", args)
-suspend fun LinPlayerCommands.anirssPreviewAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.previewAni", args)
-suspend fun LinPlayerCommands.anirssPreviewItems(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.previewItems", args)
-suspend fun LinPlayerCommands.anirssProxyImageUrl(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.proxyImageUrl", args)
-suspend fun LinPlayerCommands.anirssRate(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.rate", args)
-suspend fun LinPlayerCommands.anirssRefreshAll(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.refreshAll", args)
-suspend fun LinPlayerCommands.anirssRefreshAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.refreshAni", args)
-suspend fun LinPlayerCommands.anirssRefreshCover(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.refreshCover", args)
-suspend fun LinPlayerCommands.anirssRssToAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.rssToAni", args)
-suspend fun LinPlayerCommands.anirssScrape(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.scrape", args)
-suspend fun LinPlayerCommands.anirssSearchBgm(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.searchBgm", args)
-suspend fun LinPlayerCommands.anirssServerUpdate(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.serverUpdate", args)
-suspend fun LinPlayerCommands.anirssSetAni(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.setAni", args)
-suspend fun LinPlayerCommands.anirssSetConfig(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.setConfig", args)
-suspend fun LinPlayerCommands.anirssSetRate(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.setRate", args)
-suspend fun LinPlayerCommands.anirssStop(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.stop", args)
-suspend fun LinPlayerCommands.anirssTestIpWhitelist(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.testIpWhitelist", args)
-suspend fun LinPlayerCommands.anirssTestProxy(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.testProxy", args)
-suspend fun LinPlayerCommands.anirssTorrentsInfos(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.torrentsInfos", args)
-suspend fun LinPlayerCommands.anirssUpdateTotalEpisodeNumber(args: Map<String, Any?>? = null): JsonElement =
-    call("anirss.updateTotalEpisodeNumber", args)
 
 // ---- 弹幕 · danmaku.* (14 条) ----
 suspend fun LinPlayerCommands.danmakuAutoLoad(args: Map<String, Any?>? = null): JsonElement =
@@ -809,10 +639,10 @@ suspend fun LinPlayerCommands.prefsConfigExportQr(args: Map<String, Any?>? = nul
     call("prefs.configExportQr", args)
 suspend fun LinPlayerCommands.prefsConfigImportQr(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.configImportQr", args)
-suspend fun LinPlayerCommands.prefsGetPrefetchSettings(args: Map<String, Any?>? = null): JsonElement =
-    call("prefs.getPrefetchSettings", args)
 suspend fun LinPlayerCommands.prefsGetHomeSettings(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.getHomeSettings", args)
+suspend fun LinPlayerCommands.prefsGetPrefetchSettings(args: Map<String, Any?>? = null): JsonElement =
+    call("prefs.getPrefetchSettings", args)
 suspend fun LinPlayerCommands.prefsGetPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.getPrefs", args)
 suspend fun LinPlayerCommands.prefsGetPreloadSettings(args: Map<String, Any?>? = null): JsonElement =
@@ -833,10 +663,10 @@ suspend fun LinPlayerCommands.prefsPreloadItem(args: Map<String, Any?>? = null):
     call("prefs.preloadItem", args)
 suspend fun LinPlayerCommands.prefsSetDetailBlur(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setDetailBlur", args)
-suspend fun LinPlayerCommands.prefsSetPrefetchSettings(args: Map<String, Any?>? = null): JsonElement =
-    call("prefs.setPrefetchSettings", args)
 suspend fun LinPlayerCommands.prefsSetHomeSettings(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setHomeSettings", args)
+suspend fun LinPlayerCommands.prefsSetPrefetchSettings(args: Map<String, Any?>? = null): JsonElement =
+    call("prefs.setPrefetchSettings", args)
 suspend fun LinPlayerCommands.prefsSetPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setPrefs", args)
 suspend fun LinPlayerCommands.prefsSetPreloadSettings(args: Map<String, Any?>? = null): JsonElement =

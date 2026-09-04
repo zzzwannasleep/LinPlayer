@@ -1,7 +1,6 @@
 // Package httpx 是统一的 HTTP 出口:UA 口径、代理、自签名放行、空闲超时。
 //
-// 移植自 `crates/core/src/http.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // ---------- User-Agent 四分口径(用户 2026-07-19 定,2026-07-21 补第四道)----------
 //
 //	访问 Emby            → LinPlayer/{版本}          EmbyClient()

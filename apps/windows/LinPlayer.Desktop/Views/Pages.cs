@@ -157,8 +157,6 @@ public sealed class AddServerPage : PageBase
         {
             ("Emby", "emby", "填服务器地址和账号即可。先点「测试连接」可以确认地址对不对。"),
             ("本地文件夹", "local", "选一个本机目录当作源。没有地址也没有账号密码。"),
-            ("WebDAV", "webdav", "填 WebDAV 地址和账号密码。账号密码可留空(匿名)。"),
-            ("Ani-RSS", "anirss", "填 Ani-RSS 服务地址和账号密码。只对接播放,不含管理台。"),
         }
         /* ★★ 文件浏览型源跟着「文件浏览」入口一起下线。
            留着的后果是**登进去就是死路**:登录成功 → 侧栏没有文件浏览 → 什么都点不到。
@@ -194,14 +192,7 @@ public sealed class AddServerPage : PageBase
             serverRow.IsVisible = userRow.IsVisible = passRow.IsVisible = !isLocal;
             dirRow.IsVisible = isLocal;
             test.IsVisible = k == "emby";
-            // ★ 局域网 / Ani-RSS 各给各的占位符 —— 在 WebDAV 的框里摆个 Emby 的
-            //   示例地址只会把人带沟里。
-            server.Watermark = k switch
-            {
-                "webdav" => "https://你的 WebDAV 地址/dav",
-                "anirss" => "http://你的 Ani-RSS 地址:7789",
-                _ => "https://你的服务器地址",
-            };
+            server.Watermark = "https://你的服务器地址";
             for (var i = 0; i < kindBar.Children.Count; i++)
                 ((Button)kindBar.Children[i]).Classes.Set("primary", i == kindIndex);
         }

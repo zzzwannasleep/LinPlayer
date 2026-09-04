@@ -1,7 +1,7 @@
 package config
 
-// 代理配置。移植自 `crates/core/src/config.rs` 的 `ProxyConfig`。
 //
+// 代理配置。
 // ★ 默认值不是零值(proxy_media 默认 true),口径同 prefs.go 那份 —— 先造默认再往上盖。
 
 import (

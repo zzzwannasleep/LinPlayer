@@ -45,7 +45,7 @@
 - 浮层 `inset:0` 被 z-index 90 自绘标题栏盖住 36px → 顶对齐的抽屉头被切(居中弹窗看不出来)
 
 见 [挂真机 CDP 调试](methodology.md)(挂真机的手法)、[「待接」多半是谎](methodology.md)、
-[每次都要出可测 exe](methodology.md)、[Stremio 插件协议源](sources.md)。
+[每次都要出可测 exe](methodology.md)、Stremio 插件协议源(本地 sources.md,未入公开库)。
 
 ---
 
@@ -170,7 +170,7 @@ v2 = 核层新加一套**影视目录契约** + 两端各一个新页面:
    是 `if (sv.active) return;`,而手机端到 netdisk 路由的另一条路是「设置 → 网盘文件」,设置的
    入口是首页右上角齿轮 —— 没有 Emby 会话时 `HomePage` 早退成空状态,齿轮跟着没了。
    改成点文件浏览型的源就进它的浏览页(对齐 PC 的 `onEnter`)。这是
-   [首登闸口+源表单共用](sources.md) 那个「只判 session = 网盘用户进不了门」的同款复发。
+   首登闸口+源表单共用(本地 sources.md,未入公开库) 那个「只判 session = 网盘用户进不了门」的同款复发。
 
 ##### 版式
 
@@ -195,8 +195,8 @@ v2 = 核层新加一套**影视目录契约** + 两端各一个新页面:
   `http://tauri.localhost/index-mobile.html` —— 三端共用一份 dist,Tauri 桥还在,所以是真 UI +
   真后端。视口必须 `Emulation.setDeviceMetricsOverride`(见 [手机端 UI(ui/mobile)](ui-mobile.md))。
 
-相关:[插件 v2 市场与声明式 UI](plugins.md)、[插件仓库 v2 重写](plugins.md)、[Stremio 插件协议源](sources.md)、
-[网盘源架构(2026-07-24大改+登录扩容)](sources.md)、[挂真机 CDP 调试](methodology.md)、[测试必须先红](methodology.md)
+相关:[插件 v2 市场与声明式 UI](plugins.md)、[插件仓库 v2 重写](plugins.md)、Stremio 插件协议源(本地 sources.md,未入公开库)、
+网盘源架构(2026-07-24大改+登录扩容)(本地 sources.md,未入公开库)、[挂真机 CDP 调试](methodology.md)、[测试必须先红](methodology.md)
 
 ---
 
@@ -325,7 +325,7 @@ UHD(<UHD 求片站>)**测试账号**(用户提供,服主已授权测试,可直�
 
 这些条目和本领域强相关,但正文放在别的文件里(一条经验只存一份正文):
 
-- [Stremio 插件协议源](sources.md) — 插件协议型源的方法参考(该源已删)
+- Stremio 插件协议源(本地 sources.md,未入公开库) — 插件协议型源的方法参考(该源已删)
 - [起播不露视频窗](player-mpv.md) — 插件源起播不露画面窗的两个真因
 - [分发通道 GitHub 优于 CF](build-release.md) — 插件包与 registry 走 GitHub raw,别挪 CF
-- [SourceKind 线上是小写](sources.md) — 插件源的 kind 形如 plugin:<插件id>/<源id>
+- SourceKind 线上是小写(本地 sources.md,未入公开库) — 插件源的 kind 形如 plugin:<插件id>/<源id>

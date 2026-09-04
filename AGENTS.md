@@ -7,40 +7,47 @@
 
 ## 0. 这是什么项目
 
-**LinPlayer** —— 第三方媒体播放器。接 Emby 媒体服务器、网盘/局域网/资源站等十几种媒体源,
+**LinPlayer** —— 第三方媒体播放器。**只做 Emby**(2026-09-04 定的范围):
+网盘、局域网源(SMB/WebDAV/FTP)、Ani-RSS 全部不做,已从代码里删净;
+资源站(VOD)将来只以**插件**形式出现,走 `plugin:<插件id>/<源id>` 开放键通道。
+本机文件夹播放(`local`)保留 —— 它是播放器的基础能力,不算网盘。
 自带插件市场、弹幕、追番、下载、跨服续播。
 
 覆盖端:**Windows / Linux / Android 手机 / Android TV**。苹果全线暂不做。
 
 播放引擎是 **libmpv**,不是自研解码器 —— 涉及播放的问题先想"mpv 该怎么配",别先想"我们该怎么算"。
 
-## 0.1 ⚠️ 当前处于架构迁移期
+## 0.1 ⚠️ 架构迁移:Rust 栈已于 2026-09-04 删除
 
-正在从 **Rust + React/Tauri** 迁到 **Go 核心 + 各端原生 UI**。
+技术栈是 **Go 核心层 + C#(Avalonia) Windows 外壳**。
 
 - 目标架构、迁移方案、任务清单:[`docs/go-migration/`](docs/go-migration/README.md)
-- **现有 Rust 版是黄金实现,不是待淘汰的旧代码。** 它承载了两年的踩坑结论。
-- 迁移期 **Rust 版功能冻结**:新功能只在 Go 版做,Rust 版只修 P0。
-- 在现有代码里"顺手优化"是**明确禁止**的 —— 会静默破坏对账基准。要改单独立 issue。
+- **Rust + React/Tauri 那一整套已从仓库删除**(`crates/` `apps/desktop` `apps/android` `ui/`)。
+  需要查旧实现时:`git show rust-final:<路径>`,或 `git log -- <路径>`。
+- `core/**` 的注释里原先有 57 处「移植自 `crates/…`」的溯源引用,已随本次删除一并清掉 ——
+  注释现在只讲**这段代码本身**为什么这么写,不再指向仓库外的东西。
+- **当前只有 Windows 一个端能出包。** Linux 与 Android/TV 的 Go 版 UI 一行没写
+  (进度见 `docs/go-migration/TODO.md`),删 Rust 时它们的旧实现一并没了。
 
 ---
 
 ## 1. 仓库结构
 
 ```
-crates/
-  core/            各端共用业务核心(数据源/网络/配置/同步/下载/插件),不依赖平台专属 crate
-  mpv/             libmpv 封装 + 各平台渲染面。注意 overlay 有 4 个 cfg 变体
+core/              ★ Go 核心层。业务全在这:emby / player / plugin / net / danmaku / sync …
+                     出库为 lpcore.dll(c-shared),三通道见 SPEC §5
 apps/
-  desktop/         Tauri 桌面壳(Windows / Linux)
-  android/         安卓壳(手机 / TV,同一份代码两个包)
-ui/
-  shared/          命令桥 api.ts / theme / tokens.css
-  desktop/  mobile/  tv/
+  windows/         C# + Avalonia 的 Windows 外壳(唯一还活着的端)
+bindings/
+  csharp/  kotlin/ 从 COMMANDS.md 生成的命令绑定(Commands.g.cs / .kt)
+third_party/
+  libmpv/          libmpv 的头文件与导入库(cgo 链接用);dll 不入库,CI 现拉
+oauth-proxy/       Cloudflare Worker(OAuth 中转)+ 官网静态站
 docs/
   go-migration/    ★ 迁移文档(SPEC / MIGRATION / TODO / COMMANDS / knowledge/)
-  desktop-drafts.html  tv-drafts.html  mobile-drafts/   ← UI 必须照着草稿做
+  lessons/         踩坑经验正本(按领域分文件)
 scripts/           构建与门禁脚本
+VERSION            ★ 版本号唯一权威,见 docs/VERSIONING.md
 ```
 
 **老文档里的路径可能已作废**(2026-07 做过一次仓库重构)。以实际目录为准。
@@ -56,18 +63,11 @@ scripts/           构建与门禁脚本
 | **工具链自检** | `bash scripts/check-toolchain.sh` | 含反向注入,见 §2.2 |
 | **核心层出库** | `bash scripts/build-core.sh` | Go → `build/core/lpcore.dll` |
 | **核心层门禁(推前必跑)** | `bash scripts/check-core.sh` | 四关:go test / 出库 / FFI 契约 / C# 契约测试 |
-| 前端开发服务器 | `npm run dev` | |
-| 前端构建 | `npm run build` | |
-| **桌面出包(必做)** | `npm run pack` | 出绿色 zip + 解包测试目录 |
-| 桌面快速刷新测试目录 | `npm run pack:fast` | 跳过打 zip |
-| Rust 检查(桌面) | `cargo check -p app` | **只编 Windows,照不到安卓** |
-| **安卓检查(推前必跑)** | `bash scripts/check-android.sh` | 约 30 秒,不出 APK |
-| 安卓出包 | `bash scripts/build-android-apk.sh [--tv\|--phone]` | 默认 `--release --tv --arm64` |
-| 命令注册门禁 | `bash scripts/check-commands.sh` | 写了命令忘注册 = 静默失败 |
-| workflow 语法门禁 | `bash scripts/check-workflows.sh` | |
-| 命令契约校验 | `python scripts/gen-commands.py --check` | |
-| 单元测试 | `cargo test` | |
-| 前端逻辑自检 | `npm run check:telemetry` / `check:shortcuts` / `check:lan` | 直跑真模块,不是副本 |
+| **绑定层门禁(推前必跑)** | `bash scripts/check-bindings.sh` | 四关:产物最新 / C# 编译 / Kotlin 编译 / 四方比对 |
+| **Windows 出包(必做)** | `bash scripts/pack-win.sh` | 出绿色 zip。只报"编译通过"= 没交付 |
+| Windows 真机自检 | `bash scripts/selfcheck-win.sh` | 编核心 → 编壳 → 起假 Emby → 起 exe → 截图 |
+| workflow 语法 + 凭据闸门 | `bash scripts/check-workflows.sh` | 漏配编译期凭据 = 功能静默残废 |
+| 接线报告(不是门禁) | `python scripts/report-wiring.py` | 哪些核心层命令宿主一次都没调过 |
 
 ### 2.2 项目级工具链(Go 侧)
 
@@ -101,10 +101,10 @@ scripts/           构建与门禁脚本
 
 | 改了什么 | 最低交付 |
 |---|---|
-| 桌面端任何改动 | **必须 `npm run pack` 出 exe**。只报"编译通过"= 没交付 |
-| 安卓端任何改动 | 至少跑 `check-android.sh`;涉及 UI 要出 APK |
-| `crates/mpv` | 四个 cfg 变体都要顾到(Windows / Linux-X11 / Android / 兜底桩)。兜底桩任何 CI 目标都编不到,会静默烂掉 |
-| 前端布局/焦点/可见性 | 必须真渲染验证(见 §5) |
+| Windows 端任何改动 | **必须 `bash scripts/pack-win.sh` 出 exe**。只报"编译通过"= 没交付 |
+| 核心层任何改动 | `bash scripts/check-core.sh`(含 18 条差分对账) |
+| 命令表增删 | `bash scripts/check-bindings.sh` —— 命令名是**字符串**,拼错了编译器不管 |
+| UI 布局/焦点/可见性 | 必须真渲染验证(见 §5) |
 
 ---
 
@@ -208,16 +208,19 @@ scripts/           构建与门禁脚本
 - commit message **别用 PowerShell here-string** `@'...'@`,会污染标题。用 `$'...'` 或 heredoc
 - 大文档别硬塞 heredoc,容易被 shell 吃引号 —— 用文件写入工具
 
-### Android
+### Android(暂无实现,写 Go 版 UI 时再看)
+2026-09-04 删 Rust 栈时安卓端一并没了。下面这些是那套踩出来的,重写时仍然成立 ——
+细节连同代码去 `git show rust-final:` 里翻:
 - `libmpv.so` 走 **Git LFS**。CI 必须 `lfs: true` + 校验 ELF 魔数,否则 APK 里是指针文本
 - release 默认开 R8:只被 JNI 调的方法会被裁 → 必须写 keep 规则
 - **`-night` 资源限定符压过 `-vXX`**:按 API 分主题要同时建 `values-vXX` 和 `values-night-vXX`
 - release 变体没配 `signingConfig` 会出 `-unsigned.apk`。**`keystore.properties` 写了 ≠ 用了**
-- 裸 `cargo check` 会死在 host bindgen 缺 WinSDK 头,必须走 `scripts/` 里的脚本
 
 ### CI
 - 构建 job 漏传编译期凭据 = 功能静默残废而 CI 全绿。已在 `check-workflows.sh` 设闸门
-- 版本号唯一权威是 `tauri.conf.json`;仓库重组曾把它静默顶退,老用户永远收不到更新
+  (它认 `pack-win.sh` / `build-core.sh` 步骤,9 个变量一个都不能少)
+- **版本号唯一权威是仓库根的 `VERSION`**,见 `docs/VERSIONING.md`。
+  写死字面量害过三次 —— 版本一退,更新检查判「已是最新」并**静默**卡死所有老用户
 
 ---
 
@@ -234,7 +237,7 @@ scripts/           构建与门禁脚本
 | 播放器 / mpv / 字幕 / 画质 | `docs/lessons/player-mpv.md` |
 | 网络 / 预取 / 下载 / 线路 | `docs/lessons/network.md` |
 | Emby / 媒体库 | `docs/lessons/emby.md` |
-| 媒体源 / 网盘 / 登录 | `docs/lessons/sources.md` |
+| 媒体源 / 网盘 / 登录 | `docs/lessons/sources.md` ⚠️**仅本地,不入公开库** |
 | 弹幕 / 追番 / 同步 | `docs/lessons/danmaku-sync.md` |
 | 插件系统 | `docs/lessons/plugins.md` |
 | UI · 桌面 / 手机 / TV | `docs/lessons/ui-desktop.md` / `ui-mobile.md` / `ui-tv.md` |
@@ -248,13 +251,12 @@ scripts/           构建与门禁脚本
 | 想知道 | 看 |
 |---|---|
 | Emby 协议与适配 | `docs/go-migration/knowledge/EMBY.md` |
-| Ani-RSS 集成(51 条命令) | `docs/go-migration/knowledge/ANIRSS.md` |
 | libmpv 控制层 | `docs/go-migration/knowledge/MPV.md` |
 | 弹幕渲染 / ASS 格式 | `docs/go-migration/knowledge/ASS_DANMAKU.md` |
 | 弹幕载体格式(XML 方案) | `docs/go-migration/knowledge/DANMAKU_CARRIER.md` |
 | 超分 / Anime4K / 画质 | `docs/go-migration/knowledge/UPSCALING.md` |
 | 网络层 / 预取代理 | `docs/go-migration/knowledge/NETWORK.md` |
-| 媒体源 / 登录逆向 | `docs/go-migration/knowledge/SOURCES.md` |
+| 媒体源 / 登录逆向 | `docs/go-migration/knowledge/SOURCES.md` ⚠️**仅本地,不入公开库** |
 | 插件系统宿主契约 | `docs/go-migration/knowledge/PLUGINS.md` |
 | 前端经验甄别(A/B/C 三类) | `docs/go-migration/knowledge/UI_LESSONS.md` |
 | 目标架构 | `docs/go-migration/SPEC.md` |

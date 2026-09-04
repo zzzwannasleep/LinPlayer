@@ -1,7 +1,6 @@
 // Package sync 是 Trakt / Bangumi 同步的基座:账号存储、凭据、代理配置、日期工具。
 //
-// 移植自 `crates/core/src/sync/mod.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // ★★ **一处有意偏离,而且是必须偏离的**:
 //
 // 黄金实现把 `SYNC_PROXY_KEY`(访问自建 OAuth 代理的共享密钥)和代理地址

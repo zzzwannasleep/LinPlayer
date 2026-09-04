@@ -1,7 +1,6 @@
 // Package ranking 排行榜双源:动漫 = 弹弹Play,影视 = TMDB。
 //
-// 移植自 `crates/core/src/ranking.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // ★★ 这个模块的全部教训是一句话:**错误必须说人话地冒出去,不许吞成空数组。**
 //
 // 2026-07-21 用户报「榜单没数据」,当时 fetch 里有 6 条 `return vec![]`:

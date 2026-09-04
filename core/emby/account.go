@@ -2,8 +2,7 @@ package emby
 
 // 登录 / 登出 / 收藏 / 已看 / 管理员动作。
 //
-// 移植自 `crates/core/src/emby.rs`(login / logout / set_favorite / set_played /
-// is_admin / refresh_item / scan_all_libraries)。注释是从那边逐字搬来的。
+// 注释是从那边逐字搬来的。
 
 import (
 	"bytes"

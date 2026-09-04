@@ -2,8 +2,6 @@ package danmaku
 
 // 弹幕后处理:屏蔽词 / 用户 / 类型过滤 + 时间窗口去重 + 弹弹Play 屏蔽表导入。
 //
-// 移植自 `crates/core/src/danmaku/mod.rs`。
-//
 // ★ 手动搜索面板与自动加载**共用这一段**,保证两条路径得到一致的弹幕。
 
 import (

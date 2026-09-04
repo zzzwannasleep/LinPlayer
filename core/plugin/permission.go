@@ -1,7 +1,6 @@
 // Package plugin 是插件系统(SPEC §7)。JS 插件跑在 goja 里,宿主能力经 ctx 原生绑进去。
 //
-// 移植自 `crates/core/src/plugins/`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // 与 Rust 版的唯一实现差异:JS 引擎从 rquickjs(QuickJS)换成 goja(纯 Go)。
 // 换的理由是交叉编译 —— quickjs-go 要 cgo + 每平台一份预编译静态库,
 // 而本项目要出 Windows / Linux / Android(arm64+arm) 四个目标。

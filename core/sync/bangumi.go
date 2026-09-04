@@ -2,7 +2,6 @@ package sync
 
 // Bangumi:授权 / 个人令牌登录 / 在看状态 / 单集打勾 / 放送表。
 //
-// 移植自 `crates/core/src/sync/bangumi.rs`。
 
 import (
 	"context"

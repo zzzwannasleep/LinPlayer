@@ -1,7 +1,6 @@
 // Package preload 是详情页预热。
 //
-// 移植自 `crates/core/src/net/preload.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // 进详情页就对**即将要播的那个流**发 Range 请求,预热「头 32MB + 尾 2MB」,
 // fire-and-forget。两件事同时在办:
 //

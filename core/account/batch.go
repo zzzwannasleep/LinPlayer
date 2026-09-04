@@ -2,8 +2,7 @@ package account
 
 // 批量解析添加服务器 + `linplayer://` 深链。
 //
-// 移植自 `apps/desktop/src/lib.rs` 的 batch_parse / parse_deep_link /
-// batch_add_servers / startup_deep_link。解析本身在 core/serverbatch(纯逻辑),
+// 解析本身在 core/serverbatch(纯逻辑),
 // 这里只负责**编排**:逐块逐线路试登录、落盘、并弹幕源。
 
 import (

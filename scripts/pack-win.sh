@@ -16,6 +16,11 @@ STAGE="$OUT/LinPlayer"
 
 source "$ROOT/scripts/env.sh"
 
+# 版本口径:CI 传 LP_VERSION;本地回落到仓库根的 VERSION 加 -dev。
+# 唯一权威是 VERSION 一处 —— 见 docs/VERSIONING.md(写死字面量害过三次)。
+export LP_VERSION="${LP_VERSION:-$(tr -d '[:space:]' < "$ROOT/VERSION")-dev}"
+echo "版本: $LP_VERSION"
+
 rm -rf "$STAGE"
 mkdir -p "$STAGE"
 
@@ -32,8 +37,9 @@ dotnet publish "$APP" -c Release -r win-x64 --self-contained true \
 echo "== 3/3 打包 =="
 # ★ 发行包里**不许**有 userdata/:带上去等于把自检账号发给用户
 rm -rf "$STAGE/userdata"
-VER="$(grep -oP '(?<=<Version>)[^<]+' "$APP/LinPlayer.Desktop.csproj" 2>/dev/null || echo 0.1.0)"
-ZIP="$OUT/LinPlayer-win-x64-$VER.zip"
+# ★ 名字是**发布契约**的一部分:publish.yml 按这个名字从预发布里捞资产,
+#   release 说明里也是照这个名字写给用户的。改名要三处一起改。
+ZIP="$OUT/LinPlayer-Windows-v$LP_VERSION.zip"
 rm -f "$ZIP"
 powershell -NoProfile -Command \
   "Compress-Archive -Path '$(cygpath -w "$STAGE")' -DestinationPath '$(cygpath -w "$ZIP")' -CompressionLevel Optimal"

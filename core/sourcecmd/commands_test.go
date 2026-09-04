@@ -108,10 +108,13 @@ func TestLogin_探测不通不许落库(t *testing.T) {
 	}
 }
 
-// ★ 还没移植的源要说「这个版本还不支持」,不是一句莫名其妙的失败。
-func TestLogin_没移植的源要说清楚(t *testing.T) {
+// ★ 没有注册后端的源要说「这个版本还不支持」,不是一句莫名其妙的失败。
+// ★ kind 故意用一个**永远不会有后端**的字面量:2026-09-04 范围裁剪后内置源
+//   只剩 emby 与 local,两个都有实现。这里要钉的是「查不到后端」那条分支,
+//   拿一个真后端来测会掉进它的实现里,测的就不是这件事了。
+func TestLogin_没注册后端的源要说清楚(t *testing.T) {
 	fresh(t)
-	err := login(t, "quark", "")
+	err := login(t, "nosuchsource", "")
 	if err == nil {
 		t.Fatal("没有后端却登录成功了")
 	}
@@ -142,7 +145,7 @@ func TestActiveSource_跟着活跃账号走(t *testing.T) {
 }
 
 // ★ 没登录任何源时,浏览要报**鉴权**类错误(UI 据此引导去添加服务器),
-//   不是一句网络错误。
+//	不是一句网络错误。
 func TestListDir_没登录源要报鉴权(t *testing.T) {
 	fresh(t)
 	_, err := cmdListDir(context.Background(), 3, map[string]any{})

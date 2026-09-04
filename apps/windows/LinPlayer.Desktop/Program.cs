@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.IO;
 using Avalonia;
 using LinPlayer.Desktop.Core;
@@ -13,7 +14,19 @@ internal static class Program
     /// <summary>核心层起不来时的原因(启动页要如实显示,不能白屏)。</summary>
     public static string? CoreError { get; private set; }
 
-    public static string Version => "0.1.0-go";
+    /// <summary>本程序版本。
+    ///
+    /// ★ **不许写死字面量。** 唯一权威是仓库根的 `VERSION`(见 docs/VERSIONING.md):
+    ///   CI 用 `dotnet publish -p:Version=&lt;版本&gt;` 注进程序集,这里回读。
+    ///   2026-09-04 之前这里硬编码 `"0.1.0-go"`,而线上已经发到 `v1.0.0-build684` ——
+    ///   照那样发布,更新检查会判定「已是最新」并**静默**卡死所有老用户。
+    /// </summary>
+    public static string Version =>
+        System.Reflection.Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+        ?? typeof(Program).Assembly.GetName().Version?.ToString()
+        ?? "0.0.0-dev";
 
     [STAThread]
     public static void Main(string[] args)

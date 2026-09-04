@@ -46,7 +46,7 @@ func TestTransfer_带上独有字段(t *testing.T) {
 	a.Lines = []ServerLine{{ID: "l1", Name: "直连", URL: "https://a.example"}}
 	a.ActiveLine = 0
 	a.AllowInsecureTLS = true
-	a.SetRestValue("source_kind", "quark")
+	a.SetRestValue("source_kind", "local")
 
 	out, err := DecodeTransfer(EncodeTransfer([]Account{a}, 1))
 	if err != nil || len(out) != 1 {
@@ -62,7 +62,7 @@ func TestTransfer_带上独有字段(t *testing.T) {
 	if !g.AllowInsecureTLS {
 		t.Fatal("自签名开关丢了 —— 搬过去之后那台服务器直接连不上")
 	}
-	if g.SourceKind() != "quark" {
+	if g.SourceKind() != "local" {
 		t.Fatalf("源类型丢了(%q)—— 网盘账号会变成一个连不上的空壳", g.SourceKind())
 	}
 }

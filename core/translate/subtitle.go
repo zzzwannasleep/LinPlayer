@@ -1,7 +1,6 @@
 // Package translate 是字幕翻译 + Whisper 本地转写(桌面独占)。
 //
-// 移植自 `crates/core/src/translation.rs`(2827 行)。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // 分层:文档模型 / 语言映射 / 引擎(4 家)/ 设置 / 服务层(分块·并发·二分重试·缓存)
 // / 流式翻译 / Whisper。
 package translate

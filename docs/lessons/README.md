@@ -1,5 +1,19 @@
 # 踩坑与经验(lessons)
 
+> ## ⚠️ 2026-09-04:Rust + React/Tauri 栈已删除
+>
+> 本目录里大量条目提到 `crates/` `apps/desktop` `apps/android` `ui/desktop|mobile|tv`、
+> `cargo` / `npm run pack` / Tauri 命令、CDP+WebView2 自检手法 —— **那些代码和工具已经不在仓库里了**。
+>
+> 这些条目**不删**:它们记的是踩坑的**因果**,换栈之后大多仍然成立
+> (焦点、布局、mpv 属性、Emby 协议、发布单调性…),只是示例路径要去
+> `git show rust-final:<路径>` 里对照。凡是只在旧栈成立的(比如 `__TAURI_INTERNALS__.invoke`),
+> 已在对应条目里标注。
+>
+> 判断办法照旧,见本文末尾那条纪律:**它提到某个文件 / 函数 / 开关,先确认还存在再据此建议。**
+
+
+
 这里是把长期记忆整理迁移过来的分域经验库。它替代原来的记忆库,是本仓库「同一个坑别踩第二次」的唯一出处。
 
 **当前 123 条。** 迁移时是 125 条,2026-08-30 删掉 2 条**已被事实推翻**的(见下)。
@@ -21,7 +35,7 @@
 | [`player-mpv.md`](player-mpv.md) | 播放器 / libmpv / 字幕 / 画质 / 播放窗口 | 21 |
 | [`network.md`](network.md) | 预取代理 / 下载 / 线路 / HTTP / 超时 / UA | 14 |
 | [`emby.md`](emby.md) | Emby 协议 / 媒体库 / 图片 / 上报 / fork 差异 | 14 |
-| [`sources.md`](sources.md) | 网盘 / 局域网源 / 资源站 / 登录逆向 / 凭据 | 9 |
+| `sources.md` ⚠️**不入公开库** | 网盘 / 局域网源 / 资源站 / 登录逆向 / 凭据 | 9 |
 | [`danmaku-sync.md`](danmaku-sync.md) | 弹幕 / 弹弹Play / Bangumi / Trakt / 日历 / 排行榜 | 8 |
 | [`plugins.md`](plugins.md) | 插件系统 / 插件市场 / 插件仓库 | 5 |
 | [`ui-desktop.md`](ui-desktop.md) | PC 端 UI | 13 |

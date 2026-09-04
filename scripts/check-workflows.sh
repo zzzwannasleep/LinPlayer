@@ -90,13 +90,21 @@ echo "全部通过($i 块)"
 
 # ★★ 编译期凭据闸门。2026-07-21 事故:安卓 job 从建起来就没传 DANDANPLAY_*/TMDB_API_KEY,
 #   于是 TV 端排行榜整页空白 —— 而 CI 全绿、APK 正常出包、装得上跑得起来。
-#   这类漏配**没有任何运行时信号**:crates/core/build.rs 读不到就静默不注入,
-#   前端只好诚实显示「未注入凭据」,看着像功能没做。
-#   凡是跑 `tauri build` / `tauri android build` 的步骤,三个变量一个都不能少。
+#   这类漏配**没有任何运行时信号**:sealsecrets 读不到就静默不注入,
+#   前端只好诚实显示「这个构建没配」,看着像功能没做。
+#
+# ★ 2026-09-04:识别的构建步骤从 `tauri build` 改成 `pack-win.sh` / `build-core.sh`
+#   (Rust 栈已删)。**这一改不能忘** —— 闸门认不出任何构建步骤时会走下面的
+#   `checked == 0` 分支判失败,那是故意的:一个谁都拦不住的闸门比没有闸门更坏。
+# ★ 变量从 3 个扩到 9 个,与 core/cmd/sealsecrets/main.go 读的那批一致。
+#   全表与「漏配之后用户看到什么」见 docs/go-migration/BUILD-SECRETS.md。
 "$PY_BIN" - <<'PY'
 import yaml, glob, sys
 
-NEED = ['DANDANPLAY_APP_ID', 'DANDANPLAY_APP_SECRET', 'TMDB_API_KEY']
+NEED = ['DANDANPLAY_APP_ID', 'DANDANPLAY_APP_SECRET', 'TMDB_API_KEY',
+        'LP_SYNC_PROXY_BASE', 'LP_SYNC_PROXY_KEY', 'LP_BANGUMI_REDIRECT_URI',
+        'LP_AFDIAN_SPONSOR_URL', 'LP_ICON_LIBRARY_SOURCES', 'LP_CF_TEST_URL']
+BUILD_STEPS = ('pack-win.sh', 'build-core.sh')
 bad = []
 checked = 0
 for f in sorted(glob.glob('.github/workflows/*.yml')):
@@ -104,7 +112,7 @@ for f in sorted(glob.glob('.github/workflows/*.yml')):
     for jname, job in (d.get('jobs') or {}).items():
         for i, step in enumerate(job.get('steps') or []):
             run = step.get('run') or ''
-            if 'tauri build' not in run and 'tauri android build' not in run:
+            if not any(m in run for m in BUILD_STEPS):
                 continue
             checked += 1
             label = '%s | %s | %s' % (f, jname, step.get('name') or ('#%d' % i))
@@ -115,7 +123,8 @@ for f in sorted(glob.glob('.github/workflows/*.yml')):
                 bad.append('%s  缺少: %s' % (label, ', '.join(miss)))
 
 if checked == 0:
-    print('凭据闸门:没找到任何 tauri build 步骤 —— 闸门本身失效了,当作失败')
+    print('凭据闸门:没找到任何构建步骤(%s) —— 闸门本身失效了,当作失败'
+          % ' / '.join(BUILD_STEPS))
     sys.exit(1)
 for b in bad:
     print('  FAIL  ' + b)

@@ -2,7 +2,6 @@ package history
 
 // watch_history.json 的读写 + 续播位置决策。
 //
-// 移植自 `crates/core/src/watch_history.rs` 的 Store / WatchHistory。
 
 import (
 	"encoding/json"

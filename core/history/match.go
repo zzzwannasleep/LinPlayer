@@ -1,7 +1,6 @@
 // Package history 是本地观看记录 + 跨服务器续播。
 //
-// 移植自 `crates/core/src/watch_history.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 // 三件事:
 //  1. 记录:每台服务器(scope)各存一条自己的观看记录,存 watch_history.json
 //     (**独立于 config.json**)。

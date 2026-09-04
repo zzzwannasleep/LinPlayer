@@ -1,9 +1,0 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Theme.linplayer_android" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- 深色模式下同样要透明。理由见 values/themes.xml 里那段长注释 ——
-             **两个文件都得改**:只改一个的表现是"换个系统主题画面就没了",
-             而那种偶发性故障最难被联想到窗口背景上。 -->
-        <item name="android:windowBackground">@android:color/transparent</item>
-    </style>
-</resources>

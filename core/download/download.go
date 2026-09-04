@@ -1,7 +1,6 @@
 // Package download 多线程(分段)下载管理器。
 //
-// 移植自 `crates/core/src/download.rs`。**Rust 版是黄金实现。**
-//
+// **Rust 版是黄金实现。**
 //   - 同一时刻只下**一个文件**,单文件内部 1–4 分段(线程)并发,用 HTTP Range 分块。
 //   - 每段写独立 `${file}.partN` 临时文件,全完成后按序拼接;
 //     天然断点续传(重启按 part 大小恢复)。

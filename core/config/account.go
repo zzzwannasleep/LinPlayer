@@ -1,7 +1,6 @@
 package config
 
-// 服务器账号。移植自 `crates/core/src/config.rs`(ServerLine / Account / merge_lines
-// 以及 AppConfig 上那几个账号方法)。**Rust 版是黄金实现。**
+// 服务器账号。**Rust 版是黄金实现。**
 
 import (
 	"encoding/json"

@@ -2,7 +2,6 @@ package prefetch
 
 // 每连接的顺序取数窗口 + HTTP 供给。
 //
-// 移植自 `crates/core/src/net/prefetch.rs` 的 Stream / handle。
 
 import (
 	"bufio"

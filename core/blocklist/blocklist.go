@@ -1,6 +1,6 @@
 // Package blocklist 是媒体屏蔽名单。
 //
-// 移植自 `crates/core/src/blocklist.rs`。**Rust 版是黄金实现**,
+// **Rust 版是黄金实现**,
 // 这里的判定逻辑一条都不许简化 —— 每条都对应过一次「用户一眼就看得见的漏网」。
 package blocklist
 

@@ -2,8 +2,6 @@ package history
 
 // 观看记录「恢复扫描」的 HTTP 编排。
 //
-// 移植自 `crates/core/src/watch_history_sync.rs` 的恢复那一半。
-//
 // ★★ 分层:**所有判定**(匹配 / 挑候选 / 该不该恢复)都在 match.go,已单测。
 // 这里只回答三个问题:**打哪些请求 / 打给谁 / 失败了算什么**。
 // 凡是能不带 HTTP 说清的决定,都抽成了纯函数(RestoreAction / RestoreWrite /

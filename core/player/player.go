@@ -27,7 +27,7 @@ package player
 // (2026-08-31)。运行时需要 `libmpv-2.dll` 在 DLL 搜索路径上。
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../crates/mpv/libmpv -lmpv
+#cgo LDFLAGS: -L${SRCDIR}/../../third_party/libmpv -lmpv
 #include <stdlib.h>
 #include <stdint.h>
 

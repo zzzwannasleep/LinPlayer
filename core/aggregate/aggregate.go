@@ -1,7 +1,5 @@
 // Package aggregate 是跨所有已登录服务器的聚合视图(`emby.aggregate*`)。
 //
-// 移植自 `apps/*/src/lib.rs` 的 aggregate_search / aggregate_overview。
-//
 // ★★ 这个域只有两条命令,但两条都踩着同一个坑:**必须走生效线路
 // (ActiveLineURL),不能用账号主键**。用户切到备用线正是因为主线不通 ——
 // 打主线的结果是那台服务器 `unwrap_or_default()` 成空结果,

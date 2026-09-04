@@ -1,7 +1,6 @@
 package player
 
-// 外部播放器 + 播放窗中转。移植自 `apps/desktop/src/lib.rs` 的
-// play_external / player_window_open / player_take_pending / player_window_close。
+// 外部播放器 + 播放窗中转。
 
 import (
 	"context"

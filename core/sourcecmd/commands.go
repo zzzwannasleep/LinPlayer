@@ -20,9 +20,7 @@ import (
 	"linplayer/core/httpx"
 	"linplayer/core/player"
 	"linplayer/core/source"
-	"linplayer/core/source/anirss"
 	"linplayer/core/source/local"
-	"linplayer/core/source/webdav"
 )
 
 // RegisterCommands 由 core/commands 调用。
@@ -41,14 +39,6 @@ func RegisterCommands() {
 	bus.Register("source.catalog", cmdCatalog)
 	bus.Register("source.mediaDetail", cmdMediaDetail)
 
-	// 扫码 / 账密登录:各网盘后端各自实现。**一个都还没移植**,
-	// 所以现在一律回「该源不支持」—— 这和黄金实现里遇到不认识的源时的回答**一模一样**,
-	// 不是桩。等对应后端落地,它们自然就通了。
-	bus.Register("source.qrStart", unsupportedQR("扫码登录"))
-	bus.Register("source.qrPoll", unsupportedQR("扫码登录"))
-	bus.Register("source.passwordLogin", unsupportedQR("账密登录"))
-	bus.Register("source.quarkScanStart", unsupportedQR("夸克扫码"))
-	bus.Register("source.quarkScanPoll", unsupportedQR("夸克扫码"))
 }
 
 // registerBackends 登记已移植的后端。
@@ -58,8 +48,6 @@ func RegisterCommands() {
 // 只是暂时点不开 —— 而不是「升级之后账号没了」。
 func registerBackends() {
 	source.Register(local.New())
-	source.Register(webdav.New())
-	source.Register(anirss.New())
 }
 
 // ---------------------------------------------------------------------------
@@ -353,12 +341,6 @@ func activeCataloger() (source.Cataloger, source.Kind, *source.Server, error) {
 		return nil, "", nil, classify(source.UnsupportedFeature("影视目录"))
 	}
 	return cat, kind, srv, nil
-}
-
-func unsupportedQR(what string) bus.Handler {
-	return func(ctx context.Context, seq int64, a map[string]any) (any, error) {
-		return nil, bus.NewErr(bus.EUnsupported, "该源不支持%s", what)
-	}
 }
 
 // ---------------------------------------------------------------------------

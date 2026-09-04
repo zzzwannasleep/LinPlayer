@@ -2,8 +2,6 @@ package cf
 
 // 本地反代:监听 127.0.0.1:<随机端口>,把明文 HTTP 桥接成到**指定边缘 IP** 的 HTTPS。
 //
-// 移植自 `crates/core/src/net/cf/proxy.rs`。
-//
 // ★ Rust 侧那份是从 Dart 手写的 TLS 隧道 + 连接池 + chunked 解析一路收敛来的;
 // Go 这边 `net/http` + `httputil.ReverseProxy` 把这些全带了 ——
 // 钉 IP 只需换掉 Transport 的 DialContext,SNI 仍由 URL 的 host 决定。

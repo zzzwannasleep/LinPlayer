@@ -22,7 +22,7 @@ step "1. go vet + go test"
 # ★ libmpv 要在 DLL 搜索路径上:core/player 是 cgo 包,它的测试二进制起不来就是
 #   0xc0000135(找不到 DLL),而那个错误看起来像「测试失败」而不是「环境不对」。
 #   2026-08-31 真绊过一次:之前一直是 go 的测试缓存在挡着,包一改动就现形。
-( cd "$ROOT/core" && PATH="$ROOT/crates/mpv/libmpv:$PATH" go vet ./...   && PATH="$ROOT/crates/mpv/libmpv:$PATH" go test ./... ) || fail=$((fail + 1))
+( cd "$ROOT/core" && PATH="$ROOT/third_party/libmpv:$PATH" go vet ./...   && PATH="$ROOT/third_party/libmpv:$PATH" go test ./... ) || fail=$((fail + 1))
 
 step "2. 出库"
 bash "$ROOT/scripts/build-core.sh" >/dev/null || fail=$((fail + 1))

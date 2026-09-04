@@ -1,7 +1,7 @@
 package config
 
-// 设备间「扫码搬配置」。移植自 `crates/core/src/config_transfer.rs`。
 //
+// 设备间「扫码搬配置」。
 // 复用 Richasy/Rodel 的 CommonConfig 容器:每个账号 snake_case JSON 各自
 // AES-256-CBC/PKCS7 加密成 base64,装进 `{from,version,export_time,configs[],_key}`;
 // 容器带 `_key` → 任意实现本格式的客户端免密可解。再 gzip + base64url 塞进

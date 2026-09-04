@@ -21,17 +21,20 @@ fail=0
 step() { echo; echo "===== $* ====="; }
 
 step "1. 产物是否最新"
-# ★ COMMANDS.md 的「移植」勾是**算出来的**(读 Go 注册表),不是手打的 ——
-#   所以这一关顺带守住「移植进度表和事实分家」:注册了却没勾、勾了却没注册,都红。
-python "$ROOT/scripts/gen-commands.py" --check || fail=$((fail + 1))
+# ★ 2026-09-04:Rust 栈删除后 COMMANDS.md 改为**手维护真源**。
+#   原先它由 scripts/gen-commands.py 从 Tauri 注册表生成,而 Go 的 handler 是
+#   `map[string]any -> any`,没有静态签名可抽 —— 生成器随数据源一起下线了。
+#   「表和事实分家」现在由**第 4 关**守:它对 Go 注册表做双向比对
+#   (COMMANDS.md 有而 Go 没注册 / Go 注册了而 COMMANDS.md 没有,两个方向都红)。
 python "$ROOT/scripts/gen-bindings.py" --check || fail=$((fail + 1))
 
 step "2. C# 编译"
 ( cd "$ROOT/bindings/csharp" && dotnet build -c Release --nologo 2>&1 | tail -4 ) || fail=$((fail + 1))
 
 step "3. Kotlin 编译"
-# 借安卓工程的 gradle wrapper —— 单独再装一份 Kotlin 工具链不值当。
-GRADLEW="$ROOT/apps/android/gen/android/gradlew"
+# bindings/kotlin 自带 wrapper。2026-09-04 之前借的是安卓工程那份,
+# Rust 栈删除时一并失去 —— 独立 wrapper 是那次补上的。
+GRADLEW="$ROOT/bindings/kotlin/gradlew"
 if [ -x "$GRADLEW" ]; then
   if "$GRADLEW" -p "$ROOT/bindings/kotlin" compileKotlin -q; then
     echo "Kotlin 编译通过。"
@@ -56,8 +59,19 @@ python "$ROOT/scripts/dump-command-names.py" "$ROOT" "$TMP" || fail=$((fail + 1)
 # ★ LC_ALL=C 不能省:导出脚本按码点排,系统 sort 默认按语言环境排
 #   (会忽略标点、还可能不分大小写)。两种顺序混用时 comm 会把**每一条**
 #   都报成差异,看起来像「Go 里全是野命令」—— 第一版就是这么红的。
-( cd "$ROOT/core" && PATH="$ROOT/crates/mpv/libmpv:$PATH" go run ./cmd/listcommands ) \
+( cd "$ROOT/core" && PATH="$ROOT/third_party/libmpv:$PATH" go run ./cmd/listcommands ) \
   | LC_ALL=C sort > "$TMP/go.txt"
+
+# ★★ 拿不到注册表就**直接红**,不许退回「当作一条都没注册」。
+#   2026-09-04 真实踩到:libmpv 搬家后 cgo 链不上,listcommands 一条都没吐,
+#   而下面的野命令判断拿**空集**去比 —— comm 得空、判定通过、门禁报「全部通过」。
+#   编译失败被伪装成绿灯,比直接红危险得多(见 docs/lessons 「测试必须先红」)。
+if [ ! -s "$TMP/go.txt" ]; then
+  echo "  Go    :!! 注册表是空的 —— go run ./cmd/listcommands 没吐出任何命令。"
+  echo "          多半是 cgo 链不到 libmpv(third_party/libmpv 里要有 mpv.lib)。"
+  echo "          **不当它通过** —— 空集会让下面的野命令判断恒真。"
+  fail=$((fail + 1))
+fi
 
 cmp_sets() { # $1=名字 $2=实际 $3=期望
   if diff -u "$3" "$2" > "$TMP/d" 2>&1; then

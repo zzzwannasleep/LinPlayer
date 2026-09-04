@@ -2,7 +2,7 @@ package prefetch
 
 // 边收边吐的载体(Live)+ 落盘的环形分段缓存(diskCache)。
 //
-// 移植自 `crates/core/src/net/prefetch.rs`。**这两块是「开了多线程加载就播不出来」
+// **这两块是「开了多线程加载就播不出来」
 // 那几次故障的正中心**,注释是从 Rust 侧逐字搬来的。
 
 import (

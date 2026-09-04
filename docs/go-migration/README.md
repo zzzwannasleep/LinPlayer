@@ -28,13 +28,12 @@ Swift/SwiftUI(Apple,后置)。**
 | 文件 | 内容 |
 |---|---|
 | `EMBY.md` | Emby 协议、Items 参数矩阵、取流、图片、上报、各 fork 的怪癖与绕法 |
-| `ANIRSS.md` | Ani-RSS 集成。**51 条命令,本项目命令数最多的一个域**,比 Emby 还多 |
 | `MPV.md` | libmpv 控制层。初始化参数、事件线程、属性表、时序约束、四个 cfg 变体 |
 | `ASS_DANMAKU.md` | 弹幕渲染与 ASS 字幕格式(教程级) |
 | `DANMAKU_CARRIER.md` | 弹幕载体格式评估:XML 方案可不可行、怎么落 |
 | `UPSCALING.md` | Anime4K / ArtCNN 等超分模型、mpv 内置画质选项、档位设计 |
 | `NETWORK.md` | 预取代理、环形磁盘缓存、Range/seek、下载、线路优选、HTTP 策略 |
-| `SOURCES.md` | 媒体源抽象、19 个后端、登录逆向与签名算法 |
+| `SOURCES.md` ⚠️**仅本地,不入公开库** | 媒体源抽象、19 个后端、登录逆向与签名算法 |
 | `PLUGINS.md` | 插件宿主契约(`ctx.*` API、manifest、权限、贡献点) |
 | `UI_LESSONS.md` | 前端经验甄别:哪些换 UI 框架后依然成立、哪些是浏览器/架构包袱 |
 | `PORTING_TRAPS.md` | **Rust → Go 的等价性陷阱**:两边都编译通过、单测都绿、但输出不一样的那类 |

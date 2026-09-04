@@ -6,8 +6,6 @@ package emby
 // 不贯穿的表现是「看一半退出,续播进度不落地」—— 服务器把它们当成三次
 // 互不相干的播放,最后一次 Stopped 找不到对应的会话,进度就丢了。
 //
-// 移植自 `crates/core/src/emby.rs`(post_report / report_start /
-// report_progress / report_stopped)。
 
 import (
 	"bytes"

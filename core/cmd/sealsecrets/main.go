@@ -1,7 +1,6 @@
 // sealsecrets 把明文凭据封成密文,打印成 `go build -ldflags` 的 -X 片段。
 //
 // Go 没有 build.rs,所以这一步由构建脚本显式调用(见 scripts/build-core.sh)。
-// 对应 Rust 侧的 `crates/core/build.rs`。
 //
 //	DANDANPLAY_APP_ID     明文注入(公开标识符)
 //	DANDANPLAY_APP_SECRET 密文注入

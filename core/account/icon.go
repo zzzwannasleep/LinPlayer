@@ -2,8 +2,6 @@ package account
 
 // 服务器图标:下载 / 本地缓存 / 用户本地上传。
 //
-// 移植自 `crates/core/src/icon_cache.rs`。
-//
 // ★ 为什么吐 data URI 而不是本地路径:壳读不了任意本地文件(各端的资源协议
 // 默认都是关着的)。为一张几十 KB 的图去开资源协议 + 配 scope,
 // 不如直接把字节 base64 给它。

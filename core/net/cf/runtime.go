@@ -1,7 +1,5 @@
 // Package cf 是线路优选反代:把发往某条线路的请求改走一个**指定的边缘 IP**。
 //
-// 移植自 `crates/core/src/net/cf/`(runtime.rs / proxy.rs)。
-//
 // # 原理
 //
 // CF anycast 按 SNI + Host 调度回源 —— **连到哪个边缘 IP 都能正确回源**,

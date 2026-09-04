@@ -2,8 +2,6 @@ package player
 
 // prefs.applyPrefs —— 把选轨偏好应用到**当前正在播的这个文件**。
 //
-// 移植自 `apps/desktop/src/lib.rs` 的 apply_prefs。
-//
 // ★★ 它和 `prefs.setPrefs` 是两件事:后者只是把偏好存起来,而这条是「现在就按偏好
 // 重选一遍音轨字幕」。用户在播放中改了字幕语言,不调这条的话要退出重进才生效。
 //

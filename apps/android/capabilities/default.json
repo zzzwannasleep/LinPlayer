@@ -1,6 +1,0 @@
-{
-  "identifier": "default",
-  "description": "Android TV 主窗口的权限集",
-  "windows": ["main"],
-  "permissions": ["core:default"]
-}

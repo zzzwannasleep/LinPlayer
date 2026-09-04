@@ -7,9 +7,9 @@
   <a href="https://github.com/zzzwannasleep/LinPlayer/releases"><img src="https://img.shields.io/endpoint?url=https://291277.xyz/gh/downloads&logo=github&label=downloads" alt="Downloads"></a>
   <a href="https://linplayer.sentry.io"><img src="https://img.shields.io/endpoint?url=https://linplayeroaproxy.pages.dev/sentry/users" alt="Active Users"></a>
   <a href="https://github.com/zzzwannasleep/LinPlayer/blob/main/LICENSE"><img src="https://img.shields.io/endpoint?url=https://291277.xyz/gh/license&label=license" alt="License"></a>
-  <img src="https://img.shields.io/badge/Rust-1.80+-000000?logo=rust" alt="Rust">
-  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React">
-  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri">
+  <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/C%23-.NET%2010-512BD4?logo=dotnet&logoColor=white" alt="C#">
+  <img src="https://img.shields.io/badge/Avalonia-11-8B44AC" alt="Avalonia">
   <a href="https://github.com/zzzwannasleep/LinPlayer/actions"><img src="https://img.shields.io/github/actions/workflow/status/zzzwannasleep/LinPlayer/build.yml?branch=main&label=build&logo=github" alt="Build"></a>
   <a href="https://t.me/MikudesuChannels"><img src="https://img.shields.io/badge/Telegram-MikudesuChannels-26A5E4?logo=telegram&logoColor=white" alt="Telegram"></a>
 </p>
@@ -20,20 +20,19 @@
   <a href="docs/README.ja.md">日本語</a>
 </p>
 
-**LinPlayer** 是一个 Emby 第三方客户端，目标平台 **Windows / Linux / Android / Android TV**。
+**LinPlayer** 是一个 Emby 第三方客户端。目标平台 **Windows / Linux / Android / Android TV**，当前**只有 Windows 可用**。
 
 > ### 🚧 重构中（2026-07）
 >
-> 项目已从 Flutter 整体迁移到 **Rust 核心 + React/TypeScript UI + Tauri 壳**。
+> 项目正在从 **Rust 核心 + React/Tauri** 迁移到 **Go 核心 + 各端原生 UI**。
+> 2026-09-04 旧的 Rust/Tauri 栈已从仓库删除。
 >
-> - **桌面端（Windows / Linux）** —— 可用，正常发布。两端都是免安装绿色包，数据全在主程序同级的 `userdata/`。
->   - Linux 侧的「便携」只覆盖数据、不覆盖运行库：需要 **webkit2gtk 4.1 + GTK3 + libsoup3**（决定系统下限：Ubuntu ≥ 22.04 / Debian ≥ 12）和系统 **libmpv**，并运行在 X11 上（Wayland 会话自动经 XWayland）。详见 [便携说明](docs/PORTABLE.md)。
-> - **安卓 / Android TV** —— UI 重建中，暂无新版安装包。
-> - **苹果全线（iOS / macOS / tvOS）** —— 不再支持，已从仓库移除。
->
-> Flutter 时代的完整代码保留在 tag [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final)。
+> - **Windows** —— 可用，正常发布。免安装绿色包，数据全在主程序同级的 `userdata/`。
+> - **Linux / 安卓 / Android TV** —— **暂无可用版本**：Go 版的这几端 UI 还没写，
+>   而旧的 Rust 实现已随本次重构删除。历史版本仍可在 Releases 里找到。
 
-业务能力（数据源 / 网络 / 播放控制 / 同步 / 下载）集中在一份**各端共用的 Rust crate** 里；每端只写自己的 UI，按各自的交互语言实现。所以下表中标 🔨 的项目并不是"还没做"，而是**核心已就绪、等 UI 接线**。
+
+业务能力（Emby 协议 / 网络 / 播放控制 / 同步 / 下载 / 插件）集中在一份**各端共用的 Go 核心层**里，编译成 `lpcore` 动态库；每端只写自己的 UI，按各自的交互语言实现。所以下表中标 🔨 的项目并不是"还没做"，而是**核心已就绪、等 UI 接线**。
 
 ## 功能特性
 
@@ -42,7 +41,6 @@
 | **MPV 播放内核** | 全格式；HDR / Dolby Vision（自动切 gpu-next + 软解）；PGS/SUP 图形字幕；Anime4K 超分与画质档位 | ✅ | 🔨 |
 | **弹幕** | 弹弹play 等多后端，智能集数匹配、并行分源、描边与显示区域可调 | ✅ | 🔨 |
 | **字幕** | 自动加载 Emby 字幕流；轨道切换、延迟、字体/大小/位置；libass 完整特效 | ✅ | 🔨 |
-| **多源浏览** | Emby 之外接入 OpenList、夸克（Cookie / 扫码）、Ani-rss、飞牛影视 | ✅ | 🔨 |
 | **播放记录同步** | Emby 进度上报，跨服务器续播 | ✅ | 🔨 |
 | **Trakt / Bangumi** | 观看记录 Scrobble 与追番进度同步 | ✅ | 🔨 |
 | **追剧日历** | Trakt / Bangumi 放送表 | ✅ | 🔨 |
@@ -162,9 +160,8 @@
 
 ### UI 与框架
 
-- [Rust](https://www.rust-lang.org/) / [Tokio](https://tokio.rs) / [reqwest](https://github.com/seanmonstar/reqwest) — 各端共用的业务核心
-- [Tauri 2](https://tauri.app) — 桌面壳（窗口 / IPC / 打包）
-- [React 19](https://react.dev) / [TypeScript](https://www.typescriptlang.org) / [Vite](https://vite.dev) — 各端 UI
+- [Go](https://go.dev) — 各端共用的业务核心（编译成 `lpcore` 动态库，经 C ABI 供各端调用）
+- [.NET 10](https://dotnet.microsoft.com) / [Avalonia](https://avaloniaui.net) — Windows 外壳与 UI
 
 ### 服务与数据源
 
@@ -173,7 +170,6 @@
 - [TMDB](https://www.themoviedb.org/) — 影视排行榜数据
 - [Bangumi (bgm.tv)](https://bgm.tv/) — 番剧追番进度与收藏同步
 - [Trakt](https://trakt.tv/) — 影视观看记录同步（Scrobble）
-- [OpenList](https://github.com/OpenListTeam/OpenList) — 网盘聚合源
 - [Ani-rss](https://github.com/wushuo894/ani-rss) — 番剧 RSS 订阅与自动下载
 
 ### Emby 服

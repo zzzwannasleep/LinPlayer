@@ -2,7 +2,6 @@ package player
 
 // 字幕样式 / 次字幕 / 截图 / mpv.conf —— 播放页「更多」面板那一批。
 //
-// 移植自 `apps/desktop/src/lib.rs` 与 `crates/mpv/src/lib.rs` 的对应方法。
 
 import (
 	"context"

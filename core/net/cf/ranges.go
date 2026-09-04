@@ -1,7 +1,7 @@
 package cf
 
-// Cloudflare 边缘 IP 段随机抽样。移植自 `crates/core/src/net/cf/ranges.rs`。
 //
+// Cloudflare 边缘 IP 段随机抽样。
 // CF 优选的原理:CF anycast **按 SNI + Host 调度回源** —— 连到哪个 CF 边缘 IP
 // 都能正确回到你的源站,只要 TLS SNI / HTTP Host 仍是你的域名。
 // 于是从这些段里随机抽样、就近测速,挑一个最快的边缘。

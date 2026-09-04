@@ -2,8 +2,6 @@ package emby
 
 // 版本与流(详情页的「媒体信息」卡、播放器的版本切换)。
 //
-// 移植自 `crates/core/src/emby.rs`(RawStream / StreamInfo / MediaVersion /
-// media_versions / source_match_text / is_dolby_vision / random_picks)。
 
 import (
 	"bytes"

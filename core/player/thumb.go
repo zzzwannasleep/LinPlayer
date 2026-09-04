@@ -53,7 +53,7 @@ package player
 //   现象是「已缓存的位置也取不到图」,而核心层只说一句「打不开」。
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../crates/mpv/libmpv -lmpv
+#cgo LDFLAGS: -L${SRCDIR}/../../third_party/libmpv -lmpv
 #include <stdlib.h>
 #include <stdint.h>
 

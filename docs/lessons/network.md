@@ -625,7 +625,7 @@ mpv 侧形态:`Stream opened successfully` → duration=0、一帧不出、0 条
 - **展示媒体信息不开 ffprobe**。`playbackInfoProvider`(详情页版本信息/播放器设置面板轨道列表)改用 `getItemMediaSources`(GET Fields=MediaSources,MediaStreams),不带 IsPlayback/AutoOpenLiveStream。服务端返回什么就展示什么,没返回就没有。真正播放走播放页直接调的 `getPlaybackInfo`,不经该 provider。
 
 **Why:** 用户对服务器性能敏感,反感"为了展示就让服务端开流探测"和"无意义的限流"。
-**How to apply:** 新增任何跨服/后台联网 provider,默认套这套:无上限+CancelToken离页杀+展示走轻量元数据。参见 [File-browse sources](sources.md) [网盘/strm 播放两大坑](player-mpv.md)。
+**How to apply:** 新增任何跨服/后台联网 provider,默认套这套:无上限+CancelToken离页杀+展示走轻量元数据。参见 File-browse sources(本地 sources.md,未入公开库) [网盘/strm 播放两大坑](player-mpv.md)。
 
 ---
 
