@@ -7,16 +7,11 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 骨架屏。
 ///
-/// <para>★★ 它替掉的不是「加载中…」这三个字,而是<b>那三个字不占位</b>这件事。
-/// 内容回来的一瞬间,一行的高度从 20px 跳到 280px,页面往下一顶 ——
-/// 用户已经在看的那一段被推走了。所以骨架的尺寸<b>必须和真卡一致</b>:
-/// 它一半的价值是「有反馈」,另一半是<b>不跳版</b>。</para>
-///
-/// <para>★ 尺寸跟着 <see cref="Card"/> 走(海报 158×237 / 横版 256×144,
-/// 标题区固定 34)。哪天卡片改尺寸,这里要一起改 —— 不然骨架和真卡差几像素,
-/// 换上去还是会跳一下。</para>
-///
-/// <para>★ 呼吸动画在样式表的 <c>Border.skel</c> 上,这里只摆形状。</para>
+/// <para>它替掉的不是「加载中…」这三个字,而是那三个字不占位:内容回来的一瞬间
+/// 一行的高度从 20px 跳到 280px,页面往下一顶,用户已经在看的那一段被推走了。
+/// 所以骨架的尺寸必须和真卡一致 —— 一半的价值是「有反馈」,另一半是不跳版。
+/// 尺寸跟着 <see cref="Card"/> 走,哪天卡片改尺寸这里要一起改。
+/// 呼吸动画在样式表的 <c>Border.skel</c> 上,这里只摆形状。</para>
 /// </summary>
 public static class Skeleton
 {
@@ -45,7 +40,7 @@ public static class Skeleton
     /// <summary>首页那种横向轨道的骨架。</summary>
     public static Control Strip(bool wide, int count = 6, double? width = null)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         for (var i = 0; i < count; i++) row.Children.Add(CardShape(wide, width));
         return row;
     }
@@ -57,7 +52,7 @@ public static class Skeleton
         for (var i = 0; i < count; i++)
         {
             var c = CardShape(wide, width);
-            c.Margin = new Thickness(0, 0, 14, 16);
+            c.Margin = new Thickness(0, 0, 14, 18);
             wrap.Children.Add(c);
         }
         return wrap;
@@ -66,13 +61,13 @@ public static class Skeleton
     /// <summary>详情页头部的骨架:海报 + 标题 + 几行元信息。</summary>
     public static Control Detail() => new StackPanel
     {
-        Orientation = Orientation.Horizontal, Spacing = 22,
+        Orientation = Orientation.Horizontal, Spacing = 18,
         Children =
         {
             Block(220, 330, 12),
             new StackPanel
             {
-                Spacing = 12, VerticalAlignment = VerticalAlignment.Top,
+                Spacing = 10, VerticalAlignment = VerticalAlignment.Top,
                 Children =
                 {
                     Block(420, 30, 8), Block(300, 14, 6), Block(180, 38, 8),

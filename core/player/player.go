@@ -54,13 +54,20 @@ extern void*    mpv_wait_event(void*, double);
 extern void     mpv_terminate_destroy(void*);
 extern int      mpv_render_context_create(void**, void*, lp_render_param*);
 extern int      mpv_render_context_render(void*, lp_render_param*);
+extern int      mpv_render_context_get_info(void*, lp_render_param);
+extern long long mpv_get_time_us(void*);
+extern long long mpv_get_time_ns(void*);
 extern uint64_t mpv_render_context_update(void*);
 extern void     mpv_render_context_report_swap(void*);
 extern void     mpv_render_context_free(void*);
 
 // MPV_RENDER_PARAM_*
 enum { P_INVALID=0, P_API_TYPE=1, P_GL_INIT=2, P_GL_FBO=3, P_FLIP_Y=4,
-       P_ADVANCED_CONTROL=10, P_BLOCK_FOR_TARGET_TIME=12 };
+       P_ADVANCED_CONTROL=10, P_NEXT_FRAME_INFO=11, P_BLOCK_FOR_TARGET_TIME=12 };
+
+// mpv_render_frame_info(render.h)。target_time 和 mpv_get_time_us 同一个时钟基。
+typedef struct lp_frame_info { unsigned long long flags; long long target_time; } lp_frame_info;
+enum { FRAME_PRESENT=1, FRAME_REDRAW=2, FRAME_REPEAT=4 };
 
 static int lp_rc_create(void **out, void *mpv, void *gpa, void *gpa_ctx) {
     lp_gl_init_params gl;
@@ -107,6 +114,12 @@ static const char* lp_event_log_text(void *ev) {
     return d ? ((lp_log_msg*)d)->text : 0;
 }
 
+// get_info 的形参是**按值**传的 mpv_render_param,和 create/render 的数组不一样。
+static int lp_rc_next_frame(void *rc, lp_frame_info *out) {
+    lp_render_param p; p.type = P_NEXT_FRAME_INFO; p.data = out;
+    return mpv_render_context_get_info(rc, p);
+}
+
 static int lp_rc_render(void *rc, unsigned int fbo, int w, int h, int flip, int block) {
     lp_gl_fbo f; f.fbo = (int)fbo; f.w = w; f.h = h;
     f.internal_format = 0;  // 0 = 让 mpv 自己问 GL 要;宿主的 FBO 格式由宿主定
@@ -144,6 +157,7 @@ var (
 
 	renderCalls atomic.Int64
 	swapCalls   atomic.Int64
+	advanceCalls atomic.Int64
 	drainStop   atomic.Bool
 )
 
@@ -391,7 +405,8 @@ func GLInit(getProcAddress unsafe.Pointer, ctx unsafe.Pointer) int32 {
 	return 0
 }
 
-// GLWantsRedraw 有没有新帧要画。暂停时恒 0,不白烧 GPU。
+/* GLWantsRedraw 有没有新帧。**宿主已经不拿它决定画不画了** —— 见 GLRender 上面那段:
+   跳过 render 的那一个合成帧,宿主的 FBO 里是黑的。留着它只为分统计口径。 */
 func GLWantsRedraw() int32 {
 	mpvMu.Lock()
 	rc := rctx
@@ -405,6 +420,7 @@ func GLWantsRedraw() int32 {
 	return 0
 }
 
+
 // GLRender 渲一帧到宿主给的 FBO。
 func GLRender(fbo uint32, w, h, flipY int32) int32 {
 	mpvMu.Lock()
@@ -413,14 +429,28 @@ func GLRender(fbo uint32, w, h, flipY int32) int32 {
 	if rc == nil {
 		return -1
 	}
-	// block_for_target_time:mpv 默认阻塞到该帧的呈现时刻。在 Avalonia 上这等于
-	// 把整条 UI 渲染线程按片源帧率钉住(S1.2 实测:4K24 下循环只转 25 次/秒)。
+	/* block_for_target_time=0:**等待已经挪到 GLWantsRedraw 里了**,这里不许再等。
+
+	   2026-09-04 也把它设成过 0,当天被打回(「暂停了画面还是在抽搐」)——
+	   区别在于那次只是把等待删掉,帧改成按解码完成时刻上屏;这次是把等待
+	   搬到了合成线程之外,授时判据仍然是 mpv 给的 target_time。见 GLWantsRedraw。
+
+	   在这里等的代价是量过的:24fps 的片子,合成线程 90% 的时间堵在这一行里。 */
 	block := C.int(1)
 	if os.Getenv("LP_BLOCK_FOR_TARGET_TIME") == "0" {
 		block = 0
 	}
+	/* 先问一句「这一次会不会推进一帧」。**不是拿来决定画不画的**(那条路已经废了),
+	   只是分统计口径:重画也算进出帧节奏的话,量出来的是合成帧率不是出帧节奏。 */
+	advance := C.mpv_render_context_update(rc)&1 != 0
+	t0 := time.Now()
 	r := C.lp_rc_render(rc, C.uint(fbo), C.int(w), C.int(h), C.int(flipY), block)
+	noteRenderCost(float64(time.Since(t0).Microseconds()) / 1000)
 	renderCalls.Add(1)
+	if advance {
+		advanceCalls.Add(1)
+		noteCadence()
+	}
 	if r < 0 {
 		return -99
 	}
@@ -555,4 +585,103 @@ func SetSurface(kind int32, handle int64, width, height int32) int32 {
 	}
 	bus.Logf("warn", "lp_set_surface 在本平台不适用(桌面走通道 B):kind=%d %dx%d", kind, width, height)
 	return 0
+}
+
+
+/* ★★ 出帧节奏。**「画面抽不抽搐」唯一量得出来的东西。**
+
+   用户 2026-09-04 报「正常播放的画面都会抽搐」,而这件事:
+     · 截图看不出来 —— 抽搐是帧和帧之间的关系,截图只有一帧;
+     · mpv 的 avsync 也看不出来 —— 实测把 block_for_target_time 关掉,
+       它照样一路 0.0ms(音频时钟没受影响,受影响的是**画面上屏的时刻**)。
+       第一版判据就写在 avsync 上,反向注入之后是绿的 —— 一条假绿的门禁。
+
+   真正变的是**相邻两次上屏之间隔了多久**:
+     · block=1:mpv 阻塞到该帧的呈现时刻才返回,间隔贴着帧间隔走;
+     · block=0:解码完就交,间隔随解码耗时上下跳 —— 那就是抽搐。
+
+   所以量**间隔的标准差**(抖动)。★ 不是量平均帧率:抽搐的时候平均帧率是对的。 */
+var (
+	cadMu    sync.Mutex
+	cadLast  int64 // 上一次 render 的时刻(ns)
+	cadN     int64
+	cadSum   float64 // 毫秒
+	cadSumSq float64
+)
+
+func noteCadence() {
+	now := time.Now().UnixNano()
+	cadMu.Lock()
+	if cadLast > 0 {
+		d := float64(now-cadLast) / 1e6
+		// ★ 丢掉大空档:暂停、切页、窗口最小化都会留下几百毫秒的洞,
+		//   把它们算进去的话标准差被这几个洞主导,真正的抖动反而看不见了。
+		if d > 0 && d < 200 {
+			cadN++
+			cadSum += d
+			cadSumSq += d * d
+		}
+	}
+	cadLast = now
+	cadMu.Unlock()
+}
+
+/* renderCost:lp_rc_render **这一次调用本身**耗了多久(毫秒)。
+
+   量这个是因为 block_for_target_time=1 的语义就是「阻塞到该帧的呈现时刻」——
+   而这个调用跑在宿主的合成/UI 线程上。它堵多久,整个界面就有多久画不了新东西。
+   2026-09-04 那次「合成线程被堵 83ms」是猜的,从来没量过,于是拿这个猜测去动了
+   mpv 的默认值,把正常播放弄坏了。这次先有数再动手。 */
+var (
+	rcMu   sync.Mutex
+	rcN    int64
+	rcSum  float64
+	rcMax  float64
+	rcSlow int64 // 超过 16ms = 至少错过一个 60Hz 合成帧
+)
+
+func noteRenderCost(ms float64) {
+	rcMu.Lock()
+	rcN++
+	rcSum += ms
+	if ms > rcMax {
+		rcMax = ms
+	}
+	if ms > 16 {
+		rcSlow++
+	}
+	rcMu.Unlock()
+}
+
+// RenderCost 累计耗时 / 最大 / 超过 16ms 的次数 / 样本数。给的是**累计量**:
+// 要某一段的均值,读两次做差。
+func RenderCost() (sum, max float64, slow, n int64) {
+	rcMu.Lock()
+	defer rcMu.Unlock()
+	return rcSum, rcMax, rcSlow, rcN
+}
+
+// AdvanceCalls 其中有多少次真的推进了一帧。和 renderCalls 一比 = 一帧画面被重复画了几遍。
+func AdvanceCalls() int64 { return advanceCalls.Load() }
+
+// ResetCadence 换片 / 起播时清零。
+func ResetCadence() {
+	cadMu.Lock()
+	cadLast, cadN, cadSum, cadSumSq = 0, 0, 0, 0
+	cadMu.Unlock()
+}
+
+// Cadence 出帧节奏:平均间隔、抖动(标准差)、样本数,单位毫秒。
+func Cadence() (mean, jitter float64, n int64) {
+	cadMu.Lock()
+	defer cadMu.Unlock()
+	if cadN < 2 {
+		return 0, 0, cadN
+	}
+	mean = cadSum / float64(cadN)
+	v := cadSumSq/float64(cadN) - mean*mean
+	if v < 0 {
+		v = 0
+	}
+	return mean, math.Sqrt(v), cadN
 }

@@ -12,7 +12,7 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 设置页里几组「有核心层命令撑着」的分组。
 ///
-/// <para>★ 越界值一律<b>由核心层拒绝并回滚</b>,UI 不夹紧 —— 悄悄夹紧会让用户
+/// <para>越界值一律<b>由核心层拒绝并回滚</b>,UI 不夹紧 —— 悄悄夹紧会让用户
 /// 以为设了 8 线程生效了,实际跑的是 4。所以这里失败就把控件恢复成原值 + 显示原因。</para>
 /// </summary>
 public static class SettingsSections
@@ -49,8 +49,8 @@ public static class SettingsSections
                     {
                         threads = (int)threads.SelectedItem!,
                         cache_bytes = (long)caches[cache.SelectedIndex] * 1024 * 1024,
-                        // ★ servers 是「哪几台服开了多线程加载」。这一版没做逐服开关,
-                        //   原样送回去 —— 不送的话核心层会把已开的服务器全清掉。
+                        // servers 是「哪几台服开了多线程加载」。这一版没做逐服开关,
+                        // 原样送回去 —— 不送的话核心层会把已开的服务器全清掉。
                         servers = Strings(s, "servers"),
                     },
                 });
@@ -77,19 +77,19 @@ public static class SettingsSections
     /// <summary>
     /// 首页要画哪几条栏目。<b>按服务器</b>存,作用对象是当前登录的那台。
     ///
-    /// <para>★★ 开着也不保证看得到:服务器上<b>没有</b>合集时那一栏整条不画。
+    /// <para>开着也不保证看得到:服务器上<b>没有</b>合集时那一栏整条不画。
     /// 所以这里的措辞必须是「有就显示」而不是「显示合集栏」——
     /// 后者会让用户在一台没有合集的服务器上打开开关,然后以为功能坏了。</para>
     ///
-    /// <para>★ <b>每一台服务器一行</b>。一个「按 X 定制」的开关,
+    /// <para><b>每一台服务器一行</b>。一个「按 X 定制」的开关,
     /// 必须有一处能看到全部 X 的状态 —— 否则用户只能靠一台台切过去才知道自己设了什么。</para>
     /// </summary>
     public static Control Home(CoreClient core, JsonElement h)
     {
         var hint = Hint();
-        var rows = new StackPanel { Spacing = 8 };
+        var rows = new StackPanel { Spacing = 10 };
 
-        /* ★★ **每一台服务器一行**,不只是当前登录的那台。
+        /* **每一台服务器一行**,不只是当前登录的那台。
            一个「按 X 定制」的开关,必须有一处能看到全部 X 的状态 ——
            只给当前那台的话,用户在 A 服关掉、到 B 服看见还在,
            只能靠一台台切过去才知道自己到底设了什么。 */
@@ -101,7 +101,7 @@ public static class SettingsSections
                 var active = it.TryGetProperty("active", out var ac) && ac.ValueKind == JsonValueKind.True;
                 var box = new CheckBox
                 {
-                    // ★ 标出当前登录的那台 —— 一排服务器名里,用户得先认出自己在哪
+                    // 标出当前登录的那台 —— 一排服务器名里,用户得先认出自己在哪
                     Content = Str(it, "name") + (active ? "(当前)" : ""),
                     IsChecked = !it.TryGetProperty("enabled", out var en) || en.ValueKind != JsonValueKind.False,
                 };
@@ -109,8 +109,8 @@ public static class SettingsSections
                 {
                     try
                     {
-                        // ★ 明着把 server 送过去。不送就是「改当前登录那台」,
-                        //   而这张表里点的可能是别的服 —— 那会改错人。
+                        // 明着把 server 送过去。不送就是「改当前登录那台」,
+                        // 而这张表里点的可能是别的服 —— 那会改错人。
                         await core.PrefsSetHomeSettings(new
                         {
                             settings = new { server = srv, collections_enabled = box.IsChecked == true },
@@ -125,7 +125,7 @@ public static class SettingsSections
         if (rows.Children.Count == 0) rows.Children.Add(Note("还没有登录任何服务器。"));
 
         /* 自检:把这张表打出来(LP_SELFCHECK_HOMESET=1)。
-           ★ 判据是**行数和每行的勾选态**,不是截图 —— 这一组排在设置页很靠下的位置,
+            判据是**行数和每行的勾选态**,不是截图 —— 这一组排在设置页很靠下的位置,
              一屏根本截不到,而「只画了当前那台」和「两台都画了」在截不到的地方
              长得一模一样。 */
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_HOMESET") == "1")
@@ -181,7 +181,7 @@ public static class SettingsSections
             Spacing = 10,
             Children =
             {
-                // ★ 预热的字节**必须被复用**:只跑热路不留字节,在慢链路上等于白烧带宽
+                // 预热的字节**必须被复用**:只跑热路不留字节,在慢链路上等于白烧带宽
                 Note("提前把片头拉到本地缓存。起播时复用同一份字节,不会重下一遍。"),
                 on, Field("预热大小", head), hint,
             },
@@ -238,14 +238,14 @@ public static class SettingsSections
     /// <summary>
     /// 「起播时取跨服最大进度」开关。
     ///
-    /// <para>★ 它和上面那三项是**两个方向**:上面是「看完之后把进度推给别台」,
+    /// <para>它和上面那三项是**两个方向**:上面是「看完之后把进度推给别台」,
     /// 这条是「起播时从别台把进度拉回来」。合成一个开关的话,想要单向的人没法配。</para>
     /// </summary>
     private static Control CrossResume(CoreClient core)
     {
         var box = new CheckBox { Content = "起播时取各服务器里最靠后的进度" };
         var hint = Hint();
-        // ★ 初值从核心层**读回来**,不是默认一个再灌下去
+        // 初值从核心层**读回来**,不是默认一个再灌下去
         _ = Task.Run(async () =>
         {
             try
@@ -275,10 +275,10 @@ public static class SettingsSections
     /// <summary>
     /// 备份 / 搬迁(UI_PC §7.15)。
     ///
-    /// <para>★★ 导出的载荷里**带着所有服务器的登录凭据**(只是混淆级加密,
+    /// <para>导出的载荷里**带着所有服务器的登录凭据**(只是混淆级加密,
     /// 密钥随载荷走)。用户会把它截图发群里 —— 警示必须显眼,不能只写在提示行里。</para>
     ///
-    /// <para>★★ **导入是合并不是覆盖**:覆盖的话用户在新机器上已经加好的服务器
+    /// <para>**导入是合并不是覆盖**:覆盖的话用户在新机器上已经加好的服务器
     /// 会被静默抹掉,而他以为只是「把老机器上的搬过来」。核心层已经按合并做了,
     /// 界面上也要这么说。</para>
     /// </summary>
@@ -336,7 +336,7 @@ public static class SettingsSections
     /// <summary>
     /// CF 优选测速(UI_PC §6)。
     ///
-    /// <para>★★ 这条命令要跑几十秒(256 个候选 IP × 4 次握手 + 若干次下载测速)。
+    /// <para>这条命令要跑几十秒(256 个候选 IP × 4 次握手 + 若干次下载测速)。
     /// 按钮必须**当场变成「测速中…」并禁用** —— 一个转圈四十秒毫无反馈的按钮,
     /// 用户会当它卡死了然后反复点,而每点一次就是又一轮几十秒。</para>
     /// </summary>
@@ -348,7 +348,7 @@ public static class SettingsSections
             Classes = { "field" }, Width = 260,
             Watermark = "校验域名(通常是你的服务器域名)",
         };
-        var results = new StackPanel { Spacing = 4 };
+        var results = new StackPanel { Spacing = 6 };
         var run = new Button { Classes = { "ghost" }, Content = "开始测速" };
         run.Click += async (_, _) =>
         {
@@ -363,8 +363,8 @@ public static class SettingsSections
                     ? rs.EnumerateArray().ToList() : [];
                 if (list.Count == 0)
                 {
-                    // ★ 「一个都没过校验」多半是这个域名根本不走 CF —— 说清楚,
-                    //   别让用户以为是网不好然后一遍遍重测。
+                    // 「一个都没过校验」多半是这个域名根本不走 CF —— 说清楚,
+                    // 别让用户以为是网不好然后一遍遍重测。
                     hint.Text = "没有可用的边缘 IP。如果填了校验域名,先确认它确实走 Cloudflare。";
                     return;
                 }
@@ -400,8 +400,8 @@ public static class SettingsSections
     public static Control Update(CoreClient core, JsonElement s)
     {
         var hint = Hint();
-        // ★ 线上值是 `prerelease`,不是 `preview`。写错的那一版选「预览版」会被核心层
-        //   顶回「未知的更新渠道」—— 渠道从来就切不过去。
+        // 线上值是 `prerelease`,不是 `preview`。写错的那一版选「预览版」会被核心层
+        // 顶回「未知的更新渠道」—— 渠道从来就切不过去。
         var channels = new[] { ("正式版", "stable"), ("预览版", "prerelease") };
         var ch = new ComboBox
         {
@@ -439,9 +439,9 @@ public static class SettingsSections
         });
         // 立即检查更新。
         //
-        // ★★ 「已是最新」和「查不动」要**分开说**。核心层已经把两者分开了
-        //   (has_update=false 是确实没有,报错是限流/断网),界面不能再把它们
-        //   合并成一句「检查失败」—— 那会让用户永远等不到更新还以为自己是最新的。
+        // 「已是最新」和「查不动」要**分开说**。核心层已经把两者分开了
+        // (has_update=false 是确实没有,报错是限流/断网),界面不能再把它们
+        // 合并成一句「检查失败」—— 那会让用户永远等不到更新还以为自己是最新的。
         var check = new Button { Classes = { "ghost" }, Content = "检查更新" };
         check.Click += async (_, _) =>
         {
@@ -463,8 +463,8 @@ public static class SettingsSections
             finally { check.IsEnabled = true; }
         };
 
-        // ★ 绿色包被解压到写不进去的地方时不能自更新。核心层这一版保守报 false,
-        //   界面就得如实说 —— 摆一个点了没反应的「立即更新」比没有更糟。
+        // 绿色包被解压到写不进去的地方时不能自更新。核心层这一版保守报 false,
+        // 界面就得如实说 —— 摆一个点了没反应的「立即更新」比没有更糟。
         if (!Bool(s, "can_self_update"))
             body.Children.Add(Note("这一版还不能自动安装更新,检查到新版本会给下载地址。"));
         body.Children.Add(new StackPanel
@@ -481,7 +481,7 @@ public static class SettingsSections
     /// <summary>
     /// 解除屏蔽的入口。
     ///
-    /// <para>★★ <b>隐藏类功能必须配一个集中解除列表</b>。没有的话屏蔽就是单向门 ——
+    /// <para><b>隐藏类功能必须配一个集中解除列表</b>。没有的话屏蔽就是单向门 ——
     /// 用户屏蔽错了以后再也找不回来(Rust 版为此栽过:媒体库网格故意不滤,
     /// 就是为了留一条解除的路)。</para>
     /// </summary>
@@ -515,7 +515,7 @@ public static class SettingsSections
                     };
                     list.Children.Add(new StackPanel
                     {
-                        Orientation = Orientation.Horizontal, Spacing = 12,
+                        Orientation = Orientation.Horizontal, Spacing = 10,
                         Children =
                         {
                             new TextBlock
@@ -543,21 +543,27 @@ public static class SettingsSections
 
     private static Control Group(string title, Control body) => new Border
     {
-        Classes = { "card" }, Padding = new Thickness(18), Width = 620,
-        HorizontalAlignment = HorizontalAlignment.Left,
+        Classes = { "card" }, Padding = new Thickness(18, 18),
+        HorizontalAlignment = HorizontalAlignment.Stretch,
         Child = new StackPanel
         {
-            Spacing = 12,
+            Spacing = 10,
             Children = { new TextBlock { Text = title, Classes = { "h2" } }, body },
         },
     };
 
+    /// <summary>一行「说明 + 控件」。 标签右对齐、列宽 88 —— 三处 Field 必须一致,
+    /// 口径见 <see cref="SettingsPage"/> 里那一份的注释。</summary>
     private static Control Field(string label, Control input) => new StackPanel
     {
-        Orientation = Orientation.Horizontal, Spacing = 12,
+        Orientation = Orientation.Horizontal, Spacing = 10,
         Children =
         {
-            new TextBlock { Text = label, Width = 100, VerticalAlignment = VerticalAlignment.Center },
+            new TextBlock
+            {
+                Text = label, Width = 88, TextAlignment = TextAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
             input,
         },
     };
@@ -577,7 +583,7 @@ public static class SettingsSections
     private static TextBlock Note(string t) => new()
     {
         Text = t, FontSize = 12, TextWrapping = TextWrapping.Wrap,
-        Foreground = new SolidColorBrush(Color.Parse("#7d8798")),
+        Foreground = Tok.Of("Ink3"),
     };
 
     private static string Str(JsonElement e, string k) =>

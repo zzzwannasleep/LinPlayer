@@ -16,13 +16,10 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 排行榜(<c>UI_PC.md</c> §7.13)。动漫走弹弹Play,影视走 TMDB。
 ///
-/// <para>★★ 这一页最要紧的不是布局,是<b>错误怎么显示</b>。核心层已经把
-/// 「缺凭据 / 429 / 密钥无效 / 分类下线」分别说清楚了,UI 这边要<b>原样显示那句话</b>。
-/// 吞成「暂无数据」的话,几种成因又变回一个样子 —— 那正是 2026-07-21 那次
-/// 排查花掉一整天的原因。</para>
-///
-/// <para>★ 没有凭据的构建里 <c>emby.rankingCategories</c> 返回空表。此时要说清楚
-/// 「这个版本没带排行榜凭据」,而不是画一个空页面让人以为服务挂了。</para>
+/// <para>这一页最要紧的不是布局,是错误怎么显示。核心层已经把「缺凭据 / 429 /
+/// 密钥无效 / 分类下线」分别说清楚了,UI 这边要原样透出来 —— 吞成「暂无数据」
+/// 的话几种成因又变回一个样子,那正是排查花掉一整天的原因。
+/// 没有凭据的构建里要说「这个版本没带排行榜凭据」,而不是画个空页面。</para>
 /// </summary>
 public sealed class RankingPage : PageBase
 {
@@ -30,7 +27,7 @@ public sealed class RankingPage : PageBase
     private readonly ComboBox _group = new() { Width = 130, MinHeight = 34 };
     private readonly ComboBox _cat = new() { Width = 170, MinHeight = 34 };
     private readonly Button _refresh = new() { Content = "刷新", MinHeight = 34, Classes = { "ghost" } };
-    private readonly WrapPanel _grid = new() { ItemSpacing = 14, LineSpacing = 16 };
+    private readonly WrapPanel _grid = new() { ItemSpacing = 14, LineSpacing = 14 };
     private readonly TextBlock _msg = Dim("");
 
     private sealed record Cat(string Id, string Group, string Label, string Source);
@@ -50,7 +47,7 @@ public sealed class RankingPage : PageBase
         };
         _refresh.Click += (_, _) =>
         {
-            // ★ 手动刷新要**绕过 6 小时缓存**,否则点了没反应
+            // 手动刷新要**绕过 6 小时缓存**,否则点了没反应
             if (_curCat.Length > 0) _ = Fetch(_curCat, force: true);
         };
         _group.SelectionChanged += (_, _) => { if (!_building) RebuildCats(); };
@@ -91,7 +88,7 @@ public sealed class RankingPage : PageBase
         _all = all;
         if (_all.Count == 0)
         {
-            // ★ 空表不是「出错了」,是**这个构建没带凭据**。说清楚,别画空页面。
+            // 空表不是「出错了」,是**这个构建没带凭据**。说清楚,别画空页面。
             _msg.Text = "这个版本没有带排行榜的凭据,所以排行榜不可用。\n" +
                         "官方发行包里是带的;自己从源码构建时,需要在构建环境里提供 " +
                         "DANDANPLAY_APP_ID / DANDANPLAY_APP_SECRET / TMDB_API_KEY。";
@@ -101,7 +98,7 @@ public sealed class RankingPage : PageBase
 
         _building = true;
         _group.Items.Clear();
-        // ★ 只列**真的有分类**的组:亮一个点进去是空的页签,比不亮更让人困惑
+        // 只列**真的有分类**的组:亮一个点进去是空的页签,比不亮更让人困惑
         foreach (var (key, label) in new[] { ("anime", "动漫"), ("movie", "电影"), ("tv", "剧集") })
         {
             if (_all.Any(c => c.Group == key)) _group.Items.Add(new ComboBoxItem { Content = label, Tag = key });
@@ -134,13 +131,13 @@ public sealed class RankingPage : PageBase
         }
         catch (Exception e)
         {
-            // ★★ 原样显示核心层给的那句话。它已经分清了缺凭据 / 429 / 密钥无效 /
-            //    分类下线 —— 换成「暂无数据」的话,这几种又变回一个样子。
+            // 原样显示核心层给的那句话。它已经分清了缺凭据 / 429 / 密钥无效 /
+            // 分类下线 —— 换成「暂无数据」的话,这几种又变回一个样子。
             _msg.Text = LibraryPage.Advice(e);
             return;
         }
 
-        // ★ 换分类比请求快得多:回来时用户可能已经点到别的榜了,别把旧结果画上去
+        // 换分类比请求快得多:回来时用户可能已经点到别的榜了,别把旧结果画上去
         if (_curCat != catId) return;
 
         var n = 0;
@@ -179,7 +176,7 @@ public sealed class RankingPage : PageBase
 /// <summary>
 /// 榜单卡。和媒体卡不同:它<b>不指向用户媒体库里的条目</b>,只是一张榜单海报。
 ///
-/// <para>★ 所以不复用 <see cref="Card"/> —— 那个带右键动作(标记已看 / 收藏 / 屏蔽),
+/// <para>所以不复用 <see cref="Card"/> —— 那个带右键动作(标记已看 / 收藏 / 屏蔽),
 /// 而榜单条目在用户的服务器上根本不存在,那三项点下去只会报错。</para>
 /// </summary>
 public sealed class RankCard : Border
@@ -195,7 +192,7 @@ public sealed class RankCard : Border
         var art = new Border
         {
             Width = w, Height = h, CornerRadius = new CornerRadius(10), ClipToBounds = true,
-            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+            Background = Tok.Of("PanelAlt"),
             Child = new Panel
             {
                 Children =
@@ -204,22 +201,22 @@ public sealed class RankCard : Border
                     new TextBlock
                     {
                         Text = title, FontSize = 12, Margin = new Thickness(10),
-                        Foreground = new SolidColorBrush(Color.Parse("#6b7688")),
+                        Foreground = Tok.Of("Ink3"),
                         TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center,
                         VerticalAlignment = VerticalAlignment.Center,
                         HorizontalAlignment = HorizontalAlignment.Center,
                     },
                     img,
-                    // 名次角标:左上角。★ 媒体卡的角标在右上(未看数)和左下(进度),
-                    //   放左上是为了以后混排时一眼分得清「这是榜单卡」
+                    // 名次角标:左上角。 媒体卡的角标在右上(未看数)和左下(进度),
+                    // 放左上是为了以后混排时一眼分得清「这是榜单卡」
                     new Border
                     {
                         HorizontalAlignment = HorizontalAlignment.Left,
                         VerticalAlignment = VerticalAlignment.Top,
                         Margin = new Thickness(6),
-                        Padding = new Thickness(7, 2, 7, 3),
+                        Padding = new Thickness(6, 2, 6, 2),
                         CornerRadius = new CornerRadius(6),
-                        Background = new SolidColorBrush(Color.Parse("#cc0c0f14")),
+                        Background = new SolidColorBrush(Color.Parse("#cc000000")),
                         IsVisible = rank > 0,
                         Child = new TextBlock
                         {
@@ -259,8 +256,8 @@ public sealed class RankCard : Border
 
     private static async Task LoadArt(CoreClient core, string url, Image target, int maxH)
     {
-        // ★ 走本地图片通道(和封面同一条路)。图床在核心层的**静态白名单**里,
-        //   不在账号表里 —— 见 core/net/localserve 的 AllowStatic。
+        // 走本地图片通道(和封面同一条路)。图床在核心层的**静态白名单**里,
+        // 不在账号表里 —— 见 core/net/localserve 的 AllowStatic。
         var bmp = await Images.LoadAsync(core, url, maxH);
         if (bmp is null) return;
         Dispatcher.UIThread.Post(() =>

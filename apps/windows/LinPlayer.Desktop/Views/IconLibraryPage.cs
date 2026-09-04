@@ -15,11 +15,11 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 图标库(UI_PC §7.17)。给某台服务器挑一张图标。
 ///
-/// <para>★★ **全量渲染不封顶**(库里约 1468 个格子),靠虚拟化面板扛住。
+/// <para>**全量渲染不封顶**(库里约 1468 个格子),靠虚拟化面板扛住。
 /// 「以前封顶 300」不是在新 UI 里也封顶的理由 —— Avalonia 的 ItemsRepeater
 /// 本来就有这个能力,封顶只会让用户找不到自己要的那张。</para>
 ///
-/// <para>★ 单个图标加载失败 → 留一个占位格,不影响别的:图床里坏链是常态,
+/// <para>单个图标加载失败 → 留一个占位格,不影响别的:图床里坏链是常态,
 /// 一张坏图不该把整页拖红。</para>
 /// </summary>
 public sealed class IconLibraryPage : PageBase
@@ -83,7 +83,7 @@ public sealed class IconLibraryPage : PageBase
             Dispatcher.UIThread.Post(() =>
             {
                 _all = items;
-                /* ★★ 「这个构建没配图标源」和「拉取失败」要**分开说**。
+                /* 「这个构建没配图标源」和「拉取失败」要**分开说**。
                    前者是永远修不好的(点刷新一百次也没用),后者点一下刷新就好了 ——
                    合成一句「没有图标」的话,用户面对的是同一句话和两种完全不同的处境。 */
                 if (items.Count == 0)
@@ -118,7 +118,7 @@ public sealed class IconLibraryPage : PageBase
         ToolTip.SetTip(box, $"{Str(e, "name")}\n{Str(e, "source")}");
         box.Click += async (_, _) => await Pick(url);
 
-        // ★ 单张失败就留空格子 —— 图床坏链是常态,一张坏图不该把整页拖红。
+        // 单张失败就留空格子 —— 图床坏链是常态,一张坏图不该把整页拖红。
         _ = Task.Run(async () =>
         {
             try
@@ -138,8 +138,8 @@ public sealed class IconLibraryPage : PageBase
     {
         try
         {
-            // ★ 先清缓存再写地址:不清的话旧图标还在缓存里,选了新的也不换 ——
-            //   表现是「点了没反应」,而配置其实已经改了。
+            // 先清缓存再写地址:不清的话旧图标还在缓存里,选了新的也不换 ——
+            // 表现是「点了没反应」,而配置其实已经改了。
             await _core.AccountClearAccountIcon(new { server_id = _serverId });
             await _core.AccountUpdateAccount(new { server_id = _serverId, icon_url = url });
             _hint.Text = "已设为该服务器图标。";

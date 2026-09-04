@@ -10,20 +10,17 @@ using LinPlayer.Desktop.Core;
 namespace LinPlayer.Desktop.Views;
 
 /// <summary>
-/// 服务器管理(UI_PC §7.16)。
+/// 服务器管理(UI_PC §7.16)。身份键是 <c>server</c>(归一化后不带尾斜杠),
+/// 三端既有的 <c>server_id</c> 参数就是它 —— 别换。
 ///
-/// <para>★ 身份键是 <c>server</c>(归一化后不带尾斜杠),三端既有的
-/// <c>server_id</c> 参数就是它 —— <b>别换</b>。</para>
-///
-/// <para>★★ 一张卡 = <b>一台服务器的全部</b>:概览(名字 / 用户 / 地址 / 版本 / 线路数)
-/// 摊在外面,四组编辑动作(信息 / 线路 / 图标 / 重新登录)收进抽屉,一次只开一个。
-/// 全平铺的话一台服务器十几个控件,三台就是四十几个 —— 那不是管理页,那是控件墙;
+/// <para>一张卡 = 一台服务器的全部:概览摊在外面,四组编辑动作(信息 / 线路 /
+/// 图标 / 重新登录)收进抽屉。全平铺的话一台十几个控件、三台四十几个,
 /// 而这一页 90% 的来访只是为了「切到另一台」。</para>
 /// </summary>
 public sealed class ServersPage : PageBase
 {
     private readonly CoreClient _core;
-    private readonly StackPanel _list = new() { Spacing = 12 };
+    private readonly StackPanel _list = new() { Spacing = 10 };
     private readonly TextBlock _hint = new() { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap };
 
     /// <summary>切服务器之后要让外壳重拉会话和侧栏 —— 不然整个应用还在用旧 token。</summary>
@@ -37,16 +34,23 @@ public sealed class ServersPage : PageBase
 
     /// <param name="focus">
     /// 只编辑这一台。
-    /// <para>★★ 2026-09-03 之后<b>这一页不再是导航目的地</b> —— 服务器已经排在侧栏里,
+    /// <para>2026-09-03 之后<b>这一页不再是导航目的地</b> —— 服务器已经排在侧栏里,
     /// 编辑动作从右键菜单进来,而右键点的是**某一台**。
     /// 这时候再列出全表,用户还得在里面重新找一遍自己刚点的那台。</para>
     /// </param>
     /// <param name="drawer">进来就拉开哪个抽屉。右键菜单点的是哪一项就是哪一个。</param>
-    public ServersPage(CoreClient core, Action onSwitched, string? focus = null, string? drawer = null)
+    /// <param name="inDialog">
+    /// 在弹窗里跑(见 <see cref="ServerEditWindow"/>)。给了这两个回调就不再碰
+    /// <see cref="Nav"/> —— 弹窗是模态的,往主窗的页面栈上压页面的话
+    /// 用户看不见那一页(它被弹窗挡着),而弹窗自己一动不动。
+    /// </param>
+    public ServersPage(CoreClient core, Action onSwitched, string? focus = null, string? drawer = null,
+        (Action<Control> Push, Action Close)? inDialog = null)
     {
         _core = core; _onSwitched = onSwitched;
         _focus = string.IsNullOrEmpty(focus) ? null : focus;
         _drawer = string.IsNullOrEmpty(drawer) ? null : drawer;
+        _inDialog = inDialog;
 
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
         if (_focus is null)
@@ -71,18 +75,23 @@ public sealed class ServersPage : PageBase
         }
         else
         {
-            // 定点编辑:标题写「编辑服务器」,并给一个回首页的出口 ——
-            // ★ 这一页现在是从右键菜单进来的,Nav.Root 清了栈,没有返回键就出不去了。
-            var back = new Button { Classes = { "ghost" }, Content = "← 完成" };
-            back.Click += (_, _) => Nav.Root(new HomePage(core,
-                Nav.Session is null ? null : LibraryPage.OpenDetail(core, Nav.Session.server)));
+            /* 定点编辑。 在弹窗里跑时这个键是「关掉弹窗」;
+               还留在页面栈上跑时(自检台)它得把用户送回首页 ——
+               Nav.Root 清了栈,没有这个键就出不去了。 */
+            var back = new Button { Classes = { "primary" }, Content = "完成" };
+            back.Click += (_, _) =>
+            {
+                if (_inDialog is { } d) d.Close();
+                else Nav.Root(new HomePage(core,
+                    Nav.Session is null ? null : LibraryPage.OpenDetail(core, Nav.Session.server)));
+            };
             head.Children.Add(H1("编辑服务器"));
             head.Children.Add(back);
         }
 
         Content = Scrolled(new StackPanel
         {
-            Spacing = 16,
+            Spacing = 14,
             Children = { head, _hint, _list },
         });
         _ = Reload();
@@ -112,7 +121,7 @@ public sealed class ServersPage : PageBase
             /* 进来就拉开指定的抽屉。两个来源:
                ①右键菜单点的那一项(<see cref="_drawer"/>);
                ②真机自检 LP_SELFCHECK_PAGE=servers:lines 之类。
-               ★ 收起来的东西**截图里等于不存在** —— 四组编辑排没排齐、
+               收起来的东西**截图里等于不存在** —— 四组编辑排没排齐、
                  线路表那一行四个控件会不会挤成一团,不拉开一次就永远没人看过。 */
             var want = _drawer;
             if (want is null)
@@ -127,6 +136,16 @@ public sealed class ServersPage : PageBase
 
     private Action? _autoProbe;
 
+    /// <summary>非 null = 这一页在弹窗里跑。子页面压弹窗,「完成」关弹窗。</summary>
+    private readonly (Action<Control> Push, Action Close)? _inDialog;
+
+    /// <summary>打开一个子页面(图标库)。弹窗里就压在弹窗上,否则走页面栈。</summary>
+    private void OpenSub(Control page)
+    {
+        if (_inDialog is { } d) d.Push(page);
+        else Nav.Push(page);
+    }
+
     /// <summary>自检用:抽屉名 → 把它拉开。只记第一台服务器的。</summary>
     private readonly Dictionary<string, Action> _openDrawer = new();
 
@@ -138,7 +157,7 @@ public sealed class ServersPage : PageBase
         var msg = new TextBlock { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap };
 
         // ══════════ ① 信息卡:这台服务器是什么、还活着吗 ══════════
-        /* ★★ 「服务器信息卡」原来是没有的 —— 卡上只有一个改名框和一串地址。
+        /* 「服务器信息卡」原来是没有的 —— 卡上只有一个改名框和一串地址。
            用户在这一页要回答的第一个问题是「这台是哪台、还连得上吗」,
            而版本 / 在线状态一个都没写。这里补上,**用 testConnection 现探**:
            它不要 token,所以**token 已经失效的账号也探得出来** ——
@@ -153,20 +172,20 @@ public sealed class ServersPage : PageBase
         };
         var who = new TextBlock
         {
-            // ★ 用户名在**这里**写(侧栏那份 2026-09-02 按用户要求去掉了)——
-            //   同一台服务器上两个账号,只看服务器名分不清,而这一页正是分辨它们的地方。
+            // 用户名在**这里**写(侧栏那份 2026-09-02 按用户要求去掉了)——
+            // 同一台服务器上两个账号,只看服务器名分不清,而这一页正是分辨它们的地方。
             Text = Str(a, "user_name"), Classes = { "dim" }, FontSize = 12.5,
             VerticalAlignment = VerticalAlignment.Center,
         };
         var badge = new Border
         {
-            IsVisible = active, Padding = new Thickness(8, 2), CornerRadius = new CornerRadius(999),
-            Background = new SolidColorBrush(Color.Parse("#295b8def")),
+            IsVisible = active, Padding = new Thickness(10, 2), CornerRadius = new CornerRadius(999),
+            Background = Tok.Of("AccentSoft"),
             VerticalAlignment = VerticalAlignment.Center,
             Child = new TextBlock
             {
                 Text = "使用中", FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.Parse("#5b8def")),
+                Foreground = Tok.Of("Accent"),
             },
         };
         var remark = Str(a, "remark");
@@ -180,7 +199,7 @@ public sealed class ServersPage : PageBase
         // ══════════ ② 抽屉:四组编辑,一次只开一个 ══════════
         var drawer = new ContentControl { IsVisible = false, Margin = new Thickness(0, 6, 0, 0) };
         var openName = "";
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var tabs = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
 
         void SyncTabs()
         {
@@ -189,7 +208,7 @@ public sealed class ServersPage : PageBase
         }
         void Toggle(string name, Func<Control> make)
         {
-            /* ★ 同一个按钮再点一次就收起来。没有这一下的话抽屉打开之后
+            /* 同一个按钮再点一次就收起来。没有这一下的话抽屉打开之后
                唯一的关法是切到另一个抽屉 —— 用户会一直找那个不存在的关闭键。 */
             if (openName == name) { openName = ""; drawer.IsVisible = false; SyncTabs(); return; }
             openName = name;
@@ -197,9 +216,14 @@ public sealed class ServersPage : PageBase
             drawer.IsVisible = true;
             SyncTabs();
         }
+        /* 页签用 <c>ghost</c> 而不是 <c>chip</c>(用户 2026-09-04:
+           「当前页面按钮样式不统一,有圆角也有直角矩形」)。
+           chip 的圆角是 16(胶囊),而这张卡上别的按钮全是 8 —— 同一张卡上
+           两种圆角挨在一起,看着像两套控件混进来了。
+           选中态复用 <c>.ghost.on</c>(样式表里新加的一条),不再借 chip 的。 */
         Button Tab(string name, string label, Func<Control> make)
         {
-            var b = new Button { Classes = { "chip" }, Content = label, Tag = name };
+            var b = new Button { Classes = { "ghost" }, Content = label, Tag = name };
             b.Click += (_, _) => Toggle(name, make);
             _openDrawer.TryAdd(name, () => Toggle(name, make));
             return b;
@@ -232,8 +256,8 @@ public sealed class ServersPage : PageBase
             catch (Exception e) { msg.Text = LibraryPage.Advice(e); }
         };
 
-        // ★ 删除要二次确认。设置页整体是「零二次确认」的,但**删账号是不可逆的**,
-        //   这一条是例外 —— 误点一下要重新登录一台服务器。
+        // 删除要二次确认。设置页整体是「零二次确认」的,但**删账号是不可逆的**,
+        // 这一条是例外 —— 误点一下要重新登录一台服务器。
         var del = new Button { Classes = { "ghost" }, Content = "删除" };
         del.Click += async (_, _) =>
         {
@@ -258,7 +282,7 @@ public sealed class ServersPage : PageBase
             Orientation = Orientation.Horizontal, Spacing = 10,
             Children = { title, badge, who },
         });
-        // ★ 没写备注就整行不画 —— 留一行空的等于每张卡都高一行,而且看着像没加载出来
+        // 没写备注就整行不画 —— 留一行空的等于每张卡都高一行,而且看着像没加载出来
         if (remark != "")
             body.Children.Add(new TextBlock { Text = remark, Classes = { "dim" }, FontSize = 12.5 });
         body.Children.Add(addr);
@@ -282,7 +306,7 @@ public sealed class ServersPage : PageBase
 
         return new Border
         {
-            Classes = { "card" }, Padding = new Thickness(16),
+            Classes = { "card" }, Padding = new Thickness(18),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Child = body,
         };
@@ -291,7 +315,7 @@ public sealed class ServersPage : PageBase
     /// <summary>
     /// 探一次这台服务器:在线状态 + 服务器自报名 + 版本。
     ///
-    /// <para>★ 失败就写「连不上」并把原因写出来,不留空:一行空白说不清是
+    /// <para>失败就写「连不上」并把原因写出来,不留空:一行空白说不清是
     /// 「还没探」还是「探失败了」。</para>
     /// </summary>
     private async Task Probe(string server, TextBlock target)
@@ -315,7 +339,7 @@ public sealed class ServersPage : PageBase
 
     /// <summary>
     /// 改显示名和备注。
-    /// <para>★ 备注是核心层早就存着的字段(<c>Account.Remark</c>,<c>account.updateAccount</c>
+    /// <para>备注是核心层早就存着的字段(<c>Account.Remark</c>,<c>account.updateAccount</c>
     /// 也早就收这个键),之前 UI 一直没接 —— 这正是本仓最常见的那类缺口:
     /// 后端有、前端没接,而且两边都不报错。</para>
     /// </summary>
@@ -327,9 +351,9 @@ public sealed class ServersPage : PageBase
             Classes = { "field" }, Text = Str(a, "remark"),
             Watermark = "备注(只给自己看,比如「朋友的服务器 / 只放动画」)",
         };
-        // ★ 「允许自签名」必须有个入口。核心层的白名单已经接好了(net/tlspolicy),
-        //   但界面上没开关的话用户根本用不上 —— 自建 Emby 用自签名证书很常见,
-        //   而报出来的是一句看不懂的 x509 英文。
+        // 「允许自签名」必须有个入口。核心层的白名单已经接好了(net/tlspolicy),
+        // 但界面上没开关的话用户根本用不上 —— 自建 Emby 用自签名证书很常见,
+        // 而报出来的是一句看不懂的 x509 英文。
         var insecure = new CheckBox
         {
             Content = "允许这台服务器的自签名证书",
@@ -363,18 +387,14 @@ public sealed class ServersPage : PageBase
     /// <summary>
     /// 线路表编辑:改名 / 改地址 / 删 / 加 / 切到某条 / 从服务器同步。
     ///
-    /// <para>★★ 核心层的 <c>account.setLines</c> 是<b>整表替换</b>,所以这里也整表提交 ——
-    /// 逐条增删改的话,某一条提交失败就会留下一个「界面上有、配置里没有」的线路。</para>
-    ///
-    /// <para>★ 「切到这条」单独走 <c>setActiveLine</c>,不混在保存里:
-    /// 改地址和换线路是两件事,合成一次提交的话会出现「改到一半就被切走了」。</para>
-    ///
-    /// <para>★ 同步回来 <c>added=0</c> 是**正常结果**,不是失败 ——
-    /// 绝大多数服务器没部署那个端点。这里如实说,不弹红字。</para>
+    /// <para>核心层的 <c>account.setLines</c> 是整表替换,这里也整表提交 —— 逐条增删改
+    /// 会留下「界面上有、配置里没有」的半截状态。「切到这条」单独走
+    /// <c>setActiveLine</c>:改地址和换线路是两件事。同步回来 <c>added=0</c> 是正常结果
+    /// (绝大多数服务器没部署那个端点),如实说,不弹红字。</para>
     /// </summary>
     private Control EditLines(JsonElement a, string server, TextBlock msg)
     {
-        var rows = new StackPanel { Spacing = 8 };
+        var rows = new StackPanel { Spacing = 10 };
         var activeLine = (int)Num(a, "active_line");
         var items = Arr(a, "lines");
 
@@ -384,7 +404,7 @@ public sealed class ServersPage : PageBase
             var u = new TextBox
             {
                 Classes = { "field" }, Text = url, Watermark = "http://线路地址",
-                Margin = new Thickness(8, 0, 8, 0),
+                Margin = new Thickness(10, 0, 10, 0),
                 HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             var pick = new Button
@@ -394,7 +414,7 @@ public sealed class ServersPage : PageBase
             };
             var rm = new Button
             {
-                Classes = { "ghost" }, Content = "✕", Margin = new Thickness(8, 0, 0, 0),
+                Classes = { "ghost" }, Content = "✕", Margin = new Thickness(10, 0, 0, 0),
             };
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto") };
             Grid.SetColumn(n, 0); Grid.SetColumn(u, 1); Grid.SetColumn(pick, 2); Grid.SetColumn(rm, 3);
@@ -402,8 +422,8 @@ public sealed class ServersPage : PageBase
             rm.Click += (_, _) => rows.Children.Remove(row);
             pick.Click += async (_, _) =>
             {
-                // ★ 下标按**当前列表里的位置**算,不是建这一行时的位置 ——
-                //   中间删过一条的话两者就不一样了,而切错线路是静默的。
+                // 下标按**当前列表里的位置**算,不是建这一行时的位置 ——
+                // 中间删过一条的话两者就不一样了,而切错线路是静默的。
                 var at = rows.Children.IndexOf(row);
                 try
                 {
@@ -485,7 +505,7 @@ public sealed class ServersPage : PageBase
             Classes = { "primary" }, Content = "打开图标库…",
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        go.Click += (_, _) => Nav.Push(new IconLibraryPage(_core, server, () =>
+        go.Click += (_, _) => OpenSub(new IconLibraryPage(_core, server, () =>
         {
             _onSwitched();
             _ = Reload();
@@ -500,15 +520,12 @@ public sealed class ServersPage : PageBase
     }
 
     /// <summary>
-    /// 重新登录:token 过期时**定点换凭据**。
+    /// 重新登录:token 过期时定点换凭据。
     ///
-    /// <para>★★ 走 <c>emby.relogin</c> 而<b>不是</b> <c>emby.login</c>。
-    /// 后者是 Upsert 语义,会把这台当成「新登录的」处理 ——
-    /// 用户改过的服务器名 / 备注 / 图标 / 线路表全被冲回原样。
-    /// 核心层为此专门单列了一条命令,而 UI 一直没接(30 条零调用命令里的一条)。</para>
-    ///
-    /// <para>★ 用户名预填成当前这个:绝大多数情况是同一个账号 token 过期,
-    /// 让人重新打一遍用户名是白让人做的。</para>
+    /// <para>走 <c>emby.relogin</c> 而不是 <c>emby.login</c> —— 后者是 Upsert 语义,
+    /// 会把这台当成新登录的处理,用户改过的名字 / 备注 / 图标 / 线路表全被冲回原样。
+    /// 核心层为此专门单列了一条命令,而 UI 一直没接。用户名预填成当前这个:
+    /// 绝大多数情况是同一个账号 token 过期。</para>
     /// </summary>
     private Control Relogin(JsonElement a, string server, TextBlock msg)
     {
@@ -557,7 +574,7 @@ public sealed class ServersPage : PageBase
         foreach (var c in body) sp.Children.Add(c);
         return new Border
         {
-            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+            Background = Tok.Of("PanelAlt"),
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(14),
             Child = sp,
@@ -567,7 +584,7 @@ public sealed class ServersPage : PageBase
     /// <summary>
     /// 把测线路的结果说成人话。
     ///
-    /// <para>★ 判「通不通」看的是 <c>ms</c> 是不是 <b>null</b>,不是有没有 ok 字段 ——
+    /// <para>判「通不通」看的是 <c>ms</c> 是不是 <b>null</b>,不是有没有 ok 字段 ——
     /// 核心层就是拿 null 表示不通的(写成 0 的话「秒回」和「不通」长得一样)。</para>
     /// </summary>
     private static string Describe(JsonElement r)
@@ -591,4 +608,62 @@ public sealed class ServersPage : PageBase
     private static List<JsonElement> Arr(JsonElement e, string k) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Array
             ? v.EnumerateArray().ToList() : [];
+}
+
+/// <summary>
+/// 「编辑服务器」的弹窗外壳。
+///
+/// <para>用户 2026-09-04:「编辑信息、线路、图标等功能,直接做成一个弹窗即可」。
+/// 原来它是导航目的地:右键 → <c>Nav.Root</c> 换根 → 整页被顶掉,改个名字的代价
+/// 是丢掉当前浏览位置。弹窗是模态的 —— 它改的是全局账号状态,背后那一页
+/// 在它开着的时候点了会读到半旧的数据。尺寸 720×640 可缩放:线路表一行四个控件。</para>
+/// </summary>
+public sealed class ServerEditWindow : Window
+{
+    /// <summary>弹窗自己的小页面栈。图标库要压在它上面,不能扔给主窗。</summary>
+    private readonly Stack<Control> _stack = new();
+    private readonly ContentControl _host = new();
+
+    public ServerEditWindow(CoreClient core, Action onSwitched, string server, string? drawer)
+    {
+        Title = "编辑服务器";
+        Width = 720;
+        Height = 640;
+        MinWidth = 560;
+        MinHeight = 420;
+        WindowStartupLocation = WindowStartupLocation.CenterOwner;
+        /* 自检模式下置顶。主窗在自检时是 Topmost(防止截到别的程序),
+           而截图走的是 CopyFromScreen —— 抓的是**屏幕上那块区域**。
+           弹窗不置顶的话它被主窗压在下面,截出来是主窗的界面,
+           而脚本照样报「已打开」。右键菜单那条路 2026-09-03 已经栽过一次。 */
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK") == "1") Topmost = true;
+        // 弹窗用系统边框:自绘标题栏那一套是主窗专有的(拖拽、最大化、按钮全在
+        // MainWindow 里接的),弹窗再抄一份就是两处要一起改的代码。
+        Content = _host;
+
+        Push(new ServersPage(core, onSwitched, server, drawer, (Push, Close)));
+
+        // Esc 关掉。 有子页面时先退子页面 —— 直接关掉的话用户在图标库里按 Esc
+        // 会连编辑页一起没了,而他只是想退出挑图标。
+        KeyDown += (_, e) =>
+        {
+            if (e.Key != Avalonia.Input.Key.Escape) return;
+            if (_stack.Count > 1) Back();
+            else Close();
+            e.Handled = true;
+        };
+    }
+
+    private void Push(Control page)
+    {
+        _stack.Push(page);
+        _host.Content = page;
+    }
+
+    private void Back()
+    {
+        if (_stack.Count <= 1) return;
+        _stack.Pop();
+        _host.Content = _stack.Peek();
+    }
 }

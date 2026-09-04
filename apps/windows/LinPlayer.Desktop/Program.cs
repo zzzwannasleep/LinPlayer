@@ -16,10 +16,10 @@ internal static class Program
 
     /// <summary>本程序版本。
     ///
-    /// ★ **不许写死字面量。** 唯一权威是仓库根的 `VERSION`(见 docs/VERSIONING.md):
-    ///   CI 用 `dotnet publish -p:Version=&lt;版本&gt;` 注进程序集,这里回读。
-    ///   2026-09-04 之前这里硬编码 `"0.1.0-go"`,而线上已经发到 `v1.0.0-build684` ——
-    ///   照那样发布,更新检查会判定「已是最新」并**静默**卡死所有老用户。
+    /// **不许写死字面量。** 唯一权威是仓库根的 `VERSION`(见 docs/VERSIONING.md):
+    /// CI 用 `dotnet publish -p:Version=&lt;版本&gt;` 注进程序集,这里回读。
+    /// 2026-09-04 之前这里硬编码 `"0.1.0-go"`,而线上已经发到 `v1.0.0-build684` ——
+    /// 照那样发布,更新检查会判定「已是最新」并**静默**卡死所有老用户。
     /// </summary>
     public static string Version =>
         System.Reflection.Assembly.GetExecutingAssembly()
@@ -31,19 +31,19 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        /* ★ 控制台按 UTF-8 输出。Windows 默认代码页是 GBK,日志里的中文会变成一串问号 ——
+        /* 控制台按 UTF-8 输出。Windows 默认代码页是 GBK,日志里的中文会变成一串问号 ——
            而自检脚本正是靠 grep 中文关键字读这些日志的,乱码 = 整套日志形同不存在。 */
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { /* 无控制台时会抛,忽略 */ }
 
         Perf.Log("Main 入口");
         var exeDir = AppContext.BaseDirectory;
-        /* ★★ 数据全在 exe 同级的 userdata/(绿色包单一数据根)。
+        /* 数据全在 exe 同级的 userdata/(绿色包单一数据根)。
            用户明确要求过「不喜欢到处拉屎」—— 不要往 AppData 里写。
            这里只把根传给核心层,**路径的唯一出口在 core/paths**,UI 侧不自己拼。 */
         var dataDir = Path.Combine(exeDir, "userdata");
         var dll = Path.Combine(exeDir, "lpcore.dll");
-        // ★ 元数据缓存和核心层共用一个数据根。它必须在任何页面构造之前就绪 ——
-        //   晚一步的话首屏那几条读命令全部落空,而「首屏」正是它唯一要救的那一屏。
+        // 元数据缓存和核心层共用一个数据根。它必须在任何页面构造之前就绪 ——
+        // 晚一步的话首屏那几条读命令全部落空,而「首屏」正是它唯一要救的那一屏。
         MetaCache.Init(dataDir);
 
         try
@@ -62,7 +62,7 @@ internal static class Program
         /* 退出时调 lp_shutdown(Dispose 里)。它**阻塞到落盘完成**:停 mpv、
            关本地数据通道、停命令总线。
 
-           ★ 实测说明:进度上报那条**不靠它** —— 关窗口时播放页的
+            实测说明:进度上报那条**不靠它** —— 关窗口时播放页的
              DetachedFromVisualTree 已经发过 player.stopPlayback,
              注入「不调 Dispose」跑一遍,/Sessions/Playing/Stopped 照样上报。
              所以这一句守的是**关停顺序与落盘**,不是上报;

@@ -469,3 +469,23 @@ s = re.sub(r'^// *\n', '', s, flags=re.M)   # 想删「删空后剩下的空注�
   **注入本身可能是个等价改写**(改完行为没变,自然不红)
 - [发布版本单调性](build-release.md) — 静默失效、CI 全绿、只有用户那边不对
 - [手机端动效重做](ui-mobile.md) — 自检环境和用户环境不一致 = 假绿
+
+## 自检跑之前先认退出码 — 2026-09-05
+
+`selfcheck-win.sh` 编译失败会 `exit 1` 并且说清楚「再往下跑起的是上一次那个 exe」。
+但我这样调它:
+
+```bash
+LP_PICK=1 bash scripts/selfcheck-win.sh v1 ... >/dev/null 2>&1 ; grep "\[点选\]" build/app.log
+```
+
+`>/dev/null` 把那句警告吞了,`;` 让 grep 照跑 —— 读到的是**上一轮**的 `build/app.log`,
+断言全绿,而这一轮根本没编译成功。险些拿它当交付报上去。
+
+★ 规矩:**跑自检一律 `&& grep`,不用 `;`**;要么就别把 stderr 丢掉。
+  「脚本有防呆」不等于「我调用的方式有防呆」。
+
+顺带:那次编译失败是我用 `sed -i '/AllowUnsafeBlocks/d'` 删掉了 csproj 里**本来就有**的
+一行(`CoreClient.cs` 的 `LibraryImport` 需要它)。前一步的 `grep ... || sed ...` 里
+grep 已经找到了、sed 没执行,我却把 grep 的输出误读成「是我加的」。
+**删配置之前先 `git diff` 看它是不是本来就在。**

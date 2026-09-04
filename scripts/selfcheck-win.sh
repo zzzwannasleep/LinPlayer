@@ -14,6 +14,8 @@
 #                                                              装一个真插件跑起来
 #   LP_SHADER=ak_sharp LP_DRILL=1 bash scripts/selfcheck-win.sh quality player <片子>
 #                                                              画质档位面板(真选下拉项)
+#   LP_REPAINT=1 bash scripts/selfcheck-win.sh repaint detail:ep-1
+#                                                            详情页画两遍(那条崩溃)
 #   LP_HOME=1 bash scripts/selfcheck-win.sh home                首页合集栏(有合集)
 #   LP_HOME=1 LP_NOBOXSET=1 bash scripts/selfcheck-win.sh home-nobox
 #                                                              没有合集 -> 整条不画
@@ -22,6 +24,15 @@
 #                                                              越线 -> 必须从头放
 #   LP_TRANSCODE=1 LP_THUMB=1 bash scripts/selfcheck-win.sh tc play:mv-1 <片子>
 #                                                              服务器只给转码地址 -> 我们照样直连
+#   LP_TOAST=1 LP_KEYS=1 bash scripts/selfcheck-win.sh ui       toast + 全局快捷键
+#   LP_PANEL=1 bash scripts/selfcheck-win.sh panel play:mv-1 <片子>
+#                                                              设置抽屉:静止 4.5 秒不许被 OSD 收走
+#                                                              (「字幕/超分/比例全都不生效」的真因)
+#   LP_DL=1 bash scripts/selfcheck-win.sh dl download           下载页:分组 + 点卡片进播放页
+#   LP_DL=2 bash scripts/selfcheck-win.sh dl2 download          同上但**不点**(截图要看的是这一页)
+#   LP_PREFETCH=1 LP_THUMB=1 LP_AVSYNC=1 LP_WAIT=45 bash scripts/selfcheck-win.sh th play:mv-1 <片子>
+#                                                              缩略图(服务端 BIF)+ 音画同步
+#                                                              反注入:再跑一遍加 LP_BLOCK_FOR_TARGET_TIME=0
 #   LP_CATDETAIL=1 bash scripts/selfcheck-win.sh catalog #       "plugincatalog:$PWD/scripts/fixtures/selfcheck-plugin"
 #                                                              影视目录 + 详情盖层
 #     ↑ 这条走的是**最长的一条链**:JS 引擎 → 贡献点 → 源分派表 →
@@ -160,6 +171,10 @@ case "${LP_HIDEBOX:-}" in
   1) HIDEBOX="\"http://127.0.0.1:$PORT\"" ;;
   2) HIDEBOX="\"http://127.0.0.1:1\"" ;;
 esac
+# LP_PREFETCH=1 -> 给这台假服务器打开「多线程加载」。
+# 进度条缩略图**只读本地代理那份环形缓存**,不开这个开关就一段缓存都没有,
+# 缩略图那几条断言全部落在「没有对照组」上 —— 那不是绿,那是没验。
+PREFETCH=""; [ "${LP_PREFETCH:-}" = "1" ] && PREFETCH="\"http://127.0.0.1:$PORT\""
 [ -n "${LP_SRV2:-}" ] && SRV2=',{ "server": "http://127.0.0.1:1", "token": "t2", "user_id": "u2",
     "user_name": "第二个用户", "name": "自检用第二台", "lines": [], "active_line": 0 }'
 cat > "$BIN/userdata/config.json" <<JSON
@@ -181,6 +196,7 @@ cat > "$BIN/userdata/config.json" <<JSON
   "prefs": {
     "watched_threshold_percent": ${LP_WATCHED:-90},
     "prefetch_cache_bytes": ${LP_RING:-67108864},
+    "prefetch_servers": [$PREFETCH],
     "hide_collection_servers": [$HIDEBOX]
   }
 }
@@ -212,6 +228,54 @@ fi
 #   真因是播放页退出时把本地代理一起收了。
 rm -f "$BIN/userdata/history.json"
 
+# ★★ LP_DL=1:灌两条下载记录 —— 一条**已完成**(指着真的 clip.mp4),一条下到一半。
+#   两条都要有:只灌完成的那条,「进行中 / 已完成」分组只画得出一半,
+#   而分组恰恰是用户说的「下载页只有下载完的」那件事。
+#   ☠ file_path 必须是**真存在的文件**:playLocal 会 stat 一次,
+#     指一个不存在的路径就永远是「文件已不存在」,那条断言验的就成了错误分支。
+if [ -n "${LP_DL:-}" ]; then
+  echo "== 4.5/5 灌两条下载记录(LP_DL=$LP_DL)=="
+  mkdir -p "$BIN/userdata/downloads"
+  CLIP_JSON="$(cd "$ROOT/build" && pwd -W 2>/dev/null || printf '%s' "$ROOT/build")/clip.mp4"
+  CLIP_SIZE="$(stat -c %s "$ROOT/build/clip.mp4" 2>/dev/null || echo 84085670)"
+  HALF=$((CLIP_SIZE / 5 * 2))
+  cat > "$BIN/userdata/downloads/index.json" <<JSON
+{
+  "threads": 2,
+  "items": [
+    {
+      "id": "dl-done", "item_id": "mv-1", "type": "Movie", "title": "自检片(已下完)",
+      "container": "mp4", "url": "http://127.0.0.1:$PORT/Items/mv-1/Download",
+      "poster_url": "http://127.0.0.1:$PORT/Items/mv-1/Images/Primary",
+      "file_path": "$CLIP_JSON", "total_bytes": $CLIP_SIZE,
+      "status": "completed", "added_at": 1750000000000, "supports_range": true,
+      "segments": [{"start": 0, "end": $((CLIP_SIZE - 1)), "downloaded": $CLIP_SIZE}]
+    },
+    {
+      "id": "dl-half", "item_id": "ep-1", "type": "Episode", "title": "第 01 集",
+      "series_name": "自检剧集", "season_number": 1, "episode_number": 1,
+      "container": "mkv", "url": "http://127.0.0.1:$PORT/Items/ep-1/Download",
+      "file_path": "$BIN/userdata/downloads/ep-1.mkv", "total_bytes": $CLIP_SIZE,
+      "status": "downloading", "added_at": 1750000001000, "supports_range": true,
+      "segments": [{"start": 0, "end": $((CLIP_SIZE - 1)), "downloaded": $HALF}]
+    }
+  ]
+}
+JSON
+fi
+
+# ★ LP_PANEL 那条要验「在面板里选一条字幕,mpv 的 sid 真的跟着变」——
+#   而自检片本身没有字幕轨。写一个最小的 .srt 出来给它挂。
+#   ☠ 不写这个的话下拉里只有「关闭字幕」一项,那条断言永远绿 —— 又是一个假绿。
+if [ -n "${LP_PANEL:-}" ]; then
+  printf '1
+00:00:00,000 --> 00:30:00,000
+自检字幕
+
+' > "$ROOT/build/selfcheck.srt"
+  export LP_SELFCHECK_SRT="$(cd "$ROOT/build" && pwd -W 2>/dev/null || printf '%s' "$ROOT/build")/selfcheck.srt"
+fi
+
 echo "== 5/5 起 exe 截图 =="
 # ★ 排行榜的两个上游也指到假服务器上(它顺带假扮弹弹Play / TMDB)。
 #   没有这一步的话,排行榜只验得到「没凭据」那一半 —— 而**有数据时长什么样**
@@ -228,11 +292,15 @@ export LP_ICON_LIBRARY_SOURCES="http://127.0.0.1:$PORT/icons.json"
 # ★ 不指过去的话,市场页在没网的机器上只验得到「拉取失败」那一半 ——
 #   而**有插件时长什么样**(第三方徽章、跳过数提示、版本取最大)才是会出 bug 的那半。
 export LP_PLUGIN_OFFICIAL_REGISTRY="http://127.0.0.1:$PORT/plugins/registry.json"
-LP_CORELOG="${LP_CORELOG:-}" LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_EPISODE="${LP_EP:-}" LP_SELFCHECK_COLLAPSE="${LP_COLLAPSE:-}" LP_SELFCHECK_FILL="${LP_FILL:-}" LP_SELFCHECK_SIDEBAR="${LP_SIDEBAR:-}" LP_SELFCHECK_SRVMENU="${LP_SRVMENU:-}" LP_SELFCHECK_RAIL="${LP_RAIL:-}" LP_SELFCHECK_CHROME="${LP_CHROME:-}" LP_SELFCHECK_OSDFADE="${LP_OSDFADE:-}" LP_SELFCHECK_RESUME="${LP_RESUME:-}" LP_SELFCHECK_RECLICK="${LP_RECLICK:-}" LP_SELFCHECK_SRVICON="${LP_SRVICON:-}" LP_SELFCHECK_THUMB="${LP_THUMB:-}" LP_SELFCHECK_HOME="${LP_HOME:-}" LP_SELFCHECK_HOMESET="${LP_HOMESET:-}" LP_SELFCHECK_WATCHED="${LP_WATCHED:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
+LP_CORELOG="${LP_CORELOG:-}" LP_SELFCHECK=1 LP_SELFCHECK_MENU="${LP_MENU:-}" LP_SELFCHECK_COUNT="${LP_COUNT:-}" LP_SELFCHECK_BOOM="${LP_BOOM:-}" LP_SELFCHECK_VERSION="${LP_VER:-}" LP_SELFCHECK_REPAINT="${LP_REPAINT:-}" LP_SELFCHECK_HERO="${LP_HERO:-}" LP_SELFCHECK_NAVHOVER="${LP_NAVHOVER:-}" LP_SELFCHECK_GLYPH="${LP_GLYPH:-}" LP_SELFCHECK_COLLAPSE="${LP_COLLAPSE:-}" LP_SELFCHECK_FILL="${LP_FILL:-}" LP_SELFCHECK_SIDEBAR="${LP_SIDEBAR:-}" LP_SELFCHECK_SRVMENU="${LP_SRVMENU:-}" LP_SELFCHECK_RAIL="${LP_RAIL:-}" LP_SELFCHECK_CHROME="${LP_CHROME:-}" LP_SELFCHECK_OSDFADE="${LP_OSDFADE:-}" LP_SELFCHECK_RESUME="${LP_RESUME:-}" LP_SELFCHECK_RECLICK="${LP_RECLICK:-}" LP_SELFCHECK_SRVICON="${LP_SRVICON:-}" LP_SELFCHECK_THUMB="${LP_THUMB:-}" LP_SELFCHECK_AVSYNC="${LP_AVSYNC:-}" LP_SELFCHECK_STUTTER="${LP_STUTTER:-}" LP_SELFCHECK_PICK="${LP_PICK:-}" LP_SELFCHECK_PAUSE="${LP_PAUSEAT:-}" LP_SELFCHECK_PANEL="${LP_PANEL:-}" LP_SELFCHECK_DOWNLOAD="${LP_DL:-}" LP_SELFCHECK_TOAST="${LP_TOAST:-}" LP_SELFCHECK_KEYS="${LP_KEYS:-}" LP_SELFCHECK_HOME="${LP_HOME:-}" LP_SELFCHECK_HOMESET="${LP_HOMESET:-}" LP_SELFCHECK_WATCHED="${LP_WATCHED:-}" LP_SELFCHECK_PAGE="$PAGE" LP_SELFCHECK_MAXIMIZE="${LP_MAX:-}" LP_SELFCHECK_PLAYER_DRILL="${LP_DRILL:-}" LP_SELFCHECK_SCROLL="${LP_SCROLL:-}" LP_SELFCHECK_SOURCE="${LP_SRCKIND:-}" LP_SELFCHECK_CATALOG_DETAIL="${LP_CATDETAIL:-}" LP_SELFCHECK_SHADER="${LP_SHADER:-}" "$BIN/LinPlayer.exe" > "$ROOT/build/app.log" 2>&1 &
 # 播放页要等起播 + 解码,别的页 6 秒够
 # LP_SHADER=all 要把 28 档挨个挂一遍(每档要等真渲染一帧才编译),得多给点时间
 # LP_WAIT=秒 覆盖等待时长(滚动扫描这类要跑几秒的自检用)
 sleep "${LP_WAIT:-$([ "${LP_SHADER:-}" = "all" ] && echo 45 || { [ -n "$CLIP" ] && echo 12 || echo 6; })}"
+# LP_BURST=张数 连拍,量「暂停时画面动没动」。见 scripts/shot-burst.sh
+if [ -n "${LP_BURST:-}" ]; then
+  bash "$ROOT/scripts/shot-burst.sh" "$SHOT" "$LP_BURST" "${LP_BURST_MS:-120}"
+fi
 powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
   -ProcName LinPlayer -Out "$ROOT/build/$SHOT.png"
 # ★ **优雅关闭**,不是 Stop-Process。

@@ -22,7 +22,7 @@ public abstract class PageBase : UserControl
     /// <summary>
     /// 页面正文的滚动容器。
     ///
-    /// <para>★ 平滑滚动<b>不在这里装</b> —— 装在 <see cref="Smooth.Install"/>(类级处理器,
+    /// <para>平滑滚动<b>不在这里装</b> —— 装在 <see cref="Smooth.Install"/>(类级处理器,
     /// 全应用一次)。装在这儿的话,自己 new ScrollViewer 的那 6 处页面就漏了。</para>
     /// </summary>
     protected static ScrollViewer Scrolled(Control content) => new()
@@ -31,13 +31,13 @@ public abstract class PageBase : UserControl
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         Content = new Border
         {
-            /* ★★ <b>不封顶</b>(2026-09-02 用户点名:「媒体库页面右边有留白,
+            /* <b>不封顶</b>(2026-09-02 用户点名:「媒体库页面右边有留白,
                媒体库详情页也有…不需要这个留白」)。
                原来是 MaxWidth=1560 + Stretch,也就是「撑满、超过 1560 就居中」——
                在宽窗口上那就是左右各一条空边,而用户要的是内容铺满。
-               ★ 留下的只有 18 的水槽:贴着边画,卡片会被窗口边缘切齐,看着像裁掉了。 */
+               留下的只有 18 的水槽:贴着边画,卡片会被窗口边缘切齐,看着像裁掉了。 */
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(18, 18, 18, 28),
+            Padding = new Thickness(18, 18, 18, 26),
             Child = content,
         },
     };
@@ -54,10 +54,10 @@ public sealed class FatalPage : PageBase
     {
         Content = new Border
         {
-            Padding = new Thickness(40),
+            Padding = new Thickness(42),
             Child = new StackPanel
             {
-                Spacing = 12,
+                Spacing = 10,
                 VerticalAlignment = VerticalAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Children =
@@ -74,13 +74,11 @@ public sealed class FatalPage : PageBase
 /// <summary>
 /// 当前账号不是 Emby 时的落地页。
 ///
-/// <para>★★ 这不是「懒得做」的占位页。这些页面全都直接用 <c>Nav.Session</c> 取会话;
-/// 账号是网盘 / 局域网源时它是 null,解引用就是空引用异常。
-/// **实测**(注入摘掉这个守卫跑一遍):页面自己的 catch 会接住,但显示的是
-/// 「加载失败:Object reference not set to an instance of an object.」——
-/// 一句用户看不懂、也不知道该干什么的英文。守卫换来的是一句能照着做的中文。</para>
-///
-/// <para>这条路真实存在:从旧版升上来的用户,活跃账号本来就可能不是 Emby。</para>
+/// <para>这不是「懒得做」的占位页。这些页面全都直接用 <c>Nav.Session</c> 取会话,
+/// 账号是网盘 / 局域网源时它是 null,解引用就是空引用异常。实测(注入摘掉守卫):
+/// 页面自己的 catch 会接住,但显示的是「加载失败:Object reference not set…」——
+/// 一句用户看不懂、也不知道该干什么的英文。这条路真实存在:从旧版升上来的用户,
+/// 活跃账号本来就可能不是 Emby。</para>
 /// </summary>
 public sealed class NoSessionPage : PageBase
 {
@@ -114,7 +112,7 @@ public sealed class PlaceholderPage : PageBase
 /// <summary>
 /// 首登闸口 / 添加服务器(UI_PC §7.6)。
 ///
-/// <para>★ 它和「添加服务器」是**同一个页面的两种版式**,不是两套代码 ——
+/// <para>它和「添加服务器」是**同一个页面的两种版式**,不是两套代码 ——
 /// 两套的话新增一种源类型就要改两处,而漏掉的那处就是「某个入口加不了这种源」。</para>
 /// </summary>
 public sealed class AddServerPage : PageBase
@@ -148,38 +146,38 @@ public sealed class AddServerPage : PageBase
         };
 
         /* 源类型选择(UI_PC §7.6:一份表单定义 + 三种版式)。
-           ★★ **不能只有 Emby**:核心层已经接了本地文件夹 / WebDAV / Ani-RSS 三个
+            **不能只有 Emby**:核心层已经接了本地文件夹 / WebDAV / Ani-RSS 三个
              文件浏览型源,而界面上没有入口的话它们等于不存在 —— 而且这种「后端有、
              前端没接」正是本仓最常见的一类静默缺口。
-           ★ 新增一种源只改这张表一处:分散在各处的话,漏掉的那处就是
+            新增一种源只改这张表一处:分散在各处的话,漏掉的那处就是
              「某个入口加不了这种源」。 */
         var kinds = new[]
         {
             ("Emby", "emby", "填服务器地址和账号即可。先点「测试连接」可以确认地址对不对。"),
             ("本地文件夹", "local", "选一个本机目录当作源。没有地址也没有账号密码。"),
         }
-        /* ★★ 文件浏览型源跟着「文件浏览」入口一起下线。
+        /* 文件浏览型源跟着「文件浏览」入口一起下线。
            留着的后果是**登进去就是死路**:登录成功 → 侧栏没有文件浏览 → 什么都点不到。
            2026-09-02 砍功能时现场抓到的:砍入口不砍源类型,等于给用户挖了个坑。
            开关表在 Features.cs,那边放开 nav.browse 时这里自动跟着回来。 */
         .Where(k => k.Item2 == "emby" || Features.On("nav.browse")).ToArray();
-        // ★ 用 WrapPanel:四个芯片在固定宽的卡里一行放不下,
-        //   用 StackPanel 的话最后一个会被卡的边缘裁掉(而且**一点提示都没有**)。
-        /* ★★ 只剩一种源类型时**整条不画**。
+        // 用 WrapPanel:四个芯片在固定宽的卡里一行放不下,
+        // 用 StackPanel 的话最后一个会被卡的边缘裁掉(而且**一点提示都没有**)。
+        /* 只剩一种源类型时**整条不画**。
            一个只有一个选项的选择器是纯噪音 —— 用户会盯着它想「还能选什么」,
            而答案是没有。(同一条规矩用在详情页的季选择条上。)
            2026-09-02 砍功能之后这里就只剩 Emby 了,芯片却还孤零零摆着。 */
         var kindBar = new WrapPanel { IsVisible = kinds.Length > 1 };
         var kindDesc = Dim(kinds[0].Item3);
         var kindIndex = 0;
-        var serverRow = new StackPanel { Spacing = 8, Children = { Label("服务器地址"), server } };
-        var userRow = new StackPanel { Spacing = 8, Children = { Label("用户名"), user } };
-        var passRow = new StackPanel { Spacing = 8, Children = { Label("密码"), pass } };
+        var serverRow = new StackPanel { Spacing = 10, Children = { Label("服务器地址"), server } };
+        var userRow = new StackPanel { Spacing = 10, Children = { Label("用户名"), user } };
+        var passRow = new StackPanel { Spacing = 10, Children = { Label("密码"), pass } };
         var pickDir = new Button { Classes = { "ghost" }, Content = "选择文件夹…" };
         var pickedDir = Dim("");
         var dirRow = new StackPanel
         {
-            Spacing = 8, IsVisible = false,
+            Spacing = 10, IsVisible = false,
             Children = { Label("本机目录"), pickDir, pickedDir },
         };
 
@@ -187,7 +185,7 @@ public sealed class AddServerPage : PageBase
         {
             var k = kinds[kindIndex].Item2;
             kindDesc.Text = kinds[kindIndex].Item3;
-            // ★ 本地源的表单**只有一个「选择文件夹」按钮** —— 没有地址框也没有账号密码。
+            // 本地源的表单**只有一个「选择文件夹」按钮** —— 没有地址框也没有账号密码。
             var isLocal = k == "local";
             serverRow.IsVisible = userRow.IsVisible = passRow.IsVisible = !isLocal;
             dirRow.IsVisible = isLocal;
@@ -203,7 +201,7 @@ public sealed class AddServerPage : PageBase
             var chip = new Button
             {
                 Classes = { "ghost" }, Content = kinds[i].Item1,
-                Margin = new Thickness(0, 0, 8, 8),
+                Margin = new Thickness(0, 0, 10, 10),
             };
             chip.Click += (_, _) => { kindIndex = idx; ApplyKind(); };
             kindBar.Children.Add(chip);
@@ -222,7 +220,7 @@ public sealed class AddServerPage : PageBase
 
         var form = new StackPanel
         {
-            Spacing = 12,
+            Spacing = 10,
             Children =
             {
                 H1("连接到你的媒体服务器"),
@@ -252,15 +250,15 @@ public sealed class AddServerPage : PageBase
                         server = WithScheme(server.Text ?? ""),
                         username = user.Text ?? "",
                         password = pass.Text ?? "",
-                        // ★ 设备 id 必须**持久**:每次换一个会把服务器的设备列表刷满,
-                        //   续播会话也对不上。核心层的 config 里有一个,这里先用机器名兜底。
+                        // 设备 id 必须**持久**:每次换一个会把服务器的设备列表刷满,
+                        // 续播会话也对不上。核心层的 config 里有一个,这里先用机器名兜底。
                         device_id = DeviceId(),
                     });
                 }
                 else
                 {
-                    // ★ 文件浏览型源走 source.login:它会先探一次再落盘,
-                    //   探不通就不入库 —— 免得列表里躺着一台永远打不开的源。
+                    // 文件浏览型源走 source.login:它会先探一次再落盘,
+                    // 探不通就不入库 —— 免得列表里躺着一台永远打不开的源。
                     await core.SourceLogin(new
                     {
                         kind,
@@ -285,7 +283,7 @@ public sealed class AddServerPage : PageBase
         }
 
         // 真机自检:LP_SELFCHECK_PAGE=login:<地址>|<用户名>|<密码> 直接填好并点登录。
-        // ★ 不能靠 SendKeys —— 焦点落在哪儿不确定,实测一个字符都没进去。
+        // 不能靠 SendKeys —— 焦点落在哪儿不确定,实测一个字符都没进去。
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PAGE") is { } sc && sc.StartsWith("login:"))
         {
             var parts = sc["login:".Length..].Split('|');
@@ -296,9 +294,9 @@ public sealed class AddServerPage : PageBase
                 login.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)));
         }
 
-        /* ★ 打开就把光标放进第一个要填的框。首登闸口只有一件事可做,
+        /* 打开就把光标放进第一个要填的框。首登闸口只有一件事可做,
            还要用户先点一下输入框,那一下点击是白让人做的(和搜索页同一条规矩)。
-           ★ 必须等挂上可视树 —— 构造函数里 Focus() 是对着还没上屏的控件调,静默无效。 */
+           必须等挂上可视树 —— 构造函数里 Focus() 是对着还没上屏的控件调,静默无效。 */
         AttachedToVisualTree += (_, _) => Dispatcher.UIThread.Post(() =>
         {
             if (serverRow.IsVisible) server.Focus();
@@ -306,12 +304,12 @@ public sealed class AddServerPage : PageBase
 
         Content = new Border
         {
-            Padding = new Thickness(24),
+            Padding = new Thickness(26),
             Child = new Border
             {
                 Classes = { "card" },
                 Width = 520,
-                Padding = new Thickness(28),
+                Padding = new Thickness(26),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Child = form,
@@ -322,16 +320,11 @@ public sealed class AddServerPage : PageBase
     /// <summary>
     /// 地址补全:用户没写 <c>http://</c> 时补一个。
     ///
-    /// <para>★★ 不补的表现是 Go 的 URL 解析直接报
-    /// 「first path segment in URL cannot contain colon」—— 一句纯英文技术话,
-    /// 而且它以前还被盖成「网络不通」。而 <c>192.168.1.10:8096</c> 是**最常见的输入**。</para>
-    ///
-    /// <para>★ 补在 UI 侧,<b>不动核心层的 NormServer</b> —— 那是黄金实现里
-    /// 逐字移植过来的(Rust 版的 norm 也只 trim),动了会破坏差分对账基准。</para>
-    ///
-    /// <para>★ 默认补 <c>http://</c> 不是 https:内网 IP 和裸主机名绝大多数是 http;
-    /// 补错了协议只会连不上,而补 https 到一台只有 http 的服务器上,
-    /// 报的是看不懂的 TLS 错。</para>
+    /// <para>不补的表现是 Go 的 URL 解析报「first path segment in URL cannot contain
+    /// colon」—— 一句纯英文技术话,而且它以前还被盖成「网络不通」。
+    /// 补在 UI 侧,不动核心层的 NormServer:那是从黄金实现逐字移植的,动了会破坏
+    /// 差分对账基准。默认补 http 不是 https —— 补错协议只会连不上,而补 https 到
+    /// 一台只有 http 的服务器上,报的是看不懂的 TLS 错。</para>
     /// </summary>
     internal static string WithScheme(string raw)
     {

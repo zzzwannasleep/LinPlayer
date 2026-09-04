@@ -142,10 +142,22 @@ func registerTransport() {
 		return map[string]any{"mode": mode, "current": Prop("hwdec-current")}, nil
 	})
 
+	/* 画面比例。
+	   ☠☠ 「拉伸填满」<b>不是一个宽高比</b>,是「别保持宽高比」这件事(mpv 的 keepaspect)。
+	     原来这一档把 "-2" 当成比例塞给 video-aspect-override —— mpv 认不出这个值,
+	     **静默无视**,于是这一档点了永远没反应,而且返回值还是成功的。
+	     (用户 2026-09-04:「播放页的控制面板 字幕 超分 比例 这些全都不生效」——
+	      面板被自动收走是主因,而这一档是它自己另外坏的。)
+	   ★ 切回别的档要把 keepaspect 放回 yes,不然拉伸过一次之后就再也回不去了。 */
 	bus.Register("player.setAspectRatio", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		r, _ := a["ratio"].(string)
+		if r == "-2" {
+			setProp("keepaspect", "no")
+			return map[string]any{"ratio": r, "keepaspect": "no"}, nil
+		}
+		setProp("keepaspect", "yes")
 		setProp("video-aspect-override", r)
-		return map[string]any{"ratio": r}, nil
+		return map[string]any{"ratio": r, "keepaspect": "yes"}, nil
 	})
 
 	bus.Register("player.setSubDelay", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -262,6 +274,47 @@ func registerTransport() {
 			"cached": cachedSpans(),
 			// cached_kind:proxy / file / none。见 localSource 的注释。
 			"cached_kind": cachedKind(),
+			/* avsync 音画差(秒)。**给自检当判据用的**,UI 不显示。
+
+			   ★★ 它是「画面抽不抽搐」唯一量得出来的东西。用户说的「抽搐」
+			   在截图上一个像素都看不出来,而 mpv 自己一直在算这个数:
+			   授时正常时它贴着 0 抖(±0.01),关掉 block_for_target_time 之后
+			   帧按解码完成时刻上屏,它就会越漂越远。见 GLRender 的注释。
+			   ★ 没在播 / 拿不到时 propF 给 -1,自检按「没数」处理。 */
+			"avsync": propF("avsync"),
+			// drops 解码器丢帧数。抽搐的另一种成因(机器扛不住),和授时分得开。
+			"drops": propF("frame-drop-count"),
+			/* ★★ vo_delayed 是**画面稳不稳的最终判据**,比 frame_jitter_ms 硬:
+			   它是 mpv 自己数的「上屏晚于目标时刻的帧数」,而它的输入是我们
+			   report_swap 报上去的真实上屏时刻 —— 和授时到底由谁做无关。
+
+			   frame_jitter_ms 量的是**我们发起 render 的时刻**。block_for_target_time=1
+			   的时候那一刻就是呈现时刻(mpv 在里面等到点才放行),所以它当判据成立;
+			   授时挪出合成线程之后,发起 render 的时刻被合成心跳量化了,那个数会变大
+			   而画面并没有变差 —— 拿它继续当判据会得出反的结论。 */
+			// aspect_override 自检对账用:控件显示 16:9 而 mpv 没收到,两者长得一样。
+			"aspect_override": propF("video-aspect-override"),
+			"vo_delayed": propF("vo-delayed-frame-count"),
+			"vsync_jitter": propF("vsync-jitter"),
+		}
+		/* ★★ 出帧节奏:相邻两次上屏的**间隔抖动**。见 player.go 的 noteCadence。
+		   这是「画面抽搐」唯一量得出来的东西 —— avsync 量不出来(实测关掉授时
+		   它照样 0.0ms),截图更量不出来。 */
+		if mean, jit, n := Cadence(); n >= 2 {
+			out["frame_gap_ms"] = mean
+			out["frame_jitter_ms"] = jit
+			out["frame_samples"] = n
+		}
+		/* render 调用**本身**堵了多久。它跑在宿主合成线程上,堵多久界面就多久不动。
+		   render_calls = 合成帧数(每个合成帧都渲),advance_calls = 其中推进了一帧的次数。 */
+		/* 累计量,不是区间量 —— 自检要哪一段的数就自己前后各读一次做差。
+		   为此专门加一条命令的话,三端绑定表都得跟着改,而它只有自检会调。 */
+		if sum, mx, slow, n := RenderCost(); n >= 2 {
+			out["render_ms_sum"] = sum
+			out["render_ms_max"] = mx
+			out["render_slow16"] = slow
+			out["render_calls"] = n
+			out["advance_calls"] = AdvanceCalls()
 		}
 		if t != nil {
 			out["item_id"] = t.ItemID
@@ -290,6 +343,14 @@ type Track struct {
 	Default  bool   `json:"default"`
 	Selected bool   `json:"selected"`
 	External bool   `json:"external"`
+	// FFIndex 这条轨在**容器里的流序号**(mpv 的 `ff-index`)。
+	//
+	// ★★ 详情页「播放前先选好音轨/字幕」靠它对号入座:详情页手里只有 Emby 的
+	// `MediaStream.Index`(也是容器流序号),而那会儿 mpv 还没起、没有 track-list。
+	// 用 `id` 对不上 —— mpv 的 id 是**按类型各自从 1 开始重编**的,
+	// 和容器流序号是两套编号,混用的表现是「选了第 2 条日语,放出来是英语」。
+	// ★ 外挂字幕没有 ff-index,mpv 给 -1;调用方按 -1 判「对不上号」。
+	FFIndex int64 `json:"ff_index"`
 }
 
 // parseTracks 解析 mpv 的 track-list。
@@ -309,6 +370,7 @@ func parseTracks(raw string) []Track {
 		Default  bool    `json:"default"`
 		Selected bool    `json:"selected"`
 		External bool    `json:"external"`
+		FFIndex  *int64  `json:"ff-index"`
 	}
 	if err := json.Unmarshal([]byte(raw), &list); err != nil {
 		bus.Logf("warn", "track-list 解不动: %v", err)
@@ -317,10 +379,15 @@ func parseTracks(raw string) []Track {
 	for _, t := range list {
 		kind := t.Type
 		if kind == "sub" || kind == "audio" || kind == "video" {
+			ff := int64(-1)
+			if t.FFIndex != nil {
+				ff = *t.FFIndex
+			}
 			out = append(out, Track{
 				ID: strconv.FormatInt(t.ID, 10), Kind: kind,
 				Title: strDeref(t.Title), Lang: strDeref(t.Lang),
 				Default: t.Default, Selected: t.Selected, External: t.External,
+				FFIndex: ff,
 			})
 		}
 	}

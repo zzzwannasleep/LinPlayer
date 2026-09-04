@@ -10,24 +10,11 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 会虚拟化的媒体网格。
 ///
-/// <para>★★ 原来是一个 <c>WrapPanel</c> 把所有条目一次性 new 成卡片。
-/// 140 条时是 140 张卡 × 约 10 个可视元素 = 一千四百个控件要测量、排布、命中测试;
-/// 而真实媒体库动辄上千条,滚到底就是上万个。**这不是「慢一点」,是量级问题**。</para>
-///
-/// <para>★ Avalonia 11 的基础包里<b>没有 ItemsRepeater / UniformGridLayout</b>
-/// (那是另一个 NuGet 包),但有 <see cref="VirtualizingStackPanel"/> —— 它只虚拟化
-/// <b>一维列表</b>。所以这里把网格<b>按行折</b>:数据是「一行若干张卡」,
-/// 竖直方向交给它虚拟化。卡片宽高固定 = 行高一致,这正是它工作得最好的形状。</para>
-///
-/// <para>★ 列数<b>按实际宽度算</b>,窗口变了要重算。写死列数的话,
-/// 侧栏收起、窗口最大化、4K 屏 —— 每一种都会留下一条空白或者切掉半张卡。</para>
-///
-/// <para>★★ <b>卡片跟着行宽伸缩,把这一行铺满</b>(用户 2026-09-03 第二次点名:
-/// 「右边还是有留空,我不知道你留空的意义在哪」)。
-/// 上一轮只去掉了 <c>MaxWidth=1560</c> 那道封顶,但卡片宽度是**写死的 158**——
-/// 1400 宽的区域放得下 8 列(8×158 + 7×14 = 1362),<b>右边必然剩 38px</b>。
-/// 那 38px 不是设计,是整除不尽的余数。现在反过来算:
-/// 先按最小宽定列数,再把整行的宽度<b>均分给这几列</b>,余数一个像素都不剩。</para>
+/// <para>原来是 <c>WrapPanel</c> 一次性把所有条目 new 成卡片:140 条就是一千四百个
+/// 控件要测量排布,上千条的库滚到底是上万个。Avalonia 11 基础包里没有 ItemsRepeater,
+/// 但有只虚拟化一维列表的 <see cref="VirtualizingStackPanel"/> —— 所以把网格按行折,
+/// 竖直方向交给它。列数按实际宽度算,卡片跟着行宽伸缩把整行铺满:
+/// 写死 158 的话 (可用宽 + 间距) 除不尽,余数必然留在右边。</para>
 /// </summary>
 public sealed class MediaGrid : ContentControl
 {
@@ -55,15 +42,15 @@ public sealed class MediaGrid : ContentControl
 
         _list = new ItemsControl
         {
-            // ★ 这一行就是虚拟化的开关。不设的话默认是 StackPanel,全量实例化。
+            // 这一行就是虚拟化的开关。不设的话默认是 StackPanel,全量实例化。
             ItemsPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel()),
             ItemTemplate = new FuncDataTemplate<List<CardItem>>((row, _) => Row(row), true),
         };
         Content = _list;
         HorizontalAlignment = HorizontalAlignment.Stretch;
 
-        /* ★ 用 SizeChanged 重算列数。
-           ★★ 只在**列数真的变了**时才重建 —— 拖窗口时 SizeChanged 每帧都发,
+        /* 用 SizeChanged 重算列数。
+            只在**列数真的变了**时才重建 —— 拖窗口时 SizeChanged 每帧都发,
              每次都重建 ItemsSource 的话,拖动过程中会一直在丢弃/重建容器,
              那比不虚拟化还卡。 */
         SizeChanged += (_, _) => Relayout();
@@ -77,7 +64,7 @@ public sealed class MediaGrid : ContentControl
 
     /// <summary>
     /// 重排的防抖。
-    /// <para>★★ 拖窗口时 SizeChanged <b>每帧都发</b>,而现在卡片宽度也跟着变 ——
+    /// <para>拖窗口时 SizeChanged <b>每帧都发</b>,而现在卡片宽度也跟着变 ——
     /// 每帧重建一次 ItemsSource 等于每帧丢弃并重建一屏控件,比不虚拟化还卡。
     /// 列数变了要立刻响应(那是结构变化),纯宽度微调压到停手之后再做。</para>
     /// </summary>
@@ -104,7 +91,7 @@ public sealed class MediaGrid : ContentControl
         var avail = Bounds.Width;
         if (avail <= 1) return;
         var cols = Math.Max(1, (int)((avail + Gap) / (MinCardWidth + Gap)));
-        // ★ 均分:整行宽度减掉列间距,再除以列数。这一步之后右边不剩任何余数。
+        // 均分:整行宽度减掉列间距,再除以列数。这一步之后右边不剩任何余数。
         var w = Math.Floor((avail - Gap * (cols - 1)) / cols);
         if (cols == _cols && Math.Abs(w - _cardWidth) < 1) return;
 

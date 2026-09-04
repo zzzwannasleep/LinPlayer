@@ -16,10 +16,10 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 人物详情(<c>UI_PC.md</c> §7.16):头像 + 简介 + 参演作品网格。
 ///
-/// <para>★ 详情与作品<b>并发</b>拉。串起来的话这一页要等两个往返 ——
+/// <para>详情与作品<b>并发</b>拉。串起来的话这一页要等两个往返 ——
 /// 而它们互不依赖。</para>
 ///
-/// <para>★★ <b>作品失败 → 整段不渲染</b>,但简介照出。两条路各自吞错:
+/// <para><b>作品失败 → 整段不渲染</b>,但简介照出。两条路各自吞错:
 /// 把它们绑在一起的话,参演作品接口一抖,连人名和生平都看不到了。</para>
 /// </summary>
 public sealed class PersonPage : PageBase
@@ -44,8 +44,8 @@ public sealed class PersonPage : PageBase
 
         var avatar = new Border
         {
-            Width = 140, Height = 140, CornerRadius = new CornerRadius(70), ClipToBounds = true,
-            Background = new SolidColorBrush(Color.Parse("#1b212c")),
+            Width = 140, Height = 140, CornerRadius = new CornerRadius(999), ClipToBounds = true,
+            Background = Tok.Of("PanelAlt"),
             VerticalAlignment = VerticalAlignment.Top,
         };
         head.Children.Add(avatar);
@@ -57,7 +57,7 @@ public sealed class PersonPage : PageBase
 
         var worksTitle = H2("参演作品");
         worksTitle.IsVisible = false;
-        var works = new WrapPanel { ItemSpacing = 14, LineSpacing = 16 };
+        var works = new WrapPanel { ItemSpacing = 14, LineSpacing = 14 };
         var worksMsg = Dim("");
         body.Children.Add(worksTitle);
         body.Children.Add(worksMsg);
@@ -65,7 +65,7 @@ public sealed class PersonPage : PageBase
 
         Content = Scrolled(body);
 
-        // ★ 两条各自吞错、各自渲染:作品挂了不该把简介一起带走
+        // 两条各自吞错、各自渲染:作品挂了不该把简介一起带走
         _ = LoadDetail(personId, title, meta, bio, avatar);
         _ = LoadWorks(personId, worksTitle, works, worksMsg);
     }
@@ -86,8 +86,8 @@ public sealed class PersonPage : PageBase
 
         var name = Str(d, "name");
         var overview = Str(d, "overview");
-        // ★ 生卒 / 出生地**空是常态**:很多刮削器根本不写这几项。
-        //   空的时候整行不出现,而不是显示「生日:」后面跟一片空白。
+        // 生卒 / 出生地**空是常态**:很多刮削器根本不写这几项。
+        // 空的时候整行不出现,而不是显示「生日:」后面跟一片空白。
         var bits = new List<string>();
         if (Str(d, "birthday") is { Length: > 0 } bd) bits.Add("生于 " + Date(bd));
         if (Str(d, "death_day") is { Length: > 0 } dd) bits.Add("卒于 " + Date(dd));
@@ -130,8 +130,8 @@ public sealed class PersonPage : PageBase
         }
         catch
         {
-            // ★★ 作品失败 → **整段不渲染**(标题都不出)。
-            //    出一个空的「参演作品」标题,比不出更糟:那是在说「他没演过东西」。
+            // 作品失败 → **整段不渲染**(标题都不出)。
+            // 出一个空的「参演作品」标题,比不出更糟:那是在说「他没演过东西」。
             return;
         }
 

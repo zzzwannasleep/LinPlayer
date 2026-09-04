@@ -275,3 +275,6 @@ PC / TV / 手机的 UI 有既定草稿:`docs/desktop-drafts.html`、`docs/tv-dra
 **逐页实现,别凭空造。**
 
 草稿本身也可能有历史错误 —— 发现和现有实现冲突时,以**现有实现 + 用户最新反馈**为准,并在文档里记一笔。
+
+草稿定的是**长什么样**,风格刻度(圆角 / 间距 / 颜色)定在 `CLAUDE.md` §1.5,
+推之前跑 `bash scripts/check-style.sh`。

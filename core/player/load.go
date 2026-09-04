@@ -52,6 +52,7 @@ func loadWith(url string, startSec float64, headers map[string]string, ua string
 	   我们本来就知道给出去的是什么,没有理由去问别人。 */
 	setPlayURL(url)
 	setProp("pause", "no")
+	ResetCadence() // 换片:出帧节奏重新开始统计(上一片的样本和这一片没关系)
 	/* ★ 换片了,缩略图那个实例装的还是上一片 —— 收掉它。
 	   它是**用到才开**的(见 thumb.go),这里不需要提前开;
 	   不收的话下一次取图会先花一趟 loadfile 去换文件,而那趟是在鼠标底下发生的。 */

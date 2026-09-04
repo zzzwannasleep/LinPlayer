@@ -13,16 +13,16 @@
     外壳骨架(UI_PC §3.1):
       自绘标题栏 36px  |  侧栏 212px  |  内容区(正文封顶 1560,左右水槽 18)
 
-    ★ 自绘标题栏必须留**拖拽区**:不留的话窗口拖不动,而用户第一反应是「卡死了」。
+    自绘标题栏必须留**拖拽区**:不留的话窗口拖不动,而用户第一反应是「卡死了」。
   -->
   <Grid Name="RootGrid" RowDefinitions="36,*">
 
     <!-- ══════ 标题栏 ══════ -->
     <Grid Grid.Row="0" Name="TitleBar" Background="{DynamicResource Panel}"
           ColumnDefinitions="Auto,*,Auto">
-      <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="14,0,0,0" Spacing="9"
+      <StackPanel Grid.Column="0" Orientation="Horizontal" Margin="14,0,0,0" Spacing="10"
                   VerticalAlignment="Center">
-        <Border Name="BrandDot" Width="16" Height="16" CornerRadius="4" ClipToBounds="True"
+        <Border Name="BrandDot" Width="16" Height="16" CornerRadius="6" ClipToBounds="True"
                 Background="{DynamicResource Accent}" />
         <TextBlock Text="LinPlayer" FontSize="12.5" FontWeight="SemiBold"
                    Foreground="{DynamicResource Ink2}" VerticalAlignment="Center" />
@@ -39,13 +39,13 @@
     </Grid>
 
     <!-- ══════ 主体 ══════ -->
-    <!-- ★★ 列宽是 <b>Auto</b>,真实宽度在侧栏自己的 Width 上 ——
+    <!-- 列宽是 <b>Auto</b>,真实宽度在侧栏自己的 Width 上 ——
          GridLength **不可动画**,而用户 2026-09-03 点名要收放动效。
          把宽度挪到 Border.Width 上之后,一条 DoubleTransition 就够了。 -->
     <Grid Name="BodyGrid" Grid.Row="1" ColumnDefinitions="Auto,*">
 
-      <!-- 侧栏。★ 折叠态 72px 只留图标(Tokens 里的 SidebarCollapsedWidth)。
-           ★ ClipToBounds:收起过程中里面的文字比列还宽,不裁的话会漏到内容区上。 -->
+      <!-- 侧栏。折叠态 72px 只留图标(Tokens 里的 SidebarCollapsedWidth)。
+           ClipToBounds:收起过程中里面的文字比列还宽,不裁的话会漏到内容区上。 -->
       <Border Name="Sidebar" Grid.Column="0" Width="212" ClipToBounds="True"
               Background="{DynamicResource Panel}"
               BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
@@ -61,14 +61,14 @@
           <!-- 底部:设置 + 折叠 / 展开 -->
           <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,10">
             <RadioButton Classes="nav" Name="NavSettings" GroupName="nav" Content="设置" Tag="&#xE713;" />
-            <!-- ★★ 折叠开关放**底部**,和导航项同一套版式。
-                 ★ 折叠态下图标要和上面那一列**对齐到同一条竖线**(用户 2026-09-03 点名:
+            <!-- 折叠开关放**底部**,和导航项同一套版式。
+                 折叠态下图标要和上面那一列**对齐到同一条竖线**(用户 2026-09-03 点名:
                    「收起/展开没有和其他图标一样居中」)。导航项靠 .icononly 把图标撑成 56 宽,
                    这一个是 Button、吃不到那条选择器 —— 所以在 ToggleSidebar 里手动同步。 -->
-            <Button Name="BtnCollapse" Classes="navbtn" Height="38" Margin="8,4,8,0"
+            <Button Name="BtnCollapse" Classes="navbtn" Height="38" Margin="10,6,10,0"
                     Padding="10,0" HorizontalAlignment="Stretch"
                     HorizontalContentAlignment="Left" Background="Transparent"
-                    BorderThickness="0" CornerRadius="8" Cursor="Hand"
+                    BorderThickness="0" CornerRadius="6" Cursor="Hand"
                     Foreground="{DynamicResource Ink2}">
               <StackPanel Name="CollapseBox" Orientation="Horizontal" Spacing="10">
                 <TextBlock Name="CollapseIcon" Text="&#xE76B;" FontFamily="Segoe MDL2 Assets"
@@ -80,11 +80,11 @@
             </Button>
           </StackPanel>
 
-          <!-- ★★ 填充区 = 导航项 + 服务器区。
+          <!-- 填充区 = 导航项 + 服务器区。
                用户 2026-09-03:「侧边栏的服务器不是放到和设置一块,他是**单独的一栏**,
                放在中部」—— 所以它不再和「设置 / 收起」一起停在底部,
                而是紧跟在导航项下面,自成一段。
-               ★ 外面套 ScrollViewer:服务器多的时候(十几台)这一列会比侧栏高,
+               外面套 ScrollViewer:服务器多的时候(十几台)这一列会比侧栏高,
                  不套的话最下面几台点不到,而且**不报错**。 -->
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="0">
@@ -105,17 +105,17 @@
 
           <!--
             服务器区。
-            ★★ 2026-09-03 用户点名:「侧边栏下面那些位置可以放服务器,
+            2026-09-03 用户点名:「侧边栏下面那些位置可以放服务器,
               只需要鼠标往左边点点就可以切换服务器;同时把服务器页的那些功能
               做成右键点击服务器就出现的功能;添加服务器做成在这些服务器的上面 ——
               这样就省略了服务器页和添加服务器页了」。
-            ★ 所以顶上原来那块「服务器卡」没了:它只是一个**通往服务器页的入口**,
+            所以顶上原来那块「服务器卡」没了:它只是一个**通往服务器页的入口**,
               而现在服务器本身就在侧栏里,那个入口没有存在的理由。
-            ★ 内容由 C# 填(账号表是运行期才知道的),见 UpdateServerChip。
+            内容由 C# 填(账号表是运行期才知道的),见 UpdateServerChip。
           -->
           <StackPanel Name="ServerSection" Margin="0,14,0,6">
-            <Border Height="1" Margin="12,0,12,8" Background="{DynamicResource Line}" />
-            <TextBlock Name="ServerSectionTitle" Text="服务器" Margin="18,0,0,4"
+            <Border Height="1" Margin="14,0,14,10" Background="{DynamicResource Line}" />
+            <TextBlock Name="ServerSectionTitle" Text="服务器" Margin="18,0,0,6"
                        FontSize="11" FontWeight="SemiBold"
                        Foreground="{DynamicResource Ink3}" />
             <StackPanel Name="ServerList" Spacing="0" />
@@ -129,12 +129,12 @@
       <Panel Grid.Column="1">
         <!--
           换页淡入淡出。
-          ★★ 用 TransitioningContentControl,不是自己在 Show() 里写动画 ——
+          用 TransitioningContentControl,不是自己在 Show() 里写动画 ——
              写在代码里的话每一个换页入口(侧栏 / Nav.Push / Nav.Back / 自检跳转)
              都得各记得动一次,漏掉的那个入口就是「只有这条路没有转场」。
-          ★ 180ms:再长会挡住内容(用户等的是页面不是动画),
+          180ms:再长会挡住内容(用户等的是页面不是动画),
             再短就看不出来,等于白做。
-          ★ 只淡不滑:滑动要选方向,而「返回」和「进入」的方向应当相反 ——
+          只淡不滑:滑动要选方向,而「返回」和「进入」的方向应当相反 ——
             这个栈没有方向信息,硬滑就会出现返回时也往左滑的错觉。
         -->
         <TransitioningContentControl Name="PageHost">
@@ -144,17 +144,17 @@
         </TransitioningContentControl>
 
         <!-- 出错横幅。
-             ★★ 渲染里抛出的异常**原本会把整个进程打死** —— 没有对话框、没有日志窗口,
+             渲染里抛出的异常**原本会把整个进程打死** —— 没有对话框、没有日志窗口,
                用户看到的是「点了一下,软件没了」。现在由 Dispatcher.UnhandledException
                统一接住(见 App.axaml.cs)。
-             ★ 接住之后**必须让它看得见**。默默吞掉的话就变成了本仓最讨厌的那种失败:
+             接住之后**必须让它看得见**。默默吞掉的话就变成了本仓最讨厌的那种失败:
                不报错、不崩、只是这一块没画出来,而谁也不知道发生过什么。 -->
         <Border Name="ErrorBar" IsVisible="False"
                 VerticalAlignment="Bottom" Margin="18" Padding="14,10"
-                CornerRadius="10" Background="#4a1d28" BorderBrush="#8a3346" BorderThickness="1">
-          <StackPanel Orientation="Horizontal" Spacing="12">
+                CornerRadius="10" Background="{DynamicResource DangerBg}" BorderBrush="{DynamicResource Danger}" BorderThickness="1">
+          <StackPanel Orientation="Horizontal" Spacing="10">
             <TextBlock Name="ErrorText" VerticalAlignment="Center" MaxWidth="900"
-                       TextWrapping="Wrap" Foreground="#ffd9de" />
+                       TextWrapping="Wrap" Foreground="{DynamicResource DangerInk}" />
             <Button Name="ErrorClose" Classes="ghost" Content="知道了" />
           </StackPanel>
         </Border>

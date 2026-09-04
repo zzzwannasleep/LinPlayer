@@ -5,19 +5,13 @@ using Avalonia.Threading;
 namespace LinPlayer.Desktop.Core;
 
 /// <summary>
-/// 封面加载。
+/// 封面加载。图片不过 FFI、也不过命令队列,走核心层的本地 HTTP(<c>/img?src=…</c>,
+/// SPEC §6)—— 一屏几十张封面走命令队列,等于把几十 MB 字节塞进事件队列排队。
 ///
-/// <para>★★ 图片<b>不过 FFI、也不过命令队列</b> —— 走核心层的本地 HTTP 数据通道
-/// (<c>/img?src=…</c>,SPEC §6)。一屏几十张封面如果走命令队列,
-/// 就等于把几十 MB 的字节塞进事件队列里排队,把命令通道整个堵死。</para>
-///
-/// <para>★ 上游地址由这里拼,但<b>凭据不进 URL</b>:核心层按 origin 查白名单,
-/// 取图时自己带 <c>X-Emby-Token</c>。所以缓存键里没有 token ——
-/// 重登一次 token 变了,整盘缓存不会作废。</para>
-///
-/// <para>★★ <b>三条规矩,少一条就会「响应慢」而且查不出来</b>:
-/// ①每个 await 都 <c>ConfigureAwait(false)</c>;②按显示高度解码;③解好的位图留住。
-/// 见下面各自的注释。</para>
+/// <para>上游地址由这里拼,但凭据不进 URL:核心层按 origin 查白名单自己带 token,
+/// 所以缓存键里没有 token,重登一次整盘缓存不会作废。
+/// 三条规矩,少一条就会「响应慢」而且查不出来:每个 await 都 ConfigureAwait(false)、
+/// 按显示高度解码、解好的位图留一份 —— 见下面各自的注释。</para>
 /// </summary>
 public static class Images
 {
@@ -27,13 +21,10 @@ public static class Images
     /// <summary>
     /// 解好的位图留一份。
     ///
-    /// <para>★★ 核心层那两层缓存存的是<b>压缩字节</b>,省的是回源;
-    /// 而每次翻回首页仍然要重走一遍「本地 HTTP + 解码」。解码是 UI 侧的成本,
-    /// 核心层再快也省不掉 —— 这一层省的就是它。</para>
-    ///
-    /// <para>★ 按<b>张数</b>封顶而不是字节数:位图尺寸是我们自己按显示高度定的
-    /// (下面 DecodeToHeight),每张的量级已知,数张数就够,不必为了精确
-    /// 去追每张的实际占用。400 张 ≈ 60 MB,够铺满好几页网格。</para>
+    /// <para>核心层那两层缓存存的是压缩字节,省的是回源;而每次翻回首页仍然要
+    /// 重走一遍「本地 HTTP + 解码」,而解码在 UI 侧,核心层再快也省不掉。
+    /// 按张数封顶而不是字节数:位图尺寸是我们自己按显示高度定的,量级已知。
+    /// 400 张 ≈ 60 MB,够铺满好几页网格。</para>
     /// </summary>
     private const int CacheMax = 400;
 
@@ -44,10 +35,10 @@ public static class Images
     /// <summary>
     /// 拼一条 Emby 图片地址。<paramref name="kind"/> 只认 Primary / Backdrop / Logo。
     /// </summary>
-    /// <summary>★ 尺寸交给 /img 的 h=,别写进 src —— 写进去等于每种尺寸一个缓存键。</summary>
+    /// <summary> 尺寸交给 /img 的 h=,别写进 src —— 写进去等于每种尺寸一个缓存键。</summary>
     public static string EmbyImageUrl(string server, string itemId, string kind)
     {
-        // ★ Backdrop 要带序号,Primary/Logo 不带 —— 不带的话某些 fork 直接 404
+        // Backdrop 要带序号,Primary/Logo 不带 —— 不带的话某些 fork 直接 404
         var seg = kind == "Backdrop" ? "Backdrop/0" : kind;
         return $"{server.TrimEnd('/')}/Items/{itemId}/Images/{seg}?quality=90";
     }
@@ -60,7 +51,7 @@ public static class Images
 
         var url = $"{core.LocalBaseUrl}/img?src={Uri.EscapeDataString(upstreamUrl)}&h={Ladder(maxHeight)}";
 
-        // ★ 命中已解码的:**同步返回**,一次 await 都不排。翻回上一页时整屏封面当场就在。
+        // 命中已解码的:**同步返回**,一次 await 都不排。翻回上一页时整屏封面当场就在。
         lock (CacheLock)
         {
             if (Cache.TryGetValue(url, out var hit))
@@ -75,19 +66,13 @@ public static class Images
     }
 
     /// <summary>
-    /// 解码高度<b>归档</b>。
+    /// 解码高度归档。
     ///
-    /// <para>☠☠ 缓存键里带着 <c>h=</c>,而 <c>h</c> 是从**卡片实宽**算出来的 ——
-    /// 自从卡片改成「按行宽均分」(2026-09-03),这个宽度就是个连续量了:
-    /// 收一下侧栏,158 变成 172,<c>h</c> 从 474 变成 516,<b>缓存键当场不认</b>,
-    /// 整屏封面重新取一遍、重新解一遍。用户 2026-09-03 说的
-    /// 「收起/展开侧边栏的时候图片都要重新加载」就是这一下。</para>
-    ///
-    /// <para>★ 所以按一张<b>粗档位表</b>取整:相邻档差约 35%,
-    /// 侧栏收放引起的那点宽度变化落不出一档去。
-    /// 代价是最多多解 35% 的像素 —— 比重下一遍便宜得多。</para>
-    /// <para>★ 档位<b>只能往上取</b>:往下取会解出一张比显示尺寸还小的图,
-    /// 拉大之后是糊的,而且不报错。</para>
+    /// <para>缓存键里带着 <c>h=</c>,而它是从卡片实宽算来的 —— 自从卡片改成按行宽
+    /// 均分,这就是个连续量:收一下侧栏 158 变 172,h 从 474 变 516,缓存键当场不认,
+    /// 整屏封面重取重解(用户 2026-09-03:「收起/展开侧边栏图片都要重新加载」)。
+    /// 所以按一张粗档位表取整,相邻档差约 35%,侧栏收放落不出一档去。
+    /// 档位只能往上取:往下取会解出比显示尺寸还小的图,拉大是糊的,而且不报错。</para>
     /// </summary>
     private static readonly int[] Rungs = [120, 180, 240, 330, 450, 600, 800, 1080, 1440, 1920];
 
@@ -104,11 +89,11 @@ public static class Images
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
-            // ★ 图片通道走请求头鉴权(给 mpv 吃的那几条路才把 token 放 URL 里)
+            // 图片通道走请求头鉴权(给 mpv 吃的那几条路才把 token 放 URL 里)
             req.Headers.Add("X-LP-Token", core.LocalToken);
 
             var t0 = Perf.Ms;
-            /* ★★ 每个 await 都必须 ConfigureAwait(false)。
+            /* 每个 await 都必须 ConfigureAwait(false)。
                这个方法是被**卡片构造函数**发起的,而卡片在 UI 线程上构造 ——
                不写的话每个 await 的续体都回到 UI 线程,于是:
                  · 解码在 UI 线程上做(一屏几十张 = UI 线程连续被占几百毫秒)
@@ -124,7 +109,7 @@ public static class Images
             ms.Position = 0;
 
             var t1 = Perf.Ms;
-            /* ★★ 按**显示高度**解码,不要全尺寸解。
+            /* 按**显示高度**解码,不要全尺寸解。
                `new Bitmap(stream)` 解出来的是原图分辨率 —— 一张 1000×1500 的海报
                画在 158×237 的槽里,白解了 40 倍的像素,还占着 6 MB 内存。
                而 maxHeight 是给上游的**建议**:实测某 fork 完全无视 maxWidth,
@@ -176,9 +161,9 @@ public static class Images
         {
             Cache[url] = (bmp, ++_tick);
             if (Cache.Count <= CacheMax) return;
-            /* ★ 一次挤掉 1/4 而不是刚好一张:卡着上限的话之后**每存一张都要扫一遍**,
+            /* 一次挤掉 1/4 而不是刚好一张:卡着上限的话之后**每存一张都要扫一遍**,
                扫描成本摊到每一次写入上。挤一批,下次扫描要等很久才来。
-               ★ 挤掉的位图**不 Dispose** —— 屏幕上可能还有 Image 正指着它,
+               挤掉的位图**不 Dispose** —— 屏幕上可能还有 Image 正指着它,
                  Dispose 掉就是当场少一张图(而且不报错)。交给 GC。 */
             foreach (var k in Cache.OrderBy(kv => kv.Value.Used).Take(CacheMax / 4).Select(kv => kv.Key).ToList())
                 Cache.Remove(k);

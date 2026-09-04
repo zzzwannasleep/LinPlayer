@@ -13,26 +13,21 @@ using LinPlayer.Desktop.Core;
 namespace LinPlayer.Desktop.Views;
 
 /// <summary>
-/// 插件(<c>UI_PC.md</c> §7.11)。一页三个 tab:市场 / 已装 / 源订阅。
+/// 插件(<c>UI_PC.md</c> §7.11)。一页三个 tab:市场 / 已装 / 源订阅 ——
+/// 做成顶部 tab 而不是三个侧栏入口:「已装」经常是空的,空 tab 比空页面便宜。
 ///
-/// <para>★★ **做成顶部 tab 而不是三个侧栏入口**:「已装」经常是空的,
-/// 空 tab 比空页面便宜。</para>
-///
-/// <para>★★ **授权清单在装 / 启用之前弹,一行一条人话** —— 而且那些人话
-/// <b>由核心层透出</b>(<c>plugin.permissionCatalog</c>),UI 这边不许抄一份。
-/// 抄了就会漏新权限,弹窗里显示成一个光秃秃的 <c>sources</c> 字符串,
-/// 用户根本看不懂自己同意了什么。</para>
-///
-/// <para>★ 单个源拉不到只标那个源,不整页失败 —— 一个挂掉的第三方源
-/// 不该把整个市场变成一张报错页。</para>
+/// <para>授权清单在装 / 启用之前弹,一行一条人话,而那些人话由核心层透出
+/// (<c>plugin.permissionCatalog</c>),UI 这边不许抄一份 —— 抄了就会漏新权限,
+/// 弹窗里显示成一个光秃秃的 <c>sources</c> 字符串。单个源拉不到只标那个源:
+/// 一个挂掉的第三方源不该把整个市场变成一张报错页。</para>
 /// </summary>
 public sealed class PluginPage : PageBase
 {
     private readonly CoreClient _core;
 
-    private readonly StackPanel _marketBody = new() { Spacing = 12 };
-    private readonly StackPanel _installedBody = new() { Spacing = 12 };
-    private readonly StackPanel _sourcesBody = new() { Spacing = 12 };
+    private readonly StackPanel _marketBody = new() { Spacing = 10 };
+    private readonly StackPanel _installedBody = new() { Spacing = 10 };
+    private readonly StackPanel _sourcesBody = new() { Spacing = 10 };
     private readonly TextBlock _msg = Dim("");
 
     private List<JsonElement> _permCatalog = [];
@@ -71,7 +66,7 @@ public sealed class PluginPage : PageBase
                 new StackPanel
                 {
                     [DockPanel.DockProperty] = Dock.Top,
-                    Margin = new Thickness(18, 18, 18, 0), Spacing = 8,
+                    Margin = new Thickness(18, 18, 18, 0), Spacing = 10,
                     Children = { H1("插件"), _msg },
                 },
                 tabs,
@@ -129,20 +124,20 @@ public sealed class PluginPage : PageBase
                 Children = { refreshBtn, Dim($"共 {plugins.Count} 个插件") },
             });
 
-            /* ★★ 单个源失败只标那个源。而且**警告条要和列表一起缓存** ——
+            /* 单个源失败只标那个源。而且**警告条要和列表一起缓存** ——
                黄金实现第一版只缓存插件列表,切走再切回来(命中缓存)警告条就没了,
                剩下一个光秃秃的「没有找到插件」:用户第二次看到的是更没线索的页面。 */
             foreach (var e in errors)
             {
-                // ★ 「这个源挂了」和「这个源里有几条坏的」是两回事,措辞不能一样 ——
-                //   后者其实拉成功了,写「拉取失败」的同时又画出卡片只会更糊涂。
+                // 「这个源挂了」和「这个源里有几条坏的」是两回事,措辞不能一样 ——
+                // 后者其实拉成功了,写「拉取失败」的同时又画出卡片只会更糊涂。
                 var skipped = Str(e, "kind") == "skipped";
                 _marketBody.Children.Add(new Border
                 {
                     Background = skipped
                         ? new SolidColorBrush(Color.FromArgb(34, 200, 180, 80))
                         : new SolidColorBrush(Color.FromArgb(40, 220, 120, 60)),
-                    CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 8),
+                    CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 10),
                     Child = Dim(skipped
                         ? $"源「{Str(e, "source")}」{Str(e, "error")}"
                         : $"源「{Str(e, "source")}」拉取失败:{Str(e, "error")}"),
@@ -169,8 +164,8 @@ public sealed class PluginPage : PageBase
         var body = new StackPanel { Spacing = 6 };
 
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        // ★ 没图标就**别占位**:留一个 40px 的空白会让标题整体右移,
-        //   同一排里有图标和没图标的卡片对不齐,看着像布局坏了。
+        // 没图标就**别占位**:留一个 40px 的空白会让标题整体右移,
+        // 同一排里有图标和没图标的卡片对不齐,看着像布局坏了。
         var icon = new Image { Width = 40, Height = 40, Stretch = Stretch.Uniform };
         LoadIcon(icon, Str(p, "icon"));
         if (icon.Source is not null) head.Children.Add(icon);
@@ -182,21 +177,21 @@ public sealed class PluginPage : PageBase
 
         body.Children.Add(Dim(Str(p, "description")));
 
-        // ★ 第三方源要有**信任标记** —— 装第三方的包和装官方的包不是一回事。
+        // 第三方源要有**信任标记** —— 装第三方的包和装官方的包不是一回事。
         if (!Bool(p, "from_builtin"))
         {
             body.Children.Add(new Border
             {
                 Background = new SolidColorBrush(Color.FromArgb(38, 200, 160, 60)),
-                CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 3),
+                CornerRadius = new CornerRadius(6), Padding = new Thickness(10, 2),
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Child = new TextBlock { Text = $"第三方源:{Str(p, "source_name")}", FontSize = 11 },
             });
         }
 
-        // ★★ 可装版本取**版本号最大值**,不是数组第一个 —— 上游返回顺序不可依赖。
-        //    这一步在核心层做(plugin.marketInstall 不传 version 时自己挑),
-        //    这里只显示;显示也得跟着挑,否则卡片写 1.2.0、装下去是 1.10.0。
+        // 可装版本取**版本号最大值**,不是数组第一个 —— 上游返回顺序不可依赖。
+        // 这一步在核心层做(plugin.marketInstall 不传 version 时自己挑),
+        // 这里只显示;显示也得跟着挑,否则卡片写 1.2.0、装下去是 1.10.0。
         var best = BestVersion(p);
         body.Children.Add(Dim(best is null ? "没有当前版本能装的版本" : $"最新 {best.Value.Ver}"));
 
@@ -220,7 +215,7 @@ public sealed class PluginPage : PageBase
 
         return new Border
         {
-            Width = 280, Margin = new Thickness(0, 0, 12, 12), Padding = new Thickness(14),
+            Width = 280, Margin = new Thickness(0, 0, 14, 14), Padding = new Thickness(14),
             CornerRadius = new CornerRadius(10),
             Background = new SolidColorBrush(Color.FromArgb(20, 255, 255, 255)),
             Child = body,
@@ -239,7 +234,7 @@ public sealed class PluginPage : PageBase
         {
             var r = await _core.PluginList();
             list = r.ValueKind == JsonValueKind.Array ? r.EnumerateArray().ToList() : [];
-            /* ★ 「有没有设置面板」要**问运行时注册表**,不能看 manifest 里的贡献点计数:
+            /* 「有没有设置面板」要**问运行时注册表**,不能看 manifest 里的贡献点计数:
                panels 是一个笼统的计数,里面可能一个 settings 槽都没有 ——
                照计数画按钮的话,点进去是一片空白。 */
             _hasSettingsPanel = (await SettingsPanelsAsync())
@@ -284,7 +279,7 @@ public sealed class PluginPage : PageBase
         var enabled = Bool(p, "enabled");
         var body = new StackPanel { Spacing = 6 };
 
-        var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var title = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         title.Children.Add(new TextBlock { Text = Str(p, "name"), FontWeight = FontWeight.SemiBold });
         title.Children.Add(Dim($"v{Str(p, "version")} · {Str(p, "author")}"));
         if (Bool(p, "dev")) title.Children.Add(Dim("[开发模式]"));
@@ -292,7 +287,7 @@ public sealed class PluginPage : PageBase
 
         if (Str(p, "description") != "") body.Children.Add(Dim(Str(p, "description")));
 
-        /* ★★ 出错要**看得见**。onEnable 里踩到权限拒绝 / 写错一行,插件会注册到一半
+        /* 出错要**看得见**。onEnable 里踩到权限拒绝 / 写错一行,插件会注册到一半
            就中断,而卡片上如果只写「已启用」,用户看到的是面板永远空白、
            数据源少一半,没有任何线索。核心层已经把这句话挂在记录上了,照显。 */
         var err = Str(p, "error");
@@ -301,12 +296,12 @@ public sealed class PluginPage : PageBase
             body.Children.Add(new Border
             {
                 Background = new SolidColorBrush(Color.FromArgb(40, 220, 90, 90)),
-                CornerRadius = new CornerRadius(8), Padding = new Thickness(12, 8),
+                CornerRadius = new CornerRadius(10), Padding = new Thickness(14, 10),
                 Child = Dim(err),
             });
         }
 
-        // ★ 启用后按贡献点给一句**「去哪用」** —— 否则用户启用完不知道发生了什么。
+        // 启用后按贡献点给一句**「去哪用」** —— 否则用户启用完不知道发生了什么。
         if (enabled)
         {
             var where = WhereToUse(p);
@@ -323,7 +318,7 @@ public sealed class PluginPage : PageBase
                 if (enabled) await _core.PluginDisable(new { id });
                 else
                 {
-                    // ★★ 授权弹窗在**启用之前**,不是安装之后随便什么时候。
+                    // 授权弹窗在**启用之前**,不是安装之后随便什么时候。
                     if (!await ConfirmPermissions(Str(p, "name"), perms, false)) return;
                     await _core.PluginEnable(new { id });
                 }
@@ -342,7 +337,7 @@ public sealed class PluginPage : PageBase
         var uninstall = new Button { Classes = { "ghost" }, Content = "卸载", MinHeight = 32 };
         uninstall.Click += async (_, _) =>
         {
-            // ★ 卸载是不可逆的,必须二次确认(设置页那种「全页零二次确认」在这里不适用)。
+            // 卸载是不可逆的,必须二次确认(设置页那种「全页零二次确认」在这里不适用)。
             if (!await Confirm($"卸载「{Str(p, "name")}」?",
                     "插件文件和它保存的数据都会删掉。开发模式挂上的目录不会被删。")) return;
             try { await _core.PluginUninstall(new { id }); await LoadInstalled(); }
@@ -351,12 +346,12 @@ public sealed class PluginPage : PageBase
 
         body.Children.Add(new StackPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 8,
+            Orientation = Orientation.Horizontal, Spacing = 10,
             Children = { toggle, reload, uninstall },
         });
 
-        // ★ 插件自己贡献的设置面板放在**插件自己这里**,不是设置页的二级标签。
-        //   没贡献设置面板时整块不出现。
+        // 插件自己贡献的设置面板放在**插件自己这里**,不是设置页的二级标签。
+        // 没贡献设置面板时整块不出现。
         if (enabled && _hasSettingsPanel.Contains(id))
         {
             var open = new Button { Classes = { "ghost" }, Content = "插件设置", MinHeight = 32 };
@@ -392,7 +387,7 @@ public sealed class PluginPage : PageBase
             var r = await _core.PluginPanels(new { slot = "settings" });
             return r.ValueKind == JsonValueKind.Array ? r.EnumerateArray().ToList() : [];
         }
-        catch { return []; }
+        catch { return []; }   // 插件没提供设置面板 = 空表,不是错误
     }
 
     private async Task OpenPluginSettings(string pluginId)
@@ -445,8 +440,8 @@ public sealed class PluginPage : PageBase
         if (files.Count == 0) return;
         try
         {
-            // ★ 选择器归 UI 层:核心层是个 DLL 弹不了对话框,所以路径由这边传进去
-            //   (和 system.pickFile 一个口径)。
+            // 选择器归 UI 层:核心层是个 DLL 弹不了对话框,所以路径由这边传进去
+            // (和 system.pickFile 一个口径)。
             await _core.PluginPickInstall(new { path = files[0].Path.LocalPath });
             _msg.Text = "已安装。到「已装」里授权并启用。";
             await LoadInstalled();
@@ -542,14 +537,14 @@ public sealed class PluginPage : PageBase
         row.Children.Add(toggle);
 
         var texts = new StackPanel { Spacing = 2, Width = 520 };
-        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         head.Children.Add(new TextBlock { Text = Str(s, "name"), FontWeight = FontWeight.SemiBold });
         if (builtin) head.Children.Add(Dim("官方源"));
         texts.Children.Add(head);
         texts.Children.Add(Dim(Str(s, "url")));
         row.Children.Add(texts);
 
-        // ★ 官方源**可禁不可删** —— 删掉之后新用户开箱即空,再想找回来只能手打 URL。
+        // 官方源**可禁不可删** —— 删掉之后新用户开箱即空,再想找回来只能手打 URL。
         var del = new Button
         {
             Classes = { "ghost" }, Content = "删除", MinHeight = 32, IsEnabled = !builtin,
@@ -562,7 +557,7 @@ public sealed class PluginPage : PageBase
         };
         row.Children.Add(del);
 
-        return new Border { Padding = new Thickness(4, 6), Child = row };
+        return new Border { Padding = new Thickness(6, 6), Child = row };
     }
 
     // ---------------------------------------------------------------- 授权弹窗
@@ -598,7 +593,7 @@ public sealed class PluginPage : PageBase
             var line = new StackPanel { Spacing = 2 };
             line.Children.Add(new TextBlock
             {
-                // ★ 词表里没有这一条时退回显示原始 id —— 不能什么都不显示。
+                // 词表里没有这一条时退回显示原始 id —— 不能什么都不显示。
                 Text = title == "" ? pid : (dangerous ? "⚠ " + title : title),
                 FontWeight = FontWeight.SemiBold,
                 Foreground = dangerous ? new SolidColorBrush(Color.FromRgb(230, 160, 70)) : null,
@@ -642,14 +637,14 @@ public sealed class PluginPage : PageBase
 
         dlg.Content = new Border
         {
-            Padding = new Thickness(20), MinWidth = 380,
+            Padding = new Thickness(18), MinWidth = 380,
             Child = new StackPanel
             {
                 Spacing = 14,
                 Children = { new TextBlock { Text = title, Classes = { "h2" } }, body, buttons },
             },
         };
-        // ★ 用户直接关窗口 = 取消。不设的话 await 会永远挂着。
+        // 用户直接关窗口 = 取消。不设的话 await 会永远挂着。
         dlg.Closed += (_, _) => tcs.TrySetResult(false);
         await dlg.ShowDialog(owner);
         return await tcs.Task;

@@ -7,28 +7,13 @@ using Avalonia.Media;
 namespace LinPlayer.Desktop.Views;
 
 /// <summary>
-/// 播放页的进度条。
+/// 播放页的进度条。没用 <see cref="Slider"/> —— 现代播放器进度条的四个特征
+/// 都不是能靠改样式补上的:静止 4px、悬停涨到 7px 并冒圆头(Slider 的 Thumb 常驻),
+/// 已缓冲那一段,章节分段的缺口,悬停时浮在指针上方的时间气泡。
 ///
-/// <para>★★ <b>没用 <see cref="Slider"/></b>。用户 2026-09-03:「播放页的 UI
-/// 不是现代的播放器的 UI,没有现代播放器的那种交互」。而 Slider 缺的恰恰是
-/// 现代播放器进度条的全部特征,而且这些**都不是能靠改样式补上的**:</para>
-/// <list type="bullet">
-/// <item>静止时是一条 <b>4px 的细线</b>,悬停才涨到 7px 并冒出圆头 —— Slider 的
-/// Thumb 是常驻的,而常驻的圆点会一直在画面上戳着</item>
-/// <item><b>已缓冲</b>那一段(浅色)—— Slider 只有「已播 / 未播」两段</item>
-/// <item><b>章节分段</b> —— 在章节起点处切一道 2px 的缺口</item>
-/// <item>悬停时在指针上方浮一个<b>时间气泡</b> —— 现代播放器全都有,
-/// 它回答的是「我松手会跳到哪儿」,而这正是拖进度条时唯一想知道的事</item>
-/// </list>
-///
-/// <para>★★ <b>热区 24px,视觉 4px</b>。这两个数是分开的 ——
-/// 用户说的「一点都不好点击」就是把它们绑在一起的结果:
-/// 想好点就得画粗,画粗就压画面。分开之后,细线上下各 10px 的透明区照样接得住鼠标。</para>
-///
-/// <para>★ <b>松手才 seek</b>,拖动过程只动画面上的位置和气泡。
-/// 拖一次实时 seek 几十下,在网络流上是几十次 HTTP Range 重连;
-/// 而且本仓栽过「seek 闩拿粘性值和目标比,一比就相等当场自解除」那一条
-/// (见 pc-shortcuts-and-mpvconf),这条路上多一个并发源就多一次那种 bug 的机会。</para>
+/// <para>热区 24px、视觉 4px,这两个数分开 —— 用户说的「一点都不好点击」就是把
+/// 它们绑在一起的结果。松手才 seek:拖一次实时 seek 几十下,在网络流上是几十次
+/// Range 重连,而且本仓栽过「seek 闩拿粘性值和目标比,一比就相等当场自解除」。</para>
 /// </summary>
 public sealed class PlayerBar : Control
 {
@@ -41,7 +26,7 @@ public sealed class PlayerBar : Control
 
     private static readonly IBrush TrackBrush = new SolidColorBrush(Color.Parse("#4dffffff"));
     private static readonly IBrush BufferBrush = new SolidColorBrush(Color.Parse("#80ffffff"));
-    private static readonly IBrush PlayedBrush = new SolidColorBrush(Color.Parse("#5b8def"));
+    private static IBrush PlayedBrush => Tok.Of("Accent");
     private static readonly IBrush ThumbBrush = Brushes.White;
     /// <summary>章节缺口的颜色 = 画面本身(黑),所以看着像被切了一刀。</summary>
     private static readonly IBrush NotchBrush = new SolidColorBrush(Color.Parse("#cc000000"));
@@ -109,7 +94,7 @@ public sealed class PlayerBar : Control
 
     /// <summary>
     /// 松手 = 提交。
-    /// <para>★★ 指针被 <see cref="IPointer.Capture"/> 抓住了,所以<b>拖出控件再松手</b>
+    /// <para>指针被 <see cref="IPointer.Capture"/> 抓住了,所以<b>拖出控件再松手</b>
     /// 照样收得到这个事件。挂在别处(或者不抓指针)的话,拖出边界松手
     /// 就永远收不到抬手 —— 进度条会被永久钉住,而这个 bug 本仓栽过一次。</para>
     /// </summary>
@@ -125,7 +110,7 @@ public sealed class PlayerBar : Control
         e.Handled = true;
     }
 
-    /// <summary>轮询喂进来的真实状态。★ 拖动中<b>不接受</b> —— 否则手指还在拖,
+    /// <summary>轮询喂进来的真实状态。 拖动中<b>不接受</b> —— 否则手指还在拖,
     /// 条自己跳回旧位置(轮询里的位置还是 seek 之前的)。</summary>
     public void Sync(double position, double duration, double buffered)
     {
@@ -147,7 +132,7 @@ public sealed class PlayerBar : Control
 
     /// <summary>
     /// 哪几段的字节**已经在本地**(占全片的比例)。缩略图只有这些段有,带子画的就是它。
-    /// <para>★ 空表 = 这条流没有本地缓存(转码流之类),整条带子都不画。</para>
+    /// <para>空表 = 这条流没有本地缓存(转码流之类),整条带子都不画。</para>
     /// </summary>
     public IReadOnlyList<(double A, double B)> CachedSpans = [];
 
@@ -156,7 +141,7 @@ public sealed class PlayerBar : Control
     /// <summary>
     /// 自检:把悬停态钉住,好让「哪一段有缩略图」那条带子进截图。
     ///
-    /// <para>★ 自检里发不出真的鼠标事件,而这条带子**只在悬停时画** ——
+    /// <para>自检里发不出真的鼠标事件,而这条带子**只在悬停时画** ——
     /// 不钉住的话截图里它永远不存在,等于这块没被看过一眼。</para>
     /// </summary>
     internal void SelfCheckHover(double x)
@@ -170,7 +155,7 @@ public sealed class PlayerBar : Control
     {
         var w = Bounds.Width;
         if (w <= 1) return;
-        /* ★★ 先铺一层<b>透明</b>矩形。
+        /* 先铺一层<b>透明</b>矩形。
            命中测试看的是**画出来的东西**,不是 Bounds —— 什么都不画的 Control
            鼠标穿过去当它不存在,那 24px 的热区就等于没有,
            又回到「只有中间 4px 那条线能点」,也就是用户说的「一点都不好点击」。
@@ -191,13 +176,13 @@ public sealed class PlayerBar : Control
         Bar(0, w, TrackBrush);
         if (_duration > 0)
         {
-            // 已缓冲。★ 画在「已播」下面 —— 缓冲前沿总是在播放头右边,
-            //   顺序反了的话已播那段会被浅色盖掉。
+            // 已缓冲。 画在「已播」下面 —— 缓冲前沿总是在播放头右边,
+            // 顺序反了的话已播那段会被浅色盖掉。
             Bar(0, w * Math.Clamp(_buffered / _duration, 0, 1), BufferBrush);
             var px = w * Math.Clamp(_position / _duration, 0, 1);
             Bar(0, px, PlayedBrush);
 
-            /* 章节缺口。★ 用「画一小段底色」而不是「画一条线」——
+            /* 章节缺口。 用「画一小段底色」而不是「画一条线」——
                线要选颜色,而进度条左右两半颜色不同(已播是蓝、未播是灰),
                一条固定颜色的线在其中一半上必然看不见。 */
             foreach (var c in Chapters)
@@ -207,11 +192,11 @@ public sealed class PlayerBar : Control
                 ctx.DrawRectangle(NotchBrush, null, new Rect(cx - 1, y, 2, th));
             }
 
-            /* ★★ <b>哪一段能看缩略图</b>,画一条细带说清楚。
+            /* <b>哪一段能看缩略图</b>,画一条细带说清楚。
                用户 2026-09-03 定的规则是「缓存了的能用,没缓存的不能用」——
                既然是规则,就不能让用户靠试:划过去没图的时候,他分不清是
                「这儿没有」还是「这功能坏了」。一条 2px 的带子就说明白了。
-               ★ 只在悬停时画:平时它是噪音,而平时也没人要用缩略图。 */
+               只在悬停时画:平时它是噪音,而平时也没人要用缩略图。 */
             if (big)
                 foreach (var (a, b) in CachedSpans)
                 {
@@ -221,8 +206,8 @@ public sealed class PlayerBar : Control
                     ctx.FillRectangle(ThumbBandBrush, new Rect(x0, y + th + 3, x1 - x0, 2));
                 }
 
-            // 圆头只在悬停/拖动时出现。★ 常驻的话它会一直在画面上戳着,
-            //   而进度条 95% 的时间只需要「看一眼到哪儿了」。
+            // 圆头只在悬停/拖动时出现。 常驻的话它会一直在画面上戳着,
+            // 而进度条 95% 的时间只需要「看一眼到哪儿了」。
             if (big)
                 ctx.DrawEllipse(ThumbBrush, null,
                     new Point(px, HitHeight / 2), ThumbR, ThumbR);

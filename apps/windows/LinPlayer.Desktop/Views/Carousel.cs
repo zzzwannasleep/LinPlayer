@@ -11,11 +11,11 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 首页那种横向轨道:一排卡片 + 两侧的翻页按钮。
 ///
-/// <para>★★ <b>光有滚轮是不够的</b>。一条轨道能放 20 张卡,而屏幕上一次只看得到五六张 ——
+/// <para><b>光有滚轮是不够的</b>。一条轨道能放 20 张卡,而屏幕上一次只看得到五六张 ——
 /// 后面那十几张<b>没有任何东西告诉用户它们存在</b>。鼠标滚轮在横向滚动区上的行为
 /// 还依赖设备(有的鼠标只发纵向),触控板用户和滚轮用户看到的是两个不同的应用。</para>
 ///
-/// <para>★ 按钮<b>按能不能滚来显隐</b>,不是常驻。到头了还亮着一个点不动的按钮,
+/// <para>按钮<b>按能不能滚来显隐</b>,不是常驻。到头了还亮着一个点不动的按钮,
 /// 用户会以为卡住了。</para>
 /// </summary>
 public static class Carousel
@@ -26,7 +26,7 @@ public static class Carousel
     /// <summary>
     /// 一次翻多少:视口的 80%。
     ///
-    /// <para>★ 不翻满一屏是故意的 —— 留一张卡在视野里,用户才知道自己是<b>接着</b>看
+    /// <para>不翻满一屏是故意的 —— 留一张卡在视野里,用户才知道自己是<b>接着</b>看
     /// 而不是跳到了另一段。整屏翻页会丢掉位置感。</para>
     /// </summary>
     private const double PageFactor = 0.8;
@@ -42,8 +42,8 @@ public static class Carousel
     {
         var sv = new ScrollViewer
         {
-            // ★ 滚动条藏起来:轨道下面横着一条滚动条会把卡片标题挤开,
-            //   而翻页按钮已经把「还能往右」这件事说清楚了。
+            // 滚动条藏起来:轨道下面横着一条滚动条会把卡片标题挤开,
+            // 而翻页按钮已经把「还能往右」这件事说清楚了。
             HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
             VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Content = row,
@@ -70,7 +70,7 @@ public static class Carousel
             right.IsVisible = sv.Offset.X < max - 1;
         }
 
-        /* ★★ 翻页和滚轮**共用同一套缓动**(Smooth)。
+        /* 翻页和滚轮**共用同一套缓动**(Smooth)。
            这里原本有一份自己写的 12 帧 DispatcherTimer 补间 —— 手感和别处对不上,
            而且 16ms 闹钟和刷新率对不齐,滑到一半会顿一下。
            一个应用里有两套滚动手感,比只有一套糙的更糟。 */
@@ -79,9 +79,9 @@ public static class Carousel
         // 触控板的横向手势不用在这儿接:Smooth 是类级处理器,对所有 ScrollViewer 都生效。
         sv.ScrollChanged += (_, _) => Sync();
 
-        /* ★ 首次要等布局算完再判:构造时 Viewport/Extent 都是 0,当场判等于两个按钮都不出现。
-           ★ 量到了就把这个处理器摘掉 —— LayoutUpdated 在这一页活着的时候会**一直发**,
-             而之后的变化 ScrollChanged 已经盯着了。留着是白烧 CPU。 */
+        /* 首次要等布局算完再判:构造时 Viewport/Extent 都是 0,当场判等于两个按钮都不出现。
+            量到了就把这个处理器摘掉 —— LayoutUpdated 在这一页活着的时候会**一直发**,
+            而之后的变化 ScrollChanged 已经盯着了。留着是白烧 CPU。 */
         void First(object? _, EventArgs __)
         {
             if (sv.Viewport.Width <= 0) return;
@@ -95,28 +95,52 @@ public static class Carousel
     }
 
     /// <summary>
+    /// 轨道里卡与卡之间留多宽。
+    ///
+    /// <para>2026-09-04 之前是 0 —— <see cref="VirtualizingStackPanel"/> 没有 Spacing,
+    /// 而 <see cref="Card"/> 自己不带外边距(首页那种轨道是靠 StackPanel.Spacing 撑开的),
+    /// 于是所有走 Rail 的地方卡片一张贴着一张(用户:「季封面之间的间距太小」)。
+    /// 取 16 而不是抄首页那个 12:分集卡有剧照 + 两行字,贴太近看着像糊在一起。
+    /// 「跳到第 N 集」算滚动位置也要用这个数,所以它是 public。</para>
+    /// </summary>
+    public const double RailGap = 16;
+
+    /// <summary>
     /// 会虚拟化的横向轨道:一排卡 + 两侧翻页按钮。
     ///
-    /// <para>★★ 用户 2026-09-03:「详情页里面的集数显示和演职人员的显示,
-    /// 不要一口气全显示出来,遇到那些上千集的不一下子卡死了,
-    /// 做成一行的,可以点击左右的按钮滑动展示」。</para>
-    ///
-    /// <para>☠ 「做成一行」本身<b>解决不了卡死</b> —— 一行一千张卡还是一千张卡,
-    /// 只是从纵向排成了横向。真正省下来的是 <see cref="VirtualizingStackPanel"/>:
-    /// 屏幕上放得下几张就只造几张。所以这里是 <c>ItemsControl</c> + 虚拟化面板,
-    /// 不是往 StackPanel 里 foreach。</para>
-    ///
-    /// <para>★ <paramref name="scroller"/> 传出去给调用方:「跳到第 N 集」要滚这个容器。</para>
+    /// <para>用户 2026-09-03:「集数和演职人员不要一口气全显示出来,遇到上千集的
+    /// 不一下子卡死了,做成一行的,点左右按钮滑动」。「做成一行」本身解决不了卡死
+    /// —— 一行一千张卡还是一千张卡。真正省下来的是 <see cref="VirtualizingStackPanel"/>:
+    /// 屏幕上放得下几张就只造几张。<paramref name="scroller"/> 传给「跳到第 N 集」用。</para>
     /// </summary>
+    /// <param name="gap">卡与卡之间留多宽。默认 <see cref="RailGap"/>;首页那种轨道传 12,
+    /// 因为它历史上就是 12,改了用户当场看得出来 —— 而这一轮没人要求改首页的间距。</param>
     public static Control Rail<T>(IReadOnlyList<T> items, Func<T, Control> make,
-        double artHeight, out ScrollViewer scroller)
+        double artHeight, out ScrollViewer scroller, double gap = RailGap)
     {
         var list = new ItemsControl
         {
-            // ★ 这一行就是虚拟化的开关。不设的话默认 StackPanel,全量实例化。
+            // 这一行就是虚拟化的开关。不设的话默认 StackPanel,全量实例化。
             ItemsPanel = new FuncTemplate<Panel?>(() =>
                 new VirtualizingStackPanel { Orientation = Orientation.Horizontal }),
-            ItemTemplate = new FuncDataTemplate<T>((it, _) => make(it), true),
+            // 间距只能加在**每一项自己**身上:虚拟化面板没有 Spacing,
+            // 而外面那层 ItemsControl 的 Spacing 对虚拟化面板不生效。
+            /* 第三个参数(supportsRecycling)<b>必须是 false</b>。
+               它 2026-09-04 之前是 true —— 而这个模板是**照着数据现造控件**的
+               (`make(it)` 里读的是那一条的 id、标题、海报地址)。
+               Avalonia 的 ContentPresenter 一看见 supportsRecycling=true,
+               换内容时就<b>不再走一遍模板</b>,只把旧控件的 DataContext 换掉;
+               我们的卡片一个绑定都没有,于是它<b>原样留在那儿</b> ——
+               表现是横着滑几屏之后卡片开始重复/错位,而且**不报错**,
+               看着像「服务器返回了重复数据」。
+               代价只是滚动时多 new 几个控件;虚拟化省下的是「一千张卡」那个量级,
+                 回收省下的是「屏幕上那七张」,不值得拿正确性换。 */
+            ItemTemplate = new FuncDataTemplate<T>((it, _) =>
+            {
+                var c = make(it);
+                c.Margin = new Thickness(0, 0, gap, 0);
+                return c;
+            }, false),
             ItemsSource = items,
         };
         return Wrap(list, artHeight, out scroller);
@@ -125,7 +149,7 @@ public static class Carousel
     /// <summary>
     /// 圆形翻页按钮。默认垂直居中、贴边 —— 轨道那边要对齐图区中线,自己再改。
     ///
-    /// <para>★ 首页 Hero 共用这一个:一个应用里两处「左右翻页」长得不一样,
+    /// <para>首页 Hero 共用这一个:一个应用里两处「左右翻页」长得不一样,
     /// 用户会以为它们是两种不同的东西。</para>
     /// </summary>
     internal static Button Arrow(string glyph, HorizontalAlignment side)
@@ -136,10 +160,10 @@ public static class Carousel
             Width = ButtonSize, Height = ButtonSize,
             CornerRadius = new CornerRadius(ButtonSize / 2),
             Background = new SolidColorBrush(Color.Parse("#cc11161f")),
-            BorderBrush = new SolidColorBrush(Color.Parse("#323b4a")),
+            BorderBrush = Tok.Of("LineStrong"),
             BorderThickness = new Thickness(1),
             Foreground = Brushes.White,
-            FontSize = 20, Padding = new Thickness(0, 0, 0, 3),
+            FontSize = 20, Padding = new Thickness(0, 0, 0, 2),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
             HorizontalAlignment = side,

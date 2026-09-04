@@ -5,35 +5,25 @@ using System.Text.Json;
 namespace LinPlayer.Desktop.Core;
 
 /// <summary>
-/// 元数据缓存(命令返回的 JSON)。
+/// 元数据缓存(命令返回的 JSON)。口径是 stale-while-revalidate。
 ///
-/// <para>★★ 用户 2026-09-03:「从其他页面待久一点回到首页,首页要加载四五秒。
-/// 有缓存直接就零点几秒就打开了」。这一条的真因不在动画也不在图片 ——
-/// <b>每次进首页都是一个全新的 HomePage 实例,五条轨道各打一次远端 Emby</b>。
-/// 封面那层早就有内存缓存了(<see cref="Images"/>),元数据这层一直没有。</para>
-///
-/// <para>★★ 口径是 <b>stale-while-revalidate</b>:命中就<b>先把旧的画出来</b>
-/// (零往返,当场出现),同时照常发请求,回来再画一次。
-/// 只读缓存不刷新的话「看完一集回首页,继续观看还是旧的」——
-/// 那比慢更糟,因为它是**错的**。</para>
-///
-/// <para>★ 落盘是为了冷启动那一次。内存那份进程一关就没了,
-/// 而「打开软件第一眼」正是最需要秒开的那一眼。</para>
-///
-/// <para>☠ <b>只能缓存读命令</b>。写命令(登录 / 改设置 / 上报进度)进了缓存
-/// 就是「点了没反应」——所以这里<b>不做横切拦截</b>,由调用点显式给键。</para>
+/// <para>用户 2026-09-03:「从其他页面待久一点回到首页要加载四五秒」。真因是每次
+/// 进首页都是一个全新的 HomePage 实例、五条轨道各打一次远端 —— 封面那层早就有
+/// 内存缓存,元数据这层一直没有。命中先把旧的画出来(零往返),同时照常发请求,
+/// 回来再画一次:只读不刷新的话「看完一集回首页继续观看还是旧的」,那比慢更糟。
+/// 落盘是为了冷启动那一次。只能缓存读命令 —— 写命令进了缓存就是「点了没反应」。</para>
 /// </summary>
 public static class MetaCache
 {
     /// <summary>
     /// 缓存多久算新鲜。过期的<b>照样先画出来</b>,只是必定会被刷新覆盖一次。
     ///
-    /// <para>★ 这个值不控制「画不画」,只控制「要不要顺带清掉」——
+    /// <para>这个值不控制「画不画」,只控制「要不要顺带清掉」——
     /// 一条一周前的缓存也比一片骨架强,反正紧跟着就会被真数据替换。</para>
     /// </summary>
     private static readonly TimeSpan Keep = TimeSpan.FromDays(7);
 
-    /// <summary>盘上最多留几条。★ 按条数,不按字节:每条都是一小段 JSON,量级已知。</summary>
+    /// <summary>盘上最多留几条。 按条数,不按字节:每条都是一小段 JSON,量级已知。</summary>
     private const int MaxFiles = 600;
 
     private static readonly object Lock = new();
@@ -54,7 +44,7 @@ public static class MetaCache
     /// <summary>
     /// 键:命令名 + 参数。
     ///
-    /// <para>★★ 参数里<b>有 token</b>(会话四件套是每页显式传的)。token 一变
+    /// <para>参数里<b>有 token</b>(会话四件套是每页显式传的)。token 一变
     /// 整盘缓存就作废了 —— 所以这里把 <c>token</c> 和 <c>device_id</c> 抠掉。
     /// 不抠的话每次重登都等于清空缓存,而重登恰恰是最需要它的时候。</para>
     /// </summary>
@@ -67,7 +57,7 @@ public static class MetaCache
              + Convert.ToHexString(sha.ComputeHash(Encoding.UTF8.GetBytes(raw)))[..16];
     }
 
-    /// <summary>把 token / device_id 从键里抠掉。★ 用最笨的字符串办法,不解析 —— 键只要稳定。</summary>
+    /// <summary>把 token / device_id 从键里抠掉。 用最笨的字符串办法,不解析 —— 键只要稳定。</summary>
     private static string Strip(string json)
     {
         foreach (var k in new[] { "token", "device_id" })
@@ -88,7 +78,7 @@ public static class MetaCache
     /// <summary>
     /// 取一份旧的。没有就返回 null(<c>ValueKind == Undefined</c> 也当没有)。
     ///
-    /// <para>★ 内存没有就读盘,读到了顺手回填内存 —— 同一次会话里第二次进这一页
+    /// <para>内存没有就读盘,读到了顺手回填内存 —— 同一次会话里第二次进这一页
     /// 就不必再碰磁盘。</para>
     /// </summary>
     public static JsonElement? Peek(string key)
@@ -100,7 +90,7 @@ public static class MetaCache
             {
                 if (_dir == "") return null;
                 try { json = File.ReadAllText(Path.Combine(_dir, key + ".json")); }
-                catch { return null; }
+                catch { return null; }   // 缓存文件不在或读不动 = 没缓存,照常走网络
                 Mem[key] = json;
             }
         }
@@ -109,13 +99,13 @@ public static class MetaCache
             using var doc = JsonDocument.Parse(json);
             return doc.RootElement.Clone();
         }
-        catch { return null; }
+        catch { return null; }   // 缓存内容坏了当没缓存,下次刷新会覆盖掉
     }
 
     /// <summary>
     /// 存一份。
     ///
-    /// <para>★ 写盘扔到线程池上:它挂在「数据回来了」那一刻,而那一刻 UI 线程
+    /// <para>写盘扔到线程池上:它挂在「数据回来了」那一刻,而那一刻 UI 线程
     /// 正要拿这批数据去铺一屏卡片 —— 同步写盘就是在最忙的那一帧上插一次磁盘 IO。</para>
     /// </summary>
     public static void Put(string key, JsonElement value)
@@ -138,8 +128,8 @@ public static class MetaCache
 
     /// <summary>
     /// 超量就把最旧的删一批。
-    /// <para>★ 一次删四分之一,不是刚好删到上限:卡着上限的话之后<b>每写一条都要扫一遍目录</b>。</para>
-    /// <para>★ 一次会话只扫一次 —— 剩下的靠这一次删出来的余量顶着。</para>
+    /// <para>一次删四分之一,不是刚好删到上限:卡着上限的话之后<b>每写一条都要扫一遍目录</b>。</para>
+    /// <para>一次会话只扫一次 —— 剩下的靠这一次删出来的余量顶着。</para>
     /// </summary>
     private static void Prune()
     {
@@ -163,7 +153,7 @@ public static class MetaCache
     public static List<JsonElement>? PeekList(string key) =>
         Peek(key) is { ValueKind: JsonValueKind.Array } a ? a.EnumerateArray().ToList() : null;
 
-    /// <summary>数组版的 <see cref="Put"/>。★ 空表也存 —— 「这个库确实没内容」也是结论。</summary>
+    /// <summary>数组版的 <see cref="Put"/>。 空表也存 —— 「这个库确实没内容」也是结论。</summary>
     public static void PutList(string key, List<JsonElement> items)
     {
         try
@@ -181,7 +171,7 @@ public static class MetaCache
     /// (参数 <c>fresh=false</c>),真数据回来再调一次(<c>fresh=true</c>)。
     /// 没命中就只调后面那一次。</para>
     ///
-    /// <para>★★ 第二次<b>必须也调</b>,哪怕内容没变 —— 判「变没变」要比整段 JSON,
+    /// <para>第二次<b>必须也调</b>,哪怕内容没变 —— 判「变没变」要比整段 JSON,
     /// 而那比重画一次还贵;而漏掉第二次就成了「缓存里的东西永远刷不掉」。</para>
     /// </summary>
     public static async Task Swr(CoreClient core, string command, object? args,

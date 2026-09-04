@@ -12,11 +12,11 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 字幕翻译 + 本地转写(<c>UI_PC.md</c> §7.15)。
 ///
-/// <para>★★ 引擎的「配好了没」由<b>核心层</b>算(<c>translate.translationEngineStatus</c>),
+/// <para>引擎的「配好了没」由<b>核心层</b>算(<c>translate.translationEngineStatus</c>),
 /// UI 不自己判。自己判的后果是加一家新引擎、或者某家的必填项变了,状态点还按老规则亮着
 /// —— 用户看到绿点、点下去打不通。</para>
 ///
-/// <para>★ 各家引擎的凭据字段形状不同,所以<b>按选中的那家画</b>,不是把五家的输入框
+/// <para>各家引擎的凭据字段形状不同,所以<b>按选中的那家画</b>,不是把五家的输入框
 /// 全铺出来。全铺的话一屏十几个框,用户不知道该填哪几个。</para>
 /// </summary>
 public static class SettingsTranslate
@@ -43,7 +43,7 @@ public static class SettingsTranslate
         var target = new TextBox { Classes = { "field" }, Width = 120, Text = Str(s, "targetLang") };
 
         // 当前引擎的凭据字段。key = "组名/字段名"。
-        var creds = new StackPanel { Spacing = 8 };
+        var creds = new StackPanel { Spacing = 10 };
         var fields = new Dictionary<string, TextBox>();
 
         void Cred(string label, string group, string key, string watermark = "")
@@ -152,7 +152,7 @@ public static class SettingsTranslate
     /// <summary>拉不到设置时的那一组。**必须出现** —— 不出现的话用户会以为没这个功能。</summary>
     public static Control Unavailable(string why) => Group("字幕翻译", new StackPanel
     {
-        Spacing = 8,
+        Spacing = 10,
         Children =
         {
             Hint2("读不到翻译设置:" + (why == "" ? "(核心层没给原因)" : why)),
@@ -182,7 +182,7 @@ public static class SettingsTranslate
                 var deps = await core.TranslateWhisperDeps(new { });
                 var w = Str(deps, "whisper");
                 var f = Str(deps, "ffmpeg");
-                /* ★★ 两个依赖要**分开说**。合成一句「依赖未就绪」的话用户不知道
+                /* 两个依赖要**分开说**。合成一句「依赖未就绪」的话用户不知道
                    该去装哪个 —— 而这两件事的处置完全不同:ffmpeg 应用能自己下,
                    whisper-cli 不能(得用户自己装或手填路径)。 */
                 hint.Text =
@@ -205,7 +205,7 @@ public static class SettingsTranslate
                     };
                     btn.Click += async (_, _) =>
                     {
-                        // ★ 模型 1~3GB:按钮必须当场变字并禁用,否则用户会反复点。
+                        // 模型 1~3GB:按钮必须当场变字并禁用,否则用户会反复点。
                         btn.IsEnabled = false;
                         btn.Content = downloaded ? "删除中…" : "下载中…";
                         try
@@ -273,7 +273,7 @@ public static class SettingsTranslate
     /// <summary>
     /// 定位结果的人话。
     ///
-    /// <para>★ 核心层在 PATH 上找到时返回的是**裸文件名**(ffmpeg.exe)。
+    /// <para>核心层在 PATH 上找到时返回的是**裸文件名**(ffmpeg.exe)。
     /// 原样显示的话看着像一个相对路径,用户会以为它在程序目录里找到了 ——
     /// 于是去那个目录找,什么都没有。</para>
     /// </summary>
@@ -294,21 +294,27 @@ public static class SettingsTranslate
 
     private static Control Group(string title, Control body) => new Border
     {
-        Classes = { "card" }, Padding = new Thickness(18), Width = 620,
-        HorizontalAlignment = HorizontalAlignment.Left,
+        Classes = { "card" }, Padding = new Thickness(18, 18),
+        HorizontalAlignment = HorizontalAlignment.Stretch,
         Child = new StackPanel
         {
-            Spacing = 12,
+            Spacing = 10,
             Children = { new TextBlock { Text = title, Classes = { "h2" } }, body },
         },
     };
 
+    /// <summary>一行「说明 + 控件」。 标签右对齐、列宽 88 —— 三处 Field 必须一致,
+    /// 口径见 <see cref="SettingsPage"/> 里那一份的注释。</summary>
     private static Control Field(string label, Control input) => new StackPanel
     {
-        Orientation = Orientation.Horizontal, Spacing = 12,
+        Orientation = Orientation.Horizontal, Spacing = 10,
         Children =
         {
-            new TextBlock { Text = label, Width = 100, VerticalAlignment = VerticalAlignment.Center },
+            new TextBlock
+            {
+                Text = label, Width = 88, TextAlignment = TextAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
             input,
         },
     };
@@ -321,7 +327,7 @@ public static class SettingsTranslate
     private static TextBlock Note(string t) => new()
     {
         Text = t, FontSize = 12, TextWrapping = TextWrapping.Wrap,
-        Foreground = new SolidColorBrush(Color.Parse("#7d8798")),
+        Foreground = Tok.Of("Ink3"),
     };
 
     private static string Str(JsonElement e, string k) =>

@@ -10,17 +10,12 @@ using LinPlayer.Desktop.Core;
 namespace LinPlayer.Desktop.Views;
 
 /// <summary>
-/// 批量添加服务器(UI_PC §7.6 的第四种入口)。
+/// 批量添加服务器(UI_PC §7.6 的第四种入口)。贴一段机场 / Emby 发的开通信息 →
+/// 解析成若干账号块 → 用户确认 → 逐块逐线路试登录。
 ///
-/// <para>贴一段机场 / Emby 发的开通信息 → 解析成若干账号块 → 用户核对 / 补用户名 →
-/// 逐块逐线路试登录。</para>
-///
-/// <para>★★ 解析和添加**分两步**是故意的:一步到底的话,一段贴错的文本会直接
-/// 往配置里塞几台服务器,而用户完全没机会看清自己贴了什么。</para>
-///
-/// <para>★★ 深链(<c>linplayer://add-server</c>)也落在这一页:它可能来自任何网页
-/// 或聊天窗口,**必须先让用户看清地址和用户名再点添加** —— 核心层返回非 null
-/// 只表示「解得开」,不表示「可以加」。</para>
+/// <para>解析和添加分两步是故意的:一步到底的话,一段贴错的文本会直接往配置里
+/// 塞几台服务器。深链(<c>linplayer://add-server</c>)也落在这一页 —— 它可能来自
+/// 任何网页或聊天窗口,必须先让用户看清地址和用户名:解得开不等于可以加。</para>
 /// </summary>
 public sealed class BatchAddPage : PageBase
 {
@@ -124,7 +119,7 @@ public sealed class BatchAddPage : PageBase
     /// <summary>
     /// 一个账号块的核对卡。
     ///
-    /// <para>★ 明文 http 要**显眼地警告**:批量添加的文本常常来自陌生渠道,
+    /// <para>明文 http 要**显眼地警告**:批量添加的文本常常来自陌生渠道,
     /// 而 http 意味着账号密码在路上是裸的。</para>
     /// </summary>
     private static Control BlockCard(JsonElement b)
@@ -169,7 +164,7 @@ public sealed class BatchAddPage : PageBase
                 Margin = new Thickness(0, 6, 0, 0),
             });
         }
-        return new Border { Classes = { "card" }, Padding = new Thickness(16), Child = body };
+        return new Border { Classes = { "card" }, Padding = new Thickness(18), Child = body };
     }
 
     private async Task Add(Action onDone)
@@ -198,7 +193,7 @@ public sealed class BatchAddPage : PageBase
                     TextWrapping = TextWrapping.Wrap,
                 });
             }
-            // ★ 部分成功要**如实说**:全成功才跳走,不然用户以为都加上了。
+            // 部分成功要**如实说**:全成功才跳走,不然用户以为都加上了。
             _hint.Text = $"{ok} / {rows.Count} 台添加成功。";
             if (ok > 0 && ok == rows.Count) Dispatcher.UIThread.Post(onDone);
             else _add.IsEnabled = true;

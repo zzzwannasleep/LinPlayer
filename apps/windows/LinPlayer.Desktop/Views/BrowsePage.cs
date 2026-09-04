@@ -16,18 +16,18 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 文件浏览页(<c>UI_PC.md</c> §7.7)。网盘 / SMB / WebDAV / FTP / 本地共用这一页。
 ///
-/// <para>★★ 三条契约,每条都对应一次真事故:</para>
+/// <para>三条契约,每条都对应一次真事故:</para>
 /// <list type="number">
 /// <item><b>空目录就说空目录</b>,不要说「加载失败」—— 两者的下一步动作完全不同。</item>
 /// <item><b>凭据失效走 E_AUTH</b> → 引导重新登录,不是提示「检查网络」。</item>
 /// <item><b>起播必须走宿主的起播入口</b>(先把播放页拉起来),本页不许自己 invoke。
-///   曾经绕开独立播放窗自己起播,结果「有声音、没画面、还关不掉」。</item>
+/// 曾经绕开独立播放窗自己起播,结果「有声音、没画面、还关不掉」。</item>
 /// </list>
 /// </summary>
 public sealed class BrowsePage : PageBase
 {
     private readonly CoreClient _core;
-    private readonly StackPanel _crumbs = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
+    private readonly StackPanel _crumbs = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
     private readonly StackPanel _rows = new() { Spacing = 2 };
     private readonly TextBlock _status = Dim("");
     private readonly TextBox _filter = new() { Watermark = "在当前目录里过滤", Width = 220, Classes = { "field" } };
@@ -47,12 +47,12 @@ public sealed class BrowsePage : PageBase
 
         Content = Scrolled(new StackPanel
         {
-            Spacing = 12,
+            Spacing = 10,
             Children =
             {
                 new StackPanel
                 {
-                    Orientation = Orientation.Horizontal, Spacing = 12,
+                    Orientation = Orientation.Horizontal, Spacing = 10,
                     Children = { _crumbs, _filter },
                 },
                 _status,
@@ -77,8 +77,8 @@ public sealed class BrowsePage : PageBase
         }
         catch (Exception e)
         {
-            // ★ 凭据失效要引导**重新登录**,不是「检查网络」。
-            //   CoreException.Advice 已经按 code 分好了,原样显示即可。
+            // 凭据失效要引导**重新登录**,不是「检查网络」。
+            // CoreException.Advice 已经按 code 分好了,原样显示即可。
             _status.Text = LibraryPage.Advice(e);
             if (e is CoreException { Code: "E_AUTH" })
             {
@@ -106,8 +106,8 @@ public sealed class BrowsePage : PageBase
 
         if (_entries.Count == 0)
         {
-            // ★★ **空目录就说空目录**。说成「加载失败」的话,用户会去重试、去查网络、
-            //    去怀疑密码 —— 而实际上这里本来就没有东西。
+            // **空目录就说空目录**。说成「加载失败」的话,用户会去重试、去查网络、
+            // 去怀疑密码 —— 而实际上这里本来就没有东西。
             _status.Text = "这个文件夹是空的。";
             return;
         }
@@ -137,7 +137,7 @@ public sealed class BrowsePage : PageBase
         {
             Background = Brushes.Transparent,
             BorderThickness = new Thickness(0),
-            Padding = new Thickness(10, 8),
+            Padding = new Thickness(10, 10),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Cursor = new Cursor(StandardCursorType.Hand),
@@ -175,9 +175,9 @@ public sealed class BrowsePage : PageBase
             }
             else if (isVideo)
             {
-                // ★★ 起播走**宿主的起播入口** —— 它负责把播放页拉起来。
-                //    本页自己 invoke source.play 的话,核心层是开始放了,
-                //    但没有任何页面接管画面:「有声音、没画面、还关不掉」。
+                // 起播走**宿主的起播入口** —— 它负责把播放页拉起来。
+                // 本页自己 invoke source.play 的话,核心层是开始放了,
+                // 但没有任何页面接管画面:「有声音、没画面、还关不掉」。
                 Nav.Push(new PlayerPage(_core, id, name, 0, isSource: true));
             }
             // 非视频文件:点了不动。不弹提示 —— 用户看得见那是张封面图
@@ -214,7 +214,7 @@ public sealed class BrowsePage : PageBase
             {
                 Content = _path[i].Name,
                 Classes = { "ghost" },
-                Padding = new Thickness(8, 4),
+                Padding = new Thickness(10, 6),
                 IsEnabled = !last, // 当前这层点了也没用
             };
             b.Click += (_, _) =>

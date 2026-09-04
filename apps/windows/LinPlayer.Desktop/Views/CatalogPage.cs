@@ -13,25 +13,20 @@ using LinPlayer.Desktop.Core;
 namespace LinPlayer.Desktop.Views;
 
 /// <summary>
-/// 影视目录(<c>UI_PC.md</c> §7.8)。
+/// 影视目录(<c>UI_PC.md</c> §7.8)。存在的唯一理由:资源站不是文件树。
 ///
-/// <para>★★ <b>这一页存在的唯一理由:资源站不是文件树。</b>
-/// 旧版把资源站塞进文件浏览页,于是每样东西都得伪装成文件 —— 分类伪装成文件夹、
-/// 翻页伪装成一个叫「下一页」的文件夹、「更新至 17 集」只能拼进文件名。全错。</para>
-///
-/// <para>★★ <b>首屏要预抓几页</b>:只抓一页的话内容铺不满一屏 → 没有滚动 →
-/// 无限下拉永远不会被触发,表现是「只有十几个,再也刷不出来了」。</para>
-///
-/// <para>★ 探能力时拿到「不支持」= 这是个文件型源 → <b>静默换路</b>退回文件浏览页,
-/// 不当错误弹。</para>
+/// <para>旧版把资源站塞进文件浏览页,于是每样东西都得伪装成文件 —— 翻页伪装成
+/// 一个叫「下一页」的文件夹。首屏要预抓几页:只抓一页铺不满一屏 → 没有滚动条 →
+/// 无限下拉永远不会被触发,表现是「只有十几个,再也刷不出来了」。
+/// 探能力时拿到「不支持」= 这是个文件型源,静默换路,不当错误弹。</para>
 /// </summary>
 public sealed class CatalogPage : PageBase
 {
     private readonly CoreClient _core;
     private readonly Action _fallbackToBrowse;
 
-    private readonly StackPanel _catBar = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
-    private readonly StackPanel _subBar = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+    private readonly StackPanel _catBar = new() { Orientation = Orientation.Horizontal, Spacing = 10 };
+    private readonly StackPanel _subBar = new() { Orientation = Orientation.Horizontal, Spacing = 10 };
     private readonly TextBox _search = new() { Classes = { "field" }, Width = 240, Watermark = "站内搜索…" };
     private readonly ItemsControl _grid = new() { ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel()) };
     private readonly TextBlock _msg = Dim("加载中…");
@@ -39,7 +34,7 @@ public sealed class CatalogPage : PageBase
 
     /// <summary>详情**盖在同一页上** —— 关掉时网格的滚动位置还在。</summary>
     private readonly Border _overlay;
-    private readonly StackPanel _detailBody = new() { Spacing = 12 };
+    private readonly StackPanel _detailBody = new() { Spacing = 10 };
 
     private List<JsonElement> _cats = [];
     private string _curCat = "";
@@ -65,7 +60,7 @@ public sealed class CatalogPage : PageBase
             {
                 new StackPanel
                 {
-                    Orientation = Orientation.Horizontal, Spacing = 12,
+                    Orientation = Orientation.Horizontal, Spacing = 10,
                     Children = { H1("影视目录"), _search },
                 },
                 _catBar, _subBar, _msg, _grid,
@@ -79,7 +74,7 @@ public sealed class CatalogPage : PageBase
         _overlay = new Border
         {
             IsVisible = false,
-            /* ★ 盖层必须**不透明**。半透明的话下面那一屏海报网格会透上来,
+            /* 盖层必须**不透明**。半透明的话下面那一屏海报网格会透上来,
                详情的文字压在一堆卡片上,读起来很吃力 —— 截图里一眼就能看出来,
                而在代码里(alpha=250)看着像是「几乎不透明」。 */
             Background = new SolidColorBrush(Color.FromRgb(22, 22, 26)),
@@ -88,7 +83,7 @@ public sealed class CatalogPage : PageBase
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
                 Content = new Border
                 {
-                    Padding = new Thickness(24), MaxWidth = 1200,
+                    Padding = new Thickness(26), MaxWidth = 1200,
                     Child = new StackPanel { Spacing = 14, Children = { close, _detailBody } },
                 },
             },
@@ -106,7 +101,7 @@ public sealed class CatalogPage : PageBase
         try { r = await _core.SourceCategories(); }
         catch (Exception e)
         {
-            /* ★★ 「这个源不支持影视目录」= 它是个文件型源,**静默换路**,不弹错。
+            /* 「这个源不支持影视目录」= 它是个文件型源,**静默换路**,不弹错。
                弹错的话每个网盘用户点进来都会看到一句读不懂的红字,而正确行为是
                直接把他送到文件浏览页。核心层用 E_UNSUPPORTED 说这件事。 */
             if (IsUnsupported(e)) { Dispatcher.UIThread.Post(_fallbackToBrowse); return; }
@@ -121,7 +116,7 @@ public sealed class CatalogPage : PageBase
             _catBar.Children.Clear();
             foreach (var c in cats) _catBar.Children.Add(CatChip(c, top: true));
 
-            /* ★★ **有子分类的父级本身多半是空的**。点它(或首屏默认选它)要先落到
+            /* **有子分类的父级本身多半是空的**。点它(或首屏默认选它)要先落到
                第一个子分类,而不是把用户扔进一张空页 —— 空页看起来像「这个站没内容」。 */
             var first = cats.Count > 0 ? cats[0] : default;
             _ = Reload(FirstLeaf(first), "");
@@ -141,7 +136,7 @@ public sealed class CatalogPage : PageBase
         var btn = new Button
         {
             Classes = { "ghost" }, Content = Str(c, "name"), MinHeight = 30,
-            Padding = new Thickness(12, 4),
+            Padding = new Thickness(14, 6),
         };
         btn.Click += (_, _) =>
         {
@@ -173,7 +168,7 @@ public sealed class CatalogPage : PageBase
             _cards.Clear();
             _msg.Text = "加载中…";
         });
-        // ★ 首屏预抓 3 页:抓一页铺不满屏就没有滚动条,无限下拉永远触发不了。
+        // 首屏预抓 3 页:抓一页铺不满屏就没有滚动条,无限下拉永远触发不了。
         for (var i = 0; i < 3; i++)
         {
             await LoadPage();
@@ -194,7 +189,7 @@ public sealed class CatalogPage : PageBase
                 category_id = _curCat, keyword = _curKeyword, page = _page,
             });
             var items = Arr(r, "items");
-            /* ★★ `_hasMore` 必须在**这条 goroutine 上同步落**,不能丢进 Post 里。
+            /* `_hasMore` 必须在**这条 goroutine 上同步落**,不能丢进 Post 里。
                丢进 Post 的话:调用方 `await LoadPage()` 返回时那个 Post 还没跑,
                读到的是上一轮的旧值 —— 首屏预抓的 for 循环第一轮就 break,
                只抓到一页。表现是「只有十几部,再往下滚也不出来」,而且时快时慢
@@ -231,11 +226,11 @@ public sealed class CatalogPage : PageBase
     /// <summary>
     /// 一张海报卡。
     ///
-    /// <para>★★ 角标 / 年份 / 评分**各占各的位置**,标题里只有标题。
+    /// <para>角标 / 年份 / 评分**各占各的位置**,标题里只有标题。
     /// 拼进标题的话卡片下面会变成「神之水滴 · 更新至17集 · 2026」——
     /// 那不是标题,是把三样东西塞进一个格子。</para>
     ///
-    /// <para>★ **单击就打开,不是双击** —— 海报墙不是文件管理器。</para>
+    /// <para>**单击就打开,不是双击** —— 海报墙不是文件管理器。</para>
     /// </summary>
     private Control PosterCard(JsonElement c)
     {
@@ -250,9 +245,9 @@ public sealed class CatalogPage : PageBase
             {
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 4, 4),
+                Margin = new Thickness(0, 0, 6, 6),
                 Background = new SolidColorBrush(Color.FromArgb(200, 0, 0, 0)),
-                CornerRadius = new CornerRadius(4), Padding = new Thickness(6, 2),
+                CornerRadius = new CornerRadius(6), Padding = new Thickness(6, 2),
                 Child = new TextBlock { Text = badge, FontSize = 11, Foreground = Brushes.White },
             });
         }
@@ -267,7 +262,7 @@ public sealed class CatalogPage : PageBase
 
         var card = new Button
         {
-            Classes = { "ghost" }, Padding = new Thickness(6), Margin = new Thickness(0, 0, 12, 14),
+            Classes = { "ghost" }, Padding = new Thickness(6), Margin = new Thickness(0, 0, 14, 14),
             Content = new StackPanel
             {
                 Width = 150, Spacing = 6,
@@ -298,7 +293,7 @@ public sealed class CatalogPage : PageBase
     /// <summary>
     /// 海报 + 占位底。
     ///
-    /// <para>★ 没海报时垫一层**占位**,不是留一个空框:资源站缺图是常态,
+    /// <para>没海报时垫一层**占位**,不是留一个空框:资源站缺图是常态,
     /// 空框看起来像「这一格加载坏了」,而实际上它只是没图。</para>
     /// </summary>
     private static Grid PosterBox(Image poster, double w, double h) => new()
@@ -369,7 +364,7 @@ public sealed class CatalogPage : PageBase
                 return;
             }
 
-            /* ★ 线路是**并列的几套分集**,不是一个下拉里的选项就完事 ——
+            /* 线路是**并列的几套分集**,不是一个下拉里的选项就完事 ——
                有的线路给的是网页播放页而不是流,播不出来时用户要能一眼换一条。 */
             foreach (var line in lines)
             {
@@ -380,7 +375,7 @@ public sealed class CatalogPage : PageBase
                     var b = new Button
                     {
                         Classes = { "ghost" }, Content = Str(ep, "name"), MinHeight = 30,
-                        Margin = new Thickness(0, 0, 8, 8), Padding = new Thickness(10, 4),
+                        Margin = new Thickness(0, 0, 10, 10), Padding = new Thickness(10, 6),
                     };
                     var epCopy = ep;
                     b.Click += async (_, _) => await PlayEpisode(epCopy, title);
@@ -393,11 +388,11 @@ public sealed class CatalogPage : PageBase
 
     private Task PlayEpisode(JsonElement ep, string title)
     {
-        /* ★★ 起播必须**导航到播放页**,不是在这里调一下 source.play 就完事。
+        /* 起播必须**导航到播放页**,不是在这里调一下 source.play 就完事。
            「起播了但没有画面」这一类故障的根因就是只调命令不导航 —— 后端确实在播,
            前台还停在原来那一页。
 
-           ★ 分集的 raw 原样带过去:资源站的可播地址就在 raw 里,不带的话
+           分集的 raw 原样带过去:资源站的可播地址就在 raw 里,不带的话
            后端只拿到一个 id,解析不出流。 */
         var name = Str(ep, "name");
         Nav.Push(new PlayerPage(_core, Str(ep, "id"),

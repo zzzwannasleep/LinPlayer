@@ -13,14 +13,14 @@ namespace LinPlayer.Desktop.Views;
 /// <summary>
 /// 聚合视界:每台服务器一张卡(规模统计 + 继续观看)。
 ///
-/// <para>★ 统计和继续观看是<b>各自吞错</b>的 —— 某台服的 <c>/Items/Counts</c> 在
+/// <para>统计和继续观看是<b>各自吞错</b>的 —— 某台服的 <c>/Items/Counts</c> 在
 /// 某些 fork 上根本不存在,那一格显示不出来不该把整页拖红。</para>
 /// </summary>
 public sealed class AggregatePage : PageBase
 {
     public AggregatePage(CoreClient core)
     {
-        var rows = new StackPanel { Spacing = 22, Children = { H1("聚合视界") } };
+        var rows = new StackPanel { Spacing = 18, Children = { H1("聚合视界") } };
         var busy = Dim("加载中…");
         rows.Children.Add(busy);
         Content = Scrolled(rows);
@@ -75,14 +75,14 @@ public sealed class AggregatePage : PageBase
         if (Num(counts, "series") > 0) bits.Add($"剧集 {Num(counts, "series"):0}");
         if (Num(counts, "episode") > 0) bits.Add($"分集 {Num(counts, "episode"):0}");
         if (Num(counts, "boxset") > 0) bits.Add($"合集 {Num(counts, "boxset"):0}");
-        // ★ 统计端点 404 时这里就是空的 —— 显示「统计不可用」而不是「0 部电影」
+        // 统计端点 404 时这里就是空的 —— 显示「统计不可用」而不是「0 部电影」
         body.Children.Add(Dim(bits.Count > 0 ? string.Join("  ·  ", bits) : "这台服务器没有提供规模统计。"));
 
         var resume = c.TryGetProperty("resume", out var rs) && rs.ValueKind == JsonValueKind.Array
             ? rs.EnumerateArray().Select(CardItem.From).ToList() : [];
         if (resume.Count > 0)
         {
-            var strip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+            var strip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
             foreach (var it in resume.Take(12))
                 strip.Children.Add(new Card(core, server, it, true, LibraryPage.OpenDetail(core, server)));
             body.Children.Add(new ScrollViewer
@@ -101,7 +101,7 @@ public sealed class AggregatePage : PageBase
 
     private static Control Wrap(Control body) => new Border
     {
-        Classes = { "card" }, Padding = new Thickness(16), Child = body,
+        Classes = { "card" }, Padding = new Thickness(18), Child = body,
     };
 
     private static string Str(JsonElement e, string k) =>
@@ -115,7 +115,7 @@ public sealed class AggregatePage : PageBase
 /// <summary>
 /// 观看历史。
 ///
-/// <para>★ 这份历史是<b>本地库</b>,不是服务器的播放记录 —— 跨服续播就靠它。
+/// <para>这份历史是<b>本地库</b>,不是服务器的播放记录 —— 跨服续播就靠它。
 /// 所以「当前服务器」和「全部」是两种看法,都要有。</para>
 /// </summary>
 public sealed class HistoryPage : PageBase
@@ -123,14 +123,14 @@ public sealed class HistoryPage : PageBase
     public HistoryPage(CoreClient core)
     {
         var only = new CheckBox { Content = "只看当前服务器", IsChecked = true };
-        var list = new StackPanel { Spacing = 8 };
+        var list = new StackPanel { Spacing = 10 };
         var status = Dim("加载中…");
         var scanHint = Dim("");
 
         /* 扫描恢复:换服 / 重装之后把本地记录推回服务器。
-           ★★ 报告里的 errors 必须显示出来。这条链路最危险的 bug 是
+            报告里的 errors 必须显示出来。这条链路最危险的 bug 是
              「不崩,只是悄悄少恢复了几条」—— 只报个成功数的话没人会发现。
-           ★ prompt_candidates 是**要用户拍板**的那一批(可能匹配但不确定):
+            prompt_candidates 是**要用户拍板**的那一批(可能匹配但不确定):
              自动写下去的后果是把进度写到另一部片上,而且看起来一切正常。
              这一版先如实报个数,逐条确认的界面待做。 */
         var scan = new Button { Classes = { "ghost" }, Content = "扫描恢复到当前服务器" };
@@ -162,7 +162,7 @@ public sealed class HistoryPage : PageBase
                 H1("观看历史"),
                 new StackPanel
                 {
-                    Orientation = Orientation.Horizontal, Spacing = 12,
+                    Orientation = Orientation.Horizontal, Spacing = 10,
                     Children = { only, scan },
                 },
                 scanHint, status, list,
@@ -218,8 +218,8 @@ public sealed class HistoryPage : PageBase
                     new TextBlock { Text = right, Classes = { "dim" }, Width = 150 },
                     new TextBlock
                     {
-                        // ★ last_played_at 是**毫秒**(core/history/store.go 的 nowMs)。
-                        //   当秒读的话时间会跳到五万多年后 —— 不报错,只是日期离谱。
+                        // last_played_at 是**毫秒**(core/history/store.go 的 nowMs)。
+                        // 当秒读的话时间会跳到五万多年后 —— 不报错,只是日期离谱。
                         Text = when > 0
                             ? DateTimeOffset.FromUnixTimeMilliseconds((long)when).LocalDateTime.ToString("yyyy-MM-dd HH:mm")
                             : "",

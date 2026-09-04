@@ -3,7 +3,7 @@
   <!--
     组件样式(UI_PC §4)。**只写这一层用得到的**,别提前造轮子。
 
-    ★ 状态矩阵(§4.1):每个可交互组件都要有 默认 / 悬停 / 按下 / 禁用 / 加载 五态。
+    状态矩阵(§4.1):每个可交互组件都要有 默认 / 悬停 / 按下 / 禁用 / 加载 五态。
       少一态的表现是「点了没反应」—— 用户分不清是没点上还是在加载。
   -->
 
@@ -36,7 +36,7 @@
   </Style>
 
   <!-- 侧栏导航项。
-    ★★ 悬停/选中的底色<b>用一层叠加块的 Opacity 做</b>,**不是**给 Border 的 Background
+    悬停/选中的底色<b>用一层叠加块的 Opacity 做</b>,**不是**给 Border 的 Background
        挂 BrushTransition。
        原来那种写法有个只有肉眼看得见的 bug:退场时是把 PanelAlt 插值到 `Transparent`,
        而 Avalonia 这条插值路径**中途会经过又亮又透的颜色**。
@@ -46,10 +46,10 @@
          alpha 0.26 rgb(224,224,224) → 合成  78
        而两端是 悬停 35 / 静止 26 —— <b>中途比两端亮三倍多</b>。
        这就是用户说的「滑到下一个的时候上一个会闪亮一下」。
-       ★ 别按「非预乘插值会变暗」去推理:我第一版就是这么算的,推出来是「变暗」,
+       别按「非预乘插值会变暗」去推理:我第一版就是这么算的,推出来是「变暗」,
          方向正好反了 —— 这种事只能实测。
        Opacity 走的是预乘合成,值一定单调,不可能出现这种过冲。
-    ★ 折叠态只留图标:Content 那一栏整个不画,靠 .icononly 切。 -->
+    折叠态只留图标:Content 那一栏整个不画,靠 .icononly 切。 -->
   <Style Selector="RadioButton.nav">
     <Setter Property="Height" Value="38" />
     <Setter Property="Margin" Value="8,1" />
@@ -59,9 +59,9 @@
     <Setter Property="Template">
       <ControlTemplate>
         <Panel>
-          <Border Name="sel" CornerRadius="8" Background="{DynamicResource AccentSoft}" Opacity="0" />
-          <Border Name="hov" CornerRadius="8" Background="{DynamicResource PanelAlt}" Opacity="0" />
-          <Border Name="root" Background="Transparent" CornerRadius="8" Padding="{TemplateBinding Padding}">
+          <Border Name="sel" CornerRadius="6" Background="{DynamicResource AccentSoft}" Opacity="0" />
+          <Border Name="hov" CornerRadius="6" Background="{DynamicResource PanelAlt}" Opacity="0" />
+          <Border Name="root" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
             <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
               <!-- 图标。折叠态下它是唯一还看得见的东西,所以宽度钉死 ——
                    不钉的话不同字形宽窄不一,一列图标会左右错开。 -->
@@ -100,7 +100,7 @@
   <Style Selector="RadioButton.nav:checked">
     <Setter Property="Foreground" Value="{DynamicResource Accent}" />
   </Style>
-  <!-- 折叠态:文字整条不画,图标居中。★ 只改 IsVisible 不改宽度 ——
+  <!-- 折叠态:文字整条不画,图标居中。只改 IsVisible 不改宽度 ——
        宽度是外面那条列宽在管,两处都改会打架。 -->
   <Style Selector="RadioButton.nav.icononly /template/ ContentPresenter#label">
     <Setter Property="IsVisible" Value="False" />
@@ -115,7 +115,7 @@
   <!-- 侧栏底部那个「收起 / 展开」。和导航项同一套悬停手感,但它不是单选项。 -->
   <Style Selector="Button.navbtn /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Transitions">
       <Transitions>
         <BrushTransition Property="Background" Duration="0:0:0.12" />
@@ -126,7 +126,7 @@
     <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
   </Style>
   <!-- 侧栏服务器列表里「使用中」那一台。
-       ★ 底色和导航项的选中态用<b>同一个</b> AccentSoft —— 两块紧挨着,
+       底色和导航项的选中态用<b>同一个</b> AccentSoft —— 两块紧挨着,
          用两种「选中」的画法会让人以为它们是两种不同的状态。 -->
   <Style Selector="Button.navbtn.on /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
@@ -143,7 +143,7 @@
     <Setter Property="Background" Value="{DynamicResource Accent}" />
     <Setter Property="Foreground" Value="{DynamicResource AccentInk}" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Padding" Value="16,9" />
     <Setter Property="FontWeight" Value="SemiBold" />
     <Setter Property="Cursor" Value="Hand" />
@@ -158,9 +158,44 @@
     <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Padding" Value="14,8" />
     <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <!-- 次按钮的「选中」态。服务器编辑卡上的四个页签用它 ——
+       原来那四个是 chip(圆角 16 的胶囊),和同一张卡上别的按钮(圆角 8)
+       长得不是一套,用户 2026-09-04 点名「按钮样式不统一」。 -->
+  <Style Selector="Button.ghost.on">
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    <Setter Property="Foreground" Value="{DynamicResource Accent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.ghost.on /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource AccentSoft}" />
+  </Style>
+
+  <!-- 播放页抽屉里的延迟步进键(− / + / 归零)。
+       半透明面板上不能用 .ghost:那条边框在深色蒙版上几乎看不见。
+       圆角 6 而不是 8:这几个键只有 28 高,8 会显得过圆。 -->
+  <Style Selector="Button.osdstep">
+    <Setter Property="Background" Value="#22ffffff" />
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.osdstep /template/ ContentPresenter">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Button.osdstep:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="#3affffff" />
   </Style>
 
   <Style Selector="TextBox.field">
@@ -168,17 +203,17 @@
     <Setter Property="Foreground" Value="{DynamicResource Ink}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="CornerRadius" Value="6" />
     <Setter Property="Padding" Value="12,9" />
     <Setter Property="MinHeight" Value="40" />
   </Style>
 
   <!--
     输入框的悬停 / 聚焦态。
-    ★★ 不写这两条的话走的是 Fluent 默认:聚焦时**底色刷白、描一圈亮白边**。
+    不写这两条的话走的是 Fluent 默认:聚焦时**底色刷白、描一圈亮白边**。
        在一整套深色皮里那是一块刺眼的白斑,而且它和 .field 定的圆角/底色对不上。
        焦点必须看得见(键盘用户全靠它),但看得见 ≠ 反差拉满。
-    ★ PART_BorderElement 是 Fluent TextBox 模板里那层边框的名字 ——
+    PART_BorderElement 是 Fluent TextBox 模板里那层边框的名字 ——
       名字对不上时样式**不报错**,只是静默不生效。
   -->
   <Style Selector="TextBox.field:pointerover /template/ Border#PART_BorderElement">
@@ -198,7 +233,30 @@
     <Setter Property="Background" Value="{DynamicResource Panel}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="CornerRadius" Value="10" />
+  </Style>
+
+  <!-- 整张可点的卡片(下载页里已完成的那几条 = 点一下就播)。
+       可点的东西必须**看得出可点**。没有悬停反馈的话,用户不会去点卡片本身,
+         只会去找那个小按钮 —— 那这条交互等于没做。 -->
+  <Style Selector="Border.card.tap">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.12" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.12" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Border.card.tap:pointerover">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+  </Style>
+
+  <!-- 「确认删除?」那一下的样子。危险动作要变色,不然二次确认和第一次长得一样,
+       用户分不清自己在哪一步(下载页那个 ✕ 是连文件一起删的)。 -->
+  <Style Selector="Button.ghost.danger">
+    <Setter Property="Foreground" Value="{DynamicResource Danger}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Danger}" />
   </Style>
 
   <Style Selector="TextBlock.h1">
@@ -215,14 +273,14 @@
   </Style>
 
   <!-- ══════════════════ 动效(UI_PC §5)══════════════════
-    ★★ 时长档位只有三档,别每处各拍一个数:
+    时长档位只有三档,别每处各拍一个数:
          120ms 微反馈(底色/前景)· 170ms 元素位移(卡片抬起)· 220ms 页面转场。
        混着写的表现不是「不好看」,是**节奏乱** —— 同一次点击里
        按钮 90ms 变色、卡片 400ms 缩放,人眼会读成「卡了一下」。
-    ★ 缓动统一 CubicEaseOut:入场快出场慢,这是「跟手」的来源。
+    缓动统一 CubicEaseOut:入场快出场慢,这是「跟手」的来源。
   -->
 
-  <!-- 媒体卡:悬停抬起。★ RenderTransformOrigin 必须给,
+  <!-- 媒体卡:悬停抬起。RenderTransformOrigin 必须给,
        默认是左上角 —— 缩放时整张卡会往右下角漂,看着像在抖。 -->
   <Style Selector="Button.media">
     <Setter Property="RenderTransformOrigin" Value="50%,50%" />
@@ -242,7 +300,7 @@
   </Style>
 
   <!-- 卡面:悬停时描一圈强调色 + 压暗底色,告诉用户「这一张是当前的」。
-       ★ 光靠放大是不够的:一行卡挨在一起时,放大 4% 在截图上几乎读不出来。 -->
+       光靠放大是不够的:一行卡挨在一起时,放大 4% 在截图上几乎读不出来。 -->
   <Style Selector="Button.media /template/ ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
   </Style>
@@ -259,7 +317,7 @@
     <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
   </Style>
 
-  <!-- 封面淡入:图到了再显。★ 直接塞上去会「啪」地跳一下,一屏几十张同时跳就是闪屏。 -->
+  <!-- 封面淡入:图到了再显。直接塞上去会「啪」地跳一下,一屏几十张同时跳就是闪屏。 -->
   <Style Selector="Image.art">
     <Setter Property="Transitions">
       <Transitions>
@@ -294,7 +352,7 @@
   </Style>
 
   <!-- 骨架屏。
-    ★★ 「加载中…」那三个字**不占位**:内容回来的一瞬间页面高度从 20px 跳到 800px,
+    「加载中…」那三个字**不占位**:内容回来的一瞬间页面高度从 20px 跳到 800px,
        滚动条、已经在看的那一段全被顶走。骨架要和真内容**同尺寸**,
        它的价值一半在「有反馈」,另一半在「不跳版」。 -->
   <Style Selector="Border.skel">
@@ -311,11 +369,11 @@
 
   <!--
     播放页 OSD 的图标按钮。
-    ★ 40×36 的方形热区:符号本身只有十来像素,靠字形大小当热区的话
+    40×36 的方形热区:符号本身只有十来像素,靠字形大小当热区的话
       鼠标要瞄准才点得中 —— 而 OSD 三秒就收,瞄不中就得再晃一次鼠标。
   -->
   <Style Selector="Button.osd">
-    <!-- ★★ 46×46 正方 + 20px 字形(2026-09-03,用户:「播放页的 UI 有点小了,放大一点」)。
+    <!-- 46×46 正方 + 20px 字形(2026-09-03,用户:「播放页的 UI 有点小了,放大一点」)。
          上一版 44×40 / 15px:热区够了,但**图标本身**只有十来像素,
          在 1080p 全屏下小得像一排灰点。
          这一组数是照现代播放器的实测区间取的(热区 40~48、图标 20~24,
@@ -327,7 +385,7 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="White" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="23" />
+    <Setter Property="CornerRadius" Value="999" />
     <Setter Property="FontFamily" Value="Segoe MDL2 Assets" />
     <Setter Property="FontSize" Value="20" />
     <Setter Property="Padding" Value="0" />
@@ -339,7 +397,7 @@
   <Style Selector="Button.osd.main">
     <Setter Property="Width" Value="58" />
     <Setter Property="Height" Value="58" />
-    <Setter Property="CornerRadius" Value="29" />
+    <Setter Property="CornerRadius" Value="999" />
     <Setter Property="FontSize" Value="26" />
     <Setter Property="Background" Value="#26ffffff" />
   </Style>
@@ -351,7 +409,7 @@
   </Style>
   <!-- 开着的开关(字幕关掉了之类)要看得出来 -->
   <Style Selector="Button.osd.on /template/ ContentPresenter">
-    <Setter Property="Background" Value="#5b8def" />
+    <Setter Property="Background" Value="{DynamicResource Accent}" />
   </Style>
   <Style Selector="Button.osd /template/ ContentPresenter">
     <Setter Property="Transitions">
@@ -369,7 +427,7 @@
     <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
     <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
     <Setter Property="BorderThickness" Value="0" />
-    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="CornerRadius" Value="999" />
     <Setter Property="Padding" Value="14,7" />
     <Setter Property="FontSize" Value="12.5" />
     <Setter Property="Cursor" Value="Hand" />

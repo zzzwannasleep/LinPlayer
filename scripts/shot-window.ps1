@@ -19,6 +19,7 @@ public class Shot {
   [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);
   public struct POINT { public int X, Y; }
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int size);
   public struct RECT { public int L,T,R,B; }
 }
@@ -48,7 +49,16 @@ function Test-Visible {
   }
   $top = [Shot]::WindowFromPoint((Get-Center $probe))
   if ($top -eq [IntPtr]::Zero) { return $false }
-  return ([Shot]::GetAncestor($top, $GA_ROOT) -eq $hwnd)
+  if ([Shot]::GetAncestor($top, $GA_ROOT) -eq $hwnd) { return $true }
+  # ★★ 自己的**弹窗**不算「被别人遮住」(2026-09-04:编辑服务器改成了模态弹窗)。
+  #   GA_ROOT 走的是**父**链,而弹窗是 owner 关系不是父子 —— 于是
+  #   GetAncestor(弹窗) 返回它自己,和主窗的句柄对不上,判定当场失败,
+  #   自检报「窗口被别的程序遮住了」并中止。而屏幕上摆着的正是我们要截的那一页。
+  #   ★ 判据回到这段注释一开始就说清楚的那件事:**屏幕上那个位置显示的是不是我们**。
+  #     「我们」的单位是**进程**,不是某一个 hwnd。
+  $topPid = 0
+  [void][Shot]::GetWindowThreadProcessId($top, [ref]$topPid)
+  return ($topPid -eq $p.Id)
 }
 for ($i = 0; $i -lt 5; $i++) {
   if (Test-Visible) { break }
@@ -61,10 +71,24 @@ if (-not (Test-Visible)) {
   exit 2
 }
 Start-Sleep -Milliseconds 300
+# ★ 截**当前压在最上面的那个自家窗口**:有弹窗时截弹窗,没有就截主窗。
+#   一律截主窗的话,模态弹窗只会在截图里占中间一小块,而它才是这一轮要看的东西。
+$shotHwnd = $hwnd
+$probe2 = New-Object Shot+RECT
+if ([Shot]::DwmGetWindowAttribute($hwnd, 9, [ref]$probe2, 16) -ne 0) {
+  [void][Shot]::GetWindowRect($hwnd, [ref]$probe2)
+}
+$topNow = [Shot]::WindowFromPoint((Get-Center $probe2))
+if ($topNow -ne [IntPtr]::Zero) {
+  $rootNow = [Shot]::GetAncestor($topNow, $GA_ROOT)
+  $pidNow = 0
+  [void][Shot]::GetWindowThreadProcessId($rootNow, [ref]$pidNow)
+  if ($pidNow -eq $p.Id -and $rootNow -ne $hwnd) { $shotHwnd = $rootNow }
+}
 $r = New-Object Shot+RECT
 # DWMWA_EXTENDED_FRAME_BOUNDS = 9:拿真实可见边界,GetWindowRect 会多带阴影边
-if ([Shot]::DwmGetWindowAttribute($p.MainWindowHandle, 9, [ref]$r, 16) -ne 0) {
-  [void][Shot]::GetWindowRect($p.MainWindowHandle, [ref]$r)
+if ([Shot]::DwmGetWindowAttribute($shotHwnd, 9, [ref]$r, 16) -ne 0) {
+  [void][Shot]::GetWindowRect($shotHwnd, [ref]$r)
 }
 $w = $r.R - $r.L; $h = $r.B - $r.T
 $bmp = New-Object System.Drawing.Bitmap $w, $h

@@ -23,9 +23,9 @@ internal static partial class Native
 
     [LibraryImport(Lib)] internal static partial void lp_cancel(long seq);
 
-    // ★ 返回的是核心层用 malloc 分配的指针 —— **必须 lp_free**(SPEC §5.3)。
-    //   所以这里故意返回 nint 而不是 string:让 string 编组自动释放会用错分配器,
-    //   表现是随机崩溃,而且崩在与它无关的地方。
+    // 返回的是核心层用 malloc 分配的指针 —— **必须 lp_free**(SPEC §5.3)。
+    // 所以这里故意返回 nint 而不是 string:让 string 编组自动释放会用错分配器,
+    // 表现是随机崩溃,而且崩在与它无关的地方。
     [LibraryImport(Lib)] internal static partial nint lp_next_event(int timeoutMs);
 
     [LibraryImport(Lib)] internal static partial void lp_free(nint p);
@@ -59,15 +59,12 @@ public sealed class CoreException(string code, string message, bool retryable, s
     public string? Detail { get; } = detail;
 
     /// <summary>
-    /// 给用户看的一句话。
+    /// 给用户看的一句话。永远带上核心层给的真实原因。
     ///
-    /// <para>★★ <b>永远带上核心层给的真实原因</b>。这里原来是「错误码 → 一句固定话」,
-    /// 把 <c>Message</c> 整个丢掉了 —— 于是密码错、token 过期、地址打错、证书不认,
-    /// 用户看到的全是「网络不通,可以重试」。用户 2026-08-31 实测撞上:
-    /// 「我登陆了 Emby 服务器一直提示没网了,实际上有网络」——
-    /// 有网、也照着提示重试了,但真因根本没显示出来,他和我都是瞎的。</para>
-    ///
-    /// <para>★ 固定话只是**补一句该怎么办**,不是替换原因。</para>
+    /// <para>这里原来是「错误码 → 固定话」,把 <c>Message</c> 整个丢掉了 ——
+    /// 密码错、token 过期、地址打错,用户看到的全是「网络不通,可以重试」。
+    /// 用户 2026-08-31 实测撞上:「一直提示没网了,实际上有网络」,他和我都是瞎猜。
+    /// 固定话只是补一句该怎么办,不是替换原因。</para>
     /// </summary>
     public string Advice
     {
@@ -93,7 +90,7 @@ public sealed class CoreException(string code, string message, bool retryable, s
 /// <summary>
 /// 命令通道 + 事件泵。
 ///
-/// <para>★★ <c>lp_next_event</c> <b>有且仅有一个消费者线程</b>(SPEC §5.6)。
+/// <para><c>lp_next_event</c> <b>有且仅有一个消费者线程</b>(SPEC §5.6)。
 /// 两个线程同时调不是崩溃 —— 是事件被<b>随机分给两个线程</b>,
 /// 表现为「有时候收得到有时候收不到」。所以它被封在这里,外面拿不到。</para>
 /// </summary>
@@ -118,7 +115,7 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
     {
         Native.Preload(coreDll);
 
-        // ★ ABI 先协商再 init(SPEC §5.0)。旧库里没有这个符号 —— **那件事本身就是信号**。
+        // ABI 先协商再 init(SPEC §5.0)。旧库里没有这个符号 —— **那件事本身就是信号**。
         var abi = Native.lp_abi_version();
         if (abi != LinPlayerAbi.Version)
             throw new InvalidOperationException(
@@ -146,8 +143,8 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
             _pending.TryRemove(seq, out _);
             throw new CoreException("E_INTERNAL", $"命令没发出去({command},rc={rc})", false);
         }
-        // ★ 取消要**同时**通知核心层:只丢掉本地的 TCS 的话,核心层那边还在跑,
-        //   而它的结果没人收 —— 事件队列会一直堆着。
+        // 取消要**同时**通知核心层:只丢掉本地的 TCS 的话,核心层那边还在跑,
+        // 而它的结果没人收 —— 事件队列会一直堆着。
         if (ct.CanBeCanceled)
             ct.Register(() => { Native.lp_cancel(seq); _pending.TryRemove(seq, out _); tcs.TrySetCanceled(); });
         return Perf.On ? Timed(command, tcs.Task) : tcs.Task;
@@ -169,7 +166,7 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
             if (p == nint.Zero) continue;
             string json;
             try { json = Marshal.PtrToStringUTF8(p) ?? ""; }
-            finally { Native.lp_free(p); } // ★ 一条都不能漏,漏了是稳定增长的内存泄漏
+            finally { Native.lp_free(p); } // 一条都不能漏,漏了是稳定增长的内存泄漏
             if (json.Length == 0) continue;
 
             try { Dispatch(json); }
@@ -201,7 +198,7 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
                             Str(err, "msg") ?? "核心层报错",
                             err.ValueKind == JsonValueKind.Object
                                 && err.TryGetProperty("retryable", out var r) && r.GetBoolean(),
-                            // ★ detail 以前直接丢了。它装的常常正是「到底怎么了」那一句。
+                            // detail 以前直接丢了。它装的常常正是「到底怎么了」那一句。
                             Str(err, "detail")));
                     }
                     return;
@@ -215,12 +212,12 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
                         LocalBaseUrl = Str(data, "baseUrl") ?? "";
                         LocalToken = Str(data, "token") ?? "";
                     }
-                    /* ☠☠ **核心层的日志原来一个字都没往外走。**
+                    /* **核心层的日志原来一个字都没往外走。**
                        bus.Logf 推的是 name="log" 的事件,而壳这边没人订阅 ——
                        于是核心层里每一句 `bus.Logf("warn", ...)` 都只是进了队列然后被丢掉。
                        排查「缩略图取不到图」时因此完全是瞎的:核心层明明在报原因,
                        app.log 里一行都没有。
-                       ★ 默认**不开**(LP_CORELOG=1 才打):它每几秒就有几条,
+                       默认**不开**(LP_CORELOG=1 才打):它每几秒就有几条,
                          平时刷屏会把自检那几行断言淹掉。 */
                     if (name == "log" && _coreLog)
                         Console.WriteLine($"[核心层:{Str(data, "level")}] {Str(data, "msg")}");
@@ -228,7 +225,7 @@ public sealed class CoreClient : ILinPlayerCommands, IDisposable
                     return;
                 }
             case "eof":
-                // ★ 队列发 EOF 表示核心层要关了 —— 不退出循环的话进程退不干净
+                // 队列发 EOF 表示核心层要关了 —— 不退出循环的话进程退不干净
                 _stop = true;
                 return;
         }
