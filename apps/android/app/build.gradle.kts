@@ -62,6 +62,13 @@ android {
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
+                // minSdk ≥ 24 时 AGP 默认**只**签 v2/v3(v1 不再必要)。
+                // 这里显式把 v1 也打开:侧载到某些老 ROM / 第三方安装器上,
+                // 它们仍然只认 META-INF 里的那张证书,而「装不上」这件事
+                // 在用户那头没有任何线索。多一份签名的代价是几 KB。
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }

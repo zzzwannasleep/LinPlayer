@@ -79,7 +79,7 @@ import xyz.linplayer.app.ui.theme.R
 import xyz.linplayer.app.ui.theme.Sp
 
 /** 一个可播版本。`preferred` 由**核心层**标 —— UI 不许自己回落 `versions[0]`。 */
-private data class Version(val id: String, val name: String, val preferred: Boolean)
+internal data class Version(val id: String, val name: String, val preferred: Boolean)
 
 /**
  * 详情页族(U1.5)。**剧 / 影 / 季 / 集四张分开设计**,共用组件但版式不同。
@@ -284,7 +284,7 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
  * ☠ **不许自己回落 `versions[0]`** —— 核心层没标 preferred 就是「让核心层自己决定」,
  * UI 传 null 而不是替它选一个。
  */
-private fun defaultVersion(vs: List<Version>): Version? = vs.firstOrNull { it.preferred }
+internal fun defaultVersion(vs: List<Version>): Version? = vs.firstOrNull { it.preferred }
 
 @Composable
 private fun SeriesHero(app: xyz.linplayer.app.data.AppState, id: String, d: JsonObject?) {

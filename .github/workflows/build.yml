@@ -2,9 +2,9 @@
 #
 # 2026-09-04 重写:Rust/Tauri 栈整体删除后,原来的 build-windows / build-linux /
 # build-android 三个 job 连同它们依赖的 cargo / node / tauri 步骤一起没了。
-# 现在只有 Windows 一个端 —— Linux 与 Android 的 Go 版 UI 还没写(见
-# docs/go-migration/TODO.md 的进度表),没有可构建的东西,所以**不留空 job**:
-# 留着的话它们要么恒绿(什么都没干)要么恒红,两种都是噪音。
+# 2026-09-06:Android 手机端落地,build-android 加回来。
+# Linux 的 Go 版 UI 仍然一行没写,所以**不留空 job** —— 留着的话它要么恒绿
+# (什么都没干)要么恒红,两种都是噪音。
 name: Build
 
 on:
@@ -13,6 +13,7 @@ on:
     paths:
       - 'core/**'
       - 'apps/windows/**'
+      - 'apps/android/**'
       - 'bindings/**'
       - 'scripts/**'
       - 'third_party/**'
@@ -22,6 +23,7 @@ on:
     paths:
       - 'core/**'
       - 'apps/windows/**'
+      - 'apps/android/**'
       - 'bindings/**'
       - 'scripts/**'
       - 'third_party/**'
@@ -168,9 +170,87 @@ jobs:
           path: release/*.zip
           if-no-files-found: error
 
+  build-android:
+    name: Build Android
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Go toolchain
+        shell: bash
+        run: bash scripts/fetch-toolchain.sh
+
+      # ★ libmpv 的 Android .so **不入仓库**(和 Windows 侧 libmpv-2.dll 一个待遇),
+      #   每次构建现拉。脚本自己校验 ELF 魔数与机器类型 ——
+      #   混进一个 LFS 指针的表现是 `UnsatisfiedLinkError: bad ELF magic 76657273`,
+      #   而 APK 照样打得出来。
+      - name: Fetch Android libmpv
+        shell: bash
+        run: bash scripts/fetch-libmpv-android.sh arm64-v8a x86_64
+
+      # ★★ 编译期凭据同 Windows 那一步。漏了的表现是「弹幕搜不到 / 排行榜空白」
+      #   而 CI 全绿。scripts/check-workflows.sh 的凭据闸门盯着这一步
+      #   (它认 build-core-android.sh)。
+      - name: Build core (.so × 2 ABI)
+        shell: bash
+        env:
+          LP_VERSION: ${{ needs.version.outputs.version }}
+          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
+          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          LP_SYNC_PROXY_BASE: ${{ secrets.LP_SYNC_PROXY_BASE }}
+          LP_SYNC_PROXY_KEY: ${{ secrets.LP_SYNC_PROXY_KEY }}
+          LP_BANGUMI_REDIRECT_URI: ${{ secrets.LP_BANGUMI_REDIRECT_URI }}
+          LP_AFDIAN_SPONSOR_URL: ${{ secrets.LP_AFDIAN_SPONSOR_URL }}
+          LP_ICON_LIBRARY_SOURCES: ${{ secrets.LP_ICON_LIBRARY_SOURCES }}
+          LP_CF_TEST_URL: ${{ secrets.LP_CF_TEST_URL }}
+        run: bash scripts/build-core-android.sh arm64-v8a x86_64
+
+      - name: UI 层单测(JVM,不需要设备)
+        shell: bash
+        run: cd apps/android && ./gradlew --no-daemon testDebugUnitTest
+
+      # 签名材料从仓库密钥来。没配的话下面出的是 debug 签名的包 ——
+      # 那样也能装,但**不是**发行包,所以最后那步验签会红。
+      - name: Write keystore
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        shell: bash
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KS" | base64 -d > "$GITHUB_WORKSPACE/apps/android/lp.jks"
+          {
+            echo "storeFile=lp.jks"
+            echo "storePassword=$KS_PASS"
+            echo "keyAlias=$KS_ALIAS"
+            echo "keyPassword=$KS_KEY_PASS"
+          } > "$GITHUB_WORKSPACE/apps/android/keystore.properties"
+
+      # ★ 「keystore.properties 写了 ≠ 用了」:这一步里的验签是硬闸门,
+      #   不签名出的是 -unsigned.apk,它长得和正常包一模一样,直到用户去装。
+      - name: Pack Android
+        shell: bash
+        run: bash scripts/pack-android.sh arm64-v8a x86_64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LinPlayer-android
+          path: build/android/*.apk
+          if-no-files-found: error
+
   create-prerelease:
     name: Create Pre-release
-    needs: [version, build-windows]
+    needs: [version, build-windows, build-android]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
@@ -186,7 +266,7 @@ jobs:
       - name: Generate SHA256 checksums
         run: |
           cd ./artifacts
-          sha256sum ./*.zip > SHA256SUMS.txt
+          sha256sum ./*.zip ./*.apk > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create Pre-release

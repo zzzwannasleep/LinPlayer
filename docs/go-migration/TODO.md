@@ -60,9 +60,11 @@
 |---|---|
 | **Windows** | 🟢 出得了绿色包;**SPEC 里在范围内的命令与页面全部落地**。CI 全链路已跑通(2026-09-04 首个 Go 栈预发布 `v1.1.0-build686`) |
 | **Linux** | 🔴 **一行没写,而且旧栈实现已删** —— 2026-09-04 之前还能靠 Tauri 版发包,现在没有任何可运行的 Linux 端 |
-| **Android / TV** | 🔴 **一行没写,而且旧栈实现已删** —— 同上。手机与 TV 两个包一起没了 |
+| **Android(手机)** | 🟢 **2026-09-06 落地**:16 页 + 平台职责全套,`pack-android.sh` 出已签名 APK(arm64 34MB / x86_64 39MB),CI 有 `build-android` job。**「有画面」这一条只验到 EGL 那一步**(模拟器 EGL 有缺陷,见 `MOBILE_BLOCKERS.md` B5),要真机复验 |
+| **Android TV** | ⚪ 没做(U1.16 不在本轮范围) |
 
-> ⚠️ Linux 与 Android/TV 的状态从 ⚪(没开始但有旧版顶着)变成 🔴(**没有任何可用实现**)。
+> ⚠️ Linux 的状态从 ⚪(没开始但有旧版顶着)变成 🔴(**没有任何可用实现**)。
+> 安卓手机端已于 2026-09-06 补回(TV 形态仍缺)。
 > 这不是进度倒退,是删 Rust 栈的**已知代价**。要恢复只能把 Go 版 UI 写出来 ——
 > 旧实现在 `git show rust-final:` 里,可以参考但不再构建。
 
@@ -1134,59 +1136,94 @@ Ani-RSS 管理台(同 C24b)。
 
 ### 5.2 Android(手机 + TV)
 
-- [ ] **U1.1** 双形态分流(`UI_MODE_TYPE_TELEVISION`)
-- [ ] **U1.2** 首登闸口 / 添加服务器(渲染 `source.formSchema`)
-- [ ] **U1.3** 首页
-  - 判据:滚动流畅;**不要复刻**现有的 `content-visibility` 与滚动锚定打架的问题
-- [ ] **U1.4** 媒体库 + 筛选面板
-- [ ] **U1.5** 详情页族(剧 / 影 / 季 / 集 四张分开设计)
-- [ ] **U1.6** 播放页 + OSD
-  - 判据:遮挡率按现有 OSD 重构的结论(38.5% 量级),**不是**照抄竞品
-- [ ] **U1.7** 搜索(全局 / 库内 / 包括集)
-  - 判据:三个入口都点一遍;"包括集"默认关,分集单独一栏横版
-- [ ] **U1.8** 聚合视界
-- [ ] **U1.9** 收藏 / 服务器管理 / 线路
-- [ ] **U1.10** 文件浏览页
-- [ ] **U1.11** 影视目录页(**与文件浏览是两套页面,不复用**)
-- [ ] **U1.12** 下载页
-- [ ] **U1.13** 插件市场 / 已装 / 设置(手机形态)
-- [ ] **U1.14** 排行榜 / 日历 / Ani-RSS(手机形态)
-- [ ] **U1.15** 设置页
+> **2026-09-06:手机形态整轮落地。** 规格见 [`UI_MOBILE.md`](UI_MOBILE.md),
+> 阻塞与欠账见 [`MOBILE_BLOCKERS.md`](MOBILE_BLOCKERS.md)(B1–B5)。
+> 自检:`bash scripts/selfcheck-android.sh`(编核心 → 编 APK → 起假 Emby →
+> 灌账号 → 13 页逐页直达截图 → logcat → SurfaceFlinger → 形变压力)。
+> 出包:`bash scripts/pack-android.sh`。
+
+- [x] **U1.1** 双形态分流(`UI_MODE_TYPE_TELEVISION`)
+  - 落在 `MainActivity.isTelevision()`;TV 分支是一个说清楚的空壳(U1.16 不在本轮)
+- [x] **U1.2** 首登闸口 / 添加服务器
+  - **同一页两种版式**(`GatePage(embedded=)`),不是两套代码
+  - ⚠️ `source.formSchema` **不存在**(SPEC 和 UI_PC 都写着它,PC 端也是硬编的)——
+    见 B1。本轮照 PC 的做法把源类型表写在一处
+  - 判据:模拟器实测登录到假 Emby 成功(`POST /Users/AuthenticateByName`),
+    截图 `build/android-shots/addServer.png`
+- [x] **U1.3** 首页
+  - 判据:各块**并发**拉取 —— 假 Emby 日志里 `listRandom / listResume / listNextUp /
+    views / listCollections` 五条时间戳同为 `366165 ms`,无屏障
+  - 判据:`LazyRow` 嵌 `LazyColumn` 时高度是常量(`Dim.posterRow` / `thumbRow`),
+    这是「首页滑不动」在 Compose 上的等价形态
+  - 截图 `home.png` / `home-dark.png`
+- [x] **U1.4** 媒体库 + 筛选面板
+  - 排序走服务端;评分四档;分面拉不到在筛选弹窗里明说;空态区分「没有 / 被筛掉了」
+- [x] **U1.5** 详情页族(剧 / 影 / 季 / 集四张分开设计)
+  - ☠ 判据:**没有 `preferred` 时不许回落 `versions[0]`** —— 单测钉住,
+    反向注入(改回 `?: vs.firstOrNull()`)如期变红
+- [x] **U1.6** 播放页 + OSD
+  - 横屏九宫格【用户定 2026-07-28】,竖屏另一套;遮挡率按 38.5% 量级的四种收纳手法
+  - ⚠️ 「有画面」这一条**在模拟器上验不了**:模拟器 EGL 谎报支持
+    `EGL_KHR_create_context`(同进程 A/B 探针实证),见 B5。
+    已验到:surface 绑定成功、`method=DirectStream`、mpv 真读了 1.36 MB
+- [x] **U1.7** 搜索(全局 / 库内 / 包括集)
+  - 「包括集」默认关且一拨就重搜;「聚合」一拨不重搜;库内与聚合互斥;
+    跨服结果不给长按菜单;分集单独一栏横版
+- [x] **U1.8** 聚合视界 —— 流式 `partial` 边收边画
+- [x] **U1.9** 收藏 / 服务器管理 / 线路
+  - 状态点 `down` 与 `unknown` **写成文字**(手机没有悬停可以区分)
+  - 改账号密码走 `emby.relogin` 不是 `emby.login`
+- [x] **U1.10** 文件浏览页 —— 列表行不是网格;流式列目录;本页不自己起播
+- [x] **U1.11** 影视目录页 —— **与文件浏览是两套页面**;横条分类;首屏预抓两页
+- [x] **U1.12** 下载页 —— 「清除已完成」只清记录不删文件;并发数只读不灌
+- [x] **U1.13** 插件市场 / 已装 / 源订阅(三个 Tab)
+  - ⚠️ 插件的「整页」自定义 UI 本轮不做(不引 WebView),见 B3
+- [x] **U1.14** 排行榜 / 日历
+  - 排行榜取数失败**向上报错不吞成空表**;赞助地址来自 `system.afdianSponsorUrl`
+- [x] **U1.15** 设置页 —— 一级列表 + 二级页;改完即生效零保存按钮;失败回滚
 - [ ] **U1.16** TV 形态:全页面用 `androidx.tv` 复刻
-  - 判据:每页 D-pad 全向走通;焦点记忆生效
-- [ ] **U1.17** 开屏
-  - 判据:图标边距在 drawable 内部;Android 12 上不放大满幅
-- [ ] **U1.18** 深浅色主题
-  - 判据:`values-vXX` 与 `values-night-vXX` **两份都建**(`-night` 压过 `-vXX`)
-- [ ] **U1.19** 签名验证
-  - 判据:`unzip -l` 能看到 META-INF 证书 + "APK Sig Block 42" 魔数
-    (`keystore.properties` 写了 ≠ 用了)
-- [ ] **U1.20** Compose UI Test 覆盖关键路径
+  - **不在本轮范围**(`PROMPT_MOBILE_UI.md` 明确只做手机形态)
+- [x] **U1.17** 开屏
+  - 判据:图标边距在 drawable 内部(viewport 108,图形只占中间约 40%);
+    `installSplashScreen()` 不挂 `setKeepOnScreenCondition` —— 挂了等于做一个假加载页
+- [x] **U1.18** 深浅色主题
+  - `values` / `values-night` 两份都建;实测 `cmd uimode night yes|no` 两套都截过图
+  - **不用 Material You 动态取色**:它会把界面染成壁纸的颜色
+- [x] **U1.19** 签名验证
+  - 判据:`bash scripts/pack-android.sh` 出 34MB(arm64)/ 39MB(x86_64)已签名 APK,
+    `unzip -l` 见 `META-INF/*.RSA`,`grep` 见 "APK Sig Block 42"
+  - ★ minSdk ≥24 时 AGP 默认**只签 v2/v3**,v1 要显式打开;不打开的话
+    那条「META-INF 证书」判据永远过不了,而包其实是签了的
+  - 反向注入:移走 `keystore.properties` → 退回 debug 签名 → v1 那条如期变红
+  - 判据:**release 包真装上跑过**(R8 全模式 + 资源压缩),没有 `NoSuchMethodError`
+- [x] **U1.20** Compose UI Test 覆盖关键路径
+  - 13 条 JVM 单测(版本回落 / 地址补全 / 剧集标题 / 能力集 / 会话字段名 / 分页)
+  - 3 条 Compose UI Test(没有标题也要画右上角入口 / `E_UNSUPPORTED` 整块不画 /
+    别的错误码要显示原因和重试)—— 这三条都是真栽过的
 
 #### Android 平台职责(`SPEC.md` §8.5)
 
-这一批**不是可选的打磨**,是 Android 上"能不能当播放器用"的下限。
-
-- [ ] **U1.21** `MediaSession` + 通知栏控制
-  - 判据:锁屏 / 通知栏能暂停、上下集;标题封面正确
-  - 现状参照:安卓端已有 `set_now_playing`,新架构下它是 UI 层的事
-- [ ] **U1.22** 前台服务 + 后台播放
-  - 判据:切后台后音频不断;通知常驻;杀进程能干净收尾(先 `lp_set_surface(0)` 再销毁)
-- [ ] **U1.23** 音频焦点
-  - 判据:来电 / 别的 App 播放时自动暂停,结束后按设置恢复
-- [ ] **U1.24** 屏幕常亮
-  - 判据:播放中不息屏;暂停 / 退出后恢复
-- [ ] **U1.25** 画中画
-  - 判据:Home 键进 PiP,PiP 里能暂停;退出 PiP 回到播放页且不重新起播
-- [ ] **U1.26** 深链 `linplayer://`
-  - 判据:intent-filter 注册;冷启动与热启动两条路径都能拿到 URL 并调
-    `account.parseDeepLink`
-- [ ] **U1.27** 运行时权限
-  - 判据:通知权限(Android 13+)、本地文件访问(若做本地播放)
-  - 注:本地播放在安卓侧现在**没做**(只有 INTERNET 权限),这次要一并补,
-    且必须有越狱闸
-- [ ] **U1.28** 旋屏 / 分屏 / 折叠屏形变时 surface 生命周期正确
-  - 判据:快速反复旋转 100 次不崩(对应 B1.9)
+- [x] **U1.21** `MediaSession` + 通知栏控制
+  - 用 `MediaSessionCompat` 不用 media3-session:后者要一个 `Player` 实现,
+    而播放器不在 Java 侧
+- [x] **U1.22** 前台服务 + 后台播放
+  - `foregroundServiceType="mediaPlayback"`;`startForeground` 在 `onStartCommand`
+    第一行(5 秒内不调会 ANR);`WAKE_LOCK`
+- [x] **U1.23** 音频焦点
+  - `AudioFocusRequest`;**duck 走降 mpv 音量不是暂停**(导航提示音只有两三秒)
+- [x] **U1.24** 屏幕常亮 —— `FLAG_KEEP_SCREEN_ON`,暂停 / 退出即清
+- [x] **U1.25** 画中画 —— 只在播放页且非分屏时进
+- [x] **U1.26** 深链 `linplayer://`
+  - `singleTask` + `onCreate` / `onNewIntent` 两条路径都收;拿到 URL 交
+    `account.parseDeepLink`,**UI 不自己解析**
+- [x] **U1.27** 运行时权限
+  - 通知权限**在起播时要,不在冷启动时要**;拒了不拦流程
+  - ⚠️ 本机文件播放的越狱闸:安卓上没有本机目录源(SAF 的 `content://` 交不给 mpv),
+    见 B2
+- [x] **U1.28** 旋屏 / 分屏 / 折叠屏形变时 surface 生命周期正确
+  - 判据实测:转屏 **100 次** + 前后台 **40 次**,进程存活、0 次 FATAL
+  - ★ 转屏本身不销毁 SurfaceView(Activity 声明了 `configChanges`),
+    所以**必须同时做前后台循环** —— 只转屏的话「解绑必须同步阻塞」那条根本没被跑到
 
 ### 5.3 Windows / Linux
 

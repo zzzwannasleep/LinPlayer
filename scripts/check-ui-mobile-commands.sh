@@ -22,11 +22,14 @@ grep -oE '`(emby|account|player|source|danmaku|plugin|download|sync|translate|pr
 
 # 事件名不是命令(SPEC §5.5),它们从事件队列来,不进命令表
 EVENTS='player.status|player.tracks|player.ended|download.progress|prefetch.stats|source.qr|plugin.ui|plugin.toast|config.changed|account.status|update.available'
+# 同形不同物:Gradle 的插件 id 也长成 `<域>.<名字>` 的样子
+NOT_COMMANDS='plugin.compose|plugin.serialization'
 
 bad=0
 while read -r c; do
   [ -z "$c" ] && continue
   echo "$c" | grep -qE "^($EVENTS)$" && continue
+  echo "$c" | grep -qE "^($NOT_COMMANDS)$" && continue
   # 文档里明说「不存在」的那几条(SPEC 提到但命令表里没有的),放行 ——
   # 它们正是本门禁要暴露的事实,已经写在文档里了,不该再红一次。
   grep -n "\`$c\`" "$DOC" | grep -q "不存在" && continue

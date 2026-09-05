@@ -1136,13 +1136,15 @@ mpv 真的不再画为止;JNI 薄层**不许**把它扔到别的线程去做。
 | 页面切换到骨架 | ≤ **100 ms** | 手动计时 / Macrobenchmark |
 | 列表滚动 | **无掉帧**(120 Hz 屏 8.3 ms 预算) | `adb shell dumpsys gfxinfo <pkg>` 的 janky frames |
 | 空闲内存 | ≤ **300 MB** PSS | `adb shell dumpsys meminfo <pkg>` |
-| APK 体积(单 ABI) | ≤ **45 MB** | `unzip -l` |
+| APK 体积(单 ABI) | ≤ **45 MB** ·【实测 release】arm64 **34 MB** / x86_64 **39 MB** | `bash scripts/pack-android.sh` |
 | 进度条拖动延迟 | ≤ 1 帧 | 目测 + §2.3 第 3 条的落法保证 |
 
 > ★ 数字的来源:TTID/TTFD 用 Android Vitals 的「冷启动 < 5 s 才不算差」做下限,
-> 本项目自己收紧到 800 ms / 2.0 s;APK 45 MB 是从实测的
-> `liblpcore.so` 18.4 MB + `libmpv.so` 16.1 MB(arm64,strip 后)反推的 ——
-> 两个 `.so` 压缩后约 14 MB,加 Compose 运行时与资源。
+> 本项目自己收紧到 800 ms / 2.0 s。
+> APK 体积**已实测**:arm64 34 MB、x86_64 39 MB(release,R8 全模式 + 资源压缩)。
+> ★ **必须 ABI 拆包**:一个 ABI 的 native 就有 34 MB(`liblpcore.so` 18.4 +
+> `libmpv.so` 16.1,已 strip),两个塞进一个包是 **103 MB**,而任何一台设备
+> 只用得上其中一半。
 > **超了先看 `.so` 有没有 strip**:不 strip 会从 21 MB 涨到 105 MB(栽过)。
 
 ### 10.2 落法
