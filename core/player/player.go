@@ -236,7 +236,9 @@ func ensureMpv() int32 {
 		bus.Logf("warn", "着色器缓存目录建不出来,本次运行不缓存: %v", err)
 		sc = ""
 	}
-	opts := baseOptions(hw, sc)
+	// 平台专属选项追加在后面(后写的赢)。桌面返回 nil,所以 baseOptions 的
+	// 输出一字不变;安卓在这里换 vo 并带上软解调优与字幕字体目录。
+	opts := append(baseOptions(hw, sc), platformOptions()...)
 	// 日志走 LP_MPV_LOG 门控:log-file 会把 mpv+ffmpeg 钉在 debug 级
 	if lp := os.Getenv("LP_MPV_LOG"); lp != "" {
 		opts = append(opts, [2]string{"log-file", lp}, [2]string{"msg-level", "all=v"})
@@ -543,7 +545,7 @@ func GLUninit() {
 func waitRenderCtx(d time.Duration) bool {
 	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
-		if rctxSet.Load() {
+		if videoOutReady() {
 			return true
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -626,19 +628,8 @@ func Close() {
 	}
 }
 
-// SetSurface 是视频通道 A(SPEC §7.2)。桌面端走通道 B,这条在 Windows 上不会被调到。
-//
-// ★ 解绑(kind=0)**必须阻塞到 mpv 真的不再往里画**,否则是 use-after-free。
-// 这是安卓端最容易漏的一条 —— 而现有 Rust 版**现在就漏着**(TODO N5)。
-// 安卓端接上时在这里实现同步屏障,别再漏一次。
-func SetSurface(kind int32, handle int64, width, height int32) int32 {
-	if kind == 0 {
-		bus.Logf("info", "lp_set_surface 解绑")
-		return 0
-	}
-	bus.Logf("warn", "lp_set_surface 在本平台不适用(桌面走通道 B):kind=%d %dx%d", kind, width, height)
-	return 0
-}
+// SetSurface 是视频通道 A(SPEC §7.2)。实现按平台分:
+// 安卓在 surface_android.go(真绑 mpv 的 wid),其余平台在 surface_other.go(桩)。
 
 
 /* ★★ 出帧节奏。**「画面抽不抽搐」唯一量得出来的东西。**

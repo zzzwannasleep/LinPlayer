@@ -26,9 +26,9 @@
 
 | 项 | 版本 | 来源 |
 |---|---|---|
-| Gradle | **8.14.3** | 本机 `~/.gradle/wrapper/dists` 已有,不用现拉 |
-| Android Gradle Plugin | **8.13.2** | `dl.google.com/dl/android/maven2/com/android/tools/build/gradle/maven-metadata.xml` |
-| Kotlin | **2.4.10** | `repo1.maven.org/.../kotlin-gradle-plugin/maven-metadata.xml` |
+| Gradle | **9.7.1** | AGP 9.4 硬要求 ≥9.6.0(实测报错原文:「Minimum supported Gradle version is 9.6.0」) |
+| Android Gradle Plugin | **9.4.0** | 8.13.2 装不下 2026 年的 androidx:实测报「Dependency 'androidx.compose.ui:ui-android:1.12.0' requires Android Gradle plugin 9.1.0 or higher」 |
+| Kotlin | **2.4.10** | 只用 `plugin.compose` 与 `plugin.serialization` 两个插件 —— **AGP 9 起 Kotlin 支持内置**,带着 `org.jetbrains.kotlin.android` 会直接构建失败 |
 | Compose BOM | **2026.08.00** | `dl.google.com/.../androidx/compose/compose-bom/maven-metadata.xml` |
 | ├ compose ui(BOM 钉) | 1.12.0 | BOM 的 pom |
 | └ material3(BOM 钉) | 1.4.0 | BOM 的 pom |
@@ -41,7 +41,8 @@
 | window(折叠屏) | **1.5.1** | Google Maven |
 | profileinstaller | **1.4.1** | Google Maven |
 | coil3 | **3.6.2** | Maven Central |
-| compileSdk / targetSdk | **36** | 本机 `platforms/android-36` 已装;AGP 8.13 支持到 36 |
+| compileSdk | **37** | `androidx.core:core-ktx:1.19.0` 要求 compile against 37;本机 `platforms/android-37.0` 已装 |
+| targetSdk | **36** | 只提 compileSdk,不顺手把运行时行为也换掉 |
 | minSdk | **24** | NDK r28 起最低支持 21;24 与本机 `platforms/android-24` 对齐 |
 | NDK | **28.2.13676358** | 本机已装(另有 27 / 30-canary,脚本默认钉 28) |
 | JDK | **21**(Zulu 21.0.5) | `java -version` |

@@ -1232,9 +1232,9 @@ mpv 真的不再画为止;JNI 薄层**不许**把它扔到别的线程去做。
 
 | 依赖 | 版本 | 用途 | 官方为什么不够 |
 |---|---|---|---|
-| Gradle | 8.14.3 | 构建 | — |
-| AGP | 8.13.2 | 构建 | — |
-| Kotlin + compose 编译器插件 | 2.4.10 | 语言 | — |
+| Gradle | 9.7.1 | 构建 | AGP 9.4 硬要求 ≥9.6.0 |
+| AGP | 9.4.0 | 构建 | 8.x 装不下 2026 年的 androidx(compose ui 1.12.0 要求 ≥9.1.0) |
+| Kotlin 插件 | 2.4.10 | `plugin.compose` + `plugin.serialization` | ★ **AGP 9 起 Kotlin 内置**,不许再加 `org.jetbrains.kotlin.android`(加了直接构建失败) |
 | `androidx.compose:compose-bom` | 2026.08.00 | 统一 Compose 版本 | — |
 | `androidx.compose.material3:material3` | (BOM) 1.4.0 | 组件库 | — |
 | `androidx.compose.material3:material3-window-size-class` | (BOM) | 断点(§3.3) | — |
@@ -1243,11 +1243,11 @@ mpv 真的不再画为止;JNI 薄层**不许**把它扔到别的线程去做。
 | `androidx.lifecycle:lifecycle-runtime-compose` | 2.11.0 | `collectAsStateWithLifecycle` | — |
 | `androidx.lifecycle:lifecycle-viewmodel-compose` | 2.11.0 | ViewModel | — |
 | `androidx.core:core-splashscreen` | 1.2.0 | 开屏(U1.17) | — |
-| `androidx.core:core-ktx` | (最新 stable) | insets / 系统 API | — |
+| `androidx.core:core-ktx` | 1.19.0 | insets / 系统 API | — |
 | `androidx.media3:media3-session` | 1.11.0 | MediaSession + 通知栏(U1.21) | 平台 `MediaSession` 的通知栏样式在各版本行为不一;**只取 session,不取 exoplayer** |
 | `androidx.window:window` | 1.5.1 | 折叠屏(§3.4) | — |
 | `androidx.profileinstaller:profileinstaller` | 1.4.1 | Baseline Profile 载入 | — |
-| `org.jetbrains.kotlinx:kotlinx-serialization-json` | (随 Kotlin) | 命令 JSON + 类型安全路由 | — |
+| `org.jetbrains.kotlinx:kotlinx-serialization-json` | 1.11.0 | 命令 JSON + 类型安全路由 | — |
 | `io.coil-kt.coil3:coil-compose` | 3.6.2 | 图片(§4.4) | **androidx 没有 Compose 图片加载器** |
 | `io.coil-kt.coil3:coil-network-okhttp` | 3.6.2 | Coil 的网络引擎 | 同上 |
 

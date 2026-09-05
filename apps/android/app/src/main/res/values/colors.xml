@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- UI_MOBILE.md §1.1 的 bg。Compose 那套 token 在 LpColors.kt 里,
+         这里只留开屏与窗口底需要的两个 —— 两处分家会长歪,所以值必须一样 -->
+    <color name="lp_bg">#0E0E13</color>
+</resources>

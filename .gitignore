@@ -21,6 +21,12 @@ third_party/libmpv/*.dll
 third_party/libmpv/android/
 # 安卓的 native 产物(liblpcore.so 由 build-core-android.sh 编、libmpv.so 由 fetch 脚本拷)
 apps/android/app/src/main/jniLibs/
+# 安卓工程的构建产物与本地配置
+apps/android/build/
+apps/android/app/build/
+apps/android/.gradle/
+apps/android/local.properties
+apps/android/keystore.properties
 
 # 绿色包运行时数据(exe 同级 userdata/);跑 dev 构建时会出现在 target/ 下,别入库
 userdata/

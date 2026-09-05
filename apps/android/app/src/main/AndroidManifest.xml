@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 通知栏播放控制(U1.21):Android 13+ 通知要运行时申请 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 后台播放(U1.22):前台服务 + 唤醒锁 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- 手机形态:触摸屏必需。漏了这一条的表现是「装在 TV 上找不到」的反面 ——
+         声明成 TV 应用会让手机商店看不到它 -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <application
+        android:name=".LinPlayerApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.LinPlayer.Splash">
+
+        <!--
+          configChanges 吃下形变,不让系统重建 Activity。
+          ★ 理由不是省事,是 surface 生命周期:重建会销毁并重建 SurfaceView,
+            每转一次屏就要走一遍「阻塞解绑 → 重绑」。U1.28 要快速转 100 次不崩,
+            少一半解绑次数就是少一半机会。
+
+          launchMode=singleTask:深链(U1.26)冷启动走 onCreate、热启动走 onNewIntent,
+          两条路径都要能拿到 URL。不设的话热启动会开出第二个 Activity 实例。
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|uiMode|navigation|keyboard"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <!-- TV 形态本轮不做,但入口留着:分流靠 UiModeManager,不是两个 Activity -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+
+            <!-- U1.26 深链。拿到 URL 之后交 account.parseDeepLink,UI 不自己解析 -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="linplayer" />
+            </intent-filter>
+        </activity>
+
+        <!-- U1.22 前台服务。Android 14 起 foregroundServiceType 必填 -->
+        <service
+            android:name=".player.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
