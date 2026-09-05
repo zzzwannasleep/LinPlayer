@@ -17,6 +17,10 @@ packaging/
 
 # libmpv 大二进制(117MB dll):本地构建输入,不入普通库;CI 现拉(见 .github/workflows/build.yml)
 third_party/libmpv/*.dll
+# 安卓侧同理:scripts/fetch-libmpv-android.sh 现拉,每个 ABI 一份 16~20MB
+third_party/libmpv/android/
+# 安卓的 native 产物(liblpcore.so 由 build-core-android.sh 编、libmpv.so 由 fetch 脚本拷)
+apps/android/app/src/main/jniLibs/
 
 # 绿色包运行时数据(exe 同级 userdata/);跑 dev 构建时会出现在 target/ 下,别入库
 userdata/
