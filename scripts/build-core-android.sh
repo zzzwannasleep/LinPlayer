@@ -91,8 +91,11 @@ for abi in "${ABIS[@]}"; do
   # 判据:ELF 机器类型对得上 + 五个导出符号都在。
   # 少了任何一个,APK 照样打得出来,装上去才 UnsatisfiedLinkError。
   "$TOOLBIN/llvm-readelf" -h "$OUT/liblpcore.so" | grep -E '^\s+Machine:'
+  # ★ JNI 桥也要查。只查 lp_* 的话,漏编 JNI 的那个 ABI 装上去才炸:
+  #   UnsatisfiedLinkError: No implementation found for ... Native.abiVersion()
+  #   —— 而 .so 是加载成功的,所以「库没打进去」那条思路会把人带偏。真栽过一次。
   miss=0
-  for s in lp_abi_version lp_init lp_call lp_next_event lp_set_surface; do
+  for s in lp_abi_version lp_init lp_call lp_next_event lp_set_surface            Java_xyz_linplayer_app_core_Native_abiVersion            Java_xyz_linplayer_app_core_Native_init            Java_xyz_linplayer_app_core_Native_call            Java_xyz_linplayer_app_core_Native_nextEvent            Java_xyz_linplayer_app_core_Native_setSurface; do
     "$TOOLBIN/llvm-nm" -D --defined-only "$OUT/liblpcore.so" | grep -q " T $s\$" || { echo "  !! 缺符号 $s"; miss=1; }
   done
   [ "$miss" = 0 ] || exit 1

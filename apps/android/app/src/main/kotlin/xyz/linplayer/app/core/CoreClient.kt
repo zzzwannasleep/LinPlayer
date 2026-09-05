@@ -217,9 +217,15 @@ class CoreClient private constructor() : LinPlayerCommands {
     private fun JsonObject.str(k: String) = this[k]?.jsonPrimitive?.contentOrNull
 }
 
-/** 核心层日志默认不打:它每几秒就有几条,会把自检那几行断言淹掉。 */
+/**
+ * 核心层日志。
+ *
+ * ★ debug 构建默认开:安卓上设不了 `LP_CORELOG` 这种环境变量,
+ *   而**核心层的日志是「图片全空」「起播失败」这类问题唯一的出口** ——
+ *   关着的话排查时是全瞎的(PC 端为此瞎过一次)。release 里关掉,它每几秒就有几条。
+ */
 internal object BuildConfigLog {
-    val enabled: Boolean = System.getenv("LP_CORELOG") == "1"
+    val enabled: Boolean = xyz.linplayer.app.BuildConfig.DEBUG
 }
 
 /** `Map<String, Any?>` → `JsonObject`。生成的绑定层用弱类型入参,这里收口一次。 */

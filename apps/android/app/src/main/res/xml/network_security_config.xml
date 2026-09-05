@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ★ 明文 HTTP 只对本机开。
+
+  应用自己出网的只有**一处**:核心层的本地数据通道(SPEC §6,图片走
+  `http://127.0.0.1:<port>/img?src=`)。它是 http 的 —— 给本机回环上一条
+  自签名 TLS 没有任何收益,只有麻烦。
+
+  用户那台 Emby 是不是 http 与这里无关:那条请求走的是 Go 核心层自己的 HTTP 栈,
+  不经过 Android 的 NetworkSecurityPolicy。所以**不要**为了它开全局明文。
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

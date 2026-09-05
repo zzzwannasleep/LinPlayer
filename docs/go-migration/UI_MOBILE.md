@@ -1244,7 +1244,7 @@ mpv 真的不再画为止;JNI 薄层**不许**把它扔到别的线程去做。
 | `androidx.lifecycle:lifecycle-viewmodel-compose` | 2.11.0 | ViewModel | — |
 | `androidx.core:core-splashscreen` | 1.2.0 | 开屏(U1.17) | — |
 | `androidx.core:core-ktx` | 1.19.0 | insets / 系统 API | — |
-| `androidx.media3:media3-session` | 1.11.0 | MediaSession + 通知栏(U1.21) | 平台 `MediaSession` 的通知栏样式在各版本行为不一;**只取 session,不取 exoplayer** |
+| `androidx.media:media` | 1.8.0 | `MediaSessionCompat` + `MediaStyle` 通知(U1.21) | ★ **不用 media3-session**:它要求一个 `androidx.media3.common.Player` 实现,而播放器不在 Java 侧(解码渲染全在核心层的 libmpv 里)。接 `SimpleBasePlayer` 只为让 media3 帮画一遍通知,代价是把 mpv 的状态映射成 Player 的二十几个方法 —— 一层纯翻译的债 |
 | `androidx.window:window` | 1.5.1 | 折叠屏(§3.4) | — |
 | `androidx.profileinstaller:profileinstaller` | 1.4.1 | Baseline Profile 载入 | — |
 | `org.jetbrains.kotlinx:kotlinx-serialization-json` | 1.11.0 | 命令 JSON + 类型安全路由 | — |

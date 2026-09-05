@@ -122,7 +122,12 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.10.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
-    implementation("androidx.media3:media3-session:1.11.0")
+    // ★ 用 androidx.media 的 MediaSessionCompat,不用 media3-session。
+    //   理由:media3 的 MediaSession 要求一个 androidx.media3.common.Player 实现,
+    //   而我们的播放器**不在 Java 侧**(解码渲染全在核心层的 libmpv 里)。
+    //   接 SimpleBasePlayer 只是为了让 media3 帮我们画一遍通知,代价是把 mpv 的状态
+    //   映射成 Player 的二十几个方法 —— 那是一层纯翻译的债。
+    implementation("androidx.media:media:1.8.0")
     implementation("androidx.window:window:1.5.1")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
