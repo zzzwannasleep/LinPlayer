@@ -2344,3 +2344,40 @@ ComboBox 展开之后,选项住在 **Popup 自己的可视树**里。`GetSelfAnd
 (`Log.Init` / `SettingsSections.Logging`)就是为这个建的:默认 warn,debug 记
 OSD 收放、每个按钮的悬停翻转、音量条宽度、指针事件按秒汇总(**含「坐标真的变了几条」**
 —— 合成的指针事件正是这次的关键证据)。
+
+---
+
+## Tok.Of 名字打错 = 那段文字整个透明(2026-09-06)
+
+`Tok.Of("Ink1")` —— token 只有 `Ink` / `Ink2` / `Ink3`,**没有 Ink1**。
+`TryFindResource` 找不到就回 `Brushes.Transparent`,于是快捷键设置页左边一列
+动作名**全是透明的**:编译绿、运行不报错、控件也确实在可视树上,只是看不见。
+
+只有截图才发现得了。已在 `Tok.Of` 里补一条 debug 日志(`没有这个 token: xxx`),
+以后这类错至少在日志里留个影。
+
+**规矩:新写 `Tok.Of("…")` 时对着 `Theme/Tokens.axaml` 抄,别凭印象拼。**
+
+## 合成 Pointer 触发不了 Button.Click —— 这类自检会假绿(2026-09-06)
+
+给侧栏「长按拖拽排序」写自检时,想验的判据之一是
+「松手那一下有没有被吃掉(不吃 = 拖完顺带切了服务器)」。
+用 `RaiseEvent(new PointerPressedEventArgs(...))` + `PointerReleasedEventArgs` 合成手势,
+**发在整列上、发在那一行上都试过,Button 一次 Click 都没发过** ——
+Avalonia 的 Button 在 `OnPointerPressed` 里要 `e.Pointer.Capture(this)`,
+而手工 new 出来的 `Pointer` 抓不住捕获。
+
+判据是**反向注入抓到的**:把 `e.Handled = true` 删掉再跑,自检输出一个字都没变。
+已经把那条断言从自检里删掉,改成一句「这条验不到,只能手点」的注释。
+
+★ 一般规律:**合成输入能验「状态变了没有」,验不了「某个控件收没收到」**。
+  后者写出来就是一条永远绿的假门禁,比没有还糟。
+
+## Features.cs 的开关会误伤(2026-09-06)
+
+`nav.browse` 是 2026-09-02 砍网盘/局域网源时关掉的,但**本机文件夹源也挂在它下面** ——
+于是「添加服务器」页里源类型只剩 Emby 一条,而只剩一条时整条选择器不画:
+界面上根本没有「本地」这个选项,后端却一行不缺(`core/source/local` 完整)。
+
+★ 关一个开关之前先数一遍**谁挂在它下面**。这次是「砍网盘顺手砍掉了播放器的基础能力」,
+  而 AGENTS.md §0 白纸黑字写着 local 不算网盘。

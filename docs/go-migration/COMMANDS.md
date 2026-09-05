@@ -41,7 +41,7 @@
 <!-- BEGIN GENERATED -->
 | 域 | 前缀 | 条数 | 安卓已有 |
 |---|---|--:|--:|
-| Emby 浏览与详情 | `emby.*` | 40 | 38 |
+| Emby 浏览与详情 | `emby.*` | 41 | 38 |
 | 账号与线路 | `account.*` | 21 | 21 |
 | 播放器 | `player.*` | 40 | 32 |
 | 媒体源(浏览型 / 影视目录) | `source.*` | 9 | 9 |
@@ -52,14 +52,15 @@
 | 字幕翻译 / Whisper(桌面独占) | `translate.*` | 9 | 0 |
 | 设置与偏好 | `prefs.*` | 27 | 19 |
 | 系统 | `system.*` | 13 | 6 |
-| **合计** | | **218** | **181** |
+| **合计** | | **219** | **181** |
 
-### Emby 浏览与详情 · `emby.*` — 40 条
+### Emby 浏览与详情 · `emby.*` — 42 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
 | [x] | `emby.aggregateOverview` | `aggregate_overview` | `—` | `Result<Vec<SourceOverview>, String>` | ✅ |
 | [x] | `emby.aggregateSearch` | `aggregate_search` | `query: String, include_episodes: Option<bool>` | `Result<Vec<ServerGroup>, String>` | ✅ |
+| [x] | `emby.aggregateVersions` | **新增** | `item_id, server_id: Option<String>, version_regex: Option<String>` | `Vec<aggregate::VersionGroup>` | — | <!-- 跨服聚合同一部片的版本表。匹配判据与跨服续播共用 history.MatchCandidates -->
 | [x] | `emby.blockedList` | `blocked_list` | `—` | `Vec<linplayer_core::blocklist::BlockedItem>` | ✅ |
 | [x] | `emby.counts` | **新增** | `server, token, user_id` | `Counts` | — | <!-- 媒体库规模统计。Rust 版里 emby::counts 只被 aggregate_overview 内部调用,没单独成命令 -->
 | [x] | `emby.currentSession` | `current_session` | `—` | `Option<LoginResult>` | ✅ |
@@ -81,6 +82,7 @@
 | [x] | `emby.personItems` | `person_items` | `person_id: String, limit: Option<u32>` | `Result<Vec<Item>, String>` | ✅ |
 | [x] | `emby.rankingCategories` | `ranking_categories` | `—` | `Vec<linplayer_core::ranking::RankingCategory>` | ✅ |
 | [x] | `emby.rankingFetch` | `ranking_fetch` | `category_id: String, force_refresh: Option<bool>` | `Result<Vec<linplayer_core::ranking::RankingEntry>, String>` | ✅ |
+| [x] | `emby.permissions` | **新增** | `—` | `{is_admin, can_download}` | ✅ | <!-- 一次请求同时回答「是不是管理员」和「能不能下载」;缺字段一律判否 -->
 | [x] | `emby.refreshItem` | `refresh_item` | `item_id: String, full: bool` | `Result<(), String>` | ✅ |
 | [x] | `emby.relogin` | `relogin` | `server_id: String, username: String, password: String` | `Result<(), String>` | ✅ |
 | [x] | `emby.reportProgress` | `report_progress` | `pos: f64, paused: bool` | `Result<(), String>` | ✅ |
@@ -125,7 +127,7 @@
 | [x] | `account.testConnection` | `test_connection` | `server: String` | `Result<emby::ServerInfo, String>` | ✅ |
 | [x] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<(), String>` | ✅ |
 
-### 播放器 · `player.*` — 40 条
+### 播放器 · `player.*` — 42 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
@@ -134,6 +136,7 @@
 | [x] | `player.getMpvConf` | `get_mpv_conf` | `—` | `MpvConf` | ❌ |
 | [x] | `player.getPlaybackPrefs` | `get_playback_prefs` | `—` | `PlaybackPrefs` | ✅ |
 | [x] | `player.getScreenshotDir` | `get_screenshot_dir` | `—` | `ScreenshotDir` | ❌ |
+| [x] | `player.getSkipRange` | **新增** | `item_id: String` | `SkipRangeOf` | ✅ | <!-- 这部剧手动设过的片头片尾;没设过 range 为 null -->
 | [x] | `player.mpvCommand` | `mpv_command` | `args: Vec<String>` | `Result<(), String>` | ✅ |
 | [x] | `player.mpvGet` | `mpv_get` | `name: String` | `Result<Option<String>, String>` | ✅ |
 | [x] | `player.mpvSet` | `mpv_set` | `name: String, value: String` | `Result<(), String>` | ✅ |
@@ -154,6 +157,7 @@
 | [x] | `player.setSecondarySub` | `set_secondary_sub` | `id: String` | `Result<(), String>` | ✅ |
 | [x] | `player.setSecondarySubOpts` | `set_secondary_sub_opts` | `delay: Option<f64>, position: Option<f64>, ass_override: Option<String>` | `Result<(), String>` | ✅ |
 | [x] | `player.setShaderLevel` | `set_shader_level` | `level: String` | `Result<ShaderApplied, String>` | ✅ |
+| [x] | `player.setSkipRange` | **新增** | `item_id: String, intro_start: f64, intro_end: f64, outro_start: f64, outro_end: f64` | `SkipRangeOf` | ✅ | <!-- 手动设片头片尾;四个值全 0 = 清掉。键由核心层按剧算 -->
 | [x] | `player.setSpeed` | `set_speed` | `speed: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.setSubDelay` | `set_sub_delay` | `secs: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.setSubStyle` | `set_sub_style` | `font: Option<String>, scale: Option<f64>, position: Option<f64>, background: Option<bool>, blend_mode: Option<String>` | `Result<(), String>` | ✅ |

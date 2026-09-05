@@ -160,39 +160,53 @@ func (c *Client) ItemForHistory(ctx context.Context, s *Session, itemID string) 
 // 它不会出现在服务器地址里,而拼接时不加分隔的话 "a"+"bc" 和 "ab"+"c" 会撞成同一个键)。
 var (
 	tmdbMu    sync.Mutex
-	tmdbCache = map[string]*string{}
+	provCache = map[string]map[string]string{}
 )
 
-// SeriesTmdbID 取某剧的 TMDB id。
+// SeriesProviders 取某剧的外部 id 表(Tmdb / Imdb / Tvdb / MyAnimeList …)。
 //
-// ★ 跨服务器匹配剧集时用:同一部剧在两台服的 item_id 不同,但 TMDB id 相同。
-// 剧不存在 / 没刮到 TMDB → 返回 nil,**不是错误**:没刮削的库属正常,匹配自然降级。
-func (c *Client) SeriesTmdbID(ctx context.Context, s *Session, seriesID string) *string {
+// ★ 缓存的是**整张表**而不是某一个 id:跨服续播要 TMDB、片头片尾数据源要 IMDb 和 MAL,
+// 各缓各的等于同一部剧问好几趟,而答案在同一个响应里。
+// 剧不存在 / 没刮削 → 返回 nil,**不是错误**:没刮削的库属正常。
+func (c *Client) SeriesProviders(ctx context.Context, s *Session, seriesID string) map[string]string {
 	key := s.Server + "|" + seriesID
 	tmdbMu.Lock()
-	if v, ok := tmdbCache[key]; ok {
+	if v, ok := provCache[key]; ok {
 		tmdbMu.Unlock()
 		return v
 	}
 	tmdbMu.Unlock()
 
-	var found *string
+	var found map[string]string
 	if it, err := c.ItemForHistory(ctx, s, seriesID); err == nil && it != nil {
-		for k, v := range it.ProviderIDs {
-			if strings.EqualFold(k, "Tmdb") && strings.TrimSpace(v) != "" {
-				t := strings.TrimSpace(v)
-				found = &t
-				break
-			}
-		}
+		found = it.ProviderIDs
 	} else if err != nil {
-		// ★ 网络错**不进缓存**:那不是「这剧没有 TMDB id」,是这次没问到。
+		// ★ 网络错**不进缓存**:那不是「这剧没有外部 id」,是这次没问到。
 		//   记下来的话一次抖动会让这部剧到重启前都匹配不上。
 		return nil
 	}
 
 	tmdbMu.Lock()
-	tmdbCache[key] = found
+	provCache[key] = found
 	tmdbMu.Unlock()
 	return found
+}
+
+// ProviderOf 按名字取一个外部 id(大小写不敏感)。取不到回空串。
+func ProviderOf(ids map[string]string, name string) string {
+	for k, v := range ids {
+		if strings.EqualFold(k, name) {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// SeriesTmdbID 取某剧的 TMDB id。跨服务器匹配剧集时用:
+// 同一部剧在两台服的 item_id 不同,但 TMDB id 相同。
+func (c *Client) SeriesTmdbID(ctx context.Context, s *Session, seriesID string) *string {
+	if t := ProviderOf(c.SeriesProviders(ctx, s, seriesID), "Tmdb"); t != "" {
+		return &t
+	}
+	return nil
 }

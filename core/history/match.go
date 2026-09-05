@@ -440,6 +440,26 @@ func MatchRecordToCandidate(record Record, candidate Candidate, candidateSeriesT
 	return matchEpisode(rp, cp, uniqueCandidate)
 }
 
+// MatchCandidates 两台服务器上的两个条目是不是同一部片。
+//
+// ★★ 和 MatchRecordToCandidate **共用** matchMovie / matchEpisode。
+// 跨服选版本和跨服续播判「是同一部」必须是同一套判据 —— 各写一份的结局是
+// 「续播认得出、选版本认不出」,而两边的代码看起来都对。
+//
+// ★ 这里**不比 PresentationUniqueKey**:它只在一台服务器内唯一,
+// 跨服撞上是巧合,拿它当强证据会把两部片判成同一部。
+func MatchCandidates(self, other Candidate, selfSeriesTmdbID, otherSeriesTmdbID *string, unique bool) MatchResult {
+	sp, ok1 := FingerprintOfCandidate(self, selfSeriesTmdbID)
+	op, ok2 := FingerprintOfCandidate(other, otherSeriesTmdbID)
+	if !ok1 || !ok2 || sp.MediaKind != op.MediaKind {
+		return MatchResult{ConfNone, "类型不匹配"}
+	}
+	if sp.MediaKind == KindMovie {
+		return matchMovie(sp, op, unique)
+	}
+	return matchEpisode(sp, op, unique)
+}
+
 // sameSome 两个都有值且相等。
 // ★ **None == None 不算匹配** —— 两条都没有 TMDB id 不能因此判成同一部。
 func sameSome(l, r *string) bool { return l != nil && r != nil && *l == *r }

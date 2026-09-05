@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Animation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
@@ -104,6 +105,9 @@ public sealed class PlayerPage : UserControl
     private readonly CoreClient _core;
     /// <summary>要播的版本(MediaSource id)。空 = 核心层按正则挑。</summary>
     private readonly string _mediaSourceId = "";
+
+    /// <summary>从哪台服务器播。空 = 当前活跃那台。见构造函数的 serverId 参数。</summary>
+    private readonly string _serverId = "";
     private readonly MpvGlView _view = new();
     /// <summary>进度条。 自绘,不是 Slider —— 理由见 <see cref="PlayerBar"/> 的注释。</summary>
     private readonly PlayerBar _bar = new();
@@ -145,7 +149,15 @@ public sealed class PlayerPage : UserControl
     private readonly TextBlock _total = new() { Foreground = Brushes.White, FontSize = 12.5, Opacity = 0.75, VerticalAlignment = VerticalAlignment.Center };
     /// <summary>音轨 / 字幕 / 画质那一盘。 平铺在控制条上的话底下一整行都是下拉框,
     /// 那是设置面板不是 OSD;而且它们**看片时基本不动**,不该长期占着画面。</summary>
-    private readonly Border _settings;
+    /// <summary>超分弹层的锚点。快捷键 U 也走它 —— 键和按钮同一条路。</summary>
+    private Button _qualityBtn = null!, _aspectBtn = null!, _audioBtn = null!;
+    /// <summary>正开着的那个弹层。自检要能把它关掉,别的地方不该碰。</summary>
+    private Flyout? _openFlyout;
+    /// <summary>正开着的弹层里那几行。自检要点其中一行 —— 弹层住在另一棵可视树里,
+    /// 从这一页的可视树上根本走不过去。</summary>
+    private List<Button> _popupRows = [];
+    /// <summary>有弹层开着。开着的时候 OSD 一秒都不许收,见 Poll 里那段注释。</summary>
+    private bool _popupOpen;
     /// <summary>静音按钮。图标跟着 <c>_muted</c> 走,见 <see cref="SyncMute"/>。</summary>
     private readonly Button _mute;
     private readonly TextBlock _msg = new() { Foreground = Brushes.White, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
@@ -183,6 +195,9 @@ public sealed class PlayerPage : UserControl
     private (double Start, double End)? _intro, _outro;
     /// <summary>这一次已经跳过的那个区间,别反复弹。</summary>
     private string _skipped = "";
+    // 自动跳 / 数据出处,都由核心层随 chapterInfo 一起给 —— 开关判两次早晚判岔
+    private bool _skipAuto;
+    private string _skipSource = "";
     private readonly string _itemId;
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
     /// <summary>下一集。有就画「下一集」键,没有就不画(电影 / 最后一集)。</summary>
@@ -281,10 +296,20 @@ public sealed class PlayerPage : UserControl
     /// 播已下载到本地的那个文件。<paramref name="itemId"/> 这时候是**下载任务的 id**,
     /// 不是 Emby 的条目 id。
     /// </param>
+    /// <param name="serverId">
+    /// 从**哪台服务器**播。空 = 当前活跃的那台(绝大多数情况)。
+    /// <para>详情页在这里聚合了所有服务器上的同一部片,用户可能选了别台的版本。
+    /// 那时候 <paramref name="itemId"/> 也是**那台的** id,两者必须成对送 ——
+    /// 只换其一就是拿甲服的 id 去打乙服。</para>
+    /// <para>送的是 id 不是会话:UI 手上没有非活跃服务器的 token
+    /// (<c>account.listAccounts</c> 故意不带),会话由核心层按 id 解析。</para>
+    /// </param>
     public PlayerPage(CoreClient core, string itemId, string title, double resumeSecs,
         bool isSource = false, object? sourceRaw = null, string mediaSourceId = "",
-        CardItem? next = null, int audioIndex = -1, int subIndex = -1, bool isLocal = false)
+        CardItem? next = null, int audioIndex = -1, int subIndex = -1, bool isLocal = false,
+        string serverId = "")
     {
+        _serverId = serverId;
         _isLocal = isLocal;
         _wantAudioIndex = audioIndex;
         _wantSubIndex = subIndex;
@@ -500,11 +525,23 @@ public sealed class PlayerPage : UserControl
         var nextBtn = Glyph(Ico.Next, "下一集(N)");
         nextBtn.Click += (_, _) => GoNext();
 
-        /* 音轨 / 字幕 / 画质 / 延迟 / 比例 / 章节 收进一个抽屉。
-            它们平铺在控制条上时,底下一整行都是下拉框和标签 —— 那是**设置面板**,
-            不是 OSD。看片时这几样基本不动,不该长期压着画面。
-            抽屉贴右下角弹,不是居中弹窗:它是就地调整,不是一次决策,
-            居中弹窗会把整块画面遮掉。 */
+        /* 选集(用户 2026-09-05:「播放页没有选集按钮,不方便切换」)。
+           光有「下一集」不够 —— 追剧时常见的动作是**跳回去看某一集**,
+           而那件事原来只能退出播放页、回详情页、再翻到那一集。
+           分集表**播放页自己拉**,不让调用方喂:从集详情页进来的那条路
+           (2026-09-04 之后它是主路)调用方手上根本没有那张表。
+           按钮先不画,拉到了再显 —— 电影上它永远不该出现。 */
+        _pickEp = Glyph(Ico.Episodes, "选集 / 章节(E)");
+        _pickEp.IsVisible = false;
+        _pickEp.Click += (_, _) => ShowEpisodes();
+
+        /* **一级按钮 + 一层弹层,到此为止**(用户 2026-09-06:
+             「不应该做成太多二级三级菜单,尽量做成一级或二级」)。
+           原来是「齿轮 → 抽屉 → 下拉框 → 选项」四层,选一条字幕要点三下,
+             而抽屉本身还是一块压在画面上的设置面板。
+           下拉框**留着当数据模型** —— 选项表和 SelectionChanged 都长在它身上,
+             只是不再上屏;弹层把它的选项摊成一列可点的行。
+             这样 LoadTracks / PickTrack 那一整套一行都不用动。 */
         var subDelayRow = Stepper(_subDelayText,
             d => SetDelay(ref _subDelaySecs, d, _subDelayText, "player.setSubDelay"));
         var audDelayRow = Stepper(_audDelayText,
@@ -513,43 +550,27 @@ public sealed class PlayerPage : UserControl
         _aspect.SelectedIndex = 0;
         _aspect.SelectionChanged += (_, _) =>
             _ = Send("player.setAspectRatio", new { ratio = Aspects[Math.Max(0, _aspect.SelectedIndex)].Value });
-        _chapters.SelectionChanged += (_, _) =>
-        {
-            if (_chapters.SelectedItem is ChapterOption c) _ = SeekTo(c.At);
-        };
 
-        var chapterRow = Row("章节", _chapters);
-        chapterRow.IsVisible = false;   // 有章节才画,见 LoadChapters
-        _chapterRow = chapterRow;
+        /* 顶栏右边放**看片时基本不动**的那几样:截图、超分、比例、片头片尾。
+           底栏留给一直在用的:播放、进退、选集、倍速、音轨、字幕、音量、全屏。
+           两条各管一类,比十个按钮挤在底栏一排更好瞄 —— 用户 2026-09-06 点的名。
+           这几个用**文字**不用图标:「超分」「比例」没有公认的图标,
+             随手挑一个 MDL2 字形的结果是用户得靠试才知道它是什么
+             (而且字体里没有那个码位时画出来是个空心方框,还编译绿)。 */
+        _qualityBtn = Osd("超分", "超分档位(U)");
+        _qualityBtn.Click += (_, _) => Pick(_qualityBtn, _quality, "超分", null, true);
+        _aspectBtn = Osd("比例", "画面比例");
+        _aspectBtn.Click += (_, _) => Pick(_aspectBtn, _aspect, "画面比例", null, true);
+        var segBtn = Osd("片头片尾", "标记片头片尾 —— 这部剧以后一直用这一份");
+        segBtn.Click += (_, _) => ShowSegments(segBtn);
 
-        _settings = new Border
-        {
-            Background = new SolidColorBrush(Color.Parse("#f0161b24")),
-            BorderBrush = Tok.Of("LineStrong"),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Padding = new Thickness(18),
-            Margin = new Thickness(0, 0, 18, OsdClearance),
-            IsVisible = false,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Child = new StackPanel
-            {
-                Spacing = 10,
-                Children =
-                {
-                    // 「画质」改叫「超分」(用户 2026-09-04 点名)—— 这一格里全是
-                    // Anime4K 超分档位,叫「画质」会让人以为它管的是码率 / 清晰度档
-                    Row("音轨", _audio), Row("字幕", _subs), Row("超分", _quality),
-                    Row("比例", _aspect), chapterRow,
-                    Row("字幕延迟", subDelayRow),
-                    Row("音频延迟", audDelayRow),
-                },
-            },
-        };
-        var gear = Glyph(Ico.Setting, "音轨 / 字幕 / 超分 / 延迟(U)");
-        gear.Click += (_, _) => ShowSettings(!_settings.IsVisible);
-        _gear = gear;
+        /* 延迟**收进各自那个按钮里**(用户 2026-09-06:
+           「字幕延迟和音频延迟各自放进音轨按钮和字幕按钮里面」)。
+           它本来就是「这条轨对不上」的补救动作,和选轨是同一件事的两步。 */
+        _audioBtn = Osd("音轨", "音轨 / 音频延迟");
+        _audioBtn.Click += (_, _) => Pick(_audioBtn, _audio, "音轨", Labeled("音频延迟", audDelayRow), false);
+        var subsBtn = Osd("字幕", "字幕 / 字幕延迟");
+        subsBtn.Click += (_, _) => Pick(subsBtn, _subs, "字幕", Labeled("字幕延迟", subDelayRow), false);
 
         /* 跳过片头 / 片尾。
             这是<b>核心层早就算好、UI 从来没用过</b>的东西:player.chapterInfo
@@ -563,11 +584,7 @@ public sealed class PlayerPage : UserControl
             VerticalAlignment = VerticalAlignment.Bottom,
             Margin = new Thickness(0, 0, 26, OsdClearance + 14),
         };
-        _skip.Click += (_, _) =>
-        {
-            if (_skipTo > 0) _ = SeekTo(_skipTo);
-            _skip.IsVisible = false;
-        };
+        _skip.Click += (_, _) => DoSkip();
 
         /* 版式换成<b>「整条进度条独占一行 + 底下一排按钮」</b>。
            原来是「已播时间 | 进度条 | 总时长」挤在一行里 ——
@@ -640,12 +657,13 @@ public sealed class PlayerPage : UserControl
         if (_next is not null) left.Children.Add(nextBtn);
         left.Children.Add(_volBox);
         left.Children.Add(clock);
+        // 右下角:选集 / 倍速 / 音轨 / 字幕 / 全屏(用户 2026-09-06 点名的那一组)
         var right = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 6,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { _speed, shot, gear, full },
+            Children = { _pickEp, _speed, _audioBtn, subsBtn, full },
         };
         var controls = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(left, 0);
@@ -666,27 +684,42 @@ public sealed class PlayerPage : UserControl
             Child = new StackPanel { Spacing = 0, Children = { progress, controls } },
         };
 
+        // 顶栏也是一排按钮的落脚点 —— 不是只有底栏能放(用户 2026-09-06)
+        var topLeft = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 10,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                back,
+                new TextBlock
+                {
+                    Text = title, Foreground = Brushes.White, FontSize = 16,
+                    FontWeight = FontWeight.SemiBold,
+                    TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 620,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                _msg,
+            },
+        };
+        var topRight = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { shot, _qualityBtn, _aspectBtn, segBtn },
+        };
+        var topRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        Grid.SetColumn(topLeft, 0);
+        Grid.SetColumn(topRight, 2);
+        topRow.Children.Add(topLeft);
+        topRow.Children.Add(topRight);
         _top = new Border
         {
             Background = Scrim(true),
             Padding = new Thickness(18, 14, 18, 34),
             VerticalAlignment = VerticalAlignment.Top,
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal, Spacing = 10,
-                Children =
-                {
-                    back,
-                    new TextBlock
-                    {
-                        Text = title, Foreground = Brushes.White, FontSize = 16,
-                        FontWeight = FontWeight.SemiBold,
-                        TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 900,
-                        VerticalAlignment = VerticalAlignment.Center,
-                    },
-                    _msg,
-                },
-            },
+            Child = topRow,
         };
 
         /* 上下两条的淡入淡出。用户 2026-09-03 提过一次,2026-09-04 又说
@@ -712,39 +745,16 @@ public sealed class PlayerPage : UserControl
         {
             Background = Brushes.Black,
             // 气泡排在 _bottom <b>之后</b> —— 它要画在控制条上面,而不是被压在下面
-            Children = { _view, _top, _bottom, _skip, _settings, _bubble },
+            Children = { _view, _top, _bottom, _skip, _bubble },
         };
         _root = root;
         Content = root;
 
-        /* <b>点面板以外的任何地方 = 关掉这块面板</b>(用户 2026-09-04:
-           「播放页的选项不能点击屏幕任意位置就退出」)。
-           上一版关掉它只有两条路:再点一次齿轮,或者三秒不动等 OSD 整个收走。
-           而这块面板是压在画面上的一大块,用户的第一反应就是「点旁边关掉」——
-           所有弹出层都是这么用的。点了没反应(反而把片子暂停了)只会让人以为卡住。
-
-           挂在**隧道**阶段:冒泡阶段先到的是画面那层的
-             PointerPressed(它会 TogglePause)。要的是「这一下只关面板」,
-             所以在它之前把事件吃掉。
-           齿轮自己要排除掉:不排的话这一下先关面板、齿轮的 Click 再开一次,
-             面板永远关不掉,而且看不出为什么。
-           面板<b>里面</b>点当然不关 —— 那是在用它。
-
-           ☠ 「里面」必须按<b>逻辑树</b>判,不能按可视树。下拉框展开之后,选项住在
-             另一棵可视树里(Popup 自己的根),往上走一步就到头了,走不回 _settings ——
-             于是「点选项」被判成「点面板以外」,这一下把面板关掉并且 Handled=true,
-             ComboBox 根本收不到。用户看到的就是:点开字幕,点一个,面板没了,什么也没变。
-             <b>「字幕 / 超分 / 比例 全都不生效」是这一行,不是那三条命令。</b>
-             逻辑树上选项仍然是 ComboBox 的子节点,不管它被画到哪儿。 */
-        AddHandler(PointerPressedEvent, (_, e) =>
-        {
-            if (!_settings.IsVisible) return;
-            if (e.Source is StyledElement el &&
-                el.GetSelfAndLogicalAncestors().Any(a => ReferenceEquals(a, _settings) ||
-                                                         ReferenceEquals(a, _gear))) return;
-            _settings.IsVisible = false;
-            e.Handled = true;
-        }, RoutingStrategies.Tunnel);
+        /* 「点面板以外就关掉」这一整段没了 —— 弹层是 Avalonia 的 Flyout,
+           点外面它自己就关,点里面它自己不关。手写那一版栽过一跤:
+           判「点在里面没有」必须按**逻辑树**走(下拉框展开后选项住在另一棵可视树里),
+           按可视树判的结果是「点开字幕、点一个、面板没了、什么也没变」。
+           规矩交给框架之后,那个坑连同那段代码一起不存在了。 */
 
         // 键盘要能收到,控件得先能拿焦点 —— 不设 Focusable 按空格毫无反应,
         // 而用户只会觉得「这播放器连暂停都没有」。
@@ -814,19 +824,27 @@ public sealed class PlayerPage : UserControl
             一格 5:一格 1 要滚二十下才从静音到满,一格 10 又太粗。 */
         PointerWheelChanged += (_, e) =>
         {
-            SetVolume(_vol.Value + (e.Delta.Y > 0 ? 5 : -5));
             _lastMove = DateTime.UtcNow;
             ShowOsd(true);
-            e.Handled = true;
+            if (Fire(Actions.Hit(Actions.Player, Actions.WheelSpec(e.Delta.Y)))) e.Handled = true;
         };
         /* 点画面 = 播放/暂停,双击 = 全屏。也是事实标准。
             挂在 <see cref="MpvGlView"/> 上而不是整页 —— 挂整页的话点控制条上的
             空白处也会暂停,而那儿用户的意图是「什么都不做」。 */
         _view.PointerPressed += (_, e) =>
         {
-            if (e.GetCurrentPoint(_view).Properties.IsLeftButtonPressed && e.ClickCount == 1)
-                _ = TogglePause();
+            if (e.ClickCount != 1) return;   // 第二下是双击全屏,别顺带再暂停一次
+            if (Fire(Actions.Hit(Actions.Player, Actions.Spec(e.GetCurrentPoint(_view).Properties))))
+                e.Handled = true;
         };
+        /* 鼠标侧键挂在**整页**上,不是挂在画面上:那两个键是「上一页 / 下一页」的手感,
+           手停在控制条上按也该有反应,而画面那块只覆盖中间一片。 */
+        AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            var pp = e.GetCurrentPoint(this).Properties;
+            if (!pp.IsXButton1Pressed && !pp.IsXButton2Pressed) return;
+            if (Fire(Actions.Hit(Actions.Player, Actions.Spec(pp)))) e.Handled = true;
+        }, RoutingStrategies.Tunnel);
         _view.DoubleTapped += (_, _) => ToggleFullscreen();
 
         // 起播排在 GL 就绪之后。发出去就行,不等结果 —— 等结果会把渲染线程堵住。
@@ -879,7 +897,6 @@ public sealed class PlayerPage : UserControl
     }
 
     /// <summary>抽屉里「章节」那一行。没有章节的片子整行不画。</summary>
-    private readonly Control _chapterRow;
 
     /// <summary>跳过条按下去要跳到哪儿。</summary>
     private double _skipTo;
@@ -926,6 +943,103 @@ public sealed class PlayerPage : UserControl
         catch (Exception e) { _msg.Text = "截图失败:" + LibraryPage.Advice(e); }
     }
 
+    /// <summary>选集键。分集表拉到之前不画 —— 电影上它永远不出现。</summary>
+    private Button _pickEp = null!;
+
+    /// <summary>本剧的分集表(按季 / 集号排好)。空 = 还没拉到,或者这根本不是剧集。</summary>
+    private List<CardItem> _episodes = [];
+
+    /// <summary>
+    /// 拉本剧的分集表,给选集键用。
+    ///
+    /// <para><b>播放页自己拉,不让调用方喂</b>:2026-09-04 之后点一集是进它自己的
+    /// 详情页,而集详情页手里没有分集表(它就是一个普通条目详情页)。
+    /// 让调用方喂的结果是「从剧详情页进来有选集、从集详情页进来没有」,
+    /// 而后者才是主路。</para>
+    /// <para>拉不到就整个不画:电影 / 网盘源 / 本地文件本来就没有分集。</para>
+    /// </summary>
+    private async Task LoadEpisodes()
+    {
+        if (NoEmby || _isLocal || _isSource || _itemId == "" || Nav.Session is not { } s) return;
+        try
+        {
+            var d = await _core.EmbyItemDetail(new
+            {
+                s.server, s.token, s.user_id, s.device_id, server_id = _serverId,
+                item_id = _itemId, with_children = false,
+            });
+            if (Str(d, "type_") != "Episode") return;
+            var series = Str(d, "series_id");
+            if (series == "") return;
+            /* 一次拉不完就接着拉:服务端单页上限 200(ServerPageCap),
+               而选集正是为长剧存在的 —— 只拉一页的话《海贼王》里第 300 集之后
+               在这个列表里根本不存在,而且不报错。 */
+            var eps = new List<CardItem>();
+            while (true)
+            {
+                var page = await _core.EmbySeasonEpisodes(new
+                {
+                    s.server, s.token, s.user_id, s.device_id, server_id = _serverId,
+                    parent_id = series, start_index = eps.Count, limit = 200,
+                });
+                var got = page.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array
+                    ? arr.EnumerateArray().Select(CardItem.From).ToList() : [];
+                // 空页就停。只看 total 的话,服务端 total 报大了就是个死循环。
+                if (got.Count == 0) break;
+                eps.AddRange(got);
+                var total = page.TryGetProperty("total", out var t) && t.ValueKind == JsonValueKind.Number
+                    ? t.GetInt32() : eps.Count;
+                if (eps.Count >= total) break;
+            }
+            if (eps.Count <= 1) return;   // 只有一集的「剧」不值得给一个选择器
+            Dispatcher.UIThread.Post(() =>
+            {
+                _episodes = eps;
+                _pickEp.IsVisible = true;
+            });
+        }
+        catch { /* 拉不到分集不影响正在放的这一集 */ }
+    }
+
+    /// <summary>
+    /// 选集浮层。<b>只写 S01E01,不写剧名和标题</b>
+    /// (用户 2026-09-05:长标题会把集号挤出可视区)。
+    ///
+    /// <para>打开时把正在放的那一集<b>滚进视野</b>:第 500 集的时候浮层停在第 1 集,
+    /// 等于让用户在一千行里自己找。</para>
+    /// </summary>
+    private void ShowEpisodes()
+    {
+        var at = _episodes.FindIndex(e => e.Id == _itemId);
+        var items = new List<(string, Action?)>();
+        if (_episodes.Count > 0)
+        {
+            items.Add(("选集", null));
+            items.AddRange(_episodes.Select((e, i) =>
+                ((i == at ? "▸ " : "") + e.PickerLabel, (Action?)(() => PlayEpisode(e)))));
+        }
+        /* 章节跟着一起进来。它原来住在设置抽屉里的一个下拉框中 ——
+           抽屉没了,而章节和选集是同一件事的两个粒度(跳到别的集 / 跳到本集的某一段),
+           一个按钮一个弹层装得下,不值得再开一个入口。 */
+        var chapters = _chapters.ItemsSource?.Cast<ChapterOption>().ToList() ?? [];
+        if (chapters.Count > 0)
+        {
+            items.Add(("章节", null));
+            items.AddRange(chapters.Select(c => (c.Label, (Action?)(() => _ = SeekTo(c.At)))));
+        }
+        if (items.Count == 0) return;
+        DetailPage.Flyout(_pickEp, items, at < 0 ? -1 : at);
+    }
+
+    /// <summary>换一集。<b>替换</b>不压栈 —— 挑十次集会攒出十层播放页。</summary>
+    private void PlayEpisode(CardItem e)
+    {
+        if (e.Id == _itemId) return;
+        Stop();
+        _leaving = true;
+        Nav.Replace(new PlayerPage(_core, e.Id, e.DisplayTitle, e.ResumeSecs, serverId: _serverId));
+    }
+
     private void GoNext()
     {
         if (_next is null) return;
@@ -951,7 +1065,7 @@ public sealed class PlayerPage : UserControl
             var s = Nav.Session!;
             var r = await _core.PlayerChapterInfo(new
             {
-                s.server, s.token, s.user_id, s.device_id,
+                s.server, s.token, s.user_id, s.device_id, server_id = _serverId,
                 item_id = _itemId, runtime_secs = _duration,
             });
             var list = r.TryGetProperty("chapters", out var cs) && cs.ValueKind == JsonValueKind.Array
@@ -963,17 +1077,50 @@ public sealed class PlayerPage : UserControl
                 : [];
             _intro = RangeOf(r, "intro");
             _outro = RangeOf(r, "outro");
+            _skipAuto = r.TryGetProperty("skip_auto", out var sa) && sa.ValueKind == JsonValueKind.True;
+            _skipSource = Str(r, "skip_source");
+            // 换片重来一遍:上一集跳过了片头,不该让这一集的片头直接不弹
+            _skipped = "";
             Dispatcher.UIThread.Post(() =>
             {
                 if (list.Count == 0) return;
                 _chapters.ItemsSource = list;
-                _chapterRow.IsVisible = true;
+                // 电影没有分集但可能有章节 —— 那时这个按钮也该亮,它是同一个入口
+                _pickEp.IsVisible = true;
                 // 进度条上切缺口。现代播放器都有这一下 ——
                 // 它把「这片子有几段」直接画在了用户要拖的那条线上。
                 _bar.Chapters = list.Select(c => c.At).ToList();
             });
         }
         catch { /* 没有章节是常态,不是错误 */ }
+    }
+
+    /// <summary>
+    /// 手动设片头片尾。两段都传 null = 清掉这部剧的设定。
+    ///
+    /// <para>设完<b>就地生效</b>,不等下一次起播 —— 用户刚量完就想看它对不对,
+    /// 让他退出重进等于让他无法确认自己设对了没有。</para>
+    /// </summary>
+    private async Task SaveSkipRange((double Start, double End)? intro, (double Start, double End)? outro)
+    {
+        if (NoEmby || _itemId == "") return;
+        try
+        {
+            var s = Nav.Session!;
+            await _core.PlayerSetSkipRange(new
+            {
+                s.server, s.token, s.user_id, s.device_id, server_id = _serverId,
+                item_id = _itemId,
+                intro_start = intro?.Start ?? 0, intro_end = intro?.End ?? 0,
+                outro_start = outro?.Start ?? 0, outro_end = outro?.End ?? 0,
+            });
+            _intro = intro is { End: > 0 } ? intro : null;
+            _outro = outro is { End: > 0 } ? outro : null;
+            _skipped = "";
+            _skipSource = intro is null && outro is null ? "" : "手动设定";
+            Toast.Show(intro is null && outro is null ? "已清除这部剧的片头片尾" : "已记下,这部剧都按它来");
+        }
+        catch (Exception e) { Toast.Show(LibraryPage.Advice(e)); }
     }
 
     private static (double, double)? RangeOf(JsonElement r, string k) =>
@@ -999,7 +1146,18 @@ public sealed class PlayerPage : UserControl
             return;
         }
         _skipTo = hit.Value.End;
-        _skip.Content = which == "intro" ? "跳过片头" : "跳过片尾";
+        var what = which == "intro" ? "片头" : "片尾";
+        /* 自动跳:替用户按一下,然后**说清楚是谁给的数据**。
+           不说的话跳错了(众投数据会错)用户只知道「播放器乱跳」,
+           既不知道该去哪儿关,也不知道该改哪一条。 */
+        if (_skipAuto)
+        {
+            _skipped = which;
+            DoSkip();
+            Toast.Show(_skipSource.Length > 0 ? $"已跳过{what} · {_skipSource}" : $"已跳过{what}");
+            return;
+        }
+        _skip.Content = "跳过" + what;
         _skip.IsVisible = true;
     }
 
@@ -1017,35 +1175,16 @@ public sealed class PlayerPage : UserControl
         // 钉住 OSD:收起来之后截图看不到控制条,分不清「自动收了」和「压根没画」
         _lastMove = DateTime.UtcNow.AddYears(1);
         ShowOsd(true);
-        /* LP_DRILL=2 顺带把音轨/字幕/画质那个抽屉拉开。
-           收起来的东西**截图里等于不存在** —— 抽屉里三行控件排没排齐、
-           弹出位置有没有盖住控制条,不拉开一次就永远没人看过。 */
+        /* LP_DRILL=2 顺带把「音轨」弹层弹出来。
+           收起来的东西**截图里等于不存在** —— 弹层里的行排没排齐、
+           弹出位置有没有盖住控制条,不弹一次就永远没人看过。 */
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "2")
-            Dispatcher.UIThread.Post(() => ShowSettings(true));
+            Dispatcher.UIThread.Post(() => _audioBtn?.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
 
-        /* LP_DRILL=4:<b>拉开抽屉,然后在画面上真按一下</b>,看它关不关。
-            这条是用户 2026-09-04 那句「播放页的选项不能点击屏幕任意位置就退出」的判据。
-            截图验不了 —— 截图点不了鼠标,而它坏掉的样子恰恰是「点了没反应」。
-            事件要发在 _view 上(画面那一层),走的正是用户点画面那条真路:
-            隧道阶段我们先接住关面板,冒泡阶段那个 TogglePause 就不该再跑到。
-            顺带验「点面板自己不关」—— 只验前半条的话,一个「按下就无脑关」
-            的实现也照样绿,而那种实现下用户根本没法用这块面板。 */
-        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "4")
-        {
-            await Dispatcher.UIThread.InvokeAsync(() => ShowSettings(true));
-            await Task.Delay(300);
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                Poke(_settings);
-                Console.WriteLine(_settings.IsVisible
-                    ? "[抽屉] ✓ 点面板自己不关"
-                    : "[抽屉] ✗ 点面板自己也关掉了 —— 那就没法用它了");
-                Poke(_view);
-                Console.WriteLine(!_settings.IsVisible
-                    ? "[抽屉] ✓ 点画面(面板以外)关掉了面板"
-                    : "[抽屉] ✗ 点画面没关掉面板 —— 用户只能再去找那个齿轮");
-            });
-        }
+        /* LP_DRILL=4 那一条(「拉开抽屉,点画面看它关不关」)**删了**:
+           那是我们手写的关闭逻辑,现在换成了 Avalonia 的 Flyout —— 点外面它自己关、
+           点里面它自己不关,是框架的行为不是我们的。
+           留着一条永远绿的断言比没有更糟。 */
 
         /* <b>点过齿轮之后,空格还得是播放/暂停</b>。
            用户 2026-09-04:「为什么我点击空格不是播放/暂停,而是打开设置面板的?」
@@ -1057,24 +1196,20 @@ public sealed class PlayerPage : UserControl
              只验①的话,一个「既暂停又开面板」的实现也算过。 */
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_PLAYER_DRILL") == "5")
         {
-            /* 面板要**开着**:里面那个下拉框是我们要聚焦的控件,
-               而看不见的控件拿不到焦点(第一版就是关着的,于是 Focus() 静默失败、
-               焦点留在页面上 —— 那种情况下坏的实现和好的实现表现一模一样)。 */
-            await Dispatcher.UIThread.InvokeAsync(() => ShowSettings(true));
             await Task.Delay(300);
             var was = false;
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                /* ①「OSD 按钮不可聚焦」这一半直接问控件。 它同时也解释了为什么
-                   下面要拿别的控件去聚焦:齿轮已经拿不到焦点了。 */
-                Console.WriteLine(_gear?.Focusable == false
-                    ? "[空格] ✓ 齿轮按钮不可聚焦(Focusable=false)—— 空格不会被它当成「按我」"
-                    : "[空格] ✗ 齿轮按钮仍然可聚焦 —— 点过它之后空格就归它了");
+                /* ①「OSD 按钮不可聚焦」这一半直接问控件。它同时也解释了为什么
+                   下面要拿别的控件去聚焦:那一排按钮已经拿不到焦点了。 */
+                Console.WriteLine(_audioBtn?.Focusable == false
+                    ? "[空格] ✓ OSD 按钮不可聚焦(Focusable=false)—— 空格不会被它当成「按我」"
+                    : "[空格] ✗ OSD 按钮仍然可聚焦 —— 点过它之后空格就归它了");
 
                 /* ②「隧道阶段接键盘」这一半要拿一个**真的会抢空格的控件**来验。
-                   抽屉里的下拉框是真输入控件,它必须保持可聚焦 ——
-                   所以它正是那个「焦点在别的控件上时,播放器的键还灵不灵」的场子。 */
-                _quality.Focus();
+                   音量滑块是 OSD 上唯一可聚焦的真输入控件 ——
+                   它正是那个「焦点在别的控件上时,播放器的键还灵不灵」的场子。 */
+                _vol.Focus();
                 was = (string?)_pause.Content == Ico.Play; // true = 现在是暂停态
                 Console.WriteLine($"[空格] 焦点在 {(_quality.IsFocused ? "画质下拉框(可聚焦控件)" : "别处")};" +
                                   $"按之前 暂停={was}");
@@ -1161,6 +1296,7 @@ public sealed class PlayerPage : UserControl
         public const string Back = "\uE72B";       // 后退 10 秒
         public const string Fwd = "\uE72A";        // 前进 10 秒
         public const string Next = "\uE893";       // 下一集
+        public const string Episodes = "";  // 选集(列表)
         public const string Volume = "\uE767";
         public const string Mute = "\uE74F";
         public const string Camera = "\uE722";     // 截图
@@ -1172,6 +1308,7 @@ public sealed class PlayerPage : UserControl
         public static readonly (string Name, string Glyph)[] All =
         [
             ("播放", Play), ("暂停", Pause), ("后退", Back), ("前进", Fwd), ("下一集", Next),
+            ("选集", Episodes),
             ("音量", Volume), ("静音", Mute), ("截图", Camera), ("设置", Setting),
             ("全屏", Full), ("退出全屏", Windowed),
         ];
@@ -1201,6 +1338,149 @@ public sealed class PlayerPage : UserControl
             input,
         },
     };
+    /// <summary>
+    /// OSD 上的**文字**按钮。「超分」「比例」「音轨」这类没有公认图标的动作用它。
+    ///
+    /// <para>随手挑一个 MDL2 字形的代价是用户得靠试才知道它是什么;
+    /// 而字体里没有那个码位时画出来是个空心方框,还编译绿、运行不报错。</para>
+    /// <para><c>Width=NaN</c> 是**必须的**:<c>Button.osd</c> 那条样式把宽钉在 46,
+    /// 不解开的话「片头片尾」四个字会被裁成一个字。</para>
+    /// </summary>
+    private static Button Osd(string label, string tip)
+    {
+        var b = new Button
+        {
+            Classes = { "osd" }, Content = label,
+            FontFamily = FontFamily.Default, FontSize = 13,
+            Width = double.NaN, Padding = new Thickness(14, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Focusable = false,
+        };
+        ToolTip.SetTip(b, tip);
+        return b;
+    }
+
+    /// <summary>弹层里的一行。整行可点 —— 只有文字可点的话用户得瞄准那几个字。</summary>
+    private static Button MenuRow(string text) => new()
+    {
+        Content = text, Classes = { "ghost" }, Foreground = Brushes.White,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        HorizontalContentAlignment = HorizontalAlignment.Left,
+        MinHeight = 34,
+    };
+
+    /* 弹层压在画面上,底色恒是暗的 —— 所以这里用**白色 + 透明度**表达「弱」,
+       不写一个灰色号:写死的灰在换主题时露馅,而且它本来就该是「白得少一点」。 */
+    private static TextBlock Dimmed(string text) => new()
+    {
+        Text = text, FontSize = 12, TextWrapping = TextWrapping.Wrap,
+        Foreground = Brushes.White, Opacity = 0.62,
+        Margin = new Thickness(10, 2, 10, 2),
+    };
+
+    private static Control PopupTitle(string text) => new TextBlock
+    {
+        Text = text, FontSize = 12, FontWeight = FontWeight.SemiBold,
+        Foreground = Brushes.White, Opacity = 0.55,
+        Margin = new Thickness(10, 6, 0, 2),
+    };
+
+    /// <summary>标签 + 控件,竖着放。延迟步进器进音轨/字幕弹层时用。</summary>
+    private static Control Labeled(string label, Control body) => new StackPanel
+    {
+        Spacing = 6, Margin = new Thickness(10, 6, 10, 2),
+        Children = { PopupTitle(label), body },
+    };
+
+    /// <summary>
+    /// 把一个下拉框的选项摊成一列可点的行,贴着按钮弹出来。
+    ///
+    /// <para>下拉框本身**不上屏**,只当数据模型使:选项表、当前选中、SelectionChanged
+    /// 全长在它身上,这里改 <c>SelectedIndex</c> 走的就是原来那条路 ——
+    /// 一行选轨逻辑都不用重写。</para>
+    /// </summary>
+    private void Pick(Button anchor, ComboBox model, string title, Control? extra, bool fromTop)
+    {
+        var list = new StackPanel { Spacing = 2, MinWidth = 200 };
+        list.Children.Add(PopupTitle(title));
+        var items = model.ItemsSource?.Cast<object?>().ToList() ?? [];
+        if (items.Count == 0) list.Children.Add(Dimmed("这条流上没有可选的。"));
+        Flyout? fly = null;
+        for (var i = 0; i < items.Count; i++)
+        {
+            var idx = i;
+            // 当前那一条要**看得出来**:一列一模一样的行里,用户没法知道现在用的是哪条
+            var row = MenuRow((idx == model.SelectedIndex ? "● " : "○ ") + items[i]);
+            row.Click += (_, _) => { fly?.Hide(); model.SelectedIndex = idx; };
+            list.Children.Add(row);
+        }
+        if (extra is not null) list.Children.Add(extra);
+        _popupRows = list.Children.OfType<Button>().ToList();
+        fly = Popup(anchor, list, fromTop);
+    }
+
+    /// <summary>
+    /// 弹层。<b>播放页所有二级面板都走这一个</b>,没有第三层。
+    ///
+    /// <para>开着的时候把 <see cref="_popupOpen"/> 举起来 —— 弹层是另一个顶层窗口,
+    /// 鼠标在它上面移动这一页收不到任何 PointerMoved,<c>_lastMove</c> 会就此冻住,
+    /// 三秒后 OSD 连同弹层一起被收走。那正是老抽屉栽过的那一跤。</para>
+    /// </summary>
+    private Flyout Popup(Button anchor, Control body, bool fromTop)
+    {
+        var fly = new Flyout
+        {
+            Placement = fromTop ? PlacementMode.BottomEdgeAlignedRight : PlacementMode.TopEdgeAlignedRight,
+            Content = new ScrollViewer
+            {
+                MaxHeight = 420, MaxWidth = 420,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = body,
+            },
+        };
+        fly.Opened += (_, _) => { _popupOpen = true; _openFlyout = fly; _lastMove = DateTime.UtcNow; ShowOsd(true); };
+        fly.Closed += (_, _) => { _popupOpen = false; _openFlyout = null; _lastMove = DateTime.UtcNow; };
+        fly.ShowAt(anchor);
+        return fly;
+    }
+
+    /// <summary>
+    /// 片头片尾弹层:**标记从哪到哪**,这部剧以后一直用这一份。
+    ///
+    /// <para>用户 2026-09-06:「应该是让用户标记片头从哪里到哪里、片尾从哪里到哪里,
+    /// 这个剧就可以一直用这个了」。所以这里给的是「以当前位置为界」的两个动作 ——
+    /// 看片时准确的位置就在手上,让他去数分秒反而更容易填错,而填错会把正片切掉。</para>
+    /// </summary>
+    private void ShowSegments(Button anchor)
+    {
+        var body = new StackPanel { Spacing = 2, MinWidth = 260 };
+        body.Children.Add(PopupTitle("片头片尾"));
+        body.Children.Add(Dimmed(SegmentText()));
+        Flyout? fly = null;
+        Button Act(string text, Func<Task> go)
+        {
+            var b = MenuRow(text);
+            b.Click += (_, _) => { fly?.Hide(); _ = go(); };
+            return b;
+        }
+        body.Children.Add(Act($"片头到这儿(0:00 ~ {Clock(_position)})",
+            () => SaveSkipRange((0, _position), _outro)));
+        body.Children.Add(Act($"片尾从这儿开始({Clock(_position)} ~ 结尾)",
+            () => SaveSkipRange(_intro, (_position, _duration))));
+        body.Children.Add(Act("清除这部剧的标记", () => SaveSkipRange(null, null)));
+        body.Children.Add(Dimmed("标记按**剧**存,同一部剧只用设一遍。"
+            + "自动跳过在「设置 → 跳过片头片尾」里开。"));
+        fly = Popup(anchor, body, true);
+    }
+
+    /// <summary>片头片尾当前是什么,以及这份数据是谁给的。</summary>
+    private string SegmentText()
+    {
+        var a = _intro is { } x ? $"片头 {Clock(x.Start)} ~ {Clock(x.End)}" : "片头 未标";
+        var b = _outro is { } y ? $"片尾 {Clock(y.Start)} ~ {Clock(y.End)}" : "片尾 未标";
+        return a + " · " + b + (_skipSource.Length > 0 ? $"  ({_skipSource})" : "");
+    }
+
 
     /// <summary>
     /// OSD 上的图标按钮。
@@ -1277,7 +1557,7 @@ public sealed class PlayerPage : UserControl
                 var s = Nav.Session!;
                 await _core.PlayerPlay(new
                 {
-                    s.server, s.token, s.user_id, s.device_id,
+                    s.server, s.token, s.user_id, s.device_id, server_id = _serverId,
                     item_id = itemId, resume_secs = resumeSecs,
                     media_source_id = _mediaSourceId,
                 });
@@ -1292,45 +1572,65 @@ public sealed class PlayerPage : UserControl
     {
         _lastMove = DateTime.UtcNow;
         ShowOsd(true);
-        switch (e.Key)
+        /* 数字键跳到百分之几。 事实标准(0=开头,5=一半)。
+           **不进键位表**:十个键一个语义,拆成十条动作只会把设置页撑满,
+           而它们又不该分开改。 */
+        if (e.Key is >= Key.D0 and <= Key.D9 && _duration > 0)
         {
-            case Key.Space or Key.K: _ = TogglePause(); break;
-            case Key.Left: _ = SeekBy(-10); break;
-            case Key.Right: _ = SeekBy(10); break;
-            // J / L = ±10 秒。 YouTube 起的头,现在是事实标准 ——
-            // 手不用离开 J/K/L 三个键就能倒、停、进。
-            case Key.J: _ = SeekBy(-10); break;
-            case Key.L: _ = SeekBy(10); break;
-            // 数字键跳到百分之几。 也是事实标准(0=开头,5=一半)。
-            case >= Key.D0 and <= Key.D9 when _duration > 0:
-                _ = SeekTo(_duration * (e.Key - Key.D0) / 10.0);
-                break;
-            case Key.Up: SetVolume(_vol.Value + 5); break;
-            case Key.Down: SetVolume(_vol.Value - 5); break;
-            case Key.M:
+            _ = SeekTo(_duration * (e.Key - Key.D0) / 10.0);
+            e.Handled = true;
+            return;
+        }
+        if (Fire(Actions.Hit(Actions.Player, Actions.Spec(e)))) e.Handled = true;
+    }
+
+    /// <summary>
+    /// 动作 id → 干什么。绑不到、或这会儿不该有反应时回 false(这一下不吃掉)。
+    ///
+    /// <para>键位在 <see cref="Actions.All"/> 里,这里只管行为 ——
+    /// 从前键位和行为写在同一个 switch 上,于是改键这件事无处下手。</para>
+    /// </summary>
+    private bool Fire(string? id)
+    {
+        switch (id)
+        {
+            case "player.pause": _ = TogglePause(); break;
+            case "player.back10": _ = SeekBy(-10); break;
+            case "player.forward10": _ = SeekBy(10); break;
+            case "player.volumeUp": SetVolume(_vol.Value + 5); break;
+            case "player.volumeDown": SetVolume(_vol.Value - 5); break;
+            case "player.mute":
                 _muted = !_muted;
                 SyncMute();
                 _ = Send("player.setMute", new { mute = _muted });
                 break;
-            // U:开抽屉再展开画质。 抽屉关着时直接展开下拉框,下拉列表会飘在
-            // 一块看不见的面板上 —— 得先把面板拿出来。
-            case Key.U:
-                ShowSettings(true);
-                _quality.IsDropDownOpen = !_quality.IsDropDownOpen;
-                break;
-            // 新加的功能都要有快捷键:OSD 三秒就收,而键盘永远在
-            case Key.S: _ = Screenshot(); break;
-            case Key.N: GoNext(); break;
-            case Key.OemPeriod: _ = CycleSpeed(+1); break;   // > 加速
-            case Key.OemComma: _ = CycleSpeed(-1); break;    // < 减速
-            case Key.F or Key.Enter: ToggleFullscreen(); break;
-            // 全屏时 Esc 只退全屏,不退出播放 —— 看片时误按一下就把片关了很恼人
-            case Key.Escape when _full: ToggleFullscreen(); break;
-            case Key.Escape: Leave(); break;
-            default: return;
+            case "player.speedUp": _ = CycleSpeed(+1); break;
+            case "player.speedDown": _ = CycleSpeed(-1); break;
+            case "player.fullscreen": ToggleFullscreen(); break;
+            case "player.next": GoNext(); break;
+            case "player.episodes" when _pickEp.IsVisible: ShowEpisodes(); break;
+            // 抽屉关着时直接展开下拉框,列表会飘在一块看不见的面板上 —— 得先把面板拿出来
+            case "player.quality": Pick(_qualityBtn, _quality, "超分", null, true); break;
+            case "player.screenshot": _ = Screenshot(); break;
+            case "player.skip" when _skip.IsVisible: DoSkip(); break;
+            // 全屏时先退全屏,不退出播放 —— 看片时误按一下就把片关了很恼人
+            case "player.leave" when _full: ToggleFullscreen(); break;
+            case "player.leave": Leave(); break;
+            default: return false;
         }
-        e.Handled = true;
+        return true;
     }
+
+    /// <summary>跳过片头 / 片尾。按钮和快捷键走同一条路,不各写一遍。</summary>
+    private void DoSkip()
+    {
+        if (_skipTo > 0) _ = SeekTo(_skipTo);
+        _skip.IsVisible = false;
+        // 跳过之后用户又拖回这一段,那是他**故意要看**,别再跳一次把他弹出去
+        if (_intro is { } a && _skipTo >= a.End - 0.5 && _skipTo <= a.End + 0.5) _skipped = "intro";
+        else _skipped = "outro";
+    }
+
 
     private async Task TogglePause()
     {
@@ -1487,44 +1787,32 @@ public sealed class PlayerPage : UserControl
         _ = Task.Run(async () =>
         {
             await Task.Delay(9000);
-            /* 齿轮走它自己的 Click(Poke 只发 Pressed,Button 是 Released 才 Click ——
-               拿 Poke 去点齿轮测的是自检自己,不是这一页)。 */
-            await Dispatcher.UIThread.InvokeAsync(() => ShowSettings(true));
-            await Task.Delay(400);
-            var openedPanel = false;
-            await Dispatcher.UIThread.InvokeAsync(() => openedPanel = _settings.IsVisible);
-            Console.WriteLine(openedPanel ? "[点选] ✓ 面板开着" : "[点选] ✗ 面板没开");
+            /* 按钮走它自己的 Click(Poke 只发 Pressed,Button 是 Released 才 Click ——
+               拿 Poke 去点它测的是自检自己,不是这一页)。 */
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                _aspectBtn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await Task.Delay(500);
+            var opened = false;
+            var rows = 0;
+            await Dispatcher.UIThread.InvokeAsync(() => { opened = _popupOpen; rows = _popupRows.Count; });
+            Console.WriteLine(opened ? $"[点选] ✓ 弹层开着,{rows} 行" : "[点选] ✗ 弹层没开");
 
-            /* 拿「比例」下拉当靶子,不拿「字幕」:比例的 5 个档位是写死在代码里的,
-               任何片子都有;字幕轨要看片源,自检用的样片一条都没有,取第 2 项永远是空 ——
+            /* 拿「比例」当靶子,不拿「字幕」:比例的 5 个档位是写死在代码里的,
+               任何片子都有;字幕轨要看片源,自检用的样片一条都没有,点第 2 行永远是空 ——
                那会测成「功能坏了」,而坏的是夹具。 */
-            await Dispatcher.UIThread.InvokeAsync(() => _aspect.IsDropDownOpen = true);
-            await Task.Delay(600);
-            bool dropOpen = false, panelAlive = false;
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                dropOpen = _aspect.IsDropDownOpen; panelAlive = _settings.IsVisible;
-            });
-            Console.WriteLine(dropOpen ? "[点选] ✓ 下拉展开了" : "[点选] ✗ 下拉没展开");
-            Console.WriteLine(panelAlive
-                ? "[点选] ✓ 展开下拉之后面板还在"
-                : "[点选] ✗ 展开下拉那一下把面板关掉了");
-
             var before = _aspect.SelectedIndex;
-            Control? item = null;
-            await Dispatcher.UIThread.InvokeAsync(() => item = _aspect.ContainerFromIndex(1));
-            if (item is null) { Console.WriteLine("[点选] ✗ 弹出层里取不到第 2 项"); return; }
-            await Dispatcher.UIThread.InvokeAsync(() => PokeClick(item!));
-            await Task.Delay(800);
-            int after = -1; var alive2 = false;
+            Button? item = null;
             await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                after = _aspect.SelectedIndex; alive2 = _settings.IsVisible;
-            });
+                item = _popupRows.Count > 1 ? _popupRows[1] : null);
+            if (item is null) { Console.WriteLine("[点选] ✗ 弹层里取不到第 2 行"); return; }
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                item!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)));
+            await Task.Delay(800);
+            var after = -1;
+            await Dispatcher.UIThread.InvokeAsync(() => after = _aspect.SelectedIndex);
             Console.WriteLine(after == 1
-                ? $"[点选] ✓ 点弹出层里的第 2 项选中了它({before} → {after})"
-                : $"[点选] ✗ 点了第 2 项没选中(还停在 {after})—— 这就是「点了不生效」");
-            Console.WriteLine(alive2 ? "[点选] ✓ 选完面板还在" : "[点选] ✗ 选完面板被关掉了");
+                ? $"[点选] ✓ 点弹层里的第 2 行选中了它({before} → {after})"
+                : $"[点选] ✗ 点了第 2 行没选中(还停在 {after})—— 这就是「点了不生效」");
             /* 判到**核心层**为止。下拉框自己变了不算数 —— 「界面在撒谎」是本仓
                最贵的那类 bug:控件显示 16:9 而 mpv 根本没收到,长得一模一样。 */
             try
@@ -1901,10 +2189,11 @@ public sealed class PlayerPage : UserControl
     /// <summary>
     /// 自检:<c>LP_PANEL=1</c> —— 抽屉开着的时候,OSD 不许把它收走。
     ///
-    /// <para>用户说「字幕 超分 比例 全都不生效」,那三条命令其实都接对了,坏的是
-    /// 三秒不动 → <c>ShowOsd(false)</c> → 最后一句 <c>_settings.IsVisible = false</c>。
-    /// 判据必须真的等够 4.5 秒,中途一次鼠标事件都不发 —— 发了就刷新了
-    /// <c>_lastMove</c>,这条断言会变成永远绿。</para>
+    /// <para>「字幕 超分 比例 全都不生效」的真因是三秒不动就把面板从手底下抽走。
+    /// 判据必须真的等够 4.5 秒,中途一次鼠标事件都不发 —— 发了就永远绿。</para>
+    /// <para>换 Flyout 之后**扛事的是第二条**(控制条有没有跟着留着):
+    /// 弹层是自己的顶层窗口,OSD 收了它也还在,第一条已经不区分对错了。
+    /// 反向注入实测过:摘掉守卫只有第二条变红。</para>
     /// </summary>
     private void SelfCheckPanel()
     {
@@ -1914,22 +2203,22 @@ public sealed class PlayerPage : UserControl
             await Task.Delay(7000);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                ShowSettings(true);
+                _aspectBtn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 // 把「最后一次动鼠标」摆回现在,好让这 4.5 秒是干干净净的静止
                 _lastMove = DateTime.UtcNow;
             });
             await Task.Delay(4500);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                Console.WriteLine(_settings.IsVisible
-                    ? "[设置面板] ✓ 静止 4.5 秒之后面板还在 —— 读选项的时候它不会被抽走"
-                    : "[设置面板] ✗ 静止 4.5 秒面板自己没了 —— 面板里的每一项都等于点不着");
+                Console.WriteLine(_popupOpen
+                    ? "[设置面板] ✓ 静止 4.5 秒之后弹层还在 —— 读选项的时候它不会被抽走"
+                    : "[设置面板] ✗ 静止 4.5 秒弹层自己没了 —— 里面每一项都等于点不着");
                 Console.WriteLine(_osdOn
-                    ? "[设置面板] ✓ 控制条也跟着留着(面板底下是空的话它看着像画错了)"
-                    : "[设置面板] ✗ 控制条收了而面板留着");
+                    ? "[设置面板] ✓ 控制条也跟着留着(弹层底下是空的话它看着像画错了)"
+                    : "[设置面板] ✗ 控制条收了而弹层留着");
                 // 关掉之后 OSD 该收还是收 —— 不验这一条的话,一个「永不自动收」的
                 // 实现也照样绿,而那会让控制条一直压着画面。
-                ShowSettings(false);
+                _openFlyout?.Hide();
                 _lastMove = DateTime.UtcNow;
             });
             /* 这一条要**轮询等**,不能死等 4.5 秒就断言。
@@ -1943,8 +2232,8 @@ public sealed class PlayerPage : UserControl
                 await Dispatcher.UIThread.InvokeAsync(() => hid = !_osdOn);
             }
             Console.WriteLine(hid
-                ? "[设置面板] ✓ 关掉面板之后 OSD 照常自动收"
-                : "[设置面板] ✗ 面板关了 OSD 还赖着 —— 变成永不自动收了");
+                ? "[设置面板] ✓ 关掉弹层之后 OSD 照常自动收"
+                : "[设置面板] ✗ 弹层关了 OSD 还赖着 —— 变成永不自动收了");
             await SelfCheckPanelApplies();
         });
     }
@@ -2120,23 +2409,6 @@ public sealed class PlayerPage : UserControl
     /// 透明的控件照样吃鼠标事件,表现是「上下两头点了没反应」。
     /// 收起时不置 <c>IsVisible=false</c>:过渡没跑完就被摘掉等于没有动画。</para>
     /// </summary>
-    /// <summary>
-    /// 开 / 关设置抽屉。
-    ///
-    /// <para><b>打开时必须把 OSD 一起点亮</b>。抽屉底下没有控制条的时候,
-    /// 它是一块孤零零飘在画面上的面板 —— 而且它下面那条进度条已经不见了,
-    /// 看着就像画错了地方(ShowOsd 里那句「抽屉要跟着收」讲的是反方向的同一件事)。</para>
-    /// <para>顺手把 <c>_lastMove</c> 摆回现在:打开抽屉本身就是一次「人在操作」。</para>
-    /// </summary>
-    private void ShowSettings(bool on)
-    {
-        if (on)
-        {
-            _lastMove = DateTime.UtcNow;
-            ShowOsd(true);
-        }
-        _settings.IsVisible = on;
-    }
 
     /// <summary>OSD 开关了多少次。自检用 —— 指针不动的时候它本该一次都不翻。</summary>
     internal int OsdFlips;
@@ -2151,7 +2423,7 @@ public sealed class PlayerPage : UserControl
         if (Log.DebugOn)
             Log.D("OSD", $"{(on ? "显示" : "收起")}  静止 {(DateTime.UtcNow - _lastMove).TotalMilliseconds:0}ms" +
                          $"  指针在条上={PointerOnOsd()}  指针=({_ptr.X:0},{_ptr.Y:0})" +
-                         $"  面板={_settings.IsVisible}  累计翻转={OsdFlips}");
+                         $"  弹层={_popupOpen}  累计翻转={OsdFlips}");
         foreach (var (b, dir) in new[] { (_top, -1.0), (_bottom, 1.0) })
         {
             // 先换过渡再改值:Transitions 是读到「属性变了」那一刻才生效的,
@@ -2162,9 +2434,6 @@ public sealed class PlayerPage : UserControl
                 on ? "translateY(0px)" : $"translateY({dir * OsdSlide}px)");
             b.IsHitTestVisible = on;
         }
-        // 抽屉要跟着收。留着的话 OSD 收了之后画面上孤零零飘着一块面板,
-        // 而且它下面那条控制条已经没了,看着像画错了。
-        if (!on) _settings.IsVisible = false;
         Cursor = new Cursor(on ? StandardCursorType.Arrow : StandardCursorType.None);
     }
 
@@ -2194,7 +2463,6 @@ public sealed class PlayerPage : UserControl
     private double _renderSum, _renderSlow, _renderCalls, _advanceCalls;
 
     /// <summary>齿轮按钮。「点别处关面板」那一条要把它排除掉,见构造函数。</summary>
-    private Control? _gear;
 
     /// <summary>「为什么没有缩略图」这句话说过了没有。一场播放只说一次。</summary>
     private bool _thumbNoted;
@@ -2473,7 +2741,7 @@ public sealed class PlayerPage : UserControl
         _reportedPaused = paused;
         // 不 await:上报是记账,播放是主线。失败了核心层自己写 warn 日志,
         // 往用户脸上弹红字的话每 10 秒一次就是刷屏。
-        try { _ = _core.EmbyReportProgress(new { s.server, s.token, s.user_id, s.device_id, pos, paused }); }
+        try { _ = _core.EmbyReportProgress(new { s.server, s.token, s.user_id, s.device_id, server_id = _serverId, pos, paused }); }
         catch { /* 同上 */ }
     }
 
@@ -2506,6 +2774,7 @@ public sealed class PlayerPage : UserControl
             _duration = dur;
             _ = LoadTracks();
             _ = LoadChapters();
+            _ = LoadEpisodes();
             /* 超分档位表也要在**这里**重拉一次。
                构造函数里那次拉的时候 mpv 还没解出画面尺寸(video-params/w = 0),
                核心层就不给 will_run —— 于是「只留会生效的档」这条**一次都没生效过**。
@@ -2546,7 +2815,7 @@ public sealed class PlayerPage : UserControl
              挡不住「鼠标停在弹出层上」—— 而后者恰恰是最常见的那三秒。
            面板一关(点别处 / 再点齿轮),这一行立刻恢复作用,OSD 该收还是收。 */
         if (DateTime.UtcNow - _lastMove > TimeSpan.FromSeconds(3) && !paused
-            && !PointerOnOsd() && !_settings.IsVisible)
+            && !PointerOnOsd() && !_popupOpen)
             ShowOsd(false);
 
         // 闩和**目标**比,不和上一次读到的位置比(见字段上的注释)
@@ -2700,7 +2969,7 @@ public sealed class PlayerPage : UserControl
         {
             object arg = new { };
             if (!NoEmby && Nav.Session is { } s)
-                arg = new { s.server, s.token, s.user_id, s.device_id, pos = _position };
+                arg = new { s.server, s.token, s.user_id, s.device_id, server_id = _serverId, pos = _position };
             _ = _core.PlayerStopPlayback(arg);
         }
         catch { /* 退出路径不该因为停播失败卡住 */ }

@@ -197,6 +197,9 @@ func RegisterCommands(version string) {
 	list("emby.isAdmin", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		return defaultClient.IsAdmin(ctx, s)
 	})
+	list("emby.permissions", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
+		return defaultClient.Permissions(ctx, s)
+	})
 	list("emby.refreshItem", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		full, _ := a["full"].(bool)
 		return nil, defaultClient.RefreshItem(ctx, s, str(a, "item_id"), full)
@@ -477,6 +480,17 @@ func sessionFrom(args map[string]any) (*Session, error) {
 	get := func(k string) string {
 		v, _ := args[k].(string)
 		return v
+	}
+	/* server_id 指名道姓要哪一台。跨服选版本 / 跨服起播走的就是这一条 ——
+	   UI 手上只有 server id,没有那台的 token(见 config.SessionOf 的注释)。
+	   ★ 它**压过**同时传来的 server/token:两者不一致时,拿着 A 的 token
+	     去打 B 的条目会得到 401 或者另一条片,而两边都不报错。 */
+	if id := get("server_id"); id != "" {
+		srv, tok, uid, dev, ok := config.Current().SessionOf(id)
+		if !ok {
+			return nil, bus.NewErr(bus.ENotFound, "没有这个服务器:"+id)
+		}
+		return &Session{Server: srv, Token: tok, UserID: uid, DeviceID: dev}, nil
 	}
 	s := &Session{
 		Server:   get("server"),

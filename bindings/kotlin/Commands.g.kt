@@ -31,6 +31,7 @@ object LinPlayerCommandNames {
     val ALL: List<String> = listOf(
         "emby.aggregateOverview",
         "emby.aggregateSearch",
+        "emby.aggregateVersions",
         "emby.blockedList",
         "emby.counts",
         "emby.currentSession",
@@ -52,6 +53,7 @@ object LinPlayerCommandNames {
         "emby.personItems",
         "emby.rankingCategories",
         "emby.rankingFetch",
+        "emby.permissions",
         "emby.refreshItem",
         "emby.relogin",
         "emby.reportProgress",
@@ -95,6 +97,7 @@ object LinPlayerCommandNames {
         "player.getMpvConf",
         "player.getPlaybackPrefs",
         "player.getScreenshotDir",
+        "player.getSkipRange",
         "player.mpvCommand",
         "player.mpvGet",
         "player.mpvSet",
@@ -115,6 +118,7 @@ object LinPlayerCommandNames {
         "player.setSecondarySub",
         "player.setSecondarySubOpts",
         "player.setShaderLevel",
+        "player.setSkipRange",
         "player.setSpeed",
         "player.setSubDelay",
         "player.setSubStyle",
@@ -250,11 +254,13 @@ object LinPlayerCommandNames {
     )
 }
 
-// ---- Emby 浏览与详情 · emby.* (40 条) ----
+// ---- Emby 浏览与详情 · emby.* (42 条) ----
 suspend fun LinPlayerCommands.embyAggregateOverview(args: Map<String, Any?>? = null): JsonElement =
     call("emby.aggregateOverview", args)
 suspend fun LinPlayerCommands.embyAggregateSearch(args: Map<String, Any?>? = null): JsonElement =
     call("emby.aggregateSearch", args)
+suspend fun LinPlayerCommands.embyAggregateVersions(args: Map<String, Any?>? = null): JsonElement =
+    call("emby.aggregateVersions", args)
 suspend fun LinPlayerCommands.embyBlockedList(args: Map<String, Any?>? = null): JsonElement =
     call("emby.blockedList", args)
 suspend fun LinPlayerCommands.embyCounts(args: Map<String, Any?>? = null): JsonElement =
@@ -297,6 +303,8 @@ suspend fun LinPlayerCommands.embyRankingCategories(args: Map<String, Any?>? = n
     call("emby.rankingCategories", args)
 suspend fun LinPlayerCommands.embyRankingFetch(args: Map<String, Any?>? = null): JsonElement =
     call("emby.rankingFetch", args)
+suspend fun LinPlayerCommands.embyPermissions(args: Map<String, Any?>? = null): JsonElement =
+    call("emby.permissions", args)
 suspend fun LinPlayerCommands.embyRefreshItem(args: Map<String, Any?>? = null): JsonElement =
     call("emby.refreshItem", args)
 suspend fun LinPlayerCommands.embyRelogin(args: Map<String, Any?>? = null): JsonElement =
@@ -376,7 +384,7 @@ suspend fun LinPlayerCommands.accountTestConnection(args: Map<String, Any?>? = n
 suspend fun LinPlayerCommands.accountUpdateAccount(args: Map<String, Any?>? = null): JsonElement =
     call("account.updateAccount", args)
 
-// ---- 播放器 · player.* (40 条) ----
+// ---- 播放器 · player.* (42 条) ----
 suspend fun LinPlayerCommands.playerAddSubtitle(args: Map<String, Any?>? = null): JsonElement =
     call("player.addSubtitle", args)
 suspend fun LinPlayerCommands.playerChapterInfo(args: Map<String, Any?>? = null): JsonElement =
@@ -387,6 +395,8 @@ suspend fun LinPlayerCommands.playerGetPlaybackPrefs(args: Map<String, Any?>? = 
     call("player.getPlaybackPrefs", args)
 suspend fun LinPlayerCommands.playerGetScreenshotDir(args: Map<String, Any?>? = null): JsonElement =
     call("player.getScreenshotDir", args)
+suspend fun LinPlayerCommands.playerGetSkipRange(args: Map<String, Any?>? = null): JsonElement =
+    call("player.getSkipRange", args)
 suspend fun LinPlayerCommands.playerMpvCommand(args: Map<String, Any?>? = null): JsonElement =
     call("player.mpvCommand", args)
 suspend fun LinPlayerCommands.playerMpvGet(args: Map<String, Any?>? = null): JsonElement =
@@ -427,6 +437,8 @@ suspend fun LinPlayerCommands.playerSetSecondarySubOpts(args: Map<String, Any?>?
     call("player.setSecondarySubOpts", args)
 suspend fun LinPlayerCommands.playerSetShaderLevel(args: Map<String, Any?>? = null): JsonElement =
     call("player.setShaderLevel", args)
+suspend fun LinPlayerCommands.playerSetSkipRange(args: Map<String, Any?>? = null): JsonElement =
+    call("player.setSkipRange", args)
 suspend fun LinPlayerCommands.playerSetSpeed(args: Map<String, Any?>? = null): JsonElement =
     call("player.setSpeed", args)
 suspend fun LinPlayerCommands.playerSetSubDelay(args: Map<String, Any?>? = null): JsonElement =

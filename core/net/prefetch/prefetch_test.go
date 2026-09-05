@@ -626,3 +626,67 @@ func TestC26_缓存区间报得准(t *testing.T) {
 		t.Fatalf("区间不对: %v(期望 [0, 0.25])", sp[0])
 	}
 }
+
+// 旁路模式 vs 超前拉:**同样只读 1 段,旁路模式必须明显少缓存**。
+//
+// ★ 这条是「关掉多线程加载也要有缩略图」的地基。以前关掉开关**连代理都不起**,
+// 于是缩略图整个不存在;现在代理常开,但不许它替用户提前拉 ——
+// 否则进度条上「有缩略图」那一段会跑到播放位置前面很远,
+// 用户看到的就是「缩略图那个实例比播放的加载得还多」(2026-09-06 用户原话)。
+// ★ 判据是**两种模式相比**,不是一个拍脑袋的绝对阈值:HTTP 客户端和内核会替
+// 我们多收几段,写死阈值等于在拟合那个跟本功能无关的缓冲量。
+func TestPassthrough比超前拉少缓存(t *testing.T) {
+	up := newUpstream(t)
+
+	paths.SetRoot(t.TempDir())
+	pass, err := StartPassthrough(context.Background(), up.URL+"/video.mkv", 8*ChunkSize, nil)
+	if err != nil {
+		t.Fatalf("起旁路代理失败: %v", err)
+	}
+	defer pass.Close()
+	passN := chunksAfterReading(t, pass, ChunkSize)
+
+	ahead := startProxy(t, up, 4, 8*ChunkSize)
+	aheadN := chunksAfterReading(t, ahead, ChunkSize)
+
+	t.Logf("读 1 段之后:旁路 %.1f 段 / 超前拉 %.1f 段(全片 8 段)", passN, aheadN)
+	if passN >= aheadN {
+		t.Fatalf("旁路模式没少拉:旁路 %.1f 段,超前拉 %.1f 段 —— 开关等于没起作用", passN, aheadN)
+	}
+	// 旁路模式**绝不该把整片拉完**:那正是用户看到的「缩略图比播放加载得多」
+	if passN >= 8 {
+		t.Fatalf("旁路模式把整片都拉下来了(%.1f 段)", passN)
+	}
+}
+
+// chunksAfterReading 开一条**不封口**的 Range 连接、只读走 n 字节,
+// 然后盯着环形缓存看它自己又攒了多少段(返回段数,全片 8 段)。
+//
+// ★ 必须**连接还开着**的时候量:一封口 worker 就收了,量到的是收尾后的静止值,
+// 两种模式看起来会一样 —— 那正是这类测试最容易假绿的地方。
+func chunksAfterReading(t *testing.T, h *Handle, n int64) float64 {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, h.URL, nil)
+	req.Header.Set("Range", "bytes=0-")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("连代理失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.CopyN(io.Discard, resp.Body, n); err != nil {
+		t.Fatalf("读不到 %d 字节: %v", n, err)
+	}
+	best := 0.0
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var covered float64
+		for _, sp := range h.CachedSpans() {
+			covered += sp[1] - sp[0]
+		}
+		if covered*8 > best {
+			best = covered * 8
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return best
+}

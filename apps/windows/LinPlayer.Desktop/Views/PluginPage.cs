@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
@@ -609,46 +609,9 @@ public sealed class PluginPage : PageBase
         await ShowDialog(title, Dim(detail), "确定", "取消");
 
     /// <summary>轻量模态框。Avalonia 没有内置的,自己搭一个 Window。</summary>
-    private async Task<bool> ShowDialog(string title, Control body, string okText, string? cancelText)
-    {
-        var owner = TopLevel.GetTopLevel(this) as Window;
-        if (owner is null) return false;
-
-        var tcs = new TaskCompletionSource<bool>();
-        var buttons = new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 10,
-            HorizontalAlignment = HorizontalAlignment.Right,
-        };
-        var dlg = new Window
-        {
-            Title = title, SizeToContent = SizeToContent.WidthAndHeight,
-            CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner,
-        };
-        if (cancelText is not null)
-        {
-            var cancel = new Button { Classes = { "ghost" }, Content = cancelText, MinHeight = 32 };
-            cancel.Click += (_, _) => { tcs.TrySetResult(false); dlg.Close(); };
-            buttons.Children.Add(cancel);
-        }
-        var ok = new Button { Content = okText, MinHeight = 32 };
-        ok.Click += (_, _) => { tcs.TrySetResult(true); dlg.Close(); };
-        buttons.Children.Add(ok);
-
-        dlg.Content = new Border
-        {
-            Padding = new Thickness(18), MinWidth = 380,
-            Child = new StackPanel
-            {
-                Spacing = 14,
-                Children = { new TextBlock { Text = title, Classes = { "h2" } }, body, buttons },
-            },
-        };
-        // 用户直接关窗口 = 取消。不设的话 await 会永远挂着。
-        dlg.Closed += (_, _) => tcs.TrySetResult(false);
-        await dlg.ShowDialog(owner);
-        return await tcs.Task;
-    }
+    /// <summary>弹窗搬进 <see cref="Dialogs"/> 了 —— 删服务器、删下载也要用同一个。</summary>
+    private Task<bool> ShowDialog(string title, Control body, string okText, string? cancelText) =>
+        Dialogs.Show(this, title, body, okText, cancelText);
 
     // ---------------------------------------------------------------- 小工具
 

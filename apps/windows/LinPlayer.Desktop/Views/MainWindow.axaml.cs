@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -129,6 +129,9 @@ public partial class MainWindow : Window
            见 Toast.cs 的文件头。 */
         Toast.Host = (Panel)bar.Parent!;
         Shortcuts.Attach(this);
+        // 键位改过没有只有核心层知道。**先挂后读**:读是异步的,
+        // 等它读完再挂的话,启动那几百毫秒里按什么都没反应。
+        Actions.LoadAsync(_core).ContinueWith(_ => { }, TaskScheduler.Default);
 
         // 掉帧探针:只有 LP_PERF=1 时才真的挂上去
         Perf.WatchJank();
@@ -214,6 +217,7 @@ public partial class MainWindow : Window
         SelfCheckMenu();
         SelfCheckToast();
         SelfCheckKeys();
+        SelfCheckReorder();
         SelfCheckCount();
         SelfCheckHero();
         SelfCheckNavHover();
@@ -565,6 +569,73 @@ public partial class MainWindow : Window
                     : $"[轻提示] ✗ 3 秒后还剩 {Toast.LiveCount} 条 —— 它会一直糊在画面上"));
         });
     }
+    /// <summary>
+    /// 自检:侧栏服务器长按拖拽排序 + 悬浮显示备注。
+    ///
+    /// <para>判据有三条,<b>缺一条这个功能都可能是坏的而看不出来</b>:
+    /// ① 顺序真的换了并且**落了盘**(拿核心层的账号表对,不看界面);
+    /// ② 松手那一下<b>没有顺带切服务器</b> —— 不吃掉 Click 的话拖完就跳走了;
+    /// ③ 悬浮出来的是备注,不是那句「右键有编辑 / 线路 / 图标 / 重新登录」。</para>
+    /// </summary>
+    private void SelfCheckReorder()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_REORDER") != "1") return;
+        _ = Task.Delay(2500).ContinueWith(_ => Dispatcher.UIThread.Post(async () =>
+        {
+            var list = this.FindControl<StackPanel>("ServerList")!;
+            foreach (var c in list.Children.Skip(1))
+                Console.WriteLine($"[排序自检] 悬浮文案 = {ToolTip.GetTip(c)}");
+            if (list.Children.Count < 3)
+            {
+                Console.WriteLine("[排序自检] 只有一台服务器,拖不动 —— 灌两台再跑");
+                return;
+            }
+            Console.WriteLine("[排序自检] 拖之前 " + await OrderText());
+            var wasOn = Nav.Current?.GetType().Name;
+
+            var row = (Control)list.Children[2];
+            var ptr = new Pointer(0, PointerType.Mouse, true);
+            var at = row.TranslatePoint(new Point(8, 8), list) ?? new Point(8, 8);
+            row.RaiseEvent(new PointerPressedEventArgs(row, ptr, list, at, 0,
+                new PointerPointProperties(RawInputModifiers.LeftMouseButton,
+                    PointerUpdateKind.LeftButtonPressed), KeyModifiers.None));
+            // 长按 500ms 才进拖拽态,这里必须真的等过去
+            await Task.Delay(700);
+            var up = new Point(at.X, list.Children[1].Bounds.Y + 2);
+            list.RaiseEvent(new PointerEventArgs(InputElement.PointerMovedEvent, list, ptr, list, up, 0,
+                new PointerPointProperties(RawInputModifiers.LeftMouseButton,
+                    PointerUpdateKind.Other), KeyModifiers.None));
+            /* 松手要发在**那一行上**,不是发在整列上:发在整列上的话
+               Button 根本收不到这一下,于是「Click 有没有被吃掉」这条判据
+               永远是绿的 —— 反向注入当场抓到过。 */
+            row.RaiseEvent(new PointerReleasedEventArgs(row, ptr, list, up, 0,
+                new PointerPointProperties(RawInputModifiers.None,
+                    PointerUpdateKind.LeftButtonReleased), KeyModifiers.None, MouseButton.Left));
+            await Task.Delay(1500);
+            Console.WriteLine("[排序自检] 拖之后 " + await OrderText());
+            /* 「使用中那台跟着走」是这里真正验得到的一条:顺序换了之后
+               活跃账号必须还是原来那台(核心层按 server 修正下标,不是按位置)。 */
+            Console.WriteLine($"[排序自检] 当前页 {wasOn} -> {Nav.Current?.GetType().Name}");
+            /* ⚠ **「松手那下有没有顺带切服务器」这一条自检验不到**,别当它绿了。
+               合成的 Pointer 抓不住捕获,Avalonia 的 Button 压根不会发 Click ——
+               把 e.Handled 那行删掉再跑,这里照样是「顺序对、活跃对」。
+               反向注入当场抓到的,所以这条只能手点。 */
+        }));
+    }
+
+    /// <summary>核心层眼里的账号顺序。<b>不看界面</b> —— 界面上摆着的可能根本没落盘。</summary>
+    private async Task<string> OrderText()
+    {
+        try
+        {
+            var rows = await _core!.AccountListAccounts();
+            return string.Join(" / ", rows.EnumerateArray().Select(a =>
+                Str(a, "name") + (a.TryGetProperty("active", out var v) && v.ValueKind == JsonValueKind.True
+                    ? "(使用中)" : "")));
+        }
+        catch (Exception e) { return "拉不到:" + e.Message; }
+    }
+
 
     /// <summary>
     /// 自检:全局快捷键(用户 2026-09-04「其他页面也需要快捷键设置,全局都需要」)。
@@ -1257,7 +1328,7 @@ public partial class MainWindow : Window
             // 会话拉一次存住:命令层迁移期还要显式传 server/token/user_id,
             // 每页各拉一次就是每页多一次往返。
             try { Nav.Session = Sess.From(await _core.EmbyCurrentSession()); } catch { /* 非 Emby 账号没有会话 */ }
-            Nav.Root(Home());
+            GoDefaultPage();
             SelfCheckJump();
             await StartupDeepLinkAsync();
         }
@@ -1304,8 +1375,7 @@ public partial class MainWindow : Window
     private async Task AfterServerChange()
     {
         await OnServerSwitched();
-        this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
-        Nav.Root(Home());
+        GoDefaultPage();
     }
 
     /// <summary>
@@ -1336,14 +1406,30 @@ public partial class MainWindow : Window
         try { Nav.Session = Sess.From(await _core!.EmbyCurrentSession()); } catch { /* 同上 */ }
         this.FindControl<StackPanel>("NavList")!.IsVisible = true;
         this.FindControl<StackPanel>("ServerSection")!.IsVisible = true;
-        this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
-        Nav.Root(Home());
+        GoDefaultPage();
         // 真机自检:登录成功之后再跳到指定页面(LP_SELFCHECK_PAGE 那会儿装的是 login:...)
         SelfCheckJump(Environment.GetEnvironmentVariable("LP_SELFCHECK_AFTER"));
     }
 
     /// <summary>当前源的显示名。文件浏览页的面包屑根节点用它。</summary>
     private string _sourceName = "";
+
+    /// <summary>当前账号是浏览型源(本地文件夹)吗。见 <see cref="UpdateServerChip"/>。</summary>
+    private bool _isBrowseAccount;
+
+    /// <summary>
+    /// 回这个账号的默认页。**浏览型源的默认页是文件浏览**,不是首页 ——
+    /// 它没有 Hero / 继续观看 / 合集,落到首页只会看到一页空的。
+    ///
+    /// <para>冷启动、切服务器、加完、删完、登录完五个入口都走这里:各写各的话,
+    /// 漏掉的那个入口就是「切到本地源之后停在一页空首页上」。</para>
+    /// </summary>
+    private void GoDefaultPage()
+    {
+        var id = _isBrowseAccount ? "NavBrowse" : "NavHome";
+        this.FindControl<RadioButton>(id)!.IsChecked = true;
+        Nav.Root(_isBrowseAccount ? new BrowsePage(_core!, _sourceName) : Home());
+    }
 
     /// <summary>
     /// 刷新侧栏的服务器区 + 按账号类型开关导航入口。
@@ -1363,6 +1449,7 @@ public partial class MainWindow : Window
         var kind = active.TryGetProperty("source_kind", out var sk) && sk.ValueKind == JsonValueKind.String
             ? sk.GetString() ?? "emby" : "emby";
         var isBrowse = kind.Length > 0 && kind != "emby";
+        _isBrowseAccount = isBrowse;
         _sourceName = active.TryGetProperty("name", out var sn) ? sn.GetString() ?? "" : "";
 
         Dispatcher.UIThread.Post(() =>
@@ -1377,6 +1464,12 @@ public partial class MainWindow : Window
             void Gate(string ctl, string id, bool want) =>
                 this.FindControl<RadioButton>(ctl)!.IsVisible = want && Features.On(id);
 
+            /* 浏览型源(本地文件夹)**没有首页那一套**:Hero、继续观看、合集
+               全是 Emby 的东西,它一样都没有 —— 亮着只会点进一页空的。
+               「下载」同理:本机文件夹里的片子不需要再下载到本机。
+               用户 2026-09-06:「本地播放没那么多东西,显示出来文件夹的视频就行了」。 */
+            Gate("NavHome", "nav.home", !isBrowse);
+            Gate("NavDownload", "nav.download", !isBrowse);
             Gate("NavBrowse", "nav.browse", isBrowse);
             Gate("NavCatalog", "nav.catalog", isBrowse);
             Gate("NavLibrary", "nav.library", !isBrowse);
@@ -1404,6 +1497,8 @@ public partial class MainWindow : Window
         var list = this.FindControl<StackPanel>("ServerList")!;
         list.Children.Clear();
 
+        WireReorderOnce(list);
+
         var add = NavRow("\uE710", "添加服务器", null);
         add.Click += (_, _) => GoAddServer();
         _addRow = add;
@@ -1424,8 +1519,13 @@ public partial class MainWindow : Window
                那一帧就是用户看到的「闪回默认图」。 */
             var row = NavRow("\uE968", name, on ? "on" : null);
             if (_serverIcons.TryGetValue(server, out var known)) PaintIcon(row, known);
-            ToolTip.SetTip(row, on ? $"{name}(使用中) —— 右键有编辑 / 线路 / 图标 / 重新登录"
-                                   : $"切到 {name} —— 右键有编辑 / 线路 / 图标 / 重新登录");
+            /* 悬浮出来的是**备注**,不是操作说明。
+               原先挂的「右键有编辑 / 线路 / 图标 / 重新登录」对看过第二遍的人就是噪音,
+               而 remark 这个字段核心层一直在列表里下发(account.go 的 List),
+               界面上一处都没显示过。备注为空时回落到服务器名 —— 名字被侧栏截断时
+               悬浮仍然告诉得了「这是哪一台」。 */
+            var remark = Str(a, "remark");
+            ToolTip.SetTip(row, remark.Length > 0 ? remark : on ? $"{name}(使用中)" : name);
             row.Click += async (_, _) =>
             {
                 /* 已经在用的那台<b>不是「点了没反应」</b>(用户 2026-09-04:
@@ -1435,8 +1535,7 @@ public partial class MainWindow : Window
                    会话没变,所以不必再打一次 setActiveServer,回首页就够了。 */
                 if (on)
                 {
-                    this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
-                    Nav.Root(Home());
+                    GoDefaultPage();
                     return;
                 }
                 try
@@ -1447,12 +1546,12 @@ public partial class MainWindow : Window
                     await OnServerSwitched();
                     // 切完必须**换页**:留在原来那一页的话,页面上还是上一台服务器的内容,
                     // 而侧栏已经把新的那台标成使用中了 —— 那是界面在撒谎。
-                    this.FindControl<RadioButton>("NavHome")!.IsChecked = true;
-                    Nav.Root(Home());
+                    GoDefaultPage();
                 }
                 catch (Exception e) { Console.WriteLine("[切服务器] " + e.Message); }
             };
             row.ContextMenu = ServerMenu(server, name);
+            WireHold(row, list);
             if (on) _activeRow = row;
             list.Children.Add(row);
             _ = FillServerIcon(row, server);
@@ -1462,10 +1561,118 @@ public partial class MainWindow : Window
         SyncCollapsed();
     }
 
+    // —— 侧栏服务器长按拖拽排序 ——
+    private bool _reorderWired;
+    private DispatcherTimer? _hold;
+    private Button? _dragRow;
+    private int _dragFrom = -1;
+    private Point _pressAt;
+
+    private void CancelHold() { _hold?.Stop(); _hold = null; }
+
+    /// <summary>
+    /// 长按 500ms 进拖拽态(用户 2026-09-06:「长按即可排序」)。
+    ///
+    /// <para>不做「按下即拖」:左键切换服务器才是这一列的主功能,按下即拖会把
+    /// 每一次轻微手抖变成一次排序。</para>
+    /// <para>只有一台服务器时不进拖拽态 —— 排序需要两个位置。</para>
+    /// </summary>
+    private void WireHold(Button row, StackPanel list)
+    {
+        row.AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            if (!e.GetCurrentPoint(row).Properties.IsLeftButtonPressed) return;
+            _pressAt = e.GetPosition(list);
+            CancelHold();
+            var t = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            t.Tick += (_, _) =>
+            {
+                CancelHold();
+                if (list.Children.Count <= 2) return;
+                _dragRow = row;
+                _dragFrom = list.Children.IndexOf(row);
+                row.Opacity = 0.55;
+            };
+            _hold = t;
+            t.Start();
+        }, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>
+    /// 拖动与落库。<b>挂在整列上,不是挂在每一行上</b> ——
+    /// 只挂行的话指针拖到第二行时第一行就收不到事件了,拖拽当场停住。
+    ///
+    /// <para>松手要**吃掉这一下**:不吃的话 Button 照常发 Click,
+    /// 排完序顺手把服务器切了。隧道阶段才吃得掉,冒泡阶段 Button 已经处理完。</para>
+    /// <para>这一列会被反复重建,而 handler 挂在 <c>list</c> 自己身上不随重建消失,
+    /// 所以只挂一次。</para>
+    /// </summary>
+    private void WireReorderOnce(StackPanel list)
+    {
+        if (_reorderWired) return;
+        _reorderWired = true;
+
+        list.AddHandler(PointerMovedEvent, (_, e) =>
+        {
+            var at = e.GetPosition(list);
+            if (_dragRow is null)
+            {
+                // 长按还没到点就挪开了 = 他想滚动,不是想排序
+                if (_hold is not null && (Math.Abs(at.X - _pressAt.X) > 6 || Math.Abs(at.Y - _pressAt.Y) > 6))
+                    CancelHold();
+                return;
+            }
+            var now = list.Children.IndexOf(_dragRow);
+            var to = now;
+            // 第 0 个是「添加服务器」,它不参与排序
+            for (var i = 1; i < list.Children.Count; i++)
+            {
+                var mid = list.Children[i].Bounds.Y + list.Children[i].Bounds.Height / 2;
+                if (i < now && at.Y < mid) { to = i; break; }
+                if (i > now && at.Y > mid) to = i;
+            }
+            if (to != now) list.Children.Move(now, to);
+        }, RoutingStrategies.Bubble);
+
+        list.AddHandler(PointerReleasedEvent, (_, e) =>
+        {
+            CancelHold();
+            if (_dragRow is not { } row) return;
+            var to = list.Children.IndexOf(row);
+            _dragRow = null;
+            row.Opacity = 1;
+            e.Handled = true;
+            if (to != _dragFrom) _ = SaveOrder(_dragFrom - 1, to - 1);
+        }, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>
+    /// 落库。<b>拿命令的返回值重建这一列</b>,不是就地认下拖出来的顺序 ——
+    /// 失败时界面上摆着一个根本没落盘的顺序,下次启动它自己变回去,
+    /// 而用户会认为「排序功能是坏的」。
+    /// </summary>
+    private async Task SaveOrder(int from, int to)
+    {
+        JsonElement rows;
+        try { rows = await _core!.AccountReorderAccounts(new { from, to }); }
+        catch (Exception e)
+        {
+            Console.WriteLine("[服务器排序] " + e.Message);
+            // 排序失败之后连账号表都拉不到 = 核心层这会儿整个不通。
+            // 静默走开是对的:上一句已经把真正的原因记进日志了,
+            // 这里再弹一次「拉不到账号表」只会盖住那条真错。
+            try { rows = await _core!.AccountListAccounts(); }
+            catch { return; }
+        }
+        if (rows.ValueKind != JsonValueKind.Array) return;
+        var list = rows.EnumerateArray().ToList();
+        Dispatcher.UIThread.Post(() => BuildServerList(list));
+    }
+
     /// <summary>
     /// 右键菜单:把原来服务器页上那四组编辑动作搬过来。
     ///
-    /// <para>删除单独列在分隔线下面,并且**它自己再确认一次** ——
+    /// <para>删除单独列在分隔线下面,并且**弹窗再确认一次** ——
     /// 设置页整体是「零二次确认」的,但删账号不可逆,这一条是例外。</para>
     /// </summary>
     private ContextMenu ServerMenu(string server, string name)
@@ -1487,8 +1694,11 @@ public partial class MainWindow : Window
         var del = new MenuItem { Header = "删除这台服务器" };
         del.Click += async (_, _) =>
         {
-            // 第一次点变成「确认删除?」,再点一次才真删
-            if ((string?)del.Header != "确认删除?") { del.Header = "确认删除?"; return; }
+            /* 弹窗确认,不再是「点两下」。右键菜单点完第一下就关了,
+               第二下得**重新右键**才点得到 —— 那不叫二次确认,叫让人多操作一遍
+               (用户 2026-09-06 原话:「要重新右键服务器才能删除,麻烦」)。 */
+            if (!await Dialogs.Confirm(this, $"删除「{name}」?",
+                    "只从本机移除这台服务器的登录信息,服务器上的内容不受影响。", "删除")) return;
             try
             {
                 await _core!.AccountRemoveAccount(new { server_id = server });

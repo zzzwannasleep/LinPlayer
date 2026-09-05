@@ -1,4 +1,4 @@
-namespace LinPlayer.Desktop.Views;
+﻿namespace LinPlayer.Desktop.Views;
 
 /// <summary>
 /// 功能开关 —— 哪些东西现在给用户看得见。
@@ -25,7 +25,9 @@ public static class Features
         "nav.ranking",     // 排行榜(弹弹Play / TMDB)
         "nav.calendar",    // 追剧日历(Trakt / Bangumi)
         "nav.plugins",     // 插件市场
-        "nav.browse",      // 文件浏览(网盘 / 局域网源)—— 本来就是隐藏的
+        /* nav.browse 2026-09-06 放出来。它现在只管**本地文件夹源**一个 ——
+           网盘和局域网源已经从代码里删净了。关着它的后果是本地源加得进来、
+           侧栏却没有入口,正是这张表的注释警告过的那种「登进去就是死路」。 */
         "nav.catalog",     // 影视目录(VOD 插件源)—— 本来就是隐藏的
 
         // —— 设置分组 ——

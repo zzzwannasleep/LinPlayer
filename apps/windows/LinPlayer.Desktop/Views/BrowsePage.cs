@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -36,6 +36,8 @@ public sealed class BrowsePage : PageBase
     private readonly List<(string Id, string Name)> _path = [];
 
     private List<JsonElement> _entries = [];
+    /// <summary>过滤掉非视频之前的条数。用来分清「空文件夹」和「没有视频」。</summary>
+    private int _rawCount;
     private string _loadingDir = "";
 
     public BrowsePage(CoreClient core, string sourceName)
@@ -92,7 +94,13 @@ public sealed class BrowsePage : PageBase
         // 慢协议下用户可能已经点进别的目录了,别把旧结果画上去
         if (_loadingDir != dirId) return;
 
-        _entries = arr.ValueKind == JsonValueKind.Array ? arr.EnumerateArray().ToList() : [];
+        var all = arr.ValueKind == JsonValueKind.Array ? arr.EnumerateArray().ToList() : [];
+        /* **只留文件夹和视频**(用户 2026-09-06:「本地播放没那么多东西,
+           显示出来文件夹的视频就行了」)。封面图、nfo、字幕文件在这一页上点不开,
+           列出来只是让用户在里面找视频。
+           原始条数留着 —— 「一个视频都没有」和「这个文件夹是空的」是两句不同的话。 */
+        _rawCount = all.Count;
+        _entries = all.Where(e => Bool(e, "is_dir") || Bool(e, "is_video")).ToList();
         Render();
     }
 
@@ -108,7 +116,8 @@ public sealed class BrowsePage : PageBase
         {
             // **空目录就说空目录**。说成「加载失败」的话,用户会去重试、去查网络、
             // 去怀疑密码 —— 而实际上这里本来就没有东西。
-            _status.Text = "这个文件夹是空的。";
+            // 有东西但一个视频都没有是**另一句话**:说成「空的」他会去怀疑没读到。
+            _status.Text = _rawCount > 0 ? "这个文件夹里没有视频。" : "这个文件夹是空的。";
             return;
         }
         _status.Text = shown.Count == 0

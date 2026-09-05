@@ -24,7 +24,7 @@ import (
 //     混用的结果是跨服匹配到别的剧上去 —— 而且不报错。
 func TestSeriesTmdbIDCaches(t *testing.T) {
 	tmdbMu.Lock()
-	tmdbCache = map[string]*string{}
+	provCache = map[string]map[string]string{}
 	tmdbMu.Unlock()
 
 	var hits atomic.Int64

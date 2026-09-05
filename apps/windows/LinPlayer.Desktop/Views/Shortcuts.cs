@@ -15,50 +15,59 @@ namespace LinPlayer.Desktop.Views;
 /// 全局快捷键。用户 2026-09-04:「不仅仅是播放页,其他页面也需要快捷键」——
 /// 在这之前只有播放页有键盘,其余每一页都必须用鼠标。
 ///
-/// <para>一张表既是行为也是帮助(<see cref="Table"/>):分两处写的必然结果是帮助表
-/// 在撒谎,而用户按了没反应只会认为「快捷键是坏的」。挂在隧道阶段 —— 冒泡阶段
-/// 先到的是当前有焦点的那个控件,而 Avalonia 的 Button 会把 Space / Enter 当成
-/// 「按我」吃掉(播放页那条「空格变成打开设置面板」就是这么来的)。</para>
+/// <para>键位表搬进 <see cref="Actions"/>(2026-09-06):这里只留「动作 id → 干什么」。
+/// 原先键位、行为、帮助文案三处各写一遍,帮助表迟早在撒谎,而用户按了没反应
+/// 只会认为「快捷键是坏的」。挂在隧道阶段 —— 冒泡阶段先到的是当前有焦点的那个控件,
+/// 而 Avalonia 的 Button 会把 Space / Enter 当成「按我」吃掉。</para>
 /// </summary>
 internal static class Shortcuts
 {
-    /// <summary>一条快捷键。<paramref name="Run"/> 返回 false = 这一下没吃掉,交给别人。</summary>
-    private sealed record Key1(string Keys, string What, Func<MainWindow, bool> Run);
+    /// <summary>一行帮助:键位 + 说明。</summary>
+    private sealed record Key1(string Keys, string What);
 
     /// <summary>
-    /// 全表。<b>加键就加在这儿,帮助浮层会自己跟着变</b>。
+    /// 动作 id → 干什么。返回 false = 这一下没吃掉,交给别人。
     ///
-    /// <para>分组靠 <see cref="Group"/> 里的顺序,不在这里存组名 ——
-    /// 表本身要保持「一行一个键」的形状,好逐行核对。</para>
+    /// <para><b>加快捷键先加到 <see cref="Actions.All"/></b>,再在这里补一条实现 ——
+    /// 只加这里的话设置页和帮助浮层都看不见它。</para>
     /// </summary>
-    private static readonly Key1[] Table =
-    [
-        new("Ctrl+H",     "首页",        w => w.ShortcutNav("NavHome")),
-        new("Ctrl+L",     "媒体库",      w => w.ShortcutNav("NavLibrary")),
-        new("/ 或 Ctrl+F", "搜索",        w => w.ShortcutNav("NavSearch")),
-        new("Ctrl+I",     "收藏",        w => w.ShortcutNav("NavFavorites")),
-        new("Ctrl+J",     "下载",        w => w.ShortcutNav("NavDownload")),
-        new("Ctrl+,",     "设置",        w => w.ShortcutNav("NavSettings")),
+    private static readonly Dictionary<string, Func<MainWindow, bool>> Run = new()
+    {
+        ["nav.home"] = w => w.ShortcutNav("NavHome"),
+        ["nav.library"] = w => w.ShortcutNav("NavLibrary"),
+        ["nav.search"] = w => w.ShortcutNav("NavSearch"),
+        ["nav.favorites"] = w => w.ShortcutNav("NavFavorites"),
+        ["nav.download"] = w => w.ShortcutNav("NavDownload"),
+        ["nav.settings"] = w => w.ShortcutNav("NavSettings"),
 
-        new("Alt+← 或 退格", "返回上一页",  _ => { if (!Nav.CanBack) return false; Nav.Back(); return true; }),
-        new("Ctrl+B",     "收起 / 展开侧栏", w => { w.ShortcutToggleSidebar(); return true; }),
-        new("F11",        "窗口最大化 / 还原", w => { w.ShortcutToggleMaximize(); return true; }),
-        new("?",          "这张表",      w => { ToggleHelp(w); return true; }),
-        new("Esc",        "关掉这张表 / 返回", w => Escape(w)),
-    ];
+        ["win.back"] = _ => { if (!Nav.CanBack) return false; Nav.Back(); return true; },
+        ["win.sidebar"] = w => { w.ShortcutToggleSidebar(); return true; },
+        ["win.maximize"] = w => { w.ShortcutToggleMaximize(); return true; },
+        ["win.help"] = w => { ToggleHelp(w); return true; },
+        ["win.escape"] = Escape,
+    };
 
-    /// <summary>帮助浮层里的分组:标题 + 这一组占表里的前几行。</summary>
-    private static readonly (string Title, int From, int To)[] Group =
-    [
-        ("去哪儿", 0, 6),
-        ("窗口", 6, 11),
-    ];
-
-    public static void Attach(MainWindow w) =>
+    public static void Attach(MainWindow w)
+    {
         w.AddHandler(InputElement.KeyDownEvent, (_, e) =>
         {
             if (Match(w, e)) e.Handled = true;
         }, RoutingStrategies.Tunnel);
+
+        /* 鼠标侧键也走这张表(用户 2026-09-06 要「所有功能都能用快捷键」——
+           而鼠标键就是键)。左右键**不在全局收**:那两个键在列表、卡片、
+           输入框上各自有意义,全局抢走的话整个界面都点不动了。 */
+        w.AddHandler(InputElement.PointerPressedEvent, (_, e) =>
+        {
+            var p = e.GetCurrentPoint(w).Properties;
+            if (!p.IsXButton1Pressed && !p.IsXButton2Pressed) return;
+            if (Nav.Current is PlayerPage) return;
+            if (Fire(w, Actions.Hit(Actions.Global, Actions.Spec(p)))) e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+    }
+
+    private static bool Fire(MainWindow w, string? id) =>
+        id is not null && Run.TryGetValue(id, out var go) && go(w);
 
     private static bool Match(MainWindow w, KeyEventArgs e)
     {
@@ -68,40 +77,14 @@ internal static class Shortcuts
            带 Ctrl 的仍然接:Ctrl+F 在输入框里也该跳去搜索。 */
         var typing = w.FocusManager?.GetFocusedElement() is TextBox or AutoCompleteBox;
         var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
-        if (typing && !ctrl && e.Key != Avalonia.Input.Key.Escape) return false;
+        if (typing && !ctrl && e.Key != Key.Escape) return false;
 
         /* 播放页自己有一整套键(空格 / JKL / 数字跳转…),<b>这里一律让开</b>。
            不让的话 Ctrl 之外的键会被两边同时解释,而播放页那套才是用户当下要的。
            Esc 也让开:播放页的 Esc 是「退全屏 / 退出播放」,语义比这里更具体。 */
         if (Nav.Current is PlayerPage) return false;
 
-        var name = Name(e);
-        foreach (var k in Table)
-            if (k.Keys.Split(" 或 ").Any(one => one == name))
-                return k.Run(w);
-        return false;
-    }
-
-    /// <summary>把一次按键翻成表里那种写法。<b>翻译只此一处</b> —— 表里写什么就得能翻出什么。</summary>
-    private static string Name(KeyEventArgs e)
-    {
-        var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
-        var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
-        var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-        return e.Key switch
-        {
-            Avalonia.Input.Key.Escape => "Esc",
-            Avalonia.Input.Key.F11 => "F11",
-            Avalonia.Input.Key.Back when !ctrl && !alt => "退格",
-            Avalonia.Input.Key.Left when alt => "Alt+←",
-            // 「?」在主键盘上是 Shift+/,Avalonia 报的键是 OemQuestion(或 Divide)
-            Avalonia.Input.Key.OemQuestion when shift => "?",
-            Avalonia.Input.Key.OemQuestion when !ctrl => "/",
-            Avalonia.Input.Key.OemComma when ctrl => "Ctrl+,",
-            _ when ctrl && e.Key is >= Avalonia.Input.Key.A and <= Avalonia.Input.Key.Z =>
-                "Ctrl+" + (char)('A' + (e.Key - Avalonia.Input.Key.A)),
-            _ => "",
-        };
+        return Fire(w, Actions.Hit(Actions.Global, Actions.Spec(e)));
     }
 
     // ---------------------------------------------------------------- 帮助浮层
@@ -118,6 +101,10 @@ internal static class Shortcuts
         return true;
     }
 
+    /// <summary>
+    /// 这张表。<b>逐列从 <see cref="Actions.All"/> 现算</b>,包括用户改过的键位 ——
+    /// 照着默认值画的话,改完键的人看到的帮助是错的。
+    /// </summary>
     private static void ToggleHelp(MainWindow w)
     {
         if (Toast.Host is not { } host) return;
@@ -128,29 +115,22 @@ internal static class Shortcuts
             return;
         }
         var cols = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 26 };
-        foreach (var (title, from, to) in Group)
+        // 播放页那一栏也在这儿:用户在播放页按不出这张表(那边 Esc 是退出播放),
+        // 所以这里是他唯一看得到播放页键位的地方。
+        foreach (var g in Actions.All.GroupBy(a => a.Group))
         {
             var col = new StackPanel { Spacing = 6, MinWidth = 210 };
             col.Children.Add(new TextBlock
             {
-                Text = title, FontSize = 11.5, FontWeight = FontWeight.SemiBold,
+                Text = g.Key, FontSize = 11.5, FontWeight = FontWeight.SemiBold,
                 Foreground = new SolidColorBrush(Color.FromRgb(0x8a, 0x92, 0xa6)),
                 Margin = new Thickness(0, 0, 0, 2),
             });
-            for (var i = from; i < to && i < Table.Length; i++) col.Children.Add(Line(Table[i]));
+            foreach (var a in g)
+                col.Children.Add(Line(new Key1(Actions.KeysOf(a.Id), a.Name)));
+            if (g.Key == "播放") col.Children.Add(Line(new Key1("0-9", "跳到百分之几")));
             cols.Children.Add(col);
         }
-        // 播放页那一套单独列一栏:用户在播放页按不出这张表(那边 Esc 是退出),
-        // 所以这里就是他唯一能看到它们的地方。
-        var pc = new StackPanel { Spacing = 6, MinWidth = 210 };
-        pc.Children.Add(new TextBlock
-        {
-            Text = "播放页", FontSize = 11.5, FontWeight = FontWeight.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x8a, 0x92, 0xa6)),
-            Margin = new Thickness(0, 0, 0, 2),
-        });
-        foreach (var (k, what) in PlayerKeys) pc.Children.Add(Line(new Key1(k, what, _ => false)));
-        cols.Children.Add(pc);
 
         _help = new Border
         {
@@ -171,13 +151,13 @@ internal static class Shortcuts
                     {
                         new TextBlock
                         {
-                            Text = "键盘快捷键", FontSize = 15, FontWeight = FontWeight.SemiBold,
+                            Text = "快捷键", FontSize = 15, FontWeight = FontWeight.SemiBold,
                             Foreground = Brushes.White,
                         },
                         cols,
                         new TextBlock
                         {
-                            Text = "按 ? 或 Esc 关掉", FontSize = 11.5,
+                            Text = "设置 → 快捷键 里可以改;按 ? 或 Esc 关掉", FontSize = 11.5,
                             Foreground = new SolidColorBrush(Color.FromRgb(0x6d, 0x74, 0x86)),
                         },
                     },
@@ -189,26 +169,9 @@ internal static class Shortcuts
         host.Children.Add(_help);
     }
 
-    /// <summary>播放页那套键。 这里只是**抄一份给人看**,行为在 PlayerPage.OnKey 里;
-    /// 改了那边记得同步这里 —— 自检(LP_SELFCHECK_KEYS)会逐条核对两边对不对得上。</summary>
-    internal static readonly (string Keys, string What)[] PlayerKeys =
-    [
-        ("空格 / K", "播放 / 暂停"),
-        ("← →", "后退 / 前进 10 秒"),
-        ("↑ ↓", "音量 ±5"),
-        ("0-9", "跳到百分之几"),
-        ("F / 回车", "全屏"),
-        ("M", "静音"),
-        ("U", "音轨 / 字幕 / 画质"),
-        ("S", "截图"),
-        ("N", "下一集"),
-        ("< >", "减速 / 加速"),
-        ("Esc", "退全屏 / 退出播放"),
-    ];
-
     private static Control Line(Key1 k) => new Grid
     {
-        ColumnDefinitions = new ColumnDefinitions("108,*"),
+        ColumnDefinitions = new ColumnDefinitions("148,*"),
         Children =
         {
             new Border
@@ -221,6 +184,7 @@ internal static class Shortcuts
                 {
                     Text = k.Keys, FontSize = 11.5, FontFamily = new FontFamily("Consolas, monospace"),
                     Foreground = new SolidColorBrush(Color.FromRgb(0xd6, 0xdb, 0xe6)),
+                    TextWrapping = TextWrapping.Wrap,
                 },
             },
             new TextBlock
@@ -233,15 +197,23 @@ internal static class Shortcuts
         },
     };
 
-    /// <summary>自检用:表里一共几条、帮助浮层开着没有。</summary>
-    internal static int Count => Table.Length;
+    // ---------------------------------------------------------------- 自检
+
+    /// <summary>自检用:播放页那一栏。<b>现在是从同一张表算出来的</b>,
+    /// 不再是抄一份 —— 两边对不上这种事从此不可能发生。</summary>
+    internal static (string Keys, string What)[] PlayerKeys =>
+        Actions.All.Where(a => a.Scope == Actions.Player)
+                   .Select(a => (Actions.KeysOf(a.Id), a.Name)).ToArray();
+
+    internal static int Count => Run.Count;
 
     internal static bool HelpOpen => _help is not null;
 
     /// <summary>自检用:把这一下按键喂进来,回「吃掉了没有」。</summary>
-    internal static bool SelfCheckPress(MainWindow w, Avalonia.Input.Key key, KeyModifiers mods) =>
+    internal static bool SelfCheckPress(MainWindow w, Key key, KeyModifiers mods) =>
         Match(w, new KeyEventArgs { Key = key, KeyModifiers = mods, RoutedEvent = InputElement.KeyDownEvent });
 
-    /// <summary>自检用:表里那些键名。</summary>
-    internal static IEnumerable<string> Names => Table.Select(k => k.Keys);
+    /// <summary>自检用:全局那些键位。</summary>
+    internal static IEnumerable<string> Names =>
+        Actions.All.Where(a => a.Scope == Actions.Global).Select(a => Actions.KeysOf(a.Id));
 }

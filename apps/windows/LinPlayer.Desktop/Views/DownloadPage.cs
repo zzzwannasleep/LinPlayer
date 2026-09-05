@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -260,19 +260,15 @@ public sealed class DownloadPage : PageBase
             actions.Children.Add(resume);
         }
 
-        // 删除是**不可逆**的(连文件一起删),所以要二次确认。
-        // 设置页全页零二次确认是有意的,而这里是那条规则的例外 —— 同「删除服务器」。
+        /* 删除是**不可逆**的(连文件一起删),所以要确认。
+           走全站同一个弹窗,不再是「点一下变成确认删除、再点一次」——
+           那种就地变文案的做法在卡片上也很容易误触第二下。 */
         var del = new Button { Content = "✕", Classes = { "ghost" } };
-        del.Click += (_, e) =>
+        del.Click += async (_, e) =>
         {
             e.Handled = true;               // 别让这一下顺着卡片冒泡上去起播
-            if (del.Content as string == "✕")
-            {
-                del.Content = "确认删除?";
-                del.Classes.Add("danger");
-                Toast.Show("再点一次就连文件一起删掉");
-                return;
-            }
+            if (!await Dialogs.Confirm(this, "删掉这条下载?",
+                    "文件也会一起删掉,删了拿不回来。", "删除")) return;
             _ = Act(() => _core.DownloadRemove(new { id }), "已删除(文件也删了)");
         };
         actions.Children.Add(del);

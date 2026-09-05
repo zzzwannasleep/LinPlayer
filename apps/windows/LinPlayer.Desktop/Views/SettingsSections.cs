@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -584,6 +584,63 @@ public static class SettingsSections
                      "查完记得切回 warn —— debug 档一场播放能写几万行。"),
                 Field("档位", pick),
                 Row(open, hint),
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------- 跳过片头片尾
+
+    /// <summary>
+    /// 自动跳过片头片尾。
+    ///
+    /// <para>这一组以前<b>一个入口都没有</b>:核心层的 skip_intro / skip_outro 齐全、
+    /// 单测也写了,默认却是关的 —— 于是这个功能从上线起一次都没跑过。</para>
+    /// <para>四个开关分开给:认不认这一段、要不要替用户按、缺数据时能不能联网,
+    /// 是三件不同的事,合成一个开关就总有人被迫连带着打开自己不想要的那件。</para>
+    /// </summary>
+    public static Control SkipSegments(CoreClient core, JsonElement p)
+    {
+        var hint = Hint();
+        var intro = new CheckBox { Content = "识别片头", IsChecked = Bool(p, "skip_intro") };
+        var outro = new CheckBox { Content = "识别片尾", IsChecked = Bool(p, "skip_outro") };
+        var auto = new CheckBox { Content = "到了就直接跳过去(不用点按钮)", IsChecked = Bool(p, "skip_auto") };
+        var online = new CheckBox
+        {
+            Content = "服务器没有数据时,联网去第三方库查",
+            IsChecked = Bool(p, "skip_use_online"),
+        };
+
+        async void Save()
+        {
+            try
+            {
+                await core.PlayerSetPlaybackPrefs(new
+                {
+                    settings = new
+                    {
+                        skip_intro = intro.IsChecked == true,
+                        skip_outro = outro.IsChecked == true,
+                        skip_auto = auto.IsChecked == true,
+                        skip_use_online = online.IsChecked == true,
+                    },
+                });
+                hint.Text = "已保存,下一次起播生效。";
+            }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        }
+        foreach (var c in new[] { intro, outro, auto, online }) c.IsCheckedChanged += (_, _) => Save();
+
+        return Group("跳过片头片尾", new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                intro, outro, auto, online,
+                Note("先用服务器自己刮的章节;没有章节时按 IntroDB → TheIntroDB → AniSkip 的顺序问一遍,"
+                     + "缺片头补片头、缺片尾补片尾。三个都是免费接口,不需要账号。"),
+                Note("章节和第三方库都对不上的片子,可以在播放页的设置抽屉里手动量一次 ——"
+                     + "手动设的按剧存,同一部剧只用设一遍。"),
+                hint,
             },
         });
     }

@@ -183,9 +183,15 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	}, nil
 }
 
-// startPrefetch 按需起多线程加载代理,返回真正交给 mpv 的地址。
+// startPrefetch 起本地代理,返回真正交给 mpv 的地址。
 //
-// ★ 开关按**服务器**查(账号主键),不是全局:它是**优化**不是功能 ——
+// ★★ **代理常开,开关只管「要不要超前拉」**(2026-09-06 改)。
+// 从前是「开关关着 → 连代理都不起」,而缩略图和进度条上那条「哪一段有图」的带子
+// 唯一的字节来源就是代理的环形缓存 —— 于是「不开多线程加载就没有缩略图」。
+// 那是两个功能挂在一个开关上,用户 2026-09-06 点名。现在关着开关也起代理,
+// 只是**一段都不超前拉**:mpv 读过什么,本地才有什么,缩略图也就只在那些位置有图。
+//
+// ★ 开关按**服务器**查(账号主键),不是全局:超前拉是**优化**,
 // 能不能加速取决于对端(远程 Emby 有收益;局域网/NAS 本就跑满,多开几条 Range
 // 只是白白多占连接)。所以只能由用户按服务器主动开,不给全开的入口。
 //
@@ -202,8 +208,7 @@ func startPrefetch(ctx context.Context, s *emby.Session, target *emby.PlaybackTa
 	on := acc != nil && p.PrefetchEnabledFor(acc.Server)
 
 	/* ★★ 预热已经把这条流的头部灌进某个代理的环形缓存里了 —— 那就**必须走那个代理**,
-	   否则预热白做。判据是**上游地址一致**(同一条流),和「这台服开没开多线程加载」
-	   **无关**:开关管的是播放中并发拉多凶,而不是「已经在本地的字节要不要用」。 */
+	   否则预热白做。判据是**上游地址一致**(同一条流)。 */
 	warmHit := false
 	proxyMu.Lock()
 	if sharedProxy != nil && sharedProxy.Upstream() == target.URL {
@@ -211,18 +216,17 @@ func startPrefetch(ctx context.Context, s *emby.Session, target *emby.PlaybackTa
 	}
 	proxyMu.Unlock()
 
-	if !on && !warmHit {
-		closeSharedProxy()
-		return target.URL
-	}
-	h := proxyFor(ctx, target.URL, p)
+	h := proxyFor(ctx, target.URL, p, on)
 	if h == nil {
 		return target.URL
 	}
-	if warmHit {
+	switch {
+	case warmHit:
 		bus.Logf("info", "复用预热好的本地代理(缓存已就位)")
-	} else {
+	case on:
 		bus.Logf("info", "多线程加载已开(%d 线程,缓存上限 %d MB)", p.PrefetchThreads, p.PrefetchCacheBytes>>20)
+	default:
+		bus.Logf("info", "本地代理旁路模式(不超前拉,只把读过的字节落盘给缩略图用)")
 	}
 	return h.URL
 }

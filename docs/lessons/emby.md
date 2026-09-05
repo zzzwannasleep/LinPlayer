@@ -25,6 +25,9 @@
 - 库内搜索 — `library-scoped-search.md`
 - 未看集数角标 — `unwatched-episode-badge.md`
 - Batch add & deeplink — `batch-add-and-deeplink.md`
+- 跨服的一切都得报 server_id,不能报会话 — 2026-09-05
+- `currentSession` 吐的 server 是线路地址,不是账号主键 — 2026-09-05
+- `bus.NewErr` 不做格式化 — 2026-09-05
 - 永远不走转码流 — 2026-09-03
 - 观看阈值:一个数字管两件事 — 2026-09-03
 - 手动标「已看」只写了服务器,本地记录纹丝不动 — 2026-09-03
@@ -614,6 +617,38 @@ DirectStream 也能过,那正是「界面在撒谎」那一类。
 ★ 自检的判据是**行数和每行的勾选态**,不是截图:这一组排在设置页很靠下,
 一屏根本截不到,而「只画了当前那台」和「两台都画了」在截不到的地方长得一模一样。
 夹具也得配套 —— 只有一台服的时候这个功能**验不出对错**(`LP_SRV2=1` 灌第二台)。
+
+### 跨服的一切都得报 server_id,不能报会话 — 2026-09-05
+
+`account.listAccounts` **故意不带 token / password**(它会进事件队列、进日志、进诊断包),
+所以 UI 手上**只有当前活跃那台**的会话。跨服选版本 / 跨服起播 / 把进度报回别台,
+UI 能给的只有一个服务器 id,会话必须在核心层就地解析(`config.SessionOf`)。
+
+落点是两个 `sessionFrom`(`core/emby` 和 `core/player`)各加一段:
+`server_id` 非空就**压过**同时传来的 server/token。压过是必须的 ——
+两者不一致时,拿着甲的 token 去打乙的条目是 401,或者更糟:
+乙服上恰好有这个 id,放出来是另一部片,而两边都不报错。
+
+★ 同理,`item_id` 和 `server_id` **必须成对换**。只换 media_source_id 是同一个坑。
+
+### `currentSession` 吐的 server 是线路地址,不是账号主键 — 2026-09-05
+
+`emby.currentSession` 返回 `a.ActiveLineURL()`(故意的:封面地址要走生效线路)。
+于是 UI 转手把它当 `server_id` 报回来时,`config.Find`(只比主键)**找不到** ——
+受害的恰恰是切了备用线的用户,他切备用线正是因为主线不通。
+
+解法是 `config.Resolve`:先比主键,再比每一条线路的 URL。
+**新加按 server_id 找账号的命令,一律用 Resolve,别用 Find**
+(Find 留给 setActive / remove 那种「主键必须精确」的场合)。
+
+### `bus.NewErr` 不做格式化 — 2026-09-05
+
+签名长得像 `fmt.Errorf`:`NewErr(code, msg string, args ...any)`。
+它**不格式化** —— 第一个 arg 被当成 `Detail` 存起来,`msg` 原样进 `Msg`。
+所以 `NewErr(ENotFound, "没有这个服务器: %s", id)` 给用户看到的就是字面的 `%s`。
+
+仓库里已有的几处都是这么写的(`bus.go:240`、`account.go`)。**新写的别再加**:
+把值拼进串里(`"没有这个服务器:"+id`)。要真想统一修,得先想清楚 `Detail` 的语义要不要一起改。
 
 
 ## 跨域交叉引用

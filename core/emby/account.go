@@ -182,6 +182,37 @@ func (c *Client) IsAdmin(ctx context.Context, s *Session) (bool, error) {
 	return adminFlag(j), nil
 }
 
+// Permissions 当前登录用户的权限位。**一次请求同时回答两个问题** ——
+// 管理员菜单和下载按钮都要它,分两条命令就是两次往返。
+//
+// ★ CanDownload 读的是 `Policy.EnableContentDownloading`,字段名是**打真服务器核对过的**
+// (2026-09-06,Emby 4.9.5)。缺 Policy / 缺这个字段一律判**否** ——
+// 摆一个必定 403 的下载按钮,比不摆更糟。
+func (c *Client) Permissions(ctx context.Context, s *Session) (map[string]any, error) {
+	b, err := c.getBytes(ctx, s, fmt.Sprintf("%s/Users/%s", s.Server, url.PathEscape(s.UserID)))
+	if err != nil {
+		return nil, err
+	}
+	var j map[string]any
+	if err := json.Unmarshal(b, &j); err != nil {
+		return nil, fmt.Errorf("解析失败: %w", err)
+	}
+	return map[string]any{
+		"is_admin":     adminFlag(j),
+		"can_download": policyFlag(j, "EnableContentDownloading"),
+	}, nil
+}
+
+// policyFlag 从 /Users/{id} 响应的 Policy 里读一个布尔位。缺一律判否。
+func policyFlag(user map[string]any, key string) bool {
+	p, _ := user["Policy"].(map[string]any)
+	if p == nil {
+		return false
+	}
+	v, _ := p[key].(bool)
+	return v
+}
+
 // adminFlag 从 /Users/{id} 响应里读管理员位。
 // ★ 缺 Policy / 缺字段一律判**否** —— 宁可少给按钮。
 func adminFlag(user map[string]any) bool {

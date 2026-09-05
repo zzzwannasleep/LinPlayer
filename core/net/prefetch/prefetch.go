@@ -20,6 +20,7 @@
 package prefetch
 
 import (
+	"linplayer/core/httpx"
 	"linplayer/core/net/tlspolicy"
 
 	"context"
@@ -196,6 +197,9 @@ type origin struct {
 	contentType     string
 	threads         int
 	readAheadChunks int64
+	// ua 上游请求的 User-Agent。旁路模式下**它就是用户正在看的那一路**,
+	// 用 LinPlayerPreload 那条道会让服主在日志里把它错认成一次旁路预取。
+	ua string
 	closed          atomic.Bool
 	stop            notifier
 	client          *http.Client
@@ -220,11 +224,27 @@ func Start(ctx context.Context, upstreamURL string, threads int, cacheLimit int6
 	if threads > 4 {
 		threads = 4
 	}
-	readAhead := readAheadBytes(threads, cacheLimit)
+	readAhead := max64(readAheadBytes(threads, cacheLimit)/ChunkSize, 1)
+	return start(ctx, upstreamURL, threads, cacheLimit, readAhead, httpx.PreloadUA(), onInvalid)
+}
 
+// StartPassthrough 起一个**只旁路落盘**的代理:mpv 要哪一段就拉哪一段,顺手写进
+// 环形缓存,**一段都不超前拉**。
+//
+// ★ 「多线程加载」关着的时候走这条。缩略图和进度条上那条「哪一段有图」的带子
+// 要的是「本地有没有这段字节」,那和「要不要提前拉」是两件事 ——
+// 从前它们共用一个开关,于是关掉多线程加载 = 连缩略图一起没了(用户 2026-09-06 报的)。
+// ★ worker 仍然是 2 个:超前窗口只有一段时它们本来就只有一段在飞,
+// 而把 worker 压到 1 会碰上当初把 threads 钳进 2~4 的那个竞态修复。
+func StartPassthrough(ctx context.Context, upstreamURL string, cacheLimit int64, onInvalid ResignFn) (*Handle, error) {
+	return start(ctx, upstreamURL, 2, cacheLimit, 1, httpx.UA(), onInvalid)
+}
+
+func start(ctx context.Context, upstreamURL string, threads int, cacheLimit int64,
+	readAheadChunks int64, ua string, onInvalid ResignFn) (*Handle, error) {
 	o := &origin{
-		url: upstreamURL, threads: threads,
-		readAheadChunks: max64(readAhead/ChunkSize, 1),
+		url: upstreamURL, threads: threads, ua: ua,
+		readAheadChunks: readAheadChunks,
 		// ★ 预取拉上游用 LinPlayerPreload 这条 UA 道(SPEC §14.1):
 		//   服主要能把「替 mpv 提前拉的旁路请求」和「用户正在看的那一路」在日志里分开。
 		// ★ 走 tlspolicy:不走的话自签名服务器上「多线程加载」一开就取不到流
@@ -271,8 +291,6 @@ func Start(ctx context.Context, upstreamURL string, threads int, cacheLimit int6
 	return h, nil
 }
 
-const preloadUA = "LinPlayerPreload/"
-
 // probe 探总大小 + Content-Type:`Range: bytes=0-0` → 206 + `Content-Range: bytes 0-0/<total>`。
 func (o *origin) probe(ctx context.Context, u string) error {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -283,7 +301,7 @@ func (o *origin) probe(ctx context.Context, u string) error {
 		return err
 	}
 	req.Header.Set("Range", "bytes=0-0")
-	req.Header.Set("User-Agent", preloadUA+"dev")
+	req.Header.Set("User-Agent", o.ua)
 	resp, err := o.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("探测文件大小失败: %w", err)
@@ -414,7 +432,7 @@ func (o *origin) fetchOnce(ctx context.Context, u string, start, end int64, l *l
 		return true, false
 	}
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	req.Header.Set("User-Agent", preloadUA+"dev")
+	req.Header.Set("User-Agent", o.ua)
 
 	// 建连 + 等响应头:这一段可以用整体超时,它本来就该在几秒内完成
 	type res struct {

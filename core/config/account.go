@@ -295,6 +295,47 @@ func (c *AppConfig) Find(serverID string) *Account {
 	return nil
 }
 
+// Resolve 按 server id 找账号,**认主键也认线路地址**。serverID 为空 = 活跃账号。
+//
+// ★★ 存在的理由:`emby.currentSession` 吐给 UI 的 server 是**当前生效线路**
+// (ActiveLineURL),不是账号主键 —— 那是故意的,封面地址要走生效线路。
+// 于是 UI 转手把这个值当 server_id 报回来时,只按主键找会**找不到**,
+// 而受害的恰恰是切了备用线的用户:主线不通才切的,结果跨服那几条路全报
+// 「没有这个服务器」。
+func (c *AppConfig) Resolve(serverID string) *Account {
+	if serverID == "" {
+		return c.ActiveAccount()
+	}
+	if a := c.Find(serverID); a != nil {
+		return a
+	}
+	for i := range c.AccountList {
+		for _, l := range c.AccountList[i].Lines {
+			if l.URL == serverID {
+				return &c.AccountList[i]
+			}
+		}
+	}
+	return nil
+}
+
+// SessionOf 按 server id 取该账号的会话四元组。serverID 为空 = 活跃账号。
+//
+// ★★ 存在的理由:**UI 手上没有非活跃服务器的 token** —— account.Info 是故意不带的
+// (它会进事件队列、进日志、进诊断包)。所以跨服那几条路(选别台的版本、
+// 播别台的条目、把进度报回别台)只能由调用方报 server id,会话在核心层就地解析,
+// token 一步都不出核心层。
+// ★ 走 ActiveLineURL 不是 acc.Server —— 用户切到备用线正是因为主线不通,
+// 打主键的结果是那台服静默变成「没有这个条目」。
+// ★ 浏览型源(网盘 / 局域网)没有 Emby 会话,返回 ok=false。
+func (c *AppConfig) SessionOf(serverID string) (server, token, userID, deviceID string, ok bool) {
+	acc := c.Resolve(serverID)
+	if acc == nil || acc.IsFileBrowse() {
+		return "", "", "", "", false
+	}
+	return acc.ActiveLineURL(), acc.Token, acc.UserID, c.DeviceID, true
+}
+
 // Upsert 按 server 去重写入(同服重登刷新 token),并设为活跃账号。
 //
 // ★ 重登**保留用户侧编辑**(名称 / 备注 / 图标 / 线路 / TLS 开关)——

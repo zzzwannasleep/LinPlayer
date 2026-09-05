@@ -41,6 +41,7 @@ public static class LinPlayerCommandNames
     [
         "emby.aggregateOverview",
         "emby.aggregateSearch",
+        "emby.aggregateVersions",
         "emby.blockedList",
         "emby.counts",
         "emby.currentSession",
@@ -62,6 +63,7 @@ public static class LinPlayerCommandNames
         "emby.personItems",
         "emby.rankingCategories",
         "emby.rankingFetch",
+        "emby.permissions",
         "emby.refreshItem",
         "emby.relogin",
         "emby.reportProgress",
@@ -105,6 +107,7 @@ public static class LinPlayerCommandNames
         "player.getMpvConf",
         "player.getPlaybackPrefs",
         "player.getScreenshotDir",
+        "player.getSkipRange",
         "player.mpvCommand",
         "player.mpvGet",
         "player.mpvSet",
@@ -125,6 +128,7 @@ public static class LinPlayerCommandNames
         "player.setSecondarySub",
         "player.setSecondarySubOpts",
         "player.setShaderLevel",
+        "player.setSkipRange",
         "player.setSpeed",
         "player.setSubDelay",
         "player.setSubStyle",
@@ -262,11 +266,13 @@ public static class LinPlayerCommandNames
 
 public static class LinPlayerCommandsExtensions
 {
-    // ---- Emby 浏览与详情 · emby.* (40 条) ----
+    // ---- Emby 浏览与详情 · emby.* (42 条) ----
     public static Task<JsonElement> EmbyAggregateOverview(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("emby.aggregateOverview", args, ct);
     public static Task<JsonElement> EmbyAggregateSearch(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("emby.aggregateSearch", args, ct);
+    public static Task<JsonElement> EmbyAggregateVersions(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("emby.aggregateVersions", args, ct);
     public static Task<JsonElement> EmbyBlockedList(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("emby.blockedList", args, ct);
     public static Task<JsonElement> EmbyCounts(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -309,6 +315,8 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("emby.rankingCategories", args, ct);
     public static Task<JsonElement> EmbyRankingFetch(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("emby.rankingFetch", args, ct);
+    public static Task<JsonElement> EmbyPermissions(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("emby.permissions", args, ct);
     public static Task<JsonElement> EmbyRefreshItem(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("emby.refreshItem", args, ct);
     public static Task<JsonElement> EmbyRelogin(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -388,7 +396,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> AccountUpdateAccount(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("account.updateAccount", args, ct);
 
-    // ---- 播放器 · player.* (40 条) ----
+    // ---- 播放器 · player.* (42 条) ----
     public static Task<JsonElement> PlayerAddSubtitle(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.addSubtitle", args, ct);
     public static Task<JsonElement> PlayerChapterInfo(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -399,6 +407,8 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("player.getPlaybackPrefs", args, ct);
     public static Task<JsonElement> PlayerGetScreenshotDir(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.getScreenshotDir", args, ct);
+    public static Task<JsonElement> PlayerGetSkipRange(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("player.getSkipRange", args, ct);
     public static Task<JsonElement> PlayerMpvCommand(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.mpvCommand", args, ct);
     public static Task<JsonElement> PlayerMpvGet(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -439,6 +449,8 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("player.setSecondarySubOpts", args, ct);
     public static Task<JsonElement> PlayerSetShaderLevel(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.setShaderLevel", args, ct);
+    public static Task<JsonElement> PlayerSetSkipRange(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("player.setSkipRange", args, ct);
     public static Task<JsonElement> PlayerSetSpeed(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.setSpeed", args, ct);
     public static Task<JsonElement> PlayerSetSubDelay(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

@@ -33,7 +33,9 @@ var (
 //
 // 新起一个的表现:旧句柄一关,它的环形缓存文件就被删了 —— 详情页预热的那几十 MB
 // 全部作废,起播还得从头再下一遍。慢链路上那是几分钟的白等。
-func proxyFor(ctx context.Context, upstreamURL string, p config.Prefs) *prefetch.Handle {
+// readAhead=false 时起的是**旁路代理**:只把 mpv 读过的字节顺手落进环形缓存,
+// 一段都不超前拉。见 prefetch.StartPassthrough。
+func proxyFor(ctx context.Context, upstreamURL string, p config.Prefs, readAhead bool) *prefetch.Handle {
 	proxyMu.Lock()
 	defer proxyMu.Unlock()
 	if sharedProxy != nil {
@@ -43,7 +45,13 @@ func proxyFor(ctx context.Context, upstreamURL string, p config.Prefs) *prefetch
 		sharedProxy.Close() // 换片了:端口、goroutine、缓存文件一起收
 		sharedProxy = nil
 	}
-	h, err := prefetch.Start(ctx, upstreamURL, p.PrefetchThreads, p.PrefetchCacheBytes, nil)
+	var h *prefetch.Handle
+	var err error
+	if readAhead {
+		h, err = prefetch.Start(ctx, upstreamURL, p.PrefetchThreads, p.PrefetchCacheBytes, nil)
+	} else {
+		h, err = prefetch.StartPassthrough(ctx, upstreamURL, p.PrefetchCacheBytes, nil)
+	}
 	if err != nil {
 		bus.Logf("warn", "本地代理起不来,回退直连: %v", err)
 		return nil
@@ -160,7 +168,7 @@ func registerWarmCommands() {
 			//   起播时 mpv 连同一个代理,预热了多少当场吐多少。
 			//   只对直传流做 —— 转码 URL 是分段流,套代理没有意义。
 			if target.PlayMethod == "DirectStream" {
-				if h := proxyFor(ctx, target.URL, p); h != nil {
+				if h := proxyFor(ctx, target.URL, p, true); h != nil {
 					headURL = h.URL
 				}
 			}

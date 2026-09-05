@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -382,6 +382,7 @@ public sealed class SettingsPage : PageBase
                     void Add(Control c) => groups.Children.Add(c);
                     Add(TrackPrefs(core, p));
                     Add(Playback(core, p));
+                    Add(SettingsSections.SkipSegments(core, p));
                     if (home is { } hm) Add(SettingsSections.Home(core, hm));
                     if (prefetch is { } pf) Add(SettingsSections.Prefetch(core, pf));
                     // 下线的分组一并不画。开关表在 Features.cs,这里只查表。
@@ -403,6 +404,8 @@ public sealed class SettingsPage : PageBase
                     if (Features.On("set.cfspeed")) Add(SettingsSections.CfSpeed(core));
                     if (Features.On("set.transfer")) Add(SettingsSections.Transfer(core));
                     Add(Storage(core, paths));
+                    // 快捷键不挂 Features 开关:它是操作方式,不是一块可下线的功能
+                    Add(SettingsKeys.Section(core));
                     // 不挂 Features 开关:它是排查工具,任何版本都得有
                     Add(SettingsSections.Logging(core));
                 });

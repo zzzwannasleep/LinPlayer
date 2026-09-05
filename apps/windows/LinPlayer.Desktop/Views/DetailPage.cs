@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -640,43 +640,145 @@ public sealed class DetailPage : PageBase
         {
             _mediaHost.Children.Clear();
             var line = Dim("");
-            // 四个下拉排一行,放不下自己折行 —— 窄窗口下不会把标题挤出去
+            // 四个选择器排一行,放不下自己折行 —— 窄窗口下不会把标题挤出去
             var picks = new WrapPanel();
             var tracksHost = new StackPanel { Orientation = Orientation.Horizontal };
 
+            _vers.Clear();
+            foreach (var v in vers) _vers.Add(new VerPick(_server, "", "", true, "", v));
+
+            /* 版本键做成**和选集栏同一副样子**(chip + 浮层),不是下拉框
+               (用户 2026-09-05:「做成和选集栏一样的样式」)。
+               ComboBox 在这里有两个治不了的毛病:它的每一项只能是一行纯文本,
+                 装不下「哪台服务器 + 画质 + 体积」这三样;而跨服聚合进来之后
+                 这个列表会长到十几条,下拉框没有分组、没有小标题。 */
+            var verBtn = new Button { Classes = { "chip" }, Margin = new Thickness(0, 0, 14, 6) };
+            verBtn.Click += (_, _) => Flyout(verBtn, VersionMenu(i => Use(i)));
+
             void Use(int i)
             {
-                _versionId = Str(vers[i], "id");
-                line.Text = MediaLine(vers[i]);
+                if (i < 0 || i >= _vers.Count) return;
+                var p = _vers[i];
+                _versionId = Str(p.V, "id");
+                // 跨服那几条要**连它那台的 item_id 一起记下**:起播拿错 id
+                // 就是「选了乙服的 4K,却拿甲服的 id 去打乙服」——404 或者另一部片。
+                _versionServer = p.Current ? "" : p.ServerId;
+                _versionItem = p.Current ? "" : p.ItemId;
+                verBtn.Content = VersionChipLabel(p);
+                line.Text = MediaLine(p.V) + (p.Current ? "" : $"  ·  来自 {p.ServerName}({p.Reason})");
                 // 换版本就要重建音轨 / 字幕两个下拉:不同版本的轨道表是两回事,
                 // 留着上一版的表 = 用户选中一条这个文件里根本不存在的轨道。
                 tracksHost.Children.Clear();
                 _audioIndex = -1;
                 _subIndex = -1;
-                BuildTrackPickers(tracksHost, Arr2(vers[i], "streams"));
+                BuildTrackPickers(tracksHost, Arr2(p.V, "streams"));
             }
+            _useVersion = Use;
 
-            if (vers.Count > 1)
-            {
-                var box = new ComboBox { MinWidth = 190 };
-                var names = new List<string>();
-                for (var i = 0; i < vers.Count; i++)
-                    names.Add(Str(vers[i], "name") is { Length: > 0 } n ? n : $"版本 {i + 1}");
-                box.ItemsSource = names;
-                box.SelectedIndex = pick;
-                box.SelectionChanged += (_, _) =>
-                {
-                    if (box.SelectedIndex >= 0) Use(box.SelectedIndex);
-                };
-                picks.Children.Add(PickerCell("版本", box));
-            }
+            /* 只有一个版本时**先不画**这个键:一个点了什么都不会变的按钮比没有更糟。
+               但别台可能还有别的版本 —— 真聚合出来了再把它插进去(见 _verCell)。 */
+            _verCell = new ContentControl();
+            if (vers.Count > 1) _verCell.Content = verBtn;
+            _verBtn = verBtn;
+            picks.Children.Add(_verCell);
             picks.Children.Add(tracksHost);
             _ = BuildLinePicker(picks);
 
             Use(pick);
             _mediaHost.Children.Add(picks);
             _mediaHost.Children.Add(line);
+            // 别台的版本**另起一趟拉**:它要在每台服上搜片 + 逐条拉全字段,
+            // 一台就是好几个来回。挡在这儿的话本服的版本表要陪着一起等。
+            _ = LoadCrossVersions(itemId);
         });
+    }
+
+    /// <summary>一条可选的版本。跨服那几条要连**它那台的** item_id 一起带着。</summary>
+    private sealed record VerPick(
+        string ServerId, string ServerName, string ItemId, bool Current, string Reason, JsonElement V);
+
+    private readonly List<VerPick> _vers = [];
+    private ContentControl? _verCell;
+    private Button? _verBtn;
+    private Action<int>? _useVersion;
+
+    /// <summary>选中的版本在**哪台服务器**上。空 = 就是本页这台(绝大多数情况)。</summary>
+    private string _versionServer = "";
+
+    /// <summary>选中的版本在那台服务器上的条目 id。空 = 就是本页这个条目。</summary>
+    private string _versionItem = "";
+
+    /// <summary>
+    /// 把别的服务器上的同一部片的版本**并进同一个列表**
+    /// (用户 2026-09-05:「聚合不同服务器的版本,这样就可以方便用户选择了」)。
+    ///
+    /// <para><b>只追加,不重画</b>:浮层是每次点开现建的。重画一次的代价是
+    /// 用户刚选好的音轨 / 字幕被悄悄清回「自动」,而他什么都没做。</para>
+    /// <para>一台都没匹配上是常态(别的服务器上没有这部片),整段静默。</para>
+    /// </summary>
+    private async Task LoadCrossVersions(string itemId)
+    {
+        List<JsonElement> groups;
+        try
+        {
+            var g = await _core.EmbyAggregateVersions(new { item_id = itemId, server_id = _server });
+            groups = g.ValueKind == JsonValueKind.Array ? g.EnumerateArray().ToList() : [];
+        }
+        catch { return; }   // 别台的版本是增值项,拉不到不该在主体页面上留一行错误
+
+        var add = new List<VerPick>();
+        foreach (var g in groups)
+        {
+            if (Bool(g, "current")) continue;   // 本服那组第一趟已经拿过了
+            var sid = Str(g, "server_id");
+            var name = Str(g, "server_name") is { Length: > 0 } n ? n : sid;
+            var iid = Str(g, "item_id");
+            foreach (var v in Arr2(g, "versions").OrderByDescending(v => Num(v, "size_bytes")))
+                add.Add(new VerPick(sid, name, iid, false, Str(g, "reason"), v));
+        }
+        if (add.Count == 0) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _vers.AddRange(add);
+            // 本服只有一条版本时那个键还没画出来 —— 现在有得选了,补上
+            if (_verCell is { Content: null } cell && _verBtn is { } b) cell.Content = b;
+        });
+    }
+
+    /// <summary>版本键上写什么。 跨服那几条**必须带服务器名**,否则两条 2160p 分不清谁是谁。</summary>
+    private static string VersionChipLabel(VerPick p)
+    {
+        var name = Str(p.V, "name") is { Length: > 0 } n ? n : "版本";
+        return (p.Current ? name : $"{p.ServerName} · {name}") + "  ▾";
+    }
+
+    /// <summary>
+    /// 版本浮层的内容。<b>按服务器分组</b>,每组一个小标题。
+    ///
+    /// <para>拌成一锅的话同一档画质在两台服上都有时,用户看到两条一模一样的
+    /// 「2160p」,而点哪一条会从哪台起播,界面上一个字都没说
+    /// (聚合搜索栽过同一个坑)。</para>
+    /// </summary>
+    private List<(string Label, Action? Go)> VersionMenu(Action<int> use)
+    {
+        var items = new List<(string, Action?)>();
+        var head = "";
+        for (var i = 0; i < _vers.Count; i++)
+        {
+            var p = _vers[i];
+            var group = p.Current ? "本服务器" : p.ServerName;
+            if (group != head)
+            {
+                head = group;
+                items.Add((group, null));   // null = 小标题,不是可点项
+            }
+            var idx = i;
+            var name = Str(p.V, "name") is { Length: > 0 } n ? n : $"版本 {i + 1}";
+            var size = Size(p.V) is { Length: > 0 } sz ? $"  ·  {sz}" : "";
+            items.Add((name + size, (Action?)(() => use(idx))));
+        }
+        return items;
     }
 
     /// <summary>一格「标签 + 下拉」。 右边留 12 —— 折行之后上下两行也对得齐。</summary>
@@ -878,14 +980,14 @@ public sealed class DetailPage : PageBase
     {
         Dispatcher.UIThread.Post(() =>
         {
-            if (_mediaHost.Children.FirstOrDefault() is not WrapPanel bar || bar.Children.Count <= idx)
+            if (_useVersion is null || idx >= _vers.Count)
             {
                 Console.WriteLine("[版本自检] 没有版本条(或者版本不够多)");
                 return;
             }
-            ((Button)bar.Children[idx]).RaiseEvent(
-                new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
-            Console.WriteLine($"[版本自检] 点了第 {idx + 1} 个版本,现在的 id = {_versionId}");
+            _useVersion(idx);
+            Console.WriteLine($"[版本自检] 选了第 {idx + 1} 个版本,现在的 id = {_versionId}" +
+                              (_versionServer == "" ? "" : $",在 {_versionServer}"));
             _play?.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         });
     }
@@ -1066,10 +1168,10 @@ public sealed class DetailPage : PageBase
         }
 
         seasonBtn.Click += (_, _) => Flyout(seasonBtn, groups.Select((g, i) =>
-            ((g.Key > 0 ? $"第 {g.Key} 季" : "其它") + $" · {g.Count()} 集", (Action)(() => Pick(i)))).ToList());
+            ((g.Key > 0 ? $"第 {g.Key} 季" : "其它") + $" · {g.Count()} 集", (Action?)(() => Pick(i)))).ToList());
 
         epBtn.Click += (_, _) => Flyout(epBtn, shown.Select((e, i) =>
-            (e.DisplayTitle, (Action)(() => JumpTo(i)))).ToList());
+            (e.PickerLabel, (Action?)(() => JumpTo(i)))).ToList());
 
         /* 跳到第 N 集:把它滚到视野正中。
             滚到**正中**而不是滚到左边:滚到边上的话用户还得自己认哪一张是刚选的。 */
@@ -1119,9 +1221,16 @@ public sealed class DetailPage : PageBase
     /// <para>每次点开<b>重建</b>:季一换,集表就换了。留着上一次那份是「换了季、
     /// 跳集列表还是上一季的」,而它不报错。</para>
     /// </summary>
-    private static void Flyout(Button anchor, List<(string Label, Action Go)> items)
+    /// <param name="focus">
+    /// 打开时滚进视野的那一项(下标按 <paramref name="items"/> 算),-1 = 不滚。
+    /// <para>播放页的选集浮层要它:第 500 集时浮层停在第 1 集,
+    /// 等于让用户在一千行里自己找。</para>
+    /// </param>
+    internal static void Flyout(Button anchor, List<(string Label, Action? Go)> items, int focus = -1)
     {
         var list = new StackPanel { Spacing = 2 };
+        Control? mark = null;
+        var nth = -1;   // 第几个**可点项**(小标题不算),focus 按它数
         var fly = new Flyout
         {
             Placement = PlacementMode.BottomEdgeAlignedLeft,
@@ -1134,6 +1243,17 @@ public sealed class DetailPage : PageBase
         };
         foreach (var (label, go) in items)
         {
+            // go 为 null = 分组小标题(版本浮层按服务器分组用)。
+            // 做成一个点不动的按钮的话,用户点上去浮层会关掉而什么都没发生。
+            if (go is null)
+            {
+                list.Children.Add(new TextBlock
+                {
+                    Text = label, Classes = { "dim" }, FontSize = 12,
+                    Margin = new Thickness(10, 6, 0, 2),
+                });
+                continue;
+            }
             var b = new Button
             {
                 Content = label, Classes = { "ghost" },
@@ -1141,9 +1261,13 @@ public sealed class DetailPage : PageBase
                 HorizontalContentAlignment = HorizontalAlignment.Left,
             };
             b.Click += (_, _) => { fly.Hide(); go(); };
+            if (++nth == focus) mark = b;
             list.Children.Add(b);
         }
         fly.ShowAt(anchor);
+        // 浮层是这一刻才布局的,直接 BringIntoView 会按「还没算出来的位置」滚。
+        // 排到下一轮布局之后再滚 —— 那时候每一行的高度才是真的。
+        if (mark is not null) Dispatcher.UIThread.Post(() => mark.BringIntoView(), DispatcherPriority.Loaded);
     }
 
     /// <summary>分集到了之后,把「第 N 季 · 第 M 集」补到主按钮上。</summary>
@@ -1186,9 +1310,13 @@ public sealed class DetailPage : PageBase
                 Content = resume > 0 ? $"▶ 继续播放 · 已看到 {Clock(resume)}" : "▶ 播放",
             };
             // 版本 / 音轨 / 字幕都**点的那一刻才读** —— 用户可能在按之前又换过
+            /* 选了别台的版本就**整个换到那台**去播:item_id 和会话必须成对换。
+               只换 media_source_id 的话是拿甲服的条目 id 去打乙服 ——404,
+               或者更糟:乙服上恰好有这个 id,放出来是另一部片。 */
             play.Click += (_, _) =>
-                Nav.Push(new PlayerPage(_core, id, name, resume, mediaSourceId: _versionId,
-                    audioIndex: _audioIndex, subIndex: _subIndex));
+                Nav.Push(new PlayerPage(_core, _versionItem != "" ? _versionItem : id, name, resume,
+                    mediaSourceId: _versionId, audioIndex: _audioIndex, subIndex: _subIndex,
+                    serverId: _versionServer));
             _play = play;
             row.Children.Add(play);
         }
@@ -1248,10 +1376,25 @@ public sealed class DetailPage : PageBase
         };
         if (Features.On("card.favorite")) row.Children.Add(fav);
 
-        // 下载只对**可播条目**给。给一部剧的总条目下载按钮,点了不知道该下哪一集。
+        /* 下载只对**可播条目**给。给一部剧的总条目下载按钮,点了不知道该下哪一集。
+           而且**服务器没给下载权限时整个不出现**(用户 2026-09-06)——
+           从前是「摆着,点了再由服务端拒」,那是一个专门用来报错的按钮。
+           判据是 Emby 的 Policy.EnableContentDownloading(字段名打真服务器核对过),
+           缺字段一律判否。先建后显:异步拿到权限再点亮,免得按钮插到别人后面去。 */
         if (playable)
         {
-            var dl = new Button { Classes = { "ghost" }, Content = "⭳ 下载" };
+            var dl = new Button { Classes = { "ghost" }, Content = "⭳ 下载", IsVisible = false };
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var s = Nav.Session!;
+                    var perm = await _core.EmbyPermissions(new { s.server, s.token, s.user_id, s.device_id });
+                    if (Bool(perm, "can_download"))
+                        Dispatcher.UIThread.Post(() => dl.IsVisible = true);
+                }
+                catch { /* 问不到权限就不给按钮 —— 宁可少给,也不摆一个必定失败的 */ }
+            });
             dl.Click += async (_, _) =>
             {
                 dl.IsEnabled = false;

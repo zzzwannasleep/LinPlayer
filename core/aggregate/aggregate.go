@@ -101,6 +101,8 @@ func RegisterCommands(version string) {
 		return out, nil
 	})
 
+	registerVersionCommands()
+
 	// aggregateOverview 聚合视界:每台服务器一张卡(规模统计 + 继续观看)。
 	bus.Register("emby.aggregateOverview", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		c := config.Current()

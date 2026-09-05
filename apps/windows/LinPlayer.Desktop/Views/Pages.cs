@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -155,12 +155,11 @@ public sealed class AddServerPage : PageBase
         {
             ("Emby", "emby", "填服务器地址和账号即可。先点「测试连接」可以确认地址对不对。"),
             ("本地文件夹", "local", "选一个本机目录当作源。没有地址也没有账号密码。"),
-        }
-        /* 文件浏览型源跟着「文件浏览」入口一起下线。
-           留着的后果是**登进去就是死路**:登录成功 → 侧栏没有文件浏览 → 什么都点不到。
-           2026-09-02 砍功能时现场抓到的:砍入口不砍源类型,等于给用户挖了个坑。
-           开关表在 Features.cs,那边放开 nav.browse 时这里自动跟着回来。 */
-        .Where(k => k.Item2 == "emby" || Features.On("nav.browse")).ToArray();
+        };
+        /* 本地文件夹**不跟着 nav.browse 走**。它曾被那个开关一起滤掉,
+           于是芯片只剩一条、整条选择器不画,界面上根本选不到「本地」——
+           而 AGENTS.md §0 写的是「本机文件夹播放是播放器的基础能力,不算网盘」。
+           那次是砍网盘入口时的误伤:开关管的是网盘/局域网,不该连它一起管。 */
         // 用 WrapPanel:四个芯片在固定宽的卡里一行放不下,
         // 用 StackPanel 的话最后一个会被卡的边缘裁掉(而且**一点提示都没有**)。
         /* 只剩一种源类型时**整条不画**。

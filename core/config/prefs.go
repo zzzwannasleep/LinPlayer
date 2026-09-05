@@ -118,6 +118,21 @@ type Prefs struct {
 	// 一个字段喂两行会出现「点片头把片尾也翻了」。设置页也照这个粒度给两行。
 	SkipIntro bool `json:"skip_intro"`
 	SkipOutro bool `json:"skip_outro"`
+	// SkipAuto 到了片头片尾**直接跳过去**,不等用户点那个按钮。
+	//
+	// ★ 和上面两个分开:上面两个决定「认不认这一段」,这个决定「要不要替用户按」。
+	//   合成一个开关的话,想要按钮不想自动跳的人只能连按钮一起关掉。
+	SkipAuto bool `json:"skip_auto"`
+	// SkipUseOnline 服务端没刮章节时,允许联网去第三方片头片尾库查一次。
+	//
+	// ★ 单独一个开关而不是跟着 SkipIntro 走:那两个决定「跳不跳」,
+	//   这个决定「要不要为此发一次外网请求」—— 后者是隐私口径,不该被前者顺带打开。
+	SkipUseOnline bool `json:"skip_use_online"`
+	// SkipOverrides 用户手动设定的片头片尾。键 = 服务器|剧 id(电影则是影片 id)。
+	//
+	// ★ 按**剧**存不按集存:一部剧的片头片尾在每一集上是同一段,
+	//   按集存的话用户得为每一集设一遍,而那不是他要的。
+	SkipOverrides map[string]SkipRange `json:"skip_overrides"`
 	// 进度条悬停缩略图。数据来自服务端章节图,没有则退回纯时间气泡。默认 true。
 	PreviewThumbs bool `json:"preview_thumbs"`
 	// 杜比视界自动软解:识别到 DV 时强制 hwdec=no。默认 true ——
@@ -130,6 +145,15 @@ type Prefs struct {
 	// ★ 截图是**用户要拿去用的产物**,不是程序残留 —— 所以默认落系统图片文件夹(好找),
 	// 而不是跟着下载一起塞进 userdata/(那儿翻起来费劲)。
 	ScreenshotDir *string `json:"screenshot_dir"`
+
+	// ---- 快捷键 ----
+	// Shortcuts 用户改过的键位:动作 id → 键谱(如 "Ctrl+H"、"空格 或 鼠标左键")。
+	//
+	// ★ 只存**改过的**那几条,没改的不入表 —— 全量存下来的话,以后调整默认键位
+	//   对所有老用户都不生效,而他们根本没动过那一条。
+	// 键谱的文法与合法性由外壳定义,核心层只做透传:这是纯 UI 概念,
+	// 核心层认识它反而会出现两套解释。
+	Shortcuts map[string]string `json:"shortcuts"`
 
 	// ---- 首页合集栏 ----
 	// HideCollectionServers 哪几台服务器**不显示**首页的合集栏。
@@ -171,6 +195,14 @@ type Prefs struct {
 // DefaultPrefs 全新安装的默认偏好。
 //
 // ★ **解析必须从这里起手。** 见文件头:Go 的缺字段是零值,不是 Rust 的 serde default。
+// SkipRange 手动设定的片头片尾区间(秒)。某一段的两个值都是 0 表示这一段没设。
+type SkipRange struct {
+	IntroStart float64 `json:"intro_start"`
+	IntroEnd   float64 `json:"intro_end"`
+	OutroStart float64 `json:"outro_start"`
+	OutroEnd   float64 `json:"outro_end"`
+}
+
 func DefaultPrefs() Prefs {
 	return Prefs{
 		SubEnabled:                   true,
@@ -183,6 +215,7 @@ func DefaultPrefs() Prefs {
 		Hwdec:                        "auto-safe",
 		DefaultSpeed:                 1.0,
 		PreviewThumbs:                true,
+		SkipUseOnline:                true,
 		DolbyAutoSW:                  true,
 		UpdateChannel:                "stable",
 		UpdateAutoCheck:              true,

@@ -17,6 +17,7 @@ import (
 	"linplayer/core/config"
 	"linplayer/core/emby"
 	"linplayer/core/media"
+	"linplayer/core/segments"
 	"linplayer/core/paths"
 	"linplayer/core/shaders"
 )
@@ -26,6 +27,7 @@ var prefsClient *emby.Client
 // registerPrefsCommands 由 RegisterCommands 调用。
 func registerPrefsCommands(version string) {
 	prefsClient = emby.NewClient(version)
+	registerSkip()
 
 	/* shaderLevels 档位表。
 
@@ -159,9 +161,11 @@ func registerPrefsCommands(version string) {
 		return map[string]any{
 			"hwdec": p.Hwdec, "default_speed": p.DefaultSpeed,
 			"skip_intro": p.SkipIntro, "skip_outro": p.SkipOutro,
+			"skip_auto": p.SkipAuto, "skip_use_online": p.SkipUseOnline,
 			"preview_thumbs": p.PreviewThumbs, "dolby_auto_sw": p.DolbyAutoSW,
 			"external_player":           p.ExternalPlayer,
 			"watched_threshold_percent": p.WatchedThresholdPercent,
+			"shortcuts":                 p.Shortcuts,
 		}, nil
 	})
 	bus.Register("player.setPlaybackPrefs", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -201,6 +205,25 @@ func registerPrefsCommands(version string) {
 		}
 		if v, ok := s["skip_outro"].(bool); ok {
 			p.SkipOutro = v
+		}
+		if v, ok := s["skip_auto"].(bool); ok {
+			p.SkipAuto = v
+		}
+		if v, ok := s["skip_use_online"].(bool); ok {
+			p.SkipUseOnline = v
+			// 关了再开(或者反过来)之后,上一轮的查询结果就不该再算数了
+			segments.Clear()
+		}
+		// 键位表**整表替换**,不是逐条合并 —— 改键的界面每次送的就是完整的
+		// 「改过的那几条」,合并的话用户把某一条改回默认之后它永远删不掉。
+		if v, ok := s["shortcuts"].(map[string]any); ok {
+			m := map[string]string{}
+			for k, one := range v {
+				if str, ok := one.(string); ok && str != "" {
+					m[k] = str
+				}
+			}
+			p.Shortcuts = m
 		}
 		if v, ok := s["preview_thumbs"].(bool); ok {
 			p.PreviewThumbs = v
@@ -245,14 +268,24 @@ func registerPrefsCommands(version string) {
 		   判两次早晚判岔:一边按核心层给的区间跳、一边按自己那份开关决定要不要跳,
 		   两处状态一不同步就是「关了还在跳」或者「开了不跳」。 */
 		pf := config.Current().PrefsOf()
+		// 服务端章节只是三层来源里的一层,手动设定和第三方库在 fillSkip 里补
+		from := fillSkip(ctx, sess, id, runtime, info, pf)
 		if !pf.SkipIntro {
 			info.Intro = nil
 		}
 		if !pf.SkipOutro {
 			info.Outro = nil
 		}
+		if info.Intro == nil && info.Outro == nil {
+			from = ""
+		}
 		return map[string]any{
 			"chapters": info.Chapters, "intro": info.Intro, "outro": info.Outro,
+			// 数据出处。界面上要说得出「这一段是谁给的」——
+			// 跳错了的时候用户第一个想知道的就是它
+			"skip_source": from,
+			// 自动跳还是弹按钮由核心层说了算,调用方不必再判一次开关
+			"skip_auto": pf.SkipAuto,
 			// 缩略图开关(关着时调用方别去加载章节图,白费流量)
 			"thumbs": pf.PreviewThumbs,
 		}, nil
@@ -282,6 +315,15 @@ func settingsOf(a map[string]any) map[string]any {
 // ponytail: 迁移期两种都收。等三端绑定统一之后只留后者。
 func sessionFrom(a map[string]any) (*emby.Session, error) {
 	get := func(k string) string { v, _ := a[k].(string); return v }
+	// server_id 压过 server/token:跨服起播 / 跨服上报时 UI 手上没有那台的 token,
+	// 只报 id;拿着 A 的 token 打 B 的条目是 401 或者另一条片,而两边都不报错。
+	if id := get("server_id"); id != "" {
+		srv, tok, uid, dev, ok := config.Current().SessionOf(id)
+		if !ok {
+			return nil, bus.NewErr(bus.ENotFound, "没有这个服务器:"+id)
+		}
+		return &emby.Session{Server: srv, Token: tok, UserID: uid, DeviceID: dev}, nil
+	}
 	if get("server") != "" && get("user_id") != "" {
 		return &emby.Session{
 			Server: get("server"), Token: get("token"),

@@ -32,6 +32,21 @@ public sealed record CardItem(
     public string DisplayTitle =>
         string.IsNullOrEmpty(SeriesName) ? Name : $"{SeriesName} · {Name}";
 
+    /// <summary>
+    /// 季集号,<c>S01E01</c> 这种写法。没有季集号(电影 / 特别篇)就是空串。
+    ///
+    /// <para>用户 2026-09-05:「不要显示剧集名称+标题,遇到长的那点长度根本看不到
+    /// 具体的集数,直接显示 S01E01 这样子得了」。<b>选集列表要的是定位,不是介绍</b> ——
+    /// 「某某剧 · 第三十五集 什么什么的什么什么」在 380 宽的浮层里会被截成省略号,
+    /// 而截掉的恰恰是集号。</para>
+    /// <para>补零到两位:不补的话 S1E9 和 S1E10 在一列里对不齐,扫一眼找不着。</para>
+    /// </summary>
+    public string EpisodeCode => EpisodeNo <= 0 ? ""
+        : SeasonNo > 0 ? $"S{SeasonNo:00}E{EpisodeNo:00}" : $"E{EpisodeNo:00}";
+
+    /// <summary>选集列表里的一行。有集号就只写集号,没有才回落到名字(特别篇 / 电影)。</summary>
+    public string PickerLabel => EpisodeCode is { Length: > 0 } c ? c : Name;
+
     /// <summary>看到哪儿了(0~1)。没有进度就是 0。</summary>
     public double Progress =>
         RuntimeSecs > 0 && ResumeSecs > 0 ? Math.Clamp(ResumeSecs / RuntimeSecs, 0, 1) : 0;
