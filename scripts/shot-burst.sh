@@ -6,10 +6,10 @@
 # 用法:bash scripts/shot-burst.sh <前缀> <张数> <间隔毫秒>
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-P="${1:-burst}"; N="${2:-8}"; MS="${3:-120}"
+P="${1:-burst}"; N="${2:-8}"; MS="${3:-120}"; ZONE="${4:-}"; WHAT="${5:-画面}"
 for i in $(seq 1 "$N"); do
   powershell -NoProfile -ExecutionPolicy Bypass -File "$ROOT/scripts/shot-window.ps1" \
     -ProcName LinPlayer -Out "$ROOT/build/$P-$i.png" >/dev/null 2>&1
   powershell -NoProfile -Command "Start-Sleep -Milliseconds $MS" >/dev/null 2>&1
 done
-PYTHONUTF8=1 python "$ROOT/scripts/burst-diff.py" "$ROOT/build" "$P" "$N"
+PYTHONUTF8=1 python "$ROOT/scripts/burst-diff.py" "$ROOT/build" "$P" "$N" "$ZONE" "$WHAT"

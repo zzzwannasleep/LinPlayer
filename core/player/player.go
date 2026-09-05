@@ -421,10 +421,60 @@ func GLWantsRedraw() int32 {
 }
 
 
+/* lead:这一帧被推上屏的时刻,比 mpv 给的呈现时刻早多少毫秒。
+
+   它就是**画面比声音早多少** —— block_for_target_time=1 时 mpv 在 render 里等到点
+   才放行,所以恒为 0;设成 0 之后我们拿到帧就画,早多少完全取决于 mpv 提前多久交货。
+   2026-09-05 实测:提前约一帧(24fps 片子 ≈ +36ms),而且**改不掉** ——
+   `video-latency-hacks=yes` 试过,render 仍然堵 38.4ms,mpv 照样提前一帧交。
+
+   ☠ 单位是**纳秒**,和 mpv_get_time_ns 同基,不是 render.h 注释里写的 mpv_get_time_us。
+     按微秒算会得到 99 万毫秒,然后被护栏静默丢光 —— 这里对不上量纲就吼一声,不许静默。 */
+var (
+	leadMu    sync.Mutex
+	leadN     int64
+	leadSum   float64
+	leadBad   atomic.Int64
+)
+
+func noteLead(rc unsafe.Pointer, h unsafe.Pointer) {
+	if h == nil {
+		return
+	}
+	var fi C.lp_frame_info
+	if C.lp_rc_next_frame(rc, &fi) < 0 || fi.target_time == 0 ||
+		uint64(fi.flags)&C.FRAME_REDRAW != 0 {
+		return // 重画帧没有呈现时刻,不是节奏的一部分
+	}
+	ms := float64(int64(fi.target_time)-int64(C.mpv_get_time_ns(h))) / 1e6
+	if ms > 2000 || ms < -2000 {
+		if leadBad.Add(1)%600 == 1 {
+			bus.Logf("warn", "[提前量] target_time 和本地时钟差 %.0fms —— libmpv 多半换了单位", ms)
+		}
+		return
+	}
+	leadMu.Lock()
+	leadN++
+	leadSum += ms
+	leadMu.Unlock()
+}
+
+// Lead 画面比 mpv 给的呈现时刻平均早多少毫秒,和样本数。
+// ★ 门禁要看样本数:样本为 0 时均值是 0,而 0 恰好满足「偏差很小」。
+func Lead() (mean float64, n int64) {
+	leadMu.Lock()
+	defer leadMu.Unlock()
+	if leadN < 2 {
+		return 0, leadN
+	}
+	return leadSum / float64(leadN), leadN
+}
+
 // GLRender 渲一帧到宿主给的 FBO。
 func GLRender(fbo uint32, w, h, flipY int32) int32 {
 	mpvMu.Lock()
-	rc := rctx
+	// mh 不叫 h —— h 是这个函数的高度参数
+	rc, mh := rctx, mpvH
 	mpvMu.Unlock()
 	if rc == nil {
 		return -1
@@ -443,6 +493,9 @@ func GLRender(fbo uint32, w, h, flipY int32) int32 {
 	/* 先问一句「这一次会不会推进一帧」。**不是拿来决定画不画的**(那条路已经废了),
 	   只是分统计口径:重画也算进出帧节奏的话,量出来的是合成帧率不是出帧节奏。 */
 	advance := C.mpv_render_context_update(rc)&1 != 0
+	if advance {
+		noteLead(rc, mh) // 必须在 render 之前问 —— render 一跑,这一帧就不是「下一帧」了
+	}
 	t0 := time.Now()
 	r := C.lp_rc_render(rc, C.uint(fbo), C.int(w), C.int(h), C.int(flipY), block)
 	noteRenderCost(float64(time.Since(t0).Microseconds()) / 1000)

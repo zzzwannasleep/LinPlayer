@@ -316,6 +316,11 @@ func registerTransport() {
 			out["render_calls"] = n
 			out["advance_calls"] = AdvanceCalls()
 		}
+		// 画面比 mpv 给的呈现时刻早多少 = 画面比声音早多少。见 player.go 的 noteLead。
+		if mean, n := Lead(); n >= 2 {
+			out["lead_ms"] = mean
+			out["lead_samples"] = n
+		}
 		if t != nil {
 			out["item_id"] = t.ItemID
 			out["play_session_id"] = t.PlaySessionID

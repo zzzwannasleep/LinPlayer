@@ -45,6 +45,8 @@ internal static class Program
         // 元数据缓存和核心层共用一个数据根。它必须在任何页面构造之前就绪 ——
         // 晚一步的话首屏那几条读命令全部落空,而「首屏」正是它唯一要救的那一屏。
         MetaCache.Init(dataDir);
+        // 日志要早于一切页面 —— 它是用来抓「只在用户那台机器上出现」的现象的
+        Log.Init(dataDir);
 
         try
         {

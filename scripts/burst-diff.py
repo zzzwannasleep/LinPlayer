@@ -48,6 +48,9 @@ def load(p):
 
 def main():
     base, pre, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    # 第 4 个参数 = 只看哪一条横带(y 的比例,如 "0.88,1.0" = 底部控制条)
+    zone = sys.argv[4] if len(sys.argv) > 4 else ''
+    what = sys.argv[5] if len(sys.argv) > 5 else '画面'
     imgs = []
     for i in range(1, n+1):
         p = os.path.join(base, '%s-%d.png' % (pre, i))
@@ -57,7 +60,11 @@ def main():
         print('[连拍] ✗ 只拿到 %d 张,量不了' % len(imgs)); return
     w, h, ch, _ = imgs[0][1]
     # 画面区:去掉顶栏 6% 和底部控制条 18%,只留中间那块纯画面
-    y0, y1 = int(h*0.06), int(h*0.82)
+    if zone:
+        a_, b_ = zone.split(',')
+        y0, y1 = int(h*float(a_)), int(h*float(b_))
+    else:
+        y0, y1 = int(h*0.06), int(h*0.82)
     worst = 0.0
     for k in range(1, len(imgs)):
         _, (_, _, _, a) = imgs[k-1]
@@ -73,8 +80,8 @@ def main():
         pct = diff*100.0/max(tot, 1)
         worst = max(worst, pct)
         print('  第 %d→%d 张:差 %.2f%%' % (k, k+1, pct))
-    print('[连拍] 暂停下相邻两张最大差 %.2f%%' % worst)
-    print('[连拍] ✓ 暂停时画面是定住的' if worst < 1.0
-          else '[连拍] ✗ 暂停时画面在变 —— 这就是「暂停了还在抽搐」')
+    print('[连拍] %s 相邻两张最大差 %.2f%%' % (what, worst))
+    print('[连拍] ✓ %s 是定住的' % what if worst < 1.0
+          else '[连拍] ✗ %s 在变 —— 静止时它本该一动不动' % what)
 
 main()

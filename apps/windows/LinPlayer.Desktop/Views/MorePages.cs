@@ -403,6 +403,8 @@ public sealed class SettingsPage : PageBase
                     if (Features.On("set.cfspeed")) Add(SettingsSections.CfSpeed(core));
                     if (Features.On("set.transfer")) Add(SettingsSections.Transfer(core));
                     Add(Storage(core, paths));
+                    // 不挂 Features 开关:它是排查工具,任何版本都得有
+                    Add(SettingsSections.Logging(core));
                 });
             }
             catch (Exception e)

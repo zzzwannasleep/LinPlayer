@@ -539,6 +539,55 @@ public static class SettingsSections
         });
     }
 
+    // ---------------------------------------------------------------- 日志
+
+    /// <summary>
+    /// 日志档位。<b>切换立即生效,不用重启</b>。
+    ///
+    /// <para>为什么要有这一格:有些现象只在用户那台机器上出现(2026-09-05 的
+    /// 「播放页按钮会闪」就是 —— 连拍截图、真指针悬停、属性翻转计数全试过,
+    /// 我这边一次都没复现)。复现不了就只能把探针交到用户手上,
+    /// 而 <c>LP_*</c> 那些环境变量只有开发机会用。</para>
+    ///
+    /// <para>默认 warn。debug 是抓现场用的,抓完切回来 —— 它一场播放能写几万行。</para>
+    /// </summary>
+    public static Control Logging(CoreClient core)
+    {
+        var pick = new ComboBox
+        {
+            Width = 210, MinHeight = 32,
+            ItemsSource = new[] { "warn(默认,只记异常)", "info(记关键动作)", "debug(记一切,抓现场用)" },
+            SelectedIndex = (int)Log.Current,
+        };
+        var hint = Note(Log.FilePath == "" ? "日志文件建不出来(目录不可写?)" : Log.FilePath);
+        pick.SelectionChanged += (_, _) =>
+        {
+            Log.SetLevel((Log.Level)Math.Max(0, pick.SelectedIndex));
+            hint.Text = $"已切到 {Log.Current}。{Log.FilePath}";
+        };
+
+        var open = new Button { Classes = { "ghost" }, Content = "打开日志目录" };
+        open.Click += async (_, _) =>
+        {
+            // 白名单在核心层,UI 侧不自己拼 explorer 命令(Linux 壳还要再抄一份)
+            try { await core.SystemOpenDataDir(new { sub = "logs" }); }
+            catch (Exception e) { hint.Text = LibraryPage.Advice(e); }
+        };
+
+        return Group("日志", new StackPanel
+        {
+            Spacing = 10,
+            Children =
+            {
+                Note("排查问题时切到 debug,复现一次,然后把 logs/desktop.log 发出来。" +
+                     "切换立即生效,不用重启、也不用重进播放页。" +
+                     "查完记得切回 warn —— debug 档一场播放能写几万行。"),
+                Field("档位", pick),
+                Row(open, hint),
+            },
+        });
+    }
+
     // ---------------------------------------------------------------- 小工具
 
     private static Control Group(string title, Control body) => new Border
