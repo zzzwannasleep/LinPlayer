@@ -27,6 +27,30 @@ extern void    lp_free(char* p);
 extern void    lp_shutdown(void);
 extern int32_t lp_set_surface(int32_t kind, int64_t handle, int32_t width, int32_t height);
 
+// ffmpeg 的 JNI 挂载点(libmpv.so 导出)。声明在这里而不是引头文件:
+// 仓库里只有 mpv 的 client.h,没有 ffmpeg 的头。
+extern int av_jni_set_java_vm(void *vm, void *log_ctx);
+
+// ☠ 没有它,起播必失败,而失败信息只在 mpv 的 error 日志里:
+//     "No Java virtual machine has been registered"
+//     "Could not attach java VM."
+//     "Failed initializing any suitable GPU context!"
+//   界面上看到的只有「一直黑屏」—— surface 明明绑上了、命令全部返回成功。
+//
+//   mpv 的 android GPU 上下文要经 JNI 问 Surface 的尺寸与格式,ffmpeg 的
+//   mediacodec 也要 JavaVM。两者都从 av_jni_get_java_vm() 拿,而那个全局
+//   只能由宿主在 JNI_OnLoad 里注册一次。
+//
+// ★ 这段是 cgo 的 C 前导,它本身就住在一个块注释里 —— 里面**不能再出现块注释的
+//   结束符**,连中文说明里、连行内注释里都不行。出现了就提前把前导关掉,
+//   报一串看不懂的 Go 语法错(unexpected > / string not terminated)。
+//   这条同一天踩了三次:第一次在正文注释,第二次在中文说明,第三次在
+//   `EGL_CONTEXT_FLAGS_KHR` 那个行内注释里。
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    (void)reserved;
+    av_jni_set_java_vm((void*)vm, 0);
+    return JNI_VERSION_1_6;
+}
 
 JNIEXPORT jint JNICALL Java_xyz_linplayer_app_core_Native_abiVersion(JNIEnv* e, jclass c) {
     (void)e; (void)c;
@@ -76,15 +100,41 @@ JNIEXPORT void JNICALL Java_xyz_linplayer_app_core_Native_shutdown(JNIEnv* e, jc
 
 // 视频通道 A(SPEC §7.2)。surface == NULL 就是解绑。
 //
-// ☠ ANativeWindow_fromSurface 加一次引用,**由核心层 release**(surface_android.go 里)。
-//   在这里 release 的话,mpv 还拿着一个已经归零的窗口 —— 那是 use-after-free。
+// ☠☠ **mpv 的 --wid 在安卓上要的是 `android.view.Surface` 的 jobject,
+//     不是 ANativeWindow*。** 传 ANativeWindow* 进去,libmpv 会在**自己的线程上**
+//     再对它调一次 ANativeWindow_fromSurface,当场:
+//       JNI DETECTED ERROR IN APPLICATION: jobject is an invalid JNI transition
+//       frame reference ... in call to GetObjectField  → SIGABRT
+//     栈顶是 libandroid.so 的 ANativeWindow_fromSurface,看起来像我们这边的错,
+//     其实是**交给 mpv 的东西类型不对**。
+//
+// ★ 所以这里持有一个 **global ref**,并且:
+//   · 同一个 Surface 只是尺寸变了 → 把**同一个**引用再交一次,核心层据此走
+//     「只改尺寸」那条路,不重建 vo(重建会黑一帧);
+//   · 换了 Surface 或解绑 → 先 lp_set_surface(0) 阻塞到 mpv 不再画,**再**
+//     DeleteGlobalRef。顺序反过来就是 use-after-free。
+static jobject g_surface = NULL;
+
+static void lp_drop_surface(JNIEnv* e) {
+    if (!g_surface) return;
+    lp_set_surface(0, 0, 0, 0);            // 阻塞:返回后 mpv 已经不画了
+    (*e)->DeleteGlobalRef(e, g_surface);
+    g_surface = NULL;
+}
+
 JNIEXPORT jint JNICALL Java_xyz_linplayer_app_core_Native_setSurface(
         JNIEnv* e, jclass c, jobject surface, jint w, jint h) {
     (void)c;
-    if (surface == NULL) return (jint)lp_set_surface(0, 0, 0, 0);
-    ANativeWindow* win = ANativeWindow_fromSurface(e, surface);
-    if (!win) return -1;
-    return (jint)lp_set_surface(1, (int64_t)(intptr_t)win, (int32_t)w, (int32_t)h);
+    if (surface == NULL) { lp_drop_surface(e); return 0; }
+
+    if (g_surface && (*e)->IsSameObject(e, g_surface, surface)) {
+        // 同一个 Surface,只是尺寸变了
+        return (jint)lp_set_surface(1, (int64_t)(intptr_t)g_surface, (int32_t)w, (int32_t)h);
+    }
+    lp_drop_surface(e);
+    g_surface = (*e)->NewGlobalRef(e, surface);
+    if (!g_surface) return -1;
+    return (jint)lp_set_surface(1, (int64_t)(intptr_t)g_surface, (int32_t)w, (int32_t)h);
 }
 */
 import "C"

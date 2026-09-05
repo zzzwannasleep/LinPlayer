@@ -136,6 +136,7 @@ import "C"
 
 import (
 	"errors"
+	"strings"
 	"fmt"
 	"math"
 	"os"
@@ -293,7 +294,13 @@ func drainEvents(h unsafe.Pointer) {
 			onFileLoaded()
 		case evLogMessage:
 			if t := C.lp_event_log_text(ev); t != nil {
-				noteMpvLog(C.GoString(t))
+				txt := C.GoString(t)
+				noteMpvLog(txt)
+				/* ★ 订阅的是 error 级,所以每一条都值得往外走。
+				   原来只有 shader 编译错误被留下,别的**一个字都不出来** ——
+				   而「起播失败」在界面上只是一直黑屏,mpv 明明报了原因却没人看得到。
+				   这和「核心层日志一开始一个字都没往外走」是同一个坑。 */
+				bus.Logf("warn", "mpv: %s", strings.TrimSpace(txt))
 			}
 		case evEndFile:
 			// ★ keep-open=yes 时 END_FILE **永远不发**(文件不卸载)。

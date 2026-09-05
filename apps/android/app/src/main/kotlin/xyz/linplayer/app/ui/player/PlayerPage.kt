@@ -109,6 +109,8 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     /** 跟手 seek 的预览值。**松手才发命令** —— 跟着滑发是每帧一条,把核心层的 seek 闩打乱。 */
     var seekPreview by remember { mutableStateOf<Double?>(null) }
     var volume by remember { mutableFloatStateOf(1f) }
+    /** 起播失败(一次都没出画就 eof)。**不许静默退回去**。 */
+    var openFailed by remember { mutableStateOf(false) }
 
     // 屏幕常亮(U1.24):播放中不息屏,暂停 / 退出后恢复
     DisposableEffect(paused) {
@@ -120,7 +122,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
 
     // 起播。★ 换片时**先立「未就绪」再发命令**,不能排在两个 await 之后
     LaunchedEffect(route.itemId) {
-        everMoved = false; buffering = true; position = 0.0; duration = 0.0
+        everMoved = false; buffering = true; position = 0.0; duration = 0.0; openFailed = false
         // 通知权限在**这里**要,不在冷启动时要(U1.27):它只在后台播放挂通知栏时有意义
         (activity as? xyz.linplayer.app.MainActivity)?.askNotificationPermission()
         app.wantsPip = true
@@ -139,8 +141,13 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             duration = o.dbl("duration") ?: duration
             paused = o.bool("paused")
             buffering = o.bool("buffering")
-            // ☠ 判播完必须读 eof —— keep-open 下 END_FILE 永远不发
-            if (o.bool("eof")) nav.popBackStack()
+            /* ☠ 判播完必须读 eof —— keep-open 下 END_FILE 永远不发。
+               ★ 但「时间一次都没往前走过就 eof」不是播完,是**起播失败**:
+                 直接 popBackStack 会让用户看到「点了播放,闪一下就回来了」,
+                 什么都没说。这种时候把 mpv 报的原因显示出来。 */
+            if (o.bool("eof")) {
+                if (everMoved) nav.popBackStack() else openFailed = true
+            }
         }
     }
 
@@ -206,7 +213,14 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         // 未出画时的黑幕 + 转圈。**判据是「时间真的往前走了」**
         if (!everMoved) Box(Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center) {
-            Dim3(if (buffering) "正在缓冲…" else "正在打开…")
+            if (openFailed) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("这一片没能播起来", color = Color.White, fontSize = 16.sp)
+                Spacer(Modifier.height(Sp.x8))
+                Dim3("原因在日志里(设置 → 关于 → 导出诊断信息)。", maxLines = 2)
+                Spacer(Modifier.height(Sp.x16))
+                xyz.linplayer.app.ui.components.LpButton("返回", { nav.popBackStack() },
+                    kind = xyz.linplayer.app.ui.components.BtnKind.Secondary)
+            } else Dim3(if (buffering) "正在缓冲…" else "正在打开…")
         }
 
         // 三区手势(UI_MOBILE.md §8.4)。锁屏后只有解锁按钮响应

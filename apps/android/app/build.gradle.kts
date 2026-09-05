@@ -51,9 +51,8 @@ android {
                 it.getOrElse(2) { "0" }.toInt()
         }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // 本轮只出这两个 ABI:x86_64 给模拟器、arm64-v8a 给真机。
-        // armeabi-v7a 可后补 —— 每加一个 ABI,APK 里就多一份 34MB 的 native
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        // ★ ABI 名单只写在下面的 splits 里一处。两处都写 AGP 直接拒绝构建
+        //   (Conflicting configuration),而这是**对的** —— 两份名单必然漂移
     }
 
     signingConfigs {
@@ -100,6 +99,20 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    /* ABI 拆包。
+       ★ 一个 ABI 的 native 就有 34MB(liblpcore 18.4 + libmpv 16.1,已 strip),
+         两个塞进一个 APK 是 103MB —— 而任何一台设备只用得上其中一半。
+       ★ isUniversalApk = false:不出那个「什么都有」的包。留着它的下场是
+         发布时手一滑传的就是它,用户下 103MB 用 34MB。 */
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
+        }
+    }
+
     buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = false }
 }

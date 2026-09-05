@@ -109,6 +109,33 @@ private fun MainShell() {
         else -> -1
     }
 
+    /* 真机自检直达:`am start ... -e lp_page <名字>`。
+       ★ 不能靠 input tap 走到目标页 —— 坐标随字号 / 数据变,而且中间任何一步
+         没点中,后面全错位;截图看起来还像是「那一页做坏了」。 */
+    LaunchedEffect(Unit) {
+        val p = MainActivity.SelfCheck.page ?: return@LaunchedEffect
+        MainActivity.SelfCheck.page = null
+        val parts = p.split(":")
+        when (parts[0]) {
+            "aggregate" -> nav.navigate(Route.Aggregate)
+            "servers" -> nav.navigate(Route.Servers)
+            "search" -> nav.navigate(Route.Search())
+            "favorites" -> nav.navigate(Route.Favorites)
+            "downloads" -> nav.navigate(Route.Downloads)
+            "plugins" -> nav.navigate(Route.Plugins)
+            "ranking" -> nav.navigate(Route.Ranking)
+            "calendar" -> nav.navigate(Route.Calendar)
+            "settings" -> nav.navigate(Route.Settings)
+            "browse" -> nav.navigate(Route.Browse)
+            "catalog" -> nav.navigate(Route.Catalog)
+            "addServer" -> nav.navigate(Route.AddServer)
+            "library" -> nav.navigate(Route.Library(parts.getOrElse(1) { "" }, parts.getOrElse(2) { "媒体库" }))
+            "detail" -> nav.navigate(Route.Detail(parts.getOrElse(1) { "" }, parts.getOrElse(2) { "Series" }))
+            "player" -> nav.navigate(Route.Player(parts.getOrElse(1) { "" }, parts.getOrElse(2) { "自检" }))
+            "settingsSub" -> nav.navigate(Route.SettingsSub(parts.getOrElse(1) { "about" }))
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             NavHost(

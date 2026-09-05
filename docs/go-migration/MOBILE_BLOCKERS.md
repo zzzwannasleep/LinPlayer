@@ -103,3 +103,58 @@
   谁把横幅删了,谁就会照着错数字写 `build.gradle.kts`。
 - **需要人做什么**:无需人工介入。**下次派调研 agent 时,版本号一律不许由 agent 给**
   —— 让它写「查 Maven」并给出查询命令,数字由主 agent 现拉。
+
+---
+
+## B5 · 模拟器的 EGL 谎报支持,导致 mpv 建不出 GL 上下文(真机不受影响)
+
+- **撞到的时间 / 阶段**:2026-09-06,阶段 ⑦(播放链路真机验证)
+- **现象与证据**:
+  surface 绑定成功、命令全部返回成功、mpv 也真的读到了流,
+  但界面上一直黑屏。核心层日志(本次一并补上的 mpv error 转发)给出:
+  ```
+  [核心层:info] surface 已绑定 1080x2400
+  [核心层:info] PLAY item=ep-1 resume=0.0 psid=… method=DirectStream
+  [核心层:warn] mpv: Initializing GPU context 'android'
+  [核心层:warn] mpv: EGL_VERSION=1.4 Android META-EGL
+  [核心层:warn] mpv: Trying to create GLES 2.x + context.
+  [核心层:warn] mpv: Chosen EGLConfig: EGL_CONFORMANT=0x45 …
+  [核心层:warn] mpv: Could not create EGL context for GLES 2.x +!
+  [核心层:warn] mpv: AVIOContext: Statistics: 1362407 bytes read, 1 seeks
+  ```
+  最后一行是关键旁证:**取流那条链是通的**(会话参数 → `player.play` →
+  DirectStream → mpv 的 HTTP 读了 1.36 MB),坏的只有 GL 上下文这一步。
+
+  自己写探针在**同一个进程**里走一遍 EGL(临时加在 JNI 层,已撤):
+  ```
+  init=1 1.4 err=0x3000                          eglInitialize 成功
+  choose=1 n=1 err=0x3000                        eglChooseConfig 成功
+  bindAPI=1 err=0x3000                           eglBindAPI 成功
+  createContext=0x7d8e9d947130 err=0x3000        ← 不带 FLAGS_KHR:成功
+  createContext(FLAGS_KHR,v3)=0x0 err=0x3004     ← 带 FLAGS_KHR:EGL_BAD_ATTRIBUTE
+  createContext(FLAGS_KHR,v2)=0x0 err=0x3004
+  has_create_context=1                           ← 扩展字符串里**声称**支持
+  ```
+  **模拟器的 EGL 转换层在 `EGL_EXTENSIONS` 里声称支持 `EGL_KHR_create_context`,
+  却对 `EGL_CONTEXT_FLAGS_KHR` 回 `EGL_BAD_ATTRIBUTE`。**
+  mpv 只要看到那个扩展就会带上这个属性,于是两次尝试(GLES 3 / GLES 2)全失败。
+- **我试过的**:
+  1. 换 GPU 后端:`-gpu swiftshader_indirect` → `-gpu host`(RTX 5060 直通),
+     现象一字不变 —— 排除「软件渲染太弱」
+  2. 提高 mpv 日志级别到 `v` / `debug`,拿到 EGL 版本、厂商、选中的 EGLConfig
+     全表 —— 确认 config 是 conformant 的(`EGL_CONFORMANT=0x45`,ES2+ES3 都在)
+  3. 在同进程里自写 EGL 探针做 A/B(带 / 不带 `EGL_CONTEXT_FLAGS_KHR`)——
+     这一步才定的性:**不是我们的进程不能建 GL 上下文,是那一个属性被拒**
+- **我采取的默认决策**:**不为它加绕过。** 这是模拟器 EGL 转换层的缺陷,
+  真机上 `EGL_KHR_create_context` 是真的(mpv-android / media_kit 常年在用这条路)。
+  为一个只在模拟器上出现的问题去改 mpv 的上下文创建路径,是拿真机的正确性换自检的绿。
+  改的是**别的**:起播失败不再静默退回上一页,而是当场说「这一片没能播起来」
+  并指向诊断信息 —— 那个静默退回才是真正会伤到用户的行为。
+- **代价 / 后面要还的债**:**「有画面」这一条判据在模拟器上验不了**,
+  只验到了「surface 绑上了 + 取流通了 + mpv 走到 EGL 这一步」。
+- **需要人做什么才能真正解决**:
+  拿一台**真机**跑一次(`LP_SELFCHECK_HOST=<同网段主机地址> bash scripts/selfcheck-android.sh`,
+  然后 `am start ... -e lp_page 'player:<条目id>:x'`),确认出画面。
+  判据不是截图 —— `screencap` 抓不到 SurfaceView;用
+  `adb shell dumpsys SurfaceFlinger` 看图层有没有在刷新,加上 `player.status` 的
+  position 是否在往前走。
