@@ -7,7 +7,8 @@
 4. **`cargo check -p app` 只编 Windows**,`crates/mpv` 的 overlay 有四个 cfg 变体,兜底桩任何 CI 目标都编不到、会静默烂掉。
 5. **别再说「本机没 NDK 跑不了」** —— 仓库自带 `scripts/build-android-apk.sh`,裸 cargo check 会死在 host bindgen 缺 WinSDK 头。
 
-> 本文件共 **9** 条。每条都标了它的原记忆文件名与类型;正文按原样搬运,未做压缩或改写。
+> 本文件共 **11** 条。前 9 条标了原记忆文件名与类型;末两条是 2026-09-06
+> Go 核心 + Compose 手机端落地时新踩的。
 
 ## 本页条目
 
@@ -19,6 +20,8 @@
 - Android R8 JNI keep — `android-r8-jni-keep.md`
 - 安卓资源限定符优先级 — `android-resource-qualifier-precedence.md`
 - 安卓视频透出四层 — `android-video-transparency-chain.md`
+- Go 核心层接上安卓:五条只有装机才现形的 — 2026-09-06
+- 出包与签名:minSdk ≥24 时 AGP 默认只签 v2/v3 — 2026-09-06
 
 ---
 
@@ -312,3 +315,63 @@ Flutter 的 **release 构建默认开启 R8**(代码压缩+混淆)。只被**原
 - [TV 端 UI 选型](ui-tv.md) — TV 前端与焦点库的硬约束
 - [手机端 UI(ui/mobile)](ui-mobile.md) — 单 APK 靠 UA 标分流 TV/手机
 - [同步命令里裸 tokio::spawn](network.md) — 两端共有的「一点下载就闪退」
+
+---
+
+### Go 核心层接上安卓:五条只有装机才现形的
+
+*(2026-09-06 手机端 Compose 版整轮落地时踩的。类型:project)*
+
+**① mpv 的 `--wid` 在安卓上要的是 `android.view.Surface` 的 jobject,不是 `ANativeWindow*`。**
+传后者进去,libmpv 会**在自己的线程上**再对它调一次 `ANativeWindow_fromSurface`,当场:
+
+```
+JNI DETECTED ERROR IN APPLICATION: jobject is an invalid JNI transition
+frame reference … in call to GetObjectField        → SIGABRT
+```
+
+栈顶指着 `libandroid.so` 的 `ANativeWindow_fromSurface`,**看起来像宿主的错**。
+正确做法:JNI 层持一个 Surface 的 global ref,把那个引用的地址交给 `wid`;
+同一个 Surface 只是尺寸变了就**别重设 wid**(重设会让 vo 整个重建,转屏黑一帧),
+改设 `android-surface-size`。解绑顺序:先 `lp_set_surface(0)` 阻塞返回,**再** `DeleteGlobalRef`。
+
+**② 没有 `JNI_OnLoad` 注册 JavaVM,起播必失败。**
+mpv 的 android GPU 上下文要经 JNI 问 Surface 的尺寸与格式,ffmpeg 的 mediacodec 也要 JavaVM。
+两者都从 `av_jni_get_java_vm()` 拿,而那个全局只能由宿主注册一次。
+症状是 `"No Java virtual machine has been registered"` → `"Could not attach java VM."`
+→ `"Failed initializing any suitable GPU context!"`,而界面上只有黑屏。
+`av_jni_set_java_vm` 由 libmpv.so 导出,直接声明就能调。
+
+**③ mpv 的 error 日志原来一个字都没往外走。**
+`core/player` 只留了 shader 编译错误,别的全丢。上面两条能被定位,靠的就是把
+`MPV_EVENT_LOG_MESSAGE` 整条转成核心层日志。**「起播失败」在界面上只是黑屏,
+而 mpv 明明在报原因** —— 和「核心层日志一开始一个字都没往外走」是同一个坑。
+
+**④ 安卓设不了环境变量,所以 debug 构建里核心层日志要默认开。**
+`LP_CORELOG=1` 那条门控在 PC 上好用,在安卓上等于永远关着 —— 而它是排查唯一的出口。
+
+**⑤ cgo 的 C 前导住在一个块注释里,里面不能再出现块注释的结束符。**
+连中文说明里、连 `/* 变量名 */` 这种行内注释里都不行:出现了就提前把前导关掉,
+报一串看不懂的 Go 语法错(`unexpected >` / `string not terminated`)。**同一天踩了三次。**
+
+**失效条件**:①② 是 mpv 的契约,换 libmpv 构建也成立;
+③④ 是本仓库的实现选择;⑤ 是 cgo 的语法事实。
+
+---
+
+### 出包与签名:minSdk ≥24 时 AGP 默认只签 v2/v3
+
+*(2026-09-06。类型:project)*
+
+判据写成「`unzip -l` 看得到 `META-INF` 证书」时,**那条判据永远过不了,而包其实是签了的** ——
+AGP 在 minSdk ≥ 24 时默认关掉 v1(JAR)签名。要让两条判据都成立就显式
+`enableV1Signing = true`;顺带它也是侧载到老 ROM / 第三方安装器的唯一凭据,
+而「装不上」在用户那头没有任何线索。
+
+**ABI 必须拆包。** 一个 ABI 的 native 就有 34 MB(`liblpcore.so` 18.4 + `libmpv.so` 16.1,
+已 strip),两个塞一个包是 **103 MB**,而任何一台设备只用得上一半。
+`isUniversalApk = false` —— 留着那个「什么都有」的包,早晚有一次发布传的是它。
+★ ABI 名单只许写在 `splits` 一处:同时写 `ndk.abiFilters` 的话 AGP 直接拒绝构建,
+**而那是对的**,两份名单必然漂移。
+
+**失效条件**:AGP 9.x 的行为;v1 默认关是 minSdk ≥24 才有的。

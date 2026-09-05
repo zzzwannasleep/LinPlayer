@@ -1196,7 +1196,11 @@ Ani-RSS 管理台(同 C24b)。
     那条「META-INF 证书」判据永远过不了,而包其实是签了的
   - 反向注入:移走 `keystore.properties` → 退回 debug 签名 → v1 那条如期变红
   - 判据:**release 包真装上跑过**(R8 全模式 + 资源压缩),没有 `NoSuchMethodError`
-- [x] **U1.20** Compose UI Test 覆盖关键路径
+- [x] **U1.20** Compose UI Test 覆盖关键路径 + **参数名门禁**
+  - `python scripts/check-android-args.py`:从 Go handler 抽「读过哪些键」、
+    从 Kotlin 抽「传了哪些键」,对不上即红。**首次运行抓到 27 处静默不生效的接线错**
+    (listLatest 传 view_id 而核心层读 parent_id、reportProgress 传 position_secs
+    而核心层读 pos ……)。反向注入验过会红
   - 13 条 JVM 单测(版本回落 / 地址补全 / 剧集标题 / 能力集 / 会话字段名 / 分页)
   - 3 条 Compose UI Test(没有标题也要画右上角入口 / `E_UNSUPPORTED` 整块不画 /
     别的错误码要显示原因和重试)—— 这三条都是真栽过的

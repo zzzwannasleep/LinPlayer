@@ -7,7 +7,9 @@
 4. **安卓 edge-to-edge 下 `env(safe-area-inset-bottom)` 对导航条恒 0**,必须从原生读真实 insets 注入。
 5. **自检必须走 CDP `setDeviceMetricsOverride`**:`--window-size=390` 实测 `innerWidth` 是 504。
 
-> 本文件共 **7** 条。每条都标了它的原记忆文件名与类型;正文按原样搬运,未做压缩或改写。
+> 本文件共 **10** 条。前 7 条是旧 Web 栈时代的(版式与交互结论仍然有效,
+> **代码与 DOM 细节已作废** —— 2026-09-06 起手机端是 Kotlin + Compose);
+> 末 3 条是 Compose 版落地时新踩的。
 
 ## 本页条目
 
@@ -18,6 +20,9 @@
 - 手机端 2026-08 整改 — `mobile-detail-pages-rebuild.md`
 - 播放页 OSD 重构 — `mobile-player-osd-rebuild.md`
 - effect 依赖 vs DOM 时序 — `effect-deps-vs-dom-timing.md`
+- Compose 版手机端:参数名没有任何东西守 — 2026-09-06
+- 迁移期的命令层要调用方显式传会话四件套 — 2026-09-06
+- 三个 Compose 特有的「不报错只是不工作」 — 2026-09-06
 
 ---
 
@@ -481,3 +486,73 @@ PC 端(desktop/pages/sources/sourceForms.tsx)一直是加完补一刀 `update_ac
 - [正则筛选前端接线](ui-desktop.md) — 手机端「高级筛选规则」保存从没落库
 - 首登闸口+源表单共用(本地 sources.md,未入公开库) — 登录闸口复用 PC 的 sourceForms,不抄第二份
 - [VOD 资源站插件](plugins.md) — 手机端网盘/插件源用户进不去浏览页的宿主 bug
+
+---
+
+### Compose 版手机端:参数名没有任何东西守
+
+*(2026-09-06 Go 核心 + Compose 整轮落地。类型:project)*
+
+**命令名有 `check-bindings.sh` 的四方比对守着,参数名没有。** 而它同样是字符串:
+传 `view_id` 而核心层读的是 `parent_id`,**两边都不报错**。
+`scripts/check-android-args.py` 首次运行抓到 **27 处**,每一处都是「静默不生效」:
+
+| 传的 | 核心层读的 | 用户看到什么 |
+|---|---|---|
+| `emby.listLatest(view_id)` | `parent_id` | 首页每条「最新」轨拉的是**全库** |
+| `emby.getFilters(view_id)` | `parent_id` | 库内筛选的分面是全库的 |
+| `emby.seasonEpisodes(season_id)` | `parent_id` | 分集永远空 |
+| `emby.setFavorite(favorite)` | `fav` | 收藏点了不生效 |
+| `emby.setBlocked(item_id)` | `id` | 屏蔽点了不生效 |
+| `emby.rankingFetch(category)` | `category_id` | 榜单永远是第一个 |
+| `emby.aggregateSearch(types)` | `include_episodes` | 「包括集」开关失效 |
+| `account.setActiveLine(url)` | `index` | 切线路切不动 |
+| `player.seek(position_secs)` | `pos` | 进度条拖了不跳 |
+| `player.setTrack(type)` | `kind` | 换音轨 / 字幕无效 |
+| `player.play(version_id)` | `media_source_id` | 换版本无效 |
+| `emby.reportProgress(position_secs)` | `pos` | **进度永远报 0** |
+
+另外三条是「这个参数根本不存在」:`prefs.setPrefs("theme")`、
+`prefs.setPrefetchSettings("enabled")`(它读的是 `settings.servers` 清单)、
+`danmaku.setDanmakuConfig("enabled")`(它读的是弹幕源清单)——
+**核心层照常返回成功**,于是那三个开关是永远不生效的开关。
+
+**做法**:从 Go 的 handler 抽「读过哪些键」,从 Kotlin 的 `call(…, args(…))` 抽
+「传了哪些键」,对不上就红。写这个脚本比逐条对文档快,而且它以后一直在。
+
+---
+
+### 迁移期的命令层要调用方显式传会话四件套
+
+*(2026-09-06。类型:project)*
+
+`core/emby/commands.go` 的 `sessionFrom` 要 `server / token / user_id / device_id`,
+`core/player/` 里还有 8 处也要。**让每个页面各自记得传 = 漏掉的那一页报
+「缺少 server 或 user_id」,而它长得像后端故障。**
+收口成一处注入(`AppState.call`),不需要这四个值的命令会把它们当未知键忽略,零代价。
+★ 字段名**就是线上字段名**(小写下划线),写成驼峰核心层当作没传 —— 两边都不报编译错。
+
+---
+
+### 三个 Compose 特有的「不报错只是不工作」
+
+*(2026-09-06。类型:project)*
+
+1. **收尾的活挂在 `rememberCoroutineScope()` 上 = 一件都不跑。**
+   退出播放页时上报最终进度,那个 scope 正在被取消,`launch` 出去的活全部丢弃且不报错。
+   表现是「看一半退出,续播进度不落地」—— 和 `PlaySessionId` 那条老故障长得一样,
+   根因完全不同。解法:一个寿命跟进程的 scope。
+2. **`LpScaffold` 用「有没有标题」判要不要画整条 topbar** → 首页的搜索与设置
+   两个入口一个都没画出来,不报错,只是点不到。首页正是「没有标题但右上角有入口」那一页。
+3. **本地数据通道要 `X-LP-Token` 请求头**,不带就是 401 ——
+   而 401 在界面上和「这张图不存在」一模一样:骨架不消失、不报错、一个字都没有。
+   token 每次启动重新随机,只能在拦截器里现读,不能拼进 URL(拼进去会进 mpv 日志)。
+
+另有两条 Compose 的布局事实:
+- **`LazyRow` 嵌在 `LazyColumn` 里必须给固定高度** —— 不给会在每次测量时重新布局整列,
+  那是「首页滑不动」在 Compose 上的等价形态。
+- **`Modifier.clip` 排在 `graphicsLayer` 之后 = 先缩放后裁剪**,Ken Burns 放大的那一圈
+  会溢出容器。要在**外层**加 `clipToBounds()`。
+
+**失效条件**:1 是协程作用域的语义,长期成立;2、3 是本仓库的实现;
+最后两条是 Compose 的修饰符顺序语义。
