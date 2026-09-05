@@ -108,7 +108,7 @@ fun HomePage(nav: NavController) {
             // 每个库一条「最新」轨,**并发**
             v.valueOrNull?.forEach { view ->
                 launch {
-                    val r = app.block("emby.listLatest", args("view_id" to view.id, "limit" to 16))
+                    val r = app.block("emby.listLatest", args("parent_id" to view.id, "limit" to 16))
                     r.valueOrNull?.let { latest = latest + (view.id to Item.list(it)) }
                 }
             }
@@ -341,7 +341,7 @@ internal fun cardActions(
     CardAction("收藏") {
         scope.launch {
             runCatching {
-                app.call("emby.setFavorite", args("item_id" to item.id, "favorite" to true))
+                app.call("emby.setFavorite", args("item_id" to item.id, "fav" to true))
             }.onSuccess { app.toast("已加入收藏", xyz.linplayer.app.data.ToastKind.Ok) }
                 .onFailure { app.report(it) }
         }
@@ -357,7 +357,7 @@ internal fun cardActions(
         scope.launch {
             runCatching {
                 app.call("emby.setBlocked",
-                    args("item_id" to item.id, "name" to item.name, "blocked" to true))
+                    args("id" to item.id, "name" to item.name, "blocked" to true))
             }.onFailure { app.report(it) }
         }
     },

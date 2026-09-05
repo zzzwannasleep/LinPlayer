@@ -129,7 +129,7 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                         val s = seasons.firstOrNull { it.id == route.itemId } ?: seasons.firstOrNull()
                         curSeason = s
                         if (s != null) episodes = Item.list(app.block("emby.seasonEpisodes",
-                            args("season_id" to s.id)).valueOrNull)
+                            args("parent_id" to s.id)).valueOrNull)
                     }
                 }
             }
@@ -149,7 +149,8 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
 
     // 离页取消预热:留着不取消 = 用户翻十个详情就有十条流在偷偷拉
     androidx.compose.runtime.DisposableEffect(route.itemId) {
-        onDispose { scope.launch { runCatching { app.call("prefs.preloadCancel") } } }
+        // 同 PlayerPage:收尾要走 app.bg,composition 的 scope 这时已经在取消了
+        onDispose { app.bg.launch { runCatching { app.call("prefs.preloadCancel") } } }
     }
 
     val d = detail.valueOrNull
@@ -168,7 +169,7 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                     favorite = want // 乐观更新
                     runCatching {
                         app.call("emby.setFavorite",
-                            args("item_id" to route.itemId, "favorite" to want))
+                            args("item_id" to route.itemId, "fav" to want))
                     }.onFailure { favorite = !want; app.report(it) } // ☠ 失败必须回滚
                 }
             }
@@ -249,7 +250,7 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                                 curSeason = s
                                 scope.launch {
                                     episodes = Item.list(app.block("emby.seasonEpisodes",
-                                        args("season_id" to s.id)).valueOrNull)
+                                        args("parent_id" to s.id)).valueOrNull)
                                 }
                             }
                         }

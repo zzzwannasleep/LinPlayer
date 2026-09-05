@@ -65,8 +65,12 @@ class MainActivity : ComponentActivity() {
         intent?.getStringExtra("lp_login")?.let { SelfCheck.login = it }
         intent?.getStringExtra("lp_page")?.let { SelfCheck.page = it }
 
+        xyz.linplayer.app.data.UiPrefs.load(this)
+
         setContent {
-            LpTheme {
+            LpTheme(darkOverride = when (xyz.linplayer.app.data.UiPrefs.theme.value) {
+                "dark" -> true; "light" -> false; else -> null
+            }) {
                 if (isTelevision()) TvPlaceholder() else PhoneRoot(app)
             }
         }

@@ -169,22 +169,24 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         while (true) {
             delay(10_000)
             if (!paused && position > 0) runCatching {
-                app.call("emby.reportProgress",
-                    args("item_id" to route.itemId, "position_secs" to position))
+                // ★ 不传 item_id:核心层从**当前播放目标**取(连同 PlaySessionId)。
+                //   让调用方传 = 传错一次就是「看一半退出进度不落地」,而且查不出来
+                app.call("emby.reportProgress", args("pos" to position, "paused" to paused))
             }
         }
     }
     DisposableEffect(route.itemId) {
         onDispose {
             app.wantsPip = false
-            scope.launch {
+            // ★ 走 app.bg 不走 scope:后者正在被取消,launch 出去的活一件都不跑
+            app.bg.launch {
                 runCatching {
-                    // ☠ 播完收尾传**总时长**不是当前时间 —— 差最后零点几秒 =
-                    //   服务端不算看完,Trakt / Bangumi 一次都不触发
                     val p = if (duration > 0 && position >= duration - 2) duration else position
-                    app.call("emby.reportProgress",
-                        args("item_id" to route.itemId, "position_secs" to p, "stopped" to true))
-                    app.call("player.stopPlayback")
+                    // ★ 收尾**只发 player.stopPlayback**:它内部就带了 Stopped 上报,
+                    //   PlaySessionId 从当前播放目标取 —— 三次上报共用一个。
+                    //   不贯穿的话服务器当成三次互不相干的播放,进度就丢了。
+                    // ☠ 播完传**总时长**不是当前时间:差最后零点几秒 = 服务端不算看完
+                    app.call("player.stopPlayback", args("pos" to p))
                 }
             }
         }
@@ -241,7 +243,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                         // ★ 松手才真 seek
                         seekPreview?.let { t ->
                             scope.launch {
-                                runCatching { app.call("player.seek", args("position_secs" to t)) }
+                                runCatching { app.call("player.seek", args("pos" to t)) }
                             }
                         }
                         seekPreview = null; acc = 0f
@@ -296,7 +298,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                 onToggle = {
                     scope.launch { runCatching { app.call("player.setPause", args("paused" to !paused)) } }
                 },
-                onSeek = { t -> scope.launch { runCatching { app.call("player.seek", args("position_secs" to t)) } } },
+                onSeek = { t -> scope.launch { runCatching { app.call("player.seek", args("pos" to t)) } } },
             ) else LandscapeOsd(
                 title = route.title, position = seekPreview ?: position, duration = duration,
                 paused = paused, speed = speed, locked = locked,
@@ -304,7 +306,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                 onToggle = {
                     scope.launch { runCatching { app.call("player.setPause", args("paused" to !paused)) } }
                 },
-                onSeek = { t -> scope.launch { runCatching { app.call("player.seek", args("position_secs" to t)) } } },
+                onSeek = { t -> scope.launch { runCatching { app.call("player.seek", args("pos" to t)) } } },
                 onSpeed = { v ->
                     speed = v
                     scope.launch { runCatching { app.call("player.setSpeed", args("speed" to v)) } }

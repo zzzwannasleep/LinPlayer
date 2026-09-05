@@ -258,7 +258,7 @@ fun RankingPage(nav: NavController) {
     LaunchedEffect(cur) {
         val id = cur ?: return@LaunchedEffect
         block = Block.Loading
-        block = when (val r = app.block("emby.rankingFetch", args("category" to id))) {
+        block = when (val r = app.block("emby.rankingFetch", args("category_id" to id))) {
             is Block.Ok -> Block.Ok(Page.from(r.value).items)
             is Block.Fail -> r
             else -> Block.Loading

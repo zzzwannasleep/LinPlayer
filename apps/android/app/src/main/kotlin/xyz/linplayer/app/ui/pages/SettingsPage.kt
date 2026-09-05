@@ -27,6 +27,7 @@ import xyz.linplayer.app.data.Block
 import xyz.linplayer.app.data.LocalApp
 import xyz.linplayer.app.data.ToastKind
 import xyz.linplayer.app.data.arr
+import xyz.linplayer.app.data.strList
 import xyz.linplayer.app.data.block
 import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.long
@@ -157,28 +158,27 @@ fun SettingsSubPage(nav: NavController, entry: NavBackStackEntry) {
     }
 }
 
+/**
+ * 外观。
+ *
+ * ★ 主题走 [UiPrefs](本机 SharedPreferences),**不走核心层** ——
+ *   `prefs.setPrefs` 只认 `audio_lang` / `sub_lang` / `sub_enabled`,
+ *   根本没有 theme 这一项。原来往它塞 `theme` 的写法是**一个永远不生效的开关**:
+ *   核心层照常返回成功,配置里什么都没变。这类「设了没反应」是本仓库最难查的一种。
+ *   而且深浅色本来就不该跨设备同步 —— 手机上强制深色不代表电视上也要。
+ */
 @Composable
 private fun AppearancePanel() {
-    val app = LocalApp.current
-    val scope = rememberCoroutineScope()
-    var theme by remember { mutableStateOf("跟随系统") }
-    LaunchedEffect(Unit) {
-        theme = runCatching { app.call("prefs.getPrefs") }.getOrNull()
-            .obj().str("theme")?.let {
-                when (it) { "dark" -> "深色"; "light" -> "浅色"; else -> "跟随系统" }
-            } ?: "跟随系统"
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val theme = when (xyz.linplayer.app.data.UiPrefs.theme.value) {
+        "dark" -> "深色"; "light" -> "浅色"; else -> "跟随系统"
     }
     Panel(Modifier.padding(Sp.x16)) {
         SegRow("主题", listOf("跟随系统", "深色", "浅色"), theme, { v ->
-            theme = v
-            scope.launch {
-                runCatching {
-                    app.call("prefs.setPrefs", args("theme" to when (v) {
-                        "深色" -> "dark"; "浅色" -> "light"; else -> "system"
-                    }))
-                }.onFailure { app.report(it) }
-            }
-        }, sub = "深浅两套都调过。跟随系统时晚上自动变暗")
+            xyz.linplayer.app.data.UiPrefs.setTheme(ctx, when (v) {
+                "深色" -> "dark"; "浅色" -> "light"; else -> "system"
+            })
+        }, sub = "深浅两套都调过。跟随系统时晚上自动变暗;这一项只影响这台设备")
     }
 }
 
@@ -203,33 +203,63 @@ private fun PlayerPrefsPanel() {
     }
 }
 
+/**
+ * 多线程加载。
+ *
+ * ★ 它**不是一个全局开关**:核心层存的是一张「对哪几台服务器开」的清单
+ *   (`settings.servers`)。所以这里的开关 = 把**当前服务器**放进 / 移出那张表。
+ *   原来传的 `enabled` 核心层根本不读 —— 又一个永远不生效的开关。
+ * ★ 线程数下限是 **2**:核心层对 <2 或 >4 直接回 `E_INVALID`
+ *   (它故意不静默夹紧 —— 夹紧会让用户以为设了 8 生效了)。
+ */
 @Composable
 private fun PrefetchPanel() {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
-    var on by remember { mutableStateOf(false) }
+    val session by app.session.collectAsStateWithLifecycle()
+    var servers by remember { mutableStateOf<List<String>>(emptyList()) }
     var threads by remember { mutableStateOf(2.0) }
+    var cacheBytes by remember { mutableStateOf(0L) }
+
+    suspend fun push(newServers: List<String>, newThreads: Int) {
+        val payload = JsonObject(mapOf("settings" to JsonObject(mapOf(
+            "servers" to kotlinx.serialization.json.JsonArray(
+                newServers.map { kotlinx.serialization.json.JsonPrimitive(it) }),
+            "threads" to kotlinx.serialization.json.JsonPrimitive(newThreads),
+            "cache_bytes" to kotlinx.serialization.json.JsonPrimitive(cacheBytes),
+        ))))
+        app.call("prefs.setPrefetchSettings", payload)
+    }
+
     LaunchedEffect(Unit) {
         val o = runCatching { app.call("prefs.getPrefetchSettings") }.getOrNull().obj()
-        on = o.bool("enabled"); threads = (o.long("threads") ?: 2L).toDouble()
+        servers = o.strList("servers")
+        threads = (o.long("threads") ?: 2L).toDouble()
+        cacheBytes = o.long("cache_bytes") ?: 0L
     }
+
+    val cur = session?.server
+    val on = cur != null && cur in servers
     Panel(Modifier.padding(Sp.x16)) {
-        LpCell("多线程加载", sub = "开着不一定更快 —— 收益看服务端给不给多连接",
+        LpCell("对这台服务器开启", sub = "开着不一定更快 —— 收益看服务端给不给多连接",
             switch = on, onSwitch = { v ->
-                on = v
+                val srv = cur ?: return@LpCell
+                val before = servers
+                servers = if (v) servers + srv else servers - srv   // 乐观更新
                 scope.launch {
-                    runCatching { app.call("prefs.setPrefetchSettings", args("enabled" to v)) }
-                        .onFailure { on = !v; app.report(it) }   // ☠ 失败必须回滚
+                    runCatching { push(servers, threads.toInt()) }
+                        .onFailure { servers = before; app.report(it) }   // ☠ 失败必须回滚
                 }
             })
         Hairline()
-        StepperRow("并发连接数", threads, 1.0, 4.0, 1.0, { v ->
+        StepperRow("并发连接数", threads, 2.0, 4.0, 1.0, { v ->
+            val before = threads
             threads = v
             scope.launch {
-                runCatching { app.call("prefs.setPrefetchSettings", args("threads" to v.toInt())) }
-                    .onFailure { app.report(it) }
+                runCatching { push(servers, v.toInt()) }
+                    .onFailure { threads = before; app.report(it) }
             }
-        }, fmt = { it.toInt().toString() })
+        }, sub = "只支持 2~4;超出核心层会拒绝并回滚", fmt = { it.toInt().toString() })
     }
 }
 
@@ -255,7 +285,7 @@ private fun BlockedPanel() {
                 scope.launch {
                     runCatching {
                         app.call("emby.setBlocked",
-                            args("item_id" to id, "name" to name, "blocked" to false))
+                            args("id" to id, "name" to name, "blocked" to false))
                     }.onSuccess { reload++ }.onFailure { app.report(it) }
                 }
             })

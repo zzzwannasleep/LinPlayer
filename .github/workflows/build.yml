@@ -212,6 +212,13 @@ jobs:
           LP_CF_TEST_URL: ${{ secrets.LP_CF_TEST_URL }}
         run: bash scripts/build-core-android.sh arm64-v8a x86_64
 
+      # ★ 命令名有 check-bindings 的四方比对守着,**参数名没有任何东西守**。
+      #   传 view_id 而核心层读 parent_id,两边都不报错 —— 表现是
+      #   「筛选设了没反应」「退出播放进度不落地」。首次运行抓到 27 处。
+      - name: 参数名门禁(UI 传的键核心层必须真的读)
+        shell: bash
+        run: python scripts/check-android-args.py
+
       - name: UI 层单测(JVM,不需要设备)
         shell: bash
         run: cd apps/android && ./gradlew --no-daemon testDebugUnitTest

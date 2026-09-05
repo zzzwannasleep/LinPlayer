@@ -97,7 +97,7 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
                 if (season != null) {
                     // 播放中**只拉一屏 40 条**
                     options = Item.list(runCatching {
-                        app.call("emby.seasonEpisodes", args("season_id" to season, "limit" to 40))
+                        app.call("emby.seasonEpisodes", args("parent_id" to season, "limit" to 40))
                     }.getOrNull()).map {
                         Triple(it.id, "${(it.runtimeSecs / 60).toInt()} 分钟",
                             "S${it.seasonNo ?: 1}E${it.episodeNo ?: 1} ${it.name}")
@@ -176,12 +176,14 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
 private suspend fun pick(app: xyz.linplayer.app.data.AppState, kind: String, id: String, itemId: String) {
     runCatching {
         when (kind) {
-            "audio" -> app.call("player.setTrack", args("type" to "audio", "id" to id))
-            "subtitle" -> app.call("player.setTrack", args("type" to "sub", "id" to id))
-            "source" -> app.call("player.play", args("item_id" to itemId, "version_id" to id))
+            "audio" -> app.call("player.setTrack", args("kind" to "audio", "id" to id))
+            "subtitle" -> app.call("player.setTrack", args("kind" to "sub", "id" to id))
+            "source" -> app.call("player.play", args("item_id" to itemId, "media_source_id" to id))
             "episodes" -> app.call("player.play", args("item_id" to id))
             "quality" -> app.call("player.setShaderLevel", args("level" to id))
-            "danmaku" -> app.call("danmaku.setDanmakuConfig", args("enabled" to (id == "on")))
+            // 弹幕开关不是「配置」:danmaku.setDanmakuConfig 收的是**弹幕源清单**。
+            // 开 / 关一路走播放器的弹幕层,核心层这条命令碰不到 —— 见 MOBILE_BLOCKERS B6
+            "danmaku" -> Unit
             else -> Unit
         }
     }.onFailure { app.report(it) }

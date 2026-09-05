@@ -130,7 +130,7 @@ fun LibraryPage(nav: NavController, entry: NavBackStackEntry) {
         coroutineScope {
             launch { fetch(0) }
             launch {
-                filters = when (val r = app.block("emby.getFilters", args("view_id" to route.viewId))) {
+                filters = when (val r = app.block("emby.getFilters", args("parent_id" to route.viewId))) {
                     is Block.Ok -> Block.Ok(r.value.obj().strList("genres"))
                     is Block.Fail -> r
                     else -> Block.Loading

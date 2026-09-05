@@ -25,6 +25,19 @@ import xyz.linplayer.app.core.CoreException
  */
 class AppState(val core: CoreClient, scope: CoroutineScope) {
 
+    /**
+     * 收尾用的作用域。**寿命跟进程,不跟 composition。**
+     *
+     * ☠ 退出播放页时的「上报最终进度」如果挂在 `rememberCoroutineScope()` 上,
+     * 那个 scope 正在被取消 —— `launch` 出去的活**一件都不会跑**,
+     * 而且不报错。表现就是「看一半退出,续播进度不落地」,
+     * 和 PlaySessionId 那条老故障长得一模一样,但根因完全不同。
+     * 实测:假 Emby 只收到 `POST /Sessions/Playing`,收不到 `/Sessions/Playing/Stopped`。
+     */
+    val bg: CoroutineScope =
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+
     private val _session = MutableStateFlow<Session?>(null)
     val session: StateFlow<Session?> = _session.asStateFlow()
 

@@ -101,10 +101,11 @@ fun SearchPage(nav: NavController, entry: NavBackStackEntry) {
                 if (agg && route.viewId == null) {
                     // 聚合是**流式**的:每台服务器各自回各自渲染
                     val r = runCatching {
+                        // ★ 聚合那条命令的开关叫 include_episodes(不是 types)——
+                        //   传错名字的表现是「包括集」这个开关永远不起作用,而且不报错
                         app.call("emby.aggregateSearch", args(
                             "query" to text,
-                            // ★ 类型必须显式传:不传时服务端默认包含分集 =「永远包括集」
-                            "types" to if (eps) "Series,Movie,Episode" else "Series,Movie",
+                            "include_episodes" to eps,
                         ), onPartial = { p ->
                             val o = (p as? kotlinx.serialization.json.JsonObject)
                             val name = o.str("server") ?: "服务器"

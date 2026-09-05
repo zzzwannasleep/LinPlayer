@@ -258,7 +258,9 @@ fun LinesPage(nav: NavController, entry: NavBackStackEntry) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
 
-    data class Line(val url: String, val name: String, val active: Boolean)
+    // ★ 线路靠**下标**指名道姓,不是靠 URL:核心层的 setActiveLine / probeLine
+    //   读的是 index。而且【用户定】任何地方不展示线路地址 —— URL 只是内部键
+    data class Line(val index: Int, val url: String, val name: String, val active: Boolean)
     var lines by remember { mutableStateOf<List<Line>>(emptyList()) }
     var latency by remember { mutableStateOf<Map<String, Long?>>(emptyMap()) }
     var reload by remember { mutableStateOf(0) }
@@ -268,10 +270,10 @@ fun LinesPage(nav: NavController, entry: NavBackStackEntry) {
         lines = r.getOrNull().arr().mapIndexedNotNull { i, e ->
             val o = e.obj() ?: return@mapIndexedNotNull null
             val url = o.str("url") ?: return@mapIndexedNotNull null
-            Line(url, o.str("name")?.takeIf { it.isNotBlank() } ?: "线路 ${i + 1}", o.bool("active"))
+            Line(i, url, o.str("name")?.takeIf { it.isNotBlank() } ?: "线路 ${i + 1}", o.bool("active"))
         }
         // 线路表为空 = 单线路形态,要补出一行可见主线
-        if (lines.isEmpty()) lines = listOf(Line("", "主线路", true))
+        if (lines.isEmpty()) lines = listOf(Line(0, "", "主线路", true))
     }
 
     LpScaffold(route.name, subtitle = "服务器线路", onBack = { nav.popBackStack() }, scrolled = true) { pad ->
@@ -295,7 +297,7 @@ fun LinesPage(nav: NavController, entry: NavBackStackEntry) {
                             latency = latency + (l.url to null)
                             val r = runCatching {
                                 app.call("account.probeLine",
-                                    args("server_id" to route.serverId, "url" to l.url))
+                                    args("server_id" to route.serverId, "index" to l.index))
                             }.getOrNull()
                             latency = latency + (l.url to (r.obj().dbl("ms")?.toLong()))
                         }
@@ -314,7 +316,7 @@ fun LinesPage(nav: NavController, entry: NavBackStackEntry) {
                             scope.launch {
                                 runCatching {
                                     app.call("account.setActiveLine",
-                                        args("server_id" to route.serverId, "url" to l.url))
+                                        args("server_id" to route.serverId, "index" to l.index))
                                 }.onSuccess { reload++; app.refreshSession() }.onFailure { app.report(it) }
                             }
                         },

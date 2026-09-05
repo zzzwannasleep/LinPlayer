@@ -89,7 +89,12 @@
 #### 主题切换(U1.18)
 
 - 三态:**跟随系统 / 强制深色 / 强制浅色**,默认跟随系统。
-  Compose 侧读 `isSystemInDarkTheme()`,被设置覆盖时用 `prefs` 里的值。
+  Compose 侧读 `isSystemInDarkTheme()`,被覆盖时用 `UiPrefs` 里的值。
+- ☠ **覆盖值存本机 SharedPreferences,不存核心层。**
+  `prefs.setPrefs` 只认 `audio_lang` / `sub_lang` / `sub_enabled`,
+  往它塞 `theme` 是**一个永远不生效的开关**(核心层照常返回成功)。
+  这是「纯呈现的设备本地偏好」这一类的唯一例外,边界写在 `data/UiPrefs.kt`
+  的注释里 —— 任何有核心层消费点的东西都不许进去。见 B7。
 - **资源限定符两份都要建。** 需要按 API 分主题时,`values-vXX` 与 `values-night-vXX`
   **必须同时存在** —— `-night` 压过 `-vXX`,只建一份的表现是「浅色修好了深色没修」。
 - **Activity 主题的 `windowBackground` 不能是 `DayNight`。**
@@ -1207,7 +1212,10 @@ mpv 真的不再画为止;JNI 薄层**不许**把它扔到别的线程去做。
 - [ ] 深链 `linplayer://` **冷启动与热启动两条路径**都拿得到 URL
 - [ ] release APK **已签名**:`unzip -l` 看得到 `META-INF` 证书 + "APK Sig Block 42" 魔数
 - [ ] `.so` 已 strip,APK 体积在预算内
-- [ ] 命令名门禁:**本文 §7 出现的每个命令名都在 `COMMANDS.md` 里**
+- [ ] 命令名门禁:`bash scripts/check-ui-mobile-commands.sh`
+- [ ] **参数名门禁**:`python scripts/check-android-args.py`
+      —— 命令名有四方比对守着,**参数名没有任何东西守**,而它同样是字符串:
+      传 `view_id` 而核心层读 `parent_id`,两边都不报错。首次运行抓到 27 处
 
 ### 11.3 自检手段
 

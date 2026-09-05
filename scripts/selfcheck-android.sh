@@ -149,6 +149,33 @@ else
   echo "  (当前不在播放页,跳过)"
 fi
 
+# ---- 9. 形变压力(U1.28)-------------------------------------------------
+# ★ 转屏本身**不会**销毁 SurfaceView —— Activity 声明了 configChanges。
+#   所以两件事都做:转 100 次(验形变)+ 前后台 40 次(验真正的解绑重绑)。
+#   只做前者的话「解绑必须同步阻塞」那条根本没被跑到,测出来是假绿。
+step "形变压力 U1.28"
+"$ADB" shell settings put system accelerometer_rotation 0 >/dev/null
+"$ADB" shell am force-stop "$PKG" >/dev/null
+"$ADB" logcat -c
+"$ADB" shell "am start -n $ACT -e lp_page 'player:ep-1:stress'" >/dev/null
+sleep 6
+for _ in $(seq 1 50); do
+  "$ADB" shell settings put system user_rotation 1 >/dev/null
+  "$ADB" shell settings put system user_rotation 0 >/dev/null
+done
+for _ in $(seq 1 40); do
+  "$ADB" shell input keyevent KEYCODE_HOME >/dev/null
+  "$ADB" shell "am start -n $ACT" >/dev/null
+done
+sleep 3
+if [ -n "$("$ADB" shell pidof "$PKG" | tr -d '[:space:]')" ]; then
+  ok "转屏 100 次 + 前后台 40 次之后进程还活着"
+else
+  bad "压力测试后进程没了"
+fi
+C2="$("$ADB" logcat -d -b crash 2>/dev/null | grep -c "FATAL EXCEPTION")"
+[ "$C2" = 0 ] && ok "压力测试期间没有 FATAL" || bad "压力测试期间 $C2 次 FATAL"
+
 printf '\n'
 [ "$fail" = 0 ] && { echo "全部通过。截图在 $OUT/"; exit 0; }
 echo "$fail 项没过。截图在 $OUT/"

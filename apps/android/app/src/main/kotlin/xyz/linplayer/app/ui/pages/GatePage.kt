@@ -122,6 +122,13 @@ fun GatePage(onDone: suspend () -> Unit, embedded: Boolean = false) {
             LpField(user, { user = it }, "用户名", label = "用户名")
             Spacer(Modifier.height(Sp.x12))
             LpField(pass, { pass = it }, "密码", password = true, label = "密码")
+            /* ☠ 提示放在按钮**上面**。放下面的话键盘一弹就把它盖住了 ——
+               实测「地址填错 → 登录失败」那一屏,用户看到的是「点了没反应」,
+               而错误明明已经写出来了,只是在屏幕外。 */
+            hint?.let {
+                Spacer(Modifier.height(Sp.x12))
+                Dim2(it)
+            }
             Spacer(Modifier.height(Sp.x20))
 
             Row(horizontalArrangement = Arrangement.spacedBy(Sp.x10)) {
@@ -147,10 +154,6 @@ fun GatePage(onDone: suspend () -> Unit, embedded: Boolean = false) {
                         hint = "连上了:${info.obj().str("name").orEmpty()} · 版本 ${info.obj().str("version").orEmpty()}"
                     }
                 }, kind = BtnKind.Secondary, loading = busy)
-            }
-            hint?.let {
-                Spacer(Modifier.height(Sp.x12))
-                Dim2(it)
             }
         }
     }
