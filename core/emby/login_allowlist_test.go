@@ -81,10 +81,15 @@ func TestLoginRegistersImageAllowlist(t *testing.T) {
 }
 
 // waitResult 从事件队列里等这条 seq 的 result。
+//
+// 等待窗必须**长于被测代码里最长的那个超时**(现在是 5 秒的探名超时)。
+// 撞成同一个数时 helper 会先一步喊「等不到 result」,调用方那条
+// 「登录不能超过 8 秒」的断言就永远没机会成为失败点 ——
+// 表现是 CI 上随机红(本机 4.9 秒过、CI 5.04 秒挂)。
 func waitResult(t *testing.T, seq int64) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	t0 := time.Now()
+	for time.Since(t0) < 20*time.Second {
 		b := bus.NextEvent(200)
 		if len(b) == 0 {
 			continue
@@ -108,7 +113,7 @@ func waitResult(t *testing.T, seq int64) {
 		}
 		return
 	}
-	t.Fatal("等不到 result —— 命令没被执行,或者事件队列没吐出来")
+	t.Fatalf("等了 %v 还没等到 result —— 命令没被执行,或者事件队列没吐出来", time.Since(t0))
 }
 
 // 登出必须撤销白名单。留着的话那个 origin 就是一个永久的 SSRF 出口。

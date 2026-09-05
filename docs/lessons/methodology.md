@@ -504,3 +504,28 @@ LP_PICK=1 bash scripts/selfcheck-win.sh v1 ... >/dev/null 2>&1 ; grep "\[点选\
 一行(`CoreClient.cs` 的 `LibraryImport` 需要它)。前一步的 `grep ... || sed ...` 里
 grep 已经找到了、sed 没执行,我却把 grep 的输出误读成「是我加的」。
 **删配置之前先 `git diff` 看它是不是本来就在。**
+
+## 测试的等待窗撞上被测代码的超时 — 2026-09-06
+
+`TestLogin_探服务器名不能拖慢登录` 在 CI 上红,本机绿。日志:
+
+```
+--- FAIL: TestLogin_探服务器名不能拖慢登录 (5.04s)
+    login_servername_test.go:137: 等不到 result —— 命令没被执行,或者事件队列没吐出来
+```
+
+两个 5 撞在一起:被测的探名超时 `serverNameTimeout = 5 * time.Second`,
+而 helper `waitResult` 的等待窗也是 `time.Now().Add(5 * time.Second)`。
+结果恰好在 5.0 秒**之后**才到,helper 先一步放弃 —— 本机 4.99 秒赢、CI 5.04 秒输。
+
+★ 真正的代价不是 flaky,是**那条断言从来没生效过**:
+  测试正文写着「登录超过 8 秒就算失败」,可 helper 5 秒就死了,
+  这 8 秒的预算永远没机会成为失败点。红的理由和它想测的东西完全无关。
+
+规矩:**helper 的等待窗必须长于被测路径里最长的那个超时**,不是「差不多够」。
+撞成同一个数时,失败信息会指向 helper 而不是被测行为 —— 查错方向当场被带偏。
+超时消息里带上 `time.Since(t0)`:一眼能看出是「没执行」还是「执行得太慢」。
+
+验证方式:把 `serverNameTimeout` 临时改成 12 秒(仍小于新的 20 秒等待窗),
+失败信息变成 `登录用了 12.005s —— 名字探测必须有自己的短超时` ——
+这才证明那条 8 秒断言现在真的活着。
