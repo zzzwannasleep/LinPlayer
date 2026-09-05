@@ -20,6 +20,8 @@ Swift/SwiftUI(Apple,后置)。**
 | [`UI_PC.md`](UI_PC.md) | **PC 端 UI 规格**(Windows / Linux)。设计系统、动效、组件状态矩阵、快捷键、19 页逐页规格、播放页 OSD、无障碍、性能预算、验收清单 | 做 PC 端 UI 之前必读 |
 | [`MIGRATION.md`](MIGRATION.md) | **迁移方案**。阶段划分、逐模块映射表(含每个模块必须保留的坑)、差分对账机制 | 开始移植某个模块前读对应那行 |
 | [`TODO.md`](TODO.md) | **任务清单**。每条带客观判据 | 每天 |
+| [`UI_MOBILE.md`](UI_MOBILE.md) | **Android 手机端 UI 规格**。设计系统(刻度是枚举)、动效 token、安全区与形变、组件词汇、手势全表、16 页逐页规格、播放页九宫格 OSD、性能预算、依赖清单 | 做安卓手机端 UI 之前必读 |
+| [`research/`](research/) | Compose 生态调研六份 + **实测版本基线**(`VERSIONS_VERIFIED.md` 压过调研文档里的版本号) | 选组件 / 定版本时 |
 | [`COMMANDS.md`](COMMANDS.md) | **命令契约**,266 条。自动生成 | 写绑定层、移植命令时 |
 | [`knowledge/`](knowledge/) | **领域知识库**。每份都是从现有代码里挖出来的、带 `文件:行号` 出处的事实 | 移植某个模块之前 |
 
