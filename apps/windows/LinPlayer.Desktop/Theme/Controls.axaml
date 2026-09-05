@@ -154,6 +154,8 @@
 
   <!-- 次按钮 -->
   <Style Selector="Button.ghost">
+    <!-- 同上:提示框不许跟着指针放 -->
+    <Setter Property="ToolTip.Placement" Value="Top" />
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource Ink2}" />
     <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
@@ -372,7 +374,22 @@
     40×36 的方形热区:符号本身只有十来像素,靠字形大小当热区的话
       鼠标要瞄准才点得中 —— 而 OSD 三秒就收,瞄不中就得再晃一次鼠标。
   -->
+  <!-- ☠☠☠ 2026-09-05:播放页「每个按钮都在闪」,全屏下稳定复现。根因在 ToolTip。
+
+       Avalonia 的 ToolTip 默认 Placement=Pointer、VerticalOffset=20,也就是
+       **提示框放在指针正下方 20px**,而且它的源码里从没设过 IsHitTestVisible ——
+       提示框是吃鼠标事件的。
+
+       全屏时控制栏贴着屏幕最下沿,"指针下方 20px"放不下 → 弹出层翻转/贴边 →
+       正好压在指针上 → 按钮收到 PointerExited → 提示消失 → 指针又回到按钮上 →
+       PointerEntered → 再弹出。自激,停不下来。
+       窗口化时窗口下面还有屏幕空间,提示框放得下,所以只在全屏复现;
+       而 OSD 上每个按钮都有 ToolTip,所以是"每个按钮"。
+
+       改成锚在**控件**上(Top):提示框贴着按钮上方,而指针在按钮上 ——
+       两者不可能重叠,环就断了。放不下时它翻到按钮下方,同样不碰指针。 -->
   <Style Selector="Button.osd">
+    <Setter Property="ToolTip.Placement" Value="Top" />
     <!-- 46×46 正方 + 20px 字形(2026-09-03,用户:「播放页的 UI 有点小了,放大一点」)。
          上一版 44×40 / 15px:热区够了,但**图标本身**只有十来像素,
          在 1080p 全屏下小得像一排灰点。
@@ -448,4 +465,10 @@
   <Style Selector="Button.chip.on:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource Accent}" />
   </Style>
+  <!-- 第二层保险:提示框永远不该参与命中测试。Avalonia 默认没关,
+       而一个能吃鼠标的提示框只要盖住指针就会把悬停态打成振荡(见上面 Button.osd 那段)。 -->
+  <Style Selector="ToolTip">
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+
 </Styles>

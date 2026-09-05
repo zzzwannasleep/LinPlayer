@@ -132,8 +132,11 @@ public sealed class PlayerPage : UserControl
     /// <summary>页面顶层容器。气泡要按进度条的真实坐标挂在它上面。</summary>
     private Panel? _root;
     private readonly Slider _vol;
-    /// <summary>音量滑块的外壳。 悬停才展开 —— 常驻的话它白占一条控制栏。</summary>
+    /// <summary>音量滑块的外壳。它的宽度**不许随悬停变化** —— 理由见 _vol 的构造处。</summary>
     private readonly Border _volBox;
+
+    /// <summary>音量条的宽度。常量 —— 它是「不随悬停变化」这条规矩的载体。</summary>
+    private const double VolWidth = 92;
     /// <summary>当前播放位置(秒)。原来是从 <c>_bar.Value</c> 读的,自绘之后要自己记。</summary>
     private double _position;
     private readonly TextBlock _time = new() { Foreground = Brushes.White, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
@@ -199,6 +202,10 @@ public sealed class PlayerPage : UserControl
     /// 音量键上会不断闪烁」)。按坐标算和命中测试无关,环就断了。</para>
     /// </summary>
     private Point _ptr = new(-1, -1);
+
+    /// <summary>debug 档:指针事件按秒汇总。见 PointerMoved 里那段注释。</summary>
+    private int _moveCount, _moveReal;
+    private DateTime _moveWindow = DateTime.UtcNow;
     private bool _full;
     private bool _tracksLoaded;
     private bool _leaving;
@@ -393,17 +400,33 @@ public sealed class PlayerPage : UserControl
                 },
             },
         };
-        _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = 0, Opacity = 0 };
-        /* 音量条<b>悬停才展开</b>(现代播放器的通行做法)。
-           常驻 110px 的话它在控制栏左半边一直占着位置,而音量是个一次调好、
-           之后几乎不动的东西。展开靠 Width + Opacity 两条过渡一起走 ——
-           只动 Width 的话它会「从一条竖线长出来」,像被压扁了。 */
-        foreach (var pr in new[] { Slider.WidthProperty, Slider.OpacityProperty })
-            (_vol.Transitions ??= []).Add(new Avalonia.Animation.DoubleTransition
-            {
-                Property = pr, Duration = TimeSpan.FromMilliseconds(160),
-                Easing = new Avalonia.Animation.Easings.CubicEaseOut(),
-            });
+        /* 音量条<b>宽度常驻,只淡入淡出</b>。位置一直占着,看不见而已。
+
+           ☠☠☠ 2026-09-05:上一版是悬停时把 Width 从 0 动画到 92。用户全屏下稳定复现
+           「每个按钮都在闪」,debug 日志逮到的是一个**自激振荡**(指针一动不动):
+
+             45.902 [悬停] 静音(M) -> False  指针=(219,1023)  音量条宽=92
+             45.903 [音量条] 收起
+             45.944 [悬停] 静音(M) -> True   指针=(219,1023)  音量条宽=92→0
+             45.945 [音量条] 展开
+             45.984 [悬停] 静音(M) -> False  指针=(219,1023)  音量条宽=0→92
+             …每 42ms 一轮,一直转下去
+
+           <b>展开这个动作本身把静音键从指针底下挪走了</b> —— 于是 Exited、于是收起、
+           于是它又回到指针底下、于是 Entered、于是再展开。
+           连带每轮合成一次指针移动(日志:「这一秒 80 条移动事件,坐标真的变了 79 条」,
+           而指针根本没动),整条控制栏跟着重排 —— 那就是用户看到的「每个按钮都在闪」。
+
+           <b>规矩:悬停触发的效果不许改变悬停目标自己的布局。</b> 改了就是正反馈。
+           所以 Width 固定,只动 Opacity(Opacity 不进布局,动多少次都不会重排)。
+           代价是控制栏左边常驻 98px 空位 —— 那儿本来就是空的;
+           换来的是时间读数不再在你路过音量键时左右横跳 92px。 */
+        _vol = new Slider { Minimum = 0, Maximum = 100, Value = 100, Width = VolWidth, Opacity = 0 };
+        (_vol.Transitions ??= []).Add(new Avalonia.Animation.DoubleTransition
+        {
+            Property = Slider.OpacityProperty, Duration = TimeSpan.FromMilliseconds(160),
+            Easing = new Avalonia.Animation.Easings.CubicEaseOut(),
+        });
 
         /* OSD 的图标全部换成 <b>Segoe MDL2 Assets</b>(样式 Button.osd 里设的字体)。
            原来混着用 Unicode 杂符号(⏸ ⟲ ⟳ 🕪 ⚙ ⛶):
@@ -597,8 +620,16 @@ public sealed class PlayerPage : UserControl
                 Children = { _mute, _vol },
             },
         };
-        _volBox.PointerEntered += (_, _) => { _vol.Width = 92; _vol.Opacity = 1; };
-        _volBox.PointerExited += (_, _) => { _vol.Width = 0; _vol.Opacity = 0; };
+        _volBox.PointerEntered += (_, e) =>
+        {
+            _vol.Opacity = 1;
+            if (Log.DebugOn) Log.D("音量条", $"淡入  来源={e.Source?.GetType().Name}");
+        };
+        _volBox.PointerExited += (_, e) =>
+        {
+            _vol.Opacity = 0;
+            if (Log.DebugOn) Log.D("音量条", $"淡出  来源={e.Source?.GetType().Name}");
+        };
 
         var left = new StackPanel
         {
@@ -720,6 +751,10 @@ public sealed class PlayerPage : UserControl
         Focusable = true;
         AttachedToVisualTree += (_, _) =>
         {
+            /* 一律挂,档位在处理器里判。只在 debug 挂的话,「设置页切到 debug」之后
+               不重进播放页就什么都记不到 —— 而用户没有理由知道要重进。
+               代价是每个 OSD 按钮一个订阅,不开 debug 时处理器第一行就返回。 */
+            WatchHover();
             Focus();
             /* 用户 2026-09-03:「播放页不应该有侧边栏,还是有了」。
                原来只有按 F 进全屏才收 —— 不全屏看片时左边一直杵着导航栏,
@@ -751,7 +786,26 @@ public sealed class PlayerPage : UserControl
         AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
         PointerMoved += (_, e) =>
         {
-            _ptr = e.GetPosition(this);
+            var p = e.GetPosition(this);
+            /* debug 档按秒汇总指针事件,不逐条记(一秒几百条会把日志冲垮,
+               而且写日志本身会变成新的卡顿源)。要分清的是两件事:
+               「指针真的没动」和「指针没动但一直在收到移动事件」—— 后者会让
+               _lastMove 永远新鲜,OSD 永不收起,同时每一条都触发一次命中测试。 */
+            var moved = p != _ptr;
+            _ptr = p;   // 先更新再记 —— 记完再更新的话日志里的坐标全是上一拍的
+            if (Log.DebugOn)
+            {
+                _moveCount++;
+                if (moved) _moveReal++;
+                var now = DateTime.UtcNow;
+                if ((now - _moveWindow).TotalMilliseconds >= 1000)
+                {
+                    Log.D("指针", $"这一秒 {_moveCount} 条移动事件,其中坐标真的变了 {_moveReal} 条" +
+                                  $"  当前=({p.X:0},{p.Y:0})");
+                    _moveCount = _moveReal = 0;
+                    _moveWindow = now;
+                }
+            }
             _lastMove = DateTime.UtcNow;
             ShowOsd(true);
         };
@@ -796,6 +850,7 @@ public sealed class PlayerPage : UserControl
         SelfCheckAvSync();
         SelfCheckStutter();
         SelfCheckPick();
+        SelfCheckHoverLayout();
         /* 自检:LP_SELFCHECK_PAUSE=秒 —— 到点就暂停,让外面的连拍落在暂停态上。
            暂停时画面本该一动不动,连拍还在变就是「暂停了还在抽搐」,
            而这是这件事**唯一**能被客观拍下来的形态。 */
@@ -1176,10 +1231,19 @@ public sealed class PlayerPage : UserControl
     {
         StartPoint = new RelativePoint(0, fromTop ? 0 : 1, RelativeUnit.Relative),
         EndPoint = new RelativePoint(0, fromTop ? 1 : 0, RelativeUnit.Relative),
+        /* 权重压到靠近控件那一端。原来是 0→#d9、0.55→#73、1→透明,
+           算下来<b>按钮那一行只有 ~52% 不透明</b> —— 底下的画面有近一半透上来,
+           高对比度的动态画面(片头、雪景、夜景霓虹)透过来就是「按钮一直在闪」。
+           2026-09-05 实测:静止画面下连拍 10 张按钮行 0.00%,一放起来就 2.9% ——
+           按钮自己没动,动的是它底下的画面。
+
+           仍然是渐变不是实心条(实心的上边缘是一条硬线压在画面上);
+           只是把「基本挡住」的区间从 45% 拉到 80%,渐出留在上面那 20% 里。 */
         GradientStops =
         {
-            new GradientStop(Color.Parse("#d9000000"), 0),
-            new GradientStop(Color.Parse("#73000000"), 0.55),
+            new GradientStop(Color.Parse("#f2000000"), 0),
+            new GradientStop(Color.Parse("#cc000000"), 0.5),
+            new GradientStop(Color.Parse("#4d000000"), 0.8),
             new GradientStop(Color.Parse("#00000000"), 1),
         },
     };
@@ -1353,9 +1417,58 @@ public sealed class PlayerPage : UserControl
             });
             Console.WriteLine($"[出帧节奏] 平均间隔 {gap:0.0}ms(≈{(gap > 0 ? 1000 / gap : 0):0.0} 帧/秒)," +
                               $"抖动 {jit:0.0}ms;音画差最大 {worst * 1000:0.0}ms(采到 {n} 次),丢帧 {drops:0}");
+            double lead = 0, ln = 0;
+            await Dispatcher.UIThread.InvokeAsync(() => { lead = _leadMs; ln = _leadSamples; });
+            /* 先判样本数。样本为 0 时均值是 0,而 0 恰好满足「偏差很小」——
+               这个坑 2026-09-05 当场骗过我一次(单位算错导致一个样本都没采到,门禁照样打绿)。 */
+            Console.WriteLine(ln < 20
+                ? $"[提前量] ⚠ 只采到 {ln:0} 个样本,这条不算数"
+                : $"[提前量] 画面比声音早 {lead:0.0}ms(采到 {ln:0} 帧)");
             /* 间隔抖动只作背景数,不当判据 —— 它分不出好坏(见方法上的注释)。
                现在合成心跳(~85Hz)和视频帧率(24)不是整数倍,3 个心跳还是 4 个
                本身就带 ±半个心跳的量化,那部分谁也去不掉。 */
+        });
+    }
+
+    /// <summary>
+    /// 自检:<c>LP_SELFCHECK_HOVERLAYOUT=1</c> —— <b>悬停不许改变布局</b>。
+    ///
+    /// <para>判据写在**因**上不写在**果**上:果是自激振荡,要真指针、真全屏、
+    /// 还得等它转起来(我这边一整轮都没复现);因是「悬停改了布局」,纯几何,一测就准。
+    /// 来龙去脉见 <c>_vol</c> 构造处引的那段日志。</para>
+    /// </summary>
+    private void SelfCheckHoverLayout()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_HOVERLAYOUT") != "1") return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(6000);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                /* 收全部控件不只是按钮:时间读数是 TextBlock,而它正是被挪得最远的那个
+                   (旧行为下路过音量键它会横跳 92px)。 */
+                var btns = _bottom.GetVisualDescendants().OfType<Control>().ToList();
+                Rect[] Snapshot() => btns
+                    .Select(b => new Rect(b.TranslatePoint(default, this) ?? default, b.Bounds.Size))
+                    .ToArray();
+
+                _vol.Opacity = 0;
+                UpdateLayout();
+                var before = Snapshot();
+                // 走真实那条路:直接调悬停要做的事,然后强制走一次布局
+                _vol.Opacity = 1;
+                UpdateLayout();
+                var after = Snapshot();
+
+                var moved = before.Where((r, i) => r != after[i]).Count();
+                Console.WriteLine(moved == 0
+                    ? $"[悬停布局] ✓ 音量条淡入之后 {btns.Count} 个控件一个都没动"
+                    : $"[悬停布局] ✗ 音量条淡入把 {moved}/{btns.Count} 个控件挪了位 —— " +
+                      "悬停改布局 = 自激振荡,「每个按钮都在闪」就是这么来的");
+                Console.WriteLine($"[悬停布局] 音量条宽 {_vol.Width:0}(常量,不该随悬停变)" +
+                                  $";外壳宽 {_volBox.Bounds.Width:0}");
+                _vol.Opacity = 0;   // 自检不许留下状态:不还原的话截图里音量条一直亮着
+            });
         });
     }
 
@@ -1470,7 +1583,7 @@ public sealed class PlayerPage : UserControl
             var secs = (DateTime.UtcNow - t0).TotalSeconds;
             var rc = to.Rc - from.Rc;
             var wc = to.Wc - from.Wc;
-            /* ★★ 这一条是这一整轮的核心判据。2026-09-05 实测(LP_FBOTEST=1):
+            /* 这一条是这一整轮的核心判据。2026-09-05 实测(LP_FBOTEST=1):
                <b>不画的那一个合成帧,宿主 FBO 里读回来是黑的</b>(涂红 → 隔两帧 → (0,0,0))。
                所以「没有新帧就不渲」这个优化每跳一帧就往屏幕上推一帧黑 ——
                慢放跳 90%、开面板时合成变密,看起来就是画面一直在抽。
@@ -2025,10 +2138,20 @@ public sealed class PlayerPage : UserControl
         _settings.IsVisible = on;
     }
 
+    /// <summary>OSD 开关了多少次。自检用 —— 指针不动的时候它本该一次都不翻。</summary>
+    internal int OsdFlips;
+
     private void ShowOsd(bool on)
     {
         if (_osdOn == on) return;
         _osdOn = on;
+        OsdFlips++;
+        /* OSD 每翻一次都记 —— 「按钮在闪」如果是控制条在反复收放,这一行会
+           以肉眼能感知的频率刷屏,而且带着「为什么」:静止多久、指针在不在条上。 */
+        if (Log.DebugOn)
+            Log.D("OSD", $"{(on ? "显示" : "收起")}  静止 {(DateTime.UtcNow - _lastMove).TotalMilliseconds:0}ms" +
+                         $"  指针在条上={PointerOnOsd()}  指针=({_ptr.X:0},{_ptr.Y:0})" +
+                         $"  面板={_settings.IsVisible}  累计翻转={OsdFlips}");
         foreach (var (b, dir) in new[] { (_top, -1.0), (_bottom, 1.0) })
         {
             // 先换过渡再改值:Transitions 是读到「属性变了」那一刻才生效的,
@@ -2057,6 +2180,10 @@ public sealed class PlayerPage : UserControl
     /// <summary>mpv 自己数的「晚于目标时刻上屏」的帧数,和它估的 vsync 抖动。
     /// 画面稳不稳看这个 —— 输入是我们 report_swap 报上去的真实上屏时刻。</summary>
     private double _voDelayed, _vsyncJitter;
+
+    /// <summary>画面比 mpv 给的呈现时刻早多少毫秒 —— 也就是画面比声音早多少。
+    /// 授时由 mpv 做的时候恒为 0;交给合成节奏之后 = mpv 提前多久交货。</summary>
+    private double _leadMs, _leadSamples;
 
     /// <summary>相邻两帧上屏的平均间隔 / 间隔抖动(毫秒)。核心层 noteCadence 算的。</summary>
     private double _gapMs, _jitterMs;
@@ -2094,6 +2221,33 @@ public sealed class PlayerPage : UserControl
     /// 「鼠标停在控制条上就不收 OSD」这条规矩本身没变(所有现代播放器都有),
     /// 变的只是它怎么判。</para>
     /// </summary>
+    /// <summary>
+    /// debug 档:盯住 OSD 上每个按钮的 <c>IsPointerOver</c>,翻一次记一条。
+    ///
+    /// <para>「按钮会闪」如果是悬停高亮在闪,这里会看到指针明明没动、
+    /// 某个按钮的悬停态却在反复翻。附带记 <c>_vol.Width</c> —— 音量条的展开收起
+    /// 会让整条控制栏重排,而重排会把按钮从指针底下挪走。</para>
+    /// </summary>
+    private void WatchHover()
+    {
+        foreach (var b in _bottom.GetVisualDescendants().OfType<Button>())
+        {
+            var tip = ToolTip.GetTip(b) as string ?? (b.Content as string ?? "按钮");
+            b.PropertyChanged += (s, e) =>
+            {
+                if (!Log.DebugOn || e.Property != IsPointerOverProperty) return;
+                Log.D("悬停", $"{tip} -> {e.NewValue}  指针=({_ptr.X:0},{_ptr.Y:0})" +
+                              $"  OSD={(_osdOn ? "开" : "关")}  音量条宽={_vol.Width:0}");
+            };
+        }
+        _vol.PropertyChanged += (_, e) =>
+        {
+            // 宽度现在**应该永远不变**。真变了就是有人又把它接回悬停了 —— 记成 warn
+            if (e.Property == WidthProperty)
+                Log.W("音量条", $"宽度变了 -> {e.NewValue} —— 悬停不该改布局,见构造处的注释");
+        };
+    }
+
     private bool PointerOnOsd()
     {
         if (_ptr.X < 0) return false;   // 还没收到过指针事件
@@ -2414,6 +2568,8 @@ public sealed class PlayerPage : UserControl
         _drops = Num(st, "drops");
         _voDelayed = Num(st, "vo_delayed");
         _vsyncJitter = Num(st, "vsync_jitter");
+        _leadMs = Num(st, "lead_ms");
+        _leadSamples = Num(st, "lead_samples");
         _gapMs = Num(st, "frame_gap_ms");
         _jitterMs = Num(st, "frame_jitter_ms");
         _renderSum = Num(st, "render_ms_sum");
