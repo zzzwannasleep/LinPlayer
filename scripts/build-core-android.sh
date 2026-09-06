@@ -59,6 +59,14 @@ LP_VER="${LP_VERSION:-$(tr -d '[:space:]' < "$ROOT/VERSION")-dev}"
 VER_FLAG="-X linplayer/core/system.Version=$LP_VER"
 echo "版本: $LP_VER"
 
+# 必须导出的符号:五个 C ABI 入口 + 五个 JNI 桥。
+LP_REQUIRED_SYMS="lp_abi_version lp_init lp_call lp_next_event lp_set_surface
+Java_xyz_linplayer_app_core_Native_abiVersion
+Java_xyz_linplayer_app_core_Native_init
+Java_xyz_linplayer_app_core_Native_call
+Java_xyz_linplayer_app_core_Native_nextEvent
+Java_xyz_linplayer_app_core_Native_setSurface"
+
 for abi in "${ABIS[@]}"; do
   case "$abi" in
     arm64-v8a)   GOARCH=arm64; TRIPLE=aarch64-linux-android ;;
@@ -97,11 +105,21 @@ for abi in "${ABIS[@]}"; do
   # ★ JNI 桥也要查。只查 lp_* 的话,漏编 JNI 的那个 ABI 装上去才炸:
   #   UnsatisfiedLinkError: No implementation found for ... Native.abiVersion()
   #   —— 而 .so 是加载成功的,所以「库没打进去」那条思路会把人带偏。真栽过一次。
+  # ☠ 符号表**先落到变量**再匹配,不要 `llvm-nm | grep -q`:
+  #   `set -o pipefail` 下 grep -q 命中即退出,llvm-nm 写管道吃 SIGPIPE(141),
+  #   整条管道判失败 —— **命中反而报「缺符号」**。中招的只有排在符号表前面的
+  #   那个(lp_abi_version),靠后的匹配时 llvm-nm 已写完,所以看起来像「只缺一个」。
+  #   管道缓冲的大小和输出量跟宿主有关:Linux CI 上红,Windows 上永远复现不了。
+  syms="$("$TOOLBIN/llvm-nm" -D --defined-only "$OUT/liblpcore.so")"
   miss=0
-  for s in lp_abi_version lp_init lp_call lp_next_event lp_set_surface            Java_xyz_linplayer_app_core_Native_abiVersion            Java_xyz_linplayer_app_core_Native_init            Java_xyz_linplayer_app_core_Native_call            Java_xyz_linplayer_app_core_Native_nextEvent            Java_xyz_linplayer_app_core_Native_setSurface; do
-    "$TOOLBIN/llvm-nm" -D --defined-only "$OUT/liblpcore.so" | grep -q " T $s\$" || { echo "  !! 缺符号 $s"; miss=1; }
+  for s in $LP_REQUIRED_SYMS; do
+    grep -q " T $s$" <<< "$syms" || { echo "  !! 缺符号 $s"; miss=1; }
   done
-  [ "$miss" = 0 ] || exit 1
+  if [ "$miss" != 0 ]; then
+    echo "  -- 实际导出的 lp_/Java_ 符号 --"
+    grep -E " (T|t|W) (lp_|Java_)" <<< "$syms" || true
+    exit 1
+  fi
   echo "  -> $OUT/liblpcore.so($(stat -c %s "$OUT/liblpcore.so") 字节)+ libmpv.so"
 done
 
