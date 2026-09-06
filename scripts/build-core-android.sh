@@ -67,12 +67,21 @@ VER_FLAG="-X linplayer/core/system.Version=$LP_VER"
 echo "版本: $LP_VER"
 
 # 必须导出的符号:五个 C ABI 入口 + 五个 JNI 桥。
+# libass 那七个也在表里:它们是 **Exo 内核特效字幕的全部入口**,
+# 漏掉任何一个的表现是「装得上、能播、就是没有字幕」,而 APK 照样出得来。
 LP_REQUIRED_SYMS="lp_abi_version lp_init lp_call lp_next_event lp_set_surface
 Java_xyz_linplayer_app_core_Native_abiVersion
 Java_xyz_linplayer_app_core_Native_init
 Java_xyz_linplayer_app_core_Native_call
 Java_xyz_linplayer_app_core_Native_nextEvent
-Java_xyz_linplayer_app_core_Native_setSurface"
+Java_xyz_linplayer_app_core_Native_setSurface
+Java_xyz_linplayer_app_core_Native_assOpen
+Java_xyz_linplayer_app_core_Native_assOpenFile
+Java_xyz_linplayer_app_core_Native_assChunk
+Java_xyz_linplayer_app_core_Native_assSetSize
+Java_xyz_linplayer_app_core_Native_assRender
+Java_xyz_linplayer_app_core_Native_assClose
+Java_xyz_linplayer_app_core_Native_assVersion"
 
 for abi in "${ABIS[@]}"; do
   case "$abi" in

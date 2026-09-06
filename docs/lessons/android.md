@@ -353,18 +353,72 @@ current-vo 空 = vo 没建;建了而 dwidth 为 0 = 一帧没解出来;
 (有文本轨又一条没选中就选第一条)。渲染要**同时画文本 cue 和 bitmap cue**,
 只画一种的表现是「有的片有字幕有的没有」,看着像片源问题。
 
-**做不到的那一半**:ASS 的 `\pos` `\move` `\fad`、卡拉OK 这一层画不出来 ——
-media3 的 SSA 解析器只认位置和基本样式,它不是 libass。
-要完整特效只能切 MP 内核(libmpv 里编进去的 libass)。
-把 libass 接进 ExoPlayer 要另起一个 JNI 渲染层,但**不必再编一份 libass** ——
-实测我们用的这份 `libmpv.so`(media-kit full 变体)**导出了 191 个 `ass_*` 符号**,
-`ass_library_init` / `ass_renderer_init` / `ass_new_track` / `ass_process_codec_private` /
-`ass_process_chunk` / `ass_set_frame_size` / `ass_render_frame` 一条不缺
-(`llvm-nm -D --defined-only` 查得到)。
-剩下的活是:把 ExoPlayer 的字幕轨**按原始 ASS 字节**取出来(不能走 media3 的
-`SsaParser`,它已经把特效丢了)喂 `ass_process_chunk`,再按播放位置
-`ass_render_frame` 出图叠在画面上。工作量不小,不在本轮范围里。
+**特效字幕**:见下面那条 —— 已经接上 libass 了,不再是「切 MP 内核」。
 
+
+---
+
+### ExoPlayer 接 libass:借 libmpv 的符号,别再编一份 — 2026-09-06
+
+**结论先说**:`libmpv.so`(media-kit full 变体)**自己导出了 191 个 `ass_*` 符号**,
+`ass_library_init` / `ass_renderer_init` / `ass_new_track` / `ass_process_codec_private` /
+`ass_process_chunk` / `ass_set_frame_size` / `ass_render_frame` / `ass_read_memory`
+一条不缺(`llvm-nm -D --defined-only` 查得到)。Kotlin 侧 `System.loadLibrary("mpv")`
+排在 `lpcore` 之前,符号进全局命名空间 —— 所以**只声明不链接**就能用,
+和 `mpv_*`、`av_jni_set_java_vm` 同一条路,`CGO_LDFLAGS` 里不必加 `-lass`。
+再引一份 libass(比如 libass-android)等于把包里已有的东西又编一遍。
+
+**四个只有查过才知道、猜必错的点:**
+
+**① media3 1.11 的字幕解析在解封装阶段,不在 TextRenderer。**
+`TextRenderer` 已经没有 `SubtitleParser.Factory` 这个构造参数了(只剩 legacy 的
+`SubtitleDecoderFactory`),唯一的注入点是
+`DefaultMediaSourceFactory.setSubtitleParserFactory`。换错层的表现是
+「libass 初始化成功,但一条事件都没进去」—— 看着像 libass 没接上。
+副作用:那一层会把**所有**文本轨都解一遍,不只是选中那条,所以要按
+`Format.id` 分桶存、切轨时重放。
+
+**② media3 给的不是标准 ASS 行。**
+`MatroskaExtractor` 把每个 SSA 样本重写成 `Dialogue: <Start>,<End>,` + 原始
+Matroska 事件体,配的是一条自定义 Format:
+`Start, End, ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV, Effect, Text`
+(常量原文 `SSA_PREFIX = "Dialogue: 0:00:00:00,0:00:00:00,"`,反编译 class 核对过)。
+字段顺序和标准 ASS 的 `Layer,Start,End,Style,…` **不是一回事** ——
+直接丢给 `ass_process_data` 会把 Layer 当成 Style,样式全错而且不报错。
+**切掉前两个字段之后剩下的正好是 `ass_process_chunk` 要的那串**,
+因为 libass 自己读掉 ReadOrder 和 Layer,再按 `n_ignored=3` 跳过 Format 里的
+Layer/Start/End(读的是 libass 的 `ass.c` 原文,不是记忆)。
+时间戳格式是 `H:MM:SS:CC`,**最后一段的分隔符是冒号不是点**。
+
+**③ 没有 fontconfig。** 这份 libmpv 里一个 `Fc*` 符号都没有,
+字体只能走 libass 的**目录提供者**:`ass_set_fonts_dir("/system/fonts")`。
+和 mpv 那条路的 `sub-fonts-dir` 是同一件事 —— 不给的话一个字都不显示,不报错。
+
+**④ `ASS_Image` 的布局不能赌。** 自己声明 ABI 就得逐字对(`w,h,stride,bitmap,
+color,dst_x,dst_y,next,type`),错一个字段是花屏或 SIGSEGV。
+所以 `lpa_init_locked` 里按 `ass_library_version()` 卡了一道区间闸,
+超出就**拒绝渲染并写日志**,不去赌。
+
+**渲染怎么落地**:libass 出的是一串 8bit alpha 小图 + `0xRRGGBBAA` 颜色
+(**AA 是透明度不是不透明度**)。叠进 Kotlin 分配的 ARGB_8888 位图,native 直接
+`AndroidBitmap_lockPixels`(要 `-ljnigraphics`),写的是**预乘**值 ——
+写非预乘的表现是描边和阴影偏亮糊成一团。`unlockPixels` 会 bump 位图的
+generation id,Skia 纹理缓存据此失效。
+`ass_render_frame` 的 `detect_change` 为 0 时**一个字节都不碰位图**:
+对白字幕一秒才变几次,每帧清屏重画是纯烧电;卡拉OK 那种自然每帧返回 1。
+
+**叠加层必须和画面共用同一个 `Modifier.aspectRatio`** —— 差一个黑边的高度,
+`\pos` 定死的字就整体错位。
+
+**顺带补的**:OSD 的音轨/字幕面板原来只问 `player.tracks`(mpv 专属命令),
+Exo 内核下那两个面板**恒空且点了没反应**。已改成 Exo 时读 `exo.currentTracks`,
+轨道 id 用 `groupIndex:trackIndex` 而不是 `Format.id`(后者允许为 null 也允许重复,
+拿它当主键的表现是「选了第二条,生效的是第一条」),字幕多一项「关闭字幕」——
+关的时候必须**同时** `Libass.deactivate()`,只 disable ExoPlayer 的文本轨的话
+画面上的特效字幕纹丝不动。
+
+**仍然没有的**:MKV 内嵌附件字体(ExoPlayer 不把 attachments 透出来,
+`ass_set_extract_fonts` 已经开着,等哪天能拿到 attachment 就接 `ass_add_font`)。
 
 ---
 

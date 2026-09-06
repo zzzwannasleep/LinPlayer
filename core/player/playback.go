@@ -197,7 +197,13 @@ func play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 		"media_source_id": target.MediaSourceID,
 		"play_method":     target.PlayMethod,
 		"is_dolby_vision": target.IsDolbyVision,
-		"external_subs":   len(target.ExternalSubs),
+		/* ★★ 发**整张表**而不是一个条数。
+		   mpv 那条路用不着它(核心层自己 sub-add),但 **Exo 内核要靠它拿外挂 ASS** ——
+		   而外挂 .ass 正是「特效字幕」最常见的形态(压制组单独发的那种)。
+		   原来这里只发 `len(...)`,于是 Exo 那条路根本不知道有外挂字幕存在。
+		   ★ 地址里已经带着鉴权(DeliveryUrl 或自己拼的 api_key),UI 直接取即可;
+		     UA 走 ExoPlayer 那个 `LinPlayer/<版本>` 的 DataSource,和取流同一口径。 */
+		"external_subs": target.ExternalSubs,
 		// ★ 只有 engine=exo 那条路会读它。mpv 那条路里它是**同一个地址**,
 		//   多发一个字段没有代价,少发一个就得让 UI 自己去拼 —— 那正是
 		//   「界面自己拼地址」那一类事故的入口(反代只在 /emby/ 下处理 Range)。

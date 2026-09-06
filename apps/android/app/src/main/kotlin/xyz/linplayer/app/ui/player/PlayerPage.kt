@@ -77,6 +77,9 @@ import xyz.linplayer.app.ui.theme.R
 import xyz.linplayer.app.ui.theme.Sp
 
 private const val OSD_HIDE_MS = 5000L
+
+/** 和 ExoEngine 里那个是同一件事:libass 的字体目录。两处各写一遍早晚会漂。 */
+private const val LIBASS_FONTS_DIR = "/system/fonts"
 private const val SP_MIN = 0.25
 private const val SP_MAX = 4.0
 
@@ -147,6 +150,8 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     // 起播。★ 换片时**先立「未就绪」再发命令**,不能排在两个 await 之后
     LaunchedEffect(route.itemId) {
         everMoved = false; buffering = true; position = 0.0; duration = 0.0; openFailed = false
+        // ☠ 换片必须连 libass 的事件缓存一起清:留着就是把上一集的字幕画给这一集
+        Libass.reset()
         // 通知权限在**这里**要,不在冷启动时要(U1.27):它只在后台播放挂通知栏时有意义
         (activity as? xyz.linplayer.app.MainActivity)?.askNotificationPermission()
         app.wantsPip = true
@@ -165,6 +170,11 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                「跳到没缓冲的位置就卡死」,而且查不出来)。 */
             val url = r.str("play_url")
             if (exo != null && url != null) exo.load(url, r.dbl("resume_secs") ?: 0.0)
+            /* 外挂 ASS。**压制组单独发的那种字幕才是「特效字幕」的大头** ——
+               内封 ASS 走 media3 的解析器那条路(ExoSurface 里按选中轨切),
+               外挂的核心层根本不交给 ExoPlayer,得自己取回来喂 libass。
+               ★ fire-and-forget:取不到就没有特效字幕,不该挡住播放。 */
+            if (exo != null && subLangPref != "") loadExternalAss(app, r?.get("external_subs"))
         }.onFailure { app.report(it) }
     }
 
@@ -247,6 +257,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     DisposableEffect(route.itemId) {
         onDispose {
             app.wantsPip = false
+            Libass.reset()
             // ★ 走 app.bg 不走 scope:后者正在被取消,launch 出去的活一件都不跑
             app.bg.launch {
                 runCatching {
@@ -441,7 +452,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             Modifier.align(Alignment.CenterStart).padding(Sp.x16),
             tint = Color.White, onClick = { locked = false })
 
-        panel?.let { PlayerPanel(it, route.itemId) { panel = null } }
+        panel?.let { PlayerPanel(it, route.itemId, exo) { panel = null } }
     }
 }
 
@@ -643,4 +654,40 @@ private suspend fun failureDiag(app: xyz.linplayer.app.data.AppState): String {
         d.str("last_error")?.takeIf { it.isNotBlank() },
     ).joinToString(" · ")
     return if (tail.isEmpty()) head else head + "\n" + tail
+}
+
+/**
+ * 取回外挂 ASS 并交给 libass。
+ *
+ * ★ 判据是**内容**不是扩展名:Emby 的 `Stream.{ext}` 在有的 fork 上会转格式,
+ *   而 `.ass` 结尾的地址回一份 SRT 是真会发生的。看头两百字节有没有
+ *   `[Script Info]` / `[V4+ Styles]` —— 这一条比信文件名稳。
+ * ★ 只取**第一份能用的**:同时挂两份 ASS 等于两层字压在一起。
+ *   默认轨优先,没有默认就取第一份。
+ * ★ UA 走 `LinPlayer/<版本>`(UA 三分口径)。地址里已经带着鉴权,不另附凭据。
+ */
+private suspend fun loadExternalAss(
+    app: xyz.linplayer.app.data.AppState,
+    subs: kotlinx.serialization.json.JsonElement?,
+) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    if (!Libass.available) return@withContext
+    val list = subs.arr().mapNotNull { it.obj() }
+    val ordered = list.sortedByDescending { it.bool("is_default") }
+    for (o in ordered) {
+        val u = o.str("url")?.takeIf { it.isNotBlank() } ?: continue
+        val bytes = runCatching {
+            val c = java.net.URL(u).openConnection() as java.net.HttpURLConnection
+            c.connectTimeout = 8000
+            c.readTimeout = 15000
+            c.setRequestProperty("User-Agent",
+                "LinPlayer/" + xyz.linplayer.app.BuildConfig.VERSION_NAME)
+            c.inputStream.use { st -> st.readBytes() }
+        }.getOrNull() ?: continue
+        // 4MB 封顶:字幕再长也到不了,到了多半是取回了一部片
+        if (bytes.isEmpty() || bytes.size > (4 shl 20)) continue
+        val head = String(bytes, 0, minOf(bytes.size, 512), Charsets.UTF_8)
+        if (!head.contains("[Script Info]") && !head.contains("[V4+ Styles]") &&
+            !head.contains("[V4 Styles]")) continue
+        if (Libass.activateFile(u, bytes, LIBASS_FONTS_DIR)) return@withContext
+    }
 }

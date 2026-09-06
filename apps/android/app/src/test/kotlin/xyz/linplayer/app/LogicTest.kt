@@ -2,6 +2,7 @@ package xyz.linplayer.app
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -13,6 +14,8 @@ import xyz.linplayer.app.ui.pages.Version
 import xyz.linplayer.app.ui.pages.defaultVersion
 import xyz.linplayer.app.ui.pages.fmtTime
 import xyz.linplayer.app.ui.pages.withScheme
+import xyz.linplayer.app.ui.player.assTimeMs
+import xyz.linplayer.app.ui.player.splitMedia3Dialogue
 import xyz.linplayer.app.ui.theme.pickTone
 import xyz.linplayer.app.ui.theme.rgbToHsv
 
@@ -213,5 +216,50 @@ class LogicTest {
         assertEquals("裸数组解不出来", 1, Item.list(bare).size)
         assertEquals("{items,total} 解不出来 —— 选集面板会恒空", 1, Item.list(wrapped).size)
         assertEquals("e1", Item.list(wrapped).first().id)
+    }
+
+    // ---------------------------------------------------------------- libass
+
+    /**
+     * ☠☠ media3 给的 `Dialogue:` 行**不是标准 ASS 行**。
+     *
+     * `MatroskaExtractor` 把 SSA 样本重写成
+     * `Dialogue: <Start>,<End>,` + 原始 Matroska 事件体,配的 Format 是
+     * `Start, End, ReadOrder, Layer, Style, …`(反编译 SSA_PREFIX /
+     * SSA_DIALOGUE_FORMAT 核对过),字段顺序和标准 ASS 的
+     * `Layer,Start,End,Style,…` 不是一回事。
+     *
+     * 而切掉前两段之后剩下的正好是 `ass_process_chunk` 要的那串。
+     * 切错的表现是「字幕出来了但样式全丢」—— 编译绿、不报错、只能靠肉眼。
+     */
+    @Test fun `media3 的 Dialogue 行要切成 libass 的 chunk 口径`() {
+        // 原始字符串:ASS 满是反斜杠,转义写法一眼看不出对不对
+        val line = """Dialogue: 0:00:12:34,0:00:15:00,7,0,OP-CN,,0,0,0,,{\pos(640,80)\fad(300,300)}风吹过的夏天"""
+        val ev = splitMedia3Dialogue(line)
+        assertNotNull("这一行就是 media3 的真实形状,拆不出来等于整条路不通", ev)
+        ev!!
+        // 0:00:12:34 = 12 秒 34 百分秒
+        assertEquals("起点算错了 —— 最后一段是**百分秒**不是毫秒", 12_340L, ev.startMs)
+        assertEquals("时长算错了", 2_660L, ev.durMs)
+        assertEquals(
+            "正文必须是 ReadOrder 打头的 Matroska 口径,前两段时间要切掉",
+            """7,0,OP-CN,,0,0,0,,{\pos(640,80)\fad(300,300)}风吹过的夏天""",
+            ev.body,
+        )
+    }
+
+    /** 时间戳的分隔符是**冒号**不是点:按点切会四段变三段,整条丢掉。 */
+    @Test fun `ASS 时间戳按冒号切四段`() {
+        assertEquals(3_723_450L, assTimeMs("1:02:03:45"))
+        assertEquals(0L, assTimeMs("0:00:00:00"))
+        assertEquals("段数不对要判失败,不能猜", -1L, assTimeMs("00:00:01.500"))
+        assertEquals("非数字要判失败", -1L, assTimeMs("a:b:c:d"))
+    }
+
+    /** 不是那个形状就返回 null:宁可这一条不画,也不画一条错的。 */
+    @Test fun `不认识的行一律判失败`() {
+        assertNull(splitMedia3Dialogue("Comment: 0:00:01:00,0:00:02:00,0,0,Default,,0,0,0,,x"))
+        assertNull(splitMedia3Dialogue("Dialogue: 0:00:01:00"))
+        assertNull(splitMedia3Dialogue(""))
     }
 }

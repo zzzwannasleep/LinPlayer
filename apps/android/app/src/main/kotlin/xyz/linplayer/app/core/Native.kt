@@ -38,4 +38,35 @@ internal object Native {
      * 所以 `surfaceDestroyed` 里要直接调它,不许扔到别的线程去做。
      */
     external fun setSurface(surface: Surface?, width: Int, height: Int): Int
+
+    // ---------------------------------------------------------------- libass
+    //
+    // ☠ 这一组**只服务 ExoPlayer 内核**。mpv 那条路的字幕是 libmpv 自己
+    //   用同一个 libass 画进画面里的,走这里等于画两遍。
+    // ★ 实现全在 core/ffi/libass_android.go 的 cgo 前导里,符号借的是
+    //   **libmpv.so 已经导出的那 191 个 `ass_*`** —— 没有第二份 libass。
+
+    /** 这个构建的 libass API 版本。0 或负数 = 不可用。 */
+    external fun assVersion(): Int
+
+    /** 内封轨:header 是 MKV 的 CodecPrivate(`Format.initializationData[0]`)。 */
+    external fun assOpen(header: ByteArray?, fontsDir: String): Int
+
+    /** 外挂轨:整份 .ass / .ssa 文件的字节。 */
+    external fun assOpenFile(file: ByteArray, fontsDir: String): Int
+
+    /**
+     * 一条事件。
+     * ☠ body 必须是 **Matroska 口径**(`ReadOrder,Layer,Style,…,Text`),
+     * 不带 `Dialogue:`、不带时间 —— 时间走后两个参数(毫秒)。
+     */
+    external fun assChunk(body: ByteArray, startMs: Long, durMs: Long)
+
+    /** frame = 位图尺寸;video = 片源分辨率(不给的话特效字幕的定位会整体错位)。 */
+    external fun assSetSize(frameW: Int, frameH: Int, videoW: Int, videoH: Int)
+
+    /** 返回 -1 出错 / 0 和上一帧一样(不必重绘)/ 1 位图已更新。 */
+    external fun assRender(bitmap: android.graphics.Bitmap, posMs: Long, force: Boolean): Int
+
+    external fun assClose()
 }

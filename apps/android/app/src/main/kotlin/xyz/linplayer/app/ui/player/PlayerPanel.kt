@@ -56,7 +56,12 @@ import xyz.linplayer.app.ui.theme.Sp
  * ★ 线路是**三态**:未探(转圈)/ 探过不通(显示「—」,**不装成 0 ms**)/ 毫秒数。
  */
 @Composable
-fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
+fun PlayerPanel(
+    kind: String,
+    itemId: String,
+    exo: androidx.media3.exoplayer.ExoPlayer? = null,
+    onClose: () -> Unit,
+) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
@@ -69,7 +74,13 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
     LaunchedEffect(kind, itemId) {
         loading = true; options = emptyList()
         when (kind) {
-            "audio", "subtitle" -> {
+            "audio", "subtitle" -> if (exo != null) {
+                /* ☠☠ **Exo 内核不走 `player.tracks`。** 那条命令问的是 mpv,
+                   而 Exo 那条路上 mpv 手里根本没有这一片 —— 表现是音轨/字幕面板
+                   恒空、点了也没反应,而**一句错都不报**。轨道表要问 ExoPlayer 自己。 */
+                options = exoTracks(exo, kind)
+                current = exoCurrent(exo, kind)
+            } else {
                 // ☠ `player.tracks` 返回**裸数组**,轨道类型的字段名是 `kind` 不是 `type`。
                 //    两处都错的表现是音轨/字幕面板恒空,而且一句错都不报。
                 val t = runCatching { app.call("player.tracks") }.getOrNull()
@@ -176,7 +187,7 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
                 else -> LazyColumn(Modifier.fillMaxSize(), list) {
                     items(options, key = { it.first }) { (id, badge, label) ->
                         OptRow(label, {
-                            scope.launch { pick(app, kind, id, itemId) }
+                            scope.launch { pick(app, kind, id, itemId, exo) }
                             onClose()
                         }, selected = id == current, badge = badge)
                     }
@@ -192,7 +203,14 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
     }
 }
 
-private suspend fun pick(app: xyz.linplayer.app.data.AppState, kind: String, id: String, itemId: String) {
+private suspend fun pick(
+    app: xyz.linplayer.app.data.AppState, kind: String, id: String, itemId: String,
+    exo: androidx.media3.exoplayer.ExoPlayer? = null,
+) {
+    if (exo != null && (kind == "audio" || kind == "subtitle")) {
+        runCatching { exoPick(exo, kind, id) }.onFailure { app.report(it) }
+        return
+    }
     runCatching {
         when (kind) {
             "audio" -> app.call("player.setTrack", args("kind" to "audio", "id" to id))
@@ -257,4 +275,83 @@ private fun argsEmptyItems() = kotlinx.serialization.json.JsonObject(
 
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectTapClose(onClose: () -> Unit) {
     detectTapGestures { onClose() }
+}
+
+// ---------------------------------------------------------------- Exo 的轨道表
+
+/** 关字幕那一项的 id。用一个不可能和 `Format.id` 撞的串。 */
+private const val EXO_TRACK_OFF = "lp:off"
+
+/**
+ * ExoPlayer 的音轨 / 字幕轨。
+ *
+ * ★ id 用 `groupIndex:trackIndex` 而不是 `Format.id`:后者**允许为 null**,
+ *   而且同一个文件里可以重复 —— 拿它当主键的表现是「选了第二条,生效的是第一条」。
+ * ★ 字幕多给一项「关闭字幕」:没有它的话字幕一旦打开就再也关不掉。
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun exoTracks(
+    exo: androidx.media3.exoplayer.ExoPlayer, kind: String,
+): List<Triple<String, String?, String>> {
+    val want = if (kind == "audio") androidx.media3.common.C.TRACK_TYPE_AUDIO
+    else androidx.media3.common.C.TRACK_TYPE_TEXT
+    val out = ArrayList<Triple<String, String?, String>>()
+    if (want == androidx.media3.common.C.TRACK_TYPE_TEXT) {
+        out.add(Triple(EXO_TRACK_OFF, null, "关闭字幕"))
+    }
+    exo.currentTracks.groups.forEachIndexed { gi, g ->
+        if (g.type != want) return@forEachIndexed
+        for (ti in 0 until g.length) {
+            val f = g.getTrackFormat(ti)
+            val name = listOfNotNull(
+                f.label,
+                f.language,
+                // ASS 标出来:用户才知道这条是带特效的那一条
+                if (Libass.isAss(f)) "特效" else null,
+            ).joinToString(" · ").ifBlank { "轨道 ${gi + 1}-${ti + 1}" }
+            out.add(Triple("$gi:$ti", f.language, name))
+        }
+    }
+    return out
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun exoCurrent(exo: androidx.media3.exoplayer.ExoPlayer, kind: String): String? {
+    val want = if (kind == "audio") androidx.media3.common.C.TRACK_TYPE_AUDIO
+    else androidx.media3.common.C.TRACK_TYPE_TEXT
+    exo.currentTracks.groups.forEachIndexed { gi, g ->
+        if (g.type != want) return@forEachIndexed
+        for (ti in 0 until g.length) if (g.isTrackSelected(ti)) return "$gi:$ti"
+    }
+    return if (want == androidx.media3.common.C.TRACK_TYPE_TEXT) EXO_TRACK_OFF else null
+}
+
+/**
+ * 切轨。
+ *
+ * ☠ 关字幕要**同时**关掉 libass:只 disable ExoPlayer 的文本轨,
+ * libass 手里那条 track 还在,画面上的特效字幕纹丝不动。
+ */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun exoPick(exo: androidx.media3.exoplayer.ExoPlayer, kind: String, id: String) {
+    val text = androidx.media3.common.C.TRACK_TYPE_TEXT
+    if (id == EXO_TRACK_OFF) {
+        Libass.deactivate()
+        exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(text)
+            .setTrackTypeDisabled(text, true)
+            .build()
+        return
+    }
+    val gi = id.substringBefore(':').toIntOrNull() ?: return
+    val ti = id.substringAfter(':').toIntOrNull() ?: return
+    val g = exo.currentTracks.groups.getOrNull(gi) ?: return
+    if (ti !in 0 until g.length) return
+    val type = g.type
+    exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon()
+        .setTrackTypeDisabled(type, false)
+        .setOverrideForType(androidx.media3.common.TrackSelectionOverride(g.mediaTrackGroup, ti))
+        .build()
+    // 选的是 ASS 就把 libass 接上,不是就撤掉 —— `onTracksChanged` 里那条同源判断
+    if (type == text && !Libass.isAss(g.getTrackFormat(ti))) Libass.deactivate()
 }
