@@ -141,3 +141,41 @@ if bad:
     sys.exit(1)
 print('凭据闸门通过(%d 个构建步骤)' % checked)
 PY
+
+# ---------------------------------------------------------------------------
+# 上下文闸门:`secrets` 不许出现在任何 `if:` 里。
+#
+# ☠ 2026-09-06 烧了一整轮:`if: ${{ secrets.X != '' }}` 写在 step 上,
+#   GitHub 在**校验阶段**就判整个 workflow 非法
+#   ("Unrecognized named-value: 'secrets'"),于是**一个 job 都不生成** ——
+#   Actions 页面上只有一句「This run likely failed because of a workflow file issue」,
+#   没有任何编译错误可看,`gh run view` 也列不出 job。
+#   `yaml.safe_load` 过、`run:` 块语法也过,这个闸门之前的两关全绿。
+#
+#   官方的可用上下文表里,`steps.if` / `jobs.if` 都**没有** secrets。
+#   要按密钥有没有配来分支,把它先落到 **job 级 env**(那里允许),再判 env。
+"$PY_BIN" - <<'PY'
+import yaml, glob, sys
+
+bad = []
+
+def walk_if(where, val):
+    if isinstance(val, str) and 'secrets.' in val:
+        bad.append(where)
+
+for f in sorted(glob.glob('.github/workflows/*.yml')):
+    d = yaml.safe_load(open(f, encoding='utf-8'))
+    for jname, job in (d.get('jobs') or {}).items():
+        walk_if('%s | job %s | if' % (f, jname), job.get('if'))
+        for i, step in enumerate(job.get('steps') or []):
+            label = '%s | %s | %s | if' % (f, jname, step.get('name') or ('#%d' % i))
+            walk_if(label, step.get('if'))
+
+for b in bad:
+    print('  FAIL  ' + b + '  用了 secrets 上下文')
+if bad:
+    print("`if:` 里不许用 secrets —— GitHub 校验阶段就判 workflow 非法,一个 job 都不会生成。")
+    print("改法:把密钥落到 job 级 `env:`(那里允许),`if:` 判 `env.X`。")
+    sys.exit(1)
+print('上下文闸门通过(if 里没有 secrets)')
+PY

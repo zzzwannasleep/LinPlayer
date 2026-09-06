@@ -15,7 +15,16 @@
 _lp_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 _lp_win() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else echo "$1"; fi; }
 
-export GOROOT="$(_lp_win "$_lp_root/.toolchain/go")"
+# ★ 工具链**不在**时不要硬钉 GOROOT/CC。
+#   `fetch-toolchain.sh` 只拉 Windows 的 Go 与 zig(第 17/25 行写死了 windows-amd64),
+#   而 CI 的安卓 job 跑在 ubuntu 上、Go 由 actions/setup-go 装。
+#   无条件 export 一个不存在的 GOROOT 的表现是 `go: command not found` ——
+#   而那看起来像「机器没装 Go」,不像「这个脚本假设了 Windows」。
+#   缓存目录仍然留在项目里:那几条在哪个平台都成立。
+if [ -x "$_lp_root/.toolchain/go/bin/go" ] || [ -x "$_lp_root/.toolchain/go/bin/go.exe" ]; then
+  export GOROOT="$(_lp_win "$_lp_root/.toolchain/go")"
+  export PATH="$_lp_root/.toolchain/go/bin:$PATH"
+fi
 export GOPATH="$(_lp_win "$_lp_root/.toolchain/gopath")"
 export GOMODCACHE="$GOPATH/pkg/mod"
 export GOCACHE="$(_lp_win "$_lp_root/.toolchain/gocache")"
@@ -34,10 +43,21 @@ export ZIG_LOCAL_CACHE_DIR="$ZIG_GLOBAL_CACHE_DIR"
 export GOTOOLCHAIN=local
 
 export CGO_ENABLED=1
-export CC="$(_lp_win "$_lp_root/.toolchain/zig/zig.exe") cc"
-export CXX="$(_lp_win "$_lp_root/.toolchain/zig/zig.exe") c++"
+# 同上:zig 只有 Windows 那一份。安卓走 NDK 的 clang(build-core-android.sh 里 export),
+# Linux CI 上没有 zig 时**不要**把 CC 指到一个不存在的可执行文件
+# ★ 先定下**真实存在的那个文件**再转路径。反过来(先转再拼 .exe)在 MSYS 上会
+#   拼出 `zig.exe.exe` —— 而 cgo 报的只是「找不到编译器」。
+_lp_zig=""
+[ -f "$_lp_root/.toolchain/zig/zig.exe" ] && _lp_zig="$_lp_root/.toolchain/zig/zig.exe"
+[ -z "$_lp_zig" ] && [ -f "$_lp_root/.toolchain/zig/zig" ] && _lp_zig="$_lp_root/.toolchain/zig/zig"
+if [ -n "$_lp_zig" ]; then
+  export CC="$(_lp_win "$_lp_zig") cc"
+  export CXX="$(_lp_win "$_lp_zig") c++"
+  export PATH="$_lp_root/.toolchain/zig:$PATH"
+fi
+unset _lp_zig
 
-export PATH="$_lp_root/.toolchain/go/bin:$_lp_root/.toolchain/gopath/bin:$_lp_root/.toolchain/zig:$PATH"
+export PATH="$_lp_root/.toolchain/gopath/bin:$PATH"
 
 unset -f _lp_win
 unset _lp_root

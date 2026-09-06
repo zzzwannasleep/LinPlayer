@@ -28,7 +28,10 @@ ABIS=("$@")
 
 # ---- 找 NDK ----------------------------------------------------------------
 find_ndk() {
-  if [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "$ANDROID_NDK_HOME" ]; then echo "$ANDROID_NDK_HOME"; return; fi
+  # GitHub 的 ubuntu runner 设的是 ANDROID_NDK_ROOT / ANDROID_NDK,不是 ANDROID_NDK_HOME
+  for v in "${ANDROID_NDK_HOME:-}" "${ANDROID_NDK_ROOT:-}" "${ANDROID_NDK:-}"; do
+    if [ -n "$v" ] && [ -d "$v" ]; then echo "$v"; return; fi
+  done
   local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${LOCALAPPDATA:-}/Android/Sdk}}"
   # 默认钉 r28:装了多个 NDK 时「用哪个」不能靠运气 —— 靠运气的表现是换台机器
   # 编出来的 .so 链的是另一个 libc++,而两边都编得过。目录里没有它才退回最高版本。
