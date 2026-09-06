@@ -226,3 +226,40 @@ func revertedResult(level, reason string) map[string]any {
 			"(画面不会被弄坏)。mpv 的原话:" + firstLine(reason),
 	}
 }
+
+// ---------------------------------------------------------------- 最后一条 mpv 错误
+
+// ☠☠ 「起播失败」在界面上只有一句「这一片没能播起来」,而 mpv **明明报了原因**。
+// 上一版把原因只写进日志,于是每一次这类报告都要先让用户去导诊断包 ——
+// 「有声音没画面」这一类实测靠这个白烧过好几轮。
+//
+// 只留**最后一条**:mpv 的 error 级一次失败可能刷十几行,全存下来是一堵墙,
+// 而最后一条通常就是结论(前面那些是过程)。
+var (
+	lastErrMu  sync.Mutex
+	lastMpvErr string
+)
+
+func noteLastError(text string) {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return
+	}
+	lastErrMu.Lock()
+	lastMpvErr = t
+	lastErrMu.Unlock()
+}
+
+// LastMpvError 最后一条 mpv error 级日志。空 = 这次没报过错。
+func LastMpvError() string {
+	lastErrMu.Lock()
+	defer lastErrMu.Unlock()
+	return lastMpvErr
+}
+
+// ClearMpvError 起播前清一次。不清的话上一部片的错会被当成这一部的原因。
+func ClearMpvError() {
+	lastErrMu.Lock()
+	lastMpvErr = ""
+	lastErrMu.Unlock()
+}

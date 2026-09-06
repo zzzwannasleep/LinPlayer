@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -66,11 +68,16 @@ import xyz.linplayer.app.data.LocalApp
 import xyz.linplayer.app.data.View
 import xyz.linplayer.app.data.block
 import xyz.linplayer.app.data.keepState
+import xyz.linplayer.app.data.ToastKind
 import xyz.linplayer.app.ui.Route
+import xyz.linplayer.app.ui.switchTab
 import xyz.linplayer.app.ui.components.CardAction
 import xyz.linplayer.app.ui.components.EmptyState
 import xyz.linplayer.app.ui.components.ErrorState
 import xyz.linplayer.app.ui.components.GlassIcon
+import xyz.linplayer.app.ui.components.Hairline
+import xyz.linplayer.app.ui.components.LpDialog
+import xyz.linplayer.app.ui.components.OptRow
 import xyz.linplayer.app.ui.components.LpImmersive
 import xyz.linplayer.app.ui.components.LpRow
 import xyz.linplayer.app.ui.components.LpRowSkeleton
@@ -111,8 +118,10 @@ fun HomePage(nav: NavController) {
     var views by keepState<Block<List<View>>>("home.views") { Block.Loading }
     var latest by keepState<Map<String, List<Item>>>("home.latest") { emptyMap() }
     var collections by keepState<Block<List<Item>>>("home.collections") { Block.Loading }
-    var serverName by keepState<String?>("home.server") { null }
+    var accounts by keepState<List<Account>>("home.accounts") { emptyList() }
     var reload by remember { mutableStateOf(0) }
+    /** 顶栏那颗胶囊点开的**服务器选择弹窗**。全站没有 bottom sheet,一律居中弹窗。 */
+    var pickServer by remember { mutableStateOf(false) }
 
     // 每一块自己一个 launch:一块回来就画一块,谁也不等谁。
     LaunchedEffect(reload) {
@@ -121,11 +130,9 @@ fun HomePage(nav: NavController) {
         launch { resume = app.block("emby.listResume", args("limit" to 12)).map { Item.list(it) } }
         launch { nextUp = app.block("emby.listNextUp", args("limit" to 20)).map { Item.list(it) } }
         launch { collections = app.block("emby.listCollections").map { Item.list(it) } }
-        // 顶栏那颗服务器 chip 上的名字。**本地账号表,不走网络**
-        launch {
-            serverName = Account.list(app.block("account.listAccounts").valueOrNull)
-                .firstOrNull { it.isActive }?.name
-        }
+        // 顶栏那颗服务器 chip。**本地账号表,不走网络** —— 整张表都要,
+        // 因为点它弹的是「换一台」的列表,不是只显示当前这台的名字
+        launch { accounts = Account.list(app.block("account.listAccounts").valueOrNull) }
         launch {
             val v = app.block("emby.views").map { View.list(it) }
             views = v
@@ -142,14 +149,14 @@ fun HomePage(nav: NavController) {
     // 屏蔽条目后**整页重拉,不在 UI 逐个过滤** —— 首页手里有六份互不相干的列表副本,
     // 挨个过滤 = 把核心层的规则在 UI 再抄一遍,抄错还不报错
     LaunchedEffect(Unit) {
-        app.invalidate.collect { if (it == "library" || it == "all") reload++ }
+        app.invalidate.collect { if (it == "library" || it == "accounts" || it == "all") reload++ }
     }
 
     val open: (Item) -> Unit = { nav.navigate(Route.Detail(it.id, it.type)) }
     val menu: (Item) -> List<CardAction> = { cardActions(app, scope, it) }
 
     LpImmersive(bar = {
-        ServerChip(serverName) { nav.navigate(Route.Servers) }
+        ServerChip(accounts.firstOrNull { it.isActive }?.name) { pickServer = true }
         Spacer(Modifier.weight(1f))
         GlassIcon(LpIcons.search, "搜索") { nav.navigate(Route.Search()) }
         GlassIcon(LpIcons.settings, "设置") { nav.navigate(Route.Settings) }
@@ -191,16 +198,56 @@ fun HomePage(nav: NavController) {
                     /* ☠ 影片轨道用 **2:3 竖版海报**,`thumb` 是「16:9 剧照卡」的开关,
                        只有分集(继续观看)才该开。传成 true 的话首页下半整片变横图,
                        而 Emby 给的 Primary 本来就是竖的,横过来是被 Crop 裁掉一条。 */
+                    /* ★ 轨道标题就是**库名本身**,不缀「· 最新」【用户定 2026-09-06】:
+                       首页从上到下五六条轨全带同一个后缀,那个词一个字的信息都不提供,
+                       只是把每条标题拉长、把库名挤窄。 */
                     val items = latest[view.id]
-                    if (items == null) LpRowSkeleton("${view.name} · 最新", thumb = false)
+                    if (items == null) LpRowSkeleton(view.name, thumb = false)
                     else if (items.isNotEmpty()) LpRow(
-                        "${view.name} · 最新", items,
+                        view.name, items,
                         { app.imageUrl(it.id, "Primary", 330) }, open, thumb = false, menu = menu,
                         onMore = { nav.navigate(Route.Library(view.id, view.name)) },
                     )
                 }
             }
             item("tail") { Spacer(Modifier.height(Sp.x26)) }
+        }
+    }
+
+    /* ★★ 顶栏胶囊 = **就地换服务器**【用户定 2026-09-06】。
+       原来它 `navigate(Route.Servers)` —— 那是把「换一台」做成了一次页面跳转,
+       而服务器页是底栏的第三个 Tab,跳过去之后返回栈和 Tab 栈对不上,
+       用户原话:「无法点回首页」。
+       换成弹窗之后这件事根本不需要离开首页,顺带把那条返回路径整个消掉。 */
+    if (pickServer) LpDialog({ pickServer = false }, "切换服务器") {
+        Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            accounts.forEach { a ->
+                OptRow(
+                    a.name, sub = a.remark?.takeIf { it.isNotBlank() } ?: a.userName,
+                    selected = a.isActive,
+                    onClick = {
+                        pickServer = false
+                        // 已经是这一台就什么都不做:再打一次 setActiveServer 会让整页白重拉
+                        if (a.isActive) return@OptRow
+                        scope.launch {
+                            runCatching { app.call("account.setActiveServer", args("server_id" to a.id)) }
+                                .onSuccess {
+                                    // ★ **必须等 refreshSession**:首页各块读的是新会话,
+                                    //   不等的话它们拿旧服务器的凭据去拉内容
+                                    app.refreshSession()
+                                    reload++
+                                    app.toast("已切到「${a.name}」", ToastKind.Ok)
+                                }
+                                .onFailure { app.report(it) }
+                        }
+                    },
+                )
+            }
+            Spacer(Modifier.height(Sp.x10))
+            Hairline()
+            Spacer(Modifier.height(Sp.x10))
+            OptRow("管理服务器…", onClick = { pickServer = false; nav.switchTab(Route.Servers) })
+            OptRow("添加服务器…", onClick = { pickServer = false; nav.navigate(Route.AddServer) })
         }
     }
 }

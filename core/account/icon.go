@@ -52,22 +52,57 @@ func iconPath(serverID string) string { return filepath.Join(iconDir(), iconKey(
 // 而有些反代会把 Content-Type 抹成 application/octet-stream —— 那样拼出来的
 // data URI 浏览器不认,图标变成一个碎图标,**不报错,只是不显示**。
 func sniffMime(b []byte) string {
-	switch {
-	case len(b) >= 4 && b[0] == 0x89 && string(b[1:4]) == "PNG":
-		return "image/png"
-	case len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
-		return "image/jpeg"
-	case len(b) >= 4 && string(b[:4]) == "GIF8":
-		return "image/gif"
-	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
-		return "image/webp"
-	case len(b) >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 1 && b[3] == 0:
-		return "image/x-icon"
-	case strings.HasPrefix(string(b), "<svg") || strings.HasPrefix(string(b), "<?xml"):
-		return "image/svg+xml"
+	if m, ok := sniffImage(b); ok {
+		return m
 	}
 	return "image/png"
 }
+
+// sniffImage 认得出来才算数。第二个返回值 = **这确实是一张图**。
+//
+// ☠☠ 原来这里认不出就一律返回 image/png,而调用方只看 MIME —— 于是:
+// 反代 / SPA 对 `/web/touchicon.png` 回一份 200 的 index.html,
+// 我们把那坨 HTML **当成 png 落进缓存**,而 `IconGetAny` 是先查缓存的,
+// 从此**所有候选地址都不会再试**,图标永远出不来。
+// 两端的表现都是「一个字都不报,就是没有图标」:
+// Avalonia 的 Bitmap 和安卓的 BitmapFactory 解不开,各自 catch 掉。
+// 用户原话:「确认站点是有图标的」—— 对,坏在我们把错的那份缓存住了。
+func sniffImage(b []byte) (string, bool) {
+	switch {
+	case len(b) >= 4 && b[0] == 0x89 && string(b[1:4]) == "PNG":
+		return "image/png", true
+	case len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
+		return "image/jpeg", true
+	case len(b) >= 4 && string(b[:4]) == "GIF8":
+		return "image/gif", true
+	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return "image/webp", true
+	case len(b) >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 1 && b[3] == 0:
+		return "image/x-icon", true
+	case len(b) >= 8 && b[0] == 'B' && b[1] == 'M':
+		return "image/bmp", true
+	}
+	// SVG 的头可能是 `<?xml …?>` 也可能直接 `<svg`,只看前 256 字节就够分辨
+	if h := strings.TrimSpace(string(head(b, 256))); strings.HasPrefix(h, "<svg") ||
+		(strings.HasPrefix(h, "<?xml") && strings.Contains(h, "<svg")) {
+		return "image/svg+xml", true
+	}
+	return "", false
+}
+
+func head(b []byte, n int) []byte {
+	if len(b) < n {
+		return b
+	}
+	return b[:n]
+}
+
+// decodable 两端解得开吗。
+//
+// ★ **SVG 解不开** —— Avalonia 的 Bitmap 和安卓的 BitmapFactory 都不认,
+// 各自 catch 掉,界面上一个字都不报。既然如此就别把它当成「拿到了」:
+// 判失败,让候选列表继续往下试(官方 touchicon.png 多半是能用的那一条)。
+func decodable(mime string) bool { return mime != "image/svg+xml" }
 
 func toDataURI(b []byte) string {
 	return "data:" + sniffMime(b) + ";base64," + base64.StdEncoding.EncodeToString(b)
@@ -95,8 +130,13 @@ func IconGetAny(ctx context.Context, serverID string, urls ...string) (string, e
 		}
 		uri, err := IconGet(ctx, serverID, u)
 		if err == nil {
+			bus.Logf("info", "服务器图标取到了:%s", u)
 			return uri, nil
 		}
+		/* ★ **每一条都记一句**。「站点明明有图标却取不到」查不下去的原因就是这里静默:
+		   五条候选全试过了,日志里一个字都没有,分不清是 404、是回了 HTML、
+		   还是格式解不开。值不敏感(全是公开静态地址),照原样记。 */
+		bus.Logf("warn", "服务器图标候选失败 %s: %v", u, err)
 		last = err
 	}
 	if last == nil {
@@ -114,10 +154,17 @@ func OfficialIconURLs(server string) []string {
 	if b == "" {
 		return nil
 	}
+	/* ★ 顺序 = 「大而清晰」在前、「小而一定有」在后。
+	   ★ **根上那两条不能省**:反代常把 Emby 挂在子路径下、或者站点自己换过 web 目录,
+	     这时候 `/web/...` 全 404 而 `/favicon.ico` 好好的 —— 用户看到的就是
+	     「站点明明有图标,软件就是取不到」。 */
 	return []string{
 		b + "/web/touchicon.png",
 		b + "/web/touchicon144.png",
+		b + "/web/apple-touch-icon.png",
+		b + "/apple-touch-icon.png",
 		b + "/web/favicon.ico",
+		b + "/favicon.ico",
 	}
 }
 
@@ -166,6 +213,16 @@ func IconGet(ctx context.Context, serverID, url string) (string, error) {
 	if len(b) == 0 {
 		return "", fmt.Errorf("图标是空文件")
 	}
+	/* ☠☠ **落盘之前先确认它真的是一张图。** 缺了这一关的代价见 sniffImage 上面那段:
+	   一份 200 的 HTML 会被当成 png 缓存住,而缓存是 IconGetAny 的第一道判断 ——
+	   之后所有候选地址一条都不会再试,图标永远出不来且不报错。 */
+	mime, ok := sniffImage(b)
+	if !ok {
+		return "", fmt.Errorf("这个地址回的不是图片(多半是反代把 404 变成了首页 HTML): %s", url)
+	}
+	if !decodable(mime) {
+		return "", fmt.Errorf("图标是 %s,客户端解不开", mime)
+	}
 	if err := os.MkdirAll(iconDir(), 0o755); err != nil {
 		return "", fmt.Errorf("建图标缓存目录失败: %w", err)
 	}
@@ -192,6 +249,14 @@ func IconSetFromFile(serverID, filePath string) (string, error) {
 	//   UI 会显示成碎图标,查都没处查。
 	if len(b) == 0 {
 		return "", fmt.Errorf("图片是空文件")
+	}
+	// 和下载那条同一把尺:解不开的格式当场说清楚,别让它变成「上传成功但没图标」
+	mime, ok := sniffImage(b)
+	if !ok {
+		return "", fmt.Errorf("这不是一张图片")
+	}
+	if !decodable(mime) {
+		return "", fmt.Errorf("暂不支持 SVG 图标,换一张 PNG / JPG")
 	}
 	if err := os.MkdirAll(iconDir(), 0o755); err != nil {
 		return "", fmt.Errorf("建图标缓存目录失败: %w", err)

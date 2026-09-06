@@ -45,6 +45,9 @@ class MainActivity : ComponentActivity() {
     private val askNotification =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒了就没有通知栏控制,不拦流程 */ }
 
+    private val askStorage =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* 拒了就只是列不出文件,不拦流程 */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 开屏必须在 super.onCreate 之前装(U1.17)。
         // ★ 不挂 setKeepOnScreenCondition:核心层已经在 Application 里起好了,
@@ -117,6 +120,23 @@ class MainActivity : ComponentActivity() {
             == PackageManager.PERMISSION_GRANTED
         ) return
         askNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    /**
+     * 本机视频的读权限。**在用户要添加本机文件夹的那一刻要**,不在冷启动时要。
+     *
+     * ★ 权限名按版本分:Android 13 起是 `READ_MEDIA_VIDEO`,之前是
+     *   `READ_EXTERNAL_STORAGE`(manifest 里两条都声明了,`maxSdkVersion=32`)。
+     *   要错了的表现是**弹不出框**且 `checkSelfPermission` 恒 denied ——
+     *   界面上只会是「这个文件夹是空的」,看着像路径填错了。
+     * ★ 拒了不拦流程:用户可能只想连服务器。
+     */
+    fun askStoragePermission() {
+        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            Manifest.permission.READ_MEDIA_VIDEO
+        else Manifest.permission.READ_EXTERNAL_STORAGE
+        if (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) return
+        askStorage.launch(perm)
     }
 
     /**

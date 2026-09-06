@@ -154,3 +154,60 @@ func TestIconGetAny_全不通要报错(t *testing.T) {
 		t.Fatal("全不通时必须报错")
 	}
 }
+
+// ☠☠ 200 的 HTML 不是图标。
+//
+// 反代 / SPA 常把不存在的静态文件回成一份 200 的 `index.html`。
+// 原来这里认不出格式就一律当 png 落盘,而缓存是 IconGetAny 的**第一道判断** ——
+// 从那一刻起所有候选地址一条都不会再试,图标永远出不来,而且两端都不报错
+// (Avalonia 的 Bitmap / 安卓的 BitmapFactory 各自 catch 掉)。
+// 用户原话:「确认站点是有图标的」—— 对,坏的是我们把错的那份缓存住了。
+//
+// 判据两条:① 那一条要判失败;② 后面真有图的那条还能被试到。
+func TestIconGetAny_HTML不许当成图标缓存(t *testing.T) {
+	const id = "https://icon-html.example"
+	defer IconClear(id)
+
+	var hit []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = append(hit, r.URL.Path)
+		if r.URL.Path == "/web/favicon.ico" {
+			_, _ = w.Write([]byte("\x00\x00\x01\x00fake-ico"))
+			return
+		}
+		// 其余一律回 200 + HTML(SPA 兜底页)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<!doctype html><html><body>LinPlayer</body></html>"))
+	}))
+	defer srv.Close()
+
+	uri, err := IconGetAny(context.Background(), id,
+		srv.URL+"/web/touchicon.png", srv.URL+"/web/favicon.ico")
+	if err != nil {
+		t.Fatalf("HTML 那条该跳过继续试,实得错误 %v(试过 %v)", err, hit)
+	}
+	if !strings.HasPrefix(uri, "data:image/x-icon;base64,") {
+		t.Fatalf("拿到的不是那张 ico:%.40s", uri)
+	}
+	if len(hit) < 2 {
+		t.Fatalf("HTML 那条被当成成功了 —— 只发了 %v", hit)
+	}
+	// 缓存里躺着的必须是那张 ico,不是 HTML
+	b, e := os.ReadFile(iconPath(id))
+	if e != nil || len(b) < 4 || b[0] != 0x00 || b[2] != 0x01 {
+		t.Fatalf("缓存里不是那张 ico(err=%v, 头 %x)—— 一旦缓存被污染,之后一条候选都不会再试", e, b[:min(4, len(b))])
+	}
+}
+
+// SVG 两端都解不开:判失败,让候选列表继续往下走。
+func TestIconGet_SVG判失败而不是静默无图(t *testing.T) {
+	const id = "https://icon-svg.example"
+	defer IconClear(id)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>`))
+	}))
+	defer srv.Close()
+	if _, err := IconGet(context.Background(), id, srv.URL+"/logo.svg"); err == nil {
+		t.Fatal("SVG 该判失败 —— 判成功的话界面上是一个碎图标,而且缓存被它占住了")
+	}
+}

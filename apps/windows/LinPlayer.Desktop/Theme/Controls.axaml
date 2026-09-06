@@ -471,4 +471,68 @@
     <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
 
+  <!--
+    右键菜单(ContextMenu / MenuItem / Separator)。
+
+    **这一层原来一条样式都没有** —— 全站的右键菜单都跑在 Fluent 的出厂皮肤上:
+      白底(深色主题下是它自己的灰)、直角、和侧栏那套发丝线 + 分层表面完全两回事。
+      用户 2026-09-06:「菜单样式没有做适配优化,与软件整体风格不符」。
+    写在样式表这一处,而不是在每个建菜单的地方逐个 Setter ——
+      本仓有两处在建菜单(卡片动作、侧栏服务器),漏掉的那处就是「有一个菜单长得不一样」。
+    菜单弹在**另一个顶层窗口(PopupRoot)**里,所以 `:open` 这类伪类挂不到它身上
+      (写了不生效且不报错,见 CardActions.Animate 那段);能靠样式表管的只有
+      配色 / 圆角 / 间距这些静态属性,动效仍然要在代码里挂 Opened。
+  -->
+  <Style Selector="ContextMenu">
+    <Setter Property="Background" Value="{DynamicResource Panel}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource Line}" />
+    <!-- BorderThickness 是边框宽度不是间距,不走那把间距尺:发丝线就是 1 -->
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="MinWidth" Value="180" />
+  </Style>
+
+  <Style Selector="MenuItem">
+    <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="MinHeight" Value="34" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="MenuItem /template/ Border#PART_LayoutRoot">
+    <Setter Property="CornerRadius" Value="6" />
+  </Style>
+  <Style Selector="MenuItem:pointerover /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+  </Style>
+  <Style Selector="MenuItem:selected /template/ Border#PART_LayoutRoot">
+    <Setter Property="Background" Value="{DynamicResource PanelAlt}" />
+  </Style>
+  <!-- 禁用项 = 菜单顶上那行标题(服务器名)。它不是「点不动的功能」,
+       所以只降墨色,不加那层 Fluent 的半透明遮罩。 -->
+  <Style Selector="MenuItem:disabled">
+    <Setter Property="Foreground" Value="{DynamicResource Ink3}" />
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="Cursor" Value="Arrow" />
+  </Style>
+  <Style Selector="MenuItem:disabled /template/ ContentPresenter">
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource Ink3}" />
+  </Style>
+  <!-- 危险项:删除。红只给文字,不给底 —— 一条红底的菜单项在这套配色里太吵 -->
+  <Style Selector="MenuItem.danger">
+    <Setter Property="Foreground" Value="{DynamicResource Danger}" />
+  </Style>
+  <Style Selector="MenuItem.danger /template/ ContentPresenter">
+    <Setter Property="TextBlock.Foreground" Value="{DynamicResource Danger}" />
+  </Style>
+
+  <Style Selector="ContextMenu > Separator">
+    <Setter Property="Background" Value="{DynamicResource Line}" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="6,6" />
+  </Style>
+
 </Styles>

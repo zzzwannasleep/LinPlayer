@@ -263,8 +263,25 @@ jobs:
 
       # ★ 「keystore.properties 写了 ≠ 用了」:这一步里的验签是硬闸门,
       #   不签名出的是 -unsigned.apk,它长得和正常包一模一样,直到用户去装。
+      # ☠ 这一步**会把上面那份带凭据的 liblpcore.so 重编一遍**
+      #   (pack-android.sh 内部又调了 build-core-android.sh)。所以编译期凭据
+      #   必须在**这里**也给一份 —— 只给上一步等于白给:产物被覆盖成零凭据版本,
+      #   而 APK 照样出得来、装得上、跑得起来,只是排行榜/弹幕永远说「这个构建没带凭据」。
+      #   2026-09-06 实测踩到。凭据闸门原先认不出 pack-android.sh,已一并补进
+      #   scripts/check-workflows.sh 的 BUILD_STEPS。
       - name: Pack Android
         shell: bash
+        env:
+          LP_VERSION: ${{ needs.version.outputs.version }}
+          DANDANPLAY_APP_ID: ${{ secrets.DANDANPLAY_APP_ID }}
+          DANDANPLAY_APP_SECRET: ${{ secrets.DANDANPLAY_APP_SECRET }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          LP_SYNC_PROXY_BASE: ${{ secrets.LP_SYNC_PROXY_BASE }}
+          LP_SYNC_PROXY_KEY: ${{ secrets.LP_SYNC_PROXY_KEY }}
+          LP_BANGUMI_REDIRECT_URI: ${{ secrets.LP_BANGUMI_REDIRECT_URI }}
+          LP_AFDIAN_SPONSOR_URL: ${{ secrets.LP_AFDIAN_SPONSOR_URL }}
+          LP_ICON_LIBRARY_SOURCES: ${{ secrets.LP_ICON_LIBRARY_SOURCES }}
+          LP_CF_TEST_URL: ${{ secrets.LP_CF_TEST_URL }}
         run: bash scripts/pack-android.sh arm64-v8a
 
       - name: Upload artifact

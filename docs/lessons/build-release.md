@@ -629,6 +629,33 @@ for _s in (_sys.stdout, _sys.stderr):
 
 ---
 
+### 出包脚本会把带凭据的产物重编一遍 — 2026-09-06
+
+**症状**:GitHub Actions 里 `DANDANPLAY_*` / `TMDB_API_KEY` 都配了,
+APK 装上去「聚合世界」的排行榜仍然说「这个构建没带凭据」。
+
+**根因**:`build.yml` 的 **Pack Android** 那一步没有 `env:`,
+而 `scripts/pack-android.sh` 内部**又调了一次** `build-core-android.sh` ——
+把上一步(有凭据)编好的 `liblpcore.so` 原地覆盖成零凭据版本。
+上一步那些 secret 全白给。
+
+**闸门为什么没拦住**:`scripts/check-workflows.sh` 的 `BUILD_STEPS` 只认
+`pack-win.sh` / `build-core.sh` / `build-core-android.sh` 三个字符串,
+`pack-android.sh` 不在表里,于是那一步整个不受检查。
+
+**改法**:出包脚本本身也要进 `BUILD_STEPS`,并且给 Pack Android 补上同一批 env。
+反向注入验过:摘掉 env,闸门当场报「缺少 DANDANPLAY_APP_ID, …」。
+
+**推广**:凡是「A 步产出、B 步会重跑同一个构建」的流水线,
+**凭据要给到真正产出最终产物的那一步**,而不是名字看起来最像编译的那一步。
+`sealsecrets → -ldflags -X → secrets.decrypt` 这条链本身是好的(实测密文能解开),
+坏的一直是「谁编的最后那一份 .so」。
+
+**失效条件**:pack 脚本不再内嵌 build-core 时,这条的前半段作废,闸门那半仍然成立。
+
+
+---
+
 ## 跨域交叉引用
 
 这些条目和本领域强相关,但正文放在别的文件里(一条经验只存一份正文):

@@ -196,4 +196,22 @@ class LogicTest {
             onClick > onSwitch,
         )
     }
+
+    /**
+     * ☠☠ `emby.seasonEpisodes` 回的是 **`{items,total}`**,不是裸数组。
+     *
+     * 详情页和播放页的选集面板两处都写成 `Item.list(...)`,而 `arr()` 对 JsonObject
+     * 返回空表 —— 于是「这一季一集都没有」和「解析形状挑错了」长得一模一样,
+     * 一条日志都没有。用户报的「集数没显示出来」就是这一条。
+     *
+     * 判据:两种形状都要解得出来。
+     */
+    @Test fun `Item·list 要同时吃裸数组和 items 包裹`() {
+        val bare = Json.parseToJsonElement("""[{"id":"e1","name":"第 1 集","type_":"Episode"}]""")
+        val wrapped = Json.parseToJsonElement(
+            """{"items":[{"id":"e1","name":"第 1 集","type_":"Episode"}],"total":1}""")
+        assertEquals("裸数组解不出来", 1, Item.list(bare).size)
+        assertEquals("{items,total} 解不出来 —— 选集面板会恒空", 1, Item.list(wrapped).size)
+        assertEquals("e1", Item.list(wrapped).first().id)
+    }
 }

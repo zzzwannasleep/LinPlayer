@@ -142,19 +142,29 @@ func registerSubtitleCommands() {
 		return mpvConfNow(), nil
 	})
 
-	// opts 播放器当前的实际参数。给「为什么这么卡」那类排查用。
+	// opts 播放器当前的实际参数。给「为什么这么卡」「为什么没画面」那类排查用。
 	//
 	// ★ 回读的是 mpv 的**当前值**不是我们设进去的值:
 	//   显卡不支持时 mpv 会静默回落,只看我们设的值等于在自我确认。
+	//
+	// ★★ `current-vo` / `dwidth` / `dheight` 三条是**「有声音没画面」的分诊表**:
+	//   current-vo 空 = 视频输出压根没建起来;
+	//   建了但 dwidth/dheight 为 0 = 一帧都没解出来;
+	//   两者都有值 = 画面出来了但被上面某层挡住(那一类只能靠眼睛)。
+	//   不给这三条的话,这类报告在界面上全长一个样,每次都要来回好几轮。
+	// ★★ `last_error` 是 mpv 自己那句话。它一直只进日志,而用户看到的是
+	//   「原因在日志里」—— 等于让人去导诊断包。
 	bus.Register("player.opts", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		out := map[string]any{}
 		for _, k := range []string{
-			"hwdec", "hwdec-current", "vo", "gpu-api", "gpu-context",
+			"hwdec", "hwdec-current", "vo", "current-vo", "gpu-api", "gpu-context",
 			"video-codec", "audio-codec-name", "container-fps",
+			"dwidth", "dheight", "video-format",
 			"sub-scale", "sub-pos", "secondary-sub-ass-override", "speed", "volume",
 		} {
 			out[k] = Prop(k)
 		}
+		out["last_error"] = LastMpvError()
 		return out, nil
 	})
 }

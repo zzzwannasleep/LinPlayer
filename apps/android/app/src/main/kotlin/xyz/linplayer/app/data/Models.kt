@@ -92,7 +92,21 @@ data class Item(
             )
         }
 
-        fun list(e: JsonElement?): List<Item> = e.arr().mapNotNull { from(it) }
+        /**
+         * 一串条目。
+         *
+         * ☠☠ **裸数组和 `{items,total}` 两种形状都要吃。** 核心层这两种都在用,
+         * 而且是**故意的**(要总数/翻页的走 `listItemsPage`,其余走裸数组)——
+         * 但调用点只要挑错一个,`arr()` 对 JsonObject 返回空表,
+         * 于是「一条都没有」和「解析形状不对」长得一模一样,一个字都不报。
+         * `emby.seasonEpisodes` 回的就是 `{items,total}`,而详情页和播放页的选集面板
+         * 两处都当成裸数组解 —— 表现正是用户报的「集数没显示出来」。
+         * 补在这里而不是补三个调用点:下一个新页面照样会挑错。
+         */
+        fun list(e: JsonElement?): List<Item> {
+            val src = (e as? JsonObject)?.get("items") ?: e
+            return src.arr().mapNotNull { from(it) }
+        }
     }
 }
 

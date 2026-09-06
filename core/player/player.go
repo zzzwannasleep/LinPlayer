@@ -296,6 +296,7 @@ func drainEvents(h unsafe.Pointer) {
 			if t := C.lp_event_log_text(ev); t != nil {
 				txt := C.GoString(t)
 				noteMpvLog(txt)
+				noteLastError(txt)
 				/* ★ 订阅的是 error 级,所以每一条都值得往外走。
 				   原来只有 shader 编译错误被留下,别的**一个字都不出来** ——
 				   而「起播失败」在界面上只是一直黑屏,mpv 明明报了原因却没人看得到。
@@ -604,6 +605,8 @@ func setProp(name, value string) {
 func Prop(name string) string { return prop(name) }
 
 func playFile(path string) error {
+	// 上一部片的报错不能算在这一部头上 —— 那会让排查指向一个早就过去的问题
+	ClearMpvError()
 	if r := ensureMpv(); r != 0 {
 		return errors.New("mpv 起不来")
 	}

@@ -181,6 +181,8 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
     var subLang by remember { mutableStateOf<String?>(null) }
     var sheet by remember { mutableStateOf<String?>(null) }
     var serverId by remember { mutableStateOf<String?>(null) }
+    /** 「哪台服务器的哪条线路」。取不到线路表时只有服务器名 —— 也比「服务器线路」四个字强。 */
+    var lineLabel by remember { mutableStateOf<String?>(null) }
 
     // 详情与 itemMedia **并行**;相似推荐也并发;分集要等详情回来(series_id 只有详情才给)
     LaunchedEffect(route.itemId) {
@@ -226,9 +228,20 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
         /* 线路那一行要跳线路页,而线路页认的是**账号 id**,不是当前生效的线路地址。
            拿 session.server 去传是错的 —— 换过线路之后那个值已经是中转地址了。 */
         launch {
-            serverId = xyz.linplayer.app.data.Account
-                .list(app.block("account.listAccounts").valueOrNull)
-                .firstOrNull { it.isActive }?.id
+            val raw = app.block("account.listAccounts").valueOrNull
+            val active = xyz.linplayer.app.data.Account.list(raw).firstOrNull { it.isActive }
+            serverId = active?.id
+            /* ★★ 线路那一行要写**具体是哪台的哪条**【用户定 2026-09-06】。
+               原来恒写死「服务器线路」—— 那句话对多线路用户等于没说:
+               他想知道的正是「我现在连的是哪一条」。
+               线路名和当前线路都只在**账号表**里(`lines[] / active_line`);
+               `account.probeLines` 只发 index/ms/url,照它取值会恒「线路 N」。 */
+            val accObj = raw.arr().firstOrNull { it.obj().str("server") == active?.id }.obj()
+            val idx = accObj.long("active_line")?.toInt() ?: 0
+            val lines = accObj?.get("lines").arr()
+            val lineName = lines.getOrNull(idx).obj()?.str("name")?.takeIf { it.isNotBlank() }
+                ?: if (lines.isEmpty()) "主线路" else "线路 ${idx + 1}"
+            lineLabel = active?.name?.let { "$it · $lineName" } ?: lineName
         }
         // 进详情页就开始预热「▶ 会播的那个条目」。fire-and-forget,失败全吞
         launch { runCatching { app.call("prefs.preloadItem", args("item_id" to route.itemId)) } }
@@ -367,54 +380,12 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                     }
                 }
 
-                d.str("overview")?.takeIf { it.isNotBlank() }?.let { ov ->
-                    item("overview") { Overview(ov) }
-                }
-
-                if (people.isNotEmpty()) item("people") { People(app, people) }
-
-                /* 播放选项:**版本 / 线路 / 音轨 / 字幕**【用户点名要的四项】。
-                   剧集页不画 —— 那是整部剧,选版本没有意义;进到某一集里才有。 */
-                if (!isSeries) item("pick") {
-                    SectionTitle("播放选项")
-                    PickList(
-                        rows = listOf(
-                            PickRow(
-                                "版本", ver?.name ?: "默认",
-                                extra = if (versions.size > 1) "共 ${versions.size} 个" else null,
-                                onClick = if (versions.size > 1) ({ sheet = "version" }) else null,
-                            ),
-                            PickRow(
-                                "线路", "服务器线路",
-                                onClick = serverId?.let { sid ->
-                                    ({ nav.navigate(Route.Lines(sid, title)) })
-                                },
-                            ),
-                            PickRow(
-                                "音轨", trackLabel(ver?.of("Audio"), audioLang),
-                                onClick = if ((ver?.of("Audio")?.size ?: 0) > 1)
-                                    ({ sheet = "audio" }) else null,
-                            ),
-                            PickRow(
-                                "字幕", trackLabel(ver?.of("Subtitle"), subLang, subOff = subLang == ""),
-                                onClick = if (!ver?.of("Subtitle").isNullOrEmpty())
-                                    ({ sheet = "sub" }) else null,
-                            ),
-                        ),
-                    )
-                }
-
-                // 媒体信息:**照 Emby 官端分组成卡**,不是一张 kv 大表
-                if (!isSeries && ver != null) item("media") {
-                    SectionTitle("媒体信息")
-                    MediaCards(ver)
-                }
-
-                /* 季 / 集**两条横滑栏**(照 PC 端)【用户定 2026-09-06】。
-                   ★ 换季那一栏一动,下面的集数栏当场跟着换 —— 两栏是一条链,不是两个列表。
-                   ★ 点一集进的是**这一集的详情页**,不是直接起播:起播是详情页里那颗大按钮。
-                     上一版是一条竖着的长列表,把整页撑得看不到下面的相似推荐。 */
-                if (seasons.size > 1) item("seasons") {
+                /* ☠ 季 / 集**排在动作按钮和简介之间**【用户定 2026-09-06】。
+                   原来它们排在「播放选项 / 媒体信息 / 演职人员」后面 —— 进剧集详情页
+                   最常做的事是**找集**,不是读简介,把选集推到三屏以下等于没做。
+                   ★ 一季的剧也画季那一栏:用户报「季度没显示出来」正是这一条 ——
+                     `seasons.size > 1` 把单季剧整条藏掉了,而那是最常见的情况。 */
+                if (seasons.isNotEmpty()) item("seasons") {
                     SectionTitle("季")
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
@@ -445,6 +416,55 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                     )
                 }
 
+                d.str("overview")?.takeIf { it.isNotBlank() }?.let { ov ->
+                    item("overview") { Overview(ov) }
+                }
+
+                if (people.isNotEmpty()) item("people") { People(app, people) }
+
+                /* 播放选项:**版本 / 线路 / 音轨 / 字幕**【用户点名要的四项】。
+                   剧集页不画 —— 那是整部剧,选版本没有意义;进到某一集里才有。 */
+                if (!isSeries) item("pick") {
+                    SectionTitle("播放选项")
+                    PickList(
+                        rows = listOf(
+                            PickRow(
+                                "版本", ver?.name ?: "默认",
+                                extra = if (versions.size > 1) "共 ${versions.size} 个" else null,
+                                onClick = if (versions.size > 1) ({ sheet = "version" }) else null,
+                            ),
+                            PickRow(
+                                "线路", lineLabel ?: "默认线路",
+                                onClick = serverId?.let { sid ->
+                                    // 线路页认的是**账号 id**,不是当前生效的线路地址 ——
+                                    // 换过线路之后 session.server 已经是中转地址了
+                                    ({ nav.navigate(Route.Lines(sid, title)) })
+                                },
+                            ),
+                            PickRow(
+                                "音轨", trackLabel(ver?.of("Audio"), audioLang),
+                                onClick = if ((ver?.of("Audio")?.size ?: 0) > 1)
+                                    ({ sheet = "audio" }) else null,
+                            ),
+                            PickRow(
+                                "字幕", trackLabel(ver?.of("Subtitle"), subLang, subOff = subLang == ""),
+                                onClick = if (!ver?.of("Subtitle").isNullOrEmpty())
+                                    ({ sheet = "sub" }) else null,
+                            ),
+                        ),
+                    )
+                }
+
+                // 媒体信息:**照 Emby 官端分组成卡**,不是一张 kv 大表
+                if (!isSeries && ver != null) item("media") {
+                    SectionTitle("媒体信息")
+                    MediaCards(ver)
+                }
+
+                /* 季 / 集**两条横滑栏**(照 PC 端)【用户定 2026-09-06】。
+                   ★ 换季那一栏一动,下面的集数栏当场跟着换 —— 两栏是一条链,不是两个列表。
+                   ★ 点一集进的是**这一集的详情页**,不是直接起播:起播是详情页里那颗大按钮。
+                     上一版是一条竖着的长列表,把整页撑得看不到下面的相似推荐。 */
                 if (similar.isNotEmpty()) item("similar") {
                     LpRow("相似推荐", similar, { app.imageUrl(it.id, "Primary", 330) },
                         { nav.navigate(Route.Detail(it.id, it.type)) },

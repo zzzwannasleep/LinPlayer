@@ -118,13 +118,23 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     var volume by remember { mutableFloatStateOf(1f) }
     /** 起播失败(一次都没出画就 eof)。**不许静默退回去**。 */
     var openFailed by remember { mutableStateOf(false) }
+    /** 失败时给用户看的**具体原因**,不是「原因在日志里」。见 [failureDiag]。 */
+    var failReason by remember { mutableStateOf<String?>(null) }
 
     /* 内核。★ 进播放页时读一次就**钉住**(`remember` 不带 key):
        播到一半用户去设置里改了内核,回来时这一片的状态机会当场换一套
        —— 位置、时长、暂停三个值来源全变,而 ExoPlayer 手里根本没有这一片。
        所以设置页那一行明说「退出当前播放再进才生效」。 */
     val engine = remember { xyz.linplayer.app.data.UiPrefs.engine.value }
-    val exo = rememberExoPlayer(engine == "exo")
+    /* 字幕语言偏好。**要在建 ExoPlayer 之前读到** —— ExoPlayer 的轨道选择是
+       「参数变了才重选」,建完再补一次也行,但首帧那几秒会没有字幕。
+       `null` = 还没读到(别当成「用户关了字幕」);`""` = 用户显式关了。 */
+    var subLangPref by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        subLangPref = runCatching { app.call("prefs.getPrefs") }.getOrNull().obj()
+            .str("sub_lang") ?: ""
+    }
+    val exo = rememberExoPlayer(engine == "exo", subLangPref)
 
     // 屏幕常亮(U1.24):播放中不息屏,暂停 / 退出后恢复
     DisposableEffect(paused) {
@@ -172,7 +182,11 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             paused = !e.playWhenReady
             buffering = e.playbackState == androidx.media3.common.Player.STATE_BUFFERING
             // 起播失败要**说出来**,不许静默退回去 —— 和 mpv 那条同一条口径
-            if (e.playerError != null) { openFailed = true; return@LaunchedEffect }
+            e.playerError?.let { err ->
+                failReason = "ExoPlayer:" + (err.errorCodeName) + " " + (err.message ?: "")
+                openFailed = true
+                return@LaunchedEffect
+            }
             if (e.playbackState == androidx.media3.common.Player.STATE_ENDED) {
                 if (everMoved) nav.popBackStack() else openFailed = true
                 return@LaunchedEffect
@@ -198,7 +212,10 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                  直接 popBackStack 会让用户看到「点了播放,闪一下就回来了」,
                  什么都没说。这种时候把 mpv 报的原因显示出来。 */
             if (o.bool("eof")) {
-                if (everMoved) nav.popBackStack() else openFailed = true
+                if (everMoved) nav.popBackStack() else {
+                    failReason = failureDiag(app)
+                    openFailed = true
+                }
             }
         }
     }
@@ -310,19 +327,38 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     }
 
     val c = Lp.colors
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    /* ☠☠ **这一层不许有不透明底色。**
+       `SurfaceView`(非 ZOrderOnTop)的画面是从**窗口下面**透上来的,靠它自己在
+       View 树上按 `PorterDuff.CLEAR` 抠一个洞。在它上面刷一层
+       `background(Color.Black)` 就是把那个洞重新填死 —— 表现是
+       **有声音、没画面、一条错都不报**,和旧栈「透出链四层」记的是同一件事
+       (docs/lessons/android.md)。黑底由 Activity 的 windowBackground 承担,
+       它在整棵 View 树**下面**,不挡洞。
+       这一条是 MP 内核「只有声音没有画面」的第一嫌疑。 */
+    Box(Modifier.fillMaxSize()) {
         // 视频层:SurfaceView。Compose 内容天然画在它上面
         // ☠ 两条**互斥**:同时挂的话 mpv 和 ExoPlayer 会各画各的,上面那层赢
-        if (exo != null) ExoSurface(exo, Modifier.fillMaxSize())
+        if (exo != null) ExoSurface(exo, subOff = subLangPref == "", m = Modifier.fillMaxSize())
         else VideoSurface(app.core, Modifier.fillMaxSize())
 
-        // 未出画时的黑幕 + 转圈。**判据是「时间真的往前走了」**
+        // ExoPlayer 的字幕层。mpv 那条的字幕是 libass 画进画面里的,不走这里
+        if (exo != null) ExoSubtitles(exo)
+
+        /* 未出画时的黑幕 + 转圈。**判据是「时间真的往前走了」**。
+           ★ 它可以是不透明的 —— 它只在没画面的时候存在,而且一撤就撤干净。 */
         if (!everMoved) Box(Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center) {
-            if (openFailed) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (openFailed) Column(
+                Modifier.padding(horizontal = Sp.x26),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
                 Text("这一片没能播起来", color = Color.White, fontSize = 16.sp)
                 Spacer(Modifier.height(Sp.x8))
-                Dim3("原因在日志里(设置 → 关于 → 导出诊断信息)。", maxLines = 2)
+                /* ★ **把真正的原因摆在这里**,不是一句「原因在日志里」。
+                   上一版那句话等于让用户去导诊断包,而他只想知道是不是自己的问题;
+                   对我们这边也一样 —— 「有声音没画面」这类报告拿不到 vo / 解码器
+                   的实际取值就只能靠猜,一来一回好几轮。 */
+                Dim3(failReason ?: "原因还没拿到。设置 → 关于 → 导出诊断信息。", maxLines = 6)
                 Spacer(Modifier.height(Sp.x16))
                 xyz.linplayer.app.ui.components.LpButton("返回", { nav.popBackStack() },
                     kind = xyz.linplayer.app.ui.components.BtnKind.Secondary)
@@ -575,3 +611,36 @@ private fun Marquee(text: String, m: Modifier = Modifier) {
  */
 private fun Modifier.basicMarqueeCompat(): Modifier =
     this.basicMarquee(iterations = Int.MAX_VALUE, repeatDelayMillis = 2000, velocity = 30.dp)
+
+/**
+ * 起播失败时回读一次播放器的真实状态。
+ *
+ * ☠☠ **「有声音没画面」和「什么都没打开」在界面上长得一模一样**,而两者的根因
+ * 完全不同(前者是 vo 没起来 / 画面被挡住,后者是流没打开)。不回读的话这类报告
+ * 只能靠猜 —— 上一版那句「原因在日志里」实测白烧过好几轮。
+ *
+ * 用的是既有的 `player.opts`(它回读的是 mpv 的**当前值**,不是我们设进去的值),
+ * 不新开命令:命令名是字符串,新增一条要同时动 COMMANDS.md 和三端绑定,
+ * 而这里要的东西那条命令已经全有了。
+ *
+ * ★ 取不到就说取不到,**不编**。
+ */
+private suspend fun failureDiag(app: xyz.linplayer.app.data.AppState): String {
+    val d = runCatching { app.call("player.opts") }.getOrNull().obj()
+        ?: return "播放器没给出原因(诊断也没读到)。"
+    val vo = d.str("current-vo").orEmpty().ifBlank { d.str("vo").orEmpty() }
+    val w = d.str("dwidth")?.toIntOrNull() ?: 0
+    val h = d.str("dheight")?.toIntOrNull() ?: 0
+    val head = when {
+        vo.isBlank() -> "视频输出没能建起来(vo 是空的)"
+        w <= 0 || h <= 0 -> "视频输出建起来了,但一帧都没解出来"
+        else -> "画面有 " + w + "×" + h + ",但没能上屏"
+    }
+    val tail = listOfNotNull(
+        vo.takeIf { it.isNotBlank() }?.let { "vo=" + it },
+        d.str("hwdec-current")?.takeIf { it.isNotBlank() }?.let { "解码=" + it },
+        d.str("video-codec")?.takeIf { it.isNotBlank() },
+        d.str("last_error")?.takeIf { it.isNotBlank() },
+    ).joinToString(" · ")
+    return if (tail.isEmpty()) head else head + "\n" + tail
+}

@@ -81,6 +81,9 @@ type rawItem struct {
 	IsFolder              *bool             `json:"IsFolder"`
 	CollectionType        *string           `json:"CollectionType"`
 	ImageTags             map[string]any    `json:"ImageTags"`
+	// ★ 背景图挂在**这个数组**里,不在 ImageTags 里(写成 ImageTags["Backdrop"] 恒 false)。
+	//   只给 Hero 挑片用 —— 它不进 Item,所以不动对外的 JSON 形状。
+	BackdropImageTags     []string          `json:"BackdropImageTags"`
 	RunTimeTicks          *int64            `json:"RunTimeTicks"`
 	UserData              *rawUserData      `json:"UserData"`
 	SeriesName            *string           `json:"SeriesName"`

@@ -51,6 +51,8 @@ public static class CardActions
     /// <para>90ms + 往下 6px:菜单是**跟手**的东西,再长一点就成了「卡了一下」。
     /// 位移朝下 —— 菜单是从鼠标那一点长出来的。</para>
     /// </summary>
+    internal static void AnimateMenu(ContextMenu menu) => Animate(menu);
+
     private static void Animate(ContextMenu menu)
     {
         menu.Transitions =

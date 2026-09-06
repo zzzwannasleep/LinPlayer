@@ -1691,7 +1691,7 @@ public partial class MainWindow : Window
             return mi;
         }
 
-        var del = new MenuItem { Header = "删除这台服务器" };
+        var del = new MenuItem { Header = "删除这台服务器", Classes = { "danger" } };
         del.Click += async (_, _) =>
         {
             /* 弹窗确认,不再是「点两下」。右键菜单点完第一下就关了,
@@ -1708,8 +1708,15 @@ public partial class MainWindow : Window
             catch (Exception e) { Console.WriteLine("[删服务器] " + e.Message); }
         };
 
-        return new ContextMenu
+        var menu = new ContextMenu
         {
+            /* ★ **摆放方式显式写出来。**
+               Avalonia 11.3 里 ContextMenu 的默认值就是 Pointer(实测过),
+               但这一条被自检那条路(SelfCheckServerMenu)改成过 RightEdgeAlignedTop,
+               而 ContextMenu 对象是**跟着行一路留住**的 —— 改过一次之后,
+               之后每一次右键都贴着行弹,不再跟手。写死在这里的代价是零,
+               而「菜单不跟着鼠标出来」这种事光看代码是看不出来的。 */
+            Placement = PlacementMode.Pointer,
             ItemsSource = new List<Control>
             {
                 new MenuItem { Header = name, IsEnabled = false },
@@ -1724,6 +1731,11 @@ public partial class MainWindow : Window
                 del,
             },
         };
+        /* 入场动效和卡片右键菜单共用一套(90ms 淡入 + 下移 6px)。
+           两处各写一套的下场是「有一个菜单是硬跳出来的」——
+           用户 2026-09-04 就是这么报的:「右键菜单没有动效,没有小图标,看着生硬」。 */
+        CardActions.AnimateMenu(menu);
+        return menu;
     }
 
     /// <summary>侧栏里一行(图标 + 文字)。和导航项同一套版式,但它不是单选项。</summary>

@@ -307,6 +307,67 @@ Flutter 的 **release 构建默认开启 R8**(代码压缩+混淆)。只被**原
 
 ---
 
+### Compose 下 SurfaceView 上面不许刷不透明底色 — 2026-09-06
+
+旧栈那条「透出链四层」是 WebView 时代的说法,Compose 版的等价物只剩**一条**,
+但它更容易被顺手写出来:
+
+```kotlin
+Box(Modifier.fillMaxSize().background(Color.Black)) {   // ← 就是它
+    VideoSurface(core, Modifier.fillMaxSize())
+}
+```
+
+`SurfaceView`(非 ZOrderOnTop)的画面是从**窗口下面**透上来的,
+靠它自己在 View 树上按 `PorterDuff.CLEAR` 抠一个洞。在它上面刷一层不透明底色
+就是把那个洞重新填死 —— 表现是**有声音、没画面、一条错都不报**,
+和旧栈「透出链」记的是同一件事。黑底交给 Activity 的 `windowBackground`,
+它在整棵 View 树**下面**,不挡洞。
+
+**排错顺序照旧**:有声音 = mpv 起来了、文件加载了 → **先排除上层遮挡,再怀疑 mpv**。
+
+**配套**:`player.opts` 补了 `current-vo` / `dwidth` / `dheight` / `last_error`,
+播放页失败屏直接把它们写出来。这三条是这类问题的分诊表:
+current-vo 空 = vo 没建;建了而 dwidth 为 0 = 一帧没解出来;
+两者都有值 = 画面出来了但被挡住(那一类只能靠眼睛)。
+不给的话这三种在界面上长一个样,每次都要来回好几轮 —— 上一版那句
+「原因在日志里(设置 → 关于 → 导出诊断信息)」实测就是这么白烧的。
+
+
+---
+
+### ExoPlayer 内核的两个出厂缺省 — 2026-09-06
+
+**画面被拉伸**:裸 `SurfaceView` 把画面铺满整个 View,不管片源比例。
+`media3-ui` 的 `AspectRatioFrameLayout` 能治,但为它多引一个包不值当
+(还会顺带拖进一整套用不上的控制条)。改法是 `onVideoSizeChanged` 的宽高
+配 `Modifier.aspectRatio(ratio)` —— 它单独用就是 FIT。
+两条要点:**必须乘 `pixelWidthHeightRatio`**(非方形像素的片源否则算出瘦长画面);
+**不许再叠 `fillMaxSize()`**,叠上去两个约束都被钉死,比例当场失效。
+
+**一条字幕都没有**:`DefaultTrackSelector` 默认只在「语言命中 `preferredTextLanguage`」
+或「系统开了无障碍字幕」时才启用文本轨,而那个偏好是空的 ——
+内封字幕明明在,`onCues` 一次都不回调。
+改法三层:`setPreferredTextLanguage(prefs.sub_lang)` +
+`setSelectUndeterminedTextLanguage(true)` + `onTracksChanged` 里兜底
+(有文本轨又一条没选中就选第一条)。渲染要**同时画文本 cue 和 bitmap cue**,
+只画一种的表现是「有的片有字幕有的没有」,看着像片源问题。
+
+**做不到的那一半**:ASS 的 `\pos` `\move` `\fad`、卡拉OK 这一层画不出来 ——
+media3 的 SSA 解析器只认位置和基本样式,它不是 libass。
+要完整特效只能切 MP 内核(libmpv 里编进去的 libass)。
+把 libass 接进 ExoPlayer 要另起一个 JNI 渲染层,但**不必再编一份 libass** ——
+实测我们用的这份 `libmpv.so`(media-kit full 变体)**导出了 191 个 `ass_*` 符号**,
+`ass_library_init` / `ass_renderer_init` / `ass_new_track` / `ass_process_codec_private` /
+`ass_process_chunk` / `ass_set_frame_size` / `ass_render_frame` 一条不缺
+(`llvm-nm -D --defined-only` 查得到)。
+剩下的活是:把 ExoPlayer 的字幕轨**按原始 ASS 字节**取出来(不能走 media3 的
+`SsaParser`,它已经把特效丢了)喂 `ass_process_chunk`,再按播放位置
+`ass_render_frame` 出图叠在画面上。工作量不小,不在本轮范围里。
+
+
+---
+
 ## 跨域交叉引用
 
 这些条目和本领域强相关,但正文放在别的文件里(一条经验只存一份正文):

@@ -112,7 +112,11 @@ NEED = ['DANDANPLAY_APP_ID', 'DANDANPLAY_APP_SECRET', 'TMDB_API_KEY',
         'LP_AFDIAN_SPONSOR_URL', 'LP_ICON_LIBRARY_SOURCES', 'LP_CF_TEST_URL']
 # ★ 2026-09-06:加上安卓那条。build-core-android.sh 也读同一批编译期凭据,
 #   漏配的表现一模一样(弹幕搜不到 / 排行榜空白),而 CI 全绿。
-BUILD_STEPS = ('pack-win.sh', 'build-core.sh', 'build-core-android.sh')
+# ☠ **出包脚本也要在表里。** pack-android.sh / pack-win.sh 内部各自又调了一次
+#   build-core-android.sh / build-core.sh —— 它们**覆盖**前面那一步的产物。
+#   闸门只认被调的那个脚本名时,「Pack Android」这一步整个不受检查,
+#   于是带凭据的 .so 被零凭据版本静默顶掉,而 CI 全绿、APK 正常。真栽过。
+BUILD_STEPS = ('pack-win.sh', 'pack-android.sh', 'build-core.sh', 'build-core-android.sh')
 bad = []
 checked = 0
 for f in sorted(glob.glob('.github/workflows/*.yml')):

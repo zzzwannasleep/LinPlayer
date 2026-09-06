@@ -196,14 +196,71 @@ func sourceMatchText(m rawMediaSource) string {
 	return strings.Join(kept, " ")
 }
 
+// heroOverfetch 是「要 5 条就先拉多少条」的倍数。
+//
+// 服务端只能保证「有剧照」,**有没有艺术字要拿回来才知道**(ImageTypes 多值在各 fork
+// 上是 AND 还是 OR 不一致,不能指望)。刮了 Logo 的条目在真实库里通常是少数,
+// 所以宁可多拉一屏元数据也别让 Hero 空着 —— 这一条请求本来就只要几十条的字段。
+const heroOverfetch = 12
+
+// heroMaxFetch 过取上限。库很大时 SortBy=Random 拉几百条纯属浪费。
+const heroMaxFetch = 120
+
 // RandomPicks 首页 Hero 的随机推荐。
-// ★ 只要**有剧照**的(ImageTypes=Backdrop),否则 Hero 是一块空白。
+//
+// ★★ **只挑「同时有剧照和艺术字」的条目**【用户定 2026-09-06】:
+// Hero 的标题走 TMDB 艺术字(Emby 的 `Logo` 图),取不到就回落排版字 ——
+// 于是轮播五张里两张是艺术字、三张是宋体标题,**看着像没做完**。
+// 三端(PC / 手机 / 以后的 TV)共用这一条命令,所以判据放在这里,不放在各端页面。
+//
+// ★ 过滤在**核心层**做而不是加 `has_logo` 字段:加字段要改 Item 的对外 JSON,
+// 18 条差分对账语料会全部报「多出字段」,而这件事只有 Hero 一个消费者。
+//
+// ★ 一条都挑不出来时**退回只按剧照挑**:那种库(一张 Logo 都没刮)如果直接给空表,
+// 首页顶上就是一块什么都没有的洞 —— 比风格不统一更糟。
 func (c *Client) RandomPicks(ctx context.Context, s *Session, limit int) ([]Item, error) {
+	if limit <= 0 {
+		limit = 8
+	}
+	want := limit * heroOverfetch
+	if want > heroMaxFetch {
+		want = heroMaxFetch
+	}
 	u := fmt.Sprintf("%s/Users/%s/Items?Recursive=true&IncludeItemTypes=Movie,Series"+
 		"&SortBy=Random&Limit=%d&ImageTypes=Backdrop"+
 		"&Fields=Overview,Genres,ProductionYear,CommunityRating",
-		s.Server, url.PathEscape(s.UserID), limit)
-	return c.fetchItems(ctx, s, u)
+		s.Server, url.PathEscape(s.UserID), want)
+
+	b, err := c.getBytes(ctx, s, u)
+	if err != nil {
+		return nil, err
+	}
+	var resp itemsResponse
+	if err := json.Unmarshal(b, &resp); err != nil {
+		return nil, fmt.Errorf("解析失败: %w", err)
+	}
+
+	withLogo := make([]Item, 0, limit)
+	fallback := make([]Item, 0, limit)
+	for _, r := range resp.Items {
+		it := fromRaw(r)
+		if len(r.BackdropImageTags) == 0 {
+			continue // 服务端说它有剧照,但 fork 常常不认 ImageTypes —— 自己再判一次
+		}
+		if len(fallback) < limit {
+			fallback = append(fallback, it)
+		}
+		if r.ImageTags["Logo"] != nil {
+			withLogo = append(withLogo, it)
+			if len(withLogo) >= limit {
+				break
+			}
+		}
+	}
+	if picked := filterBlocked(withLogo); len(picked) > 0 {
+		return picked, nil
+	}
+	return filterBlocked(fallback), nil
 }
 
 // pickIndex 是 media.PickIndex 的本包别名 —— 取流和版本列表都要用,收在一处。
