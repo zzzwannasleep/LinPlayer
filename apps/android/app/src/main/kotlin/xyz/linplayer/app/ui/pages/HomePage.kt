@@ -166,11 +166,16 @@ fun HomePage(nav: NavController) {
             // 每个媒体库一条「最新」轨。未到的画骨架 —— 否则首屏下半是空的
             v.valueOrNull.orEmpty().forEach { view ->
                 item("latest-${view.id}") {
+                    /* ☠ 影片轨道用 **2:3 竖版海报**,`thumb` 是「16:9 剧照卡」的开关,
+                       只有分集(继续观看 / 接下来看)才该开。
+                       这里以前传的是 true —— 于是首页下半部分整片变成横图,
+                       而 Emby 给的 Primary 本来就是竖的,横过来是被 Crop
+                       从中间裁掉一条,又丑又没信息。 */
                     val items = latest[view.id]
-                    if (items == null) LpRowSkeleton("${view.name} · 最新", thumb = true)
+                    if (items == null) LpRowSkeleton("${view.name} · 最新", thumb = false)
                     else if (items.isNotEmpty()) LpRow(
                         "${view.name} · 最新", items,
-                        { app.imageUrl(it.id, "Primary", 220) }, open, thumb = true, menu = menu,
+                        { app.imageUrl(it.id, "Primary", 330) }, open, thumb = false, menu = menu,
                         onMore = { nav.navigate(Route.Library(view.id, view.name)) },
                     )
                 }

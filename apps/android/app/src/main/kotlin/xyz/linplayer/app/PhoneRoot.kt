@@ -77,10 +77,17 @@ fun PhoneRoot(app: AppState) {
         LaunchedEffect(Unit) { app.boot() }
 
         Box(Modifier.fillMaxSize().background(Lp.colors.bg)) {
-            when (loggedIn) {
+            // 草稿画廊:`am start ... -e lp_page 'drafts:<n>'`。
+            // ★ 放在登录判定**之前** —— 草稿不连网,不该被「还没登录」挡住
+            val draft = MainActivity.SelfCheck.page?.takeIf { it.startsWith("drafts") }
+            when {
+                draft != null -> xyz.linplayer.app.ui.drafts.DraftGallery(
+                    draft.substringAfter(":", "0").toIntOrNull() ?: 0)
+                else -> when (loggedIn) {
                 null -> BootSkeleton()
                 false -> GatePage(onDone = { app.refreshSession() })
                 true -> MainShell()
+            }
             }
             ToastHost()
         }
