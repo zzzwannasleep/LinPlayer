@@ -232,6 +232,13 @@ fun HomePage(nav: NavController) {
                         scope.launch {
                             runCatching { app.call("account.setActiveServer", args("server_id" to a.id)) }
                                 .onSuccess {
+                                    /* ☠ 先把各块打回骨架。`PageCache.clear()`(在 boot 里)
+                                       清的是那张哈希表,**清不掉当前 composition 手里的
+                                       那几个 MutableState** —— 不打回去的话,新服务器的数据
+                                       到位之前,屏幕上摆的是上一台的媒体库。那是界面在撒谎。 */
+                                    hero = Block.Loading; resume = Block.Loading
+                                    nextUp = Block.Loading; collections = Block.Loading
+                                    views = Block.Loading; latest = emptyMap()
                                     // ★ **必须等 refreshSession**:首页各块读的是新会话,
                                     //   不等的话它们拿旧服务器的凭据去拉内容
                                     app.refreshSession()

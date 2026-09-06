@@ -470,8 +470,10 @@ public sealed class Hero : Border
         // 氛围底只要 64px 高:它会被拉大九倍当糊底用,拉大图纯属白解码
         _wash = _items.Select(it => Images.LoadAsync(_core,
             Images.EmbyImageUrl(_server, Id(it), "Backdrop"), 64)).ToArray();
-        /* 艺术字(Logo)<b>没有 has_logo 这个字段可判</b>,只能拉了才知道有没有。
-           拉不到返回 null → 回落成文字标题。旧 React 版也是这么做的(onError)。 */
+        /* 艺术字(Logo)。<b>Item 上没有 has_logo 这个字段</b>,取不到只能靠拉 ——
+           但 2026-09-06 起 <c>emby.listRandom</c> 已经在核心层只挑有艺术字的条目了
+           (RandomPicks 过取再筛),所以这里回落成文字标题应当是极少数
+           (取图本身失败,或者那台库一张 Logo 都没刮)。回落链一个字没改。 */
         _logo = _items.Select(it => Images.LoadAsync(_core,
             Images.EmbyImageUrl(_server, Id(it), "Logo"), 184)).ToArray();
 

@@ -226,9 +226,12 @@ func (c *Client) RandomPicks(ctx context.Context, s *Session, limit int) ([]Item
 	if want > heroMaxFetch {
 		want = heroMaxFetch
 	}
+	/* ★ **不要 `Overview`。** `Item` 和 `rawItem` 里都没有这个字段,它从来没被解析过 ——
+	   过取 60 条的时候那是几十 KB 的白搭,而首页第一屏正等着这条请求。
+	   Hero 上要显示的只有「评分 · 年份 · 类型」。 */
 	u := fmt.Sprintf("%s/Users/%s/Items?Recursive=true&IncludeItemTypes=Movie,Series"+
 		"&SortBy=Random&Limit=%d&ImageTypes=Backdrop"+
-		"&Fields=Overview,Genres,ProductionYear,CommunityRating",
+		"&Fields=Genres,ProductionYear,CommunityRating",
 		s.Server, url.PathEscape(s.UserID), want)
 
 	b, err := c.getBytes(ctx, s, u)
