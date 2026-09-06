@@ -141,8 +141,8 @@
 | [x] | `player.mpvGet` | `mpv_get` | `name: String` | `Result<Option<String>, String>` | ✅ |
 | [x] | `player.mpvSet` | `mpv_set` | `name: String, value: String` | `Result<(), String>` | ✅ |
 | [x] | `player.opts` | `player_opts` | `—` | `Result<PlayerOpts, String>` | ✅ |
-| [x] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<f64, String>` | ✅ |
-| [x] | `player.playExternal` | `play_external` | `item_id: String, resume_secs: f64, media_source_id: Option<String>` | `Result<String, String>` | ✅ |
+| [x] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>, engine: Option<String>` | `Result<f64, String>` | ✅ |
+| [x] | `player.playExternal` | `play_external` | `item_id: String, resume_secs: f64, media_source_id: Option<String>, engine: Option<String>` | `Result<String, String>` | ✅ |
 | [x] | `player.playLocal` | `play_local` | `id: String, resume_secs: f64` | `Result<f64, String>` | ✅ |
 | [x] | `player.screenshot` | `screenshot` | `dir: Option<String>` | `Result<String, String>` | ✅ |
 | [x] | `player.seek` | `seek` | `pos: f64` | `Result<(), String>` | ✅ |

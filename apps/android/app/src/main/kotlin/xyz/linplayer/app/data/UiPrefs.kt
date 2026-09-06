@@ -18,17 +18,34 @@ import androidx.compose.runtime.mutableStateOf
 object UiPrefs {
     private const val FILE = "lp_ui"
     private const val K_THEME = "theme"
+    private const val K_ENGINE = "engine"
 
     /** `system` / `dark` / `light`。 */
     val theme = mutableStateOf("system")
 
+    /**
+     * 播放内核:`mpv` / `exo`。
+     *
+     * ★ 它进这里是因为**「哪个内核能在这台机器上出画面」是设备属性,不是账号属性**
+     *   —— 手机上 mpv 出「有声音没画面」不代表电视上也会。跨设备同步它反而害人。
+     * ★ 值只是**发给 `player.play` 的一个参数**,核心层不存它,所以不违反
+     *   「一切持久化归核心层」:这里没有第二个真相。
+     */
+    val engine = mutableStateOf("mpv")
+
     fun load(ctx: Context) {
-        theme.value = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-            .getString(K_THEME, "system") ?: "system"
+        val sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        theme.value = sp.getString(K_THEME, "system") ?: "system"
+        engine.value = sp.getString(K_ENGINE, "mpv") ?: "mpv"
     }
 
     fun setTheme(ctx: Context, v: String) {
         theme.value = v
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(K_THEME, v).apply()
+    }
+
+    fun setEngine(ctx: Context, v: String) {
+        engine.value = v
+        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putString(K_ENGINE, v).apply()
     }
 }

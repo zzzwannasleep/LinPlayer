@@ -23,12 +23,10 @@ import androidx.navigation.NavController
 import androidx.navigation.toRoute
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
-import xyz.linplayer.app.data.Block
 import xyz.linplayer.app.data.LocalApp
 import xyz.linplayer.app.data.ToastKind
 import xyz.linplayer.app.data.arr
 import xyz.linplayer.app.data.strList
-import xyz.linplayer.app.data.block
 import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.long
 import xyz.linplayer.app.data.obj
@@ -53,11 +51,13 @@ import xyz.linplayer.app.ui.theme.Sp
  * ★ 交互口径:**改完即生效、零保存按钮、越界让核心层拒绝、失败回滚**(UI_MOBILE.md §6.2)。
  * ★ 手机端比 PC 少一项:**快捷键**(没有键盘)。多的没有。
  * ★ **`unsupported` 里的命令,对应入口在启动时就不画** —— 不要等点了才 E_UNSUPPORTED。
+ * ☠ **只列已经做好的**【用户定 2026-09-06】。原来还有弹幕 / 预加载 / 代理 /
+ *   跨服续播 / Trakt·Bangumi 五条,点进去是一张「把核心层返回的键原样列出来」的表 ——
+ *   开关拨了不落库、数值不能改。那不是「做了一半」,那是**一个装成功能的入口**:
+ *   用户点进去、拨一下、以为设上了。宁可不列。要做的时候各自补一个真面板再挂回来。
  */
 @Composable
 fun SettingsPage(nav: NavController) {
-    val app = LocalApp.current
-    val caps by app.caps.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
 
     LpScaffold("设置", onBack = { nav.popBackStack() }, scrolled = rememberScrolled(list)) { pad ->
@@ -65,35 +65,15 @@ fun SettingsPage(nav: NavController) {
             item("g1") { GroupLabel("通用") }
             item("p1") {
                 Panel(Modifier.padding(horizontal = Sp.x16)) {
-                    LpCell("外观与语言", icon = LpIcons.image) { nav.navigate(Route.SettingsSub("appearance")) }
+                    LpCell("外观", icon = LpIcons.image) { nav.navigate(Route.SettingsSub("appearance")) }
                     Hairline()
                     LpCell("播放器", icon = LpIcons.play) { nav.navigate(Route.SettingsSub("player")) }
-                    Hairline()
-                    LpCell("弹幕", icon = LpIcons.danmaku) { nav.navigate(Route.SettingsSub("danmaku")) }
-                    // 字幕翻译整组**不画**:translate.whisper* 在 unsupported 里
-                    // (Whisper 模型是几百 MB 的桌面级依赖)
-                    if (caps.supports("translate.whisperModels")) {
-                        Hairline()
-                        LpCell("字幕翻译", icon = LpIcons.sub) { nav.navigate(Route.SettingsSub("translate")) }
-                    }
                 }
             }
             item("g2") { GroupLabel("网络") }
             item("p2") {
                 Panel(Modifier.padding(horizontal = Sp.x16)) {
                     LpCell("多线程加载", icon = LpIcons.cloud) { nav.navigate(Route.SettingsSub("prefetch")) }
-                    Hairline()
-                    LpCell("预加载", icon = LpIcons.download) { nav.navigate(Route.SettingsSub("preload")) }
-                    Hairline()
-                    LpCell("代理设置", icon = LpIcons.globe) { nav.navigate(Route.SettingsSub("proxy")) }
-                }
-            }
-            item("g3") { GroupLabel("同步 · 账号") }
-            item("p3") {
-                Panel(Modifier.padding(horizontal = Sp.x16)) {
-                    LpCell("跨服续播与聚合", icon = LpIcons.sync) { nav.navigate(Route.SettingsSub("sync")) }
-                    Hairline()
-                    LpCell("Trakt · Bangumi", icon = LpIcons.star) { nav.navigate(Route.SettingsSub("accounts")) }
                 }
             }
             item("g4") { GroupLabel("其它") }
@@ -133,9 +113,7 @@ fun SettingsSubPage(nav: NavController, entry: NavBackStackEntry) {
     val list = rememberLazyListState()
 
     val title = when (route.group) {
-        "appearance" -> "外观与语言"; "player" -> "播放器"; "danmaku" -> "弹幕"
-        "translate" -> "字幕翻译"; "prefetch" -> "多线程加载"; "preload" -> "预加载"
-        "proxy" -> "代理设置"; "sync" -> "跨服续播与聚合"; "accounts" -> "Trakt · Bangumi"
+        "appearance" -> "外观"; "player" -> "播放器"; "prefetch" -> "多线程加载"
         "blocked" -> "已屏蔽的内容"; "storage" -> "存储与数据目录"; else -> "关于"
     }
 
@@ -149,8 +127,7 @@ fun SettingsSubPage(nav: NavController, entry: NavBackStackEntry) {
                     "prefetch" -> PrefetchPanel()
                     "blocked" -> BlockedPanel()
                     "storage" -> StoragePanel()
-                    "about" -> AboutPanel()
-                    else -> GenericPrefsPanel(route.group)
+                    else -> AboutPanel()
                 }
             }
             item("tail") { Spacer(Modifier.height(Sp.x34)) }
@@ -190,7 +167,19 @@ private fun PlayerPrefsPanel() {
     LaunchedEffect(Unit) {
         prefs = runCatching { app.call("player.getPlaybackPrefs") }.getOrNull().obj()
     }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val engine = if (xyz.linplayer.app.data.UiPrefs.engine.value == "exo") "ExoPlayer" else "mpv"
     Panel(Modifier.padding(Sp.x16)) {
+        /* 内核切换【用户定 2026-09-06】。
+           ★ 换内核**要退出播放页重进才生效** —— 正在播的那一片不会当场换过去。
+             当场换等于中途拆掉解码器再重建,seek 位置、上报会话、Surface 三样都要重来,
+             为一个一年按一次的开关背这套复杂度不值。这句话必须写在界面上,
+             不写的话用户会以为开关没生效。 */
+        SegRow("播放内核", listOf("mpv", "ExoPlayer"), engine, { v ->
+            xyz.linplayer.app.data.UiPrefs.setEngine(ctx, if (v == "ExoPlayer") "exo" else "mpv")
+        }, sub = "mpv 认的格式多、字幕全;ExoPlayer 走安卓自带解码,更省电也更稳。" +
+            "换完要退出当前播放再进才生效")
+        Hairline()
         LpCell("后台播放", sub = "切到别的应用时音频继续,通知栏可以控制",
             switch = prefs.bool("background_play"),
             onSwitch = { v -> setPref(app, scope, "player.setPlaybackPrefs", "background_play", v) })
@@ -348,42 +337,6 @@ private fun AboutPanel() {
                     .onFailure { app.report(it) }
             }
         })
-    }
-}
-
-/** 还没做专属面板的组:读一次配置原样列出来,**不写「待接」** —— 要么做要么删。 */
-@Composable
-private fun GenericPrefsPanel(group: String) {
-    val app = LocalApp.current
-    var raw by remember { mutableStateOf<Block<JsonObject>>(Block.Loading) }
-    val cmd = when (group) {
-        "preload" -> "prefs.getPreloadSettings"
-        "proxy" -> "prefs.getProxy"
-        "sync" -> "prefs.getWritebackSettings"
-        "danmaku" -> "danmaku.getDanmakuConfig"
-        "translate" -> "prefs.getTranslationSettings"
-        else -> "prefs.getPrefs"
-    }
-    LaunchedEffect(cmd) {
-        raw = when (val r = app.block(cmd)) {
-            is Block.Ok -> Block.Ok(r.value.obj() ?: JsonObject(emptyMap()))
-            is Block.Fail -> r
-            else -> Block.Loading
-        }
-    }
-    xyz.linplayer.app.ui.components.BlockBox(raw) { o ->
-        if (o.isEmpty()) EmptyState("这一组还没有可调的项", "核心层没有返回任何配置。")
-        else Panel(Modifier.padding(Sp.x16)) {
-            o.entries.forEachIndexed { i, (k, v) ->
-                if (i > 0) Hairline()
-                val b = v.toString().trim('"')
-                if (b == "true" || b == "false") {
-                    LpCell(k, switch = b == "true", onSwitch = { nv ->
-                        // 越界值让核心层拒绝,不要在 UI 上夹紧
-                    })
-                } else LpCell(k, value = b.take(24), arrow = false)
-            }
-        }
     }
 }
 

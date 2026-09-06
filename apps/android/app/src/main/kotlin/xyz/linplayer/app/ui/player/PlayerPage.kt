@@ -88,6 +88,11 @@ private const val SP_MAX = 4.0
  *
  * ☠ 面板打开期间**上下栏一动不动**:「点出去闪一下」的根因是 scrim 盖在了 OSD 上面
  * (层级问题),不是显隐逻辑。OSD 必须抬到 scrim 之上。
+ *
+ * ★ **两个内核**【用户定 2026-09-06】:mpv(核心层里的 libmpv)与 ExoPlayer。
+ *   分叉点**只有「谁去解码渲染」这一处** —— 取流、续播位置、上报全都还走核心层的
+ *   `player.play`(带 `engine`)。整页只有三处 if:视频层、状态从哪来、控制发给谁。
+ *   各写一个播放页的下场是「换个内核续播就不对了」。
  */
 @Composable
 fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
@@ -114,6 +119,13 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     /** 起播失败(一次都没出画就 eof)。**不许静默退回去**。 */
     var openFailed by remember { mutableStateOf(false) }
 
+    /* 内核。★ 进播放页时读一次就**钉住**(`remember` 不带 key):
+       播到一半用户去设置里改了内核,回来时这一片的状态机会当场换一套
+       —— 位置、时长、暂停三个值来源全变,而 ExoPlayer 手里根本没有这一片。
+       所以设置页那一行明说「退出当前播放再进才生效」。 */
+    val engine = remember { xyz.linplayer.app.data.UiPrefs.engine.value }
+    val exo = rememberExoPlayer(engine == "exo")
+
     // 屏幕常亮(U1.24):播放中不息屏,暂停 / 退出后恢复
     DisposableEffect(paused) {
         val w = activity?.window
@@ -131,14 +143,47 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         runCatching {
             // 详情页选了版本就带上。没选就传空 —— **不许自己回落 versions[0]**,
             // 那会把核心层的版本正则整个跳过
-            app.call("player.play", if (route.versionId == null)
-                args("item_id" to route.itemId)
-            else args("item_id" to route.itemId, "media_source_id" to route.versionId))
+            val a = buildMap<String, Any> {
+                put("item_id", route.itemId)
+                put("engine", engine)
+                route.versionId?.let { put("media_source_id", it) }
+            }
+            val r = app.call("player.play", args(*a.toList().toTypedArray())).obj()
+            /* engine=exo 时核心层**只算不播**:它把该播的那条地址和续播位置回给这里,
+               由 ExoPlayer 去 loadfile。地址一律用它回的这个 —— 在 UI 里自己拼
+               是明令禁止的(反代只在 /emby/ 下处理 Range,拼错的表现是
+               「跳到没缓冲的位置就卡死」,而且查不出来)。 */
+            val url = r.str("play_url")
+            if (exo != null && url != null) exo.load(url, r.dbl("resume_secs") ?: 0.0)
         }.onFailure { app.report(it) }
     }
 
+    /* ExoPlayer 那条路的状态:**轮询 4 Hz**,和 mpv 的 `player.status` 同频。
+       ★ 只能在主线程读 ExoPlayer(它是单线程模型),`LaunchedEffect` 正好跑在
+         composition 的调度器上,也就是主线程 —— 挪到别的 dispatcher 会当场抛
+         「Player is accessed on the wrong thread」。 */
+    LaunchedEffect(exo, route.itemId) {
+        val e = exo ?: return@LaunchedEffect
+        while (true) {
+            val p = e.currentPosition / 1000.0
+            if (p > position + 0.05) everMoved = true
+            position = p
+            e.duration.takeIf { it > 0 }?.let { duration = it / 1000.0 }
+            paused = !e.playWhenReady
+            buffering = e.playbackState == androidx.media3.common.Player.STATE_BUFFERING
+            // 起播失败要**说出来**,不许静默退回去 —— 和 mpv 那条同一条口径
+            if (e.playerError != null) { openFailed = true; return@LaunchedEffect }
+            if (e.playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                if (everMoved) nav.popBackStack() else openFailed = true
+                return@LaunchedEffect
+            }
+            delay(250)
+        }
+    }
+
     // 订阅 player.status(4 Hz)。**不轮询**
-    LaunchedEffect(Unit) {
+    LaunchedEffect(engine) {
+        if (exo != null) return@LaunchedEffect
         app.core.events.collect { ev ->
             if (ev.name != "player.status") return@collect
             val o = ev.data as? JsonObject
@@ -199,6 +244,28 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         }
     }
 
+    /* 控制分派:整页只有这四个动作要认内核。
+       ★ 写成四个具名函数而不是在八个调用点各写一个 if —— 漏一个的表现是
+         「换成 ExoPlayer 之后快进不动」,而其它按钮都好使,看着像手势坏了。 */
+    fun doSeek(t: Double) {
+        if (exo != null) exo.seekTo((t * 1000).toLong())
+        else scope.launch { runCatching { app.call("player.seek", args("pos" to t)) } }
+    }
+    fun doPause(want: Boolean) {
+        if (exo != null) exo.playWhenReady = !want
+        else scope.launch { runCatching { app.call("player.setPause", args("paused" to want)) } }
+    }
+    fun doSpeed(v: Double) {
+        if (exo != null) exo.setPlaybackSpeed(v.toFloat())
+        else scope.launch { runCatching { app.call("player.setSpeed", args("speed" to v)) } }
+    }
+    fun doVolume(v: Float) {
+        if (exo != null) exo.volume = v
+        else scope.launch {
+            runCatching { app.call("player.setVolume", args("volume" to (v * 100).toInt())) }
+        }
+    }
+
     // 返回键四级:小浮层 → 面板 → OSD → 才退出播放
     BackHandler {
         when {
@@ -245,7 +312,9 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     val c = Lp.colors
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         // 视频层:SurfaceView。Compose 内容天然画在它上面
-        VideoSurface(app.core, Modifier.fillMaxSize())
+        // ☠ 两条**互斥**:同时挂的话 mpv 和 ExoPlayer 会各画各的,上面那层赢
+        if (exo != null) ExoSurface(exo, Modifier.fillMaxSize())
+        else VideoSurface(app.core, Modifier.fillMaxSize())
 
         // 未出画时的黑幕 + 转圈。**判据是「时间真的往前走了」**
         if (!everMoved) Box(Modifier.fillMaxSize().background(Color.Black),
@@ -265,22 +334,14 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             Modifier.fillMaxSize().pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { osd = !osd },
-                    onDoubleTap = {
-                        scope.launch {
-                            runCatching { app.call("player.setPause", args("paused" to !paused)) }
-                        }
-                    },
+                    onDoubleTap = { doPause(!paused) },
                 )
             }.pointerInput(duration) {
                 var acc = 0f
                 detectDragGestures(
                     onDragEnd = {
                         // ★ 松手才真 seek
-                        seekPreview?.let { t ->
-                            scope.launch {
-                                runCatching { app.call("player.seek", args("pos" to t)) }
-                            }
-                        }
+                        seekPreview?.let { t -> doSeek(t) }
                         seekPreview = null; acc = 0f
                     },
                 ) { change, drag ->
@@ -295,12 +356,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                     } else if (change.position.x > size.width / 2) {
                         // 右 1/3 竖滑 = 音量。**不用系统音量条**
                         volume = (volume - drag.y / size.height).coerceIn(0f, 1f)
-                        scope.launch {
-                            runCatching {
-                                app.call("player.setVolume",
-                                    args("volume" to (volume * 100).toInt()))
-                            }
-                        }
+                        doVolume(volume)
                         osd = true
                     } else {
                         // 左 1/3 竖滑 = 亮度。**不改系统亮度**,只改本窗口
@@ -330,22 +386,15 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             if (portrait) PortraitOsd(
                 title = route.title, position = seekPreview ?: position, duration = duration,
                 paused = paused, onBack = { nav.popBackStack() },
-                onToggle = {
-                    scope.launch { runCatching { app.call("player.setPause", args("paused" to !paused)) } }
-                },
-                onSeek = { t -> scope.launch { runCatching { app.call("player.seek", args("pos" to t)) } } },
+                onToggle = { doPause(!paused) },
+                onSeek = { t -> doSeek(t) },
             ) else LandscapeOsd(
                 title = route.title, position = seekPreview ?: position, duration = duration,
                 paused = paused, speed = speed, locked = locked,
                 onBack = { nav.popBackStack() },
-                onToggle = {
-                    scope.launch { runCatching { app.call("player.setPause", args("paused" to !paused)) } }
-                },
-                onSeek = { t -> scope.launch { runCatching { app.call("player.seek", args("pos" to t)) } } },
-                onSpeed = { v ->
-                    speed = v
-                    scope.launch { runCatching { app.call("player.setSpeed", args("speed" to v)) } }
-                },
+                onToggle = { doPause(!paused) },
+                onSeek = { t -> doSeek(t) },
+                onSpeed = { v -> speed = v; doSpeed(v) },
                 onLock = { locked = !locked },
                 onPanel = { panel = it },
             )

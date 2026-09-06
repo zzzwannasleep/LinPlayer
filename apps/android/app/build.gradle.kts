@@ -154,6 +154,14 @@ dependencies {
     //   接 SimpleBasePlayer 只是为了让 media3 帮我们画一遍通知,代价是把 mpv 的状态
     //   映射成 Player 的二十几个方法 —— 那是一层纯翻译的债。
     implementation("androidx.media:media:1.8.0")
+    /* ★ 第二个播放内核【用户定 2026-09-06:两个内核 + 可切】。
+       mpv 走的是核心层里的 libmpv(全平台一套解码);ExoPlayer 走的是**安卓平台自己的
+       MediaCodec**。两者各有各的死角:mpv 在部分机型上出「有声音没画面」,
+       而 ExoPlayer 认不了一部分容器和字幕格式。所以是**并存可切**,不是取代。
+       ★ 只引 exoplayer + 它的默认 DataSource,**不引 media3-ui / media3-session**:
+         OSD 是我们自己的 Compose,通知栏走 androidx.media 的 MediaSessionCompat
+         (理由见上面那段)。多引一个包等于把两套通知实现摆在一起。 */
+    implementation("androidx.media3:media3-exoplayer:1.11.0")
     implementation("androidx.window:window:1.5.1")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 

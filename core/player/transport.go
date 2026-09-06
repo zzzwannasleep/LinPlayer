@@ -36,7 +36,17 @@ func registerTransport() {
 		}
 		resume, _ := a["resume_secs"].(float64)
 		msid, _ := a["media_source_id"].(string)
-		out, err := Play(ctx, s, id, resume, msid)
+		/* engine:交给谁去解码渲染。空 / "mpv" = 核心层里的 libmpv(所有平台的默认);
+		   "exo" = **调用方自己播**(安卓的 ExoPlayer),核心层只把地址和续播位置算好。
+		   ★ 不认识的值一律当 mpv,不报错:内核名是 UI 传上来的字符串,
+		     拼错了该退回默认能播,而不是让用户点了播放什么都没有。 */
+		engine, _ := a["engine"].(string)
+		var out map[string]any
+		if engine == "exo" {
+			out, err = PlayResolve(ctx, s, id, resume, msid)
+		} else {
+			out, err = Play(ctx, s, id, resume, msid)
+		}
 		if err != nil {
 			return nil, &bus.Err{Code: bus.ENetwork, Msg: err.Error(), Retryable: true}
 		}

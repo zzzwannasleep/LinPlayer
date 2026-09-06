@@ -16,6 +16,7 @@ package player
 #include <stdint.h>
 
 extern int   mpv_set_option_string(void*, const char*, const char*);
+extern int   mpv_set_property_string(void*, const char*, const char*);
 extern char* mpv_get_property_string(void*, const char*);
 extern void  mpv_free(void*);
 */
@@ -62,6 +63,16 @@ func videoOutReady() bool { return surfReady.Load() }
 // 还在画就是 use-after-free。屏障是「先把 vo 拆掉,再读一次属性」——
 // mpv_get_property_string 是同步往返,它返回时核心已经处理完前面那条 vo=null。
 // 光设 vo=null 就让调用方去释放是**没有屏障**的,那正是旧栈漏掉的那一条(TODO N5)。
+//
+// ☠☠ **`vo` 和 `android-surface-size` 要用 property 接口改,不能用 option 接口。**
+// mpv 初始化**之后**,`mpv_set_option_string` 会被转成 `options/<name>` ——
+// 那只改存着的选项值,**不会拆掉 / 重建已经跑着的 vo**。于是:
+//   第一部片正常(vo 还没建,loadfile 时才读选项)→ 退出重进第二部 →
+//   旧 vo 还抓着那个已经没了的 Surface → **有声音没画面**,而一条错不报。
+// 写法照 mpv-android 那套(它是这个库在安卓上的参考实现):
+// 解绑 = `vo=null`(property) + `force-window=no` + `wid=0`;
+// 绑定 = `wid=<jobject>` + `force-window=yes` + `vo=gpu`(property)。
+// `force-window` 不切的话,vo 拆掉之后没东西把输出链重新拉起来。
 func SetSurface(kind int32, handle int64, width, height int32) int32 {
 	if kind != 0 && kind != 1 {
 		bus.Logf("warn", "lp_set_surface:安卓只认 kind=1(android.view.Surface),收到 %d", kind)
@@ -89,17 +100,19 @@ func SetSurface(kind int32, handle int64, width, height int32) int32 {
 	// 同一个 Surface 只是尺寸变了:**不重设 wid**。重设会让 vo 整个重建,
 	// 表现是转屏时黑一帧;mpv 靠 android-surface-size 就能跟上。
 	if handle == surfWid {
-		setOpt(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
+		setProp(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
 		return 0
 	}
 	detachLocked(h)
 
+	// wid 只能走 option:它不是运行期属性,vo 建立时才读它。
 	if rc := setOpt(h, "wid", strconv.FormatInt(handle, 10)); rc < 0 {
 		bus.Logf("error", "mpv wid 没设上(错误码 %d)—— 这次不会有画面", rc)
 		return -1
 	}
-	setOpt(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
-	if rc := setOpt(h, "vo", "gpu"); rc < 0 {
+	setOpt(h, "force-window", "yes")
+	setProp(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
+	if rc := setProp(h, "vo", "gpu"); rc < 0 {
 		bus.Logf("error", "mpv vo=gpu 没设上(错误码 %d)", rc)
 		return -1
 	}
@@ -115,7 +128,8 @@ func detachLocked(h unsafe.Pointer) {
 	if surfWid == 0 {
 		return
 	}
-	setOpt(h, "vo", "null")
+	setProp(h, "vo", "null")
+	setOpt(h, "force-window", "no")
 	setOpt(h, "wid", "0")
 	// ★ 同步屏障:读一次属性,等核心把上面两条处理完。
 	//   mpv_get_property_string 是同步往返,它返回时前面的选项已经生效。
@@ -133,6 +147,14 @@ func setOpt(h unsafe.Pointer, k, v string) int {
 	defer C.free(unsafe.Pointer(ck))
 	defer C.free(unsafe.Pointer(cv))
 	return int(C.mpv_set_option_string(h, ck, cv))
+}
+
+// setProp 改**运行期属性**—— 和 setOpt 不是一回事,区别见 SetSurface 头上那段。
+func setProp(h unsafe.Pointer, k, v string) int {
+	ck, cv := C.CString(k), C.CString(v)
+	defer C.free(unsafe.Pointer(ck))
+	defer C.free(unsafe.Pointer(cv))
+	return int(C.mpv_set_property_string(h, ck, cv))
 }
 
 // platformOptions 是安卓专属的 mpv 起手选项,追加在 baseOptions 之后(后写的赢)。

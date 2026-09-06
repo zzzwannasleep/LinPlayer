@@ -74,6 +74,21 @@ func applyPlaybackDefaults(p config.Prefs, isDolbyVision bool) {
 
 // Play 起播一个 Emby 条目。返回真正用的续播位置(秒)。
 func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float64, mediaSourceID string) (map[string]any, error) {
+	return play(ctx, s, itemID, resumeSecs, mediaSourceID, true)
+}
+
+// PlayResolve 只把「该播哪条流、从第几秒开始」算出来,**不碰 mpv**。
+//
+// ★★ 这是给**安卓的 ExoPlayer 内核**用的(用户 2026-09-06 点名要两个内核可切)。
+// 解码渲染换了一家,但前面那一整段没得换:版本正则、跨服续播取最大、
+// 「看完了的再点播放从头开始」、预取代理、start 上报 —— 全都还要走一遍,
+// 而且必须和 mpv 那条**逐字一样**。所以两条路共用同一个 play(),
+// 只在最后那三行分叉。各写一份的下场是「换个内核续播位置就不对了」。
+func PlayResolve(ctx context.Context, s *emby.Session, itemID string, resumeSecs float64, mediaSourceID string) (map[string]any, error) {
+	return play(ctx, s, itemID, resumeSecs, mediaSourceID, false)
+}
+
+func play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float64, mediaSourceID string, useMpv bool) (map[string]any, error) {
 	c := config.Current()
 	prefs := c.PrefsOf()
 
@@ -143,14 +158,15 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	bus.Logf("info", "PLAY item=%s resume=%.1f psid=%s method=%s",
 		itemID, resumeSecs, target.PlaySessionID, target.PlayMethod)
 
-	if r := ensureMpv(); r != 0 {
-		return nil, fmt.Errorf("mpv 起不来")
+	if useMpv {
+		if r := ensureMpv(); r != 0 {
+			return nil, fmt.Errorf("mpv 起不来")
+		}
+		if !waitRenderCtx(5 * time.Second) {
+			return nil, fmt.Errorf("视频通道未就绪:UI 还没调 lp_gl_init。起播必须排在它之后(SPEC §7.2 约束 6)")
+		}
+		applyPlaybackDefaults(prefs, target.IsDolbyVision)
 	}
-	if !waitRenderCtx(5 * time.Second) {
-		return nil, fmt.Errorf("视频通道未就绪:UI 还没调 lp_gl_init。起播必须排在它之后(SPEC §7.2 约束 6)")
-	}
-
-	applyPlaybackDefaults(prefs, target.IsDolbyVision)
 
 	// ★ 外挂字幕**先记下来,等 FILE_LOADED 再挂**。
 	//   在 loadfile 之前挂会被 loadfile 冲掉;紧跟着挂拿到的是 -12。
@@ -164,8 +180,10 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 	     loadWith 会无条件把 http-header-fields 清空、把 UA 设回 LinPlayer/{版本}。
 	     不清的话,上一次放网盘源留下的 Authorization / Cookie 会**发给 Emby 服务器**,
 	     而且画面照放,只有服务端日志里看得出来。 */
-	if err := loadWith(playURL, resumeSecs, nil, ""); err != nil {
-		return nil, err
+	if useMpv {
+		if err := loadWith(playURL, resumeSecs, nil, ""); err != nil {
+			return nil, err
+		}
 	}
 
 	// 上报 start。★ 失败**不阻断播放** —— 上报是记账,播放是主线。
@@ -180,6 +198,10 @@ func Play(ctx context.Context, s *emby.Session, itemID string, resumeSecs float6
 		"play_method":     target.PlayMethod,
 		"is_dolby_vision": target.IsDolbyVision,
 		"external_subs":   len(target.ExternalSubs),
+		// ★ 只有 engine=exo 那条路会读它。mpv 那条路里它是**同一个地址**,
+		//   多发一个字段没有代价,少发一个就得让 UI 自己去拼 —— 那正是
+		//   「界面自己拼地址」那一类事故的入口(反代只在 /emby/ 下处理 Range)。
+		"play_url": playURL,
 	}, nil
 }
 
