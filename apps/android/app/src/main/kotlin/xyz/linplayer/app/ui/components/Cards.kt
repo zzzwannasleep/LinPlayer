@@ -37,15 +37,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImagePainter
 import coil3.compose.rememberAsyncImagePainter
 import xyz.linplayer.app.data.Item
-import xyz.linplayer.app.ui.theme.Dim
 import xyz.linplayer.app.ui.theme.LpEasing
 import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
@@ -119,7 +120,7 @@ fun MediaCard(
     val c = Lp.colors
     val haptic = LocalHapticFeedback.current
     var menuOpen by remember { mutableStateOf(false) }
-    val width = if (thumb) 186.dp else 104.dp
+    val width = if (thumb) ThumbW else PosterW
 
     // 整卡读成一条:TalkBack 逐个念「图片」「标题」「年份」是噪音
     Column(m.width(width).semantics(mergeDescendants = true) { }) {
@@ -151,10 +152,10 @@ fun MediaCard(
         if (showCaption) {
             Spacer(Modifier.height(Sp.x6))
             // 一行 + 省略号:片名长短差别极大,不收会把行高撑成两三行,整条轨道高度乱跳
-            Text(item.cardTitle, color = c.fg, fontSize = 13.sp, maxLines = 1,
-                overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
+            Text(item.cardTitle, color = c.fg, fontSize = 13.sp, lineHeight = CapTitleLh,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
             item.cardSub?.let {
-                Text(it, color = c.fg3, fontSize = 11.sp, maxLines = 1,
+                Text(it, color = c.fg3, fontSize = 11.sp, lineHeight = CapSubLh, maxLines = 1,
                     modifier = Modifier.padding(top = 1.dp))
             }
         }
@@ -197,6 +198,31 @@ private fun CardMenu(open: Boolean, onDismiss: () -> Unit, actions: List<CardAct
     }
 }
 
+
+/*
+ * 卡片文字区的高度。
+ *
+ * ☠ **必须按 sp 算出来,不能写死 dp。** 轨道高度是常量(LazyRow 嵌在 LazyColumn 里
+ *   不给定高会每次测量重排整列),而卡下面两行字是 sp —— 系统字号调到 1.2 倍以上时,
+ *   写死的 dp 就把副标题裁掉半行:「继续观看」里的 SxEy、库里的年份只剩上半截。
+ *   这不是审美问题,是**两把不同的尺**被硬凑在一起。
+ */
+private val CapTitleLh = 17.sp
+private val CapSubLh = 14.sp
+
+@Composable
+private fun captionHeight(): Dp = with(LocalDensity.current) {
+    Sp.x6 + CapTitleLh.toDp() + 1.dp + CapSubLh.toDp() + 2.dp
+}
+
+/** 一条轨道该多高 = 封面 + 文字区。**两处轨道(真卡 / 骨架)共用它**,否则骨架和真卡不等高。 */
+@Composable
+fun rowHeight(thumb: Boolean): Dp =
+    (if (thumb) ThumbW * 9 / 16 else PosterW * 3 / 2) + captionHeight()
+
+private val PosterW = 104.dp
+private val ThumbW = 186.dp
+
 /**
  * 横滑轨道。
  *
@@ -217,7 +243,7 @@ fun LpRow(
     Column(m.fillMaxWidth()) {
         RowHeader(title, onMore)
         LazyRow(
-            Modifier.fillMaxWidth().height(if (thumb) Dim.thumbRow else Dim.posterRow),
+            Modifier.fillMaxWidth().height(rowHeight(thumb)),
             contentPadding = PaddingValues(horizontal = Sp.x16),
             horizontalArrangement = Arrangement.spacedBy(Sp.x10),
         ) {
@@ -237,12 +263,12 @@ fun LpRowSkeleton(title: String? = null, thumb: Boolean = false, m: Modifier = M
             SkeletonLine(104.dp)
         }
         Row(
-            Modifier.fillMaxWidth().height(if (thumb) Dim.thumbRow else Dim.posterRow)
+            Modifier.fillMaxWidth().height(rowHeight(thumb))
                 .padding(horizontal = Sp.x16),
             horizontalArrangement = Arrangement.spacedBy(Sp.x10),
         ) {
             repeat(4) {
-                Column(Modifier.width(if (thumb) 186.dp else 104.dp)) {
+                Column(Modifier.width(if (thumb) ThumbW else PosterW)) {
                     Skeleton(Modifier.fillMaxWidth().aspectRatio(if (thumb) 16f / 9f else 2f / 3f))
                     Spacer(Modifier.height(Sp.x8))
                     SkeletonLine(78.dp)

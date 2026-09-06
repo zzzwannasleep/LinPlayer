@@ -2,6 +2,7 @@ package xyz.linplayer.app.ui.pages
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +17,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -241,7 +244,16 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
     val title = d.str("name") ?: ""
     val isEpisode = route.type == "Episode"
     val isSeries = route.type == "Series" || route.type == "Season"
-    val ver = versions.firstOrNull { it.id == pickedVersion } ?: defaultVersion(versions)
+    /* ☠☠ **展示用的版本和「发给核心层的版本 id」是两回事,以前混成了一个。**
+       `defaultVersion` 只认核心层标的 `preferred`,标不出来时返回 null —— 那是对的,
+       因为**不许替核心层挑一个 id 发过去**(版本正则会被整个跳过)。
+       但上一版把这个 null 直接当成了「没有版本可展示」,后果全落在集详情页上:
+         · 音轨 / 字幕两行 `ver?.of(...)` 恒空 → onClick 恒 null → **点不动**
+         · 「媒体信息」整块 `if (ver != null)` 不成立 → **整块不画**
+       用户报的「音轨字幕选不了、缺媒体信息模块」是同一个 null。
+       所以这里分成两个值:**展示**可以回落到第一条,**发命令**仍然只认 preferred。 */
+    val ver = versions.firstOrNull { it.id == pickedVersion }
+        ?: defaultVersion(versions) ?: versions.firstOrNull()
 
     // 底色从**海报**取,不从背景图取:海报是这部片的主视觉,背景图常常是一片夜景
     val tone = rememberTone(app.imageUrl(route.itemId, "Primary", 330), c.acc.copy(alpha = .9f))
@@ -398,40 +410,39 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                     MediaCards(ver)
                 }
 
-                // 季选择条。★ 只有一季时整条不画 —— 一个只有一个选项的选择器是纯噪音
+                /* 季 / 集**两条横滑栏**(照 PC 端)【用户定 2026-09-06】。
+                   ★ 换季那一栏一动,下面的集数栏当场跟着换 —— 两栏是一条链,不是两个列表。
+                   ★ 点一集进的是**这一集的详情页**,不是直接起播:起播是详情页里那颗大按钮。
+                     上一版是一条竖着的长列表,把整页撑得看不到下面的相似推荐。 */
                 if (seasons.size > 1) item("seasons") {
+                    SectionTitle("季")
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                            .padding(horizontal = Sp.x16, vertical = Sp.x10),
+                            .padding(horizontal = Sp.x16, vertical = Sp.x6),
                         horizontalArrangement = Arrangement.spacedBy(Sp.x8),
                     ) {
-                        seasons.forEach { s ->
-                            ToneChip(s.name, s.id == curSeason?.id) {
-                                curSeason = s
+                        seasons.forEach { s2 ->
+                            ToneChip(s2.name, s2.id == curSeason?.id) {
+                                curSeason = s2
+                                episodes = emptyList()   // 先清空:留着上一季的会让人以为没换
                                 scope.launch {
                                     episodes = Item.list(app.block("emby.seasonEpisodes",
-                                        args("parent_id" to s.id)).valueOrNull)
+                                        args("parent_id" to s2.id)).valueOrNull)
                                 }
                             }
                         }
                     }
                 }
 
-                if (episodes.isNotEmpty()) {
-                    item("epTitle") {
-                        SectionTitle(if (isEpisode) "选集" else "剧集", trailing = {
-                            Dim3("已看 ${episodes.count { it.played }} / ${episodes.size}")
-                        })
-                    }
-                    // key 必须给:不给的话滚动时 item 复用会让 Coil 重复发请求
-                    itemsIndexed(episodes, key = { _, e -> e.id }) { i, ep ->
-                        EpisodeRow(
-                            app, ep, i,
-                            current = ep.id == route.itemId || (!isEpisode && ep.progress > 0f),
-                            onOpen = { nav.navigate(Route.Detail(ep.id, "Episode")) },
-                            onPlay = { toPlayer(ep.id) },
-                        )
-                    }
+                if (episodes.isNotEmpty()) item("episodes") {
+                    SectionTitle(
+                        curSeason?.name?.let { "$it · 选集" } ?: "选集",
+                        trailing = { Dim3("已看 ${episodes.count { it.played }} / ${episodes.size}") },
+                    )
+                    EpisodeStrip(
+                        app, episodes, currentId = route.itemId,
+                        onOpen = { ep -> nav.navigate(Route.Detail(ep.id, "Episode")) },
+                    )
                 }
 
                 if (similar.isNotEmpty()) item("similar") {
@@ -850,19 +861,44 @@ private fun InfoCard(title: String, summary: String, rows: List<Pair<String, Str
 }
 
 /**
- * 一集(草稿 03 的 `.eplist`)。
- * ★ **正在看的那集用状态表达,不用文字**:左侧一条琥珀竖条 + 一层横向淡入渐变。
- *   比在角落写「继续观看」快一个数量级。
- * ★ 逐条错开 22ms 上浮进场,**只在首次组合时跑一次**,滚动不会重放。
+ * 集数栏:**一条横滑的卡带**(草稿 03 的 `.eplist` 横过来)。
+ *
+ * ★ 高度按 sp 现算,不写死 dp —— 系统字号放大时写死的 dp 会把集名裁掉半行
+ *   (和首页那两条轨道同一个坑,见 `Cards.kt` 的 `rowHeight`)。
+ * ★ **正在看的那一集用状态表达,不用文字**:一圈琥珀描边 + 集号变琥珀。
+ * ★ 逐张错开 22ms 上浮进场,只跑一次。
  */
 @Composable
-private fun EpisodeRow(
+private fun EpisodeStrip(
+    app: xyz.linplayer.app.data.AppState,
+    episodes: List<Item>,
+    currentId: String,
+    onOpen: (Item) -> Unit,
+) {
+    val h = with(androidx.compose.ui.platform.LocalDensity.current) {
+        // 封面 16:9 + 集号行 + 两行集名 + 时长行
+        EpCardW * 9 / 16 + Sp.x6 + 15.sp.toDp() + 17.sp.toDp() * 2 + 15.sp.toDp() + Sp.x8
+    }
+    LazyRow(
+        Modifier.fillMaxWidth().height(h),
+        contentPadding = PaddingValues(horizontal = Sp.x16),
+        horizontalArrangement = Arrangement.spacedBy(Sp.x10),
+    ) {
+        itemsIndexed(episodes, key = { _, e -> e.id }, contentType = { _, _ -> "ep" }) { i, ep ->
+            EpCard(app, ep, i, ep.id == currentId) { onOpen(ep) }
+        }
+    }
+}
+
+private val EpCardW = 168.dp
+
+@Composable
+private fun EpCard(
     app: xyz.linplayer.app.data.AppState,
     ep: Item,
     index: Int,
     current: Boolean,
     onOpen: () -> Unit,
-    onPlay: () -> Unit,
 ) {
     val c = Lp.colors
     var shown by remember(ep.id) { mutableStateOf(false) }
@@ -872,57 +908,45 @@ private fun EpisodeRow(
     val a by animateFloatAsState(
         if (shown) 1f else 0f, lpTween(T.T5, LpEasing.emphasizedDecelerate), label = "epIn")
 
-    Box(Modifier.padding(horizontal = Sp.x12).graphicsLayer {
-        alpha = a; translationY = (1f - a) * 20f
-    }) {
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+    Column(
+        Modifier.width(EpCardW)
+            .graphicsLayer { alpha = a; translationY = (1f - a) * 16f }
+            .pressable(onOpen)
+    ) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(12.dp))
                 .then(
-                    if (current) Modifier.background(
-                        Brush.horizontalGradient(
-                            0f to c.acc.copy(alpha = .17f), 0.76f to Color.Transparent)
-                    ) else Modifier
+                    if (current) Modifier.border(2.dp, c.acc, RoundedCornerShape(12.dp))
+                    else Modifier
                 )
-                .pressable(onOpen)
-                .padding(start = if (current) 13.dp else 4.dp, end = 4.dp,
-                    top = 9.dp, bottom = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box {
-                NetImage(app.imageUrl(ep.id, "Primary", 220), null,
-                    Modifier.width(112.dp).aspectRatio(16f / 9f), 10.dp)
-                if (ep.progress > 0f) Box(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.dp)
-                        .background(c.line2)
-                ) { Box(Modifier.fillMaxWidth(ep.progress).height(2.dp).background(c.acc)) }
-            }
-            Spacer(Modifier.width(11.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "EP %02d".format(ep.episodeNo ?: (index + 1).toLong()),
-                    color = if (current) c.acc else c.fg3, fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
-                )
-                Text(
-                    ep.name, color = c.fg, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                    lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                Dim3(
-                    if (ep.progress > 0f && ep.runtimeSecs > 0)
-                        "还剩 ${fmtDur(ep.runtimeSecs - ep.resumeSecs)}"
-                    else fmtDur(ep.runtimeSecs),
-                    Modifier.padding(top = 3.dp),
-                )
-            }
-            // 这一颗才是「直接播这一集」。整行点开的是这一集的详情
-            xyz.linplayer.app.ui.components.LpIconButton(
-                LpIcons.play, "播放这一集", size = 18, tint = c.fg2, onClick = onPlay)
+            NetImage(app.imageUrl(ep.id, "Primary", 330), null, Modifier.fillMaxSize(), 12.dp)
+            if (ep.progress > 0f) Box(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth().height(2.dp)
+                    .background(c.line2)
+            ) { Box(Modifier.fillMaxWidth(ep.progress).height(2.dp).background(c.acc)) }
+            if (ep.played) Box(
+                Modifier.align(Alignment.TopEnd).padding(Sp.x6).size(18.dp)
+                    .clip(RoundedCornerShape(R.pill)).background(c.ok),
+                contentAlignment = Alignment.Center,
+            ) { Icon(LpIcons.check, "已看完", Modifier.size(11.dp), tint = Color(0xFF062418)) }
         }
-        // 竖条画在最左边,压在渐变之上
-        if (current) Box(
-            Modifier.align(Alignment.CenterStart).padding(start = 4.dp, top = 12.dp, bottom = 12.dp)
-                .width(3.dp).height(40.dp).clip(RoundedCornerShape(R.pill)).background(c.acc)
+        Spacer(Modifier.height(Sp.x6))
+        Text(
+            "EP %02d".format(ep.episodeNo ?: (index + 1).toLong()),
+            color = if (current) c.acc else c.fg3, fontSize = 11.sp, lineHeight = 15.sp,
+            fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
+        )
+        Text(
+            ep.name, color = c.fg, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+            lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            if (ep.progress > 0f && ep.runtimeSecs > 0)
+                "还剩 ${fmtDur(ep.runtimeSecs - ep.resumeSecs)}"
+            else fmtDur(ep.runtimeSecs),
+            color = c.fg3, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1,
         )
     }
 }

@@ -1,6 +1,7 @@
 package xyz.linplayer.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,6 +107,48 @@ fun Modifier.bleed(horizontal: androidx.compose.ui.unit.Dp): Modifier = this.lay
     val pad = horizontal.roundToPx()
     val p = m.measure(cs.copy(minWidth = 0, maxWidth = cs.maxWidth + pad * 2))
     layout(cs.maxWidth, p.height) { p.place(-pad, 0) }
+}
+
+// ---------------------------------------------------------------- 液态玻璃
+
+/**
+ * 液态玻璃(全站的面 / 卡 / 弹窗都走它)。
+ *
+ * ☠ **不是用模糊做的。** 安卓上真正的背景模糊要 API 31 的 `RenderEffect`,
+ *   而 `Modifier.blur` 只糊得了自己这一层、糊不到身后的内容;低版本上还静默不生效
+ *   —— 那正是「浅色修好了深色没修」那一类只在部分机型现形的坑。
+ *
+ * ★ 所以这里**用光做玻璃**,三层叠出来,没有任何 API 门槛:
+ *   ① 一层上浓下淡的膜 —— 光从上面斜进来
+ *   ② 顶沿一道高光内边 —— 玻璃的厚度
+ *   ③ 一圈由亮转暗的描边 —— 边缘的折射
+ * ★ 深浅两套值不是同一组数乘个系数:深色里玻璃是**加白**,浅色里是**磨砂白 + 深描边**。
+ *   同一套值套过去的表现是浅色下整块看不见(白加白)。
+ * ★ [solid] 只调不透明度。服务器卡传 1.4【用户定 2026-09-06:那里不要太透】。
+ */
+@Composable
+fun Modifier.glass(
+    corner: androidx.compose.ui.unit.Dp = R.md,
+    solid: Float = 1f,
+): Modifier {
+    val c = Lp.colors
+    val shape = RoundedCornerShape(corner)
+    fun a(v: Float) = (v * solid).coerceIn(0f, 1f)
+    val film = if (c.isDark)
+        listOf(Color.White.copy(alpha = a(.085f)), Color.White.copy(alpha = a(.040f)))
+    else
+        listOf(Color.White.copy(alpha = a(.78f)), Color.White.copy(alpha = a(.58f)))
+    val spec = Color.White.copy(alpha = a(if (c.isDark) .22f else .92f))
+    val edge = if (c.isDark)
+        listOf(Color.White.copy(alpha = a(.16f)), Color.White.copy(alpha = a(.045f)))
+    else
+        listOf(Color.Black.copy(alpha = a(.10f)), Color.Black.copy(alpha = a(.045f)))
+    return this
+        .clip(shape)
+        .background(Brush.verticalGradient(film))                                   // ①
+        .background(Brush.verticalGradient(0f to spec, 0.015f to Color.Transparent,
+            1f to Color.Transparent))                                               // ②
+        .border(Dim.hairline, Brush.verticalGradient(edge), shape)                   // ③
 }
 
 // ---------------------------------------------------------------- 分层替代描边

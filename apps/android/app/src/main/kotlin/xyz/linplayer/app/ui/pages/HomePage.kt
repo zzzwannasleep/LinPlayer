@@ -1,6 +1,5 @@
 package xyz.linplayer.app.ui.pages
 
-import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -18,6 +17,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,11 +27,14 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +54,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -250,9 +256,12 @@ private fun RowBlock(
 /**
  * Hero(草稿 01):**铺到屏幕物理顶端**,状态栏浮在它上面。
  *
+ * ★ **手指能左右翻**【用户定 2026-09-06】。轮播不给手是「看得见摸不着」——
+ *   自动换片留着,但手一碰就停:抢走用户正在看的那一张比不自动播更糟。
+ * ★ 标题走 **TMDB 艺术字**(Emby 的 `Logo` 图),取不到才回落成排版字。
  * ★ **上面没有播放按钮**【用户定 2026-09-06】—— 整块可点,进详情页。
- * ★ 动效三层:Ken Burns 恒速缓推 + 换片交叉淡入 + 随滚动的视差与淡出。
- * ★ 元信息只有「评分 · 年份 · 类型」—— **画质标签整个去掉**【用户定 2026-07-28】。
+ * ★ 动效三层:Ken Burns 恒速缓推 + 翻页视差 + 随滚动的整块上移淡出。
+ * ★ 元信息只有「评分 · 年份 · 类型」——**画质标签整个去掉**【用户定 2026-07-28】。
  */
 @Composable
 private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> Unit) {
@@ -264,9 +273,12 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
         is Block.Ok -> {
             val items = block.value
             if (items.isEmpty()) return
-            var idx by remember { mutableStateOf(0) }
-            val cur = items[idx % items.size]
             val app = LocalApp.current
+            val scope = rememberCoroutineScope()
+            val pager = rememberPagerState(pageCount = { items.size })
+            /* 手动翻过就不再自动轮播。**一次就够,不设「几秒后恢复」**——
+               定时恢复的表现是:用户翻到想看的那张、看了两眼,它又自己走掉。 */
+            var manual by remember { mutableStateOf(false) }
 
             // Ken Burns:恒速缓推。**只动 scale**
             val t = rememberInfiniteTransition(label = "ken")
@@ -276,7 +288,7 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
                 label = "kenZ",
             )
 
-            /* 视差:往下滚时图跟着走一半、并且淡出。
+            /* 视差:往下滚时整块跟着走一半、并且淡出。
                ★ 读滚动位置只能在 `graphicsLayer` 的 lambda 里读 —— 它在 draw 阶段求值,
                  每帧只是重画;写在外面读就是**每帧重组整条首页**。 */
             Box(
@@ -288,83 +300,130 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
                         alpha = (1f - off / (h.toPx() * 0.85f)).coerceIn(0f, 1f)
                     }
                     .clipToBounds()
-                    .pressable({ open(cur) })
             ) {
-                // 换片交叉淡入:两张图不是「换」而是「化」
-                Crossfade(cur.id, animationSpec = lpTween(T.T10), label = "heroImg") { id ->
-                    NetImage(
-                        app.imageUrl(id, "Backdrop", 720), null,
-                        Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z },
-                        corner = 0.dp, scale = ContentScale.Crop,
-                    )
-                }
-                /* 上下两头压暗:上头是给状态栏的时间和信号留可读性(**不是给它留黑底**),
-                   下头是把图化进页面底色 —— 中间那 26% 完全不压,画面要露出来 */
-                Box(
-                    Modifier.fillMaxSize().background(
-                        Brush.verticalGradient(
-                            0.00f to c.bg.copy(alpha = .60f),
-                            0.14f to c.bg.copy(alpha = .30f),
-                            0.40f to Color.Transparent,
-                            0.72f to c.bg.copy(alpha = .62f),
-                            0.99f to c.bg,
+                HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+                    val cur = items[page]
+                    Box(Modifier.fillMaxSize().pressable({ open(cur) })) {
+                        // 翻页视差:图比页面慢一拍地跟过来。位移同样在 draw 阶段读
+                        NetImage(
+                            app.imageUrl(cur.id, "Backdrop", 720), null,
+                            Modifier.fillMaxSize().graphicsLayer {
+                                scaleX = z; scaleY = z
+                                val d = (pager.currentPage - page) + pager.currentPageOffsetFraction
+                                translationX = d * size.width * 0.35f
+                            },
+                            corner = 0.dp, scale = ContentScale.Crop,
                         )
-                    )
-                )
-                Column(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                        .padding(horizontal = Sp.x20, vertical = Sp.x10),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        cur.cardTitle, color = c.fg, fontSize = 29.sp,
-                        fontWeight = FontWeight.Bold, lineHeight = 33.sp,
-                        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(Sp.x8))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(Sp.x8),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        cur.rating?.takeIf { it > 0 }?.let {
-                            Text("★ %.1f".format(it), color = c.acc, fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold)
+                        /* 上下两头压暗:上头给状态栏的时间和信号留可读性(**不是给它留黑底**),
+                           下头把图化进页面底色 —— 中间那 26% 完全不压,画面要露出来 */
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(
+                                    0.00f to c.bg.copy(alpha = .60f),
+                                    0.14f to c.bg.copy(alpha = .30f),
+                                    0.40f to Color.Transparent,
+                                    0.72f to c.bg.copy(alpha = .62f),
+                                    0.99f to c.bg,
+                                )
+                            )
+                        )
+                        Column(
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                .padding(start = Sp.x20, end = Sp.x20, top = Sp.x10, bottom = 38.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            ArtTitle(app.imageUrl(cur.id, "Logo", 240), cur.cardTitle)
+                            Spacer(Modifier.height(Sp.x8))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(Sp.x8),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                cur.rating?.takeIf { r -> r > 0 }?.let { r ->
+                                    Text("★ %.1f".format(r), color = c.acc, fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold)
+                                }
+                                listOfNotNull(
+                                    cur.year?.toString(),
+                                    cur.genres.take(2).joinToString(" ").takeIf { g -> g.isNotEmpty() },
+                                ).forEach { Text(it, color = c.fg2, fontSize = 12.sp, maxLines = 1) }
+                            }
                         }
-                        listOfNotNull(
-                            cur.year?.toString(),
-                            cur.genres.take(2).joinToString(" ").takeIf { it.isNotEmpty() },
-                        ).forEach { Text(it, color = c.fg2, fontSize = 12.sp, maxLines = 1) }
                     }
-                    Spacer(Modifier.height(Sp.x12))
-                    // 点位:选中那颗**长成一条**,不是换个颜色
-                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        items.indices.forEach { i ->
-                            val on = i == idx % items.size
-                            val w by animateDpAsState(
-                                if (on) 17.dp else 5.dp,
-                                lpTween(T.T6, LpEasing.emphasizedDecelerate), label = "dotW",
-                            )
-                            Box(
-                                Modifier.size(w, 5.dp).clip(RoundedCornerShape(R.pill))
-                                    .background(if (on) c.fg else c.fg.copy(alpha = .38f))
-                                    .pressable({ idx = i })
-                            )
-                        }
+                }
+                // 点位:选中那颗**长成一条**。★ 画在 pager 外面 —— 跟着翻页一起滑走就没人看得见
+                Row(
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = Sp.x16),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    items.indices.forEach { i ->
+                        val on = i == pager.currentPage
+                        val w by animateDpAsState(
+                            if (on) 17.dp else 5.dp,
+                            lpTween(T.T6, LpEasing.emphasizedDecelerate), label = "dotW",
+                        )
+                        Box(
+                            Modifier.size(w, 5.dp).clip(RoundedCornerShape(R.pill))
+                                .background(if (on) c.fg else c.fg.copy(alpha = .38f))
+                                .pressable({ manual = true; scope.launch { pager.animateScrollToPage(i) } })
+                        )
                     }
                 }
             }
-            // 自动换条目
-            LaunchedEffect(items) {
-                while (true) { kotlinx.coroutines.delay(7000); idx++ }
+            /* 手指一碰就停自动轮播。
+               ☠ 判据是 **interactionSource(只有真手势才发)**,不是 `isScrollInProgress` ——
+                 后者对 `animateScrollToPage` 也是 true,于是**第一次自动换片就把自己关掉了**,
+                 表现是「轮播只走一格然后再也不动」,而且看起来像自动播压根没做。 */
+            LaunchedEffect(pager) {
+                pager.interactionSource.interactions.collect { manual = true }
+            }
+            LaunchedEffect(items, manual) {
+                if (manual) return@LaunchedEffect
+                while (true) {
+                    kotlinx.coroutines.delay(7000)
+                    pager.animateScrollToPage((pager.currentPage + 1) % items.size)
+                }
             }
         }
     }
 }
 
-/** 媒体库入口条。**图标那格是琥珀圆底**,一排卡看下来有个落点。 */
+/**
+ * 艺术字标题。
+ *
+ * ★ TMDB 的片名艺术字在 Emby 里是 `Logo` 图。**不是每部片都有** ——
+ *   没有的那些回落成排版字,而不是留一块空白或者一个碎图标。
+ * ★ 判据是**图真的解出来了**,不是「地址拼得出来」:地址永远拼得出来,
+ *   拼出来的那条 404 才是常态。
+ * ★ 按**高度**定尺寸、宽度随原图 —— 按宽度定会把横长的片名压成一条。
+ */
+@Composable
+private fun ArtTitle(logoUrl: String?, fallback: String) {
+    val c = Lp.colors
+    val painter = rememberAsyncImagePainter(logoUrl)
+    val st by painter.state.collectAsState()
+    if (st is AsyncImagePainter.State.Success) androidx.compose.foundation.Image(
+        painter, fallback,
+        Modifier.heightIn(max = 92.dp).widthIn(max = 320.dp),
+        contentScale = ContentScale.Fit,
+    ) else Text(
+        fallback, color = c.fg, fontSize = 29.sp,
+        fontWeight = FontWeight.Bold, lineHeight = 33.sp,
+        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+    )
+}
+
+/**
+ * 媒体库入口条(照 PC 端:**封面卡,不是一行图标加一行字**)。
+ *
+ * ☠ **封面严禁裁剪**【用户定 2026-09-06】:各家库的封面比例五花八门(方的、16:9 的、
+ *   海报比例的),`Crop` 会把库名的字直接切掉半边。所以是 `Fit` + 一块底色垫底,
+ *   宁可两侧留边也不切。
+ * ★ 没有封面的库回落成图标 —— 一块灰底比一张碎图好。
+ */
 @Composable
 private fun ViewsRow(views: List<View>, nav: NavController) {
     val c = Lp.colors
+    val app = LocalApp.current
     Column(Modifier.fillMaxWidth()) {
         SectionTitle("媒体库")
         LazyRow(
@@ -373,19 +432,24 @@ private fun ViewsRow(views: List<View>, nav: NavController) {
             horizontalArrangement = Arrangement.spacedBy(Sp.x10),
         ) {
             items(views, key = { it.id }) { v ->
-                Row(
-                    Modifier.width(150.dp).clip(RoundedCornerShape(R.md)).background(c.s1)
-                        .pressable({ nav.navigate(Route.Library(v.id, v.name)) })
-                        .padding(Sp.x10),
-                    verticalAlignment = Alignment.CenterVertically,
+                Column(
+                    Modifier.width(158.dp).pressable({ nav.navigate(Route.Library(v.id, v.name)) }),
                 ) {
                     Box(
-                        Modifier.size(30.dp).clip(RoundedCornerShape(R.sm)).background(c.accDim),
+                        Modifier.fillMaxWidth().height(90.dp)
+                            .clip(RoundedCornerShape(R.md)).background(c.s1),
                         contentAlignment = Alignment.Center,
-                    ) { Icon(iconFor(v.collectionType), null, Modifier.size(16.dp), tint = c.acc) }
-                    Spacer(Modifier.width(Sp.x10))
-                    Text(v.name, color = c.fg, fontSize = 13.sp, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis)
+                    ) {
+                        // 垫一层图标:图没到 / 这个库压根没封面时,看到的是它而不是一块空
+                        Icon(iconFor(v.collectionType), null, Modifier.size(26.dp), tint = c.fg3)
+                        NetImage(
+                            app.imageUrl(v.id, "Primary", 260), v.name,
+                            Modifier.fillMaxSize(), R.md, ContentScale.Fit,
+                        )
+                    }
+                    Spacer(Modifier.height(Sp.x6))
+                    Text(v.name, color = c.fg, fontSize = 13.sp, lineHeight = 17.sp, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                 }
             }
         }

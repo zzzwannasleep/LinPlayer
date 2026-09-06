@@ -85,9 +85,6 @@ object Dim {
     val tabBar = 58.dp
     val tap = 48.dp
     val hairline = 1.dp
-    val posterRow = 196.dp   // 海报轨总高(卡 2:3 + 两行字)。★ LazyRow 嵌在 LazyColumn 里必须给定高
-    val thumbRow = 146.dp
-
     /* 草稿里那几块「铺到屏幕顶」的图。它们不是间距,是**版面高度**,
        所以抽成具名常量 —— 改了 Hero 高度而没改让位高度的话,底下第一条轨会被压住。 */
     val heroHome = 392.dp    // 首页 Hero(草稿 01)

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -492,23 +493,47 @@ fun ErrorState(message: String, onRetry: (() -> Unit)? = null, m: Modifier = Mod
 // ---------------------------------------------------------------- 弹窗
 
 /**
- * 居中弹窗 + scrim。**全站没有 bottom sheet**(既有决定,UI_MOBILE.md §4.2)。
+ * 居中弹窗。**全站没有 bottom sheet**(既有决定,UI_MOBILE.md §4.2)。
+ *
+ * ☠ **遮罩自己画,并且铺满整块屏(含状态栏 / 导航条)**【用户定 2026-09-06】。
+ *   靠 `BasicAlertDialog` 自带的那层平台 dim 不行:它只盖 dialog 窗口那块,
+ *   而我们整个应用是 edge-to-edge 的 —— 于是弹窗开着的时候,后面那一页的选项
+ *   还在从上下两头露出来,用户会去点它们。
+ *   做法是 `usePlatformDefaultWidth=false` + `decorFitsSystemWindows=false`
+ *   把 dialog 窗撑满,再自己铺一块 scrim。
+ * ★ 点遮罩关闭 —— 但**面板本身要拦住点击**,不然点面板空白处也会关掉。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LpDialog(onDismiss: () -> Unit, title: String? = null, content: @Composable () -> Unit) {
     val c = Lp.colors
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.clip(RoundedCornerShape(R.lg)).background(c.s2)
-                .border(Dim.hairline, c.line, RoundedCornerShape(R.lg))
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(
+            Modifier.fillMaxSize()
+                .background(c.bg.copy(alpha = if (c.isDark) 0.82f else 0.72f))
+                .clickable(interactionSource = remember { MutableInteractionSource() },
+                    indication = null, onClick = onDismiss)
                 .padding(Sp.x20),
+            contentAlignment = Alignment.Center,
         ) {
-            if (title != null) {
-                H2(title)
-                Spacer(Modifier.height(Sp.x12))
+            Column(
+                Modifier.widthIn(max = 420.dp).fillMaxWidth()
+                    // ★ 吞掉点击:不吞的话点面板里的空白也会走到上面那层的 onDismiss
+                    .clickable(interactionSource = remember { MutableInteractionSource() },
+                        indication = null, onClick = {})
+                    .glass(R.lg, solid = 1.25f)
+                    .padding(Sp.x20),
+            ) {
+                if (title != null) {
+                    H2(title)
+                    Spacer(Modifier.height(Sp.x12))
+                }
+                content()
             }
-            content()
         }
     }
 }
@@ -519,14 +544,16 @@ fun LpDialog(onDismiss: () -> Unit, title: String? = null, content: @Composable 
 fun Hairline(m: Modifier = Modifier) =
     Box(m.fillMaxWidth().height(Dim.hairline).background(Lp.colors.line))
 
-/** 卡片面板:`s1` 底 + 发丝边 + 12 圆角。设置组、服务器卡都用它。 */
+/**
+ * 卡片面板。设置组、服务器卡都用它。
+ *
+ * ★ 2026-09-06 从「s1 平铺 + 发丝边」换成 [glass]:扁平面在这套深底上读起来发闷,
+ *   而玻璃只是**换了一层膜**,版式一个像素没动。
+ * ★ [solid] 透给调用方:服务器卡要更实一点【用户定】。
+ */
 @Composable
-fun Panel(m: Modifier = Modifier, content: @Composable () -> Unit) {
-    val c = Lp.colors
-    Column(
-        m.fillMaxWidth().clip(RoundedCornerShape(R.md)).background(c.s1)
-            .border(Dim.hairline, c.line, RoundedCornerShape(R.md)),
-    ) { content() }
+fun Panel(m: Modifier = Modifier, solid: Float = 1f, content: @Composable () -> Unit) {
+    Column(m.fillMaxWidth().glass(R.md, solid)) { content() }
 }
 
 /** 三态渲染的收口:一个区块自己管自己的 Loading / Ok / Fail。 */

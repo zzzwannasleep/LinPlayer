@@ -556,3 +556,88 @@ PC 端(desktop/pages/sources/sourceForms.tsx)一直是加完补一刀 `update_ac
 
 **失效条件**:1 是协程作用域的语义,长期成立;2、3 是本仓库的实现;
 最后两条是 Compose 的修饰符顺序语义。
+
+---
+
+### 卡片文字被裁一半:dp 的容器装 sp 的内容
+
+*(2026-09-06。类型:project)*
+
+**症状**:「继续观看」卡下面那行 SxEy、媒体库卡下面的年份,**只露上半截**。
+看着像审美问题,其实是两把尺硬凑在一起。
+
+轨道高度必须是常量(`LazyRow` 嵌在 `LazyColumn` 里不给定高 = 每次测量重排整列),
+而卡下面两行字是 **sp** —— 系统字号 1.0 倍时刚好放得下,1.2 倍就裁掉半行。
+
+**做法**:高度**现算**,别写死。
+
+```kotlin
+@Composable fun rowHeight(thumb: Boolean): Dp =
+    (if (thumb) ThumbW * 9 / 16 else PosterW * 3 / 2) + captionHeight()
+
+@Composable private fun captionHeight(): Dp = with(LocalDensity.current) {
+    Sp.x6 + CapTitleLh.toDp() + 1.dp + CapSubLh.toDp() + 2.dp
+}
+```
+
+配套:两行字都**显式给 `lineHeight`**。不给的话行高来自字体度量,
+换个系统字体这个数就变了 —— 那是一个算不出来的高度。
+真卡和骨架**共用同一个 `rowHeight`**,否则加载完会跳一下。
+
+---
+
+### 「选择器点不动 + 媒体信息不见了」是同一个 null
+
+*(2026-09-06。类型:project)*
+
+**症状**(单集详情页):线路能选,**音轨和字幕点不动**,而且整个「媒体信息」模块不见了。
+三个症状,一个原因。
+
+`defaultVersion(versions)` 只认核心层标的 `preferred`,标不出来就返回 `null` ——
+**这是对的**,因为不许替核心层挑一个 id 发过去(发了版本正则会被整个跳过,
+见 `ui-lies-about-current-version`)。错在把这个 `null` 直接当成了「没有版本可展示」:
+
+- 音轨/字幕行 `onClick = if (ver?.of("Audio").size > 1) {...} else null` → 恒 null → 点不动
+- 媒体信息 `if (ver != null)` → 整块不画
+
+**规矩**:**展示用的版本**和**发给核心层的版本 id** 是两个值。
+展示可以回落到第一条(总得显示点什么);发命令仍然只认 `preferred`,没有就传 `null`。
+混成一个的时候,「核心层这次没标 preferred」会以三种完全不像的形态冒出来。
+
+---
+
+### 液态玻璃:安卓上是用光做的,不是用模糊做的
+
+*(2026-09-06。类型:project)*
+
+真正的背景模糊要 API 31 的 `RenderEffect`;`Modifier.blur` 只糊得了自己这一层、
+糊不到身后的内容,低版本上还**静默不生效**(同 `android-resource-qualifier-precedence`
+那一类只在部分机型现形的坑)。
+
+`Modifier.glass()` 三层叠出来,没有 API 门槛:①上浓下淡的膜 ②顶沿一道高光内边
+③一圈由亮转暗的描边。深浅两套值**不是同一组数乘个系数**:深色里是加白,
+浅色里是磨砂白 + 深描边 —— 同一套套过去的表现是浅色下整块看不见(白加白)。
+
+**弹窗的遮罩要自己画**:`BasicAlertDialog` 自带的平台 dim 只盖 dialog 窗口那一块,
+而整个应用是 edge-to-edge 的 —— 于是弹窗开着时,背后那一页的选项还从上下两头露出来,
+用户会去点它们。做法是 `usePlatformDefaultWidth=false` + `decorFitsSystemWindows=false`
+把 dialog 窗撑满,再自己铺一层 scrim;★ 面板本身要**吞掉点击**,
+否则点面板空白处也会走到 scrim 的 `onDismiss`。
+
+---
+
+### 排行榜「没有凭据」可能是一句假话
+
+*(2026-09-06。类型:project)*
+
+`runCatching { app.call("emby.rankingCategories") }.getOrNull().arr()` ——
+命令失败和「返回空表」在这里长得**一模一样**,都落进「这个构建没注入榜单凭据」那句空态。
+于是 GitHub 构建的包(凭据是齐的)一旦这条命令出错,用户看到的是一句假话,
+而真正的错误一个字都不显示。
+
+**空表**(= 本地构建没凭据)和**取不到**(= 命令失败,要显示核心层那句话 + 重试)
+必须分开。同一条规矩在 `ranking.go` 的注释里已经写过一遍:
+「错误必须说人话地冒出去,不许吞成空数组」—— 那次是核心层吞,这次是 UI 吞。
+
+配套:`build-core*.sh` 现在会打印**这次注入了哪几个凭据的变量名**(不打值,CI 日志是公开的)。
+少了这一行,「CI 漏配 / sealsecrets 封错 / 运行时解不开」三种在日志里都是一片安静。
