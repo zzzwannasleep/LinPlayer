@@ -191,7 +191,7 @@ fun ServersPage(nav: NavController) {
 private val iconCache = HashMap<String, ImageBitmap?>()
 
 @Composable
-private fun rememberServerIcon(serverId: String): ImageBitmap? {
+internal fun rememberServerIcon(serverId: String): ImageBitmap? {
     val app = LocalApp.current
     var img by remember(serverId) { mutableStateOf(iconCache[serverId]) }
     LaunchedEffect(serverId) {
@@ -227,13 +227,13 @@ private fun ServerCard(
                 .padding(Sp.x16),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier.size(36.dp).clip(RoundedCornerShape(R.sm)).background(c.accDim),
-                contentAlignment = Alignment.Center,
-            ) {
+            /* ☠ **图标底下不许垫底色**【用户定 2026-09-07】。服务器图标基本都是
+               带透明通道的 PNG,垫一块琥珀色进去等于给每台服务器套一个不是它的方框;
+               而且 `Crop` 会把非方形的图标切掉两边。透明底 + `Fit`,原样显示。 */
+            Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
                 if (icon != null) Image(icon, null, Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop)
-                else Icon(LpIcons.server, null, Modifier.size(20.dp), tint = c.acc)
+                    contentScale = ContentScale.Fit)
+                else Icon(LpIcons.server, null, Modifier.size(22.dp), tint = c.acc)
             }
             Spacer(Modifier.padding(horizontal = Sp.x6))
             Column(Modifier.weight(1f)) {

@@ -1,12 +1,6 @@
 package xyz.linplayer.app.ui.pages
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -156,7 +149,7 @@ fun HomePage(nav: NavController) {
     val menu: (Item) -> List<CardAction> = { cardActions(app, scope, it) }
 
     LpImmersive(bar = {
-        ServerChip(accounts.firstOrNull { it.isActive }?.name) { pickServer = true }
+        ServerChip(accounts.firstOrNull { it.isActive }) { pickServer = true }
         Spacer(Modifier.weight(1f))
         GlassIcon(LpIcons.search, "搜索") { nav.navigate(Route.Search()) }
         GlassIcon(LpIcons.settings, "设置") { nav.navigate(Route.Settings) }
@@ -259,10 +252,16 @@ fun HomePage(nav: NavController) {
     }
 }
 
-/** 顶栏那颗服务器胶囊。名字没到之前写「服务器」,**不画骨架** —— 一颗抖动的小胶囊比一个静字更吵。 */
+/**
+ * 顶栏那颗服务器胶囊。名字没到之前写「服务器」,**不画骨架** —— 一颗抖动的小胶囊比一个静字更吵。
+ *
+ * ☠ 图标位上一版是**一块渐变色块** —— 不是「图标没加载出来」,是压根没去取过图标。
+ *   现在和服务器页共用 [rememberServerIcon],而且**透明底不垫色块**【用户定 2026-09-07】。
+ */
 @Composable
-private fun ServerChip(name: String?, onClick: () -> Unit) {
+private fun ServerChip(account: Account?, onClick: () -> Unit) {
     val c = Lp.colors
+    val icon = account?.id?.let { rememberServerIcon(it) }
     Row(
         Modifier.clip(RoundedCornerShape(R.pill))
             .background(Color.Black.copy(alpha = .34f))
@@ -270,14 +269,14 @@ private fun ServerChip(name: String?, onClick: () -> Unit) {
             .padding(start = 5.dp, end = Sp.x10, top = 5.dp, bottom = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier.size(24.dp).clip(RoundedCornerShape(R.pill)).background(
-                Brush.linearGradient(listOf(c.acc, Color(0xFFE0553F)))
-            )
-        )
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            if (icon != null) androidx.compose.foundation.Image(
+                icon, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit,
+            ) else Icon(LpIcons.server, null, Modifier.size(17.dp), tint = c.acc)
+        }
         Spacer(Modifier.width(Sp.x8))
         Text(
-            name ?: "服务器", color = Color.White, fontSize = 12.5.sp,
+            account?.name ?: "服务器", color = Color.White, fontSize = 12.5.sp,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
         Icon(LpIcons.chevD, null, Modifier.padding(start = Sp.x4).size(13.dp),
@@ -334,14 +333,6 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
                定时恢复的表现是:用户翻到想看的那张、看了两眼,它又自己走掉。 */
             var manual by remember { mutableStateOf(false) }
 
-            // Ken Burns:恒速缓推。**只动 scale**
-            val t = rememberInfiniteTransition(label = "ken")
-            val z by t.animateFloat(
-                1f, 1.10f,
-                infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Reverse),
-                label = "kenZ",
-            )
-
             /* 视差:往下滚时整块跟着走一半、并且淡出。
                ★ 读滚动位置只能在 `graphicsLayer` 的 lambda 里读 —— 它在 draw 阶段求值,
                  每帧只是重画;写在外面读就是**每帧重组整条首页**。 */
@@ -364,13 +355,13 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
                 HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1) { page ->
                     val cur = items[page]
                     Box(Modifier.fillMaxSize().pressable({ open(cur) })) {
-                        /* ☠ **图不许再做翻页视差。** 上一版让图比页面慢 35% 跟过来,
-                           而 Ken Burns 最多只放大 10% —— 挪出去的那 25% 底下什么都没有,
-                           露出来的是幕布本身。用户要的就是一次干净的推拉,别的都是减分。 */
+                        /* ☠ **封面上不许再有任何常驻动效**【用户定 2026-09-07】。
+                           先后去掉的是翻页视差(挪出去的部分底下是空的,露出幕布)和
+                           Ken Burns 缓推(用户原话「为什么封面右边会有自动推拉」)。
+                           到点换一张,换的过程是一次推拉,此外画面不动。 */
                         NetImage(
                             app.imageUrl(cur.id, "Backdrop", 720), null,
-                            Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z },
-                            corner = 0.dp, scale = ContentScale.Crop,
+                            Modifier.fillMaxSize(), corner = 0.dp, scale = ContentScale.Crop,
                         )
                         /* 上下两头压暗:上头给状态栏的时间和信号留可读性(**不是给它留黑底**),
                            下头把图化进页面底色 —— 中间那 26% 完全不压,画面要露出来 */
@@ -434,15 +425,39 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
             LaunchedEffect(pager) {
                 pager.interactionSource.interactions.collect { manual = true }
             }
-            LaunchedEffect(items, manual) {
+            /* ☠ **动画曲线要自己给。** `animateScrollToPage` 默认是 spring,
+               大图翻页时那条曲线尾巴很长、还会回弹 —— 用户原话「最垃圾的推拉效果」。
+               换成一条 350ms 的 emphasized:推过去,到位,结束。 */
+            val push = lpTween<Float>(T.T7, LpEasing.emphasized)
+            LaunchedEffect(items, manual, push) {
                 if (manual) return@LaunchedEffect
                 while (true) {
                     kotlinx.coroutines.delay(7000)
-                    pager.animateScrollToPage((pager.currentPage + 1) % items.size)
+                    pager.animateScrollToPage(
+                        (pager.currentPage + 1) % items.size, animationSpec = push,
+                    )
                 }
             }
         }
     }
+}
+
+/** 艺术字的最大占位(dp)。改这两个数就是改 Hero 标题的分量。 */
+private const val ART_MAX_W = 320f
+private const val ART_MAX_H = 92f
+
+/**
+ * 艺术字实际要占的宽高(dp)—— 就是 `Fit` 之后**画出来**的那块。
+ *
+ * 抽成纯函数是为了能在 JVM 上钉:算错了不报错,只是标题和下面的标签之间
+ * 多出一段说不清哪来的空白,而那只有真机上肉眼才看得见。
+ * 原图尺寸未知(还没解出来)时按 3:1 给一个中庸值,不返回 0 ——
+ * 返回 0 的表现是标题闪一下才出来。
+ */
+internal fun artLogoSize(imgW: Float, imgH: Float, maxW: Float, maxH: Float): Pair<Float, Float> {
+    val ar = if (imgW > 0f && imgH > 0f && imgW.isFinite() && imgH.isFinite()) imgW / imgH else 3f
+    val h = minOf(maxH, maxW / ar)
+    return Pair(h * ar, h)
 }
 
 /**
@@ -453,17 +468,22 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
  * ★ 判据是**图真的解出来了**,不是「地址拼得出来」:地址永远拼得出来,
  *   拼出来的那条 404 才是常态。
  * ★ 按**高度**定尺寸、宽度随原图 —— 按宽度定会把横长的片名压成一条。
+ * ☠ 尺寸自己算,不交给 `heightIn`/`widthIn`:那两个只**约束**布局框,
+ *   `Fit` 画出来的图比框小的时候,小掉的那部分是**框里的空白**。
+ *   宽长条的片名会在下面留出一大片空 —— 用户报的「艺术字和下面的标签离得很远」。
  */
 @Composable
 private fun ArtTitle(logoUrl: String?, fallback: String) {
     val c = Lp.colors
     val painter = rememberAsyncImagePainter(logoUrl)
     val st by painter.state.collectAsState()
-    if (st is AsyncImagePainter.State.Success) androidx.compose.foundation.Image(
-        painter, fallback,
-        Modifier.heightIn(max = 92.dp).widthIn(max = 320.dp),
-        contentScale = ContentScale.Fit,
-    ) else Text(
+    val sz = painter.intrinsicSize
+    if (st is AsyncImagePainter.State.Success) {
+        val (w, h) = artLogoSize(sz.width, sz.height, ART_MAX_W, ART_MAX_H)
+        androidx.compose.foundation.Image(
+            painter, fallback, Modifier.size(w.dp, h.dp), contentScale = ContentScale.Fit,
+        )
+    } else Text(
         fallback, color = c.fg, fontSize = 29.sp,
         fontWeight = FontWeight.Bold, lineHeight = 33.sp,
         textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,

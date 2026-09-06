@@ -578,6 +578,8 @@ private fun Osd(
                 Spacer(Modifier.weight(1f))
                 SpeedGroup(speed, onSpeed)
                 if (!portrait) Chip("音轨") { onPanel("audio") }
+                // 横屏给「比例」一个自己的位置:埋在「更多」里用户找不到(报过一次)
+                if (!portrait) Chip("比例") { onPanel("ratio") }
                 Chip("字幕") { onPanel("subtitle") }
                 Chip("选集") { onPanel("episodes") }
                 Chip("更多") { onPanel("more") }

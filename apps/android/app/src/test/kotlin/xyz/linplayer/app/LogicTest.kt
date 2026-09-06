@@ -13,6 +13,7 @@ import xyz.linplayer.app.data.Session
 import xyz.linplayer.app.ui.pages.Version
 import xyz.linplayer.app.ui.pages.defaultVersion
 import xyz.linplayer.app.ui.pages.fmtTime
+import xyz.linplayer.app.ui.pages.artLogoSize
 import xyz.linplayer.app.ui.pages.withScheme
 import xyz.linplayer.app.ui.player.VideoFit
 import xyz.linplayer.app.ui.player.assTimeMs
@@ -310,5 +311,29 @@ class LogicTest {
         val unknown = videoRect(2400, 1080, 0f, VideoFit.Source)
         assertEquals(2400, unknown.width)
         assertEquals(1080, unknown.height)
+    }
+
+    /**
+     * Hero 艺术字占的位置 = 它画出来的位置。
+     *
+     * 差出来的那一块是**框里的空白**,表现是「艺术字和下面的标签离得很远」——
+     * 只有真机上肉眼看得见,所以在这里钉死。
+     */
+    @Test
+    fun `艺术字的框不许比图大`() {
+        // 宽长条:宽度先顶到上限,高度就该跟着缩,而不是留着 92 不动
+        val (w1, h1) = artLogoSize(1200f, 200f, 320f, 92f)
+        assertEquals(320f, w1, 0.01f)
+        assertEquals(53.33f, h1, 0.05f)
+        // 竖高的:高度顶到上限,宽度按比例
+        val (w2, h2) = artLogoSize(200f, 400f, 320f, 92f)
+        assertEquals(92f, h2, 0.01f)
+        assertEquals(46f, w2, 0.01f)
+        // 两种情况下框和图必须同一个比例(= 没有空白)
+        assertEquals(1200f / 200f, w1 / h1, 0.01f)
+        assertEquals(200f / 400f, w2 / h2, 0.01f)
+        // 图还没解出来:给个中庸值,不许回 0(回 0 的表现是标题闪一下才出来)
+        val (w3, h3) = artLogoSize(0f, 0f, 320f, 92f)
+        assertTrue("未知尺寸也得有个占位,拿到的是 ${w3}x${h3}", w3 > 0f && h3 > 0f)
     }
 }

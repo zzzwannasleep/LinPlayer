@@ -150,7 +150,15 @@ fun PlayerPanel(
             /* 画面比例。★ 档位表由 [VideoFit] 一处定 —— 面板里再抄一遍的话,
                加一档就得改两处,而漏掉的那处不会报错,只是少一个选项。 */
             "ratio" -> {
-                options = VideoFit.entries.map { Triple(it.name, null, it.label + " · " + it.hint) }
+                /* 片源分辨率摆在当前那一档旁边。**这是给用户看的自检**:
+                   写着「片源未知」就说明我们还没拿到画面尺寸,那时候画面必然是铺满的
+                   —— 不写的话「拉伸」和「档位没生效」在界面上长得一模一样。 */
+                val v = exo?.videoSize
+                val info = if (v != null && v.width > 0) "${v.width}×${v.height}" else "片源未知"
+                options = VideoFit.entries.map {
+                    Triple(it.name, if (it.name == fit.name) info else null,
+                        it.label + " · " + it.hint)
+                }
                 current = fit.name
             }
             /* 「更多」是**跳板**,不是设置项:选一条就换一个面板。

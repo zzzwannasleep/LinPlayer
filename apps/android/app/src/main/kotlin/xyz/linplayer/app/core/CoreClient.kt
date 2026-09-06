@@ -166,7 +166,7 @@ class CoreClient private constructor() : LinPlayerCommands {
                 try { dispatch(json) } catch (e: Throwable) {
                     // 一条事件处理坏了不能把整个泵打死 —— 泵停了的表现是
                     // 「所有命令永远不返回」,而且没有任何地方会喊
-                    Log.w(TAG, "事件处理出错(已吞)", e)
+                    Logs.w(TAG, "事件处理出错(已吞): " + Log.getStackTraceString(e))
                 }
             }
         }
@@ -204,9 +204,12 @@ class CoreClient private constructor() : LinPlayerCommands {
                     localBaseUrl = (data as? JsonObject)?.str("baseUrl") ?: ""
                     localToken = (data as? JsonObject)?.str("token") ?: ""
                 }
-                if (name == "log" && BuildConfigLog.enabled) {
+                if (name == "log") {
                     val d = data as? JsonObject
-                    Log.d(TAG, "[核心层:${d?.str("level")}] ${d?.str("msg")}")
+                    val line = "[核心层:${d?.str("level")}] ${d?.str("msg")}"
+                    // ☠ 落盘不看构建类型:release 里 Log.d 连 logcat 都不进,
+                    //   而用户手上跑的**只有** release —— 关着等于真机上永远没线索
+                    Logs.d(TAG, line)
                 }
                 _events.tryEmit(CoreEvent(name, data))
             }
@@ -215,17 +218,6 @@ class CoreClient private constructor() : LinPlayerCommands {
     }
 
     private fun JsonObject.str(k: String) = this[k]?.jsonPrimitive?.contentOrNull
-}
-
-/**
- * 核心层日志。
- *
- * ★ debug 构建默认开:安卓上设不了 `LP_CORELOG` 这种环境变量,
- *   而**核心层的日志是「图片全空」「起播失败」这类问题唯一的出口** ——
- *   关着的话排查时是全瞎的(PC 端为此瞎过一次)。release 里关掉,它每几秒就有几条。
- */
-internal object BuildConfigLog {
-    val enabled: Boolean = xyz.linplayer.app.BuildConfig.DEBUG
 }
 
 /** `Map<String, Any?>` → `JsonObject`。生成的绑定层用弱类型入参,这里收口一次。 */

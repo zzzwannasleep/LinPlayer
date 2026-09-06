@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.text.CuesWithTiming
 import androidx.media3.extractor.text.DefaultSubtitleParserFactory
 import androidx.media3.extractor.text.SubtitleParser
+import xyz.linplayer.app.core.Logs
 import xyz.linplayer.app.core.Native
 
 /**
@@ -33,6 +34,13 @@ import xyz.linplayer.app.core.Native
  * 所以唯一的入口是 `DefaultMediaSourceFactory.setSubtitleParserFactory`。
  * 那一层会把**所有**文本轨都解一遍,不只是选中的那条 —— 所以这里按
  * `Format.id` 分桶存,切轨时重放,而不是一股脑喂给 libass。
+ *
+ * ## 开轨的时机不由我们定
+ *
+ * `onTracksChanged`(切轨请求)和第一批字幕样本(数据)**谁先到是不定的**,
+ * 而轨道表往往先到 —— 那一刻缓存是空的。上一版在那里开不起来就直接放弃、
+ * 再没有人重试:事件一路被解析器吃掉、libass 一次都没开过,一句错都不报。
+ * 现在两边都会触发开轨([activateTrack] 记下要哪条,`header`/`chunk` 到了补开)。
  */
 @OptIn(UnstableApi::class)
 object Libass {
@@ -52,10 +60,15 @@ object Libass {
     private const val MAX_BYTES = 8 shl 20
     private const val MAX_EVENTS = 40_000
 
+    private const val TAG = "lp-libass-kt"
+
     private val lock = Any()
     private val bufs = LinkedHashMap<String, Buf>()
     private var active: String? = null
     private var opened = false
+    /** 想放的那条轨。数据还没到就先记下来,等第一批数据到了自己开 —— 见 [activateTrack]。 */
+    private var wanted: String? = null
+    private var wantedFonts = ""
     /** 下一帧强制重画。灌了字体 / 换了尺寸之后要用它 —— 见 [render]。 */
     private var pendingForce = false
     /** 这一部片已经灌过的字体名。附件字体常常在多条轨里重复,灌两遍是白花内存。 */
@@ -68,7 +81,9 @@ object Libass {
 
     /** 这个构建的 libass 能不能用。取不到就整条路不走 —— 不是崩,是回落成普通字幕。 */
     val available: Boolean by lazy {
-        runCatching { Native.assVersion() }.getOrDefault(0) > 0
+        val v = runCatching { Native.assVersion() }.getOrDefault(0)
+        Logs.d(TAG, "libass 版本 0x%X".format(v))
+        v > 0
     }
 
     fun isAss(f: Format?): Boolean = isAssMime(f?.sampleMimeType, f?.codecs)
@@ -77,6 +92,7 @@ object Libass {
 
     fun header(id: String, header: ByteArray?) = synchronized(lock) {
         bufs.getOrPut(id) { Buf(header) }.header = header ?: bufs[id]?.header
+        openWantedLocked(id)
     }
 
     fun chunk(id: String, body: ByteArray, startMs: Long, durMs: Long) = synchronized(lock) {
@@ -87,6 +103,7 @@ object Libass {
         }
         // 正在放的这条直通。libass 自己按 ReadOrder 去重,seek 之后重复喂不会画两遍
         if (id == active && opened) Native.assChunk(body, startMs, durMs)
+        else openWantedLocked(id)
     }
 
     // ------------------------------------------------------------ 切轨
@@ -98,10 +115,24 @@ object Libass {
      */
     fun activateTrack(id: String, fontsDir: String): Boolean = synchronized(lock) {
         if (!available) return false
+        wanted = id
+        wantedFonts = fontsDir
         if (active == id && opened) return true
+        return openLocked(id, fontsDir)
+    }
+
+    /** 数据先到、切轨请求后到,或者反过来 —— 两种顺序都要能开起来。 */
+    private fun openWantedLocked(id: String) {
+        if (!opened && id == wanted) openLocked(id, wantedFonts)
+    }
+
+    private fun openLocked(id: String, fontsDir: String): Boolean {
         val b = bufs[id] ?: return false
-        if (Native.assOpen(b.header, fontsDir) != 0) {
-            opened = false; active = null
+        val rc = Native.assOpen(b.header, fontsDir)
+        Logs.d(TAG, "开轨 $id rc=$rc 头 ${b.header?.size ?: 0} 字节 事件 ${b.events.size} 条")
+        if (rc != 0) {
+            // 开不起来是硬失败(建轨/建渲染器失败),重试只会每来一条字幕就再失败一次
+            opened = false; active = null; wanted = null
             return false
         }
         for (e in b.events) Native.assChunk(e.body, e.startMs, e.durMs)
@@ -114,6 +145,8 @@ object Libass {
     /** 切到一份外挂 .ass / .ssa(整份文件)。 */
     fun activateFile(key: String, bytes: ByteArray, fontsDir: String): Boolean = synchronized(lock) {
         if (!available) return false
+        // 外挂轨接管:内封那条不许再自己开回来,否则两条轮流抢同一个渲染器
+        wanted = null
         if (active == key && opened) return true
         if (Native.assOpenFile(bytes, fontsDir) != 0) {
             opened = false; active = null
@@ -129,6 +162,7 @@ object Libass {
         if (opened) Native.assClose()
         opened = false
         active = null
+        wanted = null
     }
 
     /** 换一部片:连缓存一起清。留着就是把上一集的字幕喂给下一集。 */
@@ -136,6 +170,7 @@ object Libass {
         if (opened) Native.assClose()
         opened = false
         active = null
+        wanted = null
         bufs.clear()
         // ★ 字体名单跟着清,但**已经灌进 libass 库里的字体不撤** ——
         //   撤要销毁整个 ASS_Library(字体目录重扫几十毫秒),而多留几份

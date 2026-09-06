@@ -60,6 +60,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.delay
 import xyz.linplayer.app.BuildConfig
+import xyz.linplayer.app.core.Logs
 
 /**
  * libass 找字体的目录。
@@ -69,6 +70,8 @@ import xyz.linplayer.app.BuildConfig
  * **文本字幕整段不显示**而且不报错 —— 和 mpv 那条路的 `sub-fonts-dir` 是同一件事。
  */
 private const val FONTS_DIR = "/system/fonts"
+
+private const val TAG_EXO = "lp-exo"
 
 /**
  * 第二个播放内核:ExoPlayer(U1.6b)。
@@ -215,18 +218,21 @@ fun ExoSurface(player: ExoPlayer, subOff: Boolean, fit: VideoFit, m: Modifier = 
     var videoW by remember(player) { mutableIntStateOf(0) }
     var videoH by remember(player) { mutableIntStateOf(0) }
 
+    /* 取一次当前的画面尺寸。`ratio` 是 0 就等于「不知道比例」,而不知道比例时
+       [videoRect] 只能铺满 —— 那正是用户看到的「画面被拉伸」。 */
+    val take = { v: VideoSize ->
+        val par = if (v.pixelWidthHeightRatio > 0f) v.pixelWidthHeightRatio else 1f
+        val r = if (v.height > 0 && v.width > 0) v.width * par / v.height else 0f
+        if (r != ratio) Logs.d(TAG_EXO, "片源尺寸 ${v.width}×${v.height} par=$par 比例=$r")
+        ratio = r
+        videoW = v.width; videoH = v.height
+    }
+
     DisposableEffect(player, subOff) {
-        fun take(v: VideoSize) {
-            val par = if (v.pixelWidthHeightRatio > 0f) v.pixelWidthHeightRatio else 1f
-            ratio = if (v.height > 0 && v.width > 0) v.width * par / v.height else 0f
-            videoW = v.width; videoH = v.height
-        }
-        /* ☠ 先把**当前值**取一遍。监听器只管「以后」,而这次注册可能已经晚了
-           (subOff 一变这个 effect 就重挂一次)。漏掉这一次的表现是比例永远是 0,
-           也就是画面一直铺满 —— 和「根本没算比例」长得一模一样。 */
+        // 监听器只管「以后」,而这次注册可能已经晚了(subOff 一变就重挂一次)
         take(player.videoSize)
         val l = object : Player.Listener {
-            override fun onVideoSizeChanged(size: VideoSize) = take(size)
+            override fun onVideoSizeChanged(size: VideoSize) { take(size) }
 
             override fun onTracksChanged(tracks: Tracks) {
                 pickSubtitleTrack(player, tracks, subOff)
@@ -237,8 +243,22 @@ fun ExoSurface(player: ExoPlayer, subOff: Boolean, fit: VideoFit, m: Modifier = 
         onDispose { player.removeListener(l) }
     }
 
+    /* ☠ **不能只靠 onVideoSizeChanged。** 它一部片只发一两次,而这一层的监听器
+       会随 `subOff` 重挂、随进程被杀重建 —— 错过那一次就永远是 0,表现正是
+       「怎么调都还是拉伸的」。比例没到手之前每 300ms 自己问一次,拿到就停。 */
+    LaunchedEffect(player) {
+        while (ratio <= 0f) {
+            delay(300)
+            take(player.videoSize)
+        }
+    }
+
     BoxWithConstraints(m.clipToBounds(), contentAlignment = Alignment.Center) {
         val r = videoRect(constraints.maxWidth, constraints.maxHeight, ratio, fit)
+        LaunchedEffect(r, fit) {
+            Logs.d(TAG_EXO, "画面 ${fit.name} 容器 ${constraints.maxWidth}×${constraints.maxHeight}" +
+                " → 画到 ${r.width}×${r.height}(比例 $ratio)")
+        }
         val box = with(LocalDensity.current) {
             Modifier.requiredSize(r.width.toDp(), r.height.toDp())
         }
@@ -261,13 +281,20 @@ fun ExoSurface(player: ExoPlayer, subOff: Boolean, fit: VideoFit, m: Modifier = 
  */
 @OptIn(UnstableApi::class)
 private fun syncLibassTrack(tracks: Tracks, subOff: Boolean) {
-    if (!Libass.available || subOff) { Libass.deactivate(); return }
+    if (!Libass.available || subOff) {
+        Logs.d(TAG_EXO, "libass 不走这条路: available=${Libass.available} subOff=$subOff")
+        Libass.deactivate(); return
+    }
     val sel = tracks.groups
         .filter { it.type == C.TRACK_TYPE_TEXT && it.isSelected }
         .flatMap { g -> (0 until g.length).filter { g.isTrackSelected(it) }.map { g.getTrackFormat(it) } }
         .firstOrNull()
+    Logs.d(TAG_EXO, "选中字幕轨 id=${sel?.id} mime=${sel?.sampleMimeType}" +
+        " codecs=${sel?.codecs} 判为 ASS=${Libass.isAss(sel)}")
     if (sel != null && Libass.isAss(sel)) {
-        if (Libass.activateTrack(sel.id ?: "ass", FONTS_DIR)) return
+        val ok = Libass.activateTrack(sel.id ?: "ass", FONTS_DIR)
+        Logs.d(TAG_EXO, "交给 libass: $ok")
+        if (ok) return
     }
     // 选中的不是 ASS:内封这条路到此为止。外挂那条由 PlayerPage 在起播时装
     if (sel != null && !Libass.isAss(sel)) Libass.deactivate()
@@ -290,6 +317,7 @@ private fun LibassLayer(player: ExoPlayer, m: Modifier, videoW: Int, videoH: Int
     val bmp = remember(size, videoW, videoH) {
         if (size.width <= 0 || size.height <= 0) null
         else Bitmap.createBitmap(size.width, size.height, Bitmap.Config.ARGB_8888).also {
+            Logs.d(TAG_EXO, "libass 画布 ${size.width}×${size.height} 片源 ${videoW}×${videoH}")
             Libass.setSize(size.width, size.height, videoW, videoH)
         }
     }

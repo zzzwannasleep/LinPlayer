@@ -10,6 +10,7 @@ import coil3.request.CachePolicy
 import coil3.request.crossfade
 import okhttp3.OkHttpClient
 import xyz.linplayer.app.core.CoreClient
+import xyz.linplayer.app.core.Logs
 
 /**
  * 进程入口。核心层在这里起(SPEC §8.0 第 2 步),不在 Activity 里 ——
@@ -21,6 +22,8 @@ class LinPlayerApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        // 日志排在核心层之前:核心层起不来本身就是最该留下记录的一种失败
+        Logs.init(this)
         // 数据根是应用私有目录:安卓上没有「绿色包同级 userdata/」那回事,
         // 也不需要 —— 卸载即清干净,而且不用任何存储权限
         core = CoreClient.start(

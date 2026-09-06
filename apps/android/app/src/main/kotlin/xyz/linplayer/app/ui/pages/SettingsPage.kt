@@ -16,7 +16,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import xyz.linplayer.app.core.Logs
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
@@ -296,10 +302,36 @@ private fun StoragePanel() {
                 .long("bytes")?.let { "%.1f MB".format(it / 1024.0 / 1024.0) }
         }
     }
+    /* 导出日志。**必须让用户自己挑位置** —— 上一版写进应用私有目录然后弹一句
+       「已导出到数据目录」,而那个目录任何文件管理器都进不去:
+       用户点了、看见成功提示、然后什么也拿不到。那不是导出,是安慰剂。 */
+    val ctx = LocalContext.current
+    val save = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            runCatching {
+                val diag = runCatching { app.call("system.exportDiagnostics") }.getOrNull()
+                val text = "== 诊断 ==\n" + (diag?.toString() ?: "取不到") + "\n\n" + Logs.dump()
+                withContext(Dispatchers.IO) {
+                    ctx.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                }
+            }.onSuccess { app.toast("日志已导出", ToastKind.Ok) }.onFailure { app.report(it) }
+        }
+    }
+
     Panel(Modifier.padding(Sp.x16)) {
         // 安卓的数据根是应用私有目录:**展示但不可点开** ——
         // 没有文件管理器能进去,给一个打不开的按钮比不给更糟
         LpCell("数据目录", sub = paths ?: "读取中…", arrow = false)
+        Hairline()
+        // 这个目录**是**能进去的(Android/data/<包名>/files/logs),所以照实写出来
+        LpCell("日志目录", sub = Logs.dirPath.ifEmpty { "未初始化" }, arrow = false)
+        Hairline()
+        LpCell("导出日志", sub = "选个位置存下来,连 logcat 一起", onClick = {
+            save.launch("linplayer-" + System.currentTimeMillis() + ".log")
+        })
         Hairline()
         LpCell("缓存占用", value = size ?: "…", arrow = false)
         Hairline()
@@ -316,7 +348,6 @@ private fun StoragePanel() {
 @Composable
 private fun AboutPanel() {
     val app = LocalApp.current
-    val scope = rememberCoroutineScope()
     val caps by app.caps.collectAsStateWithLifecycle()
     var update by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -329,14 +360,6 @@ private fun AboutPanel() {
         // 安卓端**不做应用内更新**:安装权限对一个第三方播放器是过重的要求,
         // 而且各厂商 ROM 拦法各不相同。只提示,跳发布页
         LpCell("检查更新", value = update?.let { "有新版 $it" } ?: "已是最新", arrow = false)
-        Hairline()
-        LpCell("导出诊断信息", onClick = {
-            scope.launch {
-                runCatching { app.call("system.exportDiagnostics") }
-                    .onSuccess { app.toast("诊断信息已导出到数据目录", ToastKind.Ok) }
-                    .onFailure { app.report(it) }
-            }
-        })
     }
 }
 
