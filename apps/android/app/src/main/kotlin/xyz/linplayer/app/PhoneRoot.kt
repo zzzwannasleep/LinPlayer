@@ -143,8 +143,16 @@ private fun MainShell() {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f)) {
+    /* ☠ 底栏从「Column 里占一格」改成「Box 上叠一层」。
+       占一格的话内容区被切短,底栏上面永远是一条硬边;叠一层之后轨道从它下面穿过去,
+       滚动时是渐渐化掉 —— 这是草稿 01 第 4 条要的效果。
+       代价是每个列表都得自己留白,所以底栏高度走 LocalTabClearance 下发。 */
+    androidx.compose.runtime.CompositionLocalProvider(
+        xyz.linplayer.app.ui.components.LocalTabClearance provides
+            if (tab >= 0) xyz.linplayer.app.ui.theme.Dim.tabClearance else 0.dp
+    ) {
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize()) {
             NavHost(
                 navController = nav,
                 startDestination = Route.Home,
@@ -181,9 +189,12 @@ private fun MainShell() {
             }
         }
         // 播放页是全屏页,没有底栏
-        if (tab >= 0) LpTabBar(tab) {
-            nav.switchTab(when (it) { 0 -> Route.Home; 1 -> Route.Aggregate; else -> Route.Servers })
+        if (tab >= 0) Box(Modifier.align(Alignment.BottomCenter)) {
+            LpTabBar(tab) {
+                nav.switchTab(when (it) { 0 -> Route.Home; 1 -> Route.Aggregate; else -> Route.Servers })
+            }
         }
+    }
     }
 }
 

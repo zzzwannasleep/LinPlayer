@@ -51,11 +51,14 @@ OPAQUE = {'', 'String', 'bool', 'i64', 'u64', 'f64', 'Value', 'any',
 LOCAL_KEYS = {'url'}
 
 
+# 一行字段:`People []Person `json:"people"``  ->  (Person, people)
+FIELD = re.compile(r'^\s*\w+\s+[\[\]\*]*(?:\w+\.)?(\w+)[^`]*`[^`]*json:"([^",]+)', re.M)
+
+
 def go_struct_fields():
-    """struct 名 -> json 标签集合。同名 struct 合并(跨包重名极少)。"""
+    """struct 名 -> (json 标签集合, 子 struct 名集合)。同名 struct 合并(跨包重名极少)。"""
     out = {}
     st = re.compile(r'\btype\s+(\w+)\s+struct\s*\{')
-    tag = re.compile(r'`[^`]*json:"([^",]+)')
     for base, _, files in os.walk(CORE):
         for f in files:
             if not f.endswith('.go') or f.endswith('_test.go'):
@@ -69,7 +72,33 @@ def go_struct_fields():
                     elif src[i] == '}':
                         depth -= 1
                     i += 1
-                out.setdefault(m.group(1), set()).update(tag.findall(src[m.end():i]))
+                tags, kids = out.setdefault(m.group(1), (set(), set()))
+                for ty, tag in FIELD.findall(src[m.end():i]):
+                    tags.add(tag)
+                    kids.add(ty)
+    return out
+
+
+def flatten(structs, name, depth=1, seen=None):
+    """一个类型**连同它嵌的类型**能发出来的所有字段名。
+
+    ★ 少了这一步会造**假红**:`ItemDetail.People []Person` 里的 `role`、
+      `MediaVersion.Streams []StreamInfo` 里的 `width` / `height`,
+      UI 读的都是嵌套对象的字段,而它们当然不在外层 struct 的标签里。
+      假红比漏报更贵 —— 长期红的门禁等于没有门禁,真信号会淹在噪音里。
+
+    ★ 只展开**一层**。展到两层会把 `ItemDetail.Children []Item` 底下那一整串
+      也算进来,字段集大到几乎什么都放行 —— 那就从假红滑到漏报了。
+    """
+    if seen is None:
+        seen = set()
+    if name not in structs or name in seen or depth < 0:
+        return set()
+    seen.add(name)
+    tags, kids = structs[name]
+    out = set(tags)
+    for k in kids:
+        out |= flatten(structs, k, depth - 1, seen)
     return out
 
 
@@ -115,7 +144,7 @@ def main():
                 ty = rets.get(cmd, '')
                 if ty in OPAQUE or ty not in structs:
                     continue          # 类型查不到就不判,别造假红
-                fields = structs[ty]
+                fields = flatten(structs, ty)
                 # 窗口右界:下一个调用点、下一个函数头、或 30 行,取最近的一个。
                 # 少了「函数头」这一条,收藏页会把下面下载页的字段算到自己头上(假红)。
                 nxt = [hits[i + 1].start()] if i + 1 < len(hits) else []

@@ -1,7 +1,9 @@
 package xyz.linplayer.app.ui.pages
 
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -42,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,33 +53,36 @@ import androidx.navigation.NavController
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import xyz.linplayer.app.data.Account
 import xyz.linplayer.app.data.Block
 import xyz.linplayer.app.data.Item
 import xyz.linplayer.app.data.LocalApp
-import xyz.linplayer.app.data.Page
 import xyz.linplayer.app.data.View
 import xyz.linplayer.app.data.block
 import xyz.linplayer.app.data.keepState
 import xyz.linplayer.app.ui.Route
 import xyz.linplayer.app.ui.components.CardAction
-import xyz.linplayer.app.ui.components.Dim3
 import xyz.linplayer.app.ui.components.EmptyState
 import xyz.linplayer.app.ui.components.ErrorState
-import xyz.linplayer.app.ui.components.LpIconButton
+import xyz.linplayer.app.ui.components.GlassIcon
+import xyz.linplayer.app.ui.components.LpImmersive
 import xyz.linplayer.app.ui.components.LpRow
 import xyz.linplayer.app.ui.components.LpRowSkeleton
-import xyz.linplayer.app.ui.components.LpScaffold
 import xyz.linplayer.app.ui.components.NetImage
+import xyz.linplayer.app.ui.components.SectionTitle
 import xyz.linplayer.app.ui.components.Skeleton
 import xyz.linplayer.app.ui.components.pressable
-import xyz.linplayer.app.ui.components.rememberScrolled
+import xyz.linplayer.app.ui.theme.Dim
+import xyz.linplayer.app.ui.theme.LpEasing
 import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.R
 import xyz.linplayer.app.ui.theme.Sp
+import xyz.linplayer.app.ui.theme.T
+import xyz.linplayer.app.ui.theme.lpTween
 
 /**
- * 首页(U1.3)。
+ * 首页(U1.3)。版式照草稿 01:**Hero 从 y=0 起铺,状态栏浮在图上**。
  *
  * ☠ **各块并发拉取、各自渲染,不设屏障**(SPEC §8.0 第 6 步)——
  * 这是**契约不是优化**。实测串行等待比并发慢 5.5 倍,而用户会把它描述成
@@ -89,26 +96,30 @@ fun HomePage(nav: NavController) {
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
 
-    /* ☠ 这六份数据以前是 `remember`,而 `remember` 的寿命是 composition ——
+    /* ☠ 这几份数据以前是 `remember`,而 `remember` 的寿命是 composition ——
        点进任何一页再返回,首页**整个重拉一遍**(骨架闪一次、Hero 从第一张重来)。
-       底栏的 saveState/restoreState 保得住滚动位置(rememberSaveable),保不住它们。
-       换成 keepState 之后值活过页面销毁;新鲜度仍然只由 app.invalidate 推翻。 */
+       底栏的 saveState/restoreState 保得住滚动位置(rememberSaveable),保不住它们。 */
     var hero by keepState<Block<List<Item>>>("home.hero") { Block.Loading }
     var resume by keepState<Block<List<Item>>>("home.resume") { Block.Loading }
     var nextUp by keepState<Block<List<Item>>>("home.nextUp") { Block.Loading }
     var views by keepState<Block<List<View>>>("home.views") { Block.Loading }
     var latest by keepState<Map<String, List<Item>>>("home.latest") { emptyMap() }
     var collections by keepState<Block<List<Item>>>("home.collections") { Block.Loading }
+    var serverName by keepState<String?>("home.server") { null }
     var reload by remember { mutableStateOf(0) }
 
     // 每一块自己一个 launch:一块回来就画一块,谁也不等谁。
-    // ★ 已经有数据就不重拉 —— 只留住值而照样发请求,省的只是闪烁,不是往返。
     LaunchedEffect(reload) {
         if (reload == 0 && views is Block.Ok) return@LaunchedEffect
         launch { hero = app.block("emby.listRandom", args("limit" to 5)).map { Item.list(it) } }
         launch { resume = app.block("emby.listResume", args("limit" to 12)).map { Item.list(it) } }
         launch { nextUp = app.block("emby.listNextUp", args("limit" to 20)).map { Item.list(it) } }
         launch { collections = app.block("emby.listCollections").map { Item.list(it) } }
+        // 顶栏那颗服务器 chip 上的名字。**本地账号表,不走网络**
+        launch {
+            serverName = Account.list(app.block("account.listAccounts").valueOrNull)
+                .firstOrNull { it.isActive }?.name
+        }
         launch {
             val v = app.block("emby.views").map { View.list(it) }
             views = v
@@ -131,26 +142,31 @@ fun HomePage(nav: NavController) {
     val open: (Item) -> Unit = { nav.navigate(Route.Detail(it.id, it.type)) }
     val menu: (Item) -> List<CardAction> = { cardActions(app, scope, it) }
 
-    LpScaffold(scrolled = rememberScrolled(list), actions = {
-        // 右上角两个入口:搜索与设置。底栏没有它们的位置(只有三个 Tab)
-        LpIconButton(LpIcons.search, "搜索") { nav.navigate(Route.Search()) }
-        LpIconButton(LpIcons.settings, "设置") { nav.navigate(Route.Settings) }
+    LpImmersive(bar = {
+        ServerChip(serverName) { nav.navigate(Route.Servers) }
+        Spacer(Modifier.weight(1f))
+        GlassIcon(LpIcons.search, "搜索") { nav.navigate(Route.Search()) }
+        GlassIcon(LpIcons.settings, "设置") { nav.navigate(Route.Settings) }
     }) { pad ->
         // 地基块失败才整页报错:只有 emby.views 是地基
         val v = views
         if (v is Block.Fail && !v.isSilent) {
             ErrorState(v.message, { reload++ }, Modifier.fillMaxSize())
-            return@LpScaffold
+            return@LpImmersive
         }
 
         LazyColumn(Modifier.fillMaxSize(), list, contentPadding = pad) {
-            item("hero") { Hero(hero, open) }
+            item("hero") { Hero(hero, list, open) }
 
+            // 顺序照 PC 端首页:Hero → 继续观看 → 接下来看 → 合集 → 各库最新
             item("resume") {
                 RowBlock("继续观看", resume, thumb = true, app = app, open = open, menu = menu)
             }
             item("nextup") {
                 RowBlock("接下来看", nextUp, thumb = false, app = app, open = open, menu = menu)
+            }
+            item("collections") {
+                RowBlock("合集", collections, thumb = false, app = app, open = open, menu = menu)
             }
 
             item("views") {
@@ -167,10 +183,8 @@ fun HomePage(nav: NavController) {
             v.valueOrNull.orEmpty().forEach { view ->
                 item("latest-${view.id}") {
                     /* ☠ 影片轨道用 **2:3 竖版海报**,`thumb` 是「16:9 剧照卡」的开关,
-                       只有分集(继续观看 / 接下来看)才该开。
-                       这里以前传的是 true —— 于是首页下半部分整片变成横图,
-                       而 Emby 给的 Primary 本来就是竖的,横过来是被 Crop
-                       从中间裁掉一条,又丑又没信息。 */
+                       只有分集(继续观看)才该开。传成 true 的话首页下半整片变横图,
+                       而 Emby 给的 Primary 本来就是竖的,横过来是被 Crop 裁掉一条。 */
                     val items = latest[view.id]
                     if (items == null) LpRowSkeleton("${view.name} · 最新", thumb = false)
                     else if (items.isNotEmpty()) LpRow(
@@ -180,12 +194,34 @@ fun HomePage(nav: NavController) {
                     )
                 }
             }
-
-            item("collections") {
-                RowBlock("合集", collections, thumb = false, app = app, open = open, menu = menu)
-            }
             item("tail") { Spacer(Modifier.height(Sp.x26)) }
         }
+    }
+}
+
+/** 顶栏那颗服务器胶囊。名字没到之前写「服务器」,**不画骨架** —— 一颗抖动的小胶囊比一个静字更吵。 */
+@Composable
+private fun ServerChip(name: String?, onClick: () -> Unit) {
+    val c = Lp.colors
+    Row(
+        Modifier.clip(RoundedCornerShape(R.pill))
+            .background(Color.Black.copy(alpha = .34f))
+            .pressable(onClick)
+            .padding(start = 5.dp, end = Sp.x10, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(24.dp).clip(RoundedCornerShape(R.pill)).background(
+                Brush.linearGradient(listOf(c.acc, Color(0xFFE0553F)))
+            )
+        )
+        Spacer(Modifier.width(Sp.x8))
+        Text(
+            name ?: "服务器", color = Color.White, fontSize = 12.5.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        Icon(LpIcons.chevD, null, Modifier.padding(start = Sp.x4).size(13.dp),
+            tint = Color.White.copy(alpha = .75f))
     }
 }
 
@@ -203,7 +239,7 @@ private fun RowBlock(
         // 空轨整条不画:一条只有标题的空轨比没有它更让人困惑
         is Block.Ok -> if (block.value.isNotEmpty()) LpRow(
             title, block.value,
-            { app.imageUrl(it.id, if (thumb) "Primary" else "Primary", if (thumb) 220 else 330) },
+            { app.imageUrl(it.id, "Primary", if (thumb) 220 else 330) },
             open, thumb = thumb, menu = menu,
         )
         // 各块各自 catch:一个区块失败不整页报错
@@ -212,69 +248,112 @@ private fun RowBlock(
 }
 
 /**
- * Hero:随机 5 条,两层图交叉淡入 + **Ken Burns 恒速缓推**。
+ * Hero(草稿 01):**铺到屏幕物理顶端**,状态栏浮在它上面。
  *
- * ★ 元信息只有「年份 · 评分 · 类型」—— **画质标签整个去掉**【用户定 2026-07-28】:
- *   「没人会为了参数去看一部烂片」。
+ * ★ **上面没有播放按钮**【用户定 2026-09-06】—— 整块可点,进详情页。
+ * ★ 动效三层:Ken Burns 恒速缓推 + 换片交叉淡入 + 随滚动的视差与淡出。
+ * ★ 元信息只有「评分 · 年份 · 类型」—— **画质标签整个去掉**【用户定 2026-07-28】。
  */
 @Composable
-private fun Hero(block: Block<List<Item>>, open: (Item) -> Unit) {
+private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> Unit) {
     val c = Lp.colors
-    val h = 340.dp
+    val h = Dim.heroHome
     when (block) {
-        is Block.Loading -> Skeleton(Modifier.fillMaxWidth().height(h).padding(Sp.x16))
+        is Block.Loading -> Skeleton(Modifier.fillMaxWidth().height(h), R.none)
         is Block.Fail -> Unit
         is Block.Ok -> {
             val items = block.value
             if (items.isEmpty()) return
             var idx by remember { mutableStateOf(0) }
-            val it = items[idx % items.size]
+            val cur = items[idx % items.size]
             val app = LocalApp.current
 
-            // Ken Burns:恒速缓推。**只动 scale**(§2.3 第 2 条)
+            // Ken Burns:恒速缓推。**只动 scale**
             val t = rememberInfiniteTransition(label = "ken")
             val z by t.animateFloat(
-                1f, 1.08f,
-                infiniteRepeatable(tween(12000, easing = LinearEasing), RepeatMode.Reverse),
+                1f, 1.10f,
+                infiniteRepeatable(tween(14000, easing = LinearEasing), RepeatMode.Reverse),
                 label = "kenZ",
             )
 
-            // ☠ 必须 clipToBounds:Ken Burns 把图放大到 1.08,而 NetImage 里的 clip
-            //   排在 graphicsLayer **之后** —— 缩放先发生、裁剪后发生,放大出来的那一圈
-            //   会溢出 Hero 的下边,在渐变之下露出一条硬边。
-            Box(Modifier.fillMaxWidth().height(h).clipToBounds().pressable({ open(it) })) {
-                NetImage(
-                    app.imageUrl(it.id, "Backdrop", 720), null,
-                    Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z },
-                    corner = 0.dp, scale = ContentScale.Crop,
+            /* 视差:往下滚时图跟着走一半、并且淡出。
+               ★ 读滚动位置只能在 `graphicsLayer` 的 lambda 里读 —— 它在 draw 阶段求值,
+                 每帧只是重画;写在外面读就是**每帧重组整条首页**。 */
+            Box(
+                Modifier.fillMaxWidth().height(h)
+                    .graphicsLayer {
+                        val off = if (list.firstVisibleItemIndex == 0)
+                            list.firstVisibleItemScrollOffset.toFloat() else h.toPx()
+                        translationY = off * 0.42f
+                        alpha = (1f - off / (h.toPx() * 0.85f)).coerceIn(0f, 1f)
+                    }
+                    .clipToBounds()
+                    .pressable({ open(cur) })
+            ) {
+                // 换片交叉淡入:两张图不是「换」而是「化」
+                Crossfade(cur.id, animationSpec = lpTween(T.T10), label = "heroImg") { id ->
+                    NetImage(
+                        app.imageUrl(id, "Backdrop", 720), null,
+                        Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z },
+                        corner = 0.dp, scale = ContentScale.Crop,
+                    )
+                }
+                /* 上下两头压暗:上头是给状态栏的时间和信号留可读性(**不是给它留黑底**),
+                   下头是把图化进页面底色 —— 中间那 26% 完全不压,画面要露出来 */
+                Box(
+                    Modifier.fillMaxSize().background(
+                        Brush.verticalGradient(
+                            0.00f to c.bg.copy(alpha = .60f),
+                            0.14f to c.bg.copy(alpha = .30f),
+                            0.40f to Color.Transparent,
+                            0.72f to c.bg.copy(alpha = .62f),
+                            0.99f to c.bg,
+                        )
+                    )
                 )
-                Box(Modifier.fillMaxSize().background(
-                    Brush.verticalGradient(0f to Color.Transparent, 0.55f to c.bg.copy(alpha = .55f), 1f to c.bg)
-                ))
                 Column(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(Sp.x16),
+                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .padding(horizontal = Sp.x20, vertical = Sp.x10),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text(it.name, color = c.fg, fontSize = 24.sp, fontWeight = FontWeight.Bold,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(Sp.x6))
-                    Dim3(listOfNotNull(
-                        it.year?.toString(),
-                        it.rating?.let { r -> "★ %.1f".format(r) },
-                        it.genres.take(2).joinToString(" · ").takeIf { g -> g.isNotEmpty() },
-                    ).joinToString("  ·  "))
-                    Spacer(Modifier.height(Sp.x10))
-                    Row(horizontalArrangement = Arrangement.spacedBy(Sp.x6)) {
+                    Text(
+                        cur.cardTitle, color = c.fg, fontSize = 29.sp,
+                        fontWeight = FontWeight.Bold, lineHeight = 33.sp,
+                        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(Sp.x8))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(Sp.x8),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        cur.rating?.takeIf { it > 0 }?.let {
+                            Text("★ %.1f".format(it), color = c.acc, fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold)
+                        }
+                        listOfNotNull(
+                            cur.year?.toString(),
+                            cur.genres.take(2).joinToString(" ").takeIf { it.isNotEmpty() },
+                        ).forEach { Text(it, color = c.fg2, fontSize = 12.sp, maxLines = 1) }
+                    }
+                    Spacer(Modifier.height(Sp.x12))
+                    // 点位:选中那颗**长成一条**,不是换个颜色
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         items.indices.forEach { i ->
-                            Box(Modifier.size(if (i == idx % items.size) 16.dp else 6.dp, 4.dp)
-                                .clip(RoundedCornerShape(R.pill))
-                                .background(if (i == idx % items.size) c.acc else c.line2)
-                                .pressable({ idx = i }))
+                            val on = i == idx % items.size
+                            val w by animateDpAsState(
+                                if (on) 17.dp else 5.dp,
+                                lpTween(T.T6, LpEasing.emphasizedDecelerate), label = "dotW",
+                            )
+                            Box(
+                                Modifier.size(w, 5.dp).clip(RoundedCornerShape(R.pill))
+                                    .background(if (on) c.fg else c.fg.copy(alpha = .38f))
+                                    .pressable({ idx = i })
+                            )
                         }
                     }
                 }
             }
-            // 自动换条目。交叉淡入靠 NetImage 自己的淡入(§2.2)
+            // 自动换条目
             LaunchedEffect(items) {
                 while (true) { kotlinx.coroutines.delay(7000); idx++ }
             }
@@ -282,13 +361,12 @@ private fun Hero(block: Block<List<Item>>, open: (Item) -> Unit) {
     }
 }
 
+/** 媒体库入口条。**图标那格是琥珀圆底**,一排卡看下来有个落点。 */
 @Composable
 private fun ViewsRow(views: List<View>, nav: NavController) {
     val c = Lp.colors
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().padding(start = Sp.x16, top = Sp.x12, bottom = Sp.x8)) {
-            Text("媒体库", color = c.fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        }
+        SectionTitle("媒体库")
         LazyRow(
             Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = Sp.x16),
@@ -298,11 +376,14 @@ private fun ViewsRow(views: List<View>, nav: NavController) {
                 Row(
                     Modifier.width(150.dp).clip(RoundedCornerShape(R.md)).background(c.s1)
                         .pressable({ nav.navigate(Route.Library(v.id, v.name)) })
-                        .padding(Sp.x12),
+                        .padding(Sp.x10),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(iconFor(v.collectionType), null, Modifier.size(20.dp), tint = c.acc)
-                    Spacer(Modifier.width(Sp.x8))
+                    Box(
+                        Modifier.size(30.dp).clip(RoundedCornerShape(R.sm)).background(c.accDim),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(iconFor(v.collectionType), null, Modifier.size(16.dp), tint = c.acc) }
+                    Spacer(Modifier.width(Sp.x10))
                     Text(v.name, color = c.fg, fontSize = 13.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
                 }
@@ -328,7 +409,7 @@ internal fun args(vararg pairs: Pair<String, Any>): JsonObject =
         }
     })
 
-private fun <T, Rn> Block<T>.map(f: (T) -> Rn): Block<Rn> = when (this) {
+internal fun <T, Rn> Block<T>.map(f: (T) -> Rn): Block<Rn> = when (this) {
     is Block.Loading -> Block.Loading
     is Block.Fail -> this
     is Block.Ok -> Block.Ok(f(value))

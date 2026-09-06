@@ -13,6 +13,8 @@ import xyz.linplayer.app.ui.pages.Version
 import xyz.linplayer.app.ui.pages.defaultVersion
 import xyz.linplayer.app.ui.pages.fmtTime
 import xyz.linplayer.app.ui.pages.withScheme
+import xyz.linplayer.app.ui.theme.pickTone
+import xyz.linplayer.app.ui.theme.rgbToHsv
 
 /**
  * UI 层的纯逻辑。**跑在 JVM 上,不需要设备。**
@@ -129,6 +131,42 @@ class LogicTest {
         assertEquals("12:34", fmtTime(754.0))
         assertEquals("1:00:05", fmtTime(3605.0))
     }
+
+    /* ───────────────── 封面取色 ───────────────── */
+
+    /**
+     * ☠ **色相要按圆周平均,不能按算术平均。**
+     *
+     * 红色跨 0°/360°:一半像素在 355°、一半在 5°,算术平均得 180° —— 那是**青色**,
+     * 正好是红的补色。详情页整页会染成青的,而代码看起来完全正常。
+     */
+    @Test
+    fun `取色_红色跨零度不会平均成青色`() {
+        val px = IntArray(200) { if (it % 2 == 0) 0xC81020 else 0xC82010 }
+        val hsv = rgbToHsv2(pickTone(px)!!)
+        assertTrue("色相应落在红区(±30°),实得 ${hsv[0]}", hsv[0] < 30f || hsv[0] > 330f)
+    }
+
+    /** 灰度图取不出色 —— **返回 null 让调用方回落主题色**,不要挑出一个噪点色。 */
+    @Test
+    fun `取色_灰度图返回null`() {
+        assertNull(pickTone(IntArray(200) { 0x3A3A3A }))
+        assertNull(pickTone(IntArray(200) { 0x000000 }))
+    }
+
+    /**
+     * 出来的色必须**能当底色**:太亮压不住白字,太灰等于没取色。
+     * 输入是一张刺眼的荧光绿 —— clamp 没生效的话这一条会红。
+     */
+    @Test
+    fun `取色_钳到能当底色的明度和饱和度`() {
+        val hsv = rgbToHsv2(pickTone(IntArray(200) { 0x00FF00 })!!)
+        assertTrue("饱和度 ${hsv[1]} 该在 .42~.80", hsv[1] in 0.42f..0.80f)
+        assertTrue("明度 ${hsv[2]} 该在 .42~.68", hsv[2] in 0.42f..0.68f)
+    }
+
+    private fun rgbToHsv2(rgb: Int) =
+        rgbToHsv((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF)
 
     private fun item(json: String): Item? = Item.from(Json.parseToJsonElement(json))
 }

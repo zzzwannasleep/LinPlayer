@@ -38,23 +38,33 @@ data class LpColors(
     val isDark: Boolean,
 )
 
+/*
+ * 调色板照 docs 的手机端草稿(Draft 04「去边界」)。
+ *
+ * ★ **s1/s2/s3 和 line 全是半透明白**,不是不透明色号。
+ *   草稿的核心手法是「分层替代描边」—— 卡片靠一层更亮的膜浮起来,
+ *   不靠一圈 1px 边框框住。写成不透明色号的话,叠在取色底上就成了一块死灰补丁。
+ */
 private val Dark = LpColors(
-    bg = Color(0xFF0E0E13), s1 = Color(0xFF17171E), s2 = Color(0xFF1E1E27), s3 = Color(0xFF262630),
-    line = Color(0xFF26262F), line2 = Color(0xFF383843),
-    fg = Color(0xFFF4F4F8), fg2 = Color(0xFFA3A3B4), fg3 = Color(0xFF6B6B7C),
-    acc = Color(0xFF5B8CFF), accDim = Color(0x295B8CFF), accFg = Color(0xFFFFFFFF),
-    ok = Color(0xFF37C26A), warn = Color(0xFFE0A95B), bad = Color(0xFFFF5F56),
-    scrim = Color(0xB30E0E13), chip = Color(0x8C17171E), isDark = true,
+    bg = Color(0xFF100E14),
+    s1 = Color(0x0EFFFFFF), s2 = Color(0x1AFFFFFF), s3 = Color(0x26FFFFFF),
+    line = Color(0x12FFFFFF), line2 = Color(0x24FFFFFF),
+    fg = Color(0xFFF3EFF8), fg2 = Color(0xFF9B93AE), fg3 = Color(0xFF6E6880),
+    // 强调色是**琥珀**不是蓝:草稿里评分、进度、选中态、主按钮渐变都吃它
+    acc = Color(0xFFF5A524), accDim = Color(0x2EF5A524), accFg = Color(0xFF20160A),
+    ok = Color(0xFF5CD6A0), warn = Color(0xFFF5A524), bad = Color(0xFFFF6B5E),
+    scrim = Color(0xB3100E14), chip = Color(0x8C1A1720), isDark = true,
 )
 
-// 浅色不是纯白:墨色带暖偏、底色是米黄护眼纸(语义与 UI_PC.md §1.1 对齐)
+// 浅色:同一套语义翻个面。**琥珀在白底上要压暗**,#F5A524 放浅底上是看不清的
 private val Light = LpColors(
-    bg = Color(0xFFF1ECE2), s1 = Color(0xFFFBF8F1), s2 = Color(0xFFF5F0E6), s3 = Color(0xFFEAE2D2),
-    line = Color(0xFFE4DCCC), line2 = Color(0xFFD6CCB6),
-    fg = Color(0xFF2A2622), fg2 = Color(0xFF6E6559), fg3 = Color(0xFF9C9284),
-    acc = Color(0xFF3F73D6), accDim = Color(0x213F73D6), accFg = Color(0xFFFFFFFF),
-    ok = Color(0xFF3E9E6E), warn = Color(0xFFC98A2E), bad = Color(0xFFC7554E),
-    scrim = Color(0xB3F1ECE2), chip = Color(0xBDFFFFFF), isDark = false,
+    bg = Color(0xFFFAF7FC),
+    s1 = Color(0x0B000000), s2 = Color(0x13000000), s3 = Color(0x1E000000),
+    line = Color(0x0F000000), line2 = Color(0x1F000000),
+    fg = Color(0xFF1A1622), fg2 = Color(0xFF6B6478), fg3 = Color(0xFF9A93A8),
+    acc = Color(0xFF8A5A00), accDim = Color(0x1F8A5A00), accFg = Color(0xFFFFFBF2),
+    ok = Color(0xFF1F7A55), warn = Color(0xFF8A5A00), bad = Color(0xFFC7554E),
+    scrim = Color(0xB3FAF7FC), chip = Color(0xC7FFFFFF), isDark = false,
 )
 
 /** 间距刻度。**允许的值只有这些** */
@@ -75,8 +85,17 @@ object Dim {
     val tabBar = 58.dp
     val tap = 48.dp
     val hairline = 1.dp
-    val posterRow = 214.dp   // 海报轨总高(卡 2:3 + 两行字)。★ LazyRow 嵌在 LazyColumn 里必须给定高
-    val thumbRow = 148.dp
+    val posterRow = 196.dp   // 海报轨总高(卡 2:3 + 两行字)。★ LazyRow 嵌在 LazyColumn 里必须给定高
+    val thumbRow = 146.dp
+
+    /* 草稿里那几块「铺到屏幕顶」的图。它们不是间距,是**版面高度**,
+       所以抽成具名常量 —— 改了 Hero 高度而没改让位高度的话,底下第一条轨会被压住。 */
+    val heroHome = 392.dp    // 首页 Hero(草稿 01)
+    val coverLib = 212.dp    // 媒体库库头(草稿 02)
+    val coverDetail = 236.dp // 剧/影详情页背景图(草稿 03)
+
+    /** 底栏总高:三个 Tab + 手势条。**内容从它下面穿过去**,所以列表要按它留白。 */
+    val tabClearance = 76.dp
 }
 
 val LocalLpColors = staticCompositionLocalOf { Dark }

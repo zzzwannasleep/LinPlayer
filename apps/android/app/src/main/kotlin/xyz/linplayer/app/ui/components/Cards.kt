@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -118,7 +119,7 @@ fun MediaCard(
     val c = Lp.colors
     val haptic = LocalHapticFeedback.current
     var menuOpen by remember { mutableStateOf(false) }
-    val width = if (thumb) 208.dp else 118.dp
+    val width = if (thumb) 186.dp else 104.dp
 
     // 整卡读成一条:TalkBack 逐个念「图片」「标题」「年份」是噪音
     Column(m.width(width).semantics(mergeDescendants = true) { }) {
@@ -165,13 +166,13 @@ private fun Badge(item: Item, m: Modifier) {
     val c = Lp.colors
     when {
         item.isSeries && item.unplayed > 0 -> Box(
-            m.clip(RoundedCornerShape(R.pill)).background(c.acc).padding(horizontal = 6.dp, vertical = 1.dp),
-        ) { Text(item.unplayed.toString(), color = c.accFg, fontSize = 10.sp) }
+            m.clip(RoundedCornerShape(R.pill)).background(Color(0xFF2C7BE5)).padding(horizontal = 6.dp, vertical = 1.dp),
+        ) { Text(item.unplayed.toString(), color = Color.White, fontSize = 10.sp) }
 
         item.played -> Box(
             m.size(18.dp).clip(RoundedCornerShape(R.pill)).background(c.ok),
             contentAlignment = Alignment.Center,
-        ) { Icon(LpIcons.check, "已看完", Modifier.size(11.dp), tint = c.accFg) }
+        ) { Icon(LpIcons.check, "已看完", Modifier.size(11.dp), tint = Color(0xFF062418)) }
 
         !item.isSeries && item.rating != null -> Box(
             m.clip(RoundedCornerShape(R.pill)).background(c.chip).padding(horizontal = 6.dp, vertical = 1.dp),
@@ -241,7 +242,7 @@ fun LpRowSkeleton(title: String? = null, thumb: Boolean = false, m: Modifier = M
             horizontalArrangement = Arrangement.spacedBy(Sp.x10),
         ) {
             repeat(4) {
-                Column(Modifier.width(if (thumb) 208.dp else 118.dp)) {
+                Column(Modifier.width(if (thumb) 186.dp else 104.dp)) {
                     Skeleton(Modifier.fillMaxWidth().aspectRatio(if (thumb) 16f / 9f else 2f / 3f))
                     Spacer(Modifier.height(Sp.x8))
                     SkeletonLine(78.dp)
@@ -251,19 +252,16 @@ fun LpRowSkeleton(title: String? = null, thumb: Boolean = false, m: Modifier = M
     }
 }
 
+/** 轨道标题。**和详情页的章节标题同一个手法**(左边一条琥珀竖条)—— 一页的手法整站要跟上。 */
 @Composable
 private fun RowHeader(title: String, onMore: (() -> Unit)?) {
-    Row(
-        Modifier.fillMaxWidth().padding(start = Sp.x16, end = Sp.x4, top = Sp.x12, bottom = Sp.x8),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        H2(title, Modifier.weight(1f))
-        if (onMore != null) Row(
-            Modifier.pressable(onMore).padding(horizontal = Sp.x12, vertical = Sp.x8),
+    SectionTitle(title, trailing = if (onMore == null) null else ({
+        Row(
+            Modifier.pressable(onMore).padding(horizontal = Sp.x8, vertical = Sp.x6),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Dim3("更多")
             Icon(LpIcons.chevR, null, Modifier.size(15.dp), tint = Lp.colors.fg3)
         }
-    }
+    }))
 }

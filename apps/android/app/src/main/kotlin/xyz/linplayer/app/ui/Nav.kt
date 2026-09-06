@@ -29,7 +29,10 @@ object Route {
     @Serializable data object Calendar                                        // U1.14b
     @Serializable data object Settings                                        // U1.15
     @Serializable data class SettingsSub(val group: String)                   // U1.15 二级
-    @Serializable data class Player(val itemId: String, val title: String)    // U1.6
+    /** U1.6。`versionId` = 详情页选中的 MediaSource —— 不传就让核心层按版本正则自己挑。 */
+    @Serializable data class Player(
+        val itemId: String, val title: String, val versionId: String? = null,
+    )
     @Serializable data object AddServer                                       // U1.2 的「添加」版式
 }
 

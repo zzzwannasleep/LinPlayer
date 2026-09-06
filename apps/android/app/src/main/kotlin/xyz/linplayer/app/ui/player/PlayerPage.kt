@@ -58,8 +58,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import xyz.linplayer.app.data.LocalApp
+import xyz.linplayer.app.data.arr
 import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.dbl
+import xyz.linplayer.app.data.long
 import xyz.linplayer.app.data.obj
 import xyz.linplayer.app.data.str
 import xyz.linplayer.app.ui.Route
@@ -126,8 +128,13 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         // 通知权限在**这里**要,不在冷启动时要(U1.27):它只在后台播放挂通知栏时有意义
         (activity as? xyz.linplayer.app.MainActivity)?.askNotificationPermission()
         app.wantsPip = true
-        runCatching { app.call("player.play", args("item_id" to route.itemId)) }
-            .onFailure { app.report(it) }
+        runCatching {
+            // 详情页选了版本就带上。没选就传空 —— **不许自己回落 versions[0]**,
+            // 那会把核心层的版本正则整个跳过
+            app.call("player.play", if (route.versionId == null)
+                args("item_id" to route.itemId)
+            else args("item_id" to route.itemId, "media_source_id" to route.versionId))
+        }.onFailure { app.report(it) }
     }
 
     // 订阅 player.status(4 Hz)。**不轮询**
@@ -201,10 +208,38 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         }
     }
 
-    // 横屏时锁掉系统栏。竖屏保留(下面是内容区)
-    DisposableEffect(portrait) {
-        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        onDispose { }
+    /* ☠ **方向跟着视频比例走,不让用户自己转**【用户定 2026-09-06】。
+       横片点播放就自动横过来,竖片保持竖屏 —— 「竖屏起播、横屏观看」是脱裤子放屁。
+
+       ★ 判据在**起播之前**就拿得到:`emby.itemDetail` 走的那条链里,
+         `emby.itemMedia` 的 Video 流带着 width / height。等首帧再转的话
+         用户会先看见一次竖屏闪动,那正是这条要消灭的东西。
+       ★ 拿不到宽高(strm / 网盘源常见)就**什么都不做**,按当前方向起播,
+         首帧到了再纠正一次 —— 不许瞎猜一个方向锁上去。
+       ★ 用户手动转了就交还系统:锁死会变成「我想竖着看都不行」。 */
+    var wantLandscape by remember(route.itemId) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(route.itemId) {
+        val v = runCatching { app.call("emby.itemMedia", args("item_id" to route.itemId)) }
+            .getOrNull().arr().firstOrNull().obj()
+        val vid = v?.get("streams").arr().map { it.obj() }
+            .firstOrNull { it.str("type_") == "Video" }
+        val w = vid.long("width") ?: return@LaunchedEffect
+        val h = vid.long("height") ?: return@LaunchedEffect
+        if (w > 0 && h > 0) wantLandscape = w > h
+    }
+    DisposableEffect(wantLandscape) {
+        val a = activity
+        val want = wantLandscape
+        if (a != null && want != null) {
+            // SENSOR_* 而不是 *_LANDSCAPE:锁的是「横着」,不锁是哪一头朝上
+            a.requestedOrientation = if (want)
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
+        onDispose {
+            // 退出播放页恢复原方向。留着锁的话整个 App 都跟着横过来了
+            a?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     val c = Lp.colors
@@ -414,15 +449,29 @@ private fun LandscapeOsd(
 private fun step(cur: Double, dir: Int) =
     ((cur + dir * 0.25).coerceIn(SP_MIN, SP_MAX) * 100).toInt() / 100.0
 
-/** 横屏 chip:视觉 32dp,**命中区靠外边距撑到 44dp**(UI_MOBILE.md §1.5 的唯一例外)。 */
+/**
+ * OSD 上的一颗功能钮。
+ *
+ * ★ **拆掉灰底,只剩字**(草稿 05 第 2 条)。五个灰方块并排是上一稿最像网页工具条的地方,
+ *   而画面才是这一页的主角 —— 常态的按钮不该在画面上盖出五块补丁。
+ * ★ 只有**开着**的功能才有一层琥珀底:那是这一屏唯一需要一眼看出来的状态。
+ * ★ 命中区靠外边距撑到 44dp(UI_MOBILE.md §1.5 的唯一例外)。
+ */
 @Composable
-private fun Chip32(label: String, onClick: () -> Unit) {
+private fun Chip32(label: String, onClick: () -> Unit, on: Boolean = false) {
     Box(
         Modifier.padding(6.dp).clip(RoundedCornerShape(R.pill))
-            .background(Lp.colors.chip).pressable(onClick)
+            .background(if (on) Lp.colors.acc.copy(alpha = .22f) else Color.Transparent)
+            .pressable(onClick)
             .padding(horizontal = Sp.x12, vertical = Sp.x6),
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = Color.White, fontSize = 12.sp, maxLines = 1) }
+    ) {
+        Text(
+            label, color = if (on) Color(0xFFFFD98A) else Color.White.copy(alpha = .88f),
+            fontSize = 12.5.sp, maxLines = 1,
+            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
 }
 
 /**
@@ -447,7 +496,11 @@ private fun ProgressBar(position: Double, duration: Double, onSeek: (Double) -> 
         Row(Modifier.fillMaxWidth().padding(bottom = Sp.x6)) {
             Text(fmtTime(position), color = Color.White, fontSize = 11.sp)
             Spacer(Modifier.weight(1f))
-            Text(if (enabled) fmtTime(duration) else "--:--", color = Color.White, fontSize = 11.sp)
+            // 右边写**剩余**不写总长:看片的时候关心的是「还有多久」
+            Text(
+                if (enabled) "-" + fmtTime((duration - position).coerceAtLeast(0.0)) else "--:--",
+                color = Color.White, fontSize = 11.sp,
+            )
         }
     }
 }
