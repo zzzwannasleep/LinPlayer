@@ -57,6 +57,11 @@ echo "NDK: $NDK(API $MIN_API)"
 
 # ---- 编译期凭据与版本号(和 build-core.sh 同口径)-----------------------------
 SEAL="$( cd "$ROOT/core" && go run ./cmd/sealsecrets )"
+# ★★ 打印**注入了哪几个**(只打变量名,不打值)。
+#   没这一行的时候,「排行榜空白」到底是 CI 漏配、sealsecrets 封错,
+#   还是运行时解不开,**三者在日志里长得一模一样**(都是一片安静)。
+#   这行把第一种当场排掉。值绝不能打 —— CI 日志是公开的。
+echo "编译期凭据: $(sed -E 's/=[^ ]*//g; s/-X //g' <<< "$SEAL" | tr ' ' '\n' | sed 's/.*\.//' | paste -sd' ' -)"
 LP_VER="${LP_VERSION:-$(tr -d '[:space:]' < "$ROOT/VERSION")-dev}"
 VER_FLAG="-X linplayer/core/system.Version=$LP_VER"
 echo "版本: $LP_VER"

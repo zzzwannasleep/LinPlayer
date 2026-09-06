@@ -70,6 +70,7 @@ import xyz.linplayer.app.ui.components.BlockBox
 import xyz.linplayer.app.ui.components.Body
 import xyz.linplayer.app.ui.components.Dim3
 import xyz.linplayer.app.ui.components.EmptyState
+import xyz.linplayer.app.ui.components.ErrorState
 import xyz.linplayer.app.ui.components.GlassIcon
 import xyz.linplayer.app.ui.components.LpImmersive
 import xyz.linplayer.app.ui.components.NetImage
@@ -180,25 +181,30 @@ private data class Rank(
  * ★ 列表**零分隔线**:奇数行铺一层从左往右淡出的白 5%,右侧自然消失,不会在行尾切一刀。
  * ★ 取数失败必须**向上报错,不许吞成空表** —— 空表和失败在界面上长得一样,
  *   但一个该重试一个不该。
- * ★ 分类为空 = 这个构建**没注入榜单凭据**(本地 build 恒空),不是「加载中」。
- *   卡在骨架上是最坏的表现:用户会一直等下去。
+ * ★ 分类**空表**和**取不到**是两件事,界面上必须分得开:
+ *   空表 = 这个构建没注入榜单凭据(本地 build 恒空);取不到 = 命令本身失败了。
+ *   原来两者都画成「本地构建里没有它们」—— 于是 GitHub 构建的包(凭据是齐的)
+ *   一旦这条命令出错,用户看到的是一句**假话**,而真正的错误一个字都不显示。
+ *   卡在骨架上同样是最坏的表现:用户会一直等下去。
  */
 @Composable
 fun RankingPage(nav: NavController) {
     val app = LocalApp.current
     val list = rememberLazyListState()
-    var cats by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+    var cats by remember { mutableStateOf<Block<List<Pair<String, String>>>>(Block.Loading) }
     var cur by remember { mutableStateOf<String?>(null) }
     var block by remember { mutableStateOf<Block<List<Rank>>>(Block.Loading) }
+    var reload by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        cats = runCatching { app.call("emby.rankingCategories") }.getOrNull().arr()
-            .mapNotNull {
+    LaunchedEffect(reload) {
+        cats = app.block("emby.rankingCategories").map { e ->
+            e.arr().mapNotNull {
                 val o = it.obj() ?: return@mapNotNull null
                 // ★ 分类名的字段是 label,不是 name —— 取错了每个芯片都叫「榜单」
                 (o.str("id") ?: return@mapNotNull null) to (o.str("label") ?: "榜单")
             }
-        cur = cats?.firstOrNull()?.first
+        }
+        cur = cats.valueOrNull?.firstOrNull()?.first
     }
     LaunchedEffect(cur) {
         val id = cur ?: return@LaunchedEffect
@@ -218,12 +224,24 @@ fun RankingPage(nav: NavController) {
         GlassIcon(LpIcons.search, "搜索") { nav.navigate(Route.Search()) }
     }) { pad ->
         ToneStage(GOLD, EMBER) {
-            val cs = cats
+            val cf = cats
+            if (cf is Block.Fail && !cf.isSilent) {
+                Column {
+                    BigTitle("排行榜")
+                    // ★ 原样显示核心层那句话。**别替它改写成「没有凭据」** ——
+                    //   那正是把一个真错误藏起来的写法
+                    ErrorState(cf.message, { reload++ })
+                }
+                return@ToneStage
+            }
+            val cs = cats.valueOrNull
             if (cs != null && cs.isEmpty()) {
                 Column {
                     BigTitle("排行榜")
                     EmptyState("这个版本没有可用的榜单",
-                        "榜单要靠弹弹Play / TMDB 的凭据,本地构建里没有它们。", LpIcons.trophy)
+                        "榜单要靠弹弹Play / TMDB 的编译期凭据。本地构建里没有它们;" +
+                            "发行包里有,如果这里还是空的,那就是凭据没进这次构建。",
+                        LpIcons.trophy)
                 }
                 return@ToneStage
             }
