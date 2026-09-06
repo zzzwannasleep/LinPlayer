@@ -100,7 +100,7 @@ func SetSurface(kind int32, handle int64, width, height int32) int32 {
 	// 同一个 Surface 只是尺寸变了:**不重设 wid**。重设会让 vo 整个重建,
 	// 表现是转屏时黑一帧;mpv 靠 android-surface-size 就能跟上。
 	if handle == surfWid {
-		setProp(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
+		setSurfProp(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
 		return 0
 	}
 	detachLocked(h)
@@ -111,8 +111,8 @@ func SetSurface(kind int32, handle int64, width, height int32) int32 {
 		return -1
 	}
 	setOpt(h, "force-window", "yes")
-	setProp(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
-	if rc := setProp(h, "vo", "gpu"); rc < 0 {
+	setSurfProp(h, "android-surface-size", fmt.Sprintf("%dx%d", width, height))
+	if rc := setSurfProp(h, "vo", "gpu"); rc < 0 {
 		bus.Logf("error", "mpv vo=gpu 没设上(错误码 %d)", rc)
 		return -1
 	}
@@ -128,7 +128,7 @@ func detachLocked(h unsafe.Pointer) {
 	if surfWid == 0 {
 		return
 	}
-	setProp(h, "vo", "null")
+	setSurfProp(h, "vo", "null")
 	setOpt(h, "force-window", "no")
 	setOpt(h, "wid", "0")
 	// ★ 同步屏障:读一次属性,等核心把上面两条处理完。
@@ -149,8 +149,8 @@ func setOpt(h unsafe.Pointer, k, v string) int {
 	return int(C.mpv_set_option_string(h, ck, cv))
 }
 
-// setProp 改**运行期属性**—— 和 setOpt 不是一回事,区别见 SetSurface 头上那段。
-func setProp(h unsafe.Pointer, k, v string) int {
+// setSurfProp 改**运行期属性**—— 和 setOpt 不是一回事,区别见 SetSurface 头上那段。
+func setSurfProp(h unsafe.Pointer, k, v string) int {
 	ck, cv := C.CString(k), C.CString(v)
 	defer C.free(unsafe.Pointer(ck))
 	defer C.free(unsafe.Pointer(cv))
