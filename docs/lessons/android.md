@@ -423,3 +423,24 @@ Range,拼错的表现是「跳到没缓冲的位置就卡死」(见 `network.md`
 
 安卓侧同理:整页只有三处 `if`(视频层 / 状态从哪来 / 控制发给谁)。
 `engine` 进播放页时读一次就钉住 —— 播到一半换内核会让状态来源整套换掉。
+
+---
+
+### `//go:build android` 的文件,整套门禁一处都不编
+
+*(2026-09-06。类型:project)*
+
+`check-core.sh` 只编宿主平台。`core/player/surface_android.go`、
+`core/ffi/jni_android.go` 这类带 `//go:build android` 的文件,
+**本机跑完所有门禁全绿,推上去 CI 才红** —— 这一轮就是这么红的一次
+(一个 `setProp` 撞名,五行报错)。
+
+本机唯一能照到它的一条命令(约 1 分钟,NDK 装 Android Studio 就有):
+
+```bash
+source scripts/env.sh
+ANDROID_HOME=<SDK 路径> bash scripts/build-core-android.sh arm64-v8a
+```
+
+**改过 android 专属文件就跑它,再推。** 这和「桌面 check 照不到安卓」
+是同一个洞在 Go 栈上的形态 —— 那次连红三个提交。
