@@ -51,6 +51,10 @@ type Prefs struct {
 	SubLang    *string `json:"sub_lang"`
 	SubEnabled bool    `json:"sub_enabled"` // 默认 true
 
+	// DanmakuEnabled 弹幕开关。**默认 false** —— 弹幕要先匹配上才有内容,
+	// 默认开着的表现是每起播一次就往上游打一轮匹配请求,而九成片子匹配不上。
+	DanmakuEnabled bool `json:"danmaku_enabled"`
+
 	// 正则优先选择。空 = 不启用,回退到上面的语言偏好。
 	// 优先级:手动选过的 ＞ 正则命中 ＞ 语言/服务端默认。
 	//
@@ -206,6 +210,7 @@ type SkipRange struct {
 func DefaultPrefs() Prefs {
 	return Prefs{
 		SubEnabled:                   true,
+		DanmakuEnabled:               false,
 		CrossServerWritebackRange:    "all",
 		CrossServerWritebackProgress: true,
 		PrefetchThreads:              3,

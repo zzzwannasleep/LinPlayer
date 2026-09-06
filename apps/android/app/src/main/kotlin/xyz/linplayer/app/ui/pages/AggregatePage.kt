@@ -2,6 +2,7 @@ package xyz.linplayer.app.ui.pages
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,11 +31,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import kotlinx.serialization.json.JsonObject
 import xyz.linplayer.app.data.Item
 import xyz.linplayer.app.data.LocalApp
+import xyz.linplayer.app.data.arr
+import xyz.linplayer.app.data.bool
+import xyz.linplayer.app.data.long
+import xyz.linplayer.app.data.obj
 import xyz.linplayer.app.data.str
-import xyz.linplayer.app.data.strList
 import xyz.linplayer.app.ui.Route
 import xyz.linplayer.app.ui.components.Dim3
 import xyz.linplayer.app.ui.components.EmptyState
@@ -61,28 +64,23 @@ fun AggregatePage(nav: NavController) {
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
 
-    var groups by remember { mutableStateOf<List<Pair<String, List<Item>>>>(emptyList()) }
-    var failed by remember { mutableStateOf<List<String>>(emptyList()) }
-    var done by remember { mutableStateOf(false) }
-    var serverCount by remember { mutableStateOf(0) }
+    // 一台服务器一组:规模统计 + 继续观看
+    var groups by xyz.linplayer.app.data.keepState<List<Overview>>("agg.groups") { emptyList() }
+    var done by xyz.linplayer.app.data.keepState("agg.done") { false }
     var reload by remember { mutableStateOf(0) }
 
+    /* ☠ `emby.aggregateOverview` **不是流式的**,它一次性返回整张表。
+       这里原来给它挂了 onPartial 回调,又按 server / name / items 三个
+       **核心层根本不发**的字段名去取 —— 结果 groups 恒空,页面永远画
+       「添加更多服务器才有聚合」。真实字段是 server_name / counts / resume。
+       同一类错(响应字段名对不上)由 scripts/check-android-fields.py 守着。 */
     LaunchedEffect(reload) {
-        groups = emptyList(); failed = emptyList(); done = false
-        serverCount = xyz.linplayer.app.data.Account.list(
-            runCatching { app.call("account.listAccounts") }.getOrNull()).size
-        runCatching {
-            app.call("emby.aggregateOverview", null, onPartial = { p ->
-                val o = p as? JsonObject
-                val name = o.str("server") ?: o.str("name") ?: "服务器"
-                groups = groups + (name to Item.list(o?.get("items")))
-            })
-        }.onSuccess { failed = (it as? JsonObject).strList("failed") }
-            .onFailure { app.report(it) }
+        if (reload == 0 && groups.isNotEmpty()) return@LaunchedEffect
+        done = false
+        groups = runCatching { app.call("emby.aggregateOverview") }.getOrNull()
+            .arr().mapNotNull { Overview.from(it) }
         done = true
     }
-
-    LaunchedEffect(Unit) { app.invalidate.collect { if (it == "accounts" || it == "all") reload++ } }
 
     LpScaffold("聚合视界", scrolled = rememberScrolled(list), actions = {
         LpIconButton(LpIcons.search, "搜索") { nav.navigate(Route.Search()) }
@@ -95,26 +93,21 @@ fun AggregatePage(nav: NavController) {
                 LpRowSkeleton(); LpRowSkeleton()
             }
 
-            groups.forEach { (server, items) ->
-                item(server) {
-                    if (items.isEmpty()) Dim3("$server:没有内容", Modifier.padding(Sp.x16))
-                    else LpRow(server, items, { app.imageUrl(it.id, "Primary", 330) },
-                        { nav.navigate(Route.Detail(it.id, it.type)) },
+            groups.forEach { g ->
+                item("head-${g.serverId}") { ServerHead(g) }
+                if (g.resume.isNotEmpty()) item("resume-${g.serverId}") {
+                    LpRow("继续观看", g.resume, { app.imageUrl(it.id, "Primary", 220) },
+                        { nav.navigate(Route.Detail(it.id, it.type)) }, thumb = true,
                         menu = { cardActions(app, scope, it) })
                 }
             }
 
-            // 逐台标失败,不整页失败
-            if (failed.isNotEmpty()) item("failed") {
-                Dim3("这些服务器没拉到:${failed.joinToString("、")}", Modifier.padding(Sp.x16), maxLines = 3)
-            }
-
+            // ★ 单台服务器**照样能用**【用户定 2026-09-06】:聚合视界不是「多服专属」,
+            //   它是「跨源总览 + 快捷入口」。空态只在真的一台服都没有时出现。
             if (done && groups.isEmpty()) item("empty") {
                 EmptyState(
-                    if (serverCount <= 1) "添加更多服务器才有聚合" else "这些服务器上暂时没有内容",
-                    if (serverCount <= 1) "聚合视界把多台服务器的内容并排放在一起。现在只有一台。" else null,
-                    LpIcons.globe,
-                    actionLabel = if (serverCount <= 1) "去添加服务器" else null,
+                    "还没有添加服务器", "添加一台服务器之后,这里会显示它的规模和继续观看。",
+                    LpIcons.globe, actionLabel = "去添加服务器",
                     onAction = { nav.navigate(Route.AddServer) },
                 )
             }
@@ -147,5 +140,55 @@ private fun Shortcut(label: String, icon: ImageVector, m: Modifier, onClick: () 
         Icon(icon, null, Modifier.size(20.dp), tint = c.acc)
         Spacer(Modifier.height(Sp.x6))
         Text(label, color = c.fg2, fontSize = 11.sp)
+    }
+}
+
+/** 一台服务器的总览。字段名照 `core/aggregate/aggregate.go` 的 `SourceOverview`。 */
+@androidx.compose.runtime.Immutable
+private data class Overview(
+    val serverId: String,
+    val serverName: String,
+    val active: Boolean,
+    val movie: Long,
+    val series: Long,
+    val episode: Long,
+    val resume: List<Item>,
+) {
+    companion object {
+        fun from(e: kotlinx.serialization.json.JsonElement?): Overview? {
+            val o = e.obj() ?: return null
+            val counts = o["counts"].obj()
+            return Overview(
+                serverId = o.str("server_id") ?: return null,
+                serverName = o.str("server_name")?.takeIf { it.isNotBlank() } ?: "服务器",
+                active = o.bool("active"),
+                movie = counts.long("movie") ?: 0,
+                series = counts.long("series") ?: 0,
+                episode = counts.long("episode") ?: 0,
+                resume = Item.list(o["resume"]),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ServerHead(g: Overview) {
+    val c = Lp.colors
+    Row(
+        Modifier.fillMaxWidth().padding(start = Sp.x16, end = Sp.x16, top = Sp.x20, bottom = Sp.x6),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 当前生效的那台点一个圆点。**不写地址**【用户定】——地址只是内部键
+        if (g.active) Box(Modifier.size(6.dp).clip(RoundedCornerShape(R.pill)).background(c.acc))
+        if (g.active) Spacer(Modifier.width(Sp.x6))
+        Text(g.serverName, color = c.fg, fontSize = 16.sp,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.width(Sp.x10))
+        // 规模统计:0 的那一项整个不画,不写「电影 0」
+        Dim3(listOfNotNull(
+            g.movie.takeIf { it > 0 }?.let { "电影 $it" },
+            g.series.takeIf { it > 0 }?.let { "剧集 $it" },
+            g.episode.takeIf { it > 0 }?.let { "分集 $it" },
+        ).joinToString("  ·  "))
     }
 }

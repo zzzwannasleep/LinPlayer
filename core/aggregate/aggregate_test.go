@@ -123,7 +123,12 @@ func TestAggregate必须走生效线路(t *testing.T) {
 	}
 }
 
-// 单台失败隔离:一台连不上不该让整个搜索报错。
+// 单台失败隔离:一台连不上不该让整个搜索报错 —— 但**要说出来**。
+//
+// ☠ 这条判据 2026-09-06 改过:以前失败的那台**整条被丢掉**,
+// 于是「这台没有这部片」和「这台压根没搜成」在调用方看来一模一样,
+// 半失败(一路 429 一路回空)被吞成「没搜到」。现在失败的那台照样出一条,
+// Items 空 + Error 非空。
 func TestAggregateSearch单台失败隔离(t *testing.T) {
 	c := setup(t)
 	good := embyServer(t, "good", []string{"某片"}, false)
@@ -135,8 +140,18 @@ func TestAggregateSearch单台失败隔离(t *testing.T) {
 
 	var groups []ServerGroup
 	call(t, 201, "emby.aggregateSearch", map[string]any{"query": "某"}, &groups)
-	if len(groups) != 1 || groups[0].ServerID != good.URL {
-		t.Fatalf("一台挂了其余照出,实得 %+v", groups)
+	if len(groups) != 2 {
+		t.Fatalf("好的那台出结果、坏的那台出错误,共两条,实得 %+v", groups)
+	}
+	ok, bad := groups[0], groups[1]
+	if ok.ServerID != good.URL || len(ok.Items) == 0 || ok.Error != nil {
+		t.Fatalf("能连的那台该照出结果且无错误,实得 %+v", ok)
+	}
+	if bad.Error == nil || *bad.Error == "" {
+		t.Fatalf("连不上的那台必须带出错原因,否则调用方分不清「没有」和「没搜成」,实得 %+v", bad)
+	}
+	if len(bad.Items) != 0 {
+		t.Fatalf("带 Error 时 Items 必须为空,实得 %+v", bad)
 	}
 }
 

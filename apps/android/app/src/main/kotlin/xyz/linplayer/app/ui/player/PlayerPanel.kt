@@ -34,6 +34,8 @@ import xyz.linplayer.app.data.ToastKind
 import xyz.linplayer.app.data.arr
 import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.dbl
+import xyz.linplayer.app.data.long
+import xyz.linplayer.app.data.strList
 import xyz.linplayer.app.data.obj
 import xyz.linplayer.app.data.str
 import xyz.linplayer.app.ui.components.Dim3
@@ -67,24 +69,25 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
         loading = true; options = emptyList()
         when (kind) {
             "audio", "subtitle" -> {
-                val t = runCatching { app.call("player.tracks") }.getOrNull().obj()
+                // ☠ `player.tracks` 返回**裸数组**,轨道类型的字段名是 `kind` 不是 `type`。
+                //    两处都错的表现是音轨/字幕面板恒空,而且一句错都不报。
+                val t = runCatching { app.call("player.tracks") }.getOrNull()
                 val want = if (kind == "audio") "audio" else "sub"
-                options = t?.get("tracks").arr().mapNotNull {
+                options = t.arr().mapNotNull {
                     val o = it.obj() ?: return@mapNotNull null
-                    if (o.str("type") != want) return@mapNotNull null
+                    if (o.str("kind") != want) return@mapNotNull null
                     Triple(
                         o.str("id") ?: return@mapNotNull null,
                         o.str("lang"),
                         o.str("title") ?: o.str("lang") ?: "轨道",
                     )
                 }
-                current = t?.get("tracks").arr().firstOrNull { it.obj().bool("selected") }
-                    .obj().str("id")
+                current = t.arr().firstOrNull { it.obj().bool("selected") }.obj().str("id")
             }
             "source" -> {
                 val m = runCatching { app.call("emby.itemMedia", args("item_id" to itemId)) }
-                    .getOrNull().obj()
-                options = m?.get("versions").arr().mapNotNull {
+                    .getOrNull()
+                options = m.arr().mapNotNull {
                     val o = it.obj() ?: return@mapNotNull null
                     Triple(o.str("id") ?: return@mapNotNull null,
                         if (o.bool("preferred")) "推荐" else null, o.str("name") ?: "版本")
@@ -93,7 +96,8 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
             "episodes" -> {
                 val d = runCatching { app.call("emby.itemDetail", args("item_id" to itemId)) }
                     .getOrNull().obj()
-                val season = d.str("season_id") ?: d.str("parent_id")
+                // ★ 季的主键叫 season_id(核心层这次补上的);Emby 的 ParentId 不在详情里
+                val season = d.str("season_id")
                 if (season != null) {
                     // 播放中**只拉一屏 40 条**
                     options = Item.list(runCatching {
@@ -118,6 +122,9 @@ fun PlayerPanel(kind: String, itemId: String, onClose: () -> Unit) {
                     Triple("on", null, "打开弹幕"),
                     Triple("off", null, "关闭弹幕"),
                 )
+                // 回显当前状态:不回显的话开关看起来永远是「两个都没选」
+                current = if (runCatching { app.call("prefs.getPrefs") }
+                        .getOrNull().obj().bool("danmaku_enabled")) "on" else "off"
             }
             "shot" -> {
                 runCatching { app.call("player.screenshot") }
@@ -181,13 +188,60 @@ private suspend fun pick(app: xyz.linplayer.app.data.AppState, kind: String, id:
             "source" -> app.call("player.play", args("item_id" to itemId, "media_source_id" to id))
             "episodes" -> app.call("player.play", args("item_id" to id))
             "quality" -> app.call("player.setShaderLevel", args("level" to id))
-            // 弹幕开关不是「配置」:danmaku.setDanmakuConfig 收的是**弹幕源清单**。
-            // 开 / 关一路走播放器的弹幕层,核心层这条命令碰不到 —— 见 MOBILE_BLOCKERS B6
-            "danmaku" -> Unit
+            /* 弹幕开关走 player.setDanmakuEnabled(2026-09-06 新增)。
+               ☠ **不是** danmaku.setDanmakuConfig —— 那条收的是**弹幕源清单**,
+                 传 enabled 进去核心层只会报「缺少 sources」。
+               打开时顺手匹配一次本片的弹幕并灌进渲染层:开关只管开关,
+               取哪一集是 danmaku.* 的事,两件事不合成一条命令。 */
+            "danmaku" -> {
+                app.call("player.setDanmakuEnabled", args("enabled" to (id == "on")))
+                if (id == "on") loadDanmakuFor(app, itemId) else
+                    app.call("player.danmakuSet", argsEmptyItems())
+            }
             else -> Unit
         }
     }.onFailure { app.report(it) }
 }
+
+/**
+ * 匹配本片弹幕并灌进播放器。
+ *
+ * ★ 匹配不上**不弹错**:九成片子本来就没有弹幕,弹一次错等于骂用户一次。
+ *   `danmaku.autoLoad` 分不够时返回 null,那是正常结果不是失败。
+ */
+private suspend fun loadDanmakuFor(app: xyz.linplayer.app.data.AppState, itemId: String) {
+    val d = runCatching { app.call("emby.itemDetail", args("item_id" to itemId)) }
+        .getOrNull().obj() ?: return
+    // ★ autoLoad 收的是**嵌套的 input 对象**(MatchInput),不是平铺参数。
+    //   平铺传过去核心层只会报「缺少 input」。
+    val title = d.str("series_name") ?: d.str("name") ?: return
+    val input = buildMap<String, kotlinx.serialization.json.JsonElement> {
+        put("title", kotlinx.serialization.json.JsonPrimitive(title))
+        d.long("episode_no")?.let {
+            put("episode_no", kotlinx.serialization.json.JsonPrimitive(it))
+        }
+        d.long("season_no")?.let {
+            put("season_no", kotlinx.serialization.json.JsonPrimitive(it))
+        }
+        put("genres", kotlinx.serialization.json.JsonArray(
+            d.strList("genres").map { kotlinx.serialization.json.JsonPrimitive(it) }))
+    }
+    val items = runCatching {
+        app.call("danmaku.autoLoad", kotlinx.serialization.json.JsonObject(
+            mapOf("input" to kotlinx.serialization.json.JsonObject(input))))
+    }.getOrNull()
+    if (items == null || items is kotlinx.serialization.json.JsonNull) {
+        app.toast("这一集没匹配到弹幕")
+        return
+    }
+    runCatching {
+        app.call("player.danmakuSet",
+            kotlinx.serialization.json.JsonObject(mapOf("items" to items)))
+    }.onFailure { app.report(it) }
+}
+
+private fun argsEmptyItems() = kotlinx.serialization.json.JsonObject(
+    mapOf("items" to kotlinx.serialization.json.JsonArray(emptyList())))
 
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectTapClose(onClose: () -> Unit) {
     detectTapGestures { onClose() }

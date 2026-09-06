@@ -113,6 +113,8 @@ object LinPlayerCommandNames {
         "player.setMpvConf",
         "player.setMute",
         "player.setPause",
+        "player.danmakuSet",
+        "player.setDanmakuEnabled",
         "player.setPlaybackPrefs",
         "player.setScreenshotDir",
         "player.setSecondarySub",
@@ -139,6 +141,7 @@ object LinPlayerCommandNames {
         "source.currentSource",
         "source.listDir",
         "source.login",
+        "source.formSchema",
         "source.mediaDetail",
         "source.play",
         "source.search",
@@ -384,7 +387,7 @@ suspend fun LinPlayerCommands.accountTestConnection(args: Map<String, Any?>? = n
 suspend fun LinPlayerCommands.accountUpdateAccount(args: Map<String, Any?>? = null): JsonElement =
     call("account.updateAccount", args)
 
-// ---- 播放器 · player.* (42 条) ----
+// ---- 播放器 · player.* (44 条) ----
 suspend fun LinPlayerCommands.playerAddSubtitle(args: Map<String, Any?>? = null): JsonElement =
     call("player.addSubtitle", args)
 suspend fun LinPlayerCommands.playerChapterInfo(args: Map<String, Any?>? = null): JsonElement =
@@ -427,6 +430,10 @@ suspend fun LinPlayerCommands.playerSetMute(args: Map<String, Any?>? = null): Js
     call("player.setMute", args)
 suspend fun LinPlayerCommands.playerSetPause(args: Map<String, Any?>? = null): JsonElement =
     call("player.setPause", args)
+suspend fun LinPlayerCommands.playerDanmakuSet(args: Map<String, Any?>? = null): JsonElement =
+    call("player.danmakuSet", args)
+suspend fun LinPlayerCommands.playerSetDanmakuEnabled(args: Map<String, Any?>? = null): JsonElement =
+    call("player.setDanmakuEnabled", args)
 suspend fun LinPlayerCommands.playerSetPlaybackPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("player.setPlaybackPrefs", args)
 suspend fun LinPlayerCommands.playerSetScreenshotDir(args: Map<String, Any?>? = null): JsonElement =
@@ -470,7 +477,7 @@ suspend fun LinPlayerCommands.playerWindowClose(args: Map<String, Any?>? = null)
 suspend fun LinPlayerCommands.playerWindowOpen(args: Map<String, Any?>? = null): JsonElement =
     call("player.windowOpen", args)
 
-// ---- 媒体源(浏览型 / 影视目录) · source.* (9 条) ----
+// ---- 媒体源(浏览型 / 影视目录) · source.* (10 条) ----
 suspend fun LinPlayerCommands.sourceCatalog(args: Map<String, Any?>? = null): JsonElement =
     call("source.catalog", args)
 suspend fun LinPlayerCommands.sourceCategories(args: Map<String, Any?>? = null): JsonElement =
@@ -481,6 +488,8 @@ suspend fun LinPlayerCommands.sourceListDir(args: Map<String, Any?>? = null): Js
     call("source.listDir", args)
 suspend fun LinPlayerCommands.sourceLogin(args: Map<String, Any?>? = null): JsonElement =
     call("source.login", args)
+suspend fun LinPlayerCommands.sourceFormSchema(args: Map<String, Any?>? = null): JsonElement =
+    call("source.formSchema", args)
 suspend fun LinPlayerCommands.sourceMediaDetail(args: Map<String, Any?>? = null): JsonElement =
     call("source.mediaDetail", args)
 suspend fun LinPlayerCommands.sourcePlay(args: Map<String, Any?>? = null): JsonElement =

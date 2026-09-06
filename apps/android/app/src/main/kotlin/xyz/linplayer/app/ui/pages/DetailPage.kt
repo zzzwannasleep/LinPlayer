@@ -117,7 +117,7 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                 else -> Block.Loading
             }
             val o = d.valueOrNull.obj()
-            favorite = o.bool("favorite") || o.bool("is_favorite")
+            favorite = o.bool("is_favorite")
             played = o.bool("played")
 
             val seriesId = o.str("series_id") ?: route.itemId.takeIf { route.type == "Series" }
@@ -136,7 +136,9 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
         }
         launch {
             val m = app.block("emby.itemMedia", args("item_id" to route.itemId))
-            versions = m.valueOrNull.obj()?.get("versions").arr().mapNotNull {
+            // ☠ `emby.itemMedia` 返回的是**裸数组** `[]MediaVersion`,不是 {versions:[…]}。
+            //    包一层去取的表现是版本表恒空 —— 而多版本片源正是要靠它选版本。
+            versions = m.valueOrNull.arr().mapNotNull {
                 val o = it.obj() ?: return@mapNotNull null
                 Version(o.str("id") ?: return@mapNotNull null, o.str("name") ?: "版本",
                     o.bool("preferred"))

@@ -44,9 +44,10 @@ import xyz.linplayer.app.data.Block
 import xyz.linplayer.app.data.Item
 import xyz.linplayer.app.data.LocalApp
 import xyz.linplayer.app.data.Page
+import xyz.linplayer.app.data.arr
 import xyz.linplayer.app.data.block
+import xyz.linplayer.app.data.obj
 import xyz.linplayer.app.data.str
-import xyz.linplayer.app.data.strList
 import xyz.linplayer.app.ui.Route
 import xyz.linplayer.app.ui.components.Dim3
 import xyz.linplayer.app.ui.components.EmptyState
@@ -79,17 +80,19 @@ fun SearchPage(nav: NavController, entry: NavBackStackEntry) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
 
-    var q by remember { mutableStateOf("") }
+    // 带 q 进来的(排行榜点条目)直接预填,不用用户再打一遍
+    var q by remember { mutableStateOf(route.q.orEmpty()) }
     var includeEpisodes by remember { mutableStateOf(false) }
     var aggregate by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Block<List<Item>>?>(null) }
-    /** 聚合的分组结果:服务器名 → 条目。流式来的,**收到 partial 就画**。 */
+    /** 聚合的分组结果:服务器名 → 条目。**一次性返回**,不是流式(核心层没有 partial)。 */
     var groups by remember { mutableStateOf<Map<String, List<Item>>>(emptyMap()) }
     var failedServers by remember { mutableStateOf<List<String>>(emptyList()) }
     var history by remember { mutableStateOf<List<String>>(emptyList()) }
     val focus = remember { FocusRequester() }
 
-    LaunchedEffect(Unit) { focus.requestFocus() }
+    // 预填了词就别抢焦点弹键盘 —— 用户是来看结果的,不是来打字的
+    LaunchedEffect(Unit) { if (route.q.isNullOrBlank()) focus.requestFocus() }
 
     // 防抖 250ms 后打**服务端**搜索。**不许**「拉全部库 → 全量拉条目 → 本地过滤」
     LaunchedEffect(Unit) {
@@ -99,22 +102,26 @@ fun SearchPage(nav: NavController, entry: NavBackStackEntry) {
                 if (text.length < 1) { result = null; groups = emptyMap(); return@collect }
                 result = Block.Loading; groups = emptyMap(); failedServers = emptyList()
                 if (agg && route.viewId == null) {
-                    // 聚合是**流式**的:每台服务器各自回各自渲染
-                    val r = runCatching {
-                        // ★ 聚合那条命令的开关叫 include_episodes(不是 types)——
-                        //   传错名字的表现是「包括集」这个开关永远不起作用,而且不报错
+                    /* ☠ `emby.aggregateSearch` **一次性返回整张表**,没有 partial。
+                       这里原来挂了 onPartial 又按 `server` / `failed` 取值,
+                       而核心层发的是 `server_name` / `items` —— 于是跨服搜索
+                       一组都画不出来,且不报错。 */
+                    result = runCatching {
                         app.call("emby.aggregateSearch", args(
+                            // ★ 聚合那条命令的开关叫 include_episodes(不是 types)
                             "query" to text,
                             "include_episodes" to eps,
-                        ), onPartial = { p ->
-                            val o = (p as? kotlinx.serialization.json.JsonObject)
-                            val name = o.str("server") ?: "服务器"
-                            groups = groups + (name to Item.list(o?.get("items")))
-                        })
-                    }
-                    result = r.fold({ v ->
-                        // result 携带的是汇总(失败哪些),不是数据的重复
-                        failedServers = (v as? kotlinx.serialization.json.JsonObject).strList("failed")
+                        ))
+                    }.fold({ v ->
+                        val gs = v.arr().mapNotNull { it.obj() }
+                        // 半失败(一路 429、一路回空)**不能吞成「没搜到」**:
+                        // 核心层现在会把失败的那台也发出来,带 error
+                        failedServers = gs.filter { it.str("error") != null }
+                            .map { it.str("server_name")?.takeIf { n -> n.isNotBlank() } ?: "服务器" }
+                        groups = gs.filter { it.str("error") == null }.associate { o ->
+                            (o.str("server_name")?.takeIf { n -> n.isNotBlank() } ?: "服务器") to
+                                Item.list(o["items"])
+                        }
                         Block.Ok(emptyList())
                     }, { Block.Fail("E_INTERNAL", it.message ?: "搜索失败") })
                 } else {

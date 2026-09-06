@@ -123,6 +123,8 @@ public static class LinPlayerCommandNames
         "player.setMpvConf",
         "player.setMute",
         "player.setPause",
+        "player.danmakuSet",
+        "player.setDanmakuEnabled",
         "player.setPlaybackPrefs",
         "player.setScreenshotDir",
         "player.setSecondarySub",
@@ -149,6 +151,7 @@ public static class LinPlayerCommandNames
         "source.currentSource",
         "source.listDir",
         "source.login",
+        "source.formSchema",
         "source.mediaDetail",
         "source.play",
         "source.search",
@@ -396,7 +399,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> AccountUpdateAccount(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("account.updateAccount", args, ct);
 
-    // ---- 播放器 · player.* (42 条) ----
+    // ---- 播放器 · player.* (44 条) ----
     public static Task<JsonElement> PlayerAddSubtitle(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.addSubtitle", args, ct);
     public static Task<JsonElement> PlayerChapterInfo(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -439,6 +442,10 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("player.setMute", args, ct);
     public static Task<JsonElement> PlayerSetPause(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.setPause", args, ct);
+    public static Task<JsonElement> PlayerDanmakuSet(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("player.danmakuSet", args, ct);
+    public static Task<JsonElement> PlayerSetDanmakuEnabled(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("player.setDanmakuEnabled", args, ct);
     public static Task<JsonElement> PlayerSetPlaybackPrefs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.setPlaybackPrefs", args, ct);
     public static Task<JsonElement> PlayerSetScreenshotDir(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -482,7 +489,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> PlayerWindowOpen(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("player.windowOpen", args, ct);
 
-    // ---- 媒体源(浏览型 / 影视目录) · source.* (9 条) ----
+    // ---- 媒体源(浏览型 / 影视目录) · source.* (10 条) ----
     public static Task<JsonElement> SourceCatalog(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.catalog", args, ct);
     public static Task<JsonElement> SourceCategories(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -493,6 +500,8 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("source.listDir", args, ct);
     public static Task<JsonElement> SourceLogin(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.login", args, ct);
+    public static Task<JsonElement> SourceFormSchema(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("source.formSchema", args, ct);
     public static Task<JsonElement> SourceMediaDetail(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("source.mediaDetail", args, ct);
     public static Task<JsonElement> SourcePlay(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

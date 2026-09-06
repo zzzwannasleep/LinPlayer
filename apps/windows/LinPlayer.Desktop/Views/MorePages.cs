@@ -429,6 +429,10 @@ public sealed class SettingsPage : PageBase
         var sub = new TextBox { Classes = { "field" }, Width = 220, Text = Str(p, "sub_lang") };
         var audio = new TextBox { Classes = { "field" }, Width = 220, Text = Str(p, "audio_lang") };
         var on = new CheckBox { Content = "默认开启字幕", IsChecked = Bool(p, "sub_enabled") };
+        // 弹幕开关。放在选轨这组里是因为它和「默认开字幕」是同一类:起播时的默认行为。
+        // 以前三端发的都是 danmaku.setDanmakuConfig(那条收的是**弹幕源清单**),
+        // 核心层当未知键忽略、照常返回成功 —— 一个永远不生效又不报错的开关。
+        var dm = new CheckBox { Content = "默认开启弹幕", IsChecked = Bool(p, "danmaku_enabled") };
         var hint = Dim("");
 
         var save = new Button { Classes = { "primary" }, Content = "保存" };
@@ -436,12 +440,13 @@ public sealed class SettingsPage : PageBase
         {
             try
             {
-                // 只送这三项。核心层也只改这三项 ——
+                // 只送这几项。核心层也只改这几项 ——
                 // 整体覆盖会把跨服续播之类的悄悄重置成默认值。
                 await core.PrefsSetPrefs(new
                 {
                     sub_lang = Nz(sub.Text), audio_lang = Nz(audio.Text),
                     sub_enabled = on.IsChecked == true,
+                    danmaku_enabled = dm.IsChecked == true,
                 });
                 hint.Text = "已保存。";
             }
@@ -454,7 +459,7 @@ public sealed class SettingsPage : PageBase
             Children =
             {
                 Dim("三字母语言码,如 chi / jpn / eng。留空表示不指定。"),
-                Field("字幕语言", sub), Field("音频语言", audio), on,
+                Field("字幕语言", sub), Field("音频语言", audio), on, dm,
                 new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10,
                     Children = { save, hint } },
             },

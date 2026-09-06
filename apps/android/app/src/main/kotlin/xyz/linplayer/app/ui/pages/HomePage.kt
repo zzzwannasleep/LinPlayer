@@ -55,6 +55,7 @@ import xyz.linplayer.app.data.LocalApp
 import xyz.linplayer.app.data.Page
 import xyz.linplayer.app.data.View
 import xyz.linplayer.app.data.block
+import xyz.linplayer.app.data.keepState
 import xyz.linplayer.app.ui.Route
 import xyz.linplayer.app.ui.components.CardAction
 import xyz.linplayer.app.ui.components.Dim3
@@ -88,16 +89,22 @@ fun HomePage(nav: NavController) {
     val scope = rememberCoroutineScope()
     val list = rememberLazyListState()
 
-    var hero by remember { mutableStateOf<Block<List<Item>>>(Block.Loading) }
-    var resume by remember { mutableStateOf<Block<List<Item>>>(Block.Loading) }
-    var nextUp by remember { mutableStateOf<Block<List<Item>>>(Block.Loading) }
-    var views by remember { mutableStateOf<Block<List<View>>>(Block.Loading) }
-    var latest by remember { mutableStateOf<Map<String, List<Item>>>(emptyMap()) }
-    var collections by remember { mutableStateOf<Block<List<Item>>>(Block.Loading) }
+    /* ☠ 这六份数据以前是 `remember`,而 `remember` 的寿命是 composition ——
+       点进任何一页再返回,首页**整个重拉一遍**(骨架闪一次、Hero 从第一张重来)。
+       底栏的 saveState/restoreState 保得住滚动位置(rememberSaveable),保不住它们。
+       换成 keepState 之后值活过页面销毁;新鲜度仍然只由 app.invalidate 推翻。 */
+    var hero by keepState<Block<List<Item>>>("home.hero") { Block.Loading }
+    var resume by keepState<Block<List<Item>>>("home.resume") { Block.Loading }
+    var nextUp by keepState<Block<List<Item>>>("home.nextUp") { Block.Loading }
+    var views by keepState<Block<List<View>>>("home.views") { Block.Loading }
+    var latest by keepState<Map<String, List<Item>>>("home.latest") { emptyMap() }
+    var collections by keepState<Block<List<Item>>>("home.collections") { Block.Loading }
     var reload by remember { mutableStateOf(0) }
 
-    // 每一块自己一个 launch:一块回来就画一块,谁也不等谁
+    // 每一块自己一个 launch:一块回来就画一块,谁也不等谁。
+    // ★ 已经有数据就不重拉 —— 只留住值而照样发请求,省的只是闪烁,不是往返。
     LaunchedEffect(reload) {
+        if (reload == 0 && views is Block.Ok) return@LaunchedEffect
         launch { hero = app.block("emby.listRandom", args("limit" to 5)).map { Item.list(it) } }
         launch { resume = app.block("emby.listResume", args("limit" to 12)).map { Item.list(it) } }
         launch { nextUp = app.block("emby.listNextUp", args("limit" to 20)).map { Item.list(it) } }

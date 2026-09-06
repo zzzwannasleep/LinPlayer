@@ -83,10 +83,11 @@ fun FavoritesPage(nav: NavController) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val grid = rememberLazyGridState()
-    var block by remember { mutableStateOf<Block<List<Item>>>(Block.Loading) }
+    var block by xyz.linplayer.app.data.keepState<Block<List<Item>>>("fav") { Block.Loading }
     var reload by remember { mutableStateOf(0) }
 
     LaunchedEffect(reload) {
+        if (reload == 0 && block is Block.Ok) return@LaunchedEffect
         block = when (val r = app.block("emby.listFavorites")) {
             is Block.Ok -> Block.Ok(Page.from(r.value).items)
             is Block.Fail -> r
@@ -231,140 +232,6 @@ fun DownloadsPage(nav: NavController) {
     }
 }
 
-/**
- * 排行榜(U1.14a)。
- *
- * ★ 取数失败必须**向上报错,不许吞成空表** —— 空表和失败在界面上长得一样,
- *   但一个该重试一个不该。
- * ★ **根本没有「排行榜开关」这个东西** —— 别去找,也别加。
- */
-@Composable
-fun RankingPage(nav: NavController) {
-    val app = LocalApp.current
-    val scope = rememberCoroutineScope()
-    val list = rememberLazyListState()
-    var cats by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var cur by remember { mutableStateOf<String?>(null) }
-    var block by remember { mutableStateOf<Block<List<Item>>>(Block.Loading) }
-
-    LaunchedEffect(Unit) {
-        cats = runCatching { app.call("emby.rankingCategories") }.getOrNull().arr()
-            .mapNotNull {
-                val o = it.obj() ?: return@mapNotNull null
-                (o.str("id") ?: return@mapNotNull null) to (o.str("name") ?: "榜单")
-            }
-        cur = cats.firstOrNull()?.first
-    }
-    LaunchedEffect(cur) {
-        val id = cur ?: return@LaunchedEffect
-        block = Block.Loading
-        block = when (val r = app.block("emby.rankingFetch", args("category_id" to id))) {
-            is Block.Ok -> Block.Ok(Page.from(r.value).items)
-            is Block.Fail -> r
-            else -> Block.Loading
-        }
-    }
-
-    LpScaffold("排行榜", onBack = { nav.popBackStack() }, scrolled = rememberScrolled(list)) { pad ->
-        Column(Modifier.fillMaxSize()) {
-            if (cats.size > 1) Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    .padding(horizontal = Sp.x16, vertical = Sp.x8),
-                horizontalArrangement = Arrangement.spacedBy(Sp.x8),
-            ) {
-                cats.forEach { (id, name) ->
-                    val on = id == cur
-                    Text(name, Modifier.clip(RoundedCornerShape(R.pill))
-                        .background(if (on) Lp.colors.acc else Lp.colors.s2)
-                        .pressable({ cur = id }).padding(horizontal = Sp.x16, vertical = Sp.x8),
-                        color = if (on) Lp.colors.accFg else Lp.colors.fg2, fontSize = 13.sp)
-                }
-            }
-            BlockBox(block, { cur = cur }) { items ->
-                if (items.isEmpty()) EmptyState("暂无榜单数据", "这个榜单现在是空的。", LpIcons.trophy)
-                else LazyColumn(Modifier.fillMaxSize(), list, contentPadding = pad) {
-                    itemsIndexed(items, key = { _, x -> x.id }) { i, item ->
-                        Row(Modifier.fillMaxWidth()
-                            .pressable({ nav.navigate(Route.Detail(item.id, item.type)) })
-                            .padding(horizontal = Sp.x16, vertical = Sp.x8),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("${i + 1}", Modifier.width(28.dp),
-                                color = if (i < 3) Lp.colors.acc else Lp.colors.fg3, fontSize = 15.sp)
-                            NetImage(app.imageUrl(item.id, "Primary", 220), null, Modifier.size(64.dp, 96.dp))
-                            Spacer(Modifier.width(Sp.x12))
-                            Column(Modifier.weight(1f)) {
-                                Body(item.cardTitle, maxLines = 2)
-                                item.cardSub?.let { s -> Dim3(s, Modifier.padding(top = Sp.x2)) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * 追剧日历(U1.14b · 付费)。手机竖屏默认「本日」视图。
- *
- * ☠ **赞助地址必须来自 `system.afdianSponsorUrl`,不许硬编。**
- * 2026-07-19 就栽在这:UI 里写死了一个凭空猜的主页,功能看着完全正常,
- * 而**赞助收益是零**。收款地址只能有一份。
- */
-@Composable
-fun CalendarPage(nav: NavController) {
-    val app = LocalApp.current
-    val list = rememberLazyListState()
-    var today by remember { mutableStateOf<Block<List<Triple<String, String, String>>>>(Block.Loading) }
-    var sponsorUrl by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(Unit) {
-        sponsorUrl = runCatching { app.call("system.afdianSponsorUrl") }
-            .getOrNull().obj().str("url")
-        today = when (val r = app.block("sync.bangumiCalendar")) {
-            is Block.Ok -> Block.Ok(r.value.arr().flatMap { day ->
-                val o = day.obj()
-                o?.get("items").arr().mapNotNull {
-                    val x = it.obj() ?: return@mapNotNull null
-                    Triple(
-                        x.str("name_cn")?.takeIf { s -> s.isNotBlank() } ?: x.str("name") ?: return@mapNotNull null,
-                        x.str("air_time") ?: "待定",
-                        o.str("weekday") ?: "",
-                    )
-                }
-            })
-            is Block.Fail -> r
-            else -> Block.Loading
-        }
-    }
-
-    LpScaffold("追剧日历", onBack = { nav.popBackStack() }, scrolled = rememberScrolled(list)) { pad ->
-        BlockBox(today, null) { rows ->
-            if (rows.isEmpty()) EmptyState("今天没有放送", "放送表按上游时区(JST)分组,今天这一栏是空的。",
-                LpIcons.calendar)
-            else LazyColumn(Modifier.fillMaxSize(), list, contentPadding = pad) {
-                // 一条一行、按时间从早到晚、**待定沉底**
-                val sorted = rows.sortedBy { if (it.second == "待定") "99:99" else it.second }
-                items(sorted, key = { it.first + it.second }) { (name, time, day) ->
-                    Row(Modifier.fillMaxWidth().padding(horizontal = Sp.x16, vertical = Sp.x10),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text(time, Modifier.width(56.dp), color = Lp.colors.fg3, fontSize = 12.sp)
-                        Column(Modifier.weight(1f)) {
-                            // ★ 标题不许单行截断(截成「…」= 显示不全),放开完整换行
-                            Body(name)
-                            if (day.isNotBlank()) Dim3(day, Modifier.padding(top = Sp.x2))
-                        }
-                    }
-                    Hairline(Modifier.padding(start = Sp.x16 + 56.dp))
-                }
-                if (sponsorUrl != null) item("sponsor") {
-                    Dim3("追剧日历是付费功能。赞助后可解锁「我追的番」过滤。",
-                        Modifier.padding(Sp.x16), maxLines = 3)
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun GridSkel(pad: PaddingValues) {

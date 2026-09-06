@@ -29,6 +29,12 @@ type ServerGroup struct {
 	// 别再往一个串里塞三样东西。
 	ServerName string      `json:"server_name"`
 	Items      []emby.Item `json:"items"`
+	// Error 这台搜失败了的原因。
+	//
+	// ☠ 以前失败的服务器**整条被丢掉**,调用方无从分辨「这台没有这部片」和
+	// 「这台压根没搜成」—— 半失败(一路 429 一路回空)就被吞成「没搜到」。
+	// 这一栏非空时 Items 必为空,UI 要把它当成「这台没搜成」而不是空结果。
+	Error *string `json:"error"`
 }
 
 // SourceOverview 聚合视界里的一张服务器卡。
@@ -83,10 +89,18 @@ func RegisterCommands(version string) {
 				defer wg.Done()
 				s := sessionOf(c, acc)
 				items, err := client.Search(ctx, s, query, types, 0, "")
-				if err != nil || len(items) == 0 {
-					return // 单台失败隔离:这台没结果,其余照出
+				g := ServerGroup{ServerID: acc.Server, ServerName: acc.DisplayName()}
+				switch {
+				case err != nil:
+					// 单台失败隔离:其余照出。但**要说出来**,不能悄悄消失
+					msg := err.Error()
+					g.Error = &msg
+				case len(items) == 0:
+					return // 这台没有这部片 —— 不是失败,整条不出
+				default:
+					g.Items = items
 				}
-				slots[i] = slot{ServerGroup{ServerID: acc.Server, ServerName: acc.DisplayName(), Items: items}, true}
+				slots[i] = slot{g, true}
 			}(i, acc)
 		}
 		wg.Wait()

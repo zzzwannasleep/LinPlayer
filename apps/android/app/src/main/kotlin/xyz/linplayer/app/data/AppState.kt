@@ -79,6 +79,10 @@ class AppState(val core: CoreClient, scope: CoroutineScope) {
         _caps.value = Capabilities.from(runCatching { core.callJson("system.capabilities") }.getOrNull())
         val s = runCatching { Session.from(core.callJson("emby.currentSession")) }.getOrNull()
         val accounts = runCatching { Account.list(core.callJson("account.listAccounts")) }.getOrDefault(emptyList())
+        // ☠ 换账号 / 退登必须清页面留存,否则上一个账号的内容会画给下一个人看
+        if (_session.value?.server != s?.server || _session.value?.userId != s?.userId) {
+            PageCache.clear()
+        }
         _session.value = s
         _hasAnyAccount.value = accounts.isNotEmpty()
         _loggedIn.value = s != null || accounts.isNotEmpty()

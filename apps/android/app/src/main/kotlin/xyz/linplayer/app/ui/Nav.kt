@@ -18,7 +18,7 @@ object Route {
 
     @Serializable data class Library(val viewId: String, val title: String)   // U1.4
     @Serializable data class Detail(val itemId: String, val type: String)     // U1.5
-    @Serializable data class Search(val viewId: String? = null)               // U1.7
+    @Serializable data class Search(val viewId: String? = null, val q: String? = null) // U1.7
     @Serializable data object Favorites                                       // U1.9a
     @Serializable data class Lines(val serverId: String, val name: String)    // U1.9b
     @Serializable data object Browse                                          // U1.10

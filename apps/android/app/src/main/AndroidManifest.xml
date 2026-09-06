@@ -10,6 +10,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- 本机视频(B2)。
+         ☠ **不要 MANAGE_EXTERNAL_STORAGE**:那是全盘访问,Google Play 对播放器不放行,
+           而且我们根本不需要 —— 要的只是「能读到用户的视频」。
+         READ_MEDIA_VIDEO 拿到的是 MediaStore 里视频的**真实文件路径**,
+         不是 SAF 的 content:// —— mpv 的 protocol-list 里没有 content,
+         给它 content:// 等于给一个它不认识的 scheme。
+         Android 13 以下没有这个权限名,回落 READ_EXTERNAL_STORAGE。 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <!-- 手机形态:触摸屏必需。漏了这一条的表现是「装在 TV 上找不到」的反面 ——
          声明成 TV 应用会让手机商店看不到它 -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />

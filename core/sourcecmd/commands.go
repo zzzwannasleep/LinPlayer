@@ -27,6 +27,7 @@ import (
 func RegisterCommands() {
 	registerBackends()
 
+	registerFormSchema()
 	bus.Register("source.currentSource", cmdCurrentSource)
 	bus.Register("source.login", cmdLogin)
 	bus.Register("source.listDir", cmdListDir)

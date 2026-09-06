@@ -46,12 +46,18 @@ type ItemDetail struct {
 	HasPrimary  bool     `json:"has_primary"`
 	// ★ 背景图在 **BackdropImageTags 数组**里,不在 ImageTags 里。
 	//   写成 ImageTags["Backdrop"] 永远是 false —— 详情页就永远没有大图。
-	HasBackdrop bool    `json:"has_backdrop"`
-	IsFavorite  bool    `json:"is_favorite"`
-	SeriesName  *string `json:"series_name"`
-	SeriesID    *string `json:"series_id"`
-	SeasonNo    *int64  `json:"season_no"`
-	EpisodeNo   *int64  `json:"episode_no"`
+	HasBackdrop bool `json:"has_backdrop"`
+	IsFavorite  bool `json:"is_favorite"`
+	// Played 看完标记。**详情页的「标为已看」要回显它** —— 缺了它按钮永远是「未看」态,
+	// 点一下变已看、重进又变回未看,而且一句错都不报。
+	Played     bool    `json:"played"`
+	SeriesName *string `json:"series_name"`
+	SeriesID   *string `json:"series_id"`
+	// SeasonID 这一集所属季的 id。播放器的「选集」面板要拿它去 seasonEpisodes;
+	// 只有 season_no 是不够的 —— 那是序号不是主键。
+	SeasonID  *string `json:"season_id"`
+	SeasonNo  *int64  `json:"season_no"`
+	EpisodeNo *int64  `json:"episode_no"`
 
 	OfficialRating *string `json:"official_rating"`
 	Status         *string `json:"status"`
@@ -180,6 +186,8 @@ func (c *Client) Detail(ctx context.Context, s *Session, itemID string, withChil
 		HasPrimary:  hasPrimary,
 		HasBackdrop: hasBackdrop,
 		IsFavorite:  jbool(ud, "IsFavorite"),
+		Played:      jbool(ud, "Played"),
+		SeasonID:    jstrPtr(j, "SeasonId"),
 		// ★ 这里**不**折空串 —— 与 Item 的映射不同。Rust 侧是 `.as_str().map(String::from)`,
 		//   没有 `.filter(非空)`。照搬,不许「统一一下」。
 		SeriesName: jstrPtr(j, "SeriesName"),

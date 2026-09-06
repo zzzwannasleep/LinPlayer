@@ -80,8 +80,8 @@
 | [x] | `emby.logout` | **新增** | `server, token, user_id, device_id` | `{ server_ok: bool }` | — | <!-- 服务端登出。尽力而为:某 fork 该端点 404 且 token 仍可用,失败不挡本地删账号 -->
 | [x] | `emby.personDetail` | `person_detail` | `person_id: String` | `Result<emby::PersonDetail, String>` | ✅ |
 | [x] | `emby.personItems` | `person_items` | `person_id: String, limit: Option<u32>` | `Result<Vec<Item>, String>` | ✅ |
-| [x] | `emby.rankingCategories` | `ranking_categories` | `—` | `Vec<linplayer_core::ranking::RankingCategory>` | ✅ |
-| [x] | `emby.rankingFetch` | `ranking_fetch` | `category_id: String, force_refresh: Option<bool>` | `Result<Vec<linplayer_core::ranking::RankingEntry>, String>` | ✅ |
+| [x] | `emby.rankingCategories` | `ranking_categories` | `—` | `Vec<ranking::Category>` | ✅ |
+| [x] | `emby.rankingFetch` | `ranking_fetch` | `category_id: String, force_refresh: Option<bool>` | `Result<Vec<ranking::Entry>, String>` | ✅ |
 | [x] | `emby.permissions` | **新增** | `—` | `{is_admin, can_download}` | ✅ | <!-- 一次请求同时回答「是不是管理员」和「能不能下载」;缺字段一律判否 -->
 | [x] | `emby.refreshItem` | `refresh_item` | `item_id: String, full: bool` | `Result<(), String>` | ✅ |
 | [x] | `emby.relogin` | `relogin` | `server_id: String, username: String, password: String` | `Result<(), String>` | ✅ |
@@ -152,6 +152,8 @@
 | [x] | `player.setMpvConf` | `set_mpv_conf` | `text: String` | `Result<MpvConf, String>` | ❌ |
 | [x] | `player.setMute` | `set_mute` | `mute: bool` | `Result<(), String>` | ✅ |
 | [x] | `player.setPause` | `set_pause` | `paused: bool` | `Result<(), String>` | ✅ |
+| [x] | `player.danmakuSet` | **新增** | `items: Vec<danmaku::Comment>` | `{count: i64}` | ✅ | <!-- 把 danmaku.autoLoad 取到的弹幕灌进 osd-overlay。空数组=清空,换片必须发一次 -->
+| [x] | `player.setDanmakuEnabled` | **新增** | `enabled: bool` | `{enabled: bool}` | ✅ | <!-- 弹幕开关,落 prefs.danmaku_enabled。以前三端都在发一条不存在的命令 -->
 | [x] | `player.setPlaybackPrefs` | `set_playback_prefs` | `settings: PlaybackPrefs` | `Result<(), String>` | ✅ |
 | [x] | `player.setScreenshotDir` | `set_screenshot_dir` | `dir: Option<String>` | `Result<ScreenshotDir, String>` | ❌ |
 | [x] | `player.setSecondarySub` | `set_secondary_sub` | `id: String` | `Result<(), String>` | ✅ |
@@ -183,6 +185,7 @@
 | [x] | `source.currentSource` | `current_source` | `—` | `Option<AccountInfo>` | ✅ |
 | [x] | `source.listDir` | `source_list_dir` | `dir_id: Option<String>` | `Result<Vec<SourceEntry>, String>` | ✅ |
 | [x] | `source.login` | `source_login` | `kind: SourceKind, base_url: String, username: String, password: String, cookie: Option<String>, // 令牌系源用它带 refresh_token(也可走 cookie)与可选的 oplist 地址/driver 覆盖。 // additive:老调用不传即空, 行为不变。 extra: Option<HashMap<String, String>>` | `Result<(), String>` | ✅ |
+| [x] | `source.formSchema` | **新增** | `—` | `Vec<sourcecmd::SourceForm>` | ✅ | <!-- 源类型与登录表单的唯一声明。三端各写渲染器,不许再各自硬编源类型表 -->
 | [x] | `source.mediaDetail` | `source_media_detail` | `id: String` | `Result<linplayer_core::source::MediaDetail, String>` | ✅ |
 | [x] | `source.play` | `source_play` | `entry_id: String, entry_name: String, resume_secs: f64, raw: Option<serde_json::Value>` | `Result<f64, String>` | ✅ |
 | [x] | `source.search` | `source_search` | `query: String` | `Result<Vec<SourceEntry>, String>` | ✅ |

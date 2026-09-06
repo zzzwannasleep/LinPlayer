@@ -45,6 +45,7 @@ import xyz.linplayer.app.data.ToastKind
 import xyz.linplayer.app.data.arr
 import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.dbl
+import xyz.linplayer.app.data.long
 import xyz.linplayer.app.data.obj
 import xyz.linplayer.app.data.str
 import xyz.linplayer.app.ui.Route
@@ -266,11 +267,19 @@ fun LinesPage(nav: NavController, entry: NavBackStackEntry) {
     var reload by remember { mutableStateOf(0) }
 
     LaunchedEffect(reload) {
+        // 当前生效的是第几条:只有账号表里有(active_line),探测结果里没有
+        val activeIndex = runCatching { app.call("account.listAccounts") }.getOrNull()
+            .arr().firstOrNull { it.obj().str("server") == route.serverId }
+            .obj().long("active_line")?.toInt() ?: 0
         val r = runCatching { app.call("account.probeLines", args("server_id" to route.serverId)) }
         lines = r.getOrNull().arr().mapIndexedNotNull { i, e ->
             val o = e.obj() ?: return@mapIndexedNotNull null
             val url = o.str("url") ?: return@mapIndexedNotNull null
-            Line(i, url, o.str("name")?.takeIf { it.isNotBlank() } ?: "线路 ${i + 1}", o.bool("active"))
+            // ☠ LineProbe 只发 index / ms / url —— 没有 name 也没有 active。
+            //    照那两个不存在的字段取值 = 线路名恒「线路 N」、当前线路永远标不出来。
+            //    序号用核心层给的 index,不用循环下标(探测结果会漏条)。
+            Line((o.long("index") ?: i.toLong()).toInt(), url, "线路 ${i + 1}",
+                (o.long("index") ?: i.toLong()).toInt() == activeIndex)
         }
         // 线路表为空 = 单线路形态,要补出一行可见主线
         if (lines.isEmpty()) lines = listOf(Line(0, "", "主线路", true))

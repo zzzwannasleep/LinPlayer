@@ -41,6 +41,9 @@ func RegisterCommands(version string) {
 		if v, ok := a["sub_enabled"].(bool); ok {
 			p.SubEnabled = v
 		}
+		if v, ok := a["danmaku_enabled"].(bool); ok {
+			p.DanmakuEnabled = v
+		}
 		return p, save(c, p)
 	})
 

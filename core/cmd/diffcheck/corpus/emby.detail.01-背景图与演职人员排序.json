@@ -1,6 +1,6 @@
 {
   "name": "emby.detail · 背景图看 BackdropImageTags,不是 ImageTags",
-  "note": "背景图在 BackdropImageTags 数组里。写成 ImageTags[\"Backdrop\"] 永远是 false —— 详情页就永远没有大图,而且不报错。另盯:Taglines 取第一条且空串折 null(实测只有 34% 的条目有,没值前端整行不画);导演优先排前且其余保持服务端顺序(必须稳定排序);演职人员里空名字的要滤掉。",
+  "note": "背景图在 BackdropImageTags 数组里。写成 ImageTags[\"Backdrop\"] 永远是 false —— 详情页就永远没有大图,而且不报错。另盯:Taglines 取第一条且空串折 null(实测只有 34% 的条目有,没值前端整行不画);导演优先排前且其余保持服务端顺序(必须稳定排序);演职人员里空名字的要滤掉。 【2026-09-06 契约扩展】played / season_id 是黄金实现**没有**的两个字段:缺 played 详情页的「已看」恒 false,缺 season_id 播放器的「选集」面板拿不到季主键、恒空。本条语料里夹具没给这两项,所以是 false / null;真值映射由 core/emby 的单测钉。",
   "provenance": "crates/core/src/emby.rs:786 detail() 的实现与注释 + docs/lessons/emby.md「Emby image tags」",
   "upstream": [
     {
@@ -30,8 +30,10 @@
     "has_primary": true,
     "has_backdrop": true,
     "is_favorite": true,
+    "played": false,
     "series_name": null,
     "series_id": null,
+    "season_id": null,
     "season_no": null,
     "episode_no": null,
     "official_rating": "TV-14",

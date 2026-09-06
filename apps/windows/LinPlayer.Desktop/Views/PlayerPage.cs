@@ -572,6 +572,14 @@ public sealed class PlayerPage : UserControl
         var subsBtn = Osd("字幕", "字幕 / 字幕延迟");
         subsBtn.Click += (_, _) => Pick(subsBtn, _subs, "字幕", Labeled("字幕延迟", subDelayRow), false);
 
+        /* 弹幕开关。
+            ☠ 这个入口以前三端发的都是 `danmaku.setDanmakuConfig` —— 而那条命令收的是
+              **弹幕源清单**,`enabled` 被当未知键忽略、核心层照常返回成功。
+              一个永远不生效又不报错的开关。走 `player.setDanmakuEnabled`(2026-09-06 新增)。
+            开的时候顺手匹配一次并灌进渲染层:开关只管开关,取哪一集是 `danmaku.*` 的事。 */
+        var dmBtn = Osd("弹幕", "打开 / 关闭弹幕");
+        dmBtn.Click += async (_, _) => await ToggleDanmaku(dmBtn);
+
         /* 跳过片头 / 片尾。
             这是<b>核心层早就算好、UI 从来没用过</b>的东西:player.chapterInfo
             一次请求同时给章节表和 intro/outro 区间,而且开关关着时它自己返回 null ——
@@ -663,7 +671,7 @@ public sealed class PlayerPage : UserControl
             Orientation = Orientation.Horizontal, Spacing = 6,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { _pickEp, _speed, _audioBtn, subsBtn, full },
+            Children = { _pickEp, _speed, _audioBtn, subsBtn, dmBtn, full },
         };
         var controls = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(left, 0);
@@ -1619,6 +1627,43 @@ public sealed class PlayerPage : UserControl
             default: return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// 弹幕开关。开的时候顺手匹配一次本片弹幕并灌进渲染层。
+    /// <para>匹配不上<b>不弹错</b> —— 九成片子本来就没有弹幕,弹一次错等于骂用户一次。</para>
+    /// </summary>
+    private async Task ToggleDanmaku(Button btn)
+    {
+        try
+        {
+            var p = await _core.PrefsGetPrefs();
+            var on = !(p.TryGetProperty("danmaku_enabled", out var v) && v.ValueKind == JsonValueKind.True);
+            await _core.PlayerSetDanmakuEnabled(new { enabled = on });
+            btn.Content = on ? "弹幕 ●" : "弹幕";
+            if (!on)
+            {
+                await _core.PlayerDanmakuSet(new { items = Array.Empty<object>() });
+                return;
+            }
+            if (NoEmby || _itemId == "" || Nav.Session is not { } s) return;
+            var d = await _core.EmbyItemDetail(new
+            {
+                s.server, s.token, s.user_id, s.device_id, server_id = _serverId,
+                item_id = _itemId, with_children = false,
+            });
+            var title = Str(d, "series_name") is { Length: > 0 } sn ? sn : Str(d, "name");
+            if (title == "") return;
+            // ★ autoLoad 收的是**嵌套的 input 对象**(MatchInput),不是平铺参数
+            var items = await _core.DanmakuAutoLoad(new { input = new { title } });
+            if (items.ValueKind != JsonValueKind.Array || items.GetArrayLength() == 0)
+            {
+                Toast.Show("这一集没匹配到弹幕");
+                return;
+            }
+            await _core.PlayerDanmakuSet(new { items });
+        }
+        catch (Exception e) { Toast.Show(LibraryPage.Advice(e)); }
     }
 
     /// <summary>跳过片头 / 片尾。按钮和快捷键走同一条路,不各写一遍。</summary>

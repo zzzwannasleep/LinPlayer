@@ -90,13 +90,16 @@ fun LibraryPage(nav: NavController, entry: NavBackStackEntry) {
     val scope = rememberCoroutineScope()
     val grid = rememberLazyGridState()
 
-    var items by remember { mutableStateOf<List<Item>>(emptyList()) }
-    var total by remember { mutableStateOf<Long?>(null) }
-    var first by remember { mutableStateOf<Block<Unit>>(Block.Loading) }
+    // ★ 键必须带 viewId —— 库 A 和库 B 是两页,共用一个键会串数据
+    val ck = "lib.${route.viewId}"
+    var items by xyz.linplayer.app.data.keepState<List<Item>>("$ck.items") { emptyList() }
+    var total by xyz.linplayer.app.data.keepState<Long?>("$ck.total") { null }
+    var first by xyz.linplayer.app.data.keepState<Block<Unit>>("$ck.first") { Block.Loading }
     var loadingMore by remember { mutableStateOf(false) }
-    var sort by remember { mutableStateOf(SORTS[0]) }
-    var minRating by remember { mutableStateOf(RATINGS[0]) }
-    var genre by remember { mutableStateOf<String?>(null) }
+    // 排序/筛选也留住:返回后筛选条被重置回默认,和「白重拉一次」一样恼人
+    var sort by xyz.linplayer.app.data.keepState("$ck.sort") { SORTS[0] }
+    var minRating by xyz.linplayer.app.data.keepState("$ck.rating") { RATINGS[0] }
+    var genre by xyz.linplayer.app.data.keepState<String?>("$ck.genre") { null }
     var showFilter by remember { mutableStateOf(false) }
     var filters by remember { mutableStateOf<Block<List<String>>>(Block.Loading) }
 
@@ -126,6 +129,8 @@ fun LibraryPage(nav: NavController, entry: NavBackStackEntry) {
 
     // 进库时**并发**拉分面与第一页条目
     LaunchedEffect(route.viewId, sort, minRating, genre) {
+        // 已经有这一页的结果就别重拉(筛选变了会带着新的 key 重进这里)
+        if (items.isNotEmpty() && first is Block.Ok) return@LaunchedEffect
         first = Block.Loading; items = emptyList()
         coroutineScope {
             launch { fetch(0) }
