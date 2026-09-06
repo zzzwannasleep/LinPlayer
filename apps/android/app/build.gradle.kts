@@ -107,15 +107,21 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     /* ABI 拆包。
-       ★ 一个 ABI 的 native 就有 34MB(liblpcore 18.4 + libmpv 16.1,已 strip),
-         两个塞进一个 APK 是 103MB —— 而任何一台设备只用得上其中一半。
+       ★ **手机端只出 arm64-v8a**【用户定 2026-09-06】。2019 年以后的安卓手机
+         全是 arm64,x86_64 只有模拟器用得上 —— 为了一台不存在的设备
+         每次构建多编一份 34MB 的 native,不划算。
+         32 位(armeabi-v7a)留给 TV 盒子,不在这个包里。
+       ★ 要给模拟器出包就显式传 ABI:
+             bash scripts/fetch-libmpv-android.sh x86_64
+             bash scripts/build-core-android.sh  x86_64
+         三个脚本的 ABI 映射表都还在,只是不默认编。
        ★ isUniversalApk = false:不出那个「什么都有」的包。留着它的下场是
          发布时手一滑传的就是它,用户下 103MB 用 34MB。 */
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "x86_64")
+            include("arm64-v8a")
             isUniversalApk = false
         }
     }

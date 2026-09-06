@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Android 出包。照 scripts/pack-win.sh 的形状。
 #
-#   bash scripts/pack-android.sh [abi ...]      # 默认 arm64-v8a x86_64
+#   bash scripts/pack-android.sh [abi ...]      # 默认只有 arm64-v8a(x86_64 要显式传)
 #
 # ☠ **「编译通过」不是交付。** 这个脚本的判据是「装得上的、已签名的 APK」,
 #   而验签必须看**产物本身**:
@@ -17,7 +17,9 @@ cd "$ROOT"
 SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-${LOCALAPPDATA:-}/Android/Sdk}}"
 OUT="$ROOT/build/android"
 ABIS=("$@")
-[ ${#ABIS[@]} -eq 0 ] && ABIS=(arm64-v8a x86_64)
+# ★ 默认只编 arm64-v8a【用户定 2026-09-06】。x86_64 只有模拟器用得上,
+#   32 位留给 TV。要别的 ABI 就当参数传进来,映射表都还在。
+[ ${#ABIS[@]} -eq 0 ] && ABIS=(arm64-v8a)
 
 fail=0
 bad() { fail=$((fail + 1)); echo "  ✗ $1"; }

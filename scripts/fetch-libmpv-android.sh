@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 拉 Android 的 libmpv.so(每个 ABI 一份),落到 third_party/libmpv/android/<abi>/。
 #
-#   bash scripts/fetch-libmpv-android.sh [abi ...]     # 默认 arm64-v8a x86_64
+#   bash scripts/fetch-libmpv-android.sh [abi ...]     # 默认只有 arm64-v8a(x86_64 要显式传)
 #
 # 产物**不进版本库**(.gitignore),和 Windows 侧 libmpv-2.dll 一个待遇:
 # 大二进制由脚本现拉,CI 也跑这个脚本。
@@ -19,7 +19,9 @@ VARIANT="${LP_LIBMPV_VARIANT:-full}"
 BASE="https://github.com/media-kit/libmpv-android-video-build/releases/download/$TAG"
 DEST="$ROOT/third_party/libmpv/android"
 ABIS=("$@")
-[ ${#ABIS[@]} -eq 0 ] && ABIS=(arm64-v8a x86_64)
+# ★ 默认只编 arm64-v8a【用户定 2026-09-06】。x86_64 只有模拟器用得上,
+#   32 位留给 TV。要别的 ABI 就当参数传进来,映射表都还在。
+[ ${#ABIS[@]} -eq 0 ] && ABIS=(arm64-v8a)
 
 # ELF 机器类型:LFS 指针 / 下错 ABI 都是「装得上、一跑就 UnsatisfiedLinkError」,
 # 而错误信息里那串 76657273 是 "vers"(指针文本的开头),不是机器码。所以逐个校验。

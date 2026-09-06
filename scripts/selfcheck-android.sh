@@ -58,7 +58,9 @@ step "编 APK"
   || { bad "assembleDebug 失败"; exit 1; }
 # ABI 拆包之后每个 ABI 一个 APK。装哪个由**设备**说了算,不是由我们猜
 ABI="$("$ADB" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d "[:space:]")"
-[ -n "$ABI" ] || ABI=x86_64
+# ☠ 现在默认只出 arm64-v8a 的包。x86_64 模拟器上跑自检要先自己编那份 ABI:
+#   bash scripts/fetch-libmpv-android.sh x86_64 && bash scripts/build-core-android.sh x86_64
+[ -n "$ABI" ] || ABI=arm64-v8a
 APK="$ROOT/apps/android/app/build/outputs/apk/debug/app-$ABI-debug.apk"
 [ -f "$APK" ] || APK="$ROOT/apps/android/app/build/outputs/apk/debug/app-debug.apk"
 [ -f "$APK" ] || { bad "APK 没出来"; exit 1; }

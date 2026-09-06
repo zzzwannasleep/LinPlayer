@@ -203,12 +203,12 @@ jobs:
       #   而 APK 照样打得出来。
       - name: Fetch Android libmpv
         shell: bash
-        run: bash scripts/fetch-libmpv-android.sh arm64-v8a x86_64
+        run: bash scripts/fetch-libmpv-android.sh arm64-v8a
 
       # ★★ 编译期凭据同 Windows 那一步。漏了的表现是「弹幕搜不到 / 排行榜空白」
       #   而 CI 全绿。scripts/check-workflows.sh 的凭据闸门盯着这一步
       #   (它认 build-core-android.sh)。
-      - name: Build core (.so × 2 ABI)
+      - name: Build core (.so · arm64-v8a)
         shell: bash
         env:
           LP_VERSION: ${{ needs.version.outputs.version }}
@@ -221,7 +221,7 @@ jobs:
           LP_AFDIAN_SPONSOR_URL: ${{ secrets.LP_AFDIAN_SPONSOR_URL }}
           LP_ICON_LIBRARY_SOURCES: ${{ secrets.LP_ICON_LIBRARY_SOURCES }}
           LP_CF_TEST_URL: ${{ secrets.LP_CF_TEST_URL }}
-        run: bash scripts/build-core-android.sh arm64-v8a x86_64
+        run: bash scripts/build-core-android.sh arm64-v8a
 
       # ★ 命令名有 check-bindings 的四方比对守着,**参数名没有任何东西守**。
       #   传 view_id 而核心层读 parent_id,两边都不报错 —— 表现是
@@ -265,7 +265,7 @@ jobs:
       #   不签名出的是 -unsigned.apk,它长得和正常包一模一样,直到用户去装。
       - name: Pack Android
         shell: bash
-        run: bash scripts/pack-android.sh arm64-v8a x86_64
+        run: bash scripts/pack-android.sh arm64-v8a
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
