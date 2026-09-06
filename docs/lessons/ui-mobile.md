@@ -641,3 +641,29 @@ PC 端(desktop/pages/sources/sourceForms.tsx)一直是加完补一刀 `update_ac
 
 配套:`build-core*.sh` 现在会打印**这次注入了哪几个凭据的变量名**(不打值,CI 日志是公开的)。
 少了这一行,「CI 漏配 / sealsecrets 封错 / 运行时解不开」三种在日志里都是一片安静。
+
+---
+
+### 尾随 lambda 绑到了 `onSwitch`:整张设置列表点不进去,零警告
+
+*(2026-09-06。类型:project)*
+
+**症状**:设置页所有条目**点不进去**。编译零错零警告。
+
+```kotlin
+fun LpCell(..., onClick: (() -> Unit)? = null, onSwitch: ((Boolean) -> Unit)? = null)
+
+LpCell("外观", icon = LpIcons.image) { nav.navigate(...) }   // ← 这一句
+```
+
+尾随 lambda 按 Kotlin 的规矩绑**最后一个形参**,也就是 `onSwitch`;
+而一个不声明参数的 lambda 完全可以当成 `(Boolean) -> Unit`(隐式 `it`)——
+**所以它编译得过**。于是 `onClick` 恒 null → 那一行根本没挂 `pressable`;
+`switch` 又是 null 不画开关 → `onSwitch` 永远没人调。八个入口一起哑掉。
+
+**规矩**:**「主动作」回调一律排在参数表最后一位。** 组件参数表里同时有两个
+函数类型时,把最常被写成尾随 lambda 的那个放最后 —— 顺序在这里不是风格,是语义。
+
+**钉法**:这条只能靠**反射比两个 lambda 形参的先后**(`LogicTest`),
+它是签名的形状,不是运行时行为,任何调用都测不出来。反向注入验过:
+换回原顺序当场红,换回来绿。

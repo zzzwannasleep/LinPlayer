@@ -169,4 +169,31 @@ class LogicTest {
         rgbToHsv((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF)
 
     private fun item(json: String): Item? = Item.from(Json.parseToJsonElement(json))
+
+    /**
+     * ☠☠ **`LpCell` 的 `onClick` 必须是最后一个形参。**
+     *
+     * 它排在 `onSwitch` 前面的时候,`LpCell("外观", icon = X) { nav.navigate(...) }`
+     * 这种写法会把尾随 lambda 绑到 `onSwitch`(Kotlin 绑最后一个形参),
+     * 而一个不声明参数的 lambda 完全可以当成 `(Boolean) -> Unit` —— **所以它编译得过**。
+     * 后果:`onClick` 恒 null,整张设置列表一条都点不进去,一个警告都没有。
+     *
+     * 这条只能靠反射钉:它是**签名的形状**,不是运行时行为,任何调用都测不出来。
+     * Compose 编译器会在末尾追加 Composer / 两个 int,所以只比较两个 lambda 的先后。
+     */
+    @Test
+    fun `LpCell 的 onClick 必须排在 onSwitch 后面`() {
+        val m = Class.forName("xyz.linplayer.app.ui.components.BaseKt")
+            .declaredMethods.first { it.name == "LpCell" }
+        val types = m.parameterTypes.map { it.name }
+        val onSwitch = types.indexOf("kotlin.jvm.functions.Function1")
+        val onClick = types.indexOf("kotlin.jvm.functions.Function0")
+        assertTrue("签名里该有 onSwitch:(Boolean)->Unit,实得 $types", onSwitch >= 0)
+        assertTrue("签名里该有 onClick:()->Unit,实得 $types", onClick >= 0)
+        assertTrue(
+            "onClick 必须排在 onSwitch 之后,否则尾随 lambda 会静默绑错(实得 " +
+                "onSwitch=$onSwitch onClick=$onClick)",
+            onClick > onSwitch,
+        )
+    }
 }

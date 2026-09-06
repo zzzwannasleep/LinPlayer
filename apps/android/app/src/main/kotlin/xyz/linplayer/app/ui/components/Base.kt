@@ -210,6 +210,20 @@ fun LpField(
 
 // ---------------------------------------------------------------- 单元格
 
+/**
+ * 设置 / 列表里的一行。
+ *
+ * ☠☠ **`onClick` 必须是最后一个参数,别再挪。**
+ *   它原来排在 `onSwitch` 前面,于是所有这样写的调用点:
+ *
+ *       LpCell("外观", icon = LpIcons.image) { nav.navigate(...) }
+ *
+ *   尾随 lambda 按 Kotlin 的规矩绑到**最后一个参数**,也就是 `onSwitch` ——
+ *   而一个不声明参数的 lambda 完全可以当成 `(Boolean) -> Unit`(隐式 `it`),
+ *   **所以它编译得过**。结果是 `onClick` 恒 null → 这一行根本没挂 `pressable`,
+ *   而 `switch` 是 null 又不画开关,`onSwitch` 永远没人调 ——
+ *   整张设置列表**一条都点不进去,一个警告都没有**。用户 2026-09-06 报的就是它。
+ */
 @Composable
 fun LpCell(
     label: String,
@@ -219,8 +233,8 @@ fun LpCell(
     value: String? = null,
     switch: Boolean? = null,
     arrow: Boolean = switch == null,
-    onClick: (() -> Unit)? = null,
     onSwitch: ((Boolean) -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
 ) {
     val c = Lp.colors
     Row(
