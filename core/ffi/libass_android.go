@@ -60,6 +60,7 @@ extern ASS_Library  *ass_library_init(void);
 extern void          ass_library_done(ASS_Library *);
 extern void          ass_set_fonts_dir(ASS_Library *, const char *);
 extern void          ass_set_extract_fonts(ASS_Library *, int);
+extern void          ass_add_font(ASS_Library *, const char *, const char *, int);
 extern ASS_Renderer *ass_renderer_init(ASS_Library *);
 extern void          ass_renderer_done(ASS_Renderer *);
 extern void          ass_set_frame_size(ASS_Renderer *, int, int);
@@ -114,8 +115,8 @@ static int lpa_init_locked(const char *fontsDir) {
         LPA_LOG("libass API 版本 0x%X", ver);
         g_lib = ass_library_init();
         if (!g_lib) return -1;
-        // 附件字体:MKV 里带的字体。ExoPlayer 现在不把附件透出来,
-        // 开着它至少让以后接上时不用再改这里,关着没有任何收益。
+        // 附件字体。ExoPlayer 不透出 MKV 附件,所以宿主自己从容器里抠出来
+        // 再走 lp_ass_add_font 灌进来(Libass.kt / MkvFonts.kt)。
         ass_set_extract_fonts(g_lib, 1);
         if (fontsDir && fontsDir[0]) ass_set_fonts_dir(g_lib, fontsDir);
     }
@@ -287,6 +288,41 @@ JNIEXPORT void JNICALL Java_xyz_linplayer_app_core_Native_assClose(JNIEnv *e, jc
     pthread_mutex_lock(&g_mu);
     lpa_free_locked();
     pthread_mutex_unlock(&g_mu);
+}
+
+// 灌一份内嵌字体。
+//
+// ☠☠ **加完必须重跑 ass_set_fonts(update=1)。** 字体选择器是在渲染器建立时
+// 从库里那张表快照出来的 —— 之后往库里加字体,选择器**看不见**,表现是
+// 「字体加进去了,画出来还是系统字体」,一句错都不报。
+// 渲染器还没建的时候不必管:它建的时候自然会把这些字体一起收进去。
+//
+// 字体名给的是文件名(libass 拿它当 fallback 的标识,真正的家族名它从
+// 字体表里自己读)。
+JNIEXPORT jint JNICALL Java_xyz_linplayer_app_core_Native_assAddFont(
+        JNIEnv *e, jclass c, jstring name, jbyteArray data) {
+    (void)c;
+    if (!name || !data) return -1;
+    const char *nm = (*e)->GetStringUTFChars(e, name, 0);
+    jsize n = (*e)->GetArrayLength(e, data);
+    jbyte *p = (*e)->GetByteArrayElements(e, data, 0);
+    pthread_mutex_lock(&g_mu);
+    int rc = 0;
+    if (!g_lib) {
+        g_lib = ass_library_init();
+        if (g_lib) ass_set_extract_fonts(g_lib, 1);
+    }
+    if (g_lib) {
+        ass_add_font(g_lib, nm, (const char *)p, (int)n);
+        if (g_rend) ass_set_fonts(g_rend, NULL, "sans-serif",
+                                  LPA_FONTPROVIDER_AUTODETECT, NULL, 1);
+    } else {
+        rc = -1;
+    }
+    pthread_mutex_unlock(&g_mu);
+    (*e)->ReleaseByteArrayElements(e, data, p, JNI_ABORT);
+    (*e)->ReleaseStringUTFChars(e, name, nm);
+    return rc;
 }
 
 // 这个构建里的 libass 能不能用。0 = 不可用。给 UI 决定要不要亮「特效字幕」这一项。

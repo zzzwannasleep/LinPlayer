@@ -69,4 +69,12 @@ internal object Native {
     external fun assRender(bitmap: android.graphics.Bitmap, posMs: Long, force: Boolean): Int
 
     external fun assClose()
+
+    /**
+     * 灌一份内嵌字体(MKV 附件里抠出来的)。
+     *
+     * ★ 特效字幕十有八九指名一个压制组自己塞进容器里的字体。
+     *   不给的话 libass 回落到系统字体:特效和位置都对,**字形不对**。
+     */
+    external fun assAddFont(name: String, data: ByteArray): Int
 }

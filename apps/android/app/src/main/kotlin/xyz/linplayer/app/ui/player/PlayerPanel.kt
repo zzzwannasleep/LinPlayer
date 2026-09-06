@@ -60,6 +60,7 @@ fun PlayerPanel(
     kind: String,
     itemId: String,
     exo: androidx.media3.exoplayer.ExoPlayer? = null,
+    onOpen: (String) -> Unit = {},
     onClose: () -> Unit,
 ) {
     val app = LocalApp.current
@@ -144,11 +145,16 @@ fun PlayerPanel(
                     .onFailure { app.report(it) }
                 onClose()
             }
+            /* 「更多」是**跳板**,不是设置项:选一条就换一个面板。
+               ☠ 上一版把它当设置项走 `pick`,而 pick 的 when 里根本没有 "more"
+                  这一支 —— 落到 `else -> Unit`,表现是「更多里点什么都没反应」。 */
             "more" -> {
                 options = listOf(
-                    Triple("ratio", null, "画面比例"),
-                    Triple("sleep", null, "定时关闭"),
-                    Triple("subtitle", null, "字幕"),
+                    Triple("source", null, "版本与线路"),
+                    Triple("audio", null, "音轨"),
+                    Triple("quality", null, "画质"),
+                    Triple("danmaku", null, "弹幕"),
+                    Triple("shot", null, "截图"),
                 )
             }
         }
@@ -161,20 +167,26 @@ fun PlayerPanel(
     }
 
     Box(Modifier.fillMaxSize()) {
-        // scrim。★ OSD 在它之上(PlayerPage 的绘制顺序保证),所以面板开关期间上下栏一动不动
-        Box(Modifier.fillMaxSize().background(c.scrim.copy(alpha = .5f))
+        /* scrim。★ OSD 在它之上(PlayerPage 的绘制顺序保证),面板开关期间上下栏一动不动。
+           ★ **只压到能看出「后面那层不接受点击」的程度**(0.18):这一层的职责是
+             接住面板外的点击,不是把画面调暗 —— 用户明说了面板挡画面挡得厉害。 */
+        Box(Modifier.fillMaxSize().background(c.scrim.copy(alpha = .18f))
             .pointerInput(Unit) { detectTapClose(onClose) })
         /* ★ **面板没有左边线**(草稿 05 第 3 条):底色从右往左渐隐,左缘完全透明。
            一块不透明的面 + 一条左边界 = 「从画面上切下来的一块」;
            渐隐过去 = 「浮在画面上的一层」。同一个位置,后者才有纵深。 */
         Column(
-            Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.44f)
+            Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(0.46f)
                 .background(
+                    /* ☠ 上一版右缘是 0.97 —— 那已经是**一块不透明的板**,
+                       近一半的画面被它切掉。用户报的「窗口不够透明,很挡画面」就是这个。
+                       字要看得清靠的是**渐变到底色 + 白字**,不是靠把底堵死;
+                       右缘压到 0.62 之后字仍然清楚,而画面透得过来。 */
                     androidx.compose.ui.graphics.Brush.horizontalGradient(
                         0.00f to Color.Transparent,
-                        0.16f to c.bg.copy(alpha = .72f),
-                        0.34f to c.bg.copy(alpha = .94f),
-                        1.00f to c.bg.copy(alpha = .97f),
+                        0.18f to c.bg.copy(alpha = .28f),
+                        0.42f to c.bg.copy(alpha = .52f),
+                        1.00f to c.bg.copy(alpha = .62f),
                     )
                 )
                 .safeDrawingPadding().padding(start = Sp.x20, end = Sp.x12, top = Sp.x12, bottom = Sp.x12),
@@ -187,8 +199,11 @@ fun PlayerPanel(
                 else -> LazyColumn(Modifier.fillMaxSize(), list) {
                     items(options, key = { it.first }) { (id, badge, label) ->
                         OptRow(label, {
-                            scope.launch { pick(app, kind, id, itemId, exo) }
-                            onClose()
+                            if (kind == "more") onOpen(id)
+                            else {
+                                scope.launch { pick(app, kind, id, itemId, exo) }
+                                onClose()
+                            }
                         }, selected = id == current, badge = badge)
                     }
                 }

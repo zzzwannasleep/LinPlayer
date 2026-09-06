@@ -7,10 +7,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,12 +32,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -197,10 +202,11 @@ fun ExoSurface(player: ExoPlayer, subOff: Boolean, m: Modifier = Modifier) {
             modifier = fit,
             factory = { ctx -> SurfaceView(ctx).also { player.setVideoSurfaceView(it) } },
         )
-        /* ★ 特效字幕**必须和画面用同一个 `fit`**:libass 按 PlayResX/Y 定位,
-           叠加层只要和画面差一个黑边的高度,`\pos` 定死的字就整体错位。
+        /* ★ 两个叠加层**都必须和画面用同一个 `fit`**:libass 按 PlayResX/Y 定位,
+           PGS 的 Cue 带的也是相对画面的比例 —— 差一个黑边的高度,字就整体错位。
            共用一个 Modifier 变量而不是各写一遍 —— 各写一遍的两处早晚会漂。 */
         LibassLayer(player, fit, videoW, videoH)
+        ExoSubtitles(player, fit)
     }
     DisposableEffect(player) { onDispose { player.clearVideoSurface() } }
 }
@@ -270,18 +276,19 @@ private fun LibassLayer(player: ExoPlayer, m: Modifier, videoW: Int, videoH: Int
 }
 
 /**
- * ExoPlayer 的字幕层。
+ * ExoPlayer 的字幕层(**libass 管不到的那些**)。
  *
- * ☠ **文本轨和图形轨都要画。** media3 把 SRT / VTT / 内封 SSA 解析成带文字的 `Cue`,
- *   把 PGS / DVBSub 解析成带 `bitmap` 的 `Cue` —— 只画其中一种的表现是
- *   「有的片有字幕、有的片没有」,而那看着像片源的问题。
+ * 分工:ASS/SSA 走 libass([LibassLayer]),这里画剩下的 ——
+ * SRT / VTT / TTML 这类文本,以及 **PGS / VobSub / DVBSub 这类图形字幕**。
+ * media3 1.11 自带 `PgsParser`,蓝光原盘扒出来的 `.sup` 轨直接就能解
+ * (`MatroskaExtractor` 认 `S_HDMV/PGS`,反编译核对过常量表)。
  *
- * ⚠️ **特效字幕(ASS 的 `\pos` `\move` `\fad`、卡拉OK)这一层画不出来。**
- *   media3 的 SSA 解析器只认位置和基本样式,它不是 libass。要完整特效请切 MP 内核
- *   —— 那条走的是 libmpv 里编进去的 libass。把 libass 接进 ExoPlayer 需要另起一个
- *   JNI 渲染层 —— 好消息是**不必再编一份 libass**:实测我们这份 `libmpv.so`
- *   导出了 191 个 `ass_*` 符号(`ass_library_init` / `ass_render_frame` 那一套齐全)。
- *   难的是取原始 ASS 字节(media3 的 SsaParser 已经把特效丢了)。不在本轮范围里。
+ * ☠☠ **图形字幕自带坐标,不能拉满宽度。**
+ *   `PgsParser` 给的 `Cue` 里 `position` / `line` / `size` / `bitmapHeight`
+ *   都是**相对视频画面的比例**。上一版无视它们、一律 `fillMaxWidth` ——
+ *   表现是字幕被横向拉成一条、还盖在画面正中间。
+ * ☠ 因此这一层的坐标系**必须和画面严格重合**:它和 [LibassLayer]、SurfaceView
+ *   共用同一个 `fit`。铺满全屏的话上下黑边会被算进比例,字幕整体偏。
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -296,18 +303,16 @@ fun ExoSubtitles(player: ExoPlayer, m: Modifier = Modifier) {
     }
     if (cues.isEmpty()) return
 
-    Box(m.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-        Column(
-            Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 56.dp),
+    BoxWithConstraints(m) {
+        val texts = cues.filter { it.bitmap == null }
+        cues.forEach { cue -> cue.bitmap?.let { BitmapCue(cue, it, maxWidth, maxHeight) } }
+        if (texts.isNotEmpty()) Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp, bottom = 48.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            cues.forEach { cue ->
-                val bmp = cue.bitmap
-                if (bmp != null) {
-                    // 图形字幕(PGS/DVBSub):按原图比例贴,**不许拉伸**
-                    Image(bmp.asImageBitmap(), null, Modifier.fillMaxWidth()
-                        .aspectRatio(bmp.width.toFloat() / bmp.height.coerceAtLeast(1)))
-                } else cue.text?.toString()?.takeIf { it.isNotBlank() }?.let { t ->
+            texts.forEach { cue ->
+                cue.text?.toString()?.takeIf { it.isNotBlank() }?.let { t ->
                     Text(
                         t,
                         Modifier.clip(RoundedCornerShape(6.dp))
@@ -320,4 +325,28 @@ fun ExoSubtitles(player: ExoPlayer, m: Modifier = Modifier) {
             }
         }
     }
+}
+
+/**
+ * 一张图形字幕。
+ *
+ * 坐标全按 `Cue` 里的比例还原;比例缺了才回落到「底部居中、按原图长宽比」。
+ * `DIMEN_UNSET` 是 `Float.MIN_VALUE`,**不是 0 也不是 -1** —— 拿 `<= 0` 判会
+ * 把它当成合法的 0,字幕就贴到左上角去了。
+ */
+@OptIn(UnstableApi::class)
+@Composable
+private fun BitmapCue(cue: Cue, bmp: android.graphics.Bitmap, boxW: Dp, boxH: Dp) {
+    val set = { v: Float -> v != Cue.DIMEN_UNSET }
+    val w = if (set(cue.size)) boxW * cue.size else boxW
+    val h = if (set(cue.bitmapHeight)) boxH * cue.bitmapHeight
+    else w * (bmp.height.toFloat() / bmp.width.coerceAtLeast(1))
+    val x = if (set(cue.position)) boxW * cue.position else (boxW - w) / 2
+    val y = if (set(cue.line) && cue.lineType == Cue.LINE_TYPE_FRACTION) boxH * cue.line
+    else boxH - h - 32.dp
+    Image(
+        bmp.asImageBitmap(), null,
+        Modifier.offset(x, y).size(w, h),
+        contentScale = ContentScale.FillBounds,
+    )
 }

@@ -81,7 +81,8 @@ Java_xyz_linplayer_app_core_Native_assChunk
 Java_xyz_linplayer_app_core_Native_assSetSize
 Java_xyz_linplayer_app_core_Native_assRender
 Java_xyz_linplayer_app_core_Native_assClose
-Java_xyz_linplayer_app_core_Native_assVersion"
+Java_xyz_linplayer_app_core_Native_assVersion
+Java_xyz_linplayer_app_core_Native_assAddFont"
 
 for abi in "${ABIS[@]}"; do
   case "$abi" in

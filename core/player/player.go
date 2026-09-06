@@ -329,22 +329,47 @@ const (
 )
 
 // pumpStatus 4 Hz 推 player.status —— 高频状态事件,队列里会被原地合并(SPEC §5.11)。
+//
+// ☠☠ **闸必须是 `videoOutReady()`,不能直接读 `rctxSet`。**
+// `rctxSet` 是**桌面通道 B** 的 render context 标志,只有 `GLInit` 会置位;
+// 安卓走通道 A(SurfaceView / wid),那条路上 `GLInit` 一次都不调 ——
+// 于是这里恒 continue,`player.status` 在安卓上**一条都发不出去**。
+// 表现:mpv 正常出画出声,而 UI 因为「位置一直是 0」永远撤不掉起播黑幕,
+// 用户看到的是「有声音、没画面、一直正在缓冲」,退场动画里却能瞥见几帧画面
+// (黑幕跟着页面淡出,底下的 SurfaceView 就露出来了)。一条错都不报。
+// `videoOutReady()` 是平台抽象(surface_android.go / surface_other.go 各一份),
+// 起播闸(见 PlayFile)用的就是它 —— 两处必须是同一个判据。
+//
+// ★ `paused` / `buffering` 是 UI 直接读的字段。不发的表现是暂停按钮状态永远反着,
+// 以及起播兜底那句 `if (!buffering)` 永远不成立。
 func pumpStatus() {
 	t := time.NewTicker(250 * time.Millisecond)
 	defer t.Stop()
 	for !drainStop.Load() {
 		<-t.C
-		if !rctxSet.Load() {
+		if !videoOutReady() {
 			continue
 		}
-		bus.Emit("player.status", map[string]any{
-			"position":  propF("time-pos"),
-			"duration":  propF("duration"),
-			"eof":       prop("eof-reached") == "yes",
-			"dropped":   propF("frame-drop-count"),
-			"hwdec":     prop("hwdec-current"),
-			"renderFps": renderCalls.Load(),
-		}, "player.status")
+		bus.Emit("player.status", statusFields(prop, propF, renderCalls.Load()), "player.status")
+	}
+}
+
+// statusFields 把 mpv 的属性折成 UI 那边读的那张表。
+//
+// 抽成纯函数只为一件事:**属性名拼错在真机上是看不出来的**。
+// `pause` 写成 `paused` 的表现是暂停按钮状态恒反,
+// `paused-for-cache` 写错的表现是起播那句 4 秒兜底永远不放行 ——
+// 两个都不报错,而单测能当场逮住。
+func statusFields(get func(string) string, getF func(string) float64, fps int64) map[string]any {
+	return map[string]any{
+		"position":  getF("time-pos"),
+		"duration":  getF("duration"),
+		"paused":    get("pause") == "yes",
+		"buffering": get("paused-for-cache") == "yes",
+		"eof":       get("eof-reached") == "yes",
+		"dropped":   getF("frame-drop-count"),
+		"hwdec":     get("hwdec-current"),
+		"renderFps": fps,
 	}
 }
 

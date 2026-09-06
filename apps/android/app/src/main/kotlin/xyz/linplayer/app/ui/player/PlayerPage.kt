@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -43,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -71,6 +73,7 @@ import xyz.linplayer.app.ui.components.OptRow
 import xyz.linplayer.app.ui.components.pressable
 import xyz.linplayer.app.ui.pages.args
 import xyz.linplayer.app.ui.pages.fmtTime
+import xyz.linplayer.app.ui.theme.Dim
 import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.R
@@ -175,6 +178,10 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                外挂的核心层根本不交给 ExoPlayer,得自己取回来喂 libass。
                ★ fire-and-forget:取不到就没有特效字幕,不该挡住播放。 */
             if (exo != null && subLangPref != "") loadExternalAss(app, r?.get("external_subs"))
+            /* 内嵌字体(MKV 附件)。**特效字幕的字形全靠它** ——
+               ExoPlayer 不解析 Attachments,不自己抠的话 libass 只能回落系统字体。
+               ★ 和上面那条一样是 fire-and-forget:抠不到只是字形不对,不该挡住播放。 */
+            if (exo != null && url != null) loadEmbeddedFonts(url)
         }.onFailure { app.report(it) }
     }
 
@@ -234,6 +241,15 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     LaunchedEffect(route.itemId) {
         delay(4000)
         if (!buffering) everMoved = true
+    }
+    /* 12 秒**无条件**撤黑幕。
+       ☠ 上面那条兜底带着 `!buffering` 这个前提,而前提本身可能是假的
+       (状态事件根本没来的时候 buffering 停在初值 true)—— 于是兜底不兜。
+       这一条不带任何前提:真没画面的话用户看到的是黑画面 + 一个缓冲提示,
+       和现在一样;而画面其实在的话,他至少看得见。 */
+    LaunchedEffect(route.itemId) {
+        delay(12_000)
+        everMoved = true
     }
 
     // OSD 自动收起 5000ms。两条例外:**面板开着不收**、**暂停时不收**
@@ -352,11 +368,14 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         if (exo != null) ExoSurface(exo, subOff = subLangPref == "", m = Modifier.fillMaxSize())
         else VideoSurface(app.core, Modifier.fillMaxSize())
 
-        // ExoPlayer 的字幕层。mpv 那条的字幕是 libass 画进画面里的,不走这里
-        if (exo != null) ExoSubtitles(exo)
 
-        /* 未出画时的黑幕 + 转圈。**判据是「时间真的往前走了」**。
-           ★ 它可以是不透明的 —— 它只在没画面的时候存在,而且一撤就撤干净。 */
+        /* 未出画时的黑幕。**判据是「时间真的往前走了」**。
+           ☠☠ **这块布必须有一个撤不掉就自己撤的死线**(见 everMoved 那两个兜底)。
+              它是不透明的,一旦「时间不往前走」这个判据被别的 bug 卡住,用户看到的
+              就是「有声音、没画面、一直正在缓冲」—— 而画面其实一直在下面好好画着。
+              2026-09-07 真出过这一次:安卓上 player.status 一条都发不出去
+              (闸用错了标志,见 core/player/player.go 的 pumpStatus),
+              位置永远是 0,这块布就永远撤不掉。修好了根因,死线也得留。 */
         if (!everMoved) Box(Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center) {
             if (openFailed) Column(
@@ -417,6 +436,14 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             }
         )
 
+        /* 出画之后的缓冲提示。黑幕撤了但流还没跟上时,得有个东西说明在等 ——
+           没有它的话画面卡住和播放器死了长得一模一样。 */
+        if (everMoved && buffering) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("正在缓冲…", Modifier.clip(RoundedCornerShape(R.pill)).background(c.chip)
+                .padding(horizontal = Sp.x12, vertical = Sp.x6),
+                color = Color.White, fontSize = 13.sp)
+        }
+
         // seek 预览:滑动中显示目标时间与差值
         seekPreview?.let { t ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -429,13 +456,9 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         }
 
         // ★ OSD 抬在 scrim 之上:面板开关期间上下栏**一动不动**
-        AnimatedVisibility(osd || panel != null, enter = fadeIn(), exit = fadeOut()) {
-            if (portrait) PortraitOsd(
-                title = route.title, position = seekPreview ?: position, duration = duration,
-                paused = paused, onBack = { nav.popBackStack() },
-                onToggle = { doPause(!paused) },
-                onSeek = { t -> doSeek(t) },
-            ) else LandscapeOsd(
+        AnimatedVisibility(osd && !locked || panel != null, enter = fadeIn(), exit = fadeOut()) {
+            Osd(
+                portrait = portrait,
                 title = route.title, position = seekPreview ?: position, duration = duration,
                 paused = paused, speed = speed, locked = locked,
                 onBack = { nav.popBackStack() },
@@ -452,152 +475,152 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             Modifier.align(Alignment.CenterStart).padding(Sp.x16),
             tint = Color.White, onClick = { locked = false })
 
-        panel?.let { PlayerPanel(it, route.itemId, exo) { panel = null } }
+        panel?.let {
+            PlayerPanel(it, route.itemId, exo, onOpen = { k -> panel = k }) { panel = null }
+        }
     }
 }
 
-/** 竖屏 OSD:三层(顶部返回+标题、中间三键、底部进度条)。**九宫格是横屏专属。** */
-@Composable
-private fun PortraitOsd(
-    title: String, position: Double, duration: Double, paused: Boolean,
-    onBack: () -> Unit, onToggle: () -> Unit, onSeek: (Double) -> Unit,
-) {
-    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-        Row(Modifier.align(Alignment.TopStart).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            LpIconButton(LpIcons.back, "返回", tint = Color.White, onClick = onBack)
-            Marquee(title, Modifier.weight(1f))
-        }
-        Row(Modifier.align(Alignment.Center), horizontalArrangement = Arrangement.spacedBy(Sp.x26),
-            verticalAlignment = Alignment.CenterVertically) {
-            LpIconButton(LpIcons.rewind, "快退", size = 28, tint = Color.White,
-                onClick = { onSeek((position - 10).coerceAtLeast(0.0)) })
-            LpIconButton(if (paused) LpIcons.play else LpIcons.pause,
-                if (paused) "播放" else "暂停", size = 36, tint = Color.White, onClick = onToggle)
-            LpIconButton(LpIcons.forward, "快进", size = 28, tint = Color.White, onClick = { onSeek(position + 10) })
-        }
-        ProgressBar(position, duration, onSeek, Modifier.align(Alignment.BottomCenter))
-    }
-}
+/* ── OSD ────────────────────────────────────────────────────────────────────
+   ☠☠ **控件和进度条必须在同一个 Column 里,不能各自 align 到底边。**
+   上一版就是各自 align 的:进度条 `fillMaxWidth` 贴底、又是最后一个子节点(在最上层),
+   而下排那些按钮 `padding(bottom = 44.dp)` 正好落在 Slider 那 48dp 的命中区里 ——
+   表现是「下面一整排按钮点不到」,而按钮本身看得见、也没禁用。
+   叠成 Column 之后这类事**结构上就不可能再发生**,不是靠调数值躲开。   */
+
+/** 两条渐变幕布:白字压在亮画面上看不清,而一整块不透明底又把画面切掉一条。 */
+private val TopVeil = Brush.verticalGradient(
+    listOf(Color.Black.copy(alpha = .58f), Color.Transparent),
+)
+private val BottomVeil = Brush.verticalGradient(
+    listOf(Color.Transparent, Color.Black.copy(alpha = .74f)),
+)
 
 /**
- * 横屏 OSD · 九宫格【用户定 2026-07-28】。
+ * OSD。竖横一套,差别只在**底排放几颗按钮**。
  *
- * 上一版把东西全堆在上下两条栏里,**屏幕两侧和中间全空着** —— 那是没把屏幕用完。
- * 遮挡率从 83.6% 降到 38.5% 量级靠的是把控件摊到九个角落,不是把控件做小。
+ * 上一版是竖横两个函数各写一遍布局,九宫格那套把控件摊到八个角落。
+ * 摊开确实少挡画面,但代价是「每颗按钮都得自己算 padding 去躲开别人」——
+ * 那笔账最后是用户替我们还的(点不到)。现在只剩上下两条:
+ * 上条只有返回和标题,下条一列到底,中间**整片是画面**。
  */
 @Composable
-private fun LandscapeOsd(
+private fun Osd(
+    portrait: Boolean,
     title: String, position: Double, duration: Double, paused: Boolean, speed: Double,
-    locked: Boolean, onBack: () -> Unit, onToggle: () -> Unit, onSeek: (Double) -> Unit,
+    locked: Boolean,
+    onBack: () -> Unit, onToggle: () -> Unit, onSeek: (Double) -> Unit,
     onSpeed: (Double) -> Unit, onLock: () -> Unit, onPanel: (String) -> Unit,
 ) {
-    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-        // 左上:返回 + 标题(过长慢速滚)
-        Row(Modifier.align(Alignment.TopStart).fillMaxWidth(0.6f),
-            verticalAlignment = Alignment.CenterVertically) {
+    Box(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.align(Alignment.TopCenter).fillMaxWidth().background(TopVeil)
+                .safeDrawingPadding().padding(bottom = Sp.x10),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             LpIconButton(LpIcons.back, "返回", tint = Color.White, onClick = onBack)
             Marquee(title, Modifier.weight(1f))
+            LpIconButton(
+                if (locked) LpIcons.lock else LpIcons.unlock, if (locked) "解锁" else "锁屏",
+                tint = Color.White, onClick = onLock,
+            )
         }
-        // 右上:版本·线路 / 超分 / 更多。★ 版本与线路合成一个「源」面板
-        Row(Modifier.align(Alignment.TopEnd), horizontalArrangement = Arrangement.spacedBy(Sp.x2)) {
-            Chip32("源", { onPanel("source") })
-            Chip32("画质", { onPanel("quality") })
-            Chip32("更多", { onPanel("more") })
+
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(BottomVeil)
+                .safeDrawingPadding().padding(top = Sp.x12),
+        ) {
+            ProgressRow(position, duration, onSeek)
+            Row(
+                Modifier.fillMaxWidth().padding(start = Sp.x6, end = Sp.x6, bottom = Sp.x2),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LpIconButton(LpIcons.rewind, "后退 10 秒", size = 22, tint = Color.White,
+                    onClick = { onSeek((position - 10).coerceAtLeast(0.0)) })
+                LpIconButton(
+                    if (paused) LpIcons.play else LpIcons.pause, if (paused) "播放" else "暂停",
+                    size = 30, tint = Color.White, onClick = onToggle,
+                )
+                LpIconButton(LpIcons.forward, "前进 10 秒", size = 22, tint = Color.White,
+                    onClick = { onSeek(position + 10) })
+                Spacer(Modifier.weight(1f))
+                SpeedGroup(speed, onSpeed)
+                if (!portrait) Chip("音轨") { onPanel("audio") }
+                Chip("字幕") { onPanel("subtitle") }
+                Chip("选集") { onPanel("episodes") }
+                Chip("更多") { onPanel("more") }
+            }
         }
-        // 左中:截图 / 锁屏
-        Column(Modifier.align(Alignment.CenterStart), horizontalAlignment = Alignment.CenterHorizontally) {
-            LpIconButton(LpIcons.camera, "截图", tint = Color.White, onClick = { onPanel("shot") })
-            LpIconButton(if (locked) LpIcons.lock else LpIcons.unlock,
-                if (locked) "解锁" else "锁屏", tint = Color.White, onClick = onLock)
-        }
-        // 右中:倍速条(上加 中显示 下减)
-        Column(Modifier.align(Alignment.CenterEnd), horizontalAlignment = Alignment.CenterHorizontally) {
-            LpIconButton(LpIcons.plus, "加速", tint = Color.White, onClick = { onSpeed(step(speed, +1)) })
-            Text("%.2f×".format(speed).replace(".00", ""), color = Color.White, fontSize = 13.sp)
-            LpIconButton(LpIcons.minus, "减速", tint = Color.White, onClick = { onSpeed(step(speed, -1)) })
-        }
-        // 左下:上一集 / 下一集
-        Row(Modifier.align(Alignment.BottomStart).padding(bottom = 44.dp)) {
-            Chip32("上一集", { onPanel("episodes") })
-            Chip32("下一集", { onPanel("episodes") })
-        }
-        // 右下:音轨 / 弹幕 / 选集
-        Row(Modifier.align(Alignment.BottomEnd).padding(bottom = 44.dp)) {
-            Chip32("音轨", { onPanel("audio") })
-            Chip32("弹幕", { onPanel("danmaku") })
-            Chip32("选集", { onPanel("episodes") })
-        }
-        // 中下:快退 / 播放暂停 / 快进
-        Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 44.dp),
-            horizontalArrangement = Arrangement.spacedBy(Sp.x20),
-            verticalAlignment = Alignment.CenterVertically) {
-            LpIconButton(LpIcons.rewind, "快退", size = 24, tint = Color.White,
-                onClick = { onSeek((position - 10).coerceAtLeast(0.0)) })
-            LpIconButton(if (paused) LpIcons.play else LpIcons.pause,
-                if (paused) "播放" else "暂停", size = 30, tint = Color.White, onClick = onToggle)
-            LpIconButton(LpIcons.forward, "快进", size = 24, tint = Color.White, onClick = { onSeek(position + 10) })
-        }
-        ProgressBar(position, duration, onSeek, Modifier.align(Alignment.BottomCenter))
     }
 }
 
-/** 倍速:**连续不是档位**。点一下走 0.25(长按走 0.05 由 StepperRow 那套承担)。 */
+/** 倍速:**连续不是档位**。点一下走 0.25。 */
 private fun step(cur: Double, dir: Int) =
     ((cur + dir * 0.25).coerceIn(SP_MIN, SP_MAX) * 100).toInt() / 100.0
+
+/** `− 1.5× +`。三件一组,中间那个数**不是按钮**,只是读数。 */
+@Composable
+private fun SpeedGroup(speed: Double, onSpeed: (Double) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        LpIconButton(LpIcons.minus, "减速", size = 16, tint = Color.White,
+            onClick = { onSpeed(step(speed, -1)) })
+        Text(
+            "%.2f×".format(speed).replace(".00", ""),
+            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+        )
+        LpIconButton(LpIcons.plus, "加速", size = 16, tint = Color.White,
+            onClick = { onSpeed(step(speed, +1)) })
+    }
+}
 
 /**
  * OSD 上的一颗功能钮。
  *
- * ★ **拆掉灰底,只剩字**(草稿 05 第 2 条)。五个灰方块并排是上一稿最像网页工具条的地方,
- *   而画面才是这一页的主角 —— 常态的按钮不该在画面上盖出五块补丁。
- * ★ 只有**开着**的功能才有一层琥珀底:那是这一屏唯一需要一眼看出来的状态。
- * ★ 命中区靠外边距撑到 44dp(UI_MOBILE.md §1.5 的唯一例外)。
+ * ★ **拆掉灰底,只剩字**:画面才是这一页的主角,常态的按钮不该在上面盖出几块补丁。
+ * ☠ 命中区**必须靠 `heightIn` 撑到 44dp**,不能靠外边距 —— 外边距在 `pressable`
+ *   外面,撑大的是间隙不是命中区。上一版就是这么写的,实测可点高度只有 28dp。
  */
 @Composable
-private fun Chip32(label: String, onClick: () -> Unit, on: Boolean = false) {
+private fun Chip(label: String, onClick: () -> Unit) {
     Box(
-        Modifier.padding(6.dp).clip(RoundedCornerShape(R.pill))
-            .background(if (on) Lp.colors.acc.copy(alpha = .22f) else Color.Transparent)
-            .pressable(onClick)
-            .padding(horizontal = Sp.x12, vertical = Sp.x6),
+        Modifier.heightIn(min = Dim.tap).clip(RoundedCornerShape(R.pill))
+            .pressable(onClick).padding(horizontal = Sp.x10),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label, color = if (on) Color(0xFFFFD98A) else Color.White.copy(alpha = .88f),
-            fontSize = 12.5.sp, maxLines = 1,
-            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-        )
+        Text(label, color = Color.White, fontSize = 13.sp, maxLines = 1)
     }
 }
 
 /**
- * 进度条。
+ * 进度条。左右是读数,中间是滑杆 —— 一行搞定,比上下两行省一截高度。
+ *
  * ☠ **`duration == 0` 时禁用**,并且不许用 0 盖掉已知时长 ——
  * 真服加载窗口实测 6~7 秒,这期间点中间会跳到 0.5 秒,用户看到的是「画面不变」。
  */
 @Composable
-private fun ProgressBar(position: Double, duration: Double, onSeek: (Double) -> Unit, m: Modifier) {
+private fun ProgressRow(position: Double, duration: Double, onSeek: (Double) -> Unit) {
     val enabled = duration > 0
     var live by remember(position) { mutableFloatStateOf(position.toFloat()) }
-    Column(m.fillMaxWidth().padding(horizontal = Sp.x12)) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Sp.x12),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(fmtTime(position), color = Color.White, fontSize = 11.sp)
         Slider(
             value = if (enabled) live.coerceIn(0f, duration.toFloat()) else 0f,
             onValueChange = { live = it },
             onValueChangeFinished = { if (enabled) onSeek(live.toDouble()) },
             valueRange = 0f..(if (enabled) duration.toFloat() else 1f),
             enabled = enabled,
+            modifier = Modifier.weight(1f).padding(horizontal = Sp.x10),
             colors = SliderDefaults.colors(thumbColor = Lp.colors.acc,
                 activeTrackColor = Lp.colors.acc, inactiveTrackColor = Color.White.copy(alpha = .3f)),
         )
-        Row(Modifier.fillMaxWidth().padding(bottom = Sp.x6)) {
-            Text(fmtTime(position), color = Color.White, fontSize = 11.sp)
-            Spacer(Modifier.weight(1f))
-            // 右边写**剩余**不写总长:看片的时候关心的是「还有多久」
-            Text(
-                if (enabled) "-" + fmtTime((duration - position).coerceAtLeast(0.0)) else "--:--",
-                color = Color.White, fontSize = 11.sp,
-            )
-        }
+        // 右边写**剩余**不写总长:看片的时候关心的是「还有多久」
+        Text(
+            if (enabled) "-" + fmtTime((duration - position).coerceAtLeast(0.0)) else "--:--",
+            color = Color.White, fontSize = 11.sp,
+        )
     }
 }
 
@@ -691,3 +714,18 @@ private suspend fun loadExternalAss(
         if (Libass.activateFile(u, bytes, LIBASS_FONTS_DIR)) return@withContext
     }
 }
+
+/**
+ * 抠出内嵌字体交给 libass。
+ *
+ * ★ 放在 IO 上跑,**不等它**:一次 Range 往返几百毫秒起,挡在起播前面就是
+ *   每一集都多等半秒,而它失败的代价只是字形回落。
+ */
+private suspend fun loadEmbeddedFonts(url: String) =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (!Libass.available) return@withContext
+        val ua = "LinPlayer/" + xyz.linplayer.app.BuildConfig.VERSION_NAME
+        val fonts = runCatching { MkvFonts.extract(MkvFonts.ranged(url, ua)) }
+            .getOrDefault(emptyList())
+        if (fonts.isNotEmpty()) Libass.addFonts(fonts)
+    }

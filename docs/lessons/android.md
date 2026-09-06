@@ -422,6 +422,106 @@ Exo 内核下那两个面板**恒空且点了没反应**。已改成 Exo 时读 
 
 ---
 
+### 「有声音、没画面、一直正在缓冲」= 状态事件在安卓上一条都没发 — 2026-09-07
+
+**症状**(用户原话):MP 内核有声音、没画面、没字幕,一直显示「正在缓冲」;
+**但退回集详情页的那段过场动画里能瞥见几帧真实画面**。
+
+那最后半句就是判据:画面一直在画,只是被挡着。mpv 一侧完全正常,别去查 vo。
+
+**根因**在 `core/player/player.go` 的 `pumpStatus`:
+
+```go
+if !rctxSet.Load() { continue }        // ← 错的
+if !videoOutReady() { continue }       // ← 对的
+```
+
+`rctxSet` 是**桌面通道 B**(GL render context)的标志,只有 `GLInit` 会置位。
+安卓走通道 A(SurfaceView / `wid`),`GLInit` 一次都不调 ——
+于是这道闸恒真,`player.status` **在安卓上一条都发不出去**。
+UI 那边 `position` 永远是 0,`everMoved` 永远是 false,
+起播黑幕(`background(Color.Black)` 铺满)就永远撤不掉。
+
+**为什么本机测不出来**:桌面构建里 `videoOutReady()` 的实现**就是**
+`rctxSet.Load()` —— 两者行为完全一致。任何跑在本机的行为测试都照不到这一条。
+钉它只能读源码(`status_test.go` 里那条 `TestPumpStatusGateIsPlatformAbstract`)。
+凡是「平台各一份实现」的判据,都有这个性质:**在开发机上两条分支是同一条**。
+
+**顺带暴露的**:`pumpStatus` 从来就没发过 `paused` 和 `buffering` 两个字段,
+而 UI 一直在读。表现是暂停按钮状态恒反、起播那句 4 秒兜底
+(`if (!buffering) everMoved = true`)永远不成立。
+字段名拼错同样不报错,所以那张表抽成了纯函数 `statusFields` 让单测钉。
+
+**结构上的教训**:一块**不透明的**全屏布,它的撤除条件挂在一个可能失效的信号上 ——
+这是「一个 bug 变成完全不可用」的放大器。现在多了一条 12 秒无条件死线:
+真没画面时用户看到的和以前一样(黑 + 缓冲提示),而画面其实在的时候他至少看得见。
+
+---
+
+### 下排按钮点不到 = 进度条的 Slider 盖在上面 — 2026-09-07
+
+横屏 OSD 九宫格里,下面三组按钮都写着 `align(BottomXxx).padding(bottom = 44.dp)`,
+而进度条是 `align(BottomCenter).fillMaxWidth()` 且**是最后一个子节点**(在最上层)。
+M3 `Slider` 的命中区是 48dp、通栏,正好压在那 44dp 上 ——
+**按钮看得见、没禁用、点不动**。
+
+「靠 padding 数值互相躲开」这种布局,改任何一处高度都会重新撞上。
+现在下排和进度条叠成同一个 `Column`,这类事**结构上不可能再发生**。
+
+同一批还改掉:`Chip` 的命中区靠**外**边距撑(`padding(6.dp).clip().pressable()`),
+撑大的是间隙不是命中区,实测可点高度只有 28dp。要撑得用 `heightIn(min = Dim.tap)`。
+
+顺带:「更多」面板走的是 `pick()`,而 `pick` 的 `when` 里根本没有 `"more"` 这一支,
+落到 `else -> Unit` —— **点什么都没反应**。它现在是跳板(换面板),不是设置项。
+
+---
+
+### Exo 内核的图形字幕(PGS/SUP)自带坐标,不能拉满宽度 — 2026-09-07
+
+media3 1.11 **本来就支持 PGS**:`DefaultSubtitleParserFactory` 里有
+`application/pgs -> PgsParser`,`MatroskaExtractor` 认 `S_HDMV/PGS`
+(两条都是反编译 `media3-extractor-1.11.0` 核对的,不是文档)。
+所以蓝光原盘那种字幕轨不用自己解码 —— **别去写解析器**。
+
+要改的是画法:`PgsParser` 给的 `Cue` 里 `position` / `line` / `size` /
+`bitmapHeight` 都是**相对视频画面的比例**。上一版一律 `fillMaxWidth()`,
+表现是字幕被横向拉成一条、还盖在画面正中。
+
+两个坑:
+
+- `Cue.DIMEN_UNSET` 是 `Float.MIN_VALUE`,**不是 0 也不是 -1**。
+  拿 `<= 0` 判会把它当成合法的 0,字幕贴到左上角去。
+- 叠加层的坐标系**必须和画面严格重合**:它和 libass 层、SurfaceView 共用同一个
+  `Modifier.aspectRatio`。铺满全屏的话上下黑边被算进比例,整体偏。
+
+---
+
+### MKV 内嵌字体:ExoPlayer 不透出附件,只能自己抠 — 2026-09-07
+
+特效字幕十有八九指名一个压制组塞进容器里的字体。没有它 libass 回落系统字体 ——
+**特效和位置都对,字形不对**,而且不报错。mpv 那条路没这个问题(libavformat 透给 libass)。
+
+`MatroskaExtractor` 完全不解析 Attachments。做法是宿主自己按 EBML 抠
+(`ui/player/MkvFonts.kt`),走 HTTP Range 只读需要的那几段:
+先读头部 256 KB 找 `Attachments`(0x1941A469),找不到就去 `SeekHead` 查它的位置再定点取。
+
+四条实测出来的:
+
+- **`SeekPosition` 是相对 Segment 的「数据起点」**,不是文件绝对偏移。当成绝对的
+  表现是读回一段垃圾,解析静默返回空。
+- **长度的首字节要抹掉长度标记位,而元素 ID 不抹** —— 两者规则不同。混用的表现是
+  每个元素都大出一大截,解析当场跑飞,一句错都不报。
+- **不能只信 MIME**:实测封装工具写的五花八门(`application/x-truetype-font` /
+  `application/vnd.ms-opentype` / `application/octet-stream` / 空串),后缀也得算一条。
+- **服务端不回 206 就整个放弃**:回 200 意味着它在给整部片,那比没有字体糟得多。
+
+libass 侧:`ass_add_font` 之后**必须重跑 `ass_set_fonts(..., update=1)`**。
+字体选择器是渲染器建立时从库里快照出来的,之后加的它看不见 ——
+表现是「字体灌进去了,画出来还是系统字体」。加完还要**强制重画一帧**:
+换字体不算「事件变化」,不强制的话要等下一句台词才换过来。
+
+---
+
 ## 跨域交叉引用
 
 这些条目和本领域强相关,但正文放在别的文件里(一条经验只存一份正文):

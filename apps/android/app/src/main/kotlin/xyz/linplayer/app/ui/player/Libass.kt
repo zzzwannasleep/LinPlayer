@@ -56,6 +56,10 @@ object Libass {
     private val bufs = LinkedHashMap<String, Buf>()
     private var active: String? = null
     private var opened = false
+    /** 下一帧强制重画。灌了字体 / 换了尺寸之后要用它 —— 见 [render]。 */
+    private var pendingForce = false
+    /** 这一部片已经灌过的字体名。附件字体常常在多条轨里重复,灌两遍是白花内存。 */
+    private val fonts = HashSet<String>()
 
     /** 这个构建的 libass 能不能用。取不到就整条路不走 —— 不是崩,是回落成普通字幕。 */
     val available: Boolean by lazy {
@@ -127,6 +131,28 @@ object Libass {
         opened = false
         active = null
         bufs.clear()
+        // ★ 字体名单跟着清,但**已经灌进 libass 库里的字体不撤** ——
+        //   撤要销毁整个 ASS_Library(字体目录重扫几十毫秒),而多留几份
+        //   上一集的字体只是占点内存,libass 按名字查,不会画错。
+        fonts.clear()
+    }
+
+    /**
+     * 灌内嵌字体(MKV 附件)。
+     *
+     * ★ 灌完要**强制重画一帧**:libass 只在事件变化时才说「这一帧变了」,
+     *   而换字体不算事件变化 —— 不强制的话画面上还是上一帧那份系统字体,
+     *   直到下一句台词才换过来。
+     */
+    fun addFonts(list: List<MkvFonts.Font>): Int = synchronized(lock) {
+        if (!available) return 0
+        var n = 0
+        for (f in list) {
+            if (!fonts.add(f.name)) continue
+            if (runCatching { Native.assAddFont(f.name, f.data) }.getOrDefault(-1) == 0) n++
+        }
+        if (n > 0) pendingForce = true
+        return n
     }
 
     val isActive: Boolean get() = synchronized(lock) { opened }
@@ -139,7 +165,10 @@ object Libass {
 
     /** -1 出错 / 0 和上一帧一样 / 1 位图已更新。 */
     fun render(bmp: Bitmap, posMs: Long, force: Boolean): Int = synchronized(lock) {
-        if (!opened) -1 else Native.assRender(bmp, posMs, force)
+        if (!opened) return -1
+        val f = force || pendingForce
+        pendingForce = false
+        return Native.assRender(bmp, posMs, f)
     }
 }
 
