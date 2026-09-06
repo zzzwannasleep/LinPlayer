@@ -161,10 +161,23 @@ func registerTransport() {
 	   ★ 切回别的档要把 keepaspect 放回 yes,不然拉伸过一次之后就再也回不去了。 */
 	bus.Register("player.setAspectRatio", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		r, _ := a["ratio"].(string)
-		if r == "-2" {
+		switch r {
+		case "-2":
+			// 拉伸填满:不保持宽高比
+			setProp("panscan", "0")
 			setProp("keepaspect", "no")
 			return map[string]any{"ratio": r, "keepaspect": "no"}, nil
+		case "cover":
+			/* 「自适应」= 保持比例放大到铺满,多出来的裁掉 —— 这是 panscan 不是比例。
+			   安卓 Exo 那条路在 Compose 侧算同一件事(VideoFit.Cover),
+			   两个内核给用户看的是同一张档位表,底下用什么属性是我们的事。 */
+			setProp("keepaspect", "yes")
+			setProp("video-aspect-override", "-1")
+			setProp("panscan", "1")
+			return map[string]any{"ratio": r, "panscan": "1"}, nil
 		}
+		// ★ panscan 要归零:上一档裁过之后不归零,换回别的档还是裁着的
+		setProp("panscan", "0")
 		setProp("keepaspect", "yes")
 		setProp("video-aspect-override", r)
 		return map[string]any{"ratio": r, "keepaspect": "yes"}, nil

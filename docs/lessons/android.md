@@ -522,6 +522,105 @@ libass 侧:`ass_add_font` 之后**必须重跑 `ass_set_fonts(..., update=1)`**�
 
 ---
 
+### 挂了 `setSubtitleParserFactory` 之后,轨道格式的 mime 被改写了 — 2026-09-07
+
+「libass 完全没生效,ASS 字幕直接消失」的根因,一行:
+
+```kotlin
+fun isAss(f: Format?) = f?.sampleMimeType == MimeTypes.TEXT_SSA   // 恒 false
+```
+
+`SubtitleTranscodingTrackOutput.format()` 在把轨道格式交给下游之前会改写它 ——
+`setSampleMimeType("application/x-media3-cues")` 紧跟着 `setCodecs(原 sampleMimeType)`
+(media3-extractor 1.11.0 字节码,`javap -c` 逐条核对)。
+
+于是**两侧看到的 Format 不是同一个**:
+
+| 位置 | sampleMimeType | codecs |
+|---|---|---|
+| `SubtitleParser.Factory.create()` | `text/x-ssa` | null |
+| 轨道选择 / `Tracks` / `onTracksChanged` | `application/x-media3-cues` | `text/x-ssa` |
+
+只比 sampleMimeType 的话,解析器那侧一直是对的(所以事件确实被我们吃掉了),
+而接 libass 那侧恒 false —— **字幕被吃掉了却没人画,一句错都不报**。
+判据抽成 `isAssMime(sampleMime, codecs)` 一处,三个调用点(切轨、`onTracksChanged`、
+面板上的「特效」标)共用。
+
+---
+
+### libass 的 `ass_set_frame_size` 必须在**开轨之后**再补一次 — 2026-09-07
+
+`ass_set_frame_size` 没设过 = 往一张 0×0 的画布上渲染,`ass_render_frame` 回空 ——
+**「libass 开起来了,一个字都没有」**。
+
+而这一层的调用顺序**不由我们定**:画布尺寸是 Compose 布局完才有的,
+轨道是 ExoPlayer 解完封装才有的,外挂字幕更是起播之后才装。
+`setSize` 里那句 `if (opened)` 看着无害,实际是「谁先到谁被丢掉」。
+解法是把尺寸**记下来**,`activateTrack` / `activateFile` 成功之后各补一次。
+
+同一类的还有 `ass_add_font` 之后要重跑 `ass_set_fonts(update=1)` —— 都是
+「这一层的状态要在另一层就绪时重放一遍」。
+
+---
+
+### 画面比例交给 `Modifier.aspectRatio` = 交给一条验不了的链 — 2026-09-07
+
+用户为「画面被拉伸」报了两轮。问题不在 `aspectRatio` 本身对不对,在于
+**对不对只有真机肉眼看得出来** —— 编译绿、单测绿、静态门禁绿,一路照不到。
+
+现在尺寸由纯函数 `videoRect(boxW, boxH, videoAr, fit)` 算,JVM 单测直接钉。
+凡是「只有肉眼能验」的几何,先想办法把算式拧成纯函数,再谈实现。
+
+三条实测:
+
+- **Cover(铺满裁切)那一档必须用 `requiredSize` 不能用 `size`**:后者会被父约束
+  夹回容器大小,那一档就退化成和「原始」一模一样,而且看不出来。
+- 视频层和**两个**字幕层(libass 画布、PGS/文本层)共用同一个尺寸 Modifier。
+  各写一遍的两处早晚会漂,漂了的表现是「字幕比画面宽一截」。
+- 监听器只管「以后」:`DisposableEffect` 里注册 `Player.Listener` 之前
+  先取一次 `player.videoSize`。这个 effect 的 key 一变就重挂一次,
+  漏掉当前值的表现是比例永远 0 = 铺满 = 和「没算比例」长得一样。
+
+mpv 那侧同一张档位表:「铺满裁切」不是一个宽高比,是 `panscan=1`;
+换回别的档要把 `panscan` 归零,不然裁过一次就再也回不去。
+
+---
+
+### 字幕不要黑底,要描边 — 2026-09-07
+
+给每句话垫一块半透明黑板,白字确实看得清 —— 代价是画面下方常年被切掉一条,
+亮场景里那块板比字还显眼(用户原话:「播放 SRT 字幕会带黑色遮罩背景」)。
+正解是黑色描边先画一遍、白字再压上去(`TextStyle.drawStyle = Stroke`):
+字外面一个像素都不占,压在雪地上和压在夜景上一样清楚。libass 那条路默认就是这么做的。
+
+图形字幕(PGS)另有一条:它的坐标是相对**片源画面**的,而叠加层是**显示出来**的
+那块 —— 裁切档下两者不等长,原样贴会把整条推到画面外。落点要夹回矩形内;
+双语 PGS 是一张图两行字,推出去的正好是下面那行英文。
+
+---
+
+### `HorizontalPager` 默认不预挂相邻页 — 2026-09-07
+
+首页 Hero「切封面时有一块黑色遮罩,好像和艺术字一块」,两个原因叠在一起:
+
+1. `beyondViewportPageCount` 默认 **0** —— 下一页是**开始滑的那一刻**才组合的,
+   背景图这时才开始下载。滑进来的是一块空页,上面压着渐变幕布和已经从缓存里
+   出来的艺术字,图晚半秒才补上。设成 1,图在上一页还在看的时候就取好了。
+2. 翻页视差把图往反方向挪了 35%,而 Ken Burns 最多放大 10% ——
+   挪出去的那 25% 底下什么都没有,露出来的就是幕布本身。
+   **位移量不能超过缩放留出的余量**,否则「视差」就是「露底」。
+
+---
+
+### 播放页要沉浸式,两个内核都要 — 2026-09-07
+
+隐藏的是 `WindowInsetsCompat.Type.systemBars()`,不能只隐藏 statusBars ——
+手势条压在底排按钮上,而且那条白杠在深色画面上比状态栏还显眼。
+行为用 `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`(划一下还能叫回来),
+`onDispose` 里必须 `show` 回去 —— 不还原的话回到首页也是没有状态栏。
+
+---
+
 ## 跨域交叉引用
 
 这些条目和本领域强相关,但正文放在别的文件里(一条经验只存一份正文):

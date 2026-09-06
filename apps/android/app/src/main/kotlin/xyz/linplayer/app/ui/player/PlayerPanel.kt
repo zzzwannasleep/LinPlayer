@@ -60,7 +60,9 @@ fun PlayerPanel(
     kind: String,
     itemId: String,
     exo: androidx.media3.exoplayer.ExoPlayer? = null,
+    fit: VideoFit = VideoFit.Source,
     onOpen: (String) -> Unit = {},
+    onFit: (VideoFit) -> Unit = {},
     onClose: () -> Unit,
 ) {
     val app = LocalApp.current
@@ -145,11 +147,18 @@ fun PlayerPanel(
                     .onFailure { app.report(it) }
                 onClose()
             }
+            /* 画面比例。★ 档位表由 [VideoFit] 一处定 —— 面板里再抄一遍的话,
+               加一档就得改两处,而漏掉的那处不会报错,只是少一个选项。 */
+            "ratio" -> {
+                options = VideoFit.entries.map { Triple(it.name, null, it.label + " · " + it.hint) }
+                current = fit.name
+            }
             /* 「更多」是**跳板**,不是设置项:选一条就换一个面板。
                ☠ 上一版把它当设置项走 `pick`,而 pick 的 when 里根本没有 "more"
                   这一支 —— 落到 `else -> Unit`,表现是「更多里点什么都没反应」。 */
             "more" -> {
                 options = listOf(
+                    Triple("ratio", null, "画面比例"),
                     Triple("source", null, "版本与线路"),
                     Triple("audio", null, "音轨"),
                     Triple("quality", null, "画质"),
@@ -163,7 +172,8 @@ fun PlayerPanel(
 
     val title = when (kind) {
         "source" -> "版本与线路"; "audio" -> "音轨"; "subtitle" -> "字幕"
-        "episodes" -> "选集"; "quality" -> "画质"; "danmaku" -> "弹幕"; else -> "更多"
+        "episodes" -> "选集"; "quality" -> "画质"; "danmaku" -> "弹幕"
+        "ratio" -> "画面比例"; else -> "更多"
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -200,6 +210,7 @@ fun PlayerPanel(
                     items(options, key = { it.first }) { (id, badge, label) ->
                         OptRow(label, {
                             if (kind == "more") onOpen(id)
+                            else if (kind == "ratio") { onFit(VideoFit.of(id)); onClose() }
                             else {
                                 scope.launch { pick(app, kind, id, itemId, exo) }
                                 onClose()

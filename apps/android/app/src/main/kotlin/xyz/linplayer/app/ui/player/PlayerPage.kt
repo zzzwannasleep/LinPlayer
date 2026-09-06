@@ -141,6 +141,25 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             .str("sub_lang") ?: ""
     }
     val exo = rememberExoPlayer(engine == "exo", subLangPref)
+    /* 画面比例【用户定 2026-09-07】。★ **不持久化** —— 和画质档位同一条口径:
+       它是「这一片这一次这么看」,记住的话下一片莫名其妙就是 4:3。 */
+    var videoFit by remember { mutableStateOf(VideoFit.Source) }
+
+    /* 沉浸式:**两个内核都要**【用户报 2026-09-07】。
+       ☠ 隐藏的是 `systemBars()`,不能只隐藏 statusBars —— 手势条(navigationBars)
+         压在底排按钮上,而且它那条白杠在深色画面上比状态栏还显眼。
+       ★ `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`:用户从边缘划一下还能把它们叫回来,
+         叫回来之后过几秒自己走。锁死的话用户连返回手势都不知道还在不在。
+       ★ 退出播放页必须 `show` 回去 —— 整个 App 只有这一页要沉浸,不还原的话
+         回到首页也是没有状态栏,而那看起来就像界面画崩了。 */
+    DisposableEffect(activity) {
+        val w = activity?.window
+        val ctl = w?.let { androidx.core.view.WindowInsetsControllerCompat(it, it.decorView) }
+        ctl?.systemBarsBehavior =
+            androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        ctl?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        onDispose { ctl?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
+    }
 
     // 屏幕常亮(U1.24):播放中不息屏,暂停 / 退出后恢复
     DisposableEffect(paused) {
@@ -365,7 +384,8 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     Box(Modifier.fillMaxSize()) {
         // 视频层:SurfaceView。Compose 内容天然画在它上面
         // ☠ 两条**互斥**:同时挂的话 mpv 和 ExoPlayer 会各画各的,上面那层赢
-        if (exo != null) ExoSurface(exo, subOff = subLangPref == "", m = Modifier.fillMaxSize())
+        if (exo != null)
+            ExoSurface(exo, subOff = subLangPref == "", fit = videoFit, m = Modifier.fillMaxSize())
         else VideoSurface(app.core, Modifier.fillMaxSize())
 
 
@@ -476,7 +496,19 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             tint = Color.White, onClick = { locked = false })
 
         panel?.let {
-            PlayerPanel(it, route.itemId, exo, onOpen = { k -> panel = k }) { panel = null }
+            PlayerPanel(
+                it, route.itemId, exo,
+                fit = videoFit,
+                onOpen = { k -> panel = k },
+                /* mpv 那条路的比例在核心层改(keepaspect / video-aspect-override / panscan);
+                   Exo 那条路在 Compose 侧改尺寸。**同一个档位表**,不给用户两套说法。 */
+                onFit = { f ->
+                    videoFit = f
+                    if (exo == null) scope.launch {
+                        runCatching { app.call("player.setAspectRatio", args("ratio" to f.mpvRatio)) }
+                    }
+                },
+            ) { panel = null }
         }
     }
 }

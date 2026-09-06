@@ -14,7 +14,10 @@ import xyz.linplayer.app.ui.pages.Version
 import xyz.linplayer.app.ui.pages.defaultVersion
 import xyz.linplayer.app.ui.pages.fmtTime
 import xyz.linplayer.app.ui.pages.withScheme
+import xyz.linplayer.app.ui.player.VideoFit
 import xyz.linplayer.app.ui.player.assTimeMs
+import xyz.linplayer.app.ui.player.isAssMime
+import xyz.linplayer.app.ui.player.videoRect
 import xyz.linplayer.app.ui.player.splitMedia3Dialogue
 import xyz.linplayer.app.ui.theme.pickTone
 import xyz.linplayer.app.ui.theme.rgbToHsv
@@ -261,5 +264,51 @@ class LogicTest {
         assertNull(splitMedia3Dialogue("Comment: 0:00:01:00,0:00:02:00,0,0,Default,,0,0,0,,x"))
         assertNull(splitMedia3Dialogue("Dialogue: 0:00:01:00"))
         assertNull(splitMedia3Dialogue(""))
+    }
+
+    // ------------------------------------------------------------ Exo 内核的字幕与画面
+
+    /**
+     * ☠ 这一条钉的是**用户报的「ASS 字幕直接消失」**。
+     *
+     * 挂了 `setSubtitleParserFactory` 之后,`SubtitleTranscodingTrackOutput.format()`
+     * 会把交给轨道选择那一侧的 Format 改写成 `application/x-media3-cues`,
+     * 原 mime 挪进 `codecs`(media3-extractor 1.11.0 字节码核对)。
+     * 只比 sampleMimeType 的话这个判断恒 false —— libass 一次都接不上,
+     * 而事件已经被我们的解析器吃掉了,画面上一个字都没有,一句错都不报。
+     */
+    @Test fun `改写过的轨道格式也要认出是 ASS`() {
+        assertTrue("解析器工厂那一侧看到的是改写前的",
+            isAssMime("text/x-ssa", null))
+        assertTrue("轨道选择那一侧看到的是改写后的",
+            isAssMime("application/x-media3-cues", "text/x-ssa"))
+        assertTrue("别的格式被改写后不许认成 ASS",
+            !isAssMime("application/x-media3-cues", "application/x-subrip"))
+        assertTrue("PGS 更不能认成 ASS", !isAssMime("application/pgs", null))
+    }
+
+    /**
+     * 画面比例。上一版交给 `Modifier.aspectRatio`,对不对只有真机肉眼看得出来,
+     * 用户为「画面被拉伸」报了两轮 —— 所以算式必须在这里能跑。
+     */
+    @Test fun `画面比例四档各算各的`() {
+        // 宽屏手机横过来放 16:9:高度贴边,左右留黑
+        val src = videoRect(2400, 1080, 16f / 9f, VideoFit.Source)
+        assertEquals(1080, src.height)
+        assertEquals(1920, src.width)
+        // 竖屏放 16:9:宽度贴边,上下留黑
+        val por = videoRect(1080, 2400, 16f / 9f, VideoFit.Source)
+        assertEquals(1080, por.width)
+        assertEquals(608, por.height)
+        // 自适应 = 铺满裁切:两边都不小于容器
+        val cov = videoRect(2400, 1080, 16f / 9f, VideoFit.Cover)
+        assertTrue("铺满档必须盖住整个容器,宽=${cov.width} 高=${cov.height}",
+            cov.width >= 2400 && cov.height >= 1080)
+        // 强制档不看片源比例
+        assertEquals(1440, videoRect(2400, 1080, 16f / 9f, VideoFit.R4x3).width)
+        // 首帧之前比例还不知道:先铺满,别算出一块 0
+        val unknown = videoRect(2400, 1080, 0f, VideoFit.Source)
+        assertEquals(2400, unknown.width)
+        assertEquals(1080, unknown.height)
     }
 }

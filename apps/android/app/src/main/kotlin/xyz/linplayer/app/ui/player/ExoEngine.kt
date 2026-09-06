@@ -5,18 +5,16 @@ import android.view.SurfaceView
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -29,13 +27,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -150,6 +153,46 @@ fun ExoPlayer.load(url: String, startSecs: Double) {
 }
 
 /**
+ * 画面比例档位【用户定 2026-09-07】。
+ *
+ * ★ 档位是**枚举不是数值**:给一个自由输入的比例框,用户只会输出一堆变形的画面。
+ */
+enum class VideoFit(val label: String, val hint: String, val mpvRatio: String) {
+    Source("原始", "按片源比例,完整显示", "-1"),
+    Cover("自适应", "铺满屏幕,超出的裁掉", "cover"),
+    R4x3("4:3", "强制 4:3", "1.3333"),
+    R16x9("16:9", "强制 16:9", "1.7778");
+
+    companion object {
+        fun of(id: String?): VideoFit = entries.firstOrNull { it.name == id } ?: Source
+    }
+}
+
+/**
+ * 画面在容器里占的那块矩形(像素,居中放)。
+ *
+ * ☠ **这一步必须是能在 JVM 上跑的纯函数。** 上一版把它交给
+ * `Modifier.aspectRatio`,而那条链错没错**只有真机上肉眼看得出来** ——
+ * 用户为「画面被拉伸」报了两轮。算式摆在这里,`ExoEngineTest` 直接钉。
+ *
+ * ★ contain(留黑边)和 cover(裁掉多余)只差一个比较方向,不写成两份。
+ */
+internal fun videoRect(boxW: Int, boxH: Int, videoAr: Float, fit: VideoFit): IntSize {
+    if (boxW <= 0 || boxH <= 0) return IntSize.Zero
+    val ar = when (fit) {
+        VideoFit.R4x3 -> 4f / 3f
+        VideoFit.R16x9 -> 16f / 9f
+        else -> videoAr
+    }
+    // 比例还不知道(首帧之前)就先铺满:这期间画面本来就还没有
+    if (ar <= 0f || !ar.isFinite()) return IntSize(boxW, boxH)
+    val boxAr = boxW.toFloat() / boxH
+    val heightBound = if (fit == VideoFit.Cover) boxAr < ar else boxAr > ar
+    return if (heightBound) IntSize(Math.round(boxH * ar), boxH)
+    else IntSize(boxW, Math.round(boxW / ar))
+}
+
+/**
  * ExoPlayer 的视频层。
  *
  * ★ 和 mpv 那条一样用 `SurfaceView` 而不是 `TextureView`:独立合成层,
@@ -157,29 +200,33 @@ fun ExoPlayer.load(url: String, startSecs: Double) {
  * ★ **解绑写在 onDispose 里**:不解的话换内核 / 退出播放页之后,
  *   ExoPlayer 还攥着一个已经没了的 Surface。
  *
- * ☠☠ **画面比例必须自己算。**
- *   裸 `SurfaceView` 把画面**拉满整个 View**,不管片源是什么比例 ——
- *   用户报的「画面比例不对,直接被拉伸,没有自适应」就是这一条。
- *   `media3-ui` 的 `AspectRatioFrameLayout` 能干这件事,但为它多引一个包不值当
- *   (那个包还会顺带把一整套我们不用的控制条拖进来):
- *   `onVideoSizeChanged` 的宽高 + `Modifier.aspectRatio` 就够了,而且比例算在
- *   Compose 侧,和 OSD 用的是同一套坐标。
- *   ★ 必须乘 `pixelWidthHeightRatio`:非方形像素的片源(DVD 源、部分 1080i)
- *     光看 width/height 会算出一个瘦长的画面,而这在编译期看不出来。
+ * ☠☠ **画面比例必须自己算。** 裸 `SurfaceView` 把画面拉满整个 View,
+ *   不管片源是什么比例。尺寸由 [videoRect] 一处算出,视频层和两个字幕层
+ *   **共用同一个 `box`** —— 各写一遍的两处早晚会漂,而漂了的表现是
+ *   「字幕比画面宽一截」,不报错。
+ * ★ 必须乘 `pixelWidthHeightRatio`:非方形像素的片源(DVD 源、部分 1080i)
+ *   光看 width/height 会算出一个瘦长的画面,而这在编译期看不出来。
+ * ★ Cover 档的矩形**比容器大**,所以用 `requiredSize` 而不是 `size` ——
+ *   后者会被父约束夹回去,那一档就退化成和「原始」一模一样。
  */
 @Composable
-fun ExoSurface(player: ExoPlayer, subOff: Boolean, m: Modifier = Modifier) {
+fun ExoSurface(player: ExoPlayer, subOff: Boolean, fit: VideoFit, m: Modifier = Modifier) {
     var ratio by remember(player) { mutableFloatStateOf(0f) }
     var videoW by remember(player) { mutableIntStateOf(0) }
     var videoH by remember(player) { mutableIntStateOf(0) }
 
     DisposableEffect(player, subOff) {
+        fun take(v: VideoSize) {
+            val par = if (v.pixelWidthHeightRatio > 0f) v.pixelWidthHeightRatio else 1f
+            ratio = if (v.height > 0 && v.width > 0) v.width * par / v.height else 0f
+            videoW = v.width; videoH = v.height
+        }
+        /* ☠ 先把**当前值**取一遍。监听器只管「以后」,而这次注册可能已经晚了
+           (subOff 一变这个 effect 就重挂一次)。漏掉这一次的表现是比例永远是 0,
+           也就是画面一直铺满 —— 和「根本没算比例」长得一模一样。 */
+        take(player.videoSize)
         val l = object : Player.Listener {
-            override fun onVideoSizeChanged(size: VideoSize) {
-                val par = if (size.pixelWidthHeightRatio > 0f) size.pixelWidthHeightRatio else 1f
-                ratio = if (size.height > 0 && size.width > 0) size.width * par / size.height else 0f
-                videoW = size.width; videoH = size.height
-            }
+            override fun onVideoSizeChanged(size: VideoSize) = take(size)
 
             override fun onTracksChanged(tracks: Tracks) {
                 pickSubtitleTrack(player, tracks, subOff)
@@ -190,23 +237,17 @@ fun ExoSurface(player: ExoPlayer, subOff: Boolean, m: Modifier = Modifier) {
         onDispose { player.removeListener(l) }
     }
 
-    /* 外层铺满(黑边归它),内层按真实比例。
-       ★ `Modifier.aspectRatio` 单独用就是 FIT:它按外层给的最大约束试宽、放不下再试高,
-         宽片得到上下黑边、竖片得到左右黑边。**不要再叠 fillMaxSize()** ——
-         叠上去两个约束都被钉死,比例这一条当场失效(表现就是照样拉伸)。
-       ★ 比例还不知道时先铺满:首帧一到 onVideoSizeChanged 会纠正,
-         而这期间画面本来就还没有。 */
-    val fit = if (ratio > 0f) Modifier.aspectRatio(ratio) else Modifier.fillMaxSize()
-    Box(m, contentAlignment = Alignment.Center) {
+    BoxWithConstraints(m.clipToBounds(), contentAlignment = Alignment.Center) {
+        val r = videoRect(constraints.maxWidth, constraints.maxHeight, ratio, fit)
+        val box = with(LocalDensity.current) {
+            Modifier.requiredSize(r.width.toDp(), r.height.toDp())
+        }
         AndroidView(
-            modifier = fit,
+            modifier = box,
             factory = { ctx -> SurfaceView(ctx).also { player.setVideoSurfaceView(it) } },
         )
-        /* ★ 两个叠加层**都必须和画面用同一个 `fit`**:libass 按 PlayResX/Y 定位,
-           PGS 的 Cue 带的也是相对画面的比例 —— 差一个黑边的高度,字就整体错位。
-           共用一个 Modifier 变量而不是各写一遍 —— 各写一遍的两处早晚会漂。 */
-        LibassLayer(player, fit, videoW, videoH)
-        ExoSubtitles(player, fit)
+        LibassLayer(player, box, videoW, videoH)
+        ExoSubtitles(player, box)
     }
     DisposableEffect(player) { onDispose { player.clearVideoSurface() } }
 }
@@ -308,22 +349,38 @@ fun ExoSubtitles(player: ExoPlayer, m: Modifier = Modifier) {
         cues.forEach { cue -> cue.bitmap?.let { BitmapCue(cue, it, maxWidth, maxHeight) } }
         if (texts.isNotEmpty()) Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, bottom = 48.dp),
+                .padding(start = 24.dp, end = 24.dp, bottom = 40.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             texts.forEach { cue ->
-                cue.text?.toString()?.takeIf { it.isNotBlank() }?.let { t ->
-                    Text(
-                        t,
-                        Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(Color.Black.copy(alpha = .55f))
-                            .padding(horizontal = 10.dp, vertical = 2.dp),
-                        color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Medium,
-                        textAlign = TextAlign.Center, lineHeight = 23.sp,
-                    )
-                }
+                cue.text?.toString()?.takeIf { it.isNotBlank() }?.let { TextCue(it) }
             }
         }
+    }
+}
+
+/**
+ * 一句文本字幕。
+ *
+ * ☠ **不要黑底。** 上一版给每句话垫一块 55% 的黑板 —— 白字确实看得清了,
+ *   代价是画面下方常年被切掉一条,亮场景里那块板比字还显眼(用户原话:
+ *   「播放 SRT 字幕会带黑色遮罩背景」)。
+ *   正解是**描边**:黑边先画一遍、白字再压上去。字外面一个像素都不占,
+ *   压在雪地上和压在夜景上一样清楚 —— 这也是 libass 那条路的默认做法。
+ */
+@Composable
+private fun TextCue(t: String) {
+    val base = TextStyle(
+        fontSize = 18.sp, lineHeight = 24.sp,
+        fontWeight = FontWeight.Medium, textAlign = TextAlign.Center,
+    )
+    Box(contentAlignment = Alignment.Center) {
+        Text(t, style = base.copy(
+            color = Color.Black,
+            // Round 的接头:方角在笔画拐弯处会支出一个小尖角
+            drawStyle = Stroke(width = 6f, join = StrokeJoin.Round, cap = StrokeCap.Round),
+        ))
+        Text(t, style = base.copy(color = Color.White))
     }
 }
 
@@ -338,15 +395,22 @@ fun ExoSubtitles(player: ExoPlayer, m: Modifier = Modifier) {
 @Composable
 private fun BitmapCue(cue: Cue, bmp: android.graphics.Bitmap, boxW: Dp, boxH: Dp) {
     val set = { v: Float -> v != Cue.DIMEN_UNSET }
-    val w = if (set(cue.size)) boxW * cue.size else boxW
-    val h = if (set(cue.bitmapHeight)) boxH * cue.bitmapHeight
-    else w * (bmp.height.toFloat() / bmp.width.coerceAtLeast(1))
+    val w = (if (set(cue.size)) boxW * cue.size else boxW).coerceAtMost(boxW)
+    val h = (if (set(cue.bitmapHeight)) boxH * cue.bitmapHeight
+    else w * (bmp.height.toFloat() / bmp.width.coerceAtLeast(1))).coerceAtMost(boxH)
     val x = if (set(cue.position)) boxW * cue.position else (boxW - w) / 2
     val y = if (set(cue.line) && cue.lineType == Cue.LINE_TYPE_FRACTION) boxH * cue.line
-    else boxH - h - 32.dp
+    else boxH - h - 24.dp
+    /* ☠ **落点要夹回画面里。** PGS 的坐标是相对**片源画面**的,而我们这块布
+       是显示出来的那块 —— 「自适应」档裁过之后两者不等长,原样贴会把整条字幕
+       推到画面外面。双语字幕是一张图两行字,推出去的正好是下面那行英文
+       (用户原话:「双语字幕直接看不到下面的英语了」)。 */
     Image(
         bmp.asImageBitmap(), null,
-        Modifier.offset(x, y).size(w, h),
+        Modifier
+            .offset(x.coerceIn(0.dp, (boxW - w).coerceAtLeast(0.dp)),
+                y.coerceIn(0.dp, (boxH - h).coerceAtLeast(0.dp)))
+            .size(w, h),
         contentScale = ContentScale.FillBounds,
     )
 }

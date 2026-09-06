@@ -355,17 +355,21 @@ private fun Hero(block: Block<List<Item>>, list: LazyListState, open: (Item) -> 
                     }
                     .clipToBounds()
             ) {
-                HorizontalPager(pager, Modifier.fillMaxSize()) { page ->
+                /* ☠☠ **相邻那一页要提前composition。** `HorizontalPager` 默认
+                   `beyondViewportPageCount = 0` —— 下一页是**开始滑的那一刻**才挂上去的,
+                   于是它的背景图这时才开始下载:滑进来的是一块空页,上面压着渐变幕布和
+                   已经从缓存里出来的艺术字,图晚半秒才「啪」地补上。
+                   用户看到的就是「切封面时有一块黑色遮罩,好像和艺术字一块」。
+                   预挂一页,图在上一页还在看的时候就取好了。 */
+                HorizontalPager(pager, Modifier.fillMaxSize(), beyondViewportPageCount = 1) { page ->
                     val cur = items[page]
                     Box(Modifier.fillMaxSize().pressable({ open(cur) })) {
-                        // 翻页视差:图比页面慢一拍地跟过来。位移同样在 draw 阶段读
+                        /* ☠ **图不许再做翻页视差。** 上一版让图比页面慢 35% 跟过来,
+                           而 Ken Burns 最多只放大 10% —— 挪出去的那 25% 底下什么都没有,
+                           露出来的是幕布本身。用户要的就是一次干净的推拉,别的都是减分。 */
                         NetImage(
                             app.imageUrl(cur.id, "Backdrop", 720), null,
-                            Modifier.fillMaxSize().graphicsLayer {
-                                scaleX = z; scaleY = z
-                                val d = (pager.currentPage - page) + pager.currentPageOffsetFraction
-                                translationX = d * size.width * 0.35f
-                            },
+                            Modifier.fillMaxSize().graphicsLayer { scaleX = z; scaleY = z },
                             corner = 0.dp, scale = ContentScale.Crop,
                         )
                         /* 上下两头压暗:上头给状态栏的时间和信号留可读性(**不是给它留黑底**),

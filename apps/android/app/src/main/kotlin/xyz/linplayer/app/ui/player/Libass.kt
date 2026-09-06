@@ -60,14 +60,18 @@ object Libass {
     private var pendingForce = false
     /** 这一部片已经灌过的字体名。附件字体常常在多条轨里重复,灌两遍是白花内存。 */
     private val fonts = HashSet<String>()
+    /** 最近一次要的画布 / 片源尺寸。见 [setSize]。 */
+    private var canvasW = 0
+    private var canvasH = 0
+    private var storeW = 0
+    private var storeH = 0
 
     /** 这个构建的 libass 能不能用。取不到就整条路不走 —— 不是崩,是回落成普通字幕。 */
     val available: Boolean by lazy {
         runCatching { Native.assVersion() }.getOrDefault(0) > 0
     }
 
-    fun isAss(f: Format?): Boolean =
-        f?.sampleMimeType == MimeTypes.TEXT_SSA
+    fun isAss(f: Format?): Boolean = isAssMime(f?.sampleMimeType, f?.codecs)
 
     // ------------------------------------------------------------ 喂数据
 
@@ -103,6 +107,7 @@ object Libass {
         for (e in b.events) Native.assChunk(e.body, e.startMs, e.durMs)
         active = id
         opened = true
+        applySizeLocked()
         return true
     }
 
@@ -116,6 +121,7 @@ object Libass {
         }
         active = key
         opened = true
+        applySizeLocked()
         return true
     }
 
@@ -159,8 +165,24 @@ object Libass {
 
     // ------------------------------------------------------------ 渲染
 
+    /**
+     * 画布尺寸。
+     *
+     * ☠ **记下来,开轨之后要再补一次。** `ass_set_frame_size` 没设过的话
+     * libass 往一张 0×0 的画布上渲染 —— `ass_render_frame` 回空,
+     * 表现是「libass 开起来了,一个字都没有」。而这一层的调用顺序**不由我们定**:
+     * 画布是 Compose 布局完才有尺寸的,轨道是 ExoPlayer 解完封装才有的,
+     * 外挂字幕更是起播之后才装。谁先谁后随机 —— 所以不能只在 setSize 这一侧发。
+     */
     fun setSize(frameW: Int, frameH: Int, videoW: Int, videoH: Int) = synchronized(lock) {
-        if (opened) Native.assSetSize(frameW, frameH, videoW, videoH)
+        canvasW = frameW; canvasH = frameH; storeW = videoW; storeH = videoH
+        applySizeLocked()
+    }
+
+    private fun applySizeLocked() {
+        if (!opened || canvasW <= 0 || canvasH <= 0) return
+        Native.assSetSize(canvasW, canvasH, storeW, storeH)
+        pendingForce = true
     }
 
     /** -1 出错 / 0 和上一帧一样 / 1 位图已更新。 */
@@ -275,3 +297,22 @@ internal fun assTimeMs(s: String): Long {
         -1   // 解不出来就当这一条不存在:画错时间的字幕比没有更烦
     }
 }
+
+/**
+ * 这条轨是不是 ASS/SSA。
+ *
+ * ☠☠ **不能只看 `sampleMimeType`。** 一旦挂了 `setSubtitleParserFactory`,
+ * `SubtitleTranscodingTrackOutput.format()` 就会把交给下游的 Format 改写成
+ * `sampleMimeType = application/x-media3-cues`,**把原来的 mime 挪进 `codecs`**
+ * (media3-extractor 1.11.0 字节码:`setSampleMimeType("application/x-media3-cues")`
+ * 紧跟着 `setCodecs(format.sampleMimeType)`)。
+ *
+ * 于是**轨道选择那一侧看到的永远不是 `text/x-ssa`** —— 上一版只比 sampleMimeType,
+ * 这个判断恒 false:libass 一次都没被接上,而事件已经被我们的解析器吃掉了。
+ * 表现就是用户报的「ASS 字幕直接消失,libass 完全没生效」,一句错都不报。
+ *
+ * 解析器工厂那一侧收到的是**改写前**的 Format(所以那边一直是对的),
+ * 两侧共用这一个判据,不要各写一遍。
+ */
+internal fun isAssMime(sampleMime: String?, codecs: String?): Boolean =
+    sampleMime == MimeTypes.TEXT_SSA || codecs == MimeTypes.TEXT_SSA
