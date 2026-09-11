@@ -20,110 +20,114 @@
   <a href="README.ja.md">日本語</a>
 </p>
 
-**LinPlayer** is a third-party Emby client targeting **Windows / Linux / Android / Android TV**. Right now **only Windows is usable**.
+**LinPlayer** is a third-party Emby client: one shared Go core plus a native UI on every platform. Targets **Windows / Android / Android TV / Linux**; **Windows and Android (phone / tablet) are usable today**.
 
-> ### 🚧 Under reconstruction (2026-07)
+> ### 🚧 Migration in progress
 >
-> The project is migrating from a **Rust core + React/Tauri** stack to a **Go core + native UI on every platform**.
-> The old Rust/Tauri stack was deleted from the repository on 2026-09-04.
+> The project moved from a **Rust core + React/Tauri** stack to a **Go core + native UI per platform**.
+> The old Rust/Tauri stack was deleted from the repo on 2026-09-04; tag [`rust-final`](https://github.com/zzzwannasleep/LinPlayer/tree/rust-final) is its last state.
 >
-> - **Windows** — working, shipping normally. Portable zip; all data lives in `userdata/` next to the executable.
-> - **Linux / Android / Android TV** — **no builds available**: the Go-side UI for these has not been written yet,
->   and the old Rust implementation went away with this refactor. Older builds are still on the Releases page.
-> - **Apple platforms (iOS / macOS / tvOS)** — no longer supported, removed from the repo.
->
-> The complete Flutter-era code is preserved at tag [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final);
-> the Rust/Tauri stack at tag [`rust-final`](https://github.com/zzzwannasleep/LinPlayer/tree/rust-final).
+> | Platform | Status |
+> |:--|:--|
+> | **Windows** | Working, shipping normally. Portable zip; all data lives in `userdata/` next to the executable |
+> | **Android phone / tablet** | Working (since 2026-09-06). Native Jetpack Compose UI, signed APK |
+> | **Android TV** | Not started — touch interaction does not transfer to a remote; focus navigation needs its own build |
+> | **Linux** | Not started — the old Tauri implementation went away with the refactor; older builds are still on the Releases page |
+> | **Apple platforms** | Not planned |
 
-Business logic (Emby protocol, networking, playback control, sync, downloads, plugins) lives in a **single Go core shared by every platform**, built as the `lpcore` shared library; each platform only writes its own UI in its own idiom. So a 🔨 below does not mean "not built yet" — it means **the core is ready and waiting for UI wiring**.
+## Download
+
+Grab it from [**Releases**](https://github.com/zzzwannasleep/LinPlayer/releases):
+
+- **Windows** — `LinPlayer-Windows-v*.zip`. Portable: unzip and run, nothing written to the registry. To upgrade, overwrite the same folder — accounts and settings live in `userdata/` and survive.
+- **Android** — `app-arm64-v8a-release.apk` (arm64 phones / tablets).
+- Two channels: **stable** and **pre-release**. Once installed, *Settings → About → Check for updates* downloads and applies updates in place.
 
 ## Features
 
-| Feature | Notes | Desktop | Android / TV |
-|:--|:--|:--:|:--:|
-| **MPV player core** | All formats; HDR / Dolby Vision (auto gpu-next + software decode); PGS/SUP graphic subtitles; Anime4K upscaling and quality presets | ✅ | 🔨 |
-| **Danmaku** | DanDanPlay and other backends, smart episode matching, parallel sources, adjustable outline and display area | ✅ | 🔨 |
-| **Subtitles** | Auto-load Emby subtitle streams; track switching, delay, font/size/position; full libass effects | ✅ | 🔨 |
-| **Multi-source browsing** | Beyond Emby: OpenList, Quark (cookie / QR), Ani-rss, Feiniu | ✅ | 🔨 |
-| **Playback sync** | Emby progress reporting, cross-server resume | ✅ | 🔨 |
-| **Trakt / Bangumi** | Scrobbling and anime watch-progress sync | ✅ | 🔨 |
-| **Airing calendar** | Trakt / Bangumi release schedules | ✅ | 🔨 |
-| **Rankings** | DanDanPlay anime chart + TMDB movie/TV chart (toggleable) | ✅ | 🔨 |
-| **Downloads** | Custom multi-threaded ranged download engine | ✅ | 🔨 |
-| **Multi-threaded loading** | Local prefetch proxy, concurrent ranged reads feeding the player ahead of playback | ✅ | 🔨 |
-| **Proxy** | Custom proxy + Cloudflare best-IP local reverse proxy | ✅ | 🔨 |
-| **Plugin system** | QuickJS engine, per-plugin isolation — crashes and timeouts never reach the host | ✅ | 🔨 |
-| **Bulk server import** | Paste multi-line configs and import them in one pass | ✅ | 🔨 |
-| **Config migration** | Transfer server configs between devices by QR (credentials included, fully offline) | ✅ | 🔨 |
-| **In-app updates** | Dual channel (stable / pre) overwrite updates | ✅ | 🔨 |
+Business logic (Emby protocol, networking, playback control, sync, downloads, plugins) lives in a **single Go core shared by every platform**, built as the `lpcore` shared library; each platform only writes its own UI in its own idiom. So a ⬜ below does not mean "not built" — it means **the core is ready and only that platform's UI wiring is missing**.
 
-<sub>✅ wired and usable · 🔨 core ready, UI being rebuilt</sub>
+| Feature | Notes | Windows | Android |
+|:--|:--|:--:|:--:|
+| **MPV player core** | All formats; HDR / Dolby Vision (auto gpu-next + software decode); PGS/SUP graphic subtitles; six Anime4K enhancement presets | ✅ | ✅ |
+| **Second engine (ExoPlayer)** | Android only, long-press play to switch; no image enhancement on this engine (glsl-shaders belong to mpv) | — | ✅ |
+| **Danmaku** | DanDanPlay and other backends, smart episode matching, parallel sources, search plus nine display settings | ✅ | ✅ |
+| **Subtitles** | Auto-load Emby subtitle streams; track switching, delay, font/size/position; full libass effects and embedded fonts | ✅ | ✅ |
+| **Playback sync** | Emby progress reporting, cross-server resume | ✅ | ✅ |
+| **Airing calendar** | Trakt / Bangumi release schedules (Android currently has Bangumi only) | ✅ | ✅ |
+| **Rankings** | DanDanPlay anime chart + TMDB movie/TV chart | ✅ | ✅ |
+| **Downloads** | Custom multi-threaded ranged download engine | ✅ | ✅ |
+| **Multi-threaded loading** | Local prefetch proxy, concurrent ranged reads feeding the player ahead of playback | ✅ | ✅ |
+| **Plugin system** | QuickJS engine, per-plugin isolation and permission prompts — crashes and timeouts never reach the host | ✅ | ✅ |
+| **In-app updates** | Dual channel (stable / pre), download and overwrite | ✅ | ✅ |
+| **Trakt / Bangumi** | Scrobbling and anime watch-progress sync | ✅ | ⬜ |
+| **Proxy** | Custom proxy + Cloudflare best-IP local reverse proxy | ✅ | ⬜ |
+| **Bulk server import** | Paste multi-line configs and import them in one pass | ✅ | ⬜ |
+| **Config migration** | Transfer server configs between devices by QR (credentials included, fully offline) | ✅ | ⬜ |
+| **Keyboard shortcuts** | Player keybindings with an on-screen cheat sheet | ✅ | — |
+
+<sub>✅ wired and usable · ⬜ core ready, UI not wired on this platform · — not applicable</sub>
+
+> **Out of scope** (decided 2026-09-04): cloud drives (Aliyun, Baidu, 115, 189, 139, Quark, OpenList, Feiniu),
+> LAN sources (SMB / WebDAV / FTP) and Ani-RSS are all dropped and their code removed.
+> Video-resource sites will only ever come back as **plugins**. Local folder playback stays — it is table stakes for a player.
 
 ## Screenshots
 
-### Desktop
+### Desktop (Windows)
 
 > Content shown courtesy of [**UHD MEDIA**](https://www.uhdnow.com).
 
 <table>
   <tr>
-    <td colspan="2"><img src="images/screenshots/pc-player.png" width="100%" alt="Player"><br><sub><b>Player</b></sub></td>
+    <td colspan="2"><img src="images/screenshots/pc-player.jpg" width="100%" alt="Player"><br><sub><b>Player</b> — danmaku, dual subtitles and image enhancement all live in this layer</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="images/screenshots/pc-home.png" width="100%" alt="Home"><br><sub><b>Home</b></sub></td>
-    <td width="50%"><img src="images/screenshots/pc-library.png" width="100%" alt="Library"><br><sub><b>Library</b></sub></td>
+    <td width="50%"><img src="images/screenshots/pc-home.jpg" width="100%" alt="Home"><br><sub><b>Home</b></sub></td>
+    <td width="50%"><img src="images/screenshots/pc-library.jpg" width="100%" alt="Library"><br><sub><b>Library</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/pc-series-detail.png" width="100%" alt="Series detail"><br><sub><b>Series Detail</b></sub></td>
-    <td><img src="images/screenshots/pc-episode-detail.png" width="100%" alt="Episode detail"><br><sub><b>Episode Detail</b></sub></td>
+    <td><img src="images/screenshots/pc-series-detail.jpg" width="100%" alt="Series detail"><br><sub><b>Series Detail</b></sub></td>
+    <td><img src="images/screenshots/pc-movie-detail.jpg" width="100%" alt="Movie detail"><br><sub><b>Movie Detail</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/pc-rankings.png" width="100%" alt="Rankings"><br><sub><b>Rankings</b></sub></td>
-    <td><img src="images/screenshots/pc-favorites.png" width="100%" alt="Favorites"><br><sub><b>Favorites</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-calendar-week.png" width="100%" alt="Calendar week"><br><sub><b>Calendar · Week</b></sub></td>
-    <td><img src="images/screenshots/pc-calendar-day.png" width="100%" alt="Calendar day"><br><sub><b>Calendar · Day</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-plugins.png" width="100%" alt="Plugins"><br><sub><b>Plugins</b></sub></td>
-    <td><img src="images/screenshots/pc-servers.png" width="100%" alt="Servers"><br><sub><b>Servers</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-add-server.png" width="100%" alt="Add server"><br><sub><b>Add Server</b></sub></td>
-    <td><img src="images/screenshots/pc-settings.png" width="100%" alt="Settings"><br><sub><b>Settings</b></sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" width="50%"><img src="images/screenshots/pc-login.png" width="100%" alt="First-run login"><br><sub><b>First-run Login</b></sub></td>
+    <td><img src="images/screenshots/pc-episode-detail.jpg" width="100%" alt="Episode detail"><br><sub><b>Episode Detail</b></sub></td>
+    <td><img src="images/screenshots/pc-add-server.jpg" width="100%" alt="Add server"><br><sub><b>Add Server</b> — the first-run login gate</sub></td>
   </tr>
 </table>
 
-### Mobile
-
-<details>
-<summary><b>Flutter-era screenshots</b> — the new Android UI is being rebuilt; these will be replaced</summary>
-
-<br>
-
-> Content shown courtesy of [**BAVA**](https://shop.mebimmer.de).
+### Tablet (Android)
 
 <table>
   <tr>
-    <td colspan="3"><img src="images/screenshots/mobile-player.jpg" width="100%" alt="Player"><br><sub><b>Player</b></sub></td>
+    <td width="33%"><img src="images/screenshots/tablet-home.jpg" width="100%" alt="Home"><br><sub><b>Home</b></sub></td>
+    <td width="33%"><img src="images/screenshots/tablet-series-detail.jpg" width="100%" alt="Series detail"><br><sub><b>Series Detail</b></sub></td>
+    <td width="33%"><img src="images/screenshots/tablet-episode-detail.jpg" width="100%" alt="Episode detail"><br><sub><b>Episode Detail</b></sub></td>
   </tr>
   <tr>
-    <td width="33%"><img src="images/screenshots/mobile-home.jpg" width="100%" alt="Home"><br><sub><b>Home</b></sub></td>
-    <td width="33%"><img src="images/screenshots/mobile-series-detail.jpg" width="100%" alt="Series detail"><br><sub><b>Series Detail</b></sub></td>
-    <td width="33%"><img src="images/screenshots/mobile-episode-detail.jpg" width="100%" alt="Episode detail"><br><sub><b>Episode Detail</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/mobile-movie-detail.jpg" width="100%" alt="Movie detail"><br><sub><b>Movie Detail</b></sub></td>
-    <td><img src="images/screenshots/mobile-rankings.jpg" width="100%" alt="Rankings"><br><sub><b>Rankings</b></sub></td>
-    <td><img src="images/screenshots/mobile-settings.jpg" width="100%" alt="Settings"><br><sub><b>Settings</b></sub></td>
+    <td><img src="images/screenshots/tablet-player.jpg" width="100%" alt="Player"><br><sub><b>Player</b></sub></td>
+    <td><img src="images/screenshots/tablet-rankings.jpg" width="100%" alt="Rankings"><br><sub><b>Rankings</b></sub></td>
+    <td><img src="images/screenshots/tablet-calendar.jpg" width="100%" alt="Calendar"><br><sub><b>Airing Calendar</b></sub></td>
   </tr>
 </table>
 
-</details>
+### Phone (Android)
+
+<table>
+  <tr>
+    <td colspan="3"><img src="images/screenshots/phone-player.jpg" width="100%" alt="Player"><br><sub><b>Player</b> — landscape OSD; the side panel holds aspect ratio, version &amp; line, audio tracks, danmaku and subtitle styling</sub></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="images/screenshots/phone-home.jpg" width="100%" alt="Home"><br><sub><b>Home</b></sub></td>
+    <td width="33%"><img src="images/screenshots/phone-aggregate.jpg" width="100%" alt="Aggregate"><br><sub><b>Aggregate View</b> — favorites, downloads, rankings and calendar across servers</sub></td>
+    <td width="33%"><img src="images/screenshots/phone-rankings.jpg" width="100%" alt="Rankings"><br><sub><b>Rankings</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/phone-series-detail.jpg" width="100%" alt="Series detail"><br><sub><b>Series Detail</b></sub></td>
+    <td><img src="images/screenshots/phone-calendar.jpg" width="100%" alt="Calendar"><br><sub><b>Airing Calendar</b></sub></td>
+    <td><img src="images/screenshots/phone-settings.jpg" width="100%" alt="Settings"><br><sub><b>Settings</b></sub></td>
+  </tr>
+</table>
 
 ## Development & Tech
 

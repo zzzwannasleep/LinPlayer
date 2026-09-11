@@ -165,3 +165,6 @@ docs/code-lore.md
 
 # 手机端草稿(与 desktop-drafts / tv-drafts 同性质:本地工作材料,不入库)
 docs/mobile-drafts/
+
+# 截图原图(几十 MB 的 PNG/长截屏)。README 用的是 docs/images/screenshots/ 里的压缩版
+screenshot/

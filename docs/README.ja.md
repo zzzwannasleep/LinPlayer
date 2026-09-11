@@ -20,110 +20,114 @@
   <b>日本語</b>
 </p>
 
-**LinPlayer** は **Windows / Linux / Android / Android TV** を対象とした Emby サードパーティクライアントです。現時点では **Windows のみ利用可能**です。
+**LinPlayer** は Emby サードパーティクライアントです。共通の Go コア + 各プラットフォームのネイティブ UI という構成で、対象は **Windows / Android / Android TV / Linux**。現時点で **Windows と Android（スマートフォン / タブレット）が利用可能**です。
 
-> ### 🚧 再構築中（2026-07）
+> ### 🚧 移行中
 >
-> 本プロジェクトは **Rust コア + React/Tauri** から **Go コア + 各プラットフォームのネイティブ UI** へ移行中です。
-> 旧 Rust/Tauri スタックは 2026-09-04 にリポジトリから削除されました。
+> 本プロジェクトは **Rust コア + React/Tauri** から **Go コア + 各プラットフォームのネイティブ UI** へ移行しました。
+> 旧 Rust/Tauri スタックは 2026-09-04 にリポジトリから削除され、タグ [`rust-final`](https://github.com/zzzwannasleep/LinPlayer/tree/rust-final) がその最終状態です。
 >
-> - **Windows** —— 利用可能、通常どおり配布中。インストール不要の ZIP で、データはすべて実行ファイルと同じ階層の `userdata/` に入ります。
-> - **Linux / Android / Android TV** —— **利用可能なビルドはありません**：Go 版のこれらの UI はまだ書かれておらず、
->   旧 Rust 実装は今回のリファクタで削除されました。過去のビルドは Releases から入手できます。
-> - **Apple 系（iOS / macOS / tvOS）** —— サポート終了、リポジトリから削除済みです。
->
-> Flutter 時代の完全なコードはタグ [`flutter-final`](https://github.com/zzzwannasleep/LinPlayer/tree/flutter-final)、
-> Rust/Tauri スタックはタグ [`rust-final`](https://github.com/zzzwannasleep/LinPlayer/tree/rust-final) に保存されています。
+> | プラットフォーム | 状況 |
+> |:--|:--|
+> | **Windows** | 利用可能、通常どおり配布中。インストール不要の ZIP で、データはすべて実行ファイルと同じ階層の `userdata/` に入ります |
+> | **Android スマホ / タブレット** | 利用可能（2026-09-06 以降）。Jetpack Compose によるネイティブ UI、署名済み APK を配布 |
+> | **Android TV** | 未着手 —— タッチ前提の操作はリモコンに移植できないため、フォーカス移動版を別に作る必要があります |
+> | **Linux** | 未着手 —— 旧 Tauri 実装はリファクタとともに削除されました。過去のビルドは Releases から入手できます |
+> | **Apple 系** | 対応予定なし |
 
-ビジネスロジック（Emby プロトコル / ネットワーク / 再生制御 / 同期 / ダウンロード / プラグイン）は**全プラットフォーム共通の単一 Go コア**にまとまっており、`lpcore` 共有ライブラリとしてビルドされます。各プラットフォームは自分の UI だけを、それぞれの流儀で書きます。したがって下表の 🔨 は「未着手」ではなく、**コアは完成済みで UI の配線待ち**という意味です。
+## ダウンロード
+
+[**Releases**](https://github.com/zzzwannasleep/LinPlayer/releases) から入手できます：
+
+- **Windows** —— `LinPlayer-Windows-v*.zip`。インストール不要、解凍してそのまま実行でき、レジストリにも書き込みません。更新は同じフォルダーに上書きするだけ —— アカウントと設定は `userdata/` にあるので消えません。
+- **Android** —— `app-arm64-v8a-release.apk`（arm64 のスマホ / タブレット）。
+- チャンネルは 2 つ：**stable** と **pre-release**。インストール後は「設定 → このアプリについて → 更新を確認」からそのままダウンロードして上書きできます。
 
 ## 機能
 
-| 機能 | 内容 | デスクトップ | Android / TV |
-|:--|:--|:--:|:--:|
-| **MPV 再生コア** | 全フォーマット；HDR / Dolby Vision（gpu-next + ソフトデコードへ自動切替）；PGS/SUP グラフィック字幕；Anime4K 超解像と画質プリセット | ✅ | 🔨 |
-| **弾幕（コメント）** | DanDanPlay など複数バックエンド、話数の自動マッチング、ソース並列取得、縁取りと表示領域の調整 | ✅ | 🔨 |
-| **字幕** | Emby 字幕ストリームの自動読み込み；トラック切替、遅延、フォント／サイズ／位置；libass のフル特効 | ✅ | 🔨 |
-| **マルチソース閲覧** | Emby 以外に OpenList、Quark（Cookie / QR）、Ani-rss、飛牛 | ✅ | 🔨 |
-| **再生同期** | Emby への進捗レポート、サーバー跨ぎのレジューム | ✅ | 🔨 |
-| **Trakt / Bangumi** | 視聴記録の Scrobble とアニメ視聴進捗の同期 | ✅ | 🔨 |
-| **放送カレンダー** | Trakt / Bangumi の放送スケジュール | ✅ | 🔨 |
-| **ランキング** | DanDanPlay アニメランキング + TMDB 映画・ドラマランキング（切替可） | ✅ | 🔨 |
-| **ダウンロード** | 自作のマルチスレッド（レンジ分割）ダウンロードエンジン | ✅ | 🔨 |
-| **マルチスレッド読み込み** | ローカルプリフェッチプロキシが並列レンジ取得で先読みしプレーヤーへ供給 | ✅ | 🔨 |
-| **プロキシ** | カスタムプロキシ + Cloudflare 最速 IP ローカルリバースプロキシ | ✅ | 🔨 |
-| **プラグインシステム** | QuickJS エンジン、プラグインごとに隔離——クラッシュやタイムアウトはホストに波及しません | ✅ | 🔨 |
-| **サーバー一括追加** | 複数行の設定を貼り付けて一度に解析・取り込み | ✅ | 🔨 |
-| **設定の移行** | QR でデバイス間にサーバー設定を直接転送（認証情報を含み、完全オフライン） | ✅ | 🔨 |
-| **アプリ内アップデート** | デュアルチャンネル（stable / pre）の上書き更新 | ✅ | 🔨 |
+ビジネスロジック（Emby プロトコル / ネットワーク / 再生制御 / 同期 / ダウンロード / プラグイン）は**全プラットフォーム共通の単一 Go コア**にまとまっており、`lpcore` 共有ライブラリとしてビルドされます。各プラットフォームは自分の UI だけを、それぞれの流儀で書きます。したがって下表の ⬜ は「未着手」ではなく、**コアは完成済みで、そのプラットフォームの UI 配線だけが残っている**という意味です。
 
-<sub>✅ 配線済みで利用可能 · 🔨 コアは完成済み、UI 再構築中</sub>
+| 機能 | 説明 | Windows | Android |
+|:--|:--|:--:|:--:|
+| **MPV 再生コア** | 全フォーマット；HDR / Dolby Vision（gpu-next + ソフトデコードへ自動切替）；PGS/SUP 画像字幕；Anime4K 画質強化 6 段階 | ✅ | ✅ |
+| **第 2 のコア（ExoPlayer）** | Android 限定、再生ボタン長押しで切替。このコアでは画質強化は使えません（glsl-shaders は mpv のもの） | — | ✅ |
+| **弾幕** | DanDanPlay ほか複数バックエンド、話数の自動マッチング、ソース並列取得、検索と 9 項目の表示設定 | ✅ | ✅ |
+| **字幕** | Emby の字幕ストリームを自動読み込み；トラック切替、遅延、フォント/サイズ/位置；libass の全効果と埋め込みフォント | ✅ | ✅ |
+| **再生記録の同期** | Emby への進捗報告、サーバーをまたぐレジューム | ✅ | ✅ |
+| **放送カレンダー** | Trakt / Bangumi の放送スケジュール（Android は現状 Bangumi のみ） | ✅ | ✅ |
+| **ランキング** | DanDanPlay アニメランキング + TMDB 映画・ドラマランキング | ✅ | ✅ |
+| **ダウンロード** | 自前のマルチスレッド Range 分割ダウンロードエンジン | ✅ | ✅ |
+| **マルチスレッド読み込み** | ローカル先読みプロキシ。並列 Range 要求で先回りして取得しプレーヤーへ供給 | ✅ | ✅ |
+| **プラグイン** | QuickJS エンジン、プラグインごとの隔離と権限確認。クラッシュやタイムアウトはホストに波及しません | ✅ | ✅ |
+| **アプリ内更新** | 2 チャンネル（stable / pre）、ダウンロードして上書き | ✅ | ✅ |
+| **Trakt / Bangumi** | 視聴履歴の Scrobble とアニメ進捗の同期 | ✅ | ⬜ |
+| **プロキシ** | カスタムプロキシ + Cloudflare 最速 IP ローカルリバースプロキシ | ✅ | ⬜ |
+| **サーバー一括追加** | 複数行の設定を貼り付けて一括で解析・取り込み | ✅ | ⬜ |
+| **設定の移行** | QR コードで端末間にサーバー設定を直接転送（認証情報込み、クラウドを経由しない） | ✅ | ⬜ |
+| **キーボードショートカット** | 再生画面のキー操作とキー一覧の表示 | ✅ | — |
+
+<sub>✅ 配線済みで利用可能 · ⬜ コアは完成済み、このプラットフォームの UI が未配線 · — 対象外</sub>
+
+> **対象外にしたもの**（2026-09-04 決定）：クラウドストレージ（Aliyun / Baidu / 115 / 189 / 139 / Quark / OpenList / 飛牛）、
+> LAN ソース（SMB / WebDAV / FTP）、Ani-RSS はすべて取りやめ、コードも削除済みです。
+> 動画リソースサイトは今後**プラグインの形でのみ**提供されます。ローカルフォルダー再生は残します —— プレーヤーの基本機能だからです。
 
 ## スクリーンショット
 
-### デスクトップ
+### デスクトップ（Windows）
 
-> 表示コンテンツは [**UHD MEDIA**](https://www.uhdnow.com) のご提供です。
-
-<table>
-  <tr>
-    <td colspan="2"><img src="images/screenshots/pc-player.png" width="100%" alt="プレーヤー"><br><sub><b>プレーヤー</b></sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="images/screenshots/pc-home.png" width="100%" alt="ホーム"><br><sub><b>ホーム</b></sub></td>
-    <td width="50%"><img src="images/screenshots/pc-library.png" width="100%" alt="ライブラリ"><br><sub><b>ライブラリ</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-series-detail.png" width="100%" alt="シリーズ詳細"><br><sub><b>シリーズ詳細</b></sub></td>
-    <td><img src="images/screenshots/pc-episode-detail.png" width="100%" alt="エピソード詳細"><br><sub><b>エピソード詳細</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-rankings.png" width="100%" alt="ランキング"><br><sub><b>ランキング</b></sub></td>
-    <td><img src="images/screenshots/pc-favorites.png" width="100%" alt="お気に入り"><br><sub><b>お気に入り</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-calendar-week.png" width="100%" alt="カレンダー 今週"><br><sub><b>カレンダー · 今週</b></sub></td>
-    <td><img src="images/screenshots/pc-calendar-day.png" width="100%" alt="カレンダー 今日"><br><sub><b>カレンダー · 今日</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-plugins.png" width="100%" alt="プラグイン"><br><sub><b>プラグイン</b></sub></td>
-    <td><img src="images/screenshots/pc-servers.png" width="100%" alt="サーバー"><br><sub><b>サーバー</b></sub></td>
-  </tr>
-  <tr>
-    <td><img src="images/screenshots/pc-add-server.png" width="100%" alt="サーバー追加"><br><sub><b>サーバー追加</b></sub></td>
-    <td><img src="images/screenshots/pc-settings.png" width="100%" alt="設定"><br><sub><b>設定</b></sub></td>
-  </tr>
-  <tr>
-    <td colspan="2" width="50%"><img src="images/screenshots/pc-login.png" width="100%" alt="初回ログイン"><br><sub><b>初回ログイン</b></sub></td>
-  </tr>
-</table>
-
-### モバイル
-
-<details>
-<summary><b>Flutter 版のスクリーンショット</b> —— 新しい Android UI は再構築中で、完了後に差し替えます</summary>
-
-<br>
-
-> 表示コンテンツは [**BAVA サーバー**](https://shop.mebimmer.de) のご提供です。
+> 表示内容は [**UHD MEDIA**](https://www.uhdnow.com) によるものです。
 
 <table>
   <tr>
-    <td colspan="3"><img src="images/screenshots/mobile-player.jpg" width="100%" alt="プレーヤー"><br><sub><b>プレーヤー</b></sub></td>
+    <td colspan="2"><img src="images/screenshots/pc-player.jpg" width="100%" alt="プレーヤー"><br><sub><b>プレーヤー</b> —— 弾幕・二言語字幕・画質強化はすべてこの層にあります</sub></td>
   </tr>
   <tr>
-    <td width="33%"><img src="images/screenshots/mobile-home.jpg" width="100%" alt="ホーム"><br><sub><b>ホーム</b></sub></td>
-    <td width="33%"><img src="images/screenshots/mobile-series-detail.jpg" width="100%" alt="シリーズ詳細"><br><sub><b>シリーズ詳細</b></sub></td>
-    <td width="33%"><img src="images/screenshots/mobile-episode-detail.jpg" width="100%" alt="エピソード詳細"><br><sub><b>エピソード詳細</b></sub></td>
+    <td width="50%"><img src="images/screenshots/pc-home.jpg" width="100%" alt="ホーム"><br><sub><b>ホーム</b></sub></td>
+    <td width="50%"><img src="images/screenshots/pc-library.jpg" width="100%" alt="ライブラリ"><br><sub><b>ライブラリ</b></sub></td>
   </tr>
   <tr>
-    <td><img src="images/screenshots/mobile-movie-detail.jpg" width="100%" alt="映画詳細"><br><sub><b>映画詳細</b></sub></td>
-    <td><img src="images/screenshots/mobile-rankings.jpg" width="100%" alt="ランキング"><br><sub><b>ランキング</b></sub></td>
-    <td><img src="images/screenshots/mobile-settings.jpg" width="100%" alt="設定"><br><sub><b>設定</b></sub></td>
+    <td><img src="images/screenshots/pc-series-detail.jpg" width="100%" alt="シリーズ詳細"><br><sub><b>シリーズ詳細</b></sub></td>
+    <td><img src="images/screenshots/pc-movie-detail.jpg" width="100%" alt="映画詳細"><br><sub><b>映画詳細</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/pc-episode-detail.jpg" width="100%" alt="エピソード詳細"><br><sub><b>エピソード詳細</b></sub></td>
+    <td><img src="images/screenshots/pc-add-server.jpg" width="100%" alt="サーバー追加"><br><sub><b>サーバー追加</b> —— 初回起動時のログイン画面</sub></td>
   </tr>
 </table>
 
-</details>
+### タブレット（Android）
+
+<table>
+  <tr>
+    <td width="33%"><img src="images/screenshots/tablet-home.jpg" width="100%" alt="ホーム"><br><sub><b>ホーム</b></sub></td>
+    <td width="33%"><img src="images/screenshots/tablet-series-detail.jpg" width="100%" alt="シリーズ詳細"><br><sub><b>シリーズ詳細</b></sub></td>
+    <td width="33%"><img src="images/screenshots/tablet-episode-detail.jpg" width="100%" alt="エピソード詳細"><br><sub><b>エピソード詳細</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/tablet-player.jpg" width="100%" alt="プレーヤー"><br><sub><b>プレーヤー</b></sub></td>
+    <td><img src="images/screenshots/tablet-rankings.jpg" width="100%" alt="ランキング"><br><sub><b>ランキング</b></sub></td>
+    <td><img src="images/screenshots/tablet-calendar.jpg" width="100%" alt="放送カレンダー"><br><sub><b>放送カレンダー</b></sub></td>
+  </tr>
+</table>
+
+### スマートフォン（Android）
+
+<table>
+  <tr>
+    <td colspan="3"><img src="images/screenshots/phone-player.jpg" width="100%" alt="プレーヤー"><br><sub><b>プレーヤー</b> —— 横画面 OSD。右のパネルは画面比率 / バージョンと回線 / 音声トラック / 弾幕 / 字幕スタイル</sub></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="images/screenshots/phone-home.jpg" width="100%" alt="ホーム"><br><sub><b>ホーム</b></sub></td>
+    <td width="33%"><img src="images/screenshots/phone-aggregate.jpg" width="100%" alt="集約ビュー"><br><sub><b>集約ビュー</b> —— サーバーをまたぐお気に入り / ダウンロード / ランキング / カレンダー</sub></td>
+    <td width="33%"><img src="images/screenshots/phone-rankings.jpg" width="100%" alt="ランキング"><br><sub><b>ランキング</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="images/screenshots/phone-series-detail.jpg" width="100%" alt="シリーズ詳細"><br><sub><b>シリーズ詳細</b></sub></td>
+    <td><img src="images/screenshots/phone-calendar.jpg" width="100%" alt="放送カレンダー"><br><sub><b>放送カレンダー</b></sub></td>
+    <td><img src="images/screenshots/phone-settings.jpg" width="100%" alt="設定"><br><sub><b>設定</b></sub></td>
+  </tr>
+</table>
 
 ## 開発と技術
 
@@ -169,6 +173,8 @@ LinPlayer は以下のオープンソースプロジェクト、メディアサ�
 
 - [Go](https://go.dev) — 全プラットフォーム共通のビジネスコア（`lpcore` 共有ライブラリとしてビルドし、C ABI 経由で各端から呼び出す）
 - [.NET 10](https://dotnet.microsoft.com) / [Avalonia](https://avaloniaui.net) — Windows のシェルと UI
+- [Kotlin](https://kotlinlang.org) / [Jetpack Compose](https://developer.android.com/compose) — Android のシェルと UI
+- [AndroidX Media3 / ExoPlayer](https://github.com/androidx/media) — Android で切り替えられる第 2 の再生コア
 
 ### サービスとデータソース
 
@@ -178,19 +184,16 @@ LinPlayer は以下のオープンソースプロジェクト、メディアサ�
 - [Bangumi (bgm.tv)](https://bgm.tv/) — アニメの視聴進捗とコレクション同期
 - [anibt](https://anibt.net) — 国内向け Bangumi リバースプロキシ（API と画像の高速化）を LinPlayer に提供いただき、視聴同期がそのまま使える状態に。次世代の BT／マグネット検索サイトでもあり、リソース豊富で快適、おすすめです
 - [Trakt](https://trakt.tv/) — 映画・ドラマの視聴履歴同期（Scrobble）
-- [OpenList](https://github.com/OpenListTeam/OpenList) — ネットワークディスク集約ソース
-- [Ani-rss](https://github.com/wushuo894/ani-rss) — アニメ RSS 購読と自動ダウンロード
 
 ### Emby サーバー
 
 UI デモと長期的なサポートを提供いただいた以下の Emby サーバーに感謝します：
 
 - [UHD MEDIA](https://www.uhdnow.com) — デスクトップのスクリーンショット提供
-- [BAVA サーバー](https://shop.mebimmer.de) — モバイルのスクリーンショット提供
+- [BAVA サーバー](https://shop.mebimmer.de) — 旧モバイル版のスクリーンショット提供
 
 ### ネットワークとプロキシ
 
-- [rustls](https://github.com/rustls/rustls) — TLS 実装（自己署名証明書はホスト許可リスト単位で許容）
 - [Cloudflare](https://www.cloudflare.com/) — 最速 IP ローカルリバースプロキシが依拠するエッジネットワーク
 
 ### スクリプトとツール
