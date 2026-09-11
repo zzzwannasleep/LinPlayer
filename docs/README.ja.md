@@ -98,6 +98,8 @@
 
 ### タブレット（Android）
 
+> 表示内容は [**稳健115**](https://shop.wenjian.de) によるものです。
+
 <table>
   <tr>
     <td width="33%"><img src="images/screenshots/tablet-home.jpg" width="100%" alt="ホーム"><br><sub><b>ホーム</b></sub></td>
@@ -112,6 +114,8 @@
 </table>
 
 ### スマートフォン（Android）
+
+> 表示内容は [**ME MEDIA**](https://shop.mebimmer.de) によるものです。
 
 <table>
   <tr>
@@ -190,7 +194,8 @@ LinPlayer は以下のオープンソースプロジェクト、メディアサ�
 UI デモと長期的なサポートを提供いただいた以下の Emby サーバーに感謝します：
 
 - [UHD MEDIA](https://www.uhdnow.com) — デスクトップのスクリーンショット提供
-- [BAVA サーバー](https://shop.mebimmer.de) — 旧モバイル版のスクリーンショット提供
+- [稳健115](https://shop.wenjian.de) — タブレットのスクリーンショット提供
+- [ME MEDIA](https://shop.mebimmer.de) — スマートフォンのスクリーンショット提供
 
 ### ネットワークとプロキシ
 

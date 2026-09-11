@@ -98,6 +98,8 @@ Business logic (Emby protocol, networking, playback control, sync, downloads, pl
 
 ### Tablet (Android)
 
+> Content shown courtesy of [**稳健115**](https://shop.wenjian.de).
+
 <table>
   <tr>
     <td width="33%"><img src="images/screenshots/tablet-home.jpg" width="100%" alt="Home"><br><sub><b>Home</b></sub></td>
@@ -112,6 +114,8 @@ Business logic (Emby protocol, networking, playback control, sync, downloads, pl
 </table>
 
 ### Phone (Android)
+
+> Content shown courtesy of [**ME MEDIA**](https://shop.mebimmer.de).
 
 <table>
   <tr>
@@ -190,7 +194,8 @@ LinPlayer stands on the shoulders of these open-source projects, media services 
 Thanks to the following Emby servers for providing UI demos and long-term support:
 
 - [UHD MEDIA](https://www.uhdnow.com) — desktop screenshots content
-- [BAVA](https://shop.mebimmer.de) — mobile screenshots content
+- [稳健115](https://shop.wenjian.de) — tablet screenshots content
+- [ME MEDIA](https://shop.mebimmer.de) — phone screenshots content
 
 ### Network & Proxy
 

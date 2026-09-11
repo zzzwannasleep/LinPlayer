@@ -98,6 +98,8 @@
 
 ### 平板（Android）
 
+> 截图内容来自 [**稳健115**](https://shop.wenjian.de)。
+
 <table>
   <tr>
     <td width="33%"><img src="docs/images/screenshots/tablet-home.jpg" width="100%" alt="首页"><br><sub><b>首页</b></sub></td>
@@ -112,6 +114,8 @@
 </table>
 
 ### 手机（Android）
+
+> 截图内容来自 [**ME MEDIA**](https://shop.mebimmer.de)。
 
 <table>
   <tr>
@@ -188,7 +192,8 @@
 感谢以下 Emby 服为 LinPlayer 提供界面演示与长期支持：
 
 - [UHD MEDIA](https://www.uhdnow.com) — 桌面端截图内容来源
-- [BAVA 服](https://shop.mebimmer.de) — 早期移动端截图内容来源
+- [稳健115](https://shop.wenjian.de) — 平板截图内容来源
+- [ME MEDIA](https://shop.mebimmer.de) — 手机端截图内容来源
 
 ### 网络与代理
 

@@ -37,6 +37,8 @@ LinPlayer 各端界面一览。点击图片可放大查看。
 
 ## 平板（Android）
 
+> 截图内容来自 [稳健115](https://shop.wenjian.de)。
+
 <table>
   <tr>
     <td width="33%"><img src="/img/screenshots/tablet-home.jpg" alt="首页"><br><sub><b>首页</b></sub></td>
@@ -51,6 +53,8 @@ LinPlayer 各端界面一览。点击图片可放大查看。
 </table>
 
 ## 手机（Android）
+
+> 截图内容来自 [ME MEDIA](https://shop.mebimmer.de)。
 
 <table>
   <tr>
