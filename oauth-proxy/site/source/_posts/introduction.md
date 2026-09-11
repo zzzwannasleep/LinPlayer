@@ -5,7 +5,7 @@ categories: [入门]
 tags: [介绍, Emby]
 ---
 
-**LinPlayer** 是一个第三方 **Emby** 客户端播放器，覆盖 **移动端、桌面端、TV 端**三类设备，主打高品质本地与流媒体播放体验。
+**LinPlayer** 是一个第三方 **Emby** 客户端播放器。一份各端共用的 **Go 核心层** + 每端自己写的原生 UI，主打高品质本地与流媒体播放体验。
 
 <!-- more -->
 
@@ -17,18 +17,22 @@ tags: [介绍, Emby]
 
 ## 支持的平台
 
-| 平台 | 技术栈 | 说明 |
+| 平台 | 技术栈 | 状态 |
 |---|---|---|
-| Android / iOS | Flutter（Material） | 移动端主形态 |
-| Windows / Linux / macOS | Flutter（fluent_ui / macos_ui / Material 分平台） | 桌面端原生观感 |
-| Android TV / Apple TV / 平板 | Flutter（焦点导航 TV UI） | 遥控器友好 |
+| **Windows** | Go 核心 + C# / .NET 10 / Avalonia | 可用，正常发布。免安装绿色包 |
+| **Android 手机 / 平板** | Go 核心 + Kotlin / Jetpack Compose | 可用（2026-09-06 起），出已签名 APK |
+| **Android TV** | 同上，但需要一版焦点导航 UI | 未开始 —— 手机端那套触摸交互搬不上遥控器 |
+| **Linux** | Go 核心 + Avalonia | 未开始 |
+| 苹果全线 | —— | 不做 |
+
+> 2026-09-04 起旧的 **Rust 核心 + React/Tauri** 栈已从仓库删除（再往前还有一代 Flutter 栈）。
+> Linux 与 TV 端因此暂时没有可运行的实现 —— 这是换栈明知的代价，不是进度倒退。
 
 ## 播放内核
 
-LinPlayer 同时集成两套内核，按内容与平台择优：
-
-- **libmpv**：复杂字幕（含 PGS/SUP）、滤镜、超分（Anime4K）等。
-- **ExoPlayer（Media3）**：Android 原生硬解链路，配合 libass 渲染 ASS 字幕。
+- **libmpv** —— 两端都用它做默认内核。复杂字幕（含 PGS/SUP）、滤镜、画面增强（Anime4K）等。
+- **ExoPlayer（Media3）** —— **仅安卓**，播放页长按播放键即可切。原生硬解链路，能耗与兼容性好；
+  该内核下没有画面增强（glsl-shaders 是 mpv 的东西）。
 
 > 详见 [播放内核与字幕](/wiki/player-cores/) 与 [功能特性](/wiki/features/)。
 

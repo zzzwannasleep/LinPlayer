@@ -11,15 +11,16 @@ LinPlayer 的核心功能一览。
 
 ## 播放
 
-- 双内核：libmpv / ExoPlayer，可在播放页「更多 → 内核切换」即时切换。
+- 双内核（**仅安卓**）：设置 →「播放器」选默认内核；播放页**长按播放键**用另一个内核起播一次。
+  换内核要退出当前播放再进 —— 播到一半换等于拆掉解码器重建。
 - 硬解 / 软解切换，记忆进度续播。
-- 倍速、长按临时倍速、跳过片头/片尾、画面比例、超分辨率（Anime4K，mpv）。
+- 倍速、长按临时倍速、跳过片头/片尾、画面比例、画面增强（Anime4K 六档，仅 mpv 内核）。
 - 手势：双击快进退、左右滑进度、上下滑亮度/音量、长按倍速。
 
 ## 字幕
 
 - 文本字幕：SRT / ASS / SSA / VTT / TTML。
-- **ASS/SSA 特效**：libmpv 内置 libass；ExoPlayer 经 ass-media 用 libass 渲染为位图，保留字号/位置/样式。
+- **ASS/SSA 特效**：libmpv 内置 libass；ExoPlayer 借用 libmpv 已导出的 libass 符号渲染成位图（不引第二份），保留字号/位置/样式。
 - 图形字幕：PGS / SUP（依赖含 `hdmv_pgs_subtitle` 解码器的 libmpv）。
 - 外挂字幕导入、字幕延迟、次字幕（mpv）。
 
@@ -33,7 +34,8 @@ LinPlayer 的核心功能一览。
 
 - **插件系统**：基于 QuickJS 的 JS 插件，独立 isolate 运行。详见 [插件系统](/wiki/plugins/)。
 
-## 桌面 / TV
+## 各端
 
-- 桌面端按平台采用 fluent_ui（Win）/ macos_ui（mac）/ Material（Linux），自绘标题栏、沉浸模式。
-- TV 端遥控器焦点导航，专为大屏设计。
+- **Windows**：C# / Avalonia，自绘标题栏、独立播放窗口、键盘快捷键。
+- **Android 手机 / 平板**：Kotlin / Jetpack Compose，沉浸式播放页，手势全套。
+- **Android TV**：未开始（遥控器焦点导航要单独做一版）。

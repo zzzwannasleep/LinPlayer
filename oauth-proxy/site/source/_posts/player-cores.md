@@ -13,12 +13,12 @@ LinPlayer 集成两套播放内核，理解它们的差异有助于选对内核�
 
 - 复杂字幕的最佳选择：内置 **libass**，ASS/SSA 特效保真度最高。
 - 支持 **PGS/SUP** 图形字幕（需 libmpv 含 `hdmv_pgs_subtitle` 解码器）。
-- 支持滤镜、超分（Anime4K）、次字幕等高级能力。
+- 支持滤镜、画面增强（Anime4K 六档）、次字幕等高级能力。
 
 ## ExoPlayer（Media3）
 
-- Android 原生硬解链路，能耗与兼容性好。
-- ASS/SSA 经 **ass-media**（libass）渲染为带精确位置/尺寸的位图叠加，样式保真。
+- **仅安卓**，播放页长按播放键切换。原生硬解链路，能耗与兼容性好。
+- ASS/SSA 借用 **libmpv 已导出的 libass 符号**渲染为带精确位置/尺寸的位图叠加，样式保真（不为此再引一份 libass）。
 - 适合追求原生硬解、不需要 mpv 高级特性的场景。
 
 ## HDR / Dolby Vision
