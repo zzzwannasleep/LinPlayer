@@ -74,6 +74,10 @@ import xyz.linplayer.app.ui.components.rememberScrolled
 import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.Sp
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.unit.dp
 
 /**
  * 设置(U1.15)。**一级列表 + 二级页**(手机没有主从两栏的宽度)。
@@ -902,6 +906,9 @@ private fun StoragePanel() {
  * 而核心层挑资产用的关键词在安卓上是 `linux`,APK 名里没有,**永远挑不出包**。
  * 两个都不报错 —— 这就是用户说的「检查更新也没啥用」。
  */
+/** 更新说明最多占这么高。再长弹窗就比屏幕还高,底下两颗键点不到。 */
+private val UpdateNotesMaxHeight = 320.dp
+
 @Composable
 private fun AboutPanel() {
     val app = LocalApp.current
@@ -911,6 +918,8 @@ private fun AboutPanel() {
     var newest by remember { mutableStateOf<JsonObject?>(null) }
     var checked by remember { mutableStateOf(false) }
     var prog by remember { mutableStateOf<JsonObject?>(null) }
+    // 点一下直接开下载是不对的:手机上多半是流量,而且用户没看见这一版改了什么
+    var offer by remember { mutableStateOf<JsonObject?>(null) }
 
     suspend fun check(): JsonObject? {
         val r = runCatching { app.call("system.checkUpdate") }.getOrNull().obj()
@@ -929,11 +938,37 @@ private fun AboutPanel() {
             sub = newest?.let { "点一下就下载并安装" },
             onClick = {
                 scope.launch {
-                    if (check() == null) app.toast("已经是最新版本")
-                    else runUpdate(app, ctx) { prog = it }
+                    val u = check()
+                    if (u == null) app.toast("已经是最新版本") else offer = u
                 }
             },
         )
+    }
+
+    /* 更新说明在这儿是**第一次**被显示出来 —— 之前安卓端从头到尾没有任何地方
+       读过 notes,点一下就开始下。说明本身也刚从「每次都一样的下载指引」换成
+       这一版真实的提交清单(scripts/release-notes.sh)。 */
+    offer?.let { u ->
+        val mb = (u.long("asset_size") ?: 0L) / 1048576.0
+        LpDialog({ offer = null }, "新版本 " + (u.str("version") ?: "")) {
+            Column(
+                Modifier
+                    .heightIn(max = UpdateNotesMaxHeight)
+                    .verticalScroll(rememberScrollState()),
+            ) { Dim2(u.str("notes")?.takeIf { it.isNotBlank() } ?: "这一版没有更新说明。") }
+            Spacer(Modifier.height(Sp.x12))
+            Dim2(if (mb > 0) "安装包 %.1f MB,下完会跳到系统安装界面。".format(mb)
+                 else "下完会跳到系统安装界面。")
+            Spacer(Modifier.height(Sp.x16))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                LpButton("取消", { offer = null })
+                Spacer(Modifier.width(Sp.x10))
+                LpButton("下载并安装", {
+                    offer = null
+                    scope.launch { runUpdate(app, ctx) { prog = it } }
+                })
+            }
+        }
     }
 
     if (prog != null) {

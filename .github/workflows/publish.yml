@@ -90,6 +90,39 @@ jobs:
           done
           echo "缺失 $MISSING 个平台产物（不阻断发布）"
 
+      - name: Carry over the pre-release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.resolve.outputs.version }}"
+          # 预发布的说明就是**这一版真实的提交清单**(build.yml 生成的),
+          # 提升成正式版时原样带过来。在这儿重新算一遍反而会算错:
+          # 这个 job 根本没 checkout 仓库,拿不到历史。
+          gh release view "${{ steps.resolve.outputs.pretag }}"             --repo "${{ github.repository }}" --json body --jq .body > /tmp/notes.md || true
+          if [ ! -s /tmp/notes.md ]; then
+            echo "## 本次更新" > /tmp/notes.md
+            echo "" >> /tmp/notes.md
+            echo "- 预发布里没有更新说明,这一版的改动请看提交历史。" >> /tmp/notes.md
+          fi
+          # 下载与说明放在**更新说明后面**。放前面的话应用内弹窗第一屏全是
+          # 每次都一样的下载指引,用户看不到这次到底改了什么。
+          cat >> /tmp/notes.md <<EOF
+
+          ### 下载
+          - **Windows**:\`LinPlayer-Windows-v$VER.zip\`(免安装绿色包,解压即用)
+          - **安卓**:\`app-arm64-v8a-release.apk\`(arm64 手机 / TV)
+
+          ### 说明
+          - 应用内「设置 → 更新 → 检查更新」可以一路走完下载和安装,不用手动下包。
+          - Windows 端内置完整版 libmpv(支持 PGS/SUP 图形字幕)。
+          - **Linux 暂无可用版本**:Go 版的 Linux UI 还没写。
+          - 绿色包的全部数据(账号/缓存/下载)都写在主程序同级的 \`userdata/\`,
+            整个文件夹拷走即完成迁移;删掉文件夹即卸载干净。
+          EOF
+          sed -i 's/^          //' /tmp/notes.md
+          echo "---- 最终发布说明 ----"; cat /tmp/notes.md
+
       - name: Generate SHA256 checksums
         run: |
           # 重新为最终发布产物生成汇总校验文件（覆盖预发布里旧的同名文件），
@@ -107,21 +140,7 @@ jobs:
           prerelease: false
           make_latest: true
           files: /tmp/assets/*
-          generate_release_notes: true
-          body: |
-            ## LinPlayer v${{ steps.resolve.outputs.version }}
-
-            自动更新：应用内「设置 → 更新 → 检查更新」一路走完下载和安装，不用手动下包。
-
-            ### 下载
-            - **Windows**：`LinPlayer-Windows-v${{ steps.resolve.outputs.version }}.zip`（免安装绿色包，解压即用）
-            - **安卓**：`app-arm64-v8a-release.apk`（arm64 手机 / TV）
-
-            ### 说明
-            - Windows 端内置完整版 libmpv（支持 PGS/SUP 图形字幕）。
-            - **Linux 暂无可用版本**：Go 版的 Linux UI 还没写。历史版本仍可在更早的 Release 里下载。
-            - 绿色包的全部数据（账号/缓存/下载）都写在主程序同级的 `userdata/`，
-              整个文件夹拷走即完成迁移；删掉文件夹即卸载干净。
+          body_path: /tmp/notes.md
 
       - name: Delete Pre-release
         env:

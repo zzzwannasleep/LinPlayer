@@ -116,8 +116,10 @@ public static class Smooth
         var stepX = Math.Max(80, sv.Viewport.Width * 0.20);
 
         var d = Drivers.GetValue(sv, _ => new Driver { TargetX = sv.Offset.X, TargetY = sv.Offset.Y });
-        // 没在动画时以**当前实际位置**为基准:上一次滑完之后用户可能拖过滚动条
-        if (!d.Running) { d.TargetX = sv.Offset.X; d.TargetY = sv.Offset.Y; }
+        // 没在动画时以**当前实际位置**为基准:上一次滑完之后用户可能拖过滚动条 / 拖过轨道。
+        // 判 StillAlive 不是判 Running,理由见 GlideX。
+        var alive = StillAlive(d.Running, d.LastFrame);
+        if (!alive) { d.TargetX = sv.Offset.X; d.TargetY = sv.Offset.Y; }
 
         /* 竖滚轮**只喂竖向**。
            首页那种横向轨道自己也是个 ScrollViewer(横能滚、竖不能),
@@ -127,7 +129,7 @@ public static class Smooth
         if (canY && dy != 0) d.TargetY -= dy * stepY;
         if (canX && dx != 0) d.TargetX -= dx * stepX;
         // 这一格什么都没喂进去(竖轨道收到横手势之类)→ 不拦,让它冒泡给外层
-        if (!d.Running &&
+        if (!alive &&
             Math.Abs(d.TargetY - sv.Offset.Y) < 0.5 && Math.Abs(d.TargetX - sv.Offset.X) < 0.5) return false;
 
         Clamp(sv, d);
@@ -139,7 +141,11 @@ public static class Smooth
     public static void GlideX(ScrollViewer sv, double deltaX)
     {
         var d = Drivers.GetValue(sv, _ => new Driver { TargetX = sv.Offset.X, TargetY = sv.Offset.Y });
-        if (!d.Running) { d.TargetX = sv.Offset.X; d.TargetY = sv.Offset.Y; }
+        /* ☠ 判的是<b>还活着没有</b>,不是 <c>Running</c> 这个字段。
+           只判字段的话:窗口最小化 / 页面被顶掉 → 帧不再来,而 Running 永远停在 true,
+           于是这里不再对齐当前位置,目标一直叠在那个<b>永远到不了的旧值</b>上 ——
+           表现就是用户报的「点左右按钮卡死」:按钮还亮着,点下去一动不动。 */
+        if (!StillAlive(d.Running, d.LastFrame)) { d.TargetX = sv.Offset.X; d.TargetY = sv.Offset.Y; }
         d.TargetX += deltaX;
         Clamp(sv, d);
         Run(sv, d);
@@ -216,6 +222,101 @@ public static class Smooth
     /// </summary>
     internal static bool StillAlive(bool running, DateTime lastFrame) =>
         running && DateTime.UtcNow - lastFrame < FrameStall;
+
+    /// <summary>起拖阈值。手按在卡片上点一下,指针总会抖一两个像素 ——
+    /// 不设阈值的话每一次点击都被判成拖拽,卡片就再也点不开了。</summary>
+    private const double DragSlop = 6;
+
+    /// <summary>
+    /// 按住左键拖着滑(用户 2026-09-12:「长按鼠标左键 向左滑动 反之向右滑动」)。
+    ///
+    /// <para>☠ 越过阈值时必须<b>把指针抢过来</b>。轨道里每张卡自己就是个 Button,
+    /// 它在按下那一刻已经抓走了指针;不抢的话松手会被它当成一次点击,
+    /// 直接跳进详情页 —— 「想滑一下结果换了一页」比滑不动更糟。
+    /// 抢过来之后 Button 收到 PointerCaptureLost,自己把按下态取消,Click 就不发了。</para>
+    /// <para>拖的时候<b>不加缓动</b>,一比一跟手:加了等于内容黏在手上慢半拍。</para>
+    /// </summary>
+    public static void EnableDrag(ScrollViewer sv)
+    {
+        var fromX = 0.0;         // 按下那一刻的偏移
+        var anchorX = 0.0;       // 按下那一刻的指针横坐标
+        var armed = false;       // 左键按着,还没越过阈值
+        var dragging = false;
+        InputElement? pressed = null;   // 按在哪张卡上 —— 起拖时要去取消它的按下态
+
+        sv.AddHandler(InputElement.PointerPressedEvent, (object? _, PointerPressedEventArgs e) =>
+        {
+            armed = dragging = false;
+            pressed = e.Source as InputElement;
+            if (!e.GetCurrentPoint(sv).Properties.IsLeftButtonPressed) return;
+            // 滚不动就别接:横不动的轨道上按住不放会把整页的选择/点击都吃掉
+            if (sv.Extent.Width - sv.Viewport.Width <= 1) return;
+            anchorX = e.GetPosition(sv).X;
+            fromX = sv.Offset.X;
+            armed = true;
+        }, RoutingStrategies.Tunnel);
+
+        sv.AddHandler(InputElement.PointerMovedEvent, (object? _, PointerEventArgs e) =>
+        {
+            if (!armed) return;
+            var dx = e.GetPosition(sv).X - anchorX;
+            if (!dragging)
+            {
+                if (Math.Abs(dx) < DragSlop) return;
+                dragging = true;
+                /* ☠ 取消卡片按下态的正路是**给它发一次 PointerCaptureLost**,
+                   不是把松手那一下吃掉。实测(LP_RAILPROBE)两条都会咬人:
+                   · 只抢指针不发这一下 —— Avalonia 的 Button 按下时**并不抓指针**,
+                     抢了等于没抢,松手照样跳进详情页;
+                   · 改成吃掉松手 —— Button 的 IsPressed 就永远停在 true,
+                     它的状态机没走完,**下一次点卡片被整个吞掉**。 */
+                pressed?.RaiseEvent(new PointerCaptureLostEventArgs(pressed, e.Pointer));
+                e.Pointer.Capture(sv);
+            }
+            StopAt(sv, fromX - dx);
+            e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+
+        sv.AddHandler(InputElement.PointerReleasedEvent, (object? _, PointerReleasedEventArgs e) =>
+        {
+            // 把抢来的指针还回去 —— 不还的话它一直记在轨道名下
+            if (dragging) e.Pointer.Capture(null);
+            armed = dragging = false;
+            pressed = null;
+        }, RoutingStrategies.Tunnel);
+
+        // 指针被别人抢走(弹窗、切页)时得收手,不然下一次移动会从一个陈旧的锚点算起
+        sv.PointerCaptureLost += (_, _) => armed = dragging = false;
+    }
+
+    /// <summary>
+    /// 拖拽期间把驱动器摁在当前位置。
+    /// <para>不摁的话手和上一轮缓动同时在改 Offset:松手后内容会自己往回飘一段。</para>
+    /// </summary>
+    internal static void StopAt(ScrollViewer sv, double x)
+    {
+        var d = Drivers.GetValue(sv, _ => new Driver());
+        d.Running = false;
+        d.Gen++;  // 让上一轮的帧回调下一帧自己退场
+        d.TargetX = Math.Clamp(x, 0, Math.Max(0, sv.Extent.Width - sv.Viewport.Width));
+        d.TargetY = sv.Offset.Y;
+        sv.Offset = sv.Offset.WithX(d.TargetX);
+    }
+
+    /// <summary>
+    /// 自检:把驱动器摆成「上一轮还挂着但帧早就不来了」。
+    ///
+    /// <para>这正是窗口最小化 / 页面被顶掉之后留下的形状。摆完之后由调用方去点
+    /// <b>真的翻页按钮</b>,再看轨道动没动 —— 动不了就是用户报的那个
+    /// 「按钮还亮着,点下去一动不动」。</para>
+    /// </summary>
+    internal static void SelfCheckArmWedge(ScrollViewer sv)
+    {
+        var d = Drivers.GetValue(sv, _ => new Driver());
+        d.Running = true;
+        d.LastFrame = DateTime.MinValue;
+        d.TargetX = -99999;   // 一个永远到不了的旧目标
+    }
 
     /// <summary>
     /// 自检:让驱动器进「目标去不了」的死角,再看它退不退得出来。

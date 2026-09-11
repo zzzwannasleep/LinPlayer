@@ -49,6 +49,10 @@ public static class Carousel
             Content = row,
         };
 
+        /* 按住左键拖着滑。翻页按钮一次只走 80%,而「从第 3 集拖到第 300 集」
+           点按钮要点四十下 —— 用户 2026-09-12 要的就是这个。 */
+        Smooth.EnableDrag(sv);
+
         var left = Arrow("‹", HorizontalAlignment.Left);
         var right = Arrow("›", HorizontalAlignment.Right);
         /* 翻页键也要跟着缩。窗口拉窄之后卡只剩 104 宽,而两颗 40px 的按钮

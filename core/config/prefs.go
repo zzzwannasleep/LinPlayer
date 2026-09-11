@@ -233,8 +233,25 @@ type Prefs struct {
 	// ---- 更新 ----
 	// 更新渠道。默认 "stable" —— 不能让普通用户默认吃到每次推 main 的构建。
 	UpdateChannel string `json:"update_channel"`
-	// 启动时自动检查更新。关掉之后只剩设置页里的手动检查。默认 true。
-	UpdateAutoCheck bool `json:"update_auto_check"`
+	// 启动时自动检查更新。**默认关**,用户到设置里勾上才会自动查
+	// (用户 2026-09-12:「自动检查更新默认关,需用户打开自动更新再自动检查更新」)。
+	//
+	// ☠ JSON 键换过名(原来是 `update_auto_check`)。换名是**故意**的:
+	// 这个开关从落库到 2026-09-11 之前一个消费者都没有,老配置里那个 true
+	// 不是任何人的选择,只是当年的默认值被整体落了盘。沿用旧键的话,
+	// 改默认值对所有存过设置的人一点用都没有 —— 他们的盘上写着 true。
+	// 旧键会留在配置文件里没人读,那是死数据,不影响任何东西。
+	UpdateAutoCheck bool `json:"update_auto_check_optin"`
+
+	// ---- 窗口(只有 PC 壳用)----
+	// 关掉时的窗口尺寸与最大化状态。**0 表示还没记过**,那时按 XAML 的默认值开。
+	//
+	// ★ 这三项是本文件里少数「零值就是正确默认值」的字段 —— 别照着文件头那条
+	//   「默认值不是零值」给它们编一个 1280×800 的默认:编了的话用户拉小窗口、
+	//   关掉、再打开,拿到的还是 1280×800,而他正是为这件事来提需求的。
+	WindowW   int  `json:"window_w"`
+	WindowH   int  `json:"window_h"`
+	WindowMax bool `json:"window_max"`
 
 	// WatchedThresholdPercent 看到百分之多少算「已观看」。默认 90。
 	//
@@ -326,7 +343,7 @@ func DefaultPrefs() Prefs {
 		SkipUseOnline:                true,
 		DolbyAutoSW:                  true,
 		UpdateChannel:                "stable",
-		UpdateAutoCheck:              true,
+		// 这里**不写** UpdateAutoCheck —— 零值 false 就是要的默认值(默认不自动查)
 		DetailBlur:                   40,
 		// ★ 三个哨兵都是「不动 mpv 的默认值」,不是 0 —— 0 在这三项上分别是
 		//   「字幕缩到看不见」「字幕顶到画面最上沿」「一点描边都没有」。

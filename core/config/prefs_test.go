@@ -28,7 +28,6 @@ func TestParsePrefs缺字段要拿到默认值不是零值(t *testing.T) {
 		{"preview_thumbs", p.PreviewThumbs, p.PreviewThumbs},
 		{"dolby_auto_sw", p.DolbyAutoSW, p.DolbyAutoSW},
 		{"preload_enabled", p.PreloadEnabled, p.PreloadEnabled},
-		{"update_auto_check", p.UpdateAutoCheck, p.UpdateAutoCheck},
 		{"cross_server_writeback_progress", p.CrossServerWritebackProgress, p.CrossServerWritebackProgress},
 		{"hwdec", p.Hwdec == "auto-safe", p.Hwdec},
 		{"default_speed", p.DefaultSpeed == 1.0, p.DefaultSpeed},
@@ -51,6 +50,9 @@ func TestParsePrefs缺字段要拿到默认值不是零值(t *testing.T) {
 		{"cross_server_resume", p.CrossServerResume},
 		{"cross_server_writeback", p.CrossServerWriteback},
 		{"skip_outro", p.SkipOutro},
+		// 2026-09-12 从「默认开」改成「默认关」(用户要求需先打开才自动查)。
+		// 顺带换了 JSON 键名,所以老配置里的 update_auto_check 读不进来 —— 正是要的。
+		{"update_auto_check_optin", p.UpdateAutoCheck},
 	} {
 		if c.on {
 			t.Errorf("%s 默认必须是关的", c.name)
@@ -58,6 +60,19 @@ func TestParsePrefs缺字段要拿到默认值不是零值(t *testing.T) {
 	}
 	if len(p.PrefetchServers) != 0 {
 		t.Error("多线程加载默认一台都不开")
+	}
+}
+
+// 老配置里那个 update_auto_check 不许再被读进来。
+//
+// ☠ 它从落库到 2026-09-11 之前一个消费者都没有,盘上那个 true 不是谁的选择,
+// 只是当年的默认值被整体落了盘。认它 = 改了默认值对所有老用户都没用。
+func TestParsePrefs不认老的自动检查键(t *testing.T) {
+	if ParsePrefs(json.RawMessage(`{"update_auto_check":true}`)).UpdateAutoCheck {
+		t.Fatal("老键还在被读 —— 存过设置的用户仍然会被自动检查更新")
+	}
+	if !ParsePrefs(json.RawMessage(`{"update_auto_check_optin":true}`)).UpdateAutoCheck {
+		t.Fatal("新键读不进来 —— 用户勾了也不生效")
 	}
 }
 

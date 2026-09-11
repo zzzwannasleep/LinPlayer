@@ -297,6 +297,14 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # 要算「上次发布到现在改了什么」,得有完整历史和全部 tag
+          fetch-depth: 0
+
+      - name: Build release notes from commits
+        run: bash scripts/release-notes.sh "/tmp/notes.md"
+
       - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -319,3 +327,6 @@ jobs:
           name: v${{ needs.version.outputs.version }} (Pre-release)
           prerelease: true
           files: ./artifacts/*
+          # 更新说明来自**这一段时间真实的提交**。原来一条都不写,于是应用内
+          # 「更新说明」在预览版渠道上永远是空白。
+          body_path: /tmp/notes.md

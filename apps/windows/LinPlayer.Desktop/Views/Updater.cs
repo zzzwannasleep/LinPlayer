@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Layout;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Threading;
 using LinPlayer.Core;
@@ -57,26 +58,52 @@ internal static class Updater
         await Offer(anchor, core, u, Flag(r, "can_self_update"));
     }
 
+    /// <summary>
+    /// 更新说明那一块。**可滚动,不截断。**
+    ///
+    /// <para>原来是 <c>notes[..600]</c> 一刀切。而发布说明前面那段「下载在哪、
+    /// 数据目录在哪」是每次都一样的固定文案 —— 六百个字正好全给了它,真正改了
+    /// 什么被切在后面(用户 2026-09-12:「更新 md 一直是固定的,牛头不对马嘴」)。
+    /// 文案顺序已经在 publish.yml 里掉过来了,这里把剩下的那一半放开。</para>
+    /// </summary>
+    private static Control Notes(string text, string tail)
+    {
+        var body = new StackPanel
+        {
+            Spacing = 10,
+            Children = { new TextBlock { Text = text, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap } },
+        };
+        if (tail.Length > 0)
+            body.Children.Add(new TextBlock { Text = tail, TextWrapping = TextWrapping.Wrap });
+        return new ScrollViewer
+        {
+            // 封顶 360:再长就是一个比屏幕还高的弹窗,确定键会被顶到看不见的地方
+            MaxHeight = 360, MaxWidth = 460,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = body,
+        };
+    }
+
     /// <summary>问一句要不要装,然后一条龙走完。</summary>
     private static async Task Offer(Visual anchor, CoreClient core, JsonElement u, bool canSelfUpdate)
     {
         var notes = Str(u, "notes");
-        if (notes.Length > 600) notes = notes[..600] + "…";
         var title = "新版本 " + Str(u, "version");
 
         if (!canSelfUpdate)
         {
             /* 写不进安装目录(多半解压在 Program Files)。这里**不给「立即更新」** ——
                摆一个点了必然失败的按钮比没有更糟。 */
-            await Dialogs.Tell(anchor, title,
-                notes + "\n\n程序所在的文件夹写不进去,没法自动覆盖。\n" +
-                "把整个文件夹挪到个人目录下再试,或者去这里手动下载:\n" + Str(u, "html_url"));
+            await Dialogs.Show(anchor, title, Notes(notes,
+                    "程序所在的文件夹写不进去,没法自动覆盖。\n" +
+                    "把整个文件夹挪到个人目录下再试,或者去这里手动下载:\n" + Str(u, "html_url")),
+                "知道了", null);
             return;
         }
 
         var size = Num(u, "asset_size");
-        var detail = notes + (size > 0 ? "\n\n安装包 " + MB(size) + ",下载完会自动重启装上。" : "");
-        if (!await Dialogs.Confirm(anchor, title, detail, "下载并安装", danger: false)) return;
+        var tail = size > 0 ? "安装包 " + MB(size) + ",下载完会自动重启装上。" : "";
+        if (!await Dialogs.Show(anchor, title, Notes(notes, tail), "下载并安装", "取消")) return;
 
         await RunInstall(anchor, core);
     }

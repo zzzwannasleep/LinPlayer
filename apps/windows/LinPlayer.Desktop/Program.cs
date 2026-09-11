@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Linq;
 using System.Reflection;
 using System.IO;
 using Avalonia;
+using Avalonia.VisualTree;
 using LinPlayer.Desktop.Core;
 
 namespace LinPlayer.Desktop;
@@ -96,6 +98,17 @@ internal static class Program
             return;
         }
 
+        /* 选集轨道自检:`LP_RAILPROBE=1 LinPlayer.exe` 打几行就退,不开窗口。
+           上一轮只钉住了驱动器本身,而用户 2026-09-12 报的还是「点左右按钮卡死」——
+           说明该钉的是**整条轨道**:一千条数据 + 真的虚拟化面板 + 真的翻页按钮,
+           从头点到尾再点回来。只测驱动器测不出「按钮自己消失了」这一类死法。 */
+        if (Environment.GetEnvironmentVariable("LP_RAILPROBE") is { Length: > 0 })
+        {
+            AppBuilder.Configure<App>().UsePlatformDetect().SetupWithoutStarting();
+            Environment.ExitCode = RailProbe() ? 0 : 1;
+            return;
+        }
+
         Perf.Log("Main 入口");
         var exeDir = AppContext.BaseDirectory;
         /* 数据全在 exe 同级的 userdata/(绿色包单一数据根)。
@@ -132,6 +145,205 @@ internal static class Program
              别拿上报当它的验收判据(我第一版就是这么错的)。 */
         Perf.Summary();
         Core?.Dispose();
+    }
+
+    /// <summary>
+    /// 选集轨道从头点到尾、再点回来,全程按钮都得点得动。
+    ///
+    /// <para>造的是**真的** <see cref="Views.Carousel.Rail"/>(虚拟化面板 + 两颗真按钮),
+    /// 点的是按钮自己的 Click —— 抄一段 GlideX 出来测的话,测的是那份抄本。</para>
+    ///
+    /// <para>☠ <b>必须开一个真窗口。</b> 没有可视根时 ScrollViewer 的 Extent 恒为 0,
+    /// 而 Extent 是 0 就意味着「滚哪儿都一样」—— 每一句断言都会白白变绿
+    /// (第一版正是这么写的,四条假绿)。所以它不进 CI,跟 selfcheck 一起手跑。</para>
+    /// </summary>
+    private static bool RailProbe()
+    {
+        const int n = 200, cardW = 214;   // 200 条就够逼出量程,再多只是让探针跑几分钟
+        var items = Enumerable.Range(1, n).ToList();
+        // 卡片用真 Button:轨道里的卡就是 Button,而「拖完松手会不会被当成点击」
+        // 只有让真 Button 参与整条路由才测得出来
+        var clicks = 0;
+        var panel = (Avalonia.Controls.Panel)Views.Carousel.Rail(items, _ =>
+        {
+            var b = new Avalonia.Controls.Button { Width = cardW, Height = 120 };
+            b.Click += (_, _) => clicks++;
+            return b;
+        }, 120, out var sv);
+
+        var w = new Avalonia.Controls.Window
+        {
+            Width = 900, Height = 240, ShowInTaskbar = false,
+            SystemDecorations = Avalonia.Controls.SystemDecorations.None,
+            Content = panel,
+        };
+        w.Show();
+
+        /// 把消息泵跑一阵,让布局、虚拟化和 RequestAnimationFrame 都走完
+        void Pump(int ms)
+        {
+            var t0 = DateTime.UtcNow;
+            while ((DateTime.UtcNow - t0).TotalMilliseconds < ms)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                System.Threading.Thread.Sleep(4);
+            }
+        }
+        Pump(400);
+
+        var arrows = panel.Children.OfType<Avalonia.Controls.Button>().ToList();
+        var bad = 0;
+        void Want(bool ok, string what)
+        {
+            Console.WriteLine((ok ? "PROBE 轨道 ✓ " : "PROBE 轨道 ✗ ") + what);
+            if (!ok) bad++;
+        }
+        if (arrows.Count != 2)
+        {
+            Console.WriteLine($"PROBE 轨道 ✗ 没找到两颗翻页按钮(找到 {arrows.Count} 颗)");
+            w.Close();
+            return false;
+        }
+        var (left, right) = (arrows[0], arrows[1]);
+
+        var max = sv.Extent.Width - sv.Viewport.Width;
+        Console.WriteLine($"PROBE 轨道 · {n} 条 量程 Extent={sv.Extent.Width:0} 视口={sv.Viewport.Width:0} 可滚={max:0}");
+        // 这一条是**前置闸**:量程报不出来的话,后面每一句都是假绿
+        Want(max > cardW * 10, "虚拟化面板报得出真量程(报不出来后面全是假绿)");
+
+        // 点一下,再等它滑完(缓动是 8 帧,这里给足 300ms)
+        void Click(Avalonia.Controls.Button b)
+        {
+            b.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+            Pump(180);   // 缓动 8 帧约 130ms
+        }
+
+        // ① 一路点到尽头。一次翻 80% 视口,一千张卡要点三百多下
+        var steps = 0;
+        var stalled = 0;
+        for (; steps < 800 && sv.Offset.X < max - 1; steps++)
+        {
+            var before = sv.Offset.X;
+            // 两颗按钮**不能同时没有** —— 那就是用户说的「卡死」的样子
+            if (!left.IsVisible && !right.IsVisible) { Want(false, $"第 {steps} 步两颗按钮一起消失了"); break; }
+            if (!right.IsVisible) { Want(false, $"第 {steps} 步「›」提前消失,才走到 {before:0}/{max:0}"); break; }
+            Click(right);
+            if (sv.Offset.X - before < 1) stalled++;
+        }
+        Want(sv.Offset.X >= max - 1, $"连点「›」{steps} 下走到尽头(停在 {sv.Offset.X:0}/{max:0})");
+        Want(stalled == 0, $"中途没有一下是白点的(白点了 {stalled} 下)");
+        Want(!right.IsVisible && left.IsVisible, "到尽头之后「›」收起、「‹」还在");
+
+        // ② 再点回来
+        var back = 0;
+        for (; back < 800 && sv.Offset.X > 1; back++)
+        {
+            if (!left.IsVisible) { Want(false, $"回程第 {back} 步「‹」提前消失,还剩 {sv.Offset.X:0}"); break; }
+            Click(left);
+        }
+        Want(sv.Offset.X <= 1, $"连点「‹」{back} 下回到开头(停在 {sv.Offset.X:0})");
+
+        /* ③ 驱动器挂着「还在跑」但帧早就不来了 —— 最小化 / 页面被顶掉之后就是这个形状。
+              这一条红过:GlideX 原来只判 Running 字段,于是目标一直叠在一个
+              永远到不了的旧值上,按钮还亮着但点下去一动不动。 */
+        var at = sv.Offset.X;
+        Views.Smooth.SelfCheckArmWedge(sv);
+        Click(right);
+        var moved = sv.Offset.X - at;
+        Want(moved > 1, $"「上一轮还挂着但帧不来了」之后点一下仍然走得动(挪了 {moved:0.#}px)");
+
+        /* ④⑤ 按住左键拖。合成真的指针事件,从**卡片自己**发出去 ——
+              这样隧道阶段会经过轨道(我们的处理器在那儿),冒泡阶段会回到卡片
+              (Button 的点击判定在那儿)。只调 StopAt 测不出这两件事里的任何一件。 */
+        // 按下点要**贴着卡片自己算**:轨道一滚卡就挪位了,写死一个窗口坐标的话
+        // 第二次按下早已落在卡外,Button 的命中测试不通过 —— 那是探针的错,不是代码的错
+        Avalonia.Controls.Button? Card()
+        {
+            Pump(120);
+            return sv.GetVisualDescendants().OfType<Avalonia.Controls.Button>().FirstOrDefault();
+        }
+        double MidX(Avalonia.Controls.Control c) =>
+            c.TranslatePoint(new Point(c.Bounds.Width / 2, 0), w)?.X ?? 0;
+
+        Views.Smooth.StopAt(sv, 0);
+        if (Card() is not { } card) { Want(false, "轨道里一张卡都没造出来,拖拽没法测"); }
+        else
+        {
+            double Gesture(double dx)
+            {
+                Views.Smooth.StopAt(sv, 0);
+                Pump(120);
+                clicks = 0;
+                var x = MidX(card);
+                Drag(w, card, x, x - dx);
+                Pump(200);
+                return sv.Offset.X;
+            }
+
+            // 拖多远走多远,一比一跟手;而且松手**不算**点了这张卡
+            var went = Gesture(160);
+            Want(Math.Abs(went - 160) < 2, $"拖多远走多远(走了 {went:0}px,该走 160)");
+            Want(clicks == 0, $"拖完松手不算点击(卡片被点开了 {clicks} 次)");
+
+            /* ☠ 拖完之后**下一次点击不许被吞**。这一条是本轮实测抓出来的:
+               「把松手那一下吃掉」会让卡片的 IsPressed 永远停在 true,
+               它的状态机没走完,下一次点卡片整个没反应。 */
+            var after = Gesture(0);
+            Want(Math.Abs(after) < 0.5 && clicks == 1,
+                $"拖完之后卡片照样点得开(轨道没动={Math.Abs(after) < 0.5} 点开了 {clicks} 次)");
+
+            // 手抖几个像素仍然算点击 —— 没有这道阈值的话卡片永远点不开
+            var jitter = Gesture(DragSlopProbe - 1);
+            Want(Math.Abs(jitter) < 0.5 && clicks == 1,
+                $"手抖 {DragSlopProbe - 1:0} 像素仍然算点击(轨道没动={Math.Abs(jitter) < 0.5} 点开了 {clicks} 次)");
+            // 越过阈值就是拖,不是点
+            var past = Gesture(DragSlopProbe);
+            Want(Math.Abs(past - DragSlopProbe) < 0.5 && clicks == 0,
+                $"越过 {DragSlopProbe:0} 像素就转成拖拽(走了 {past:0} 点开了 {clicks} 次)");
+        }
+
+        w.Close();
+        Console.WriteLine(bad == 0 ? "PROBE 轨道 全部通过" : $"PROBE 轨道 {bad} 条不过");
+        return bad == 0;
+    }
+
+    /// <summary>
+    /// 合成一次「按下 → 横移 → 松手」。<paramref name="from"/> / <paramref name="to"/>
+    /// 是相对窗口的横坐标。
+    /// <para>事件从 <paramref name="src"/>(一张卡)发出去,路由才会和真鼠标一样
+    /// 先隧道经过轨道、再冒泡回到卡片。</para>
+    /// </summary>
+    /// <summary>起拖阈值,和 <see cref="Views.Smooth"/> 里那个必须一致 ——
+    /// 探针写死一个自己的数,改了阈值它还是绿的。</summary>
+    private const double DragSlopProbe = 6;
+
+    private static readonly Avalonia.Input.Pointer MousePtr =
+        new(1, Avalonia.Input.PointerType.Mouse, true);   // 真鼠标全程是同一个指针
+
+    private static void Drag(Avalonia.Controls.Window w, Avalonia.Controls.Control src, double from, double to)
+    {
+        var ptr = MousePtr;
+        var down = new Avalonia.Input.PointerPointProperties(
+            Avalonia.Input.RawInputModifiers.LeftMouseButton,
+            Avalonia.Input.PointerUpdateKind.LeftButtonPressed);
+        var up = new Avalonia.Input.PointerPointProperties(
+            Avalonia.Input.RawInputModifiers.None,
+            Avalonia.Input.PointerUpdateKind.LeftButtonReleased);
+        const double y = 60;
+
+        src.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(
+            src, ptr, w, new Point(from, y), 0, down, Avalonia.Input.KeyModifiers.None));
+        // 分几步挪:真鼠标不会一步到位,而起拖阈值判的正是「这一步走了多远」
+        for (var i = 1; i <= 4; i++)
+        {
+            var x = from + (to - from) * i / 4.0;
+            src.RaiseEvent(new Avalonia.Input.PointerEventArgs(
+                Avalonia.Input.InputElement.PointerMovedEvent, src, ptr, w,
+                new Point(x, y), 0, down, Avalonia.Input.KeyModifiers.None));
+        }
+        src.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(
+            src, ptr, w, new Point(to, y), 0, up, Avalonia.Input.KeyModifiers.None,
+            Avalonia.Input.MouseButton.Left));
     }
 
     public static AppBuilder BuildAvaloniaApp() =>

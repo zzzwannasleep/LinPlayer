@@ -504,7 +504,9 @@ public static class SettingsSections
             ItemsSource = channels.Select(x => x.Item1).ToList(),
             SelectedIndex = Math.Max(0, Array.FindIndex(channels, x => x.Item2 == Str(s, "channel"))),
         };
-        var auto = new CheckBox { Content = "启动时检查更新", IsChecked = Bool(s, "auto_check") };
+        // 默认**关**(用户 2026-09-12)。不勾就只有下面那颗手动按钮 ——
+        // 这是个会自己联网的行为,得用户点头
+        var auto = new CheckBox { Content = "启动时自动检查更新", IsChecked = Bool(s, "auto_check") };
 
         async void Save()
         {

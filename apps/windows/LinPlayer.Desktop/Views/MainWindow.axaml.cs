@@ -38,6 +38,10 @@ public partial class MainWindow : Window
         // 窗口是这之后才建的,不自己取一次就还是默认字体
         if (Core.UiFont.Current is { } uf) FontFamily = uf;
 
+        // 上次关掉时是多大就开多大。摆尺寸必须在窗口显示之前,晚一步用户会看见它跳一下
+        WindowMemory.Restore(this, _core);
+        WindowMemory.Track(this, _core);
+
         var drag = this.FindControl<Border>("DragArea")!;
         // 自绘标题栏必须自己接拖拽与双击最大化 —— 不接的话窗口拖不动,
         // 而用户第一反应是「卡死了」,不会想到是标题栏没实现。
@@ -1207,6 +1211,14 @@ public partial class MainWindow : Window
     /// </summary>
     private void SetImmersive(bool on)
     {
+        /* 进播放页之前是什么状态,出来就还是什么状态。
+           用户 2026-09-12:「换页面之后也不会自动缩放」—— 根因是退全屏一律回
+           WindowState.Normal(那是给页面内按 F 退全屏设计的,见 SetFullscreen),
+           而**离开播放页**也走那一条,于是最大化看片、回来变成小窗口。 */
+        if (on) _preImmersive = WindowState;
+        else if (_preImmersive == WindowState.Maximized && WindowState == WindowState.Normal)
+            WindowState = WindowState.Maximized;
+
         var root = this.FindControl<Grid>("RootGrid")!;
         var body = this.FindControl<Grid>("BodyGrid")!;
         root.RowDefinitions[0].Height = on ? new GridLength(0) : new GridLength(36);
@@ -1227,6 +1239,9 @@ public partial class MainWindow : Window
     /// 全屏在屏幕上是同一张图,用户按了 F 什么都没变,只能判定「退不出去」。
     /// 丢掉的那点便利,换来的是「退出全屏」这件事在屏幕上看得见。</para>
     /// </summary>
+    /// <summary>进播放页之前的窗口状态。退出沉浸式时还回去,见 <see cref="SetImmersive"/>。</summary>
+    private WindowState _preImmersive = WindowState.Normal;
+
     private void SetFullscreen(bool on) =>
         WindowState = on ? WindowState.FullScreen : WindowState.Normal;
 

@@ -374,3 +374,37 @@ func Test首页栏目开关改的是指定那台(t *testing.T) {
 		t.Fatal("不认识的服务器键被静默收下了 —— 那一条谁也看不到、谁也删不掉,而它一直在生效")
 	}
 }
+
+// 窗口尺寸要落盘,而且**只在普通窗口态下记**。
+//
+// ☠ 这一条钉的是「关掉再打开还是那个大小」。零值是合法的「还没记过」,
+// 所以不能用「非零即有效」来判 —— 真正要拒的是最小化时窗口管理器报回来的
+// 那种一条缝的尺寸(存进去下次开机就是一条缝,而且用户无从恢复)。
+func TestSetPrefs记住窗口尺寸(t *testing.T) {
+	setup(t)
+	call(t, 501, "prefs.setPrefs", map[string]any{
+		"window_w": float64(760), "window_h": float64(520), "window_max": true,
+	})
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := reloaded.PrefsOf()
+	if p.WindowW != 760 || p.WindowH != 520 || !p.WindowMax {
+		t.Fatalf("窗口尺寸没落盘: %dx%d max=%v", p.WindowW, p.WindowH, p.WindowMax)
+	}
+
+	// 一条缝的尺寸要拒掉,原值不动
+	call(t, 502, "prefs.setPrefs", map[string]any{"window_w": float64(12), "window_h": float64(8)})
+	p = config.Current().PrefsOf()
+	if p.WindowW != 760 || p.WindowH != 520 {
+		t.Fatalf("离谱尺寸被写进去了: %dx%d", p.WindowW, p.WindowH)
+	}
+
+	// 没传的键一律不动 —— 只报「最大化了」不该把尺寸清空
+	call(t, 503, "prefs.setPrefs", map[string]any{"window_max": false})
+	p = config.Current().PrefsOf()
+	if p.WindowW != 760 || p.WindowH != 520 || p.WindowMax {
+		t.Fatalf("只改最大化把尺寸带走了: %dx%d max=%v", p.WindowW, p.WindowH, p.WindowMax)
+	}
+}

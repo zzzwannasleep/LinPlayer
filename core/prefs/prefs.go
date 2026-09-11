@@ -56,6 +56,18 @@ func RegisterCommands(version string) {
 		if v, ok := a["danmaku_enabled"].(bool); ok {
 			p.DanmakuEnabled = v
 		}
+		/* 窗口尺寸。**要夹一下**:关窗口那一刻拿到的可能是 0(最小化时
+		   某些窗口管理器报的就是 0),存进去下次开机就是一条缝。
+		   0 本身是合法的「没记过」,所以只拒 1~199 这段离谱值。 */
+		if v, ok := a["window_w"].(float64); ok && (v == 0 || v >= 200) {
+			p.WindowW = int(v)
+		}
+		if v, ok := a["window_h"].(float64); ok && (v == 0 || v >= 200) {
+			p.WindowH = int(v)
+		}
+		if v, ok := a["window_max"].(bool); ok {
+			p.WindowMax = v
+		}
 		return p, save(c, p)
 	})
 
