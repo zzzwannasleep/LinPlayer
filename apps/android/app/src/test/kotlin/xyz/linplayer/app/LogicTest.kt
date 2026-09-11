@@ -2,6 +2,7 @@ package xyz.linplayer.app
 
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -39,6 +40,8 @@ import xyz.linplayer.app.ui.player.shotCorner
 import xyz.linplayer.app.ui.player.DragAxis
 import xyz.linplayer.app.ui.player.cueRect
 import xyz.linplayer.app.ui.player.fmtSpeed
+import xyz.linplayer.app.ui.player.turningTo
+import xyz.linplayer.app.ui.pages.arOf
 import xyz.linplayer.app.ui.player.lockAxis
 import xyz.linplayer.app.ui.player.videoRect
 import xyz.linplayer.app.ui.player.splitMedia3Dialogue
@@ -511,6 +514,40 @@ class LogicTest {
         assertEquals("", fmtSpeed(1024, 0))
         // 计数器回绕 / 换网卡时差值会是负数 —— 那时宁可不画
         assertEquals("", fmtSpeed(-1, sec))
+    }
+
+    /**
+     * 详情页交给播放页的宽高比。它决定的是**在第一帧之前**横过来还是竖着，
+     * 拿不到就必须是 0(=不知道),不许瞎猜 —— 猜错的表现是转过去再转回来。
+     */
+    @Test fun `详情页算得出片源宽高比拿不到就给零`() {
+        fun ver(vararg st: Stream) = Version("v", "版本", true, streams = st.toList())
+        fun video(w: Long?, h: Long?) = Stream(
+            0, "Video", "hevc", null, null, null, null, w, h,
+            null, null, null, null, null, true, false,
+        )
+        assertEquals(16f / 9f, arOf(ver(video(1920, 1080))), 1e-4f)
+        assertEquals(9f / 16f, arOf(ver(video(1080, 1920))), 1e-4f)
+        // strm / 网盘源常常没有这两个字段,以及一条视频流都没有的版本
+        assertEquals(0f, arOf(ver(video(null, 1080))), 0f)
+        assertEquals(0f, arOf(ver(video(1920, 0))), 0f)
+        assertEquals(0f, arOf(ver()), 0f)
+        assertEquals(0f, arOf(null), 0f)
+    }
+
+    /**
+     * 「屏幕正要转过去」的判据。转的这一下必须一整块黑 ——
+     * 竖版 OSD 先画出来再整块转,就是用户 2026-09-12 报的那一段「觉得卡」。
+     *
+     * ☠ 不知道方向时必须是 false:那时黑起来是拿一个猜测去换一段黑屏。
+     */
+    @Test fun `方向对不上才算在转不知道就不算`() {
+        assertTrue("要横的还竖着 —— 正要转", turningTo(true, portrait = true))
+        assertFalse("要横的已经横了", turningTo(true, portrait = false))
+        assertTrue("要竖的还横着 —— 正要转", turningTo(false, portrait = false))
+        assertFalse("要竖的已经竖了", turningTo(false, portrait = true))
+        assertFalse("不知道方向,什么都不做", turningTo(null, portrait = true))
+        assertFalse("不知道方向,什么都不做", turningTo(null, portrait = false))
     }
 
     /**

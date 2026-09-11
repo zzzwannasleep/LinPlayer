@@ -39,6 +39,10 @@ object Route {
     @Serializable data class Player(
         val itemId: String, val title: String, val versionId: String? = null,
         val engine: String? = null,
+        /* 片源宽高比。详情页点播放那一刻就知道(它手里的 Version 带着 width/height),
+           带过来是为了在**第一帧之前**把横竖屏定下来 —— 让播放页自己去问一次网络的话,
+           用户会先看见一个竖屏的播放页,再整块转过去。0 = 不知道,播放页自己去问。 */
+        val ar: Float = 0f,
     )
     @Serializable data object AddServer                                       // U1.2 的「添加」版式
 }

@@ -204,6 +204,16 @@ public sealed class PlayerPage : UserControl
     private string _skipSource = "";
     private readonly string _itemId;
     private readonly DispatcherTimer _poll = new() { Interval = TimeSpan.FromMilliseconds(250) };
+
+    /* 顶栏那一格网速【用户定 2026-09-12】。跟着**这一页**数,不跟顶栏的显隐走 ——
+       顶栏一叫出来就该有读数,不是从零再数一秒。取不到统计时它一直不可见。 */
+    private readonly TextBlock _net = new()
+    {
+        Foreground = Brushes.White, FontSize = 12, Opacity = .82, IsVisible = false,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+    private long _netBytes = -1;
+    private DateTime _netAt;
     /// <summary>下一集。有就画「下一集」键,没有就不画(电影 / 最后一集)。</summary>
     private readonly CardItem? _next;
 
@@ -739,7 +749,7 @@ public sealed class PlayerPage : UserControl
             Orientation = Orientation.Horizontal, Spacing = 6,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { shot, _qualityBtn, _aspectBtn, segBtn },
+            Children = { _net, shot, _qualityBtn, _aspectBtn, segBtn },
         };
         var topRow = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(topLeft, 0);
@@ -885,7 +895,7 @@ public sealed class PlayerPage : UserControl
         // 起播排在 GL 就绪之后。发出去就行,不等结果 —— 等结果会把渲染线程堵住。
         _view.OnReady = () => Dispatcher.UIThread.Post(() => _ = Start(itemId, resumeSecs));
 
-        _poll.Tick += (_, _) => _ = Poll();
+        _poll.Tick += (_, _) => { SampleNet(); _ = Poll(); };
         _poll.Start();
         DetachedFromVisualTree += (_, _) => Stop();
 
@@ -2999,6 +3009,21 @@ public sealed class PlayerPage : UserControl
 
     /// <summary>OSD 开关了多少次。自检用 —— 指针不动的时候它本该一次都不翻。</summary>
     internal int OsdFlips;
+
+    /// <summary>一秒一采。轮询是 250ms 一跳,所以这里自己看表,够一秒才出一个数。</summary>
+    private void SampleNet()
+    {
+        var got = NetSpeed.TotalRx();
+        if (got < 0) return;
+        var now = DateTime.UtcNow;
+        if (_netBytes < 0) { _netBytes = got; _netAt = now; return; }
+        var dt = (now - _netAt).TotalSeconds;
+        if (dt < 1) return;
+        _net.Text = NetSpeed.Fmt(got - _netBytes, dt);
+        _net.IsVisible = _net.Text.Length > 0;
+        _netBytes = got;
+        _netAt = now;
+    }
 
     private void ShowOsd(bool on)
     {

@@ -165,6 +165,20 @@ internal data class Person(val id: String, val name: String)
  */
 internal fun defaultVersion(vs: List<Version>): Version? = vs.firstOrNull { it.preferred }
 
+/**
+ * 这一版画面的宽高比。拿不到就 0。
+ *
+ * 用处是**在进播放页之前**就把横竖屏定下来(见 `Route.Player.ar`)。
+ * 0 不是「方形」,是「不知道」—— strm / 网盘源常常没有这份数据,那时不许瞎猜一个方向,
+ * 交给播放页自己去问。
+ */
+internal fun arOf(v: Version?): Float {
+    val s = v?.of("Video")?.firstOrNull() ?: return 0f
+    val w = s.width ?: return 0f
+    val h = s.height ?: return 0f
+    return if (w > 0 && h > 0) w.toFloat() / h else 0f
+}
+
 /* ───────────────────────────── 页面 ───────────────────────────── */
 
 /**
@@ -313,7 +327,9 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
          做成「这一次的参数」而不是改全局开关 —— 换回来不必再进一趟设置页。 */
     val toPlayer: (String, String?) -> Unit = { target, engine ->
         nav.navigate(Route.Player(
-            target, title, pickedVersion ?: ver?.takeIf { it.preferred }?.id, engine))
+            target, title, pickedVersion ?: ver?.takeIf { it.preferred }?.id, engine,
+            // 只有播的就是这一页这一片时,手里这份宽高比才算数
+            ar = if (target == route.itemId) arOf(ver) else 0f))
     }
 
     LpImmersive(bar = {

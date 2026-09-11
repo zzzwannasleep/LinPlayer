@@ -119,14 +119,45 @@ internal fun lockAxis(dx: Float, dy: Float, slop: Float, ratio: Float = 1.7f): D
     }
 }
 
+/** 转屏没落定就一直黑着不行,这是上限。分屏 / 折叠屏上方向请求可能根本不生效。 */
+private const val TurnGiveUpMs = 900L
+
+/** 退场时给系统转屏留的那一下。它只要够系统拍下「转之前那一帧」就行。 */
+private const val TurnSettleMs = 150L
+
 /**
- * 网速读数【用户定 2026-09-08】。
+ * 现在这个方向和想要的方向对不上,也就是「正在转 / 马上要转」。
+ *
+ * `want == null` 是**不知道**(strm / 网盘源拿不到宽高),那时什么都不做 ——
+ * 不知道方向却把界面黑起来,是拿一个猜测去换一段黑屏。
+ */
+internal fun turningTo(want: Boolean?, portrait: Boolean): Boolean =
+    want != null && want != !portrait
+
+/**
+ * 整机下行网速,一秒一采,采到就回调。
  *
  * ★ 口径是**整机**(TrafficStats 全设备计数),不是这一条流 —— 用户要看的是
  *   「现在到底还有没有在下东西」,而播放中同时还有封面、弹幕、上报在跑。
- * ★ 取不到(有的 ROM 返回 UNSUPPORTED)就返回空串,**界面上那一格整个不画**。
+ * ★ 取不到(有的 ROM 返回 UNSUPPORTED)就一直不回调,界面上那一格整个不画。
  *   摆一个恒为 0 的读数比不摆更糟。
  */
+internal suspend fun sampleNetSpeed(onText: (String) -> Unit) {
+    var last = android.net.TrafficStats.getTotalRxBytes()
+    var lastAt = System.nanoTime()
+    if (last == android.net.TrafficStats.UNSUPPORTED.toLong()) return
+    while (true) {
+        delay(1000)
+        val now = android.net.TrafficStats.getTotalRxBytes()
+        val at = System.nanoTime()
+        if (now == android.net.TrafficStats.UNSUPPORTED.toLong()) return
+        onText(fmtSpeed(now - last, at - lastAt))
+        last = now
+        lastAt = at
+    }
+}
+
+/** 网速读数的格式【用户定 2026-09-08】。量不出来返回空串,那一格就整个不画。 */
 internal fun fmtSpeed(bytes: Long, nanos: Long): String {
     if (nanos <= 0L || bytes < 0L) return ""
     val bps = bytes * 1_000_000_000.0 / nanos
@@ -207,6 +238,18 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     /** 失败时给用户看的**具体原因**,不是「原因在日志里」。见 [failureDiag]。 */
     var failReason by remember { mutableStateOf<String?>(null) }
 
+    /* 退场:**先松方向锁、等屏幕转回去,再 pop**。
+       直接 pop 的话系统拍到的是详情页横着的第一帧,转过来就是用户说的「反之也有」;
+       在这儿转,拍到的是播放页那块黑幕。等的这一下顺带把 OSD 撤了(见 [leaving])。 */
+    var leaving by remember { mutableStateOf(false) }
+    val leave: () -> Unit = { leaving = true }
+    LaunchedEffect(leaving) {
+        if (!leaving) return@LaunchedEffect
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        delay(TurnSettleMs)
+        nav.popBackStack()
+    }
+
     /* 内核。★ 进播放页时读一次就**钉住**(`remember` 不带 key):
        播到一半用户去设置里改了内核,回来时这一片的状态机会当场换一套
        —— 位置、时长、暂停三个值来源全变,而 ExoPlayer 手里根本没有这一片。
@@ -235,8 +278,9 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
     /* 画面比例【用户定 2026-09-07】。★ **不持久化** —— 和画面增强档位同一条口径:
        它是「这一片这一次这么看」,记住的话下一片莫名其妙就是 4:3。 */
     var videoFit by remember { mutableStateOf(VideoFit.Source) }
-    /** 片源比例,来自 `emby.itemMedia`(和判断横竖屏是同一份数据)。0 = 还没拿到。 */
-    var srcAr by remember(route.itemId) { mutableFloatStateOf(0f) }
+    /* 片源比例。**起手就是详情页带过来的那一份**(`Route.Player.ar`),
+       0 = 详情页也不知道(strm / 网盘源常见),那时下面那个 LaunchedEffect 去问一次。 */
+    var srcAr by remember(route.itemId) { mutableFloatStateOf(route.ar) }
     /** 有没有「同一季的其它集」。**电影没有,所以电影不该有那颗「选集」**【用户定 2026-09-07】。 */
     var hasEpisodes by remember(route.itemId) { mutableStateOf(false) }
     LaunchedEffect(route.itemId) {
@@ -323,7 +367,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                 return@LaunchedEffect
             }
             if (e.playbackState == androidx.media3.common.Player.STATE_ENDED) {
-                if (everMoved) nav.popBackStack() else openFailed = true
+                if (everMoved) leave() else openFailed = true
                 return@LaunchedEffect
             }
             delay(250)
@@ -347,7 +391,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                  直接 popBackStack 会让用户看到「点了播放,闪一下就回来了」,
                  什么都没说。这种时候把 mpv 报的原因显示出来。 */
             if (o.bool("eof")) {
-                if (everMoved) nav.popBackStack() else {
+                if (everMoved) leave() else {
                     failReason = failureDiag(app)
                     openFailed = true
                 }
@@ -433,21 +477,25 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         when {
             panel != null -> panel = null
             osd -> osd = false
-            else -> nav.popBackStack()
+            else -> leave()
         }
     }
 
     /* ☠ **方向跟着视频比例走,不让用户自己转**【用户定 2026-09-06】。
        横片点播放就自动横过来,竖片保持竖屏 —— 「竖屏起播、横屏观看」是脱裤子放屁。
 
-       ★ 判据在**起播之前**就拿得到:`emby.itemDetail` 走的那条链里,
-         `emby.itemMedia` 的 Video 流带着 width / height。等首帧再转的话
-         用户会先看见一次竖屏闪动,那正是这条要消灭的东西。
+       ★ 判据在**进这一页之前**就拿得到:详情页手里的 Version 带着 width / height,
+         经 `Route.Player.ar` 送过来。上一版是进来之后自己再问一次 `emby.itemMedia` ——
+         一次网络往返之后才转,用户看到的就是「竖屏的播放页画好了,再整块转过去」
+         (用户 2026-09-12:「有一段从竖屏转向横屏的画面…只会觉得卡」)。
        ★ 拿不到宽高(strm / 网盘源常见)就**什么都不做**,按当前方向起播,
          首帧到了再纠正一次 —— 不许瞎猜一个方向锁上去。
        ★ 用户手动转了就交还系统:锁死会变成「我想竖着看都不行」。 */
-    var wantLandscape by remember(route.itemId) { mutableStateOf<Boolean?>(null) }
+    var wantLandscape by remember(route.itemId) {
+        mutableStateOf(if (route.ar > 0f) route.ar > 1f else null)
+    }
     LaunchedEffect(route.itemId) {
+        if (route.ar > 0f) return@LaunchedEffect   // 详情页已经告诉我们了,不必再问一次
         val v = runCatching { app.call("emby.itemMedia", args("item_id" to route.itemId)) }
             .getOrNull().arr().firstOrNull().obj()
         val vid = v?.get("streams").arr().map { it.obj() }
@@ -477,6 +525,23 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
             a?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
+
+    /* ☠ **转屏这一下不许让用户看见。**
+       系统转屏动画拍的是**转之前那一帧**,再把那张图转过去。所以只要那一帧是
+       一整块黑,转屏就等于黑转黑 —— 看不见。黑幕本来就铺着,差的只是 OSD:
+       竖版排布先画出来再整块转,正是用户报的「那一段从竖屏转向横屏的画面」。
+       转不动的场合(分屏 / 折叠屏 / 无视方向请求的 ROM)最多黑 [TurnGiveUpMs] 就照常画,
+       不然那台设备上顶栏永远出不来。 */
+    val turning = turningTo(wantLandscape, portrait)
+    var turnGaveUp by remember(route.itemId) { mutableStateOf(false) }
+    LaunchedEffect(turning) { if (turning) { delay(TurnGiveUpMs); turnGaveUp = true } }
+
+    /* 网速读数。**在这一层数,不在 OSD 里数**【用户定 2026-09-12:「网速显示要常驻,
+       不需要打开再统计再显示,跟随状态栏显隐就行了」】。
+       原来它长在 [Osd] 里,而 OSD 是 `AnimatedVisibility` —— 收起来整个退出组合,
+       协程被取消;每叫出一次顶栏都是从零开始数一秒,先空着再跳出一个数。 */
+    var netSpeed by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) { sampleNetSpeed { netSpeed = it } }
 
     val c = Lp.colors
     /* ☠☠ **这一层不许有不透明底色。**
@@ -522,7 +587,7 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
                    的实际取值就只能靠猜,一来一回好几轮。 */
                 Dim3(failReason ?: "原因还没拿到。设置 → 存储与数据目录 → 导出日志。", maxLines = 6)
                 Spacer(Modifier.height(Sp.x16))
-                xyz.linplayer.app.ui.components.LpButton("返回", { nav.popBackStack() },
+                xyz.linplayer.app.ui.components.LpButton("返回", leave,
                     kind = xyz.linplayer.app.ui.components.BtnKind.Secondary)
             } else Dim3(if (buffering) "正在缓冲…" else "正在打开…")
         }
@@ -626,12 +691,15 @@ fun PlayerPage(nav: NavController, entry: NavBackStackEntry) {
         }
 
         // ★ OSD 抬在 scrim 之上:面板开关期间上下栏**一动不动**
-        AnimatedVisibility(osd && !locked || panel != null, enter = fadeIn(), exit = fadeOut()) {
+        AnimatedVisibility(
+            (osd && !locked || panel != null) && !(leaving || turning && !turnGaveUp),
+            enter = fadeIn(), exit = fadeOut(),
+        ) {
             Osd(
-                portrait = portrait,
+                portrait = portrait, netSpeed = netSpeed,
                 title = route.title, position = seekPreview ?: position, duration = duration,
                 paused = paused, speed = speed, hasEpisodes = hasEpisodes, heat = heat,
-                onBack = { nav.popBackStack() },
+                onBack = leave,
                 onToggle = { doPause(!paused) },
                 onSeek = { t -> doSeek(t) },
                 onSpeed = { v -> speed = v; doSpeed(v) },
@@ -701,7 +769,7 @@ private val BottomVeil = Brush.verticalGradient(
  */
 @Composable
 private fun Osd(
-    portrait: Boolean,
+    portrait: Boolean, netSpeed: String,
     title: String, position: Double, duration: Double, paused: Boolean, speed: Double,
     hasEpisodes: Boolean, heat: List<Float>,
     onBack: () -> Unit, onToggle: () -> Unit, onSeek: (Double) -> Unit,
@@ -717,7 +785,7 @@ private fun Osd(
             LpIconButton(LpIcons.back, "返回", tint = Color.White, onClick = onBack)
             Marquee(title, Modifier.weight(1f))
             // 网速在「更多」左边 —— 右上角这一片本来就是这一页的读数区
-            NetSpeed()
+            NetSpeed(netSpeed)
             // ★ 「更多」在**右上角**【用户定 2026-09-07】。它是这一页的抽屉,
             //   抽屉该在角上,不该混在底排那串常用动作里
             Chip("更多") { onPanel("more") }
@@ -806,30 +874,11 @@ private fun AdjustHud(brightness: Boolean, value: Float) {
     }
 }
 
-/**
- * 右上角的网速读数。**整机口径**,见 [fmtSpeed]。
- *
- * ★ 一秒一次就够:再密只是让数字跳得看不清,而它要回答的问题是「卡是不是没网了」。
- */
+/** 右上角的网速读数,只管画。数在哪儿数见 [sampleNetSpeed]。 */
 @Composable
-private fun NetSpeed() {
-    var text by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        var last = android.net.TrafficStats.getTotalRxBytes()
-        var lastAt = System.nanoTime()
-        // UNSUPPORTED 的 ROM 上直接不画这一格,别摆一个恒为 0 的读数
-        if (last == android.net.TrafficStats.UNSUPPORTED.toLong()) return@LaunchedEffect
-        while (true) {
-            delay(1000)
-            val now = android.net.TrafficStats.getTotalRxBytes()
-            val at = System.nanoTime()
-            if (now == android.net.TrafficStats.UNSUPPORTED.toLong()) return@LaunchedEffect
-            text = fmtSpeed(now - last, at - lastAt)
-            last = now
-            lastAt = at
-        }
-    }
-    if (text.isNotEmpty()) Text(
+private fun NetSpeed(text: String) {
+    if (text.isEmpty()) return
+    Text(
         text, Modifier.padding(end = Sp.x6),
         color = Color.White.copy(alpha = .82f), fontSize = 12.sp, maxLines = 1,
     )

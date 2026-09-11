@@ -88,6 +88,8 @@ internal static class Program
             Console.WriteLine(stuck
                 ? $"PROBE 滚动 ✗ 卡住了(跑满 {frames} 帧还没退出)—— 翻页按钮会变成死的"
                 : $"PROBE 滚动 ✓ 第 {frames} 帧退出,偏移停在 {sv.Offset.X:0.#}");
+            // ☠ 退出码以前一直是 0:probes-win.sh 按退出码判,这一组等于打了字没人听
+            if (stuck) Environment.ExitCode = 1;
             /* 第二道闸:窗口最小化时渲染循环停了,排进去的那一帧永远不会来。
                只判 Running 一个字段的话它永远停在 true,之后每次点按钮都当场 return。 */
             var fresh = Views.Smooth.StillAlive(true, DateTime.UtcNow);
@@ -95,6 +97,16 @@ internal static class Program
             Console.WriteLine(fresh && !stale
                 ? "PROBE 滚动 ✓ 帧停了 5 秒的那一轮会被判死并重启"
                 : $"PROBE 滚动 ✗ 停帧判定坏了(刚跑过={fresh} 停了5秒={stale})—— 最小化再还原后按钮会是死的");
+            if (!fresh || stale) Environment.ExitCode = 1;
+            return;
+        }
+
+        /* 网速读数自检:`LP_NETPROBE=1 LinPlayer.exe` 打几行就退,不开窗口。
+           读数坏掉的样子是「顶栏上那一格不见了」或者「永远 0 KB/s」——
+           两种都不报错,而且看上去像网络问题,不像我们的问题。 */
+        if (Environment.GetEnvironmentVariable("LP_NETPROBE") is { Length: > 0 })
+        {
+            Environment.ExitCode = NetProbe() ? 0 : 1;
             return;
         }
 
@@ -157,6 +169,36 @@ internal static class Program
     /// 而 Extent 是 0 就意味着「滚哪儿都一样」—— 每一句断言都会白白变绿
     /// (第一版正是这么写的,四条假绿)。所以它不进 CI,跟 selfcheck 一起手跑。</para>
     /// </summary>
+    /// <summary>
+    /// 网速读数自检。纯算术 + 一次真采样,不开窗口,进得了 CI。
+    /// </summary>
+    private static bool NetProbe()
+    {
+        var bad = 0;
+        void Eq(string got, string want, string what)
+        {
+            if (got == want) { Console.WriteLine($"PROBE 网速 ✓ {what}"); return; }
+            Console.WriteLine($"PROBE 网速 ✗ {what}:得到「{got}」,该是「{want}」");
+            bad++;
+        }
+        Eq(Views.NetSpeed.Fmt(2L * 1024 * 1024, 1), "2.0 MB/s", "兆档一位小数");
+        Eq(Views.NetSpeed.Fmt(512_000, 1), "500 KB/s", "千档不带小数");
+        Eq(Views.NetSpeed.Fmt(100, 1), "0 KB/s", "太慢也给个 0,不给空");
+        Eq(Views.NetSpeed.Fmt(1024, 0), "", "没走过时间不给数");
+        Eq(Views.NetSpeed.Fmt(-1, 1), "", "字节倒退不给数");
+
+        /* 计数器**只能往前**。倒退的话两次相减是负数,Fmt 返回空串 ——
+           表现是顶栏上那一格时有时无,而不是报错。 */
+        var a = Views.NetSpeed.TotalRx();
+        var b = Views.NetSpeed.TotalRx();
+        if (a < 0 && b < 0) Console.WriteLine("PROBE 网速 ✓ 这台机器问不到网卡统计,那一格本就不画");
+        else if (b >= a && a >= 0) Console.WriteLine($"PROBE 网速 ✓ 整机计数只往前({a} → {b})");
+        else { Console.WriteLine($"PROBE 网速 ✗ 整机计数倒退了({a} → {b})"); bad++; }
+
+        Console.WriteLine(bad == 0 ? "PROBE 网速 全部通过" : $"PROBE 网速 {bad} 条不过");
+        return bad == 0;
+    }
+
     private static bool RailProbe()
     {
         const int n = 200, cardW = 214;   // 200 条就够逼出量程,再多只是让探针跑几分钟
