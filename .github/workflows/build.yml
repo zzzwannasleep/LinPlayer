@@ -303,7 +303,8 @@ jobs:
           fetch-depth: 0
 
       - name: Build release notes from commits
-        run: bash scripts/release-notes.sh "/tmp/notes.md"
+        # pre:对比上一个发布(预发布或正式版)。正式版提升时 publish.yml 用 stable 另算
+        run: bash scripts/release-notes.sh "/tmp/notes.md" pre
 
       - name: Download release artifacts
         uses: actions/download-artifact@v4
