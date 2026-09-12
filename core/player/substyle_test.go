@@ -1,6 +1,7 @@
 package player
 
 import (
+	"encoding/json"
 	"testing"
 
 	"linplayer/core/config"
@@ -34,8 +35,12 @@ func Test字幕样式_老配置里的零值不是用户的选择(t *testing.T) {
 	}
 	// 哨兵要**原样透给 UI**:翻成具体数字的话,面板一打开就把默认值
 	// 当成用户的选择写回去了。
-	m := subStyleOf(p)
-	if m["scale"] != 0.0 || m["position"] != -1 || m["border_size"] != -1.0 {
+	// 判的是**序列化之后**的形状:UI 看到的是 JSON,不是 Go 结构体。
+	// 直接看字段的话 omitempty 漏了都测不出来。
+	raw, _ := json.Marshal(subStyleOf(p))
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if m["scale"] != 0.0 || m["position"] != -1.0 || m["border_size"] != -1.0 {
 		t.Fatalf("哨兵没原样透出去:%v", m)
 	}
 	if _, ok := m["scale_by_window"]; ok {

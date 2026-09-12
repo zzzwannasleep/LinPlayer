@@ -203,6 +203,19 @@ func IconLibrary(ctx context.Context, force bool) []IconEntry {
 	return iconCacheGet(true)
 }
 
+// IconLibraryReply 图标库。
+//
+// Configured 和「拉取失败」要分开说:合成一句「没有图标」的话,前者是永远
+// 修不好的(界面在等一件不会发生的事),后者点一下刷新就好。
+type IconLibraryReply struct {
+	Items      []IconEntry `json:"items"`
+	Configured bool        `json:"configured"`
+	// Builtin 内置源**只报条数不报地址**:地址走编译期注入,
+	// 摆到界面上等于把它抄进了截图和日志里。
+	Builtin int      `json:"builtin"`
+	Sources []string `json:"sources"`
+}
+
 func registerIconLibrary() {
 	bus.Register("prefs.iconLibrary", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		force, _ := a["force"].(bool)
@@ -213,12 +226,10 @@ func registerIconLibrary() {
 		/* ★★ 「这个构建没配源」和「拉取失败」要分开说。
 		   合成一句「没有图标」的话,前者是永远修不好的(界面在等一件不会发生的事),
 		   后者点一下刷新就好了 —— 而用户看到的是同一句话。 */
-		return map[string]any{
-			"items": items, "configured": len(IconSources()) > 0,
-			// 内置的那几条**只报条数不报地址**:地址走编译期注入,
-			// 摆到界面上等于把它抄进了截图和日志里
-			"builtin": len(BuiltinIconSources()),
-			"sources": UserIconSources(),
+		return IconLibraryReply{
+			Items: items, Configured: len(IconSources()) > 0,
+			Builtin: len(BuiltinIconSources()),
+			Sources: UserIconSources(),
 		}, nil
 	})
 

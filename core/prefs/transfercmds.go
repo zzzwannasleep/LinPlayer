@@ -16,6 +16,28 @@ import (
 	"linplayer/core/config"
 )
 
+// BackupExported 一次备份导出的结果。
+//
+// 具名而不是裸 map:UI 靠 Warning 决定要不要弹「别公开分享」那句话,
+// 键名拼错了这句警示就静默消失 —— 而文件里带着所有服务器的凭据。
+type BackupExported struct {
+	// Content 给了 path 就已经落盘,这里空着,不再跨 FFI 回吐一份大字符串。
+	Content  string `json:"content,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Bytes    int    `json:"bytes"`
+	Filename string `json:"filename"`
+	// Accounts / Warning 只在这份备份真的带账号时才发。
+	Accounts *int   `json:"accounts,omitempty"`
+	Warning  string `json:"warning,omitempty"`
+}
+
+// BackupImported 一次还原的结果。
+type BackupImported struct {
+	Imported         int  `json:"imported"`
+	Total            int  `json:"total"`
+	SettingsRestored bool `json:"settings_restored"`
+}
+
 func registerTransferCommands() {
 	bus.Register("prefs.configExportQr", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		c := config.Current()
@@ -64,15 +86,17 @@ func registerTransferCommands() {
 		if err != nil {
 			return nil, bus.NewErr(bus.EInternal, "备份编码失败: %v", err)
 		}
-		out := map[string]any{
-			"content": string(b), "bytes": len(b),
-			"filename": "LinPlayer-备份-" + time.Now().Format("20060102-150405") + ".lpbak",
+		out := BackupExported{
+			Content:  string(b),
+			Bytes:    len(b),
+			Filename: "LinPlayer-备份-" + time.Now().Format("20060102-150405") + ".lpbak",
 		}
 		if withAccounts {
-			out["accounts"] = len(c.AccountList)
+			n := len(c.AccountList)
+			out.Accounts = &n
 			// ★★ 文件里**带着 token 和密码**,而加密是混淆级(密钥随文件走)。
 			//   这句话必须交到 UI 手上 —— 用户会把备份发到群里。
-			out["warning"] = "这份备份里包含你所有服务器的登录凭据,别公开分享。"
+			out.Warning = "这份备份里包含你所有服务器的登录凭据,别公开分享。"
 		}
 		// UI 可以直接落盘;给了 path 就核心层写,省掉一次大字符串跨 FFI
 		if p, ok := a["path"].(string); ok && strings.TrimSpace(p) != "" {
@@ -82,8 +106,8 @@ func registerTransferCommands() {
 			if err := os.WriteFile(p, b, 0o600); err != nil {
 				return nil, bus.NewErr(bus.EInvalid, "写不进去: %v", err)
 			}
-			out["path"] = p
-			delete(out, "content") // 已经落盘了,再回吐一份是白花
+			out.Path = p
+			out.Content = "" // 已经落盘了,再回吐一份是白花
 		}
 		return out, nil
 	})
@@ -116,8 +140,8 @@ func registerTransferCommands() {
 		if err := c.Save(); err != nil {
 			return nil, bus.NewErr(bus.EInternal, "配置保存失败: %v", err)
 		}
-		return map[string]any{
-			"imported": n, "total": len(c.AccountList), "settings_restored": restored,
+		return BackupImported{
+			Imported: n, Total: len(c.AccountList), SettingsRestored: restored,
 		}, nil
 	})
 }

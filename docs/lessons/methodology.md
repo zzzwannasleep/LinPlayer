@@ -645,3 +645,37 @@ inj 字段名 asset_size      -> assetSize    : GREEN   ← 没红
 配套的第二个坑:断言的**位置**。第一版把这条断言写在滚动之前,那会儿一次回收都还没发生,
 报的是 0 —— 一条永远绿的断言。和 [[test-must-fail-first]] 里「断言的时序让 bug 没机会发生」
 是同一类。
+
+## 裸 map 就是一份没人对得了账的契约 — 2026-09-12
+
+上一轮把 `COMMANDS.md` 的返回类型名修对之后,门禁的覆盖率是 70/153(46%),
+放行的 83 处里绝大多数是**核心层直接 `return map[string]any{...}`** ——
+文档那一列要么写 `()`,要么写一个 Rust 时代留下的、核心层里根本不存在的名字
+(`PlaybackPrefs` `DataPaths` `MpvConf` `PrefetchSettings` 等 12 个,一个都查不到)。
+
+给其中 17 条补上具名 struct(`DanmakuStyle` / `SubStyle` / `MpvConf` /
+`ShaderLevel` / `ShaderApplied` / `PlaybackPrefs` / `PrefetchSettings` /
+`Blocklist` / `BlocklistImported` / `DataPaths` / `CacheSize` / `PlayResult` /
+`IconData` / `BackupExported` / `BackupImported` / `IconLibraryReply`),
+覆盖率到 96/153(63%),当场挖出一条真 bug:
+
+- **安卓设置页的「数据目录」永远停在「读取中…」**:
+  `system.dataPaths` 发的是 `root`,而 `SettingsPage.kt` 读的是 `dataRoot`。
+  桌面端(`MorePages.cs`)读的是 `root`,对的 —— 一处对一处错,
+  正是「同一功能几套入口就得每套点一遍」那条的又一次。
+
+两条实操结论:
+
+- **`omitempty` 是契约的一部分,别用结构体字段去测它。** `subStyleOf` 原来靠
+  「没设过就不往 map 里放 `scale_by_window`」,换成 struct 之后这条规则住在
+  tag 里。测试必须 `json.Marshal` 之后再判,直接看 Go 字段的话 omitempty
+  漏写了也测不出来。
+- **同名 struct 跨包会被门禁并成并集,那是弱化。** `system.Info`(更新信息)
+  和 `account.Info`(账号)撞名,导致账号那几条命令的字段表里混进
+  `asset_url` `prerelease` 这种东西,什么都放得进去。改名 `UpdateInfo`,
+  7 处引用。剩下 `Entry` `Item` `TestResult` 三组仍在撞,门禁会把它们印出来。
+
+★ 还剩 57 处放行。其中一大半是返回 `()` 的写命令(没字段可对),
+  另一部分卡在**窗口法**:`app.call` 往下 20 行之外的取值不归任何命令 ——
+  安卓设置页那种「先 call 一次拿回 `prefs`,再往下铺五十行开关」的写法
+  整片在门禁视野之外。想被覆盖,就把响应绑到一个**只赋值一次**的变量上。

@@ -855,7 +855,7 @@ private fun StoragePanel() {
     var size by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         // 同一面板里的多个请求**必须并发**:串行 await 会把后端本身的卡放大 N 倍
-        launch { paths = runCatching { app.call("system.dataPaths") }.getOrNull().obj().str("dataRoot") }
+        launch { paths = runCatching { app.call("system.dataPaths") }.getOrNull().obj().str("root") }
         launch {
             size = runCatching { app.call("system.cacheSize") }.getOrNull().obj()
                 .long("bytes")?.let { "%.1f MB".format(it / 1024.0 / 1024.0) }

@@ -20,6 +20,14 @@ import (
 	"linplayer/core/system"
 )
 
+// PrefetchSettings 多线程加载(预取代理)的设置。
+type PrefetchSettings struct {
+	// Servers 按账号主键开:能不能加速取决于对端,不给全开的入口。
+	Servers    []string `json:"servers"`
+	Threads    int      `json:"threads"`
+	CacheBytes int64    `json:"cache_bytes"`
+}
+
 // RegisterCommands 由 lp_init 调用。version 是发行版本号(更新设置要用)。
 func RegisterCommands(version string) {
 	registerCFCommands()
@@ -74,9 +82,9 @@ func RegisterCommands(version string) {
 	// ---- 多线程加载 ----
 	bus.Register("prefs.getPrefetchSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		p := config.Current().PrefsOf() // PrefsOf 已经钳过
-		return map[string]any{
-			"servers": p.PrefetchServers, "threads": p.PrefetchThreads,
-			"cache_bytes": p.PrefetchCacheBytes,
+		return PrefetchSettings{
+			Servers: p.PrefetchServers, Threads: p.PrefetchThreads,
+			CacheBytes: p.PrefetchCacheBytes,
 		}, nil
 	})
 	bus.Register("prefs.setPrefetchSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {

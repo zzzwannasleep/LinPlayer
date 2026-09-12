@@ -367,12 +367,28 @@ func danmakuLayoutReply() map[string]any {
 	}
 }
 
-func styleReply(p config.Prefs) map[string]any {
-	return map[string]any{
-		"area": p.DanmakuArea, "scale": p.DanmakuScale, "opacity": p.DanmakuOpacity,
-		"speed": p.DanmakuSpeed, "top_lines": p.DanmakuTopLines,
-		"bottom_lines": p.DanmakuBottomLines, "merge": p.DanmakuMerge,
-		"bold": p.DanmakuBold, "heatmap": p.DanmakuHeatmap,
+// DanmakuStyle 弹幕样式面板的回显体。
+//
+// 具名而不是裸 map:字段名是跨语言契约,拼错了两边都不报错,只是取到 null
+// 画成空。有了这个类型 check-android-fields.py 才对得上账。
+type DanmakuStyle struct {
+	Area        float64 `json:"area"`
+	Scale       float64 `json:"scale"`
+	Opacity     float64 `json:"opacity"`
+	Speed       float64 `json:"speed"`
+	TopLines    int     `json:"top_lines"`
+	BottomLines int     `json:"bottom_lines"`
+	Merge       bool    `json:"merge"`
+	Bold        bool    `json:"bold"`
+	Heatmap     bool    `json:"heatmap"`
+}
+
+func styleReply(p config.Prefs) DanmakuStyle {
+	return DanmakuStyle{
+		Area: p.DanmakuArea, Scale: p.DanmakuScale, Opacity: p.DanmakuOpacity,
+		Speed: p.DanmakuSpeed, TopLines: p.DanmakuTopLines,
+		BottomLines: p.DanmakuBottomLines, Merge: p.DanmakuMerge,
+		Bold: p.DanmakuBold, Heatmap: p.DanmakuHeatmap,
 	}
 }
 

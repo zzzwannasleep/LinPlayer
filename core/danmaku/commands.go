@@ -14,6 +14,24 @@ import (
 	"linplayer/core/secrets"
 )
 
+// Blocklist 落库的屏蔽表:按词屏蔽 + 按发送者屏蔽。
+type Blocklist struct {
+	Words []string `json:"words"`
+	Users []string `json:"users"`
+}
+
+// BlocklistImported 导入一份弹弹Play 屏蔽表 XML 之后的回执。
+//
+// TotalWords / TotalUsers 是**合并去重之后**的总数,不是这次导进来的条数 ——
+// UI 拿它给「现在一共屏蔽了多少」,两者混用会越导数字越离谱。
+type BlocklistImported struct {
+	TextWords    []string `json:"text_words"`
+	UserIDs      []string `json:"user_ids"`
+	SkippedCount int      `json:"skipped_count"`
+	TotalWords   int      `json:"total_words"`
+	TotalUsers   int      `json:"total_users"`
+}
+
 // OfficialSourceID 官方源的固定 id。
 const OfficialSourceID = "official"
 
@@ -272,17 +290,17 @@ func RegisterCommands() {
 		if err := SaveBlocklist(words, users); err != nil {
 			return nil, bus.NewErr(bus.EInternal, "屏蔽表保存失败: %v", err)
 		}
-		return map[string]any{
-			"text_words": r.TextWords, "user_ids": r.UserIDs,
-			"skipped_count": r.SkippedCount,
-			"total_words":   len(words), "total_users": len(users),
+		return BlocklistImported{
+			TextWords: r.TextWords, UserIDs: r.UserIDs,
+			SkippedCount: r.SkippedCount,
+			TotalWords:   len(words), TotalUsers: len(users),
 		}, nil
 	})
 
 	// ---- 屏蔽词(落库,自动加载和手动搜索都用它)----
 	bus.Register("danmaku.getBlockwords", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		words, users := LoadBlocklist()
-		return map[string]any{"words": words, "users": users}, nil
+		return Blocklist{Words: words, Users: users}, nil
 	})
 
 	bus.Register("danmaku.setBlockwords", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -296,7 +314,7 @@ func RegisterCommands() {
 		if err := SaveBlocklist(words, users); err != nil {
 			return nil, bus.NewErr(bus.EInternal, "屏蔽表保存失败: %v", err)
 		}
-		return map[string]any{"words": words, "users": users}, nil
+		return Blocklist{Words: words, Users: users}, nil
 	})
 
 	// ---- 缓存 ----

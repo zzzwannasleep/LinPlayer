@@ -317,17 +317,28 @@ func boolProp(on bool) string {
 //
 // ★ 哨兵(0 / -1 / nil)原样透出去,让 UI 知道「这一项用的是 mpv 默认值」——
 // 翻成具体数字的话,面板一打开就把默认值当成用户的选择写回去了。
-func subStyleOf(p config.Prefs) map[string]any {
-	m := map[string]any{
-		"scale": p.SubScale, "position": p.SubPos,
-		"border_size": p.SubBorderSize, "bold": p.SubBold,
-		"scale_max": config.SubScaleMax, "scale_min": config.SubScaleMin,
-		"position_max": config.SubPosMax, "border_max": config.SubBorderMax,
+// SubStyle 字幕样式面板的回显体。量程一起发 —— 滑块的上下限只能有一个出处。
+type SubStyle struct {
+	Scale      float64 `json:"scale"`
+	Position   int     `json:"position"`
+	BorderSize float64 `json:"border_size"`
+	Bold       bool    `json:"bold"`
+	// ScaleByWindow 没记过就不发,让 UI 显示 mpv 的默认而不是我们猜的 false。
+	ScaleByWindow *bool   `json:"scale_by_window,omitempty"`
+	ScaleMax      float64 `json:"scale_max"`
+	ScaleMin      float64 `json:"scale_min"`
+	PositionMax   int     `json:"position_max"`
+	BorderMax     float64 `json:"border_max"`
+}
+
+func subStyleOf(p config.Prefs) SubStyle {
+	return SubStyle{
+		Scale: p.SubScale, Position: p.SubPos,
+		BorderSize: p.SubBorderSize, Bold: p.SubBold,
+		ScaleByWindow: p.SubScaleByWindow,
+		ScaleMax:      config.SubScaleMax, ScaleMin: config.SubScaleMin,
+		PositionMax: config.SubPosMax, BorderMax: config.SubBorderMax,
 	}
-	if p.SubScaleByWindow != nil {
-		m["scale_by_window"] = *p.SubScaleByWindow
-	}
-	return m
 }
 
 /*
@@ -439,16 +450,19 @@ func sanitizeMpvConf(text string) (string, []string) {
 	return strings.Join(lines, "\n"), dropped
 }
 
-func mpvConfNow() map[string]any {
+// MpvConf 用户那份 mpv.conf 的当前状态。
+type MpvConf struct {
+	Text string `json:"text"`
+	Path string `json:"path"`
+	// Active 文件真的在。空文件也算在(用户可能就是要一个空的)。
+	Active bool `json:"active"`
+}
+
+func mpvConfNow() MpvConf {
 	p := userConfPath()
 	b, _ := os.ReadFile(p)
 	st, err := os.Stat(p)
-	return map[string]any{
-		"text": string(b),
-		"path": p,
-		// active = 文件真的在。空文件也算在(用户可能就是要一个空的)
-		"active": err == nil && !st.IsDir(),
-	}
+	return MpvConf{Text: string(b), Path: p, Active: err == nil && !st.IsDir()}
 }
 
 // writeUserConf 写 mpv.conf。

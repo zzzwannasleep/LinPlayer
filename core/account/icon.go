@@ -22,6 +22,11 @@ import (
 	"linplayer/core/paths"
 )
 
+// IconData 一张图标,base64 data URI。
+type IconData struct {
+	DataURI string `json:"data_uri"`
+}
+
 // maxIconBytes 单张图标上限。
 //
 // ★ 防的是「图标地址被填成一部电影的直链」:不设限就会把整部片读进内存
@@ -291,7 +296,7 @@ func registerIconCommands() {
 		if err != nil {
 			return nil, bus.NewErr(bus.ENotFound, "%v", err)
 		}
-		return map[string]any{"data_uri": uri}, nil
+		return IconData{DataURI: uri}, nil
 	})
 
 	bus.Register("account.setAccountIconFile", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -316,7 +321,7 @@ func registerIconCommands() {
 		if err := commit(c); err != nil {
 			return nil, err
 		}
-		return map[string]any{"data_uri": uri}, nil
+		return IconData{DataURI: uri}, nil
 	})
 
 	bus.Register("account.clearAccountIcon", func(ctx context.Context, seq int64, a map[string]any) (any, error) {

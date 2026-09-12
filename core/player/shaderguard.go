@@ -223,13 +223,11 @@ func resetShaderMemory() {
 // ★ 三个字段缺一不可:`count=0` 和 `will_run=false` 让老调用方也不会误判成成功,
 // `reverted` 让 UI 知道要把下拉框拨回「关闭」—— 显示某档而实际是关的,
 // 是同一类谎换个地方说。
-func revertedResult(level, reason string) map[string]any {
-	return map[string]any{
-		"level":    level,
-		"count":    0,
-		"will_run": false,
-		"reverted": true,
-		"note": "这档在你这台机器的渲染后端上跑不起来,已自动退回「关闭」" +
+func revertedResult(level, reason string) ShaderApplied {
+	no := false
+	return ShaderApplied{
+		Level: level, Count: 0, WillRun: &no, Reverted: true,
+		Note: "这档在你这台机器的渲染后端上跑不起来,已自动退回「关闭」" +
 			"(画面不会被弄坏)。mpv 的原话:" + firstLine(reason),
 	}
 }

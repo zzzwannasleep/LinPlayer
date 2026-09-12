@@ -194,8 +194,8 @@ func pickAsset(names []string, sets [][]string) int {
 	return -1
 }
 
-// Info 查到的新版本。
-type Info struct {
+// UpdateInfo 查到的新版本。
+type UpdateInfo struct {
 	// Tag 原始 tag(如 `v1.2.0-build91-pre`)—— 比较**用它**,不是下面那个 Version。
 	Tag string `json:"tag"`
 	// Version 只脱掉 tag 前面那个 v,构建号照留 —— 规约成 x.y.z 的话,
@@ -277,7 +277,7 @@ func getJSON(ctx context.Context, url string, out any) error {
 // ★★ 「没有更新」和「没查成」必须分开:返回 (nil, nil) 是**确实**没有,
 // 返回 error 是断网 / 限流。混成一个的话「查不动」会被说成「已是最新」——
 // 那是最坏的一种沉默失败,用户永远等不到更新还以为自己是最新的。
-func CheckUpdate(ctx context.Context, channel, currentTag string) (*Info, error) {
+func CheckUpdate(ctx context.Context, channel, currentTag string) (*UpdateInfo, error) {
 	base := githubAPI + "/repos/" + repo
 
 	var rel release
@@ -304,7 +304,7 @@ func CheckUpdate(ctx context.Context, channel, currentTag string) (*Info, error)
 		return nil, nil
 	}
 
-	info := &Info{
+	info := &UpdateInfo{
 		Tag:        rel.TagName,
 		Version:    DisplayVersion(rel.TagName),
 		Name:       rel.Name,
@@ -370,6 +370,6 @@ type CheckResult struct {
 	HasUpdate bool   `json:"has_update"`
 	Current   string `json:"current"`
 	// 没有更新时是 nil。界面要立刻决定给「下载并安装」还是只给一条下载链接。
-	Update        *Info `json:"update"`
+	Update        *UpdateInfo `json:"update"`
 	CanSelfUpdate bool  `json:"can_self_update"`
 }

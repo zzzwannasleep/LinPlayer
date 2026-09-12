@@ -69,7 +69,7 @@
 | [x] | `emby.itemDetail` | `item_detail` | `item_id: String, // 缺省 = true（桌面/TV 的旧调用点不传，行为不变）。 // 手机端传 false：它按季分页拉集，不需要这一坨。 with_children: Option<bool>` | `Result<emby::ItemDetail, String>` | ✅ |
 | [x] | `emby.itemMedia` | `item_media` | `item_id: String` | `Result<Vec<emby::MediaVersion>, String>` | ✅ |
 | [x] | `emby.listCollections` | `list_collections` | `—` | `Result<Vec<Item>, String>` | ✅ |
-| [x] | `emby.collectionItems` | **新增** | `item_id: String` | `{movies,series,others}` | — | <!-- 合集成员，影片/剧集分开（合集页原来一个字都画不出来） -->
+| [x] | `emby.collectionItems` | **新增** | `item_id: String` | `CollectionItems` | — | <!-- 合集成员，影片/剧集分开（合集页原来一个字都画不出来） -->
 | [x] | `emby.listFavorites` | `list_favorites` | `—` | `Result<Vec<Item>, String>` | ✅ |
 | [x] | `emby.listItems` | `list_items` | `parent_id: String` | `Result<Vec<Item>, String>` | ✅ |
 | [x] | `emby.listItemsPage` | `list_items_page` | `parent_id: String, start_index: Option<u32>, limit: Option<u32>, sort_by: Option<String>, sort_order: Option<String>, genres: Option<Vec<String>>, tags: Option<Vec<String>>, years: Option<Vec<i32>>, studios: Option<Vec<String>>, rating_min: Option<f64>, rating_max: Option<f64>` | `Page` | ✅ |
@@ -110,7 +110,7 @@
 | [x] | `account.batchParse` | `batch_parse` | `text: String` | `Vec<linplayer_core::server_batch::ParsedServerBlock>` | ✅ |
 | [x] | `account.clearAccountIcon` | `clear_account_icon` | `server_id: String` | `()` | ✅ |
 | [x] | `account.getCrossServerResume` | `get_cross_server_resume` | `—` | `bool` | ✅ |
-| [x] | `account.icon` | `account_icon` | `server_id: String` | `Result<String, String>` | ✅ |
+| [x] | `account.icon` | `account_icon` | `server_id: String` | `Result<IconData, String>` | ✅ |
 | [x] | `account.listAccounts` | `list_accounts` | `—` | `Info` | ✅ |
 | [x] | `account.parseDeepLink` | `parse_deep_link` | `url: String` | `DeepLink` | ✅ |
 | [x] | `account.probeAccounts` | `probe_accounts` | `—` | `ProbeResult` | ✅ |
@@ -126,7 +126,7 @@
 | [x] | `account.startupDeepLink` | `startup_deep_link` | `—` | `Option<String>` | ✅ |
 | [x] | `account.syncLines` | `sync_lines` | `server_id: String` | `Result<SyncedLines, String>` | ✅ |
 | [x] | `account.testConnection` | `test_connection` | `server: String, username: String, password: String` | `Result<account::TestResult, String>` | ✅ |
-| [x] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<(), String>` | ✅ |
+| [x] | `account.updateAccount` | `update_account` | `server_id: String, name: Option<String>, remark: Option<String>, icon_url: Option<String>, allow_insecure_tls: Option<bool>, password: Option<String>` | `Result<Vec<Info>, String>` | ✅ |
 
 ### 播放器 · `player.*` — 43 条
 
@@ -142,7 +142,7 @@
 | [x] | `player.mpvGet` | `mpv_get` | `name: String` | `Result<Option<String>, String>` | ✅ |
 | [x] | `player.mpvSet` | `mpv_set` | `name: String, value: String` | `Result<(), String>` | ✅ |
 | [x] | `player.opts` | `player_opts` | `—` | `Result<PlayerOpts, String>` | ✅ |
-| [x] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>, engine: Option<String>` | `Result<f64, String>` | ✅ |
+| [x] | `player.play` | `play` | `item_id: String, resume_secs: f64, media_source_id: Option<String>, engine: Option<String>` | `Result<PlayResult, String>` | ✅ |
 | [x] | `player.playExternal` | `play_external` | `item_id: String, resume_secs: f64, media_source_id: Option<String>, engine: Option<String>` | `Result<String, String>` | ✅ |
 | [x] | `player.playLocal` | `play_local` | `id: String, resume_secs: f64` | `Result<f64, String>` | ✅ |
 | [x] | `player.screenshot` | `screenshot` | `dir: Option<String>` | `Result<String, String>` | ✅ |
@@ -168,11 +168,11 @@
 | [x] | `player.setSpeed` | `set_speed` | `speed: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.setSubDelay` | `set_sub_delay` | `secs: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.setSubStyle` | `set_sub_style` | `font: Option<String>, scale: Option<f64>, position: Option<f64>, background: Option<bool>, blend_mode: Option<String>` | `Result<(), String>` | ✅ |
-| [x] | `player.getSubStyle` | **新增** | `-` | `{scale,position,border_size,bold,scale_by_window}` | — | <!-- 读回落库的字幕样式，面板打开时用 -->
+| [x] | `player.getSubStyle` | **新增** | `-` | `SubStyle` | — | <!-- 读回落库的字幕样式，面板打开时用 -->
 | [x] | `player.setTrack` | `set_track` | `kind: String, id: String` | `Result<(), String>` | ✅ |
 | [x] | `player.setTrackRegexes` | `set_track_regexes` | `version_regex: String, sub_regex: String, audio_regex: String` | `Result<(), String>` | ✅ |
 | [x] | `player.setVolume` | `set_volume` | `volume: f64` | `Result<(), String>` | ✅ |
-| [x] | `player.shaderLevels` | `shader_levels` | `—` | `Vec<(&'static str, &'static str, &'static str)>` | ✅ |
+| [x] | `player.shaderLevels` | `shader_levels` | `—` | `Vec<ShaderLevel>` | ✅ |
 | [x] | `player.status` | `status` | `—` | `Result<Status, String>` | ✅ |
 | [x] | `player.stopPlayback` | `stop_playback` | `pos: f64` | `Result<(), String>` | ✅ |
 | [x] | `player.takePending` | `player_take_pending` | `—` | `Option<serde_json::Value>` | ❌ |
@@ -206,17 +206,17 @@
 | [x] | `danmaku.cacheSize` | `danmaku_cache_size` | `—` | `u64` | ✅ |
 | [x] | `danmaku.episodes` | `danmaku_episodes` | `source_id: String, anime_id: String, anime_title: String` | `Episode` | ✅ |
 | [x] | `danmaku.filter` | `danmaku_filter` | `comments: Vec<DanmakuComment>, options: danmaku::FilterOptions` | `Comment` | ✅ |
-| [x] | `danmaku.getDanmakuConfig` | `get_danmaku_config` | `—` | `Vec<DanmakuServer>` | ✅ |
+| [x] | `danmaku.getDanmakuConfig` | `get_danmaku_config` | `—` | `Vec<SourceConfig>` | ✅ |
 | [x] | `danmaku.getOfficialDanmaku` | `get_official_danmaku` | `—` | `OfficialDanmaku` | ✅ |
-| [x] | `danmaku.importBlocklist` | `danmaku_import_blocklist` | `xml: String` | `danmaku::DanmakuFilterImportResult` | ✅ |
+| [x] | `danmaku.importBlocklist` | `danmaku_import_blocklist` | `xml: String` | `BlocklistImported` | ✅ |
 | [x] | `danmaku.load` | `danmaku_load` | `episode_id: String, source_id: Option<String>, ch_convert: Option<i32>` | `Comment` | ✅ |
 | [x] | `danmaku.loadLocal` | `danmaku_load_local` | `path: String` | `Comment` | ✅ |
 | [x] | `danmaku.match` | `danmaku_match` | `input: danmaku::MatchInput` | `Result<Vec<danmaku::DanmakuMatchCandidate>, String>` | ✅ |
 | [x] | `danmaku.minAutoScore` | `danmaku_min_auto_score` | `—` | `f64` | ✅ |
 | [x] | `danmaku.search` | `danmaku_search` | `keyword: String` | `SourceGroup` | ✅ |
 | [x] | `danmaku.setDanmakuConfig` | `set_danmaku_config` | `sources: Vec<DanmakuServer>` | `Result<(), String>` | ✅ |
-| [x] | `danmaku.getBlockwords` | **新增** | `—` | `{words: Vec<String>, users: Vec<String>}` | ✅ | <!-- 落库的屏蔽词与屏蔽用户。autoLoad/filter 无条件并进来,不靠调用方传 -->
-| [x] | `danmaku.setBlockwords` | **新增** | `words: Vec<String>, users: Vec<String>` | `{words: Vec<String>, users: Vec<String>}` | ✅ | <!-- 只传要改的那一半,另一半原样留着 -->
+| [x] | `danmaku.getBlockwords` | **新增** | `—` | `Blocklist` | ✅ | <!-- 落库的屏蔽词与屏蔽用户。autoLoad/filter 无条件并进来,不靠调用方传 -->
+| [x] | `danmaku.setBlockwords` | **新增** | `words: Vec<String>, users: Vec<String>` | `Blocklist` | ✅ | <!-- 只传要改的那一半,另一半原样留着 -->
 
 ### 插件 · `plugin.*` — 22 条
 
@@ -303,9 +303,9 @@
 | [x] | `prefs.cfSpeedTest` | `cf_speed_test` | `validate_host: Option<String>, test_url: Option<String>` | `Result<Vec<linplayer_core::net::cf::CfTestResult>, String>` | ✅ |
 | [x] | `prefs.configExportQr` | `config_export_qr` | `—` | `String` | ✅ |
 | [x] | `prefs.configImportQr` | `config_import_qr` | `payload: String` | `Result<usize, String>` | ✅ |
-| [x] | `prefs.backupExport` | **新增** | `accounts: Option<bool>, settings: Option<bool>, path: Option<String>` | `{content?,path?,filename,bytes,accounts?,warning?}` | — | <!-- 备份与还原：导出 -->
-| [x] | `prefs.backupImport` | **新增** | `content: Option<String>, path: Option<String>, accounts: Option<bool>, settings: Option<bool>` | `{imported,total,settings_restored}` | — | <!-- 备份与还原：导入（合并不覆盖） -->
-| [x] | `prefs.backupPreview` | **新增** | `content: Option<String>, path: Option<String>` | `{from,export_time,accounts,has_settings}` | — | <!-- 导入前看清楚要还原什么 -->
+| [x] | `prefs.backupExport` | **新增** | `accounts: Option<bool>, settings: Option<bool>, path: Option<String>` | `BackupExported` | — | <!-- 备份与还原：导出 -->
+| [x] | `prefs.backupImport` | **新增** | `content: Option<String>, path: Option<String>, accounts: Option<bool>, settings: Option<bool>` | `BackupImported` | — | <!-- 备份与还原：导入（合并不覆盖） -->
+| [x] | `prefs.backupPreview` | **新增** | `content: Option<String>, path: Option<String>` | `BackupPreview` | — | <!-- 导入前看清楚要还原什么 -->
 | [x] | `prefs.getHomeSettings` | **新增** | `-` | `HomeSettings` | — | <!-- 首页栏目设置(合集栏按服开关等) -->
 | [x] | `prefs.getPrefetchSettings` | `get_prefetch_settings` | `—` | `PrefetchSettings` | ✅ |
 | [x] | `prefs.getPrefs` | `get_prefs` | `—` | `Prefs` | ✅ |
@@ -314,7 +314,7 @@
 | [x] | `prefs.getTranslationSettings` | `get_translation_settings` | `—` | `tr::TranslationSettings` | ❌ |
 | [x] | `prefs.getUpdateSettings` | `get_update_settings` | `—` | `UpdateSettings` | ✅ |
 | [x] | `prefs.getWritebackSettings` | `get_writeback_settings` | `—` | `WritebackSettings` | ✅ |
-| [x] | `prefs.iconLibrary` | `icon_library` | `—` | `()` | ✅ |
+| [x] | `prefs.iconLibrary` | `icon_library` | `—` | `IconLibraryReply` | ✅ |
 | [x] | `prefs.setIconSources` | `—` | `—` | `()` | ✅ |
 | [x] | `prefs.preloadCancel` | `preload_cancel` | `—` | `()` | ❌ |
 | [x] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
@@ -334,11 +334,11 @@
 |:--:|---|---|---|---|:--:|
 | [x] | `system.afdianSponsorUrl` | `afdian_sponsor_url` | `—` | `String` | ✅ |
 | [x] | `system.afdianVerify` | `afdian_verify` | `order_no: String` | `Result<linplayer_core::sync::AfdianVerifyResult, String>` | ✅ |
-| [x] | `system.cacheSize` | `cache_size` | `—` | `Result<u64, String>` | ✅ |
+| [x] | `system.cacheSize` | `cache_size` | `—` | `Result<CacheSize, String>` | ✅ |
 | [x] | `system.cancelUpdate` | **新增** | `-` | `Result<system::UpdateProgress, String>` | ✅ | <!-- 掐掉在跑的更新下载 -->
 | [x] | `system.capabilities` | **新增** | `-` | `{ commands: string[], ... }` | — | <!-- 本平台支持哪些命令。UI 启动时拿它隐藏入口(SPEC 5.6) -->
 | [x] | `system.checkUpdate` | `check_update` | `—` | `CheckResult` | ✅ |
-| [x] | `system.clearCache` | `clear_cache` | `—` | `Result<(), String>` | ✅ |
+| [x] | `system.clearCache` | `clear_cache` | `—` | `Result<CacheSize, String>` | ✅ |
 | [x] | `system.dataPaths` | `data_paths` | `—` | `DataPaths` | ✅ |
 | [x] | `system.downloadUpdate` | **新增** | `-` | `Result<system::UpdateProgress, String>` | ✅ | <!-- 开下载,立刻返回;进度轮询 system.updateProgress -->
 | [x] | `system.exportDiagnostics` | **新增** | `-` | `{ ... }` | — | <!-- 诊断导出(SPEC 5.6)。**不许带凭据** -->

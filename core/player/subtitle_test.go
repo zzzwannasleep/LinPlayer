@@ -15,20 +15,20 @@ import (
 // ★ 留一个空文件和没有文件对 mpv 是两件事(前者仍然会开 config-dir 那条路)。
 func TestMpvConf全空即删文件(t *testing.T) {
 	paths.SetRoot(t.TempDir())
-	if got := mpvConfNow(); got["active"] != false || got["text"] != "" {
+	if got := mpvConfNow(); got.Active || got.Text != "" {
 		t.Fatalf("一开始不该有配置: %+v", got)
 	}
 	if err := writeUserConf("hwdec=no\n"); err != nil {
 		t.Fatal(err)
 	}
 	got := mpvConfNow()
-	if got["active"] != true || !strings.Contains(got["text"].(string), "hwdec=no") {
+	if !got.Active || !strings.Contains(got.Text, "hwdec=no") {
 		t.Fatalf("写完该读得回来: %+v", got)
 	}
 	if err := writeUserConf("   \n\t"); err != nil {
 		t.Fatal(err)
 	}
-	if got := mpvConfNow(); got["active"] != false {
+	if got := mpvConfNow(); got.Active {
 		t.Fatalf("全空白该把文件删掉,实得 %+v —— 留个空文件和没有文件对 mpv 是两件事", got)
 	}
 	if _, err := os.Stat(userConfPath()); !os.IsNotExist(err) {

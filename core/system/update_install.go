@@ -112,7 +112,7 @@ func (s *updState) progress(n int64) {
 }
 
 // start 开下载。已经在下就什么都不做 —— 按钮连点不该叠出两条。
-func (s *updState) start(info *Info) {
+func (s *updState) start(info *UpdateInfo) {
 	s.mu.Lock()
 	if s.phase == "downloading" {
 		s.mu.Unlock()
@@ -153,7 +153,7 @@ func (w *countWriter) Write(p []byte) (int, error) {
 // fetchAsset 把发行资产拉到 cache/update/ 下,返回落盘路径。
 //
 // 先写 `.part` 再改名:中途断网留下的半个文件不能被下一次当成「已经下好了」。
-func fetchAsset(ctx context.Context, info *Info, on func(int64)) (string, error) {
+func fetchAsset(ctx context.Context, info *UpdateInfo, on func(int64)) (string, error) {
 	if info.AssetURL == "" {
 		return "", fmt.Errorf("这个版本没有适合本平台的安装包")
 	}

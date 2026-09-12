@@ -25,6 +25,47 @@ import (
 
 var prefsClient *emby.Client
 
+/* 这三个类型换掉的是三张裸 map。字段名是跨语言契约,而裸 map 里的键
+   谁也对不了账 —— 拼错了核心层不报错、UI 取到 null,页面画成空。
+   具名之后 check-android-fields.py 才查得到该发哪些字段。 */
+
+// PlaybackPrefs 播放器默认行为(设置页那一屏的回显体)。
+type PlaybackPrefs struct {
+	Hwdec                   string            `json:"hwdec"`
+	DefaultSpeed            float64           `json:"default_speed"`
+	SkipIntro               bool              `json:"skip_intro"`
+	SkipOutro               bool              `json:"skip_outro"`
+	SkipAuto                bool              `json:"skip_auto"`
+	SkipUseOnline           bool              `json:"skip_use_online"`
+	PreviewThumbs           bool              `json:"preview_thumbs"`
+	DolbyAutoSW             bool              `json:"dolby_auto_sw"`
+	ExternalPlayer          string            `json:"external_player"`
+	WatchedThresholdPercent int64             `json:"watched_threshold_percent"`
+	Shortcuts               map[string]string `json:"shortcuts"`
+}
+
+// ShaderLevel 画面增强档位表里的一档。
+type ShaderLevel struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Group    string `json:"group"`
+	Selected bool   `json:"selected"`
+	// WillRun 尺寸未知(没在播)时不发 —— 猜一个 false 会让抽屉里空一张表。
+	WillRun *bool `json:"will_run,omitempty"`
+}
+
+// ShaderApplied 应用一档之后的回执。
+//
+// count>0 只证明 mpv 收下了路径,证明不了 shader 会跑 —— WillRun 才是那句话。
+type ShaderApplied struct {
+	Level string `json:"level"`
+	Count int    `json:"count"`
+	// Reverted 这档在本机跑不起来,已自动退回「关闭」。
+	Reverted bool   `json:"reverted,omitempty"`
+	WillRun  *bool  `json:"will_run,omitempty"`
+	Note     string `json:"note,omitempty"`
+}
+
 /* 当前生效的画质档。进程里记一份是因为移动端的面板每次打开都是新建的,
    没有这个就回显不出「现在开着哪一档」,用户看到的是一张全都没选中的表。 */
 var curShader atomic.Value
@@ -117,14 +158,13 @@ func registerPrefsCommands(version string) {
 		vw, vh := propF("video-params/w"), propF("video-params/h")
 		ow, oh := propF("osd-dimensions/w"), propF("osd-dimensions/h")
 		cur := currentShaderLevel()
-		out := make([]map[string]any, 0, len(shaders.Levels()))
+		out := make([]ShaderLevel, 0, len(shaders.Levels()))
 		for _, l := range shaders.Levels() {
-			m := map[string]any{"id": l.ID, "name": l.Name, "group": l.Group,
-				"selected": l.ID == cur}
+			one := ShaderLevel{ID: l.ID, Name: l.Name, Group: l.Group, Selected: l.ID == cur}
 			if run, ok := shaders.WillRun(l.ID, vw, vh, ow, oh); ok {
-				m["will_run"] = run
+				one.WillRun = &run
 			}
-			out = append(out, m)
+			out = append(out, one)
 		}
 		return out, nil
 	})
@@ -159,7 +199,7 @@ func registerPrefsCommands(version string) {
 		setProp("glsl-shader-opts", shaders.Opts(level))
 		setProp("glsl-shaders", strings.Join(list, string(filepath.ListSeparator)))
 
-		out := map[string]any{"level": level, "count": len(list)}
+		out := ShaderApplied{Level: level, Count: len(list)}
 		if len(list) == 0 {
 			rememberShader("off")
 			return out, nil // off:关掉就完事,没有「会不会跑」这回事
@@ -198,10 +238,10 @@ func registerPrefsCommands(version string) {
 				vw, vh, ow, oh, shaders.WhenRatio)
 		}
 		if run, ok := shaders.WillRun(level, vw, vh, ow, oh); ok {
-			out["will_run"] = run
+			out.WillRun = &run
 			if !run {
 				// ★ 说清楚**为什么**不生效,以及怎么办 —— 只回一个 false 等于让用户猜
-				out["note"] = fmt.Sprintf(
+				out.Note = fmt.Sprintf(
 					"这档是**放大**滤镜,当前尺寸下不会生效:要求画面区大于源的 %.1f 倍才工作。"+
 						"现在源 %.0f×%.0f、画面区只有 %.0f×%.0f(%.2f×)—— 你在缩小画面,没有可放大的。"+
 						"全屏即可生效;想在窗口里就见效,请选「锐化」「去噪」那几族。",
@@ -247,14 +287,14 @@ func registerPrefsCommands(version string) {
 	// ---- 播放器默认行为 ----
 	bus.Register("player.getPlaybackPrefs", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		p := config.Current().PrefsOf()
-		return map[string]any{
-			"hwdec": p.Hwdec, "default_speed": p.DefaultSpeed,
-			"skip_intro": p.SkipIntro, "skip_outro": p.SkipOutro,
-			"skip_auto": p.SkipAuto, "skip_use_online": p.SkipUseOnline,
-			"preview_thumbs": p.PreviewThumbs, "dolby_auto_sw": p.DolbyAutoSW,
-			"external_player":           p.ExternalPlayer,
-			"watched_threshold_percent": p.WatchedThresholdPercent,
-			"shortcuts":                 p.Shortcuts,
+		return PlaybackPrefs{
+			Hwdec: p.Hwdec, DefaultSpeed: p.DefaultSpeed,
+			SkipIntro: p.SkipIntro, SkipOutro: p.SkipOutro,
+			SkipAuto: p.SkipAuto, SkipUseOnline: p.SkipUseOnline,
+			PreviewThumbs: p.PreviewThumbs, DolbyAutoSW: p.DolbyAutoSW,
+			ExternalPlayer:          p.ExternalPlayer,
+			WatchedThresholdPercent: p.WatchedThresholdPercent,
+			Shortcuts:               p.Shortcuts,
 		}, nil
 	})
 	bus.Register("player.setPlaybackPrefs", func(ctx context.Context, seq int64, a map[string]any) (any, error) {

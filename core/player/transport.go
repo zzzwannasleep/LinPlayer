@@ -26,7 +26,7 @@ func registerTransport() {
 				if err := playFile(p); err != nil {
 					return nil, bus.NewErr(bus.EInternal, "%v", err)
 				}
-				return map[string]any{"path": p}, nil
+				return &PlayResult{Path: p}, nil
 			}
 			return nil, bus.NewErr(bus.EInvalid, "缺少 item_id")
 		}
@@ -41,7 +41,7 @@ func registerTransport() {
 		   ★ 不认识的值一律当 mpv,不报错:内核名是 UI 传上来的字符串,
 		     拼错了该退回默认能播,而不是让用户点了播放什么都没有。 */
 		engine, _ := a["engine"].(string)
-		var out map[string]any
+		var out *PlayResult
 		if engine == "exo" {
 			out, err = PlayResolve(ctx, s, id, resume, msid)
 		} else {

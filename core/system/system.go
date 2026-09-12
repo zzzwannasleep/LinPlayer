@@ -13,6 +13,27 @@ import (
 	"linplayer/core/paths"
 )
 
+// DataPaths 数据都落在哪。绿色包的全部意义就是「数据留在包里」,
+// 所以这几个值必须能直接摆给用户看。
+type DataPaths struct {
+	Root      string `json:"root"`
+	Config    string `json:"config"`
+	History   string `json:"history"`
+	Cache     string `json:"cache"`
+	Logs      string `json:"logs"`
+	Downloads string `json:"downloads"`
+	Plugins   string `json:"plugins"`
+	Models    string `json:"models"`
+	ExeDir    string `json:"exe_dir"`
+	Kind      string `json:"kind"`
+}
+
+// CacheSize 缓存占用。FreedBytes 只有清理那条命令会填。
+type CacheSize struct {
+	Bytes      int64 `json:"bytes"`
+	FreedBytes int64 `json:"freed_bytes,omitempty"`
+}
+
 // Version 由 -ldflags -X 注入(SPEC §10.4 编译期凭据同款机制)。
 var Version = "dev"
 
@@ -55,7 +76,7 @@ func RegisterCommands() {
 		if err != nil {
 			return nil, bus.NewErr(bus.EInternal, "统计缓存失败: %v", err)
 		}
-		return map[string]any{"bytes": n}, nil
+		return CacheSize{Bytes: n}, nil
 	})
 
 	bus.Register("system.clearCache", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
@@ -67,7 +88,7 @@ func RegisterCommands() {
 		//   用户看着占用变 0、封面却还是旧的 —— 那不叫清理,叫骗人。
 		imgcache.MemClear()
 		after, _ := paths.CacheSize()
-		return map[string]any{"freed_bytes": before - after, "bytes": after}, nil
+		return CacheSize{Bytes: after, FreedBytes: before - after}, nil
 	})
 
 	// ---- 路径 ----
@@ -76,20 +97,20 @@ func RegisterCommands() {
 	//   绿色包的全部意义就是「数据留在包里」,所以这几个值必须能直接摆给用户看。
 	bus.Register("system.dataPaths", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		exe, _ := os.Executable()
-		return map[string]any{
-			"root":      paths.Root(),
-			"config":    paths.ConfigFile(),
-			"history":   paths.HistoryFile(),
-			"cache":     paths.CacheDir(),
-			"logs":      paths.LogsDir(),
-			"downloads": paths.DownloadsDir(),
-			"plugins":   paths.PluginsDir(),
-			"models":    paths.ModelsDir(),
-			"exe_dir":   filepath.Dir(exe),
+		return DataPaths{
+			Root:      paths.Root(),
+			Config:    paths.ConfigFile(),
+			History:   paths.HistoryFile(),
+			Cache:     paths.CacheDir(),
+			Logs:      paths.LogsDir(),
+			Downloads: paths.DownloadsDir(),
+			Plugins:   paths.PluginsDir(),
+			Models:    paths.ModelsDir(),
+			ExeDir:    filepath.Dir(exe),
 			// ponytail: RootKind(Portable / Overridden / SystemFallback)等 paths 补上。
 			// **SystemFallback 意味着数据没能留在包里,必须显眼告警,不能装没事** ——
 			// 现在报 unknown,UI 不该拿它当「一切正常」。
-			"kind": "unknown",
+			Kind: "unknown",
 		}, nil
 	})
 
