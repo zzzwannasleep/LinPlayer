@@ -21,6 +21,7 @@ import xyz.linplayer.app.ui.player.DanmakuStyle
 import xyz.linplayer.app.ui.player.DmItem
 import xyz.linplayer.app.ui.player.dmFirstAtOrAfter
 import xyz.linplayer.app.ui.player.dmRollX
+import xyz.linplayer.app.ui.player.dmTick
 import xyz.linplayer.app.ui.player.SubStyle
 import xyz.linplayer.app.ui.pages.Stream
 import xyz.linplayer.app.ui.pages.Version
@@ -725,5 +726,19 @@ class LogicTest {
         assertTrue("还没拉过", needRefetch(hasItems = false, ok = false, fetchedAs = null, key = a))
         assertTrue("拉过但失败了,下次进来要重试",
             needRefetch(hasItems = false, ok = false, fetchedAs = a, key = a))
+    }
+
+    @Test fun `弹幕钟每帧软对表seek才硬对`() {
+        // 一帧 60Hz、1.0 倍速:钟往前走一帧的量
+        assertEquals(10.0 + 1 / 60.0, dmTick(10.0, 10.0 + 1 / 60.0, 1 / 60.0, 1.0), 1e-9)
+        // ☠ 落后 0.2 秒(轮询刚来一拍)**不许一把拽过去** —— 那就是「整屏一起跳」
+        val soft = dmTick(clock = 10.0, target = 10.2, dt = 0.0, speed = 1.0)
+        assertTrue("要往前追", soft > 10.0)
+        assertTrue("但一帧只追一小段,不许追平", soft < 10.05)
+        // 差过一秒是 seek / 换片,这时候必须硬对,不然要好几秒才追得上
+        assertEquals(50.0, dmTick(10.0, 50.0, 0.0, 1.0), 1e-9)
+        assertEquals(10.0, dmTick(50.0, 10.0, 0.0, 1.0), 1e-9)
+        // 倍速要参与走表,否则 2 倍速下弹幕比画面慢一半
+        assertEquals(10.0 + 2 / 60.0, dmTick(10.0, 10.0 + 2 / 60.0, 1 / 60.0, 2.0), 1e-9)
     }
 }

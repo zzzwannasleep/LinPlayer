@@ -6,11 +6,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import kotlin.math.abs
 import kotlinx.serialization.json.JsonObject
 import xyz.linplayer.app.data.arr
 import xyz.linplayer.app.data.bool
@@ -86,6 +88,20 @@ fun parseDmLayout(r: JsonObject?): DmLayout? {
 }
 
 /**
+ * 弹幕钟走一帧。`target` 是轮询报回来的播放位置,`dt` 是这一帧过了多少秒。
+ *
+ * 软对表而不是硬赋值:轮询一秒来 4~10 拍,每拍都把钟拽到轮询值上的话,
+ * 整屏弹幕会跟着一起跳 —— 那正是用户说的「抽帧」。
+ */
+fun dmTick(clock: Double, target: Double, dt: Double, speed: Double): Double {
+    val next = clock + dt * speed
+    val drift = target - next
+    // 差过一秒就是 seek / 换片,直接对齐;否则每帧只追 8% ——
+    // 硬对表会让整屏弹幕在每一拍轮询上一起跳一下,那正是「抽帧」的样子
+    return if (abs(drift) > 1.0) target else next + drift * 0.08
+}
+
+/**
  * 一条滚动弹幕在 `now` 时刻的左边缘。
  *
  * 从右沿出发,走到整条完全离开左边为止 —— 走的距离是 `width + w`,不是 `width`。
@@ -119,19 +135,27 @@ fun DanmakuLayer(
     if (layout == null || layout.items.isEmpty()) return
 
     /* ★ 每收到一次 position 就**对表**,两次之间自己按帧往前推。
-       直接拿 position 画的表现是弹幕每秒只动 4 下(或者 Exo 那边 10 下)—— 一格一格地跳。 */
+       直接拿 position 画的表现是弹幕每秒只动 4 下(或者 Exo 那边 10 下)—— 一格一格地跳。
+
+       ☠ **position 不能进 LaunchedEffect 的 key。** 进了的话每来一拍轮询就
+       重启一次帧循环:硬对一次表 + 起手那句 `withFrameNanos` 白丢一帧,
+       一秒 4~10 次,看上去正是用户说的「弹幕滚动像抽帧」(2026-09-12)。
+       改成一条长命的循环 + 每帧软对表,见 [dmTick]。 */
     val clock = remember { mutableDoubleStateOf(position) }
-    LaunchedEffect(position, paused, speed) {
-        clock.doubleValue = position
+    val target = rememberUpdatedState(position)
+    LaunchedEffect(paused, speed) {
         if (paused) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
             withFrameNanos { n ->
-                clock.doubleValue += (n - last) / 1_000_000_000.0 * speed
+                clock.doubleValue = dmTick(
+                    clock.doubleValue, target.value, (n - last) / 1_000_000_000.0, speed)
                 last = n
             }
         }
     }
+    // 暂停时钟停了,而这期间用户可能拖了进度条 —— 那时只能硬对
+    LaunchedEffect(position, paused) { if (paused) clock.doubleValue = position }
 
     // 两支笔跨帧复用:每帧新建 Paint 会把 GC 拖进渲染帧里
     val fill = remember { Paint(Paint.ANTI_ALIAS_FLAG) }

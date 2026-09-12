@@ -6,7 +6,6 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
-using Avalonia.Threading;
 
 namespace LinPlayer.Desktop.Views;
 
@@ -86,14 +85,12 @@ public sealed class DanmakuLayer : Control
     private bool _paused;
     private double _speed = 1;
     private DateTime _synced = DateTime.UtcNow;
-    private readonly DispatcherTimer _timer;
+    /// <summary>正在逐帧重绘。只在有弹幕可画时才转 —— 一直转着的话没弹幕的片子也在烧 CPU。</summary>
+    private bool _running;
 
     public DanmakuLayer()
     {
         IsHitTestVisible = false;
-        // 60Hz 重绘。只在有弹幕可画的时候转 —— 一直转着的话没弹幕的片子也在烧 CPU
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _timer.Tick += (_, _) => InvalidateVisual();
     }
 
     public DmLayout? Layout
@@ -115,10 +112,31 @@ public sealed class DanmakuLayer : Control
         Pace();
     }
 
+    /// <summary>
+    /// 该不该逐帧重绘。
+    ///
+    /// <para>这里原来是一个 <c>DispatcherTimer(16ms)</c> —— 那是**自己定的闹钟**,
+    /// 和显示器刷新率对不齐,于是周期性地一帧画两次、一帧不画。帧率数字是满的,
+    /// 眼睛看到的却是弹幕在抽帧(用户 2026-09-12:「弹幕滚动看起来还是抽帧一样」)。
+    /// <see cref="TopLevel.RequestAnimationFrame"/> 挂在渲染循环上,天然对齐 ——
+    /// 同一个坑滚动那边(<c>Smooth</c>)早就填了,这一层漏了。</para>
+    /// </summary>
     private void Pace()
     {
         var want = IsVisible && _layout is { Items.Count: > 0 } && !_paused;
-        if (want) _timer.Start(); else _timer.Stop();
+        if (!want || _running) return;
+        if (TopLevel.GetTopLevel(this) is not { } top) return;
+        _running = true;
+        void Frame(TimeSpan _)
+        {
+            // 条件掉了就停下来,下一次 Pace() 再起。这一句就是原来的 _timer.Stop()
+            if (!IsVisible || _layout is not { Items.Count: > 0 } || _paused) { _running = false; return; }
+            InvalidateVisual();
+            // 每帧都要重新取 TopLevel:页面被顶掉之后往一个卸载了的窗口排帧是条不会停的循环
+            if (TopLevel.GetTopLevel(this) is { } t) t.RequestAnimationFrame(Frame);
+            else _running = false;
+        }
+        top.RequestAnimationFrame(Frame);
     }
 
     /// <summary>
