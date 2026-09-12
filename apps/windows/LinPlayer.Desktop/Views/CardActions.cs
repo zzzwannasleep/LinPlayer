@@ -101,12 +101,13 @@ public static class CardActions
         public const string Fav = "\uE734";      // 空心星
         public const string FavOn = "\uE735";    // 实心星
         public const string Block = "\uE711";    // 叉
+        public const string Download = "\uE896";  // 下箭头
 
         /// <summary>自检用:全表。字体里没这个码位时画出来是个空心方框,而它编译绿、运行不报错。</summary>
         public static readonly (string Name, string Glyph)[] All =
         [
             ("播放", Play), ("从头播放", Replay), ("已播放", Played), ("未播放", Unplayed),
-            ("收藏", Fav), ("已收藏", FavOn), ("屏蔽", Block),
+            ("收藏", Fav), ("已收藏", FavOn), ("屏蔽", Block), ("下载", Download),
         ];
     }
 
@@ -191,6 +192,24 @@ public static class CardActions
             _ = SyncFavorite(core, item.Id, fav);
         }
 
+        /* 下载(桌面草稿 03 页第 16 条:分集右键要有「下载本集」)。
+           详情页那颗下载按钮一直都在,卡片右键里却没有 —— 而选集时想下一集,
+           右键才是顺手的那一下,点进详情页再回来是两次跳转。 */
+        if (Playable(item.Type))
+        {
+            var down = new MenuItem { Header = "下载", Icon = Icon(G.Download), IsVisible = false };
+            down.Click += async (_, _) =>
+            {
+                // container 这儿拿不到(列表命令不发它)。空串 = 交给核心层兜底(默认 mkv),
+                // 和详情页「取不到就交给核心层」同一个口径。
+                var ok = await Run(core, "download.enqueue",
+                    new { item_id = item.Id, type_ = item.Type, title = item.Name, container = "" }, after);
+                Toast.Result(ok, "已加入下载", "加入下载失败");
+            };
+            items.Add(down);
+            _ = ShowIfDownloadable(core, down);
+        }
+
         var block = new MenuItem { Header = "屏蔽这个", Icon = Icon(G.Block) };
         block.Click += async (_, _) =>
         {
@@ -204,6 +223,34 @@ public static class CardActions
 
         menu.ItemsSource = items;
         return menu;
+    }
+
+    /// <summary>
+    /// 下载权限问明白了再把那一条画出来。<b>能不能下载是服务端判的</b>,
+    /// 不问就画等于摆一个必定失败的菜单项(详情页那颗下载按钮同一个口径)。
+    ///
+    /// <para>结果按服务器记一次:权限和条目无关,而右键二十张卡就是二十次同样的请求。
+    /// 只在 UI 线程读写,不加锁。</para>
+    /// </summary>
+    private static readonly Dictionary<string, bool> DownloadOk = [];
+
+    private static async Task ShowIfDownloadable(CoreClient core, MenuItem down)
+    {
+        var s = Nav.Session;
+        if (s is null) return;
+        if (!DownloadOk.TryGetValue(s.server, out var ok))
+        {
+            try
+            {
+                var perm = await core.EmbyPermissions(new { s.server, s.token, s.user_id, s.device_id });
+                ok = perm.ValueKind == System.Text.Json.JsonValueKind.Object
+                     && perm.TryGetProperty("can_download", out var v)
+                     && v.ValueKind == System.Text.Json.JsonValueKind.True;
+            }
+            catch { return; } // 问不到权限就不画这一条 —— 宁可少给,也不摆一个必定失败的
+            DownloadOk[s.server] = ok;
+        }
+        if (ok) Dispatcher.UIThread.Post(() => down.IsVisible = true);
     }
 
     /// <summary>收藏那一条的文案 + 状态。<b>状态存在 Tag 里,不从文案反推</b> —— 文案是给人看的。</summary>

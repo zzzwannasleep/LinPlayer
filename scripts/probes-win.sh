@@ -32,6 +32,7 @@ run LP_SCALEPROBE  "响应式缩放曲线"
 run LP_SCROLLPROBE "滚动驱动器退不退得出死角"
 run LP_NETPROBE    "顶栏网速读数"
 run LP_KEYPROBE    "按键翻成 mpv 键名(input.conf 生效的入口)"
+run LP_EPMETAPROBE "分集卡那行小字(分辨率/码率/大小)"
 run LP_RAILPROBE   "选集轨道:翻页到头再回来 + 长按拖动"
 
 if [ "$BAD" -eq 0 ]; then echo "探针全部通过。"; else echo "$BAD 组探针不过。"; fi

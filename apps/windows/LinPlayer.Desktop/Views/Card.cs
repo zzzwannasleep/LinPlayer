@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Avalonia;
@@ -16,13 +17,15 @@ public sealed record CardItem(
     string Id, string Name, string Type, string SeriesName,
     bool HasPrimary, bool Played, long UnplayedCount,
     double RuntimeSecs, double ResumeSecs,
-    int SeasonNo, int EpisodeNo)
+    int SeasonNo, int EpisodeNo,
+    long VideoHeight = 0, long Bitrate = 0, long SizeBytes = 0)
 {
     public static CardItem From(JsonElement e) => new(
         Str(e, "id"), Str(e, "name"), Str(e, "type_"), Str(e, "series_name"),
         Bool(e, "has_primary"), Bool(e, "played"), Num(e, "unplayed_item_count"),
         Dbl(e, "runtime_secs"), Dbl(e, "resume_secs"),
-        (int)Num(e, "season_no"), (int)Num(e, "episode_no"));
+        (int)Num(e, "season_no"), (int)Num(e, "episode_no"),
+        Num(e, "video_height"), Num(e, "bitrate"), Num(e, "size_bytes"));
 
     /// <summary>
     /// 列表里显示的标题。
@@ -56,6 +59,39 @@ public sealed record CardItem(
     public string RuntimeLabel => RuntimeSecs < 60 ? "" : $"{(int)(RuntimeSecs / 60)} 分钟";
 
     /// <summary>
+    /// 分集卡下面那行小字:<c>4K · 45M · 18.4G</c>(桌面草稿 03 页第 16 条)。
+    ///
+    /// <para>这三个数<b>一直都在回</b>(<c>seasonEpisodes</c> 带 <c>Fields=MediaSources</c>),
+    /// 只是没人画 —— 想知道「这集是不是 4K」原来只能一集集点进详情页。</para>
+    /// <para>写法比媒体信息那一块<b>更短</b>:卡宽最窄 140px,
+    /// <c>18.4 GB</c> 那种带空格的写法会被省略号吃掉后半截。</para>
+    /// <para>拿不到就整段空串 —— 不写「未知」。</para>
+    /// </summary>
+    public string MediaLabel
+    {
+        get
+        {
+            var bits = new List<string>();
+            // 高度才是大家用来说话的那个数,和媒体信息那一块同一个口径
+            if (VideoHeight > 0) bits.Add(VideoHeight >= 2160 ? "4K" : $"{VideoHeight}p");
+            if (Bitrate > 0) bits.Add($"{Bitrate / 1_000_000.0:0.#}M");
+            if (SizeBytes > 0)
+            {
+                bits.Add(SizeBytes >= 1L << 30
+                    ? $"{SizeBytes / (double)(1L << 30):0.#}G"
+                    : $"{SizeBytes / (double)(1L << 20):0}M");
+            }
+            return string.Join(" · ", bits);
+        }
+    }
+
+    /// <summary>
+    /// 分集卡实际印出去的那一行。<b>回落逻辑放在这儿而不是调用点</b> ——
+    /// 留在调用点的话探针只钉得住格式化,钉不住「刮削不全的库上会不会变成空行」。
+    /// </summary>
+    public string EpisodeSubtitle => MediaLabel is { Length: > 0 } m ? m : RuntimeLabel;
+
+    /// <summary>
     /// 转回 JSON,给 <see cref="Core.MetaCache"/> 存。
     ///
     /// <para>字段名<b>必须和核心层的输出一模一样</b> —— 存进去的东西
@@ -71,6 +107,7 @@ public sealed record CardItem(
             unplayed_item_count = c.UnplayedCount,
             runtime_secs = c.RuntimeSecs, resume_secs = c.ResumeSecs,
             season_no = c.SeasonNo, episode_no = c.EpisodeNo,
+            video_height = c.VideoHeight, bitrate = c.Bitrate, size_bytes = c.SizeBytes,
         }));
         return doc.RootElement.Clone();
     }

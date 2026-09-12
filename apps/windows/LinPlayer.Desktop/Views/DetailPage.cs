@@ -1341,7 +1341,9 @@ public sealed class DetailPage : PageBase
             railHost.Content = Carousel.Rail(list,
                 it => new Card(_core, _server, it, true,
                     x => Nav.Push(new DetailPage(_core, _server, x.Id)),
-                    width: EpisodeCardWidth, subtitle: it.RuntimeLabel, title: it.Name, titleLines: 1),
+                    // 分辨率 / 码率 / 大小(草稿 03 页第 16 条),缺了回落到时长
+                    width: EpisodeCardWidth, subtitle: it.EpisodeSubtitle,
+                    title: it.Name, titleLines: 1),
                 EpisodeCardWidth * 9 / 16, out var sv);
             rail = sv;
         }

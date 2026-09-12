@@ -118,6 +118,13 @@ internal static class Program
             return;
         }
 
+        /* 分集卡那行小字自检:`LP_EPMETAPROBE=1 LinPlayer.exe`。纯格式化,进得了 CI。 */
+        if (Environment.GetEnvironmentVariable("LP_EPMETAPROBE") is { Length: > 0 })
+        {
+            Environment.ExitCode = EpMetaProbe() ? 0 : 1;
+            return;
+        }
+
         /* 选集轨道自检:`LP_RAILPROBE=1 LinPlayer.exe` 打几行就退,不开窗口。
            上一轮只钉住了驱动器本身,而用户 2026-09-12 报的还是「点左右按钮卡死」——
            说明该钉的是**整条轨道**:一千条数据 + 真的虚拟化面板 + 真的翻页按钮,
@@ -231,6 +238,52 @@ internal static class Program
         Eq(Views.MpvKeys.Name(Avalonia.Input.Key.ImeConvert, none), null, "输入法键不转");
 
         Console.WriteLine(bad == 0 ? "PROBE 键名 全部通过" : $"PROBE 键名 {bad} 条不过");
+        return bad == 0;
+    }
+
+    /// <summary>
+    /// 分集卡下面那行「4K · 45M · 18.4G」。
+    ///
+    /// <para>三个数各自都可能缺(刮削不全的库上经常全缺)。缺哪个就少哪一段,
+    /// 全缺时必须是<b>空串</b> —— 回落到时长这件事由调用方做,
+    /// 这里返回「未知」的话卡上会印出一行「未知」。</para>
+    /// </summary>
+    private static bool EpMetaProbe()
+    {
+        var bad = 0;
+        void Eq(string got, string want, string what)
+        {
+            if (got == want) { Console.WriteLine($"PROBE 分集小字 ✓ {what}"); return; }
+            Console.WriteLine($"PROBE 分集小字 ✗ {what}:得到「{got}」,该是「{want}」");
+            bad++;
+        }
+        static Views.CardItem It(long h, long br, long size) =>
+            new("i", "n", "Episode", "", false, false, 0, 0, 0, 1, 1, h, br, size);
+
+        Eq(It(2160, 45_000_000, 19_770_609_664).MediaLabel, "4K · 45M · 18.4G", "三样齐全");
+        // 2160 写「4K」和媒体信息那一块同口径;1080 就写 1080p
+        Eq(It(1080, 8_500_000, 2_147_483_648).MediaLabel, "1080p · 8.5M · 2G", "1080 不写 4K");
+        // 不足 1G 的用 M,别印出「0.4G」
+        Eq(It(720, 1_200_000, 419_430_400).MediaLabel, "720p · 1.2M · 400M", "小文件用 M");
+        Eq(It(1080, 0, 0).MediaLabel, "1080p", "只有分辨率就只写分辨率");
+        Eq(It(0, 0, 0).MediaLabel, "", "全缺时是空串,不是「未知」");
+        // 带空格的「18.4 GB」在 140px 的窄卡上会被省略号吃掉后半截
+        Eq(It(2160, 45_000_000, 19_770_609_664).MediaLabel.Contains(" GB") ? "有空格" : "紧凑",
+            "紧凑", "体积用紧凑写法");
+        // 卡上真正印出去的那一行:三个数缺光时必须回落到时长,不能留一行空白
+        Eq(It(0, 0, 0) with { RuntimeSecs = 2700 } is var noMeta ? noMeta.EpisodeSubtitle : "",
+            "45 分钟", "刮削不全时回落到时长");
+        Eq(It(1080, 0, 0) with { RuntimeSecs = 2700 } is var both ? both.EpisodeSubtitle : "",
+            "1080p", "有媒体信息就不写时长");
+
+        /* 上面全是**直接构造**出来的 CardItem,绕开了 JSON 那一段 ——
+           `From` 少解析一个字段、`ToJson` 少写一个键,这些断言一条都不会红,
+           而真机上的表现是「卡上那行小字永远是时长」或者「缓存命中但全是空的」。
+           所以最后走一趟真往返:JSON 进、JSON 出、再读回来。 */
+        var round = Views.CardItem.From(Views.CardItem.ToJson(It(2160, 45_000_000, 19_770_609_664)));
+        Eq(round.MediaLabel, "4K · 45M · 18.4G", "过一趟 JSON 往返还在");
+
+        Console.WriteLine(bad == 0 ? "PROBE 分集小字 全部通过" : $"PROBE 分集小字 {bad} 条不过");
         return bad == 0;
     }
 
