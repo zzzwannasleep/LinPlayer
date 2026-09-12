@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -308,6 +309,61 @@ func (c *Client) Favorites(ctx context.Context, s *Session) ([]Item, error) {
 		"&Fields=PrimaryImageAspectRatio,CommunityRating,DateCreated,DateLastMediaAdded,SortName",
 		s.Server, url.PathEscape(s.UserID))
 	return c.fetchAllPaged(ctx, s, base, 2000)
+}
+
+// FavoriteSorts 收藏页的排序档位,**第一条是默认档**
+// 【用户定 2026-09-12:「增加 收藏的排序功能,方便及时查看更新内容」】。
+//
+// 默认给「更新时间」而不是「加入时间」:收藏是用来追更的,要问的是
+// 「哪一部刚出新集」,而「什么时候收的」排出来的是另一个问题的答案。
+var FavoriteSorts = []string{"更新时间", "名称", "评分", "年份"}
+
+// SortFavorites 就地排序收藏列表。认不出的档位一律按第一档,不报错。
+//
+// ★ **只能在本地排。** 某 fork 在 `Filters=IsFavorite` 上直接无视 SortBy
+// (见 [Client.Favorites]),送上去等于什么都没做,而且返回 200。
+// ★ 排序放核心层不放两端:两端各写一份,改一处漏一处,
+// 漏掉的那端只是顺序悄悄不一样 —— 没人会报上来。
+func SortFavorites(items []Item, by string) {
+	// 缺值一律沉底:排序档位是「按什么看」,而没有那个值的条目回答不了这个问题
+	less := map[string]func(a, b *Item) bool{
+		"名称": func(a, b *Item) bool { return sortKey(a) < sortKey(b) },
+		"评分": func(a, b *Item) bool { return f(a.Rating) > f(b.Rating) },
+		"年份": func(a, b *Item) bool { return i64(a.Year) > i64(b.Year) },
+	}[by]
+	if less == nil {
+		less = func(a, b *Item) bool { return sv(a.DateUpdated) > sv(b.DateUpdated) }
+	}
+	sort.SliceStable(items, func(x, y int) bool { return less(&items[x], &items[y]) })
+}
+
+// sortKey 名称排序的判据:优先服务端给的 SortName(「The Matrix」在 M 上而不是 T)。
+func sortKey(it *Item) string {
+	if s := sv(it.SortName); s != "" {
+		return s
+	}
+	return it.Name
+}
+
+func sv(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func f(p *float64) float64 {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
+func i64(p *int64) int64 {
+	if p == nil {
+		return -1
+	}
+	return *p
 }
 
 // ---------------------------------------------------------------- 统计

@@ -107,6 +107,13 @@ func Test基础选项_给了配置目录就要开config(t *testing.T) {
 	if got["config-dir"] != "D:/x/userdata/mpv" {
 		t.Errorf("config-dir 没传对,实得 %q", got["config-dir"])
 	}
+	/* ☠ 壳会把自己没用掉的键 keypress 给 mpv(input.conf 生效的唯一通路)。
+	   默认键位不关的话 `q` 当场退播放器、`s` 悄悄截图 —— 而这些键在转发之前
+	   一个都到不了 mpv,所以关掉是维持原样,不是减功能。 */
+	if got["input-default-bindings"] != "no" {
+		t.Errorf("默认键位没关(实得 %q)—— 转发按键之后 q 会把播放器退掉",
+			got["input-default-bindings"])
+	}
 }
 
 // ★★ **实测**:用户的 mpv.conf **顶得掉**我们在 mpv_initialize 之前设的选项。

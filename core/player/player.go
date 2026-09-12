@@ -194,7 +194,13 @@ func baseOptions(hwdec, shaderCacheDir, confDir string) [][2]string {
 		   ★ 排在最前面是**故意**的:mpv 解析配置文件时带 PRESERVE_CMDLINE,
 		     我们在 init 之前设的选项赢(probeConfDirPrecedence 实测钉住)。
 		     顺序在这里不改变结果,但读代码的人得知道谁盖谁。 */
-		opts = append(opts, [2]string{"config", "yes"}, [2]string{"config-dir", confDir})
+		opts = append(opts, [2]string{"config", "yes"}, [2]string{"config-dir", confDir},
+			/* ☠ **默认键位必须关掉。** 壳现在会把自己没用掉的键 keypress 给 mpv
+			   (见 PlayerPage.ForwardToMpv,那是 input.conf 生效的唯一通路),
+			   一开默认键位,`q` 当场把播放器退了、`s` 悄悄截一张图 —— 而这些键
+			   在此之前**一个都到不了 mpv**,所以关掉不是减功能,是维持原样。
+			   用户自己在 input.conf 里写的那几条照常生效。 */
+			[2]string{"input-default-bindings", "no"})
 	}
 	opts = append(opts,
 		[2]string{"vo", "libmpv"},

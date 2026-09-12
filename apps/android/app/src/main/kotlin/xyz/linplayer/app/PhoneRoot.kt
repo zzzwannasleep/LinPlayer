@@ -114,7 +114,7 @@ private fun MainShell() {
     val tab = when {
         route.endsWith("Home") -> 0
         route.endsWith("Aggregate") -> 1
-        route.endsWith("Servers") -> 2
+        route.endsWith("Favorites") -> 2
         else -> -1
     }
 
@@ -128,6 +128,7 @@ private fun MainShell() {
         when (parts[0]) {
             "aggregate" -> nav.navigate(Route.Aggregate)
             "servers" -> nav.navigate(Route.Servers)
+            "favoritesTab" -> nav.switchTab(Route.Favorites)
             "search" -> nav.navigate(Route.Search())
             "favorites" -> nav.navigate(Route.Favorites)
             "downloads" -> nav.navigate(Route.Downloads)
@@ -204,7 +205,7 @@ private fun MainShell() {
         if (tab >= 0 && !xyz.linplayer.app.ui.components.LongShot.capturing.value) {
             Box(Modifier.align(Alignment.BottomCenter)) {
                 LpTabBar(tab) {
-                    nav.switchTab(when (it) { 0 -> Route.Home; 1 -> Route.Aggregate; else -> Route.Servers })
+                    nav.switchTab(when (it) { 0 -> Route.Home; 1 -> Route.Aggregate; else -> Route.Favorites })
                 }
             }
         }

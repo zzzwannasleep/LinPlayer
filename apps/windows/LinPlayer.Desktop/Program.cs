@@ -110,6 +110,14 @@ internal static class Program
             return;
         }
 
+        /* mpv 键名自检:`LP_KEYPROBE=1 LinPlayer.exe` 打几行就退,不开窗口。
+           纯映射,进得了 CI。 */
+        if (Environment.GetEnvironmentVariable("LP_KEYPROBE") is { Length: > 0 })
+        {
+            Environment.ExitCode = KeyProbe() ? 0 : 1;
+            return;
+        }
+
         /* 选集轨道自检:`LP_RAILPROBE=1 LinPlayer.exe` 打几行就退,不开窗口。
            上一轮只钉住了驱动器本身,而用户 2026-09-12 报的还是「点左右按钮卡死」——
            说明该钉的是**整条轨道**:一千条数据 + 真的虚拟化面板 + 真的翻页按钮,
@@ -186,6 +194,43 @@ internal static class Program
         else { Console.WriteLine($"PROBE 网速 ✗ 整机计数倒退了({a} → {b})"); bad++; }
 
         Console.WriteLine(bad == 0 ? "PROBE 网速 全部通过" : $"PROBE 网速 {bad} 条不过");
+        return bad == 0;
+    }
+
+    /// <summary>
+    /// 按键翻成 mpv 键名。纯映射,不开窗口,进得了 CI。
+    ///
+    /// <para>它钉的是 <c>input.conf</c> 那条链的入口:名字翻错了,用户写的绑定
+    /// 一条都对不上,而且<b>一句错都不报</b> —— 只是「按了没反应」。</para>
+    /// </summary>
+    private static bool KeyProbe()
+    {
+        var bad = 0;
+        void Eq(string? got, string? want, string what)
+        {
+            if (got == want) { Console.WriteLine($"PROBE 键名 ✓ {what}"); return; }
+            Console.WriteLine($"PROBE 键名 ✗ {what}:得到「{got ?? "(不转)"}」,该是「{want ?? "(不转)"}」");
+            bad++;
+        }
+        const Avalonia.Input.KeyModifiers none = Avalonia.Input.KeyModifiers.None;
+        const Avalonia.Input.KeyModifiers ctrl = Avalonia.Input.KeyModifiers.Control;
+        const Avalonia.Input.KeyModifiers shift = Avalonia.Input.KeyModifiers.Shift;
+
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.D, none), "d", "字母是小写");
+        // 单字母 + Shift 在 mpv 那边就是大写字母本身。写成 Shift+d 的话
+        //    用户 input.conf 里那条 `D` 永远匹配不上,而且不报错
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.D, shift), "D", "Shift+字母折成大写");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.D, ctrl), "Ctrl+d", "Ctrl 加前缀");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.D, ctrl | shift), "Ctrl+Shift+d", "两个修饰键同时在");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.Space, none), "SPACE", "命名键大写");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.PageDown, none), "PGDWN", "翻页键是 PGDWN 不是 PGDOWN");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.F5, none), "F5", "功能键");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.D7, none), "7", "数字键只给数字");
+        // 修饰键本身按下时也来一次 KeyDown。转过去等于每次组合键都先给 mpv 一个孤立的 Ctrl
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.LeftCtrl, ctrl), null, "修饰键自己不转");
+        Eq(Views.MpvKeys.Name(Avalonia.Input.Key.ImeConvert, none), null, "输入法键不转");
+
+        Console.WriteLine(bad == 0 ? "PROBE 键名 全部通过" : $"PROBE 键名 {bad} 条不过");
         return bad == 0;
     }
 

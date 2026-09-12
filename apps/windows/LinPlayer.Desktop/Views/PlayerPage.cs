@@ -1645,7 +1645,27 @@ public sealed class PlayerPage : UserControl
             e.Handled = true;
             return;
         }
-        if (Fire(Actions.Hit(Actions.Player, Actions.Spec(e)))) e.Handled = true;
+        if (Fire(Actions.Hit(Actions.Player, Actions.Spec(e)))) { e.Handled = true; return; }
+        ForwardToMpv(e);
+    }
+
+    /// <summary>
+    /// 我们没用掉的键<b>原样交给 mpv</b>,这样用户那份 <c>input.conf</c> 才真能生效。
+    ///
+    /// <para><c>vo=libmpv</c> 下 mpv 没有自己的窗口,<b>一个键盘事件都收不到</b> ——
+    /// 这就是「input.conf 只部分生效」的全部原因:生效的那部分是 <c>mpv.conf</c> 里的
+    /// 选项,按键绑定一条都没生效(用户 2026-09-12)。</para>
+    ///
+    /// <para>转发之后<b>不</b>置 Handled:这一下我们本来就没要,吃掉它会让
+    /// 上层(比如全局快捷键)也收不到。</para>
+    /// </summary>
+    private void ForwardToMpv(KeyEventArgs e)
+    {
+        // 焦点在输入框里:那是在打字不是在按快捷键。转过去的话搜弹幕输个「s」
+        // 就顺手截了张图 —— 而且没有任何提示
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is TextBox) return;
+        if (MpvKeys.Name(e.Key, e.KeyModifiers) is not { } name) return;
+        _ = Send("player.mpvCommand", new { args = new[] { "keypress", name } });
     }
 
     /// <summary>

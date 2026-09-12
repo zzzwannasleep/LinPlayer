@@ -183,7 +183,9 @@ fun HomePage(nav: NavController) {
                 open = pickServer, anchorH = anchorH, accounts = accounts,
                 onClose = { pickServer = false },
                 onPick = { a -> pickServer = false; switchServer(a) },
-                onManage = { pickServer = false; nav.switchTab(Route.Servers) },
+                // ☠ 这里必须是 navigate 不是 switchTab:2026-09-12 起服务器**不是 Tab 了**,
+                //    switchTab 会把它当成一根平级栈弹到起点 —— 表现是返回键回不到首页
+                onManage = { pickServer = false; nav.navigate(Route.Servers) },
                 onAdd = { pickServer = false; nav.navigate(Route.AddServer) },
             )
         }
@@ -286,8 +288,6 @@ private fun ServerChip(account: Account?, onClick: () -> Unit) {
  *
  * ☠ 上一版是一个居中弹窗。弹窗是「打断你,让你回答一个问题」;而换服务器是
  *   顶栏那颗按钮的**展开态** —— 它不该盖住整页,也不该让人先看一遍标题。
- *   再上一版更糟,是 `navigate(Route.Servers)`:那台是底栏第三个 Tab,
- *   跳过去之后返回栈和 Tab 栈对不上,用户原话「无法点回首页」。
  */
 @Composable
 private fun ServerMenu(

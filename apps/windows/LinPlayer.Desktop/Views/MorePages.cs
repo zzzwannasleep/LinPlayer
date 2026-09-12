@@ -281,23 +281,57 @@ public sealed class SearchPage : PageBase
 /// <summary>收藏页。</summary>
 public sealed class FavoritesPage : PageBase
 {
+    /// <summary>
+    /// 排序档位。<b>必须和核心层 <c>emby.FavoriteSorts</c> 逐字一致</b> —— 对不上就静默落回第一档。
+    ///
+    /// <para>排序是核心层<b>本地</b>做的:某 fork 在 <c>Filters=IsFavorite</c> 上无视
+    /// SortBy 且照样回 200,送上去等于什么都没做。</para>
+    /// </summary>
+    private static readonly string[] Sorts = ["更新时间", "名称", "评分", "年份"];
+
     public FavoritesPage(CoreClient core)
     {
         var rows = new StackPanel { Spacing = 14, Children = { H1("收藏") } };
         var busy = Dim("加载中…");
+        var sort = Sorts[0];
+        var picks = new WrapPanel { ItemSpacing = 6, LineSpacing = 6 };
+        rows.Children.Add(picks);
         rows.Children.Add(busy);
         Content = Scrolled(rows);
 
+        // 档位换了整页重画:收藏是一次全量拉回来的(没有分页),重排就是重来一遍
+        void Load()
+        {
+            foreach (var b in picks.Children.OfType<Button>())
+                b.Classes.Set("on", (string?)b.Tag == sort);
+            while (rows.Children.Count > 2) rows.Children.RemoveAt(2);
+            busy.Text = "加载中…";
+            if (!rows.Children.Contains(busy)) rows.Children.Add(busy);
+            Fetch();
+        }
+
+        foreach (var name in Sorts)
+        {
+            var b = new Button { Classes = { "chip" }, Content = name, Tag = name };
+            b.Click += (_, _) => { sort = name; Load(); };
+            picks.Children.Add(b);
+        }
+        Load();
+
+        void Fetch() =>
         _ = Task.Run(async () =>
         {
             try
             {
                 var s = Nav.Session!;
-                var res = await core.EmbyListFavorites(new { s.server, s.token, s.user_id, s.device_id });
+                var want = sort;
+                var res = await core.EmbyListFavorites(new { s.server, s.token, s.user_id, s.device_id, sort });
                 var items = res.ValueKind == JsonValueKind.Array
                     ? res.EnumerateArray().Select(CardItem.From).ToList() : [];
                 Dispatcher.UIThread.Post(() =>
                 {
+                    // 等这一趟网络的工夫里用户换了档位:这批是旧档位的结果,别落地
+                    if (want != sort) return;
                     rows.Children.Remove(busy);
                     if (items.Count == 0) { rows.Children.Add(Dim("还没有收藏。详情页点「收藏」就会出现在这里。")); return; }
 

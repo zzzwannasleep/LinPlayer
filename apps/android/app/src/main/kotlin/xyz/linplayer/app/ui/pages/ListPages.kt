@@ -72,23 +72,35 @@ import xyz.linplayer.app.ui.components.Skeleton
 import xyz.linplayer.app.ui.components.StepperRow
 import xyz.linplayer.app.ui.components.pressable
 import xyz.linplayer.app.ui.components.rememberScrolled
+import xyz.linplayer.app.ui.components.ToneChip
 import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.R
 import xyz.linplayer.app.ui.theme.Sp
 
-/** 收藏(U1.9a)。 */
+/**
+ * 收藏(U1.9a)。**2026-09-12 起是底栏第三个 Tab**,所以没有返回键。
+ *
+ * 排序档位表在核心层(`emby.FavoriteSorts`),这里只按名字传过去 ——
+ * 服务端那条路对某些 fork 是死的,排序是核心层本地做的。
+ */
 @Composable
 fun FavoritesPage(nav: NavController) {
     val app = LocalApp.current
     val scope = rememberCoroutineScope()
     val grid = rememberLazyGridState()
     var block by xyz.linplayer.app.data.keepState<Block<List<Item>>>("fav") { Block.Loading }
+    var sort by xyz.linplayer.app.data.keepState("fav.sort") { FAV_SORTS[0] }
+    /* 手里这份是按哪一档拉的。少了它,下面那道「已经有结果就别重拉」的闸
+       会把换档位一起吞掉 —— 和媒体库那个坑同一个形状。 */
+    var fetchedSort by xyz.linplayer.app.data.keepState<String?>("fav.as") { null }
     var reload by remember { mutableStateOf(0) }
 
-    LaunchedEffect(reload) {
-        if (reload == 0 && block is Block.Ok) return@LaunchedEffect
-        block = when (val r = app.block("emby.listFavorites")) {
+    LaunchedEffect(reload, sort) {
+        // ☠ 判据必须带上档位,否则就是媒体库那个坑(2026-09-12「筛选了不刷新」)
+        if (reload == 0 && block is Block.Ok && fetchedSort == sort) return@LaunchedEffect
+        fetchedSort = sort
+        block = when (val r = app.block("emby.listFavorites", args("sort" to sort))) {
             is Block.Ok -> Block.Ok(Page.from(r.value).items)
             is Block.Fail -> r
             else -> Block.Loading
@@ -96,7 +108,7 @@ fun FavoritesPage(nav: NavController) {
     }
     LaunchedEffect(Unit) { app.invalidate.collect { if (it == "library" || it == "all") reload++ } }
 
-    LpScaffold("收藏", onBack = { nav.popBackStack() }, scrolled = rememberScrolled(grid)) { pad ->
+    LpScaffold("收藏", scrolled = rememberScrolled(grid)) { pad ->
         BlockBox(block, { reload++ }, skeleton = { GridSkel(pad) }) { items ->
             if (items.isEmpty()) EmptyState(
                 "还没有收藏任何内容",
@@ -108,6 +120,15 @@ fun FavoritesPage(nav: NavController) {
                 horizontalArrangement = Arrangement.spacedBy(Sp.x10),
                 verticalArrangement = Arrangement.spacedBy(Sp.x16),
             ) {
+                item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                            .padding(bottom = Sp.x8),
+                        horizontalArrangement = Arrangement.spacedBy(Sp.x6),
+                    ) {
+                        FAV_SORTS.forEach { s -> ToneChip(s, on = s == sort) { sort = s } }
+                    }
+                }
                 items(items, key = { it.id }) {
                     MediaCard(it, app.imageUrl(it.id, "Primary", 330),
                         { nav.navigate(Route.Detail(it.id, it.type)) },
@@ -117,6 +138,9 @@ fun FavoritesPage(nav: NavController) {
         }
     }
 }
+
+/** 收藏排序档位。**必须和核心层 `emby.FavoriteSorts` 逐字一致** —— 对不上就静默落回第一档。 */
+private val FAV_SORTS = listOf("更新时间", "名称", "评分", "年份")
 
 /**
  * 下载(U1.12)。

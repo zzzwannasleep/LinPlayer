@@ -120,14 +120,14 @@ fun AggregatePage(nav: NavController) {
     }
 }
 
-/** 一行快捷入口:继续观看 / 收藏 / 下载 / 排行榜 / 日历。 */
+/** 一行快捷入口。收藏 2026-09-12 提去底栏了,腾出来的位置给服务器。 */
 @Composable
 private fun Shortcuts(nav: NavController) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = Sp.x16, vertical = Sp.x12),
         horizontalArrangement = Arrangement.spacedBy(Sp.x8),
     ) {
-        Shortcut("收藏", LpIcons.heart, Modifier.weight(1f)) { nav.navigate(Route.Favorites) }
+        Shortcut("服务器", LpIcons.server, Modifier.weight(1f)) { nav.navigate(Route.Servers) }
         Shortcut("下载", LpIcons.download, Modifier.weight(1f)) { nav.navigate(Route.Downloads) }
         Shortcut("排行榜", LpIcons.trophy, Modifier.weight(1f)) { nav.navigate(Route.Ranking) }
         Shortcut("日历", LpIcons.calendar, Modifier.weight(1f)) { nav.navigate(Route.Calendar) }

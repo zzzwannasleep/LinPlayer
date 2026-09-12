@@ -93,7 +93,13 @@ func RegisterCommands(version string) {
 		return defaultClient.NextUp(ctx, s, intArg(a, "limit", 12))
 	})
 	list("emby.listFavorites", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
-		return defaultClient.Favorites(ctx, s)
+		v, err := defaultClient.Favorites(ctx, s)
+		if err != nil {
+			return nil, err
+		}
+		// 排序在这儿做:服务端那条路对某些 fork 是死的,见 [Client.Favorites]
+		SortFavorites(v, str(a, "sort"))
+		return v, nil
 	})
 	list("emby.listCollections", func(ctx context.Context, s *Session, a map[string]any) (any, error) {
 		return defaultClient.Collections(ctx, s)

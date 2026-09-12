@@ -209,7 +209,11 @@ fun LpTabBar(current: Int, onPick: (Int) -> Unit) {
             Tab("首页", if (current == 0) LpIcons.homeOn else LpIcons.home, current == 0,
                 Modifier.weight(1f)) { onPick(0) }
             Tab("聚合视界", LpIcons.globe, current == 1, Modifier.weight(1f)) { onPick(1) }
-            Tab("服务器", LpIcons.server, current == 2, Modifier.weight(1f)) { onPick(2) }
+            /* 第三格是**收藏**不是服务器【用户定 2026-09-12】。
+               服务器一台一台加完就不再动了,而收藏是每天要看「哪部更新了」的地方 ——
+               底栏只有三格,给一个用一次的入口是浪费。服务器挪去聚合页那排快捷入口。 */
+            Tab("收藏", if (current == 2) LpIcons.heartOn else LpIcons.heart, current == 2,
+                Modifier.weight(1f)) { onPick(2) }
         }
         Spacer(Modifier.height(
             WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
