@@ -44,20 +44,14 @@ func registerMiscCommands() {
 	// 正是因为主线不通 —— 探主线只会把一台能用的服务器标成红的。
 	bus.Register("account.probeAccounts", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		c := config.Current()
-		type result struct {
-			Server string `json:"server"`
-			OK     bool   `json:"ok"`
-			MS     int64  `json:"ms,omitempty"`
-			Error  string `json:"error,omitempty"`
-		}
-		out := make([]result, len(c.AccountList))
+		out := make([]ProbeResult, len(c.AccountList))
 		var wg sync.WaitGroup
 		for i := range c.AccountList {
 			acc := c.AccountList[i]
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				r := result{Server: acc.Server}
+				r := ProbeResult{Server: acc.Server}
 				// 浏览型源没有 /System/Info/Public,探不了,一律当可用
 				if acc.IsFileBrowse() {
 					r.OK = true
@@ -76,4 +70,17 @@ func registerMiscCommands() {
 		wg.Wait()
 		return out, nil
 	})
+}
+
+// ProbeResult 一台服务器的探活结果。
+//
+// 放在包级而不是函数里,是为了让安卓侧的字段名门禁能查到它:
+// 局部类型对账不上,而这条命令的字段名恰好栽过 —— 界面按 server_id / state
+// 去读,真实字段是 server / ok,那几个状态点从上线起就是空的。
+type ProbeResult struct {
+	Server string `json:"server"`
+	OK     bool   `json:"ok"`
+	// MS 毫秒。不通时不发这一项,别写 0 —— 「秒回」和「不通」不能长得一样。
+	MS    int64  `json:"ms,omitempty"`
+	Error string `json:"error,omitempty"`
 }

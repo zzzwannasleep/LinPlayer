@@ -98,7 +98,7 @@ fun BrowsePage(nav: NavController) {
     val ctx = LocalContext.current
 
     data class Entry(val id: String, val name: String, val isDir: Boolean,
-                     val size: Long?, val modified: String?)
+                     val size: Long?)
 
     /** 当前生效的文件源(null = 还没添加,或者当前活跃的是 Emby)。 */
     var source by remember { mutableStateOf<JsonObject?>(null) }
@@ -116,7 +116,9 @@ fun BrowsePage(nav: NavController) {
         localSources = runCatching { app.call("account.listAccounts") }.getOrNull().arr()
             .mapNotNull { e ->
                 val o = e.obj() ?: return@mapNotNull null
-                if (o.str("kind") != "local" && o.str("source_kind") != "local") return@mapNotNull null
+                // 字段名是 source_kind。原来还并了一句 `o.str("kind")`,
+                // 而核心层从来不发 kind —— 那半句恒真,是个假的保险
+                if (o.str("source_kind") != "local") return@mapNotNull null
                 val id = o.str("server") ?: return@mapNotNull null
                 id to (o.str("name")?.takeIf { it.isNotBlank() } ?: folderName(id))
             }
@@ -131,23 +133,18 @@ fun BrowsePage(nav: NavController) {
         if (stack.isEmpty()) { state = Block.Ok(Unit); return@LaunchedEffect }
         state = Block.Loading; entries = emptyList()
         val dir = stack.last().first
+        /* ☠ 这里原来还挂着一个 `onPartial`(「边列边出」),而**核心层这条命令
+           一次 partial 都不发** —— 那段回调从上线起没跑过一次,靠的一直是下面
+           这条兜底。留着它只会让人以为大目录是增量出的。真要做增量,
+           得先让 core/sourcecmd 用 bus.Partial 发,再把它加回来。 */
         val r = runCatching {
-            app.call("source.listDir",
-                dir?.let { args("dir_id" to it) },
-                onPartial = { p ->
-                    // 边列边出:大目录不许攒齐再画
-                    entries = entries + p.arr().mapNotNull { e ->
-                        val o = e.obj() ?: return@mapNotNull null
-                        Entry(o.str("id") ?: return@mapNotNull null, o.str("name") ?: "",
-                            o.bool("is_dir"), o.long("size"), o.str("modified"))
-                    }
-                })
+            app.call("source.listDir", dir?.let { args("dir_id" to it) })
         }
         state = r.fold({ v ->
-            if (entries.isEmpty()) entries = v.arr().mapNotNull { e ->
+            entries = v.arr().mapNotNull { e ->
                 val o = e.obj() ?: return@mapNotNull null
                 Entry(o.str("id") ?: return@mapNotNull null, o.str("name") ?: "",
-                    o.bool("is_dir"), o.long("size"), o.str("modified"))
+                    o.bool("is_dir"), o.long("size"))
             }
             Block.Ok(Unit)
         }, { e ->
@@ -234,11 +231,12 @@ fun BrowsePage(nav: NavController) {
                         Spacer(Modifier.padding(horizontal = Sp.x6))
                         Column(Modifier.weight(1f)) {
                             Body(e.name, maxLines = 2)
-                            val meta = listOfNotNull(
-                                e.size?.let { "%.1f MB".format(it / 1024.0 / 1024.0) },
-                                e.modified,
-                            ).joinToString("  ·  ")
-                            if (meta.isNotEmpty()) Dim3(meta, Modifier.padding(top = Sp.x2))
+                            // 修改时间**核心层不发**(source.Entry 里没有这个字段),
+                            // 原来那一格是恒空的 —— 摆着不生效的东西比没有更糟
+                            e.size?.let {
+                                Dim3("%.1f MB".format(it / 1024.0 / 1024.0),
+                                    Modifier.padding(top = Sp.x2))
+                            }
                         }
                     }
                     Hairline(Modifier.padding(start = Sp.x48))

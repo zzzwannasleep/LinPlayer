@@ -91,7 +91,7 @@ func RegisterCommands() {
 		}
 		// ★ 回读**实际生效**的档位:核心层会钳在 1~4。
 		//   只回 nil 的话,用户设了 8 线程、实际生效 4 线程,毫无反馈。
-		return map[string]any{"threads": m.Threads()}, nil
+		return ThreadsReply{Threads: m.Threads()}, nil
 	})
 
 	// download.andApplyUpdate —— 自更新的下载 + 应用那一步。
@@ -123,4 +123,10 @@ func num(a map[string]any, k string) float64 {
 		return v
 	}
 	return 0
+}
+
+// ThreadsReply 分段数的回读。**不传 threads 就是只读** —— 两端的下载页
+// 都靠它显示当前档位,而它此前是个裸 map,字段名门禁对不上账。
+type ThreadsReply struct {
+	Threads int `json:"threads"`
 }

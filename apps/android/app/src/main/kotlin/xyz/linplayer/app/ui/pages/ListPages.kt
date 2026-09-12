@@ -178,9 +178,16 @@ fun DownloadsPage(nav: NavController) {
     }
 
     LaunchedEffect(Unit) {
-        val r = runCatching { app.call("download.list") }.getOrNull()
-        tasks = parse(r)
-        threads = (r.obj().long("threads") ?: 2L).toDouble()
+        tasks = parse(runCatching { app.call("download.list") }.getOrNull())
+        /* ☠ 线程数**不在 download.list 里** —— 它返回的是一个任务数组,
+           原来那句 `r.obj().long("threads")` 拿数组当对象读,恒 null,
+           于是这一格**永远显示 2**,用户设成 4 也看不出来。
+           真出处是 `download.setThreads` 不传参数时的回读(桌面端一直是这么读的)。 */
+        // 把响应**绑到一个变量**上再读:链式写法认不出接收者,字段名门禁只能
+        // 回落到「本函数所有命令的并集」,而这个函数里正好也调 setThreads ——
+        // 那样改回去读错命令它也不会红。绑了变量它就能精确归属。
+        val cur = runCatching { app.call("download.setThreads") }.getOrNull().obj()
+        threads = (cur.long("threads") ?: 2L).toDouble()
         loaded = true
         // 订阅进度事件而不是轮询:轮询是「每秒一次全表」,事件是「变了才来」
         app.core.events.collect { ev ->

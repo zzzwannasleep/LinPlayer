@@ -61,7 +61,7 @@
 | [x] | `emby.aggregateOverview` | `aggregate_overview` | `—` | `Result<Vec<SourceOverview>, String>` | ✅ |
 | [x] | `emby.aggregateSearch` | `aggregate_search` | `query: String, include_episodes: Option<bool>` | `Result<Vec<ServerGroup>, String>` | ✅ |
 | [x] | `emby.aggregateVersions` | **新增** | `item_id, server_id: Option<String>, version_regex: Option<String>` | `Vec<aggregate::VersionGroup>` | — | <!-- 跨服聚合同一部片的版本表。匹配判据与跨服续播共用 history.MatchCandidates -->
-| [x] | `emby.blockedList` | `blocked_list` | `—` | `Vec<linplayer_core::blocklist::BlockedItem>` | ✅ |
+| [x] | `emby.blockedList` | `blocked_list` | `—` | `Entry` | ✅ |
 | [x] | `emby.counts` | **新增** | `server, token, user_id` | `Counts` | — | <!-- 媒体库规模统计。Rust 版里 emby::counts 只被 aggregate_overview 内部调用,没单独成命令 -->
 | [x] | `emby.currentSession` | `current_session` | `—` | `Option<LoginResult>` | ✅ |
 | [x] | `emby.getFilters` | `get_filters` | `parent_id: String` | `Result<emby::Filters, String>` | ✅ |
@@ -72,7 +72,7 @@
 | [x] | `emby.collectionItems` | **新增** | `item_id: String` | `{movies,series,others}` | — | <!-- 合集成员，影片/剧集分开（合集页原来一个字都画不出来） -->
 | [x] | `emby.listFavorites` | `list_favorites` | `—` | `Result<Vec<Item>, String>` | ✅ |
 | [x] | `emby.listItems` | `list_items` | `parent_id: String` | `Result<Vec<Item>, String>` | ✅ |
-| [x] | `emby.listItemsPage` | `list_items_page` | `parent_id: String, start_index: Option<u32>, limit: Option<u32>, sort_by: Option<String>, sort_order: Option<String>, genres: Option<Vec<String>>, tags: Option<Vec<String>>, years: Option<Vec<i32>>, studios: Option<Vec<String>>, rating_min: Option<f64>, rating_max: Option<f64>` | `Result<emby::ItemPage, String>` | ✅ |
+| [x] | `emby.listItemsPage` | `list_items_page` | `parent_id: String, start_index: Option<u32>, limit: Option<u32>, sort_by: Option<String>, sort_order: Option<String>, genres: Option<Vec<String>>, tags: Option<Vec<String>>, years: Option<Vec<i32>>, studios: Option<Vec<String>>, rating_min: Option<f64>, rating_max: Option<f64>` | `Page` | ✅ |
 | [x] | `emby.listLatest` | `list_latest` | `parent_id: String, limit: u32` | `Result<Vec<Item>, String>` | ✅ |
 | [x] | `emby.listNextUp` | `list_next_up` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
 | [x] | `emby.listRandom` | `list_random` | `limit: u32` | `Result<Vec<Item>, String>` | ✅ |
@@ -89,7 +89,7 @@
 | [x] | `emby.reportProgress` | `report_progress` | `pos: f64, paused: bool` | `Result<(), String>` | ✅ |
 | [x] | `emby.scanLibraries` | `scan_libraries` | `—` | `Result<(), String>` | ✅ |
 | [x] | `emby.search` | `search` | `query: String, types: Option<Vec<String>>, limit: Option<u32>, parent_id: Option<String>` | `Result<Vec<Item>, String>` | ✅ |
-| [x] | `emby.seasonEpisodes` | `season_episodes` | `parent_id: String, start_index: Option<i64>, limit: Option<i64>` | `Result<emby::ItemPage, String>` | ✅ |
+| [x] | `emby.seasonEpisodes` | `season_episodes` | `parent_id: String, start_index: Option<i64>, limit: Option<i64>` | `Page` | ✅ |
 | [x] | `emby.seriesSeasons` | `series_seasons` | `series_id: String` | `Result<Vec<emby::SeasonInfo>, String>` | ✅ |
 | [x] | `emby.setBlocked` | `set_blocked` | `item_id: String, name: String, blocked: bool` | `()` | ✅ |
 | [x] | `emby.setFavorite` | `set_favorite` | `item_id: String, fav: bool` | `Result<(), String>` | ✅ |
@@ -111,9 +111,9 @@
 | [x] | `account.clearAccountIcon` | `clear_account_icon` | `server_id: String` | `()` | ✅ |
 | [x] | `account.getCrossServerResume` | `get_cross_server_resume` | `—` | `bool` | ✅ |
 | [x] | `account.icon` | `account_icon` | `server_id: String` | `Result<String, String>` | ✅ |
-| [x] | `account.listAccounts` | `list_accounts` | `—` | `Vec<AccountInfo>` | ✅ |
-| [x] | `account.parseDeepLink` | `parse_deep_link` | `url: String` | `Option<linplayer_core::server_batch::DeepLinkAddServer>` | ✅ |
-| [x] | `account.probeAccounts` | `probe_accounts` | `—` | `Result<Vec<AccountInfo>, String>` | ✅ |
+| [x] | `account.listAccounts` | `list_accounts` | `—` | `Info` | ✅ |
+| [x] | `account.parseDeepLink` | `parse_deep_link` | `url: String` | `DeepLink` | ✅ |
+| [x] | `account.probeAccounts` | `probe_accounts` | `—` | `ProbeResult` | ✅ |
 | [x] | `account.probeLine` | `probe_line` | `server_id: String, index: usize` | `Result<LineProbe, String>` | ✅ |
 | [x] | `account.probeLines` | `probe_lines` | `server_id: String` | `Result<Vec<LineProbe>, String>` | ✅ |
 | [x] | `account.removeAccount` | `remove_account` | `server_id: String` | `Result<(), String>` | ✅ |
@@ -188,32 +188,32 @@
 |:--:|---|---|---|---|:--:|
 | [x] | `source.catalog` | `source_catalog` | `category_id: Option<String>, keyword: Option<String>, page: u32` | `Result<linplayer_core::source::MediaPage, String>` | ✅ |
 | [x] | `source.categories` | `source_categories` | `—` | `Result<Vec<linplayer_core::source::MediaCategory>, String>` | ✅ |
-| [x] | `source.currentSource` | `current_source` | `—` | `Option<AccountInfo>` | ✅ |
-| [x] | `source.listDir` | `source_list_dir` | `dir_id: Option<String>` | `Result<Vec<SourceEntry>, String>` | ✅ |
+| [x] | `source.currentSource` | `current_source` | `—` | `CurrentSource` | ✅ |
+| [x] | `source.listDir` | `source_list_dir` | `dir_id: Option<String>` | `Entry` | ✅ |
 | [x] | `source.login` | `source_login` | `kind: SourceKind, base_url: String, username: String, password: String, cookie: Option<String>, // 令牌系源用它带 refresh_token(也可走 cookie)与可选的 oplist 地址/driver 覆盖。 // additive:老调用不传即空, 行为不变。 extra: Option<HashMap<String, String>>` | `Result<(), String>` | ✅ |
 | [x] | `source.formSchema` | **新增** | `—` | `Vec<sourcecmd::SourceForm>` | ✅ | <!-- 源类型与登录表单的唯一声明。三端各写渲染器,不许再各自硬编源类型表 -->
 | [x] | `source.mediaDetail` | `source_media_detail` | `id: String` | `Result<linplayer_core::source::MediaDetail, String>` | ✅ |
 | [x] | `source.play` | `source_play` | `entry_id: String, entry_name: String, resume_secs: f64, raw: Option<serde_json::Value>` | `Result<f64, String>` | ✅ |
-| [x] | `source.search` | `source_search` | `query: String` | `Result<Vec<SourceEntry>, String>` | ✅ |
+| [x] | `source.search` | `source_search` | `query: String` | `Entry` | ✅ |
 | [x] | `source.watchdog` | `source_watchdog` | `pos: f64` | `Result<bool, String>` | ✅ |
 
 ### 弹幕 · `danmaku.*` — 16 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
-| [x] | `danmaku.autoLoad` | `danmaku_auto_load` | `input: danmaku::MatchInput, options: danmaku::FilterOptions, ch_convert: Option<i32>, anchor_key: Option<String>` | `Result<Option<Vec<DanmakuComment>>, String>` | ✅ |
+| [x] | `danmaku.autoLoad` | `danmaku_auto_load` | `input: danmaku::MatchInput, options: danmaku::FilterOptions, ch_convert: Option<i32>, anchor_key: Option<String>` | `Comment` | ✅ |
 | [x] | `danmaku.cacheClear` | `danmaku_cache_clear` | `—` | `usize` | ✅ |
 | [x] | `danmaku.cacheSize` | `danmaku_cache_size` | `—` | `u64` | ✅ |
-| [x] | `danmaku.episodes` | `danmaku_episodes` | `source_id: String, anime_id: String, anime_title: String` | `Result<Vec<danmaku::DanmakuEpisode>, String>` | ✅ |
-| [x] | `danmaku.filter` | `danmaku_filter` | `comments: Vec<DanmakuComment>, options: danmaku::FilterOptions` | `Vec<DanmakuComment>` | ✅ |
+| [x] | `danmaku.episodes` | `danmaku_episodes` | `source_id: String, anime_id: String, anime_title: String` | `Episode` | ✅ |
+| [x] | `danmaku.filter` | `danmaku_filter` | `comments: Vec<DanmakuComment>, options: danmaku::FilterOptions` | `Comment` | ✅ |
 | [x] | `danmaku.getDanmakuConfig` | `get_danmaku_config` | `—` | `Vec<DanmakuServer>` | ✅ |
 | [x] | `danmaku.getOfficialDanmaku` | `get_official_danmaku` | `—` | `OfficialDanmaku` | ✅ |
 | [x] | `danmaku.importBlocklist` | `danmaku_import_blocklist` | `xml: String` | `danmaku::DanmakuFilterImportResult` | ✅ |
-| [x] | `danmaku.load` | `danmaku_load` | `episode_id: String, source_id: Option<String>, ch_convert: Option<i32>` | `Result<Vec<DanmakuComment>, String>` | ✅ |
-| [x] | `danmaku.loadLocal` | `danmaku_load_local` | `path: String` | `Result<Vec<DanmakuComment>, String>` | ✅ |
+| [x] | `danmaku.load` | `danmaku_load` | `episode_id: String, source_id: Option<String>, ch_convert: Option<i32>` | `Comment` | ✅ |
+| [x] | `danmaku.loadLocal` | `danmaku_load_local` | `path: String` | `Comment` | ✅ |
 | [x] | `danmaku.match` | `danmaku_match` | `input: danmaku::MatchInput` | `Result<Vec<danmaku::DanmakuMatchCandidate>, String>` | ✅ |
 | [x] | `danmaku.minAutoScore` | `danmaku_min_auto_score` | `—` | `f64` | ✅ |
-| [x] | `danmaku.search` | `danmaku_search` | `keyword: String` | `Result<Vec<danmaku::DanmakuSourceGroup>, String>` | ✅ |
+| [x] | `danmaku.search` | `danmaku_search` | `keyword: String` | `SourceGroup` | ✅ |
 | [x] | `danmaku.setDanmakuConfig` | `set_danmaku_config` | `sources: Vec<DanmakuServer>` | `Result<(), String>` | ✅ |
 | [x] | `danmaku.getBlockwords` | **新增** | `—` | `{words: Vec<String>, users: Vec<String>}` | ✅ | <!-- 落库的屏蔽词与屏蔽用户。autoLoad/filter 无条件并进来,不靠调用方传 -->
 | [x] | `danmaku.setBlockwords` | **新增** | `words: Vec<String>, users: Vec<String>` | `{words: Vec<String>, users: Vec<String>}` | ✅ | <!-- 只传要改的那一半,另一半原样留着 -->
@@ -233,7 +233,7 @@
 | [x] | `plugin.marketInstall` | `plugin_market_install` | `id: String, version: Option<String>` | `Result<Json, String>` | ✅ |
 | [x] | `plugin.marketList` | `plugin_market_list` | `refresh: Option<bool>` | `Result<Json, String>` | ✅ |
 | [x] | `plugin.marketRemoveSource` | `plugin_market_remove_source` | `id: String` | `Result<Vec<PluginSource>, String>` | ✅ |
-| [x] | `plugin.marketSources` | `plugin_market_sources` | `—` | `Vec<PluginSource>` | ✅ |
+| [x] | `plugin.marketSources` | `plugin_market_sources` | `—` | `Source` | ✅ |
 | [x] | `plugin.marketToggleSource` | `plugin_market_toggle_source` | `id: String, enabled: bool` | `Result<Vec<PluginSource>, String>` | ✅ |
 | [x] | `plugin.panels` | `plugin_panels` | `slot: String` | `Result<Vec<serde_json::Value>, String>` | ✅ |
 | [x] | `plugin.permissionCatalog` | `plugin_permission_catalog` | `—` | `Vec<Json>` | ✅ |
@@ -252,11 +252,11 @@
 | [x] | `download.andApplyUpdate` | `download_and_apply_update` | `—` | `Result<(), String>` | ❌ |
 | [x] | `download.clearCompleted` | `download_clear_completed` | `—` | `usize` | ✅ |
 | [x] | `download.enqueue` | `download_enqueue` | `item_id: String, type_: String, title: String, container: String, poster_url: Option<String>` | `Result<String, String>` | ✅ |
-| [x] | `download.list` | `download_list` | `—` | `Vec<linplayer_core::download::DownloadItem>` | ✅ |
+| [x] | `download.list` | `download_list` | `—` | `Item` | ✅ |
 | [x] | `download.pause` | `download_pause` | `id: String` | `()` | ✅ |
 | [x] | `download.remove` | `download_remove` | `id: String` | `()` | ✅ |
 | [x] | `download.resume` | `download_resume` | `id: String` | `()` | ✅ |
-| [x] | `download.setThreads` | `download_set_threads` | `threads: usize` | `()` | ✅ |
+| [x] | `download.setThreads` | `download_set_threads` | `threads: usize` | `ThreadsReply` | ✅ |
 
 ### 同步(Trakt / Bangumi / 日历) · `sync.*` — 15 条
 

@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.Account
 import xyz.linplayer.app.data.LocalApp
 import xyz.linplayer.app.data.ToastKind
@@ -119,14 +120,17 @@ fun ServersPage(nav: NavController) {
 
     LaunchedEffect(reload) {
         accounts = Account.list(runCatching { app.call("account.listAccounts") }.getOrNull())
-        // 连通状态**异步**探测:未探时是「未检测」不是「不通」
+        /* 连通状态**异步**探测:未探时是「未检测」不是「不通」。
+           ☠ 这里原来挂的是 `onPartial`,而**整个核心层只有一处在发 partial**
+           (core/system),这条命令一次都不发 —— 回调永远不触发,那几个状态点
+           从上线起就是空的。而且它读的 `server_id` / `state` 也不存在:
+           真实字段是 server / ok / ms / error。同一类错(聚合页、搜索页)已经栽过两次。 */
         launch {
-            runCatching {
-                app.call("account.probeAccounts", null, onPartial = { p ->
-                    val o = p as? JsonObject
-                    val id = o.str("server_id") ?: o.str("server")
-                    if (id != null) status = status + (id to (o.str("state") ?: "unknown"))
-                })
+            val probed = runCatching { app.call("account.probeAccounts") }.getOrNull().arr()
+            status = status + probed.mapNotNull { e ->
+                val o = e.obj() ?: return@mapNotNull null
+                val id = o.str("server") ?: return@mapNotNull null
+                id to if (o.bool("ok")) "ok" else "down"
             }
         }
     }

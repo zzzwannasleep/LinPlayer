@@ -112,14 +112,25 @@ func cmdCurrentSource(ctx context.Context, seq int64, a map[string]any) (any, er
 	if acc == nil || !acc.IsFileBrowse() {
 		return nil, nil // 不是错误:当前就是没有源
 	}
-	return map[string]any{
-		"server_id":      acc.Server,
-		"server_name":    acc.DisplayName(),
-		"user_name":      acc.UserName,
-		"source_kind":    acc.SourceKind(),
-		"is_file_browse": true,
-		"active":         true,
+	return CurrentSource{
+		ServerID: acc.Server, ServerName: acc.DisplayName(),
+		UserName: acc.UserName, SourceKind: string(acc.SourceKind()),
+		IsFileBrowse: true, Active: true,
 	}, nil
+}
+
+// CurrentSource 当前这个文件浏览型源。
+//
+// 具名类型是为了让安卓侧的字段名门禁对得上账:返回裸 map 的命令它一律放行,
+// 而这一条的字段名(server_id / server_name)和 account.listAccounts 的
+// (server / name)**故意不一样**,两边挨着写最容易串。
+type CurrentSource struct {
+	ServerID     string `json:"server_id"`
+	ServerName   string `json:"server_name"`
+	UserName     string `json:"user_name"`
+	SourceKind   string `json:"source_kind"`
+	IsFileBrowse bool   `json:"is_file_browse"`
+	Active       bool   `json:"active"`
 }
 
 func cmdLogin(ctx context.Context, seq int64, a map[string]any) (any, error) {
