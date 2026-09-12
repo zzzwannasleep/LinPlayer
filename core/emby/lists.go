@@ -108,6 +108,10 @@ type ItemQuery struct {
 	Genres     []string `json:"genres"`
 	Tags       []string `json:"tags"`
 	Studios    []string `json:"studios"`
+	// StudioIds 按**工作室 id** 筛。实测(2026-09-12,Emby 4.9.5):
+	// `Studios=<名字>` 被完全无视 —— 返回全库 1673 条,头几条的工作室对不上;
+	// 换成 `StudioIds=49567` 精确命中 1 条。所以点工作室 chip 走的是这一条。
+	StudioIds []string `json:"studio_ids"`
 	Years      []int64  `json:"years"`
 	RatingMin  *float64 `json:"rating_min"`
 	RatingMax  *float64 `json:"rating_max"`
@@ -118,17 +122,38 @@ func (q *ItemQuery) needsLocalFilter() bool {
 		len(q.Years) > 0 || q.RatingMin != nil || q.RatingMax != nil
 }
 
-func (q *ItemQuery) matches(it Item) bool {
-	if len(q.Genres) > 0 {
-		hit := false
-		for _, g := range q.Genres {
-			for _, x := range it.Genres {
-				if strings.EqualFold(x, g) {
-					hit = true
-				}
+// anyFold 两串列表有没有交集(不分大小写)。空的要求列表当成「不筛」。
+func anyFold(want, have []string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	for _, w := range want {
+		for _, h := range have {
+			if strings.EqualFold(w, h) {
+				return true
 			}
 		}
-		if !hit {
+	}
+	return false
+}
+
+func (q *ItemQuery) matches(it Item) bool {
+	if !anyFold(q.Genres, it.Genres) {
+		return false
+	}
+	/* ☠ 标签和工作室原来**只发出去、不复筛** —— 而 `needsLocalFilter` 又把它们
+	   算作「要复筛」。于是在无视这两个参数的服务器上,复筛一遍什么都没滤掉,
+	   整页不匹配的条目照样铺出来,一句错都不报。
+	   实测 2026-09-12:`Studios=<名字>` 在真 Emby 4.9.5 上返回全库 1673 条。 */
+	if !anyFold(q.Tags, it.Tags) {
+		return false
+	}
+	if len(q.Studios) > 0 {
+		names := make([]string, 0, len(it.Studios))
+		for _, st := range it.Studios {
+			names = append(names, st.Name)
+		}
+		if !anyFold(q.Studios, names) {
 			return false
 		}
 	}
@@ -170,7 +195,7 @@ func (c *Client) Items(ctx context.Context, s *Session, parentID string, q *Item
 	// Fields 必须带 Genres/ProductionYear/CommunityRating,否则客户端复筛没有判据。
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s/Users/%s/Items?ParentId=%s&Recursive=true&IncludeItemTypes=Movie,Series"+
-		"&Fields=PrimaryImageAspectRatio,Genres,ProductionYear,CommunityRating",
+		"&Fields=PrimaryImageAspectRatio,Genres,Tags,Studios,ProductionYear,CommunityRating",
 		s.Server, url.PathEscape(s.UserID), url.QueryEscape(parentID))
 
 	limit := ServerPageCap
@@ -196,6 +221,8 @@ func (c *Client) Items(ctx context.Context, s *Session, parentID string, q *Item
 	pushList(&b, "Genres", q.Genres, "|")
 	pushList(&b, "Tags", q.Tags, "|")
 	pushList(&b, "Studios", q.Studios, "|")
+	// 工作室**按 id 才筛得动**(见 ItemQuery.StudioIds 上那段实测)
+	pushList(&b, "StudioIds", q.StudioIds, ",")
 	if len(q.Years) > 0 {
 		parts := make([]string, 0, len(q.Years))
 		for _, y := range q.Years {

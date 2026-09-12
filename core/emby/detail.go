@@ -74,6 +74,12 @@ type ItemDetail struct {
 	// ★ 分集自己没有这条元数据,所以要**回头问它所属的剧**(见 seriesBgmID)。
 	BgmID *int64 `json:"bgm_id"`
 
+	// Tags 自定义标签,Studios 出品方(带 id)。**详情页那排 chip 要能点**
+	// 【用户定 2026-09-12:「增加 标签 工作室,同时支持点击 标签 工作室 类型 的跳转」】。
+	// 工作室带 id 是因为按名字筛在真 Emby 上是假的,见 [ItemQuery.StudioIds]。
+	Tags    []string `json:"tags"`
+	Studios []Named  `json:"studios"`
+
 	Children []Item   `json:"children"` // Series/Season → 剧集;Movie/Episode → 空
 	People   []Person `json:"people"`
 }
@@ -143,7 +149,7 @@ func (c *Client) Detail(ctx context.Context, s *Session, itemID string, withChil
 	// Taglines / OfficialRating / Status:「这剧完结没有」是选片时真会问的问题,
 	// 比画质标签有用得多。★ 电影没有 Status,Taglines 常为空数组 ——
 	// 两者都是可空,前端没值就**整行不画**,不留空位。
-	u := fmt.Sprintf("%s/Users/%s/Items/%s?Fields=Overview,Genres,ProductionYear,"+
+	u := fmt.Sprintf("%s/Users/%s/Items/%s?Fields=Overview,Genres,Tags,Studios,ProductionYear,"+
 		"CommunityRating,PremiereDate,People,Taglines,OfficialRating,Status,ChildCount,ProviderIds",
 		s.Server, url.PathEscape(s.UserID), url.PathEscape(itemID))
 
@@ -242,6 +248,8 @@ func (c *Client) Detail(ctx context.Context, s *Session, itemID string, withChil
 
 	return &ItemDetail{
 		ID:          id,
+		Tags:        jstrList(j, "Tags"),
+		Studios:     jnamedList(j, "Studios"),
 		Name:        jstr(j, "Name"),
 		Type:        typ,
 		Overview:    jstr(j, "Overview"),
@@ -396,4 +404,46 @@ func jmap(m map[string]any, k string) map[string]any {
 		return map[string]any{}
 	}
 	return v
+}
+
+// jstrList 一个字符串数组字段。**取不到给空数组不给 nil** ——
+// null 到了前端会让 `.length` 那一行整个炸掉,而不是少画一行。
+func jstrList(j map[string]any, key string) []string {
+	out := []string{}
+	arr, _ := j[key].([]any)
+	for _, v := range arr {
+		if sv, ok := v.(string); ok && sv != "" {
+			out = append(out, sv)
+		}
+	}
+	return out
+}
+
+// jnamedList 一个 `[{Name, Id}]` 数组字段。id 两家类型不同(Emby 数字、
+// Jellyfin GUID 字符串),一律拉成字符串。
+func jnamedList(j map[string]any, key string) []Named {
+	out := []Named{}
+	arr, _ := j[key].([]any)
+	for _, v := range arr {
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := m["Name"].(string)
+		if name == "" {
+			continue // 没名字的画出来是个空 chip,点了还搜不出东西
+		}
+		out = append(out, Named{Name: name, ID: anyID(m["Id"])})
+	}
+	return out
+}
+
+func anyID(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatInt(int64(x), 10)
+	}
+	return ""
 }

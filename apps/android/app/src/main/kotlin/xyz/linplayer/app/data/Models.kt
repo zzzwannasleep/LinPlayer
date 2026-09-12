@@ -37,6 +37,18 @@ fun JsonObject?.boolOrNull(k: String): Boolean? = this?.get(k)?.jsonPrimitive?.b
 fun JsonObject?.strList(k: String): List<String> =
     this?.get(k).arr().mapNotNull { it.jsonPrimitive.contentOrNull }
 
+/**
+ * 一串 `{name, id}`(工作室这类)。返回 `(名字, id)`。
+ *
+ * 没名字的丢掉 —— 画出来是个空 chip,点了还搜不出东西。
+ */
+fun JsonObject?.namedList(k: String): List<Pair<String, String>> =
+    this?.get(k).arr().mapNotNull {
+        val o = it.obj() ?: return@mapNotNull null
+        val n = o.str("name") ?: return@mapNotNull null
+        if (n.isBlank()) null else n to (o.str("id") ?: "")
+    }
+
 /** 条目。字段名照 `core/emby/emby.go` 的 `Item`(JSON 名一致,对账靠的就是这个)。 */
 @Immutable
 data class Item(

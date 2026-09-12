@@ -29,6 +29,10 @@ public sealed class DetailPage : PageBase
     /// <summary>分集。<b>和头部分开拉</b> —— 见构造函数里那段注释。</summary>
     private Task<List<CardItem>>? _episodesTask;
     private readonly ContentControl _episodesHost = new();
+    /* 相似推荐。桌面端此前**整块没有**,而移动端一直有
+       (用户 2026-09-12:「桌面端集/电影详情页需要优化,缺少很多东西,
+       参考移动端集/电影详情页」)。异步补,拉不到就整块不画。 */
+    private readonly ContentControl _similarHost = new();
 
     /// <summary>头图区(全宽出血)。</summary>
     private readonly ContentControl _heroHost = new();
@@ -77,7 +81,7 @@ public sealed class DetailPage : PageBase
 
     /* 换档时要重新量的四块。**按槽存不按表存** —— 用列表的话每次重画都会再挂一份,
        而详情页的重画路径是真实存在的(见 Redraw 那一段),挂两份就是同一块画两遍。 */
-    private Action? _rescaleHead, _rescaleEpisodes, _rescalePeople, _rescaleCollection;
+    private Action? _rescaleHead, _rescaleEpisodes, _rescalePeople, _rescaleCollection, _rescaleSimilar;
 
     public DetailPage(CoreClient core, string server, string itemId)
     {
@@ -91,6 +95,7 @@ public sealed class DetailPage : PageBase
             _rescaleHead?.Invoke();
             _rescaleEpisodes?.Invoke();
             _rescalePeople?.Invoke();
+            _rescaleSimilar?.Invoke();
             _rescaleCollection?.Invoke();
         });
 
@@ -483,6 +488,54 @@ public sealed class DetailPage : PageBase
             _rescalePeople();
             body.Children.Add(peopleHost);
         }
+
+        // ---- 相似推荐 ----
+        // 挂点先摆上,内容异步补:为了这一块让整页晚出来是本末倒置,
+        // 而它又常常是空的(刮削不全的库上 Similar 直接回空)
+        body.Children.Add(Loose(_similarHost));
+        _ = LoadSimilar(id);
+    }
+
+    /// <summary>
+    /// 相似推荐。<b>拉不到 / 没有就整块不画</b> —— 摆一个「暂无相似内容」的空标题
+    /// 比没有更糟:它占着一屏高度,而且每次进详情页都提醒一次「这里本该有东西」。
+    /// </summary>
+    private async Task LoadSimilar(string id)
+    {
+        List<CardItem> items;
+        try
+        {
+            var s = Nav.Session!;
+            var r = await _core.EmbySimilarItems(new
+            {
+                s.server, s.token, s.user_id, s.device_id, item_id = id, limit = 12,
+            });
+            items = r.ValueKind == JsonValueKind.Array
+                ? r.EnumerateArray().Select(CardItem.From).ToList() : [];
+        }
+        catch
+        {
+            // 拉不到就当没有。相似推荐是锦上添花,为它把详情页拖红不值当
+            return;
+        }
+        if (items.Count == 0) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var host = new ContentControl();
+            _rescaleSimilar = () =>
+            {
+                var w = Responsive.S(Bounds.Width, 168, 112);
+                host.Content = Carousel.Rail(items,
+                    it => new Card(_core, _server, it, false,
+                        LibraryPage.OpenDetail(_core, _server), width: w),
+                    w * 3 / 2, out _);
+            };
+            _rescaleSimilar();
+            _similarHost.Content = new StackPanel
+            {
+                Spacing = 14, Children = { H2($"相似推荐 · {items.Count}"), host },
+            };
+        });
     }
 
     /// <summary>演职人员一格:圆头像 + 姓名 + 角色。</summary>
@@ -618,18 +671,17 @@ public sealed class DetailPage : PageBase
            而且年份、评分、分级、类型是四种不同的东西,拿同一个分隔符串起来
            等于告诉眼睛「它们是一类」。片状可以自然折行,也能一眼数清有几项。 */
         var chips = new WrapPanel();
-        void Chip(string t)
+        void Chip(string t) => chips.Children.Add(Views.Chips.Plain(t));
+
+        /* 类型 / 标签 / 工作室这三种片是**能点的**
+           【用户定 2026-09-12:「同时支持点击 标签 工作室 类型 的跳转」】。
+           年份、评分、分级那几种不给点:它们要么不是一个可以「按它列一串」的维度,
+           要么点出来是全库。能点和不能点长得不一样,别让人去试。 */
+        void Jump(string kind, string label, string value)
         {
-            if (t == "") return;
-            chips.Children.Add(new Border
-            {
-                Margin = new Thickness(0, 0, 10, 10), Padding = new Thickness(10, 6),
-                CornerRadius = new CornerRadius(6),
-                Background = Tok.Of("PanelAlt"),
-                BorderBrush = Tok.Of("LineStrong"),
-                BorderThickness = new Thickness(1),
-                Child = new TextBlock { Text = t, FontSize = 12.5, Foreground = Tok.Of("Ink") },
-            });
+            if (label == "" || value == "") return;
+            chips.Children.Add(Views.Chips.Clickable(label,
+                () => Nav.Push(new LibraryGridPage(_core, _server, "", label, (kind, value)))));
         }
         if (Num(d, "year") > 0) Chip(((int)Num(d, "year")).ToString());
         if (Num(d, "rating") > 0) Chip($"★ {Num(d, "rating"):0.0}");
@@ -641,7 +693,11 @@ public sealed class DetailPage : PageBase
              它在下面「剧集 · N 季 · 共 M 集」那一行,那时候数据已经在手上了。
              为了凑一个数去等分集,等于把整个头部又拖回去等那 1.8MB。 */
         if (type == "Series" && Num(d, "child_count") > 0) Chip($"{(int)Num(d, "child_count")} 季");
-        foreach (var g in Arr(d, "genres").Take(4)) Chip(g);
+        foreach (var g in Arr(d, "genres").Take(4)) Jump("genre", g, g);
+        foreach (var t in Arr(d, "tags").Take(6)) Jump("tag", t, t);
+        /* 工作室点过去要带 **id 不是名字** —— 实测(Emby 4.9.5)`Studios=<名字>`
+           被完全无视,返回全库 1673 条;`StudioIds=` 才精确命中。 */
+        foreach (var st in Named(d, "studios").Take(4)) Jump("studio", st.Name, st.Id);
         if (chips.Children.Count > 0) head.Children.Add(chips);
 
         // 标语:没有就整行不画(实测只有约三分之一的条目有)
@@ -1645,4 +1701,10 @@ public sealed class DetailPage : PageBase
     private static List<JsonElement> Arr2(JsonElement e, string k) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.Array
             ? v.EnumerateArray().ToList() : [];
+
+    /// <summary>一串 <c>{name, id}</c>。没名字的丢掉 —— 画出来是个空片,点了还搜不出东西。</summary>
+    private static List<(string Name, string Id)> Named(JsonElement e, string k) =>
+        Arr2(e, k)
+            .Select(x => (Name: Str(x, "name"), Id: Str(x, "id")))
+            .Where(x => x.Name != "").ToList();
 }

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -255,6 +255,10 @@ public sealed class LibraryGridPage : PageBase
 
     private readonly CoreClient _core;
     private readonly string _server, _parentId;
+    /* 这一页是不是「按某个类型 / 标签 / 工作室 列条目」。空 = 普通的库网格。
+       复用这一页而不是另写一张:分页、排序、代次、滚到底再拉,那几件事一模一样,
+       另写一份的下场是其中一件在这儿修了、在那儿没修。 */
+    private readonly (string Kind, string Value) _facet;
     /// <summary> 虚拟化网格。这一页是全站最长的一页(分页拉,能拉到上千条)。</summary>
     private readonly MediaGrid _grid;
     private readonly TextBlock _status = new() { Classes = { "dim" } };
@@ -273,9 +277,16 @@ public sealed class LibraryGridPage : PageBase
        没有它的表现是用户报的「筛选了不刷新」—— 见 Requery 与 LoadMore。 */
     private int _gen;
 
-    public LibraryGridPage(CoreClient core, string server, string parentId, string title)
+    /// <param name="facet">
+    /// 按某一项列条目:<c>("genre"|"tag"|"studio", 值)</c>。工作室那一档传的是
+    /// <b>id 不是名字</b> —— 实测(Emby 4.9.5)<c>Studios=&lt;名字&gt;</c> 被完全无视,
+    /// 返回全库 1673 条,只有 <c>StudioIds=</c> 才精确命中。
+    /// </param>
+    public LibraryGridPage(CoreClient core, string server, string parentId, string title,
+        (string Kind, string Value) facet = default)
     {
         _core = core; _server = server; _parentId = parentId;
+        _facet = (facet.Kind ?? "", facet.Value ?? "");
         _grid = new MediaGrid(core, server, false, LibraryPage.OpenDetail(core, server));
 
         _sort.ItemsSource = Sorts.Select(x => x.Label).ToList();
@@ -298,7 +309,11 @@ public sealed class LibraryGridPage : PageBase
            窗口收窄之后 StackPanel 会把最后一个**直接切掉**,而且一点提示都没有。
            换行至少还看得见。 */
         var bar = new WrapPanel { ItemSpacing = 10, ItemHeight = double.NaN };
-        foreach (var b in new Control[] { _sort, _genre, _year })
+        // 类型落地页上不摆「类型」下拉:这一页本身就是一个类型,再给一个能改的
+        // 下拉等于让人把自己筛出去,而标题还写着原来那个类型
+        var combosInBar = _facet.Kind == "genre"
+            ? new Control[] { _sort, _year } : [_sort, _genre, _year];
+        foreach (var b in combosInBar)
         {
             b.Margin = new Thickness(0, 0, 0, 6);
             bar.Children.Add(b);
@@ -429,7 +444,11 @@ public sealed class LibraryGridPage : PageBase
                 query = new
                 {
                     limit = PageSize, start_index = _loaded,
-                    sort_by = by, sort_order = order, genres, years,
+                    sort_by = by, sort_order = order, years,
+                    // 落地页那一档压过下拉框:这一页存在的理由就是「只看这一个」
+                    genres = _facet.Kind == "genre" ? [_facet.Value] : genres,
+                    tags = _facet.Kind == "tag" ? new[] { _facet.Value } : null,
+                    studio_ids = _facet.Kind == "studio" ? new[] { _facet.Value } : null,
                 },
             });
             // 等这一趟网络的工夫里用户换了筛选:这批是旧筛选的结果,一个字都不能落地

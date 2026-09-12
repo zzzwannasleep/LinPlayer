@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"linplayer/core/net/tlspolicy"
@@ -64,6 +65,21 @@ type Item struct {
 	// 「更新时间」排序用。DateLastMediaAdded 优先(剧集新集入库才动),没有就 DateCreated。
 	DateUpdated *string `json:"date_updated"`
 	SortName    *string `json:"sort_name"`
+
+	// Tags 自定义标签。实测某台真服上**全库一条都没有** —— 前端没值就整行不画。
+	Tags []string `json:"tags"`
+	// Studios 出品方。**带 id**:按名字筛在真 Emby 上是假的(实测 `Studios=<名字>`
+	// 返回全库 1673 条),只有 `StudioIds=` 才精确命中。
+	Studios []Named `json:"studios"`
+}
+
+// Named 一个有 id 的名字(工作室、类型条目……)。
+//
+// ★ id 的类型**两家不一样**:Emby 给数字(实测 49567),Jellyfin 给 GUID 字符串。
+// 所以对外一律转成字符串,别在这上面挑边。
+type Named struct {
+	Name string `json:"name"`
+	ID   string `json:"id"`
 }
 
 // Page 一页结果(含总数)。
@@ -100,6 +116,28 @@ type rawItem struct {
 	DateCreated           *string           `json:"DateCreated"`
 	DateLastMediaAdded    *string           `json:"DateLastMediaAdded"`
 	SortName              *string           `json:"SortName"`
+	Tags                  []string          `json:"Tags"`
+	Studios               []rawNamed        `json:"Studios"`
+}
+
+// rawNamed Emby 的 `{Name, Id}`。Id 收成 RawMessage 是因为**两家类型不同**:
+// Emby 给数字、Jellyfin 给 GUID 字符串,声明成任何一种都会在另一家上解析失败,
+// 而失败的表现是整个条目解析报错 —— 不是少一个字段。
+type rawNamed struct {
+	Name string          `json:"Name"`
+	ID   json.RawMessage `json:"Id"`
+}
+
+// named 把 `{Name, Id}` 折成对外的形状,顺手把数字 id 和带引号的字符串 id 拉平。
+func named(in []rawNamed) []Named {
+	out := make([]Named, 0, len(in))
+	for _, r := range in {
+		if r.Name == "" {
+			continue // 没名字的条目画出来是一个空 chip,点了还搜不出东西
+		}
+		out = append(out, Named{Name: r.Name, ID: strings.Trim(string(r.ID), `"`)})
+	}
+	return out
 }
 
 type rawUserData struct {
@@ -236,6 +274,11 @@ func fromRaw(r rawItem) Item {
 	if genres == nil {
 		genres = []string{}
 	}
+	tags := r.Tags
+	if tags == nil {
+		// null 和空数组对前端是两件事:null 会让 `.length` 那一行整个炸掉
+		tags = []string{}
+	}
 	providers := r.ProviderIDs
 	if providers == nil {
 		providers = map[string]string{}
@@ -266,6 +309,8 @@ func fromRaw(r rawItem) Item {
 		SeriesID:              nonEmpty(r.SeriesID),
 		DateUpdated:           nonEmpty(dateUpdated),
 		SortName:              nonEmpty(r.SortName),
+		Tags:                  tags,
+		Studios:               named(r.Studios),
 	}
 }
 

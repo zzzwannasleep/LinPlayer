@@ -124,7 +124,10 @@ def doc_return_types():
 CALL = re.compile(r'\b(?:call|block|callJson)\(\s*"([a-z]+\.[A-Za-z]+)"')
 NL = chr(10)
 FUNC = re.compile(NL + '(?:@Composable' + NL + ')?(?:private |internal )?fun ')
-READ = re.compile(r'\.(?:str|dbl|long|bool|strList|get)\(\s*"([a-z_0-9]+)"\s*\)')
+# ☠ 新写一个取值器就要加进来。漏掉的表现是**闸门静默少数几处** ——
+# 它照样打「✓ N 处」,只是那几处从来没被对过账(namedList 就这么漏过一次)。
+READ = re.compile(
+    r'\.(?:str|dbl|long|bool|boolOrNull|strList|namedList|arr|obj|get)\(\s*"([a-z_0-9]+)"\s*\)')
 
 
 def main():

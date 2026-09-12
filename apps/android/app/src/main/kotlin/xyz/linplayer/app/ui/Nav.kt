@@ -19,7 +19,16 @@ object Route {
     @Serializable data class Library(val viewId: String, val title: String)   // U1.4
     @Serializable data class Detail(val itemId: String, val type: String)     // U1.5
     @Serializable data class Search(val viewId: String? = null, val q: String? = null) // U1.7
-    @Serializable data object Favorites                                       // U1.9a
+    @Serializable data object Favorites                                       // U1.9a · Tab 2
+
+    /**
+     * 「按某个类型 / 标签 / 工作室 列条目」的落地页
+     * 【用户定 2026-09-12:「支持点击 标签 工作室 类型 的跳转」】。
+     *
+     * kind ∈ genre / tag / studio。**工作室那一档 value 传的是 id 不是名字** ——
+     * 实测(Emby 4.9.5)`Studios=<名字>` 被完全无视,返回全库 1673 条。
+     */
+    @Serializable data class Facet(val kind: String, val value: String, val label: String)
     @Serializable data class Lines(val serverId: String, val name: String)    // U1.9b
     @Serializable data object Browse                                          // U1.10
     @Serializable data object Catalog                                         // U1.11

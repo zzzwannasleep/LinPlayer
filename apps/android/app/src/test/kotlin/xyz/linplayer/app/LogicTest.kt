@@ -16,6 +16,7 @@ import xyz.linplayer.app.ui.components.dialogWidth
 import xyz.linplayer.app.ui.components.longShotHeight
 import xyz.linplayer.app.ui.components.longShotSlices
 import xyz.linplayer.app.ui.pages.moved
+import xyz.linplayer.app.ui.pages.facetParam
 import xyz.linplayer.app.ui.pages.needRefetch
 import xyz.linplayer.app.ui.player.DanmakuStyle
 import xyz.linplayer.app.ui.player.DmItem
@@ -740,5 +741,15 @@ class LogicTest {
         assertEquals(10.0, dmTick(50.0, 10.0, 0.0, 1.0), 1e-9)
         // 倍速要参与走表,否则 2 倍速下弹幕比画面慢一半
         assertEquals(10.0 + 2 / 60.0, dmTick(10.0, 10.0 + 2 / 60.0, 1 / 60.0, 2.0), 1e-9)
+    }
+
+    @Test fun `工作室落地页必须按id筛不能按名字`() {
+        assertEquals("genres", facetParam("genre"))
+        assertEquals("tags", facetParam("tag"))
+        // ☠ 写成 studios 的表现是「点了工作室,出来的是一整个库」,而且一句错都不报:
+        //    实测 Emby 4.9.5 上 Studios=<名字> 返回全库 1673 条
+        assertEquals("studio_ids", facetParam("studio"))
+        // 认不出的一律当类型 —— 总比往 query 里放一个核心层不认识的键强
+        assertEquals("genres", facetParam("没这一档"))
     }
 }

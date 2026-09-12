@@ -45,6 +45,7 @@ import xyz.linplayer.app.ui.pages.CalendarPage
 import xyz.linplayer.app.ui.pages.CatalogPage
 import xyz.linplayer.app.ui.pages.DetailPage
 import xyz.linplayer.app.ui.pages.DownloadsPage
+import xyz.linplayer.app.ui.pages.FacetPage
 import xyz.linplayer.app.ui.pages.FavoritesPage
 import xyz.linplayer.app.ui.pages.GatePage
 import xyz.linplayer.app.ui.pages.HomePage
@@ -178,6 +179,7 @@ private fun MainShell() {
                 composable<Route.Detail> { DetailPage(nav, it) }
                 composable<Route.Search> { SearchPage(nav, it) }
                 composable<Route.Favorites> { FavoritesPage(nav) }
+                composable<Route.Facet> { FacetPage(nav, it) }
                 composable<Route.Lines> { LinesPage(nav, it) }
                 composable<Route.Browse> { BrowsePage(nav) }
                 composable<Route.Catalog> { CatalogPage(nav) }

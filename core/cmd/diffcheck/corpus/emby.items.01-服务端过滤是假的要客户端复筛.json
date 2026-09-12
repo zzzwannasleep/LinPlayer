@@ -15,7 +15,7 @@
        "runtime_secs":0,"resume_secs":0,"series_name":null,"episode_no":null,"season_no":null,
        "video_height":null,"bitrate":null,"size_bytes":null,"played":false,"unplayed_item_count":0,
        "genres":["喜剧"],"year":null,"rating":null,"provider_ids":{},"presentation_unique_key":null,
-       "path":null,"series_id":null,"date_updated":null,"sort_name":null}
+       "path":null,"series_id":null,"date_updated":null,"sort_name":null,"tags":[],"studios":[]}
     ]
   }
 }

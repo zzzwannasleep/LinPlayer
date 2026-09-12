@@ -59,6 +59,7 @@ import xyz.linplayer.app.data.block
 import xyz.linplayer.app.data.bool
 import xyz.linplayer.app.data.dbl
 import xyz.linplayer.app.data.long
+import xyz.linplayer.app.data.namedList
 import xyz.linplayer.app.data.obj
 import xyz.linplayer.app.data.str
 import xyz.linplayer.app.data.strList
@@ -372,13 +373,24 @@ fun DetailPage(nav: NavController, entry: NavBackStackEntry) {
                 }
 
                 item("tags") {
-                    val tags = d.strList("genres").take(4) +
-                        listOfNotNull(d.str("official_rating"), d.str("status"))
-                    if (tags.isNotEmpty()) Row(
+                    /* 类型 / 标签 / 工作室这三种**能点**
+                       【用户定 2026-09-12:「支持点击 标签 工作室 类型 的跳转」】。
+                       分级和完结状态不给点:它们不是「能按它列一串」的维度。
+                       工作室带的是 **id 不是名字** —— 按名字筛在真 Emby 上是假的。 */
+                    val jumps = d.strList("genres").take(4).map { Triple("genre", it, it) } +
+                        d.strList("tags").take(6).map { Triple("tag", it, it) } +
+                        d.namedList("studios").take(3).map { Triple("studio", it.second, it.first) }
+                    val plain = listOfNotNull(d.str("official_rating"), d.str("status"))
+                    if (jumps.isNotEmpty() || plain.isNotEmpty()) Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                             .padding(start = Sp.x16, end = Sp.x16, top = Sp.x12),
                         horizontalArrangement = Arrangement.spacedBy(Sp.x6),
-                    ) { tags.forEach { Tag(it) } }
+                    ) {
+                        jumps.forEach { (kind, value, label) ->
+                            Tag(label) { nav.navigate(Route.Facet(kind, value, label)) }
+                        }
+                        plain.forEach { Tag(it) }
+                    }
                 }
 
                 if (!isBoxSet) item("actions") {
@@ -807,13 +819,18 @@ private fun kickerOf(d: JsonObject?): String = when (d.str("type_")) {
 /* ───────────────────────────── 区块 ───────────────────────────── */
 
 @Composable
-private fun Tag(text: String) {
+private fun Tag(text: String, onClick: (() -> Unit)? = null) {
     val c = Lp.colors
+    // 能点的和不能点的**长得不一样**:一排里有的能点有的不能点,
+    // 外观一致的话用户只能靠试
     Text(
         text,
-        Modifier.clip(RoundedCornerShape(R.pill)).background(c.s1)
+        Modifier.clip(RoundedCornerShape(R.pill))
+            .background(if (onClick != null) c.acc.copy(alpha = .18f) else c.s1)
+            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
             .padding(horizontal = Sp.x10, vertical = 3.dp),
-        color = c.fg.copy(alpha = .86f), fontSize = 11.sp, maxLines = 1,
+        color = if (onClick != null) c.acc else c.fg.copy(alpha = .86f),
+        fontSize = 11.sp, maxLines = 1,
     )
 }
 

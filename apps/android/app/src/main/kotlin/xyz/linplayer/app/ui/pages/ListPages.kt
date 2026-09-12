@@ -77,6 +77,8 @@ import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.R
 import xyz.linplayer.app.ui.theme.Sp
+import androidx.compose.runtime.derivedStateOf
+import androidx.navigation.toRoute
 
 /**
  * 收藏(U1.9a)。**2026-09-12 起是底栏第三个 Tab**,所以没有返回键。
@@ -273,4 +275,98 @@ private fun GridSkel(pad: PaddingValues) {
             }
         }
     }
+}
+
+/**
+ * 「按某个类型 / 标签 / 工作室 列条目」
+ * 【用户定 2026-09-12:「支持点击 标签 工作室 类型 的跳转」】。
+ *
+ * ★ 工作室走的是 `studio_ids` 不是 `studios`:实测(Emby 4.9.5)按名字筛被完全无视,
+ *   返回全库 1673 条,头几条的工作室对不上;按 id 才精确命中。
+ */
+@Composable
+fun FacetPage(nav: NavController, entry: androidx.navigation.NavBackStackEntry) {
+    val route = entry.toRoute<Route.Facet>()
+    val app = LocalApp.current
+    val scope = rememberCoroutineScope()
+    val grid = rememberLazyGridState()
+    var items by remember { mutableStateOf<List<Item>>(emptyList()) }
+    var first by remember { mutableStateOf<Block<Unit>>(Block.Loading) }
+    var total by remember { mutableStateOf<Long?>(null) }
+    var loading by remember { mutableStateOf(false) }
+
+    suspend fun fetch(offset: Int) {
+        val q = buildMap<String, Any> {
+            put("start_index", offset); put("limit", FACET_PAGE)
+            put("sort_by", "SortName"); put("sort_order", "Ascending")
+            put(facetParam(route.kind), jsonArrayOf(listOf(route.value)))
+        }
+        // parent_id 空 = 不限库:按标签找片本来就不该被「你现在在哪个库」框住
+        val a = mapOf("parent_id" to "", "query" to args(*q.toList().toTypedArray()))
+        when (val r = app.block("emby.listItemsPage", args(*a.toList().toTypedArray()))) {
+            is Block.Ok -> {
+                val p = Page.from(r.value)
+                items = if (offset == 0) p.items else items + p.items
+                total = p.total
+                first = Block.Ok(Unit)
+            }
+            is Block.Fail -> if (offset == 0) first = r
+            else -> Unit
+        }
+    }
+    LaunchedEffect(route.kind, route.value) { fetch(0) }
+
+    // 滚到底再拉下一页。闩防重入 —— 没有它的话一屏滚动能连发四五次同一页
+    val needMore by remember {
+        derivedStateOf {
+            val last = grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            items.isNotEmpty() && last >= items.size - 8 &&
+                (total == null || items.size < (total ?: 0))
+        }
+    }
+    LaunchedEffect(needMore) {
+        if (!needMore || loading) return@LaunchedEffect
+        loading = true
+        fetch(items.size)
+        loading = false
+    }
+
+    val kindName = when (route.kind) { "tag" -> "标签"; "studio" -> "工作室"; else -> "类型" }
+    LpScaffold(route.label, subtitle = kindName, onBack = { nav.popBackStack() },
+        scrolled = rememberScrolled(grid)) { pad ->
+        BlockBox(first, { scope.launch { fetch(0) } }, skeleton = { GridSkel(pad) }) {
+            if (items.isEmpty()) EmptyState(
+                "没有找到「${route.label}」下的内容",
+                "这台服务器上可能没有刮到这一项,或者它只挂在被屏蔽的库里。",
+                LpIcons.search,
+            ) else LazyVerticalGrid(
+                GridCells.Adaptive(112.dp), Modifier.fillMaxSize(), grid,
+                contentPadding = PaddingValues(Sp.x16, Sp.x8, Sp.x16, pad.calculateBottomPadding()),
+                horizontalArrangement = Arrangement.spacedBy(Sp.x10),
+                verticalArrangement = Arrangement.spacedBy(Sp.x16),
+            ) {
+                items(items, key = { it.id }) {
+                    MediaCard(it, app.imageUrl(it.id, "Primary", 330),
+                        { nav.navigate(Route.Detail(it.id, it.type)) },
+                        Modifier.fillMaxWidth(), menu = cardActions(app, scope, it))
+                }
+            }
+        }
+    }
+}
+
+/** 一页拉多少。和媒体库那页同一个数,别在这儿另起一档。 */
+private const val FACET_PAGE = 120
+
+/**
+ * 落地页那一档要往 `emby.listItemsPage` 的 query 里放哪个参数名。
+ *
+ * ☠ 工作室是 **`studio_ids`** 不是 `studios`:实测(Emby 4.9.5)按名字筛被完全无视,
+ * 返回全库 1673 条、头几条对不上;按 id 才精确命中。写成 `studios` 的表现是
+ * 「点了工作室,出来的是一整个库」—— **一句错都不报**。
+ */
+internal fun facetParam(kind: String): String = when (kind) {
+    "tag" -> "tags"
+    "studio" -> "studio_ids"
+    else -> "genres"
 }
