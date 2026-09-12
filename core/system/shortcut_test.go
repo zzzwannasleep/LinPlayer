@@ -64,9 +64,22 @@ func Test快捷方式真写真读真修(t *testing.T) {
 	if err := comReady(); err != nil {
 		t.Skipf("这台机器上起不了 WScript.Shell COM:%v —— .lnk 只有真桌面上验得了", err)
 	}
+	/* 两组路径分开跑,**不是为了多测一遍**:
+	   纯 ASCII 那组钉的是「.lnk 这条链路本身通不通」,中文那组钉的是
+	   「值有没有被哪一层的 ANSI 代码页啃掉」。合成一组的话,
+	   en-US 机器上红了分不清是链路坏了还是编码坏了 —— CI 上正是这么卡了四个提交。 */
+	for _, c := range []struct{ why, sub, moved string }{
+		{"纯 ASCII 路径", "plain dir", "moved dir"},
+		{"中文 + 空格路径", "我的 程序", "挪过去 的地方"},
+	} {
+		t.Run(c.why, func(t *testing.T) { roundTripLnk(t, c.sub, c.moved) })
+	}
+}
+
+func roundTripLnk(t *testing.T, sub, movedDir string) {
+	t.Helper()
 	dir := t.TempDir()
-	// 中文 + 空格:psRun 把值走环境变量递进去,为的就是这一类路径
-	exeDir := filepath.Join(dir, "我的 程序")
+	exeDir := filepath.Join(dir, sub)
 	if err := os.MkdirAll(exeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +100,7 @@ func Test快捷方式真写真读真修(t *testing.T) {
 	}
 
 	// 把程序挪窝:旧目标不在了,这正是用户报的「找不到项目」
-	moved := filepath.Join(dir, "挪过去 的地方")
+	moved := filepath.Join(dir, movedDir)
 	if err := os.MkdirAll(moved, 0o755); err != nil {
 		t.Fatal(err)
 	}

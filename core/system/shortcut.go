@@ -83,8 +83,11 @@ psValue 跑一段 PowerShell 并把它的值取回来。
 Base64 全是 ASCII,哪个代码页都改不动它,而且不需要控制台。
 */
 func psValue(script string, env map[string]string) (string, error) {
-	out, err := psRun("$v = "+script+
-		"\n[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$v))", env)
+	/* 脚本裹进 & { } 里:前面几行是解 Base64 的赋值,不出值,取的是最后那个表达式。
+	   直接写 `$v = <脚本>` 的话,多行脚本只有第一行会被当成赋值的右边,
+	   剩下几行照跑但没人接 —— 回来是空串,而且不报错。 */
+	out, err := psRun("$v = & {\n"+script+"\n}\n"+
+		"[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$v))", env)
 	if err != nil {
 		return "", err
 	}
@@ -93,6 +96,20 @@ func psValue(script string, env map[string]string) (string, error) {
 		return "", fmt.Errorf("PowerShell 回的不是 Base64(%q):%w", out, err)
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+/*
+psArg 把一个值递进 PowerShell:环境变量里放 Base64,脚本头上解回来。
+
+☠ 直接放原文**在别的机器上会烂**。CI(en-US)实测:路径里那十个汉字到了
+PowerShell 手上是十个 `?` —— 简体中文机器的 ANSI 代码页(CP936)编得出它们,
+所以本地怎么跑都是绿的。Base64 全是 ASCII,中间隔着几层代码页都改不动它。
+*/
+func psArg(name, value string) (string, string, string) {
+	env := "LP_" + name + "_B64"
+	line := "$" + name + " = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:" +
+		env + "))\n"
+	return line, env, base64.StdEncoding.EncodeToString([]byte(value))
 }
 
 // comReady 这台机器上起不起得来 WScript.Shell。起不来就没有 .lnk 这回事
@@ -114,9 +131,9 @@ func desktopDir() string {
 
 // lnkTarget 读一个 .lnk 指向哪。读不出来返回空串(坏文件、不是 .lnk、没权限)。
 func lnkTarget(lnk string) string {
-	s, err := psValue(
-		`(New-Object -ComObject WScript.Shell).CreateShortcut($env:LP_LNK).TargetPath`,
-		map[string]string{"LP_LNK": lnk})
+	decl, env, val := psArg("lnk", lnk)
+	s, err := psValue(decl+"(New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath",
+		map[string]string{env: val})
 	if err != nil {
 		return ""
 	}
@@ -125,12 +142,14 @@ func lnkTarget(lnk string) string {
 
 // writeLnk 建 / 改一个快捷方式,指向 exe。
 func writeLnk(lnk, exe string) error {
-	_, err := psRun(`$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:LP_LNK)
-$s.TargetPath = $env:LP_EXE
-$s.WorkingDirectory = Split-Path -Parent $env:LP_EXE
-$s.IconLocation = $env:LP_EXE + ',0'
+	dl, el, lv := psArg("lnk", lnk)
+	de, ee, ev := psArg("exe", exe)
+	_, err := psRun(dl+de+`$s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+$s.TargetPath = $exe
+$s.WorkingDirectory = Split-Path -Parent $exe
+$s.IconLocation = $exe + ',0'
 $s.Description = 'LinPlayer'
-$s.Save()`, map[string]string{"LP_LNK": lnk, "LP_EXE": exe})
+$s.Save()`, map[string]string{el: lv, ee: ev})
 	return err
 }
 
