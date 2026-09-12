@@ -40,6 +40,9 @@ public sealed class DetailPage : PageBase
     /// <summary>媒体信息 / 版本条的挂点(在播放按钮下面)。</summary>
     private readonly StackPanel _mediaHost = new() { Spacing = 10 };
 
+    /// <summary>媒体信息那一整块(草稿 03 页第 20 条)。在正文里,不在头图右列。</summary>
+    private readonly ContentControl _mediaBlocksHost = new();
+
     /// <summary>当前选中的版本 id。空 = 交给核心层按正则挑(preferred)。</summary>
     private string _versionId = "";
 
@@ -489,6 +492,10 @@ public sealed class DetailPage : PageBase
             body.Children.Add(peopleHost);
         }
 
+        // ---- 媒体信息 ----
+        // 挂点先摆上,内容跟着版本表一起补(LoadMedia)。电影 / 分集才有版本。
+        body.Children.Add(Loose(_mediaBlocksHost));
+
         // ---- 相似推荐 ----
         // 挂点先摆上,内容异步补:为了这一块让整页晚出来是本末倒置,
         // 而它又常常是空的(刮削不全的库上 Similar 直接回空)
@@ -882,6 +889,7 @@ public sealed class DetailPage : PageBase
             Use(pick);
             _mediaHost.Children.Add(picks);
             _mediaHost.Children.Add(line);
+            _mediaBlocksHost.Content = MediaBlocks(vers);
             // 别台的版本**另起一趟拉**:它要在每台服上搜片 + 逐条拉全字段,
             // 一台就是好几个来回。挡在这儿的话本服的版本表要陪着一起等。
             _ = LoadCrossVersions(itemId);
@@ -1097,6 +1105,152 @@ public sealed class DetailPage : PageBase
             host.Children.Add(PickerCell("线路", box));
         });
     }
+
+    // ---------------------------------------------------------------- 媒体信息
+
+    /// <summary>流卡的宽。窄窗口下缩一档 —— 一张 200 宽的卡在 420 的内容区里只摆得下两张。</summary>
+    private double StreamCardWidth => Responsive.S(Bounds.Width, 196, 148);
+
+    /// <summary>
+    /// 一条流(或者「常规」那一块)在卡上要写的几行。
+    ///
+    /// <para><b>抽成纯函数是为了能钉住它</b>:哪一行该出现、缺值时是不是整行不画,
+    /// 这两件事错了都不报错,画面上只是少一行 —— 而少的那一行往往正是用户在找的。</para>
+    /// <para>缺值一律**整行不画**,不写「未知」。</para>
+    /// </summary>
+    internal static List<(string K, string V)> StreamRows(JsonElement s)
+    {
+        var rows = new List<(string, string)>();
+        void Add(string k, string v) { if (!string.IsNullOrEmpty(v)) rows.Add((k, v)); }
+
+        switch (Str(s, "type_"))
+        {
+            case "Video":
+                Add("编码", Str(s, "codec") is { Length: > 0 } vc ? CodecName(vc) : "");
+                if (Num(s, "width") > 0 && Num(s, "height") > 0)
+                    Add("分辨率", $"{(int)Num(s, "width")}×{(int)Num(s, "height")}");
+                Add("码率", Mbps(Num(s, "bitrate")));
+                if (Num(s, "frame_rate") > 0) Add("帧率", $"{Num(s, "frame_rate"):0.###} fps");
+                // 制式决定要不要切软解(见杜比那条),值得单独一行
+                Add("制式", Str(s, "video_range_type"));
+                Add("规格", Str(s, "profile"));
+                break;
+            case "Audio":
+                Add("编码", Str(s, "codec") is { Length: > 0 } ac ? CodecName(ac) : "");
+                Add("语言", Str(s, "language"));
+                Add("声道", Str(s, "channel_layout") is { Length: > 0 } cl ? cl
+                    : Num(s, "channels") > 0 ? $"{(int)Num(s, "channels")} 声道" : "");
+                Add("码率", Mbps(Num(s, "bitrate")));
+                Add("轨道名", Str(s, "title"));
+                break;
+            case "Subtitle":
+                Add("语言", Str(s, "language"));
+                Add("格式", Str(s, "codec").ToUpperInvariant());
+                Add("轨道名", Str(s, "title"));
+                // 外挂字幕是**另一个文件**,要单独挂载 —— 它和内封的行为不一样,得说出来
+                if (Bool(s, "is_external")) Add("来源", "外挂");
+                break;
+        }
+        if (Bool(s, "is_default")) Add("默认", "是");
+        return rows;
+    }
+
+    /// <summary>「常规」那一块:整个版本的容器 / 体积 / 总码率 / 时长。</summary>
+    internal static List<(string K, string V)> VersionRows(JsonElement v)
+    {
+        var rows = new List<(string, string)>();
+        void Add(string k, string s) { if (!string.IsNullOrEmpty(s)) rows.Add((k, s)); }
+        Add("容器", Str(v, "container").ToUpperInvariant());
+        Add("体积", Size(v));
+        Add("总码率", Mbps(Num(v, "bitrate")));
+        if (Num(v, "runtime_secs") >= 60) Add("时长", $"{(int)(Num(v, "runtime_secs") / 60)} 分钟");
+        return rows;
+    }
+
+    /// <summary>码率的人话。0 / 缺值就是空串 —— 整行不画,不写「0 Mbps」。</summary>
+    private static string Mbps(double bps) => bps <= 0 ? "" : $"{bps / 1_000_000.0:0.##} Mbps";
+
+    /// <summary>
+    /// 媒体信息(桌面草稿 03 页第 20 条)。<b>每个版本一整块竖排,块内每条流一张
+    /// 纵向卡片横排全铺开</b>,不用点按钮切换 —— 和 Emby 官端一致。
+    ///
+    /// <para>原来这一块只有<b>一行文字</b>(「4K · HEVC · 18.4 GB · 3 条音轨 · 2 条字幕」):
+    /// 想知道第二条音轨是什么语言、字幕是不是外挂,只能起播之后到播放页去翻。</para>
+    /// </summary>
+    private Control MediaBlocks(List<JsonElement> vers)
+    {
+        var host = new StackPanel { Spacing = 10 };
+        host.Children.Add(H2("媒体信息"));
+        foreach (var v in vers)
+        {
+            if (vers.Count > 1) host.Children.Add(Dim(VersionChipLabel(new VerPick(_server, "", "", true, "", v))));
+            var blocks = new List<(string Title, List<(string K, string V)> Rows)>
+            {
+                ("常规", VersionRows(v)),
+            };
+            foreach (var s in Arr2(v, "streams"))
+            {
+                var rows = StreamRows(s);
+                if (rows.Count == 0) continue;   // 一行都写不出来的流不占一张卡
+                blocks.Add((StreamCardTitle(s), rows));
+            }
+            // 横排 + 可拖 = 和选集轨道同一个驱动器(草稿:「块内卡片鼠标左右拖动滑动」)
+            host.Children.Add(Carousel.Rail(blocks, StreamCard, StreamCardHeight(blocks), out _));
+        }
+        return host;
+    }
+
+    /// <summary>流卡的抬头。字幕用语言,音轨用语言 —— 三条「音频」并排是认不出谁是谁的。</summary>
+    private static string StreamCardTitle(JsonElement s) => Str(s, "type_") switch
+    {
+        "Video" => "视频",
+        "Audio" => Str(s, "language") is { Length: > 0 } al ? $"音频 · {al}" : "音频",
+        "Subtitle" => Str(s, "language") is { Length: > 0 } sl ? $"字幕 · {sl}" : "字幕",
+        _ => "其它",
+    };
+
+    /// <summary>
+    /// 卡高按**最长的那一块**算,所有卡一样高。
+    /// <para>各算各的高度会让这一排参差不齐,而看上去像是间距没调好。</para>
+    /// </summary>
+    private static double StreamCardHeight(List<(string Title, List<(string K, string V)> Rows)> blocks) =>
+        34 + blocks.Max(b => b.Rows.Count) * 20 + 20;
+
+    private Control StreamCard((string Title, List<(string K, string V)> Rows) b)
+    {
+        var col = new StackPanel { Spacing = 2 };
+        col.Children.Add(new TextBlock
+        {
+            Text = b.Title, FontSize = 12.5, FontWeight = FontWeight.SemiBold,
+            Margin = new Thickness(0, 0, 0, 6),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        foreach (var (k, v) in b.Rows)
+        {
+            col.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 6,
+                Children =
+                {
+                    new TextBlock { Text = k, FontSize = 11.5, Width = 46, Foreground = Tok.Of("Ink2") },
+                    new TextBlock
+                    {
+                        Text = v, FontSize = 11.5, TextTrimming = TextTrimming.CharacterEllipsis,
+                        MaxWidth = StreamValueMax,
+                    },
+                },
+            });
+        }
+        return new Border
+        {
+            Width = StreamCardWidth, Padding = new Thickness(10),
+            CornerRadius = new CornerRadius(10), Background = Tok.Of("PanelAlt"),
+            Child = col,
+        };
+    }
+
+    /// <summary>值那一列最宽能占多少。写死一个大数会把卡撑破,而卡宽是响应式的。</summary>
+    private double StreamValueMax => StreamCardWidth - 46 - 6 - 20;
 
     /// <summary>
     /// 一行人话的媒体信息。

@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.IO;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.VisualTree;
 using LinPlayer.Desktop.Core;
@@ -122,6 +124,13 @@ internal static class Program
         if (Environment.GetEnvironmentVariable("LP_EPMETAPROBE") is { Length: > 0 })
         {
             Environment.ExitCode = EpMetaProbe() ? 0 : 1;
+            return;
+        }
+
+        /* 媒体信息卡自检:`LP_MEDIAPROBE=1 LinPlayer.exe`。纯取值,进得了 CI。 */
+        if (Environment.GetEnvironmentVariable("LP_MEDIAPROBE") is { Length: > 0 })
+        {
+            Environment.ExitCode = MediaRowsProbe() ? 0 : 1;
             return;
         }
 
@@ -284,6 +293,52 @@ internal static class Program
         Eq(round.MediaLabel, "4K · 45M · 18.4G", "过一趟 JSON 往返还在");
 
         Console.WriteLine(bad == 0 ? "PROBE 分集小字 全部通过" : $"PROBE 分集小字 {bad} 条不过");
+        return bad == 0;
+    }
+
+    /// <summary>
+    /// 媒体信息卡上每条流写哪几行(桌面草稿 03 页第 20 条)。
+    ///
+    /// <para>该出现的行没出现、缺值时写成「未知」—— 这两种都不报错,
+    /// 画面上只是少一行或者多一行废话,而少的那一行往往正是用户在找的。</para>
+    /// </summary>
+    private static bool MediaRowsProbe()
+    {
+        var bad = 0;
+        void Eq(string got, string want, string what)
+        {
+            if (got == want) { Console.WriteLine($"PROBE 媒体信息 ✓ {what}"); return; }
+            Console.WriteLine($"PROBE 媒体信息 ✗ {what}:得到「{got}」,该是「{want}」");
+            bad++;
+        }
+        static List<(string K, string V)> S(string json) =>
+            Views.DetailPage.StreamRows(JsonDocument.Parse(json).RootElement.Clone());
+        static List<(string K, string V)> V(string json) =>
+            Views.DetailPage.VersionRows(JsonDocument.Parse(json).RootElement.Clone());
+        static string Flat(List<(string K, string V)> rows) =>
+            string.Join(" | ", rows.Select(r => r.K + "=" + r.V));
+
+        Eq(Flat(S("""{"type_":"Video","codec":"hevc","width":3840,"height":2160,"bitrate":45000000,"frame_rate":23.976,"video_range_type":"HDR10","profile":"Main 10"}""")),
+            "编码=HEVC | 分辨率=3840×2160 | 码率=45 Mbps | 帧率=23.976 fps | 制式=HDR10 | 规格=Main 10",
+            "视频流六行齐全且按序");
+        // 缺值整行不画,不写「未知」也不写「0 Mbps」
+        Eq(Flat(S("""{"type_":"Video","codec":"h264","bitrate":0}""")),
+            "编码=H.264", "缺的行直接不画");
+        // channel_layout 比 channels 好读,有它就不写「6 声道」
+        Eq(Flat(S("""{"type_":"Audio","codec":"eac3","language":"jpn","channels":6,"channel_layout":"5.1","bitrate":640000,"is_default":true}""")),
+            "编码=EAC3 | 语言=jpn | 声道=5.1 | 码率=0.64 Mbps | 默认=是",
+            "音轨优先写声道布局");
+        Eq(Flat(S("""{"type_":"Audio","codec":"aac","channels":2}""")),
+            "编码=AAC | 声道=2 声道", "没有布局才回落到声道数");
+        // 外挂字幕是另一个文件、要单独挂载,行为和内封不一样,必须说出来
+        Eq(Flat(S("""{"type_":"Subtitle","codec":"ass","language":"chi","title":"简体","is_external":true}""")),
+            "语言=chi | 格式=ASS | 轨道名=简体 | 来源=外挂", "外挂字幕要标出来");
+        Eq(Flat(S("""{"type_":"EmbeddedImage","codec":"png"}""")),
+            "", "认不出的流一行都不写(调用方据此不给它一张卡)");
+        Eq(Flat(V("""{"container":"mkv","size_bytes":19770609664,"bitrate":45000000,"runtime_secs":3540}""")),
+            "容器=MKV | 体积=18.4 GB | 总码率=45 Mbps | 时长=59 分钟", "常规那一块");
+
+        Console.WriteLine(bad == 0 ? "PROBE 媒体信息 全部通过" : $"PROBE 媒体信息 {bad} 条不过");
         return bad == 0;
     }
 
