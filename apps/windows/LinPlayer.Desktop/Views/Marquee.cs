@@ -2,7 +2,6 @@ using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using Avalonia.Threading;
 using Avalonia.VisualTree;
 
 namespace LinPlayer.Desktop.Views;
@@ -30,7 +29,8 @@ public sealed class Marquee : Decorator
         TextWrapping = TextWrapping.NoWrap,
     };
     private readonly TranslateTransform _shift = new();
-    private readonly DispatcherTimer _timer;
+    /// <summary>正在逐帧走。放得下的时候彻底停,不空转一个 60Hz 的循环。</summary>
+    private bool _running;
     private double _overflow;
     private double _x;
     private double _hold = Hold;
@@ -47,10 +47,7 @@ public sealed class Marquee : Decorator
         _text.RenderTransform = _shift;
         Child = _text;
         ToolTip.SetTip(this, text);   // 滚动要等,鼠标停一下就能看全
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _timer.Tick += Step;
         AttachedToVisualTree += (_, _) => Pace();
-        DetachedFromVisualTree += (_, _) => _timer.Stop();
     }
 
     public string Text
@@ -85,20 +82,37 @@ public sealed class Marquee : Decorator
         return finalSize;
     }
 
-    /// <summary>放得下就**彻底停下来**,不空转一个 60Hz 的定时器。</summary>
+    /// <summary>
+    /// 放得下就**彻底停下来**,不空转一个 60Hz 的循环。
+    ///
+    /// <para>驱动是 <see cref="TopLevel.RequestAnimationFrame"/> 不是 DispatcherTimer:
+    /// 后者是自己定的 16ms 闹钟,和刷新率对不齐会周期性地一帧走两下、一帧不走 ——
+    /// 同一个坑 <c>Smooth</c> 和 <c>DanmakuLayer</c> 都填过,这里是第三处。</para>
+    /// </summary>
     private void Pace()
     {
-        if (_overflow > 1 && this.GetVisualRoot() is not null)
+        if (_overflow <= 1 || TopLevel.GetTopLevel(this) is not { } top)
         {
-            _last = DateTime.UtcNow;
-            _timer.Start();
+            _x = 0; _atEnd = false; _shift.X = 0;
+            return;
         }
-        else { _timer.Stop(); _x = 0; _atEnd = false; _shift.X = 0; }
+        if (_running) return;
+        _running = true;
+        _last = DateTime.UtcNow;
+        void Frame(TimeSpan _)
+        {
+            // 条件掉了(装不下变成装得下、页面被顶掉)就收手,下一次 Pace() 再起
+            if (_overflow <= 1) { _running = false; _x = 0; _atEnd = false; _shift.X = 0; return; }
+            Step();
+            if (TopLevel.GetTopLevel(this) is { } t) t.RequestAnimationFrame(Frame);
+            else _running = false;
+        }
+        top.RequestAnimationFrame(Frame);
     }
 
     private bool _atEnd;
 
-    private void Step(object? sender, EventArgs e)
+    private void Step()
     {
         var now = DateTime.UtcNow;
         var dt = (now - _last).TotalSeconds;
