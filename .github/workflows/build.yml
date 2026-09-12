@@ -325,6 +325,10 @@ jobs:
         with:
           tag_name: v${{ needs.version.outputs.version }}-pre
           name: v${{ needs.version.outputs.version }} (Pre-release)
+          # tag 钉在**这次构建的那个提交**上。不钉的话默认打在 main 最新 —— 两次推送挨得近时,
+          # 前一版的 tag 会落到后一个提交上,下一版的更新说明就多列一条上一版已经发过的
+          # (实测 build752 的 tag 落在了 build753 的提交上)
+          target_commitish: ${{ github.sha }}
           prerelease: true
           files: ./artifacts/*
           # 更新说明来自**这一段时间真实的提交**。原来一条都不写,于是应用内
