@@ -41,6 +41,7 @@ var Version = "dev"
 func RegisterCommands() {
 	registerMiscCommands()
 	registerUpdateCommands()
+	registerShortcutCommands()
 	bus.Register("system.ping", func(ctx context.Context, seq int64, args map[string]any) (any, error) {
 		return map[string]any{"pong": true, "ts": bus.MonoMillis()}, nil
 	})

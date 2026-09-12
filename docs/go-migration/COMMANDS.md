@@ -51,7 +51,7 @@
 | 同步(Trakt / Bangumi / 日历) | `sync.*` | 15 | 15 |
 | 字幕翻译 / Whisper(桌面独占) | `translate.*` | 9 | 0 |
 | 设置与偏好 | `prefs.*` | 27 | 19 |
-| 系统 | `system.*` | 13 | 6 |
+| 系统 | `system.*` | 15 | 6 |
 | **合计** | | **219** | **181** |
 
 ### Emby 浏览与详情 · `emby.*` — 42 条
@@ -329,7 +329,7 @@
 | [x] | `prefs.setUpdateSettings` | `set_update_settings` | `channel: String, auto_check: bool, proxy: String` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setWritebackSettings` | `set_writeback_settings` | `settings: WritebackSettings` | `Result<(), String>` | ✅ |
 
-### 系统 · `system.*` — 17 条
+### 系统 · `system.*` — 19 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
@@ -345,6 +345,8 @@
 | [x] | `system.exportDiagnostics` | **新增** | `-` | `{ ... }` | — | <!-- 诊断导出(SPEC 5.6)。**不许带凭据** -->
 | [x] | `system.installUpdate` | **新增** | `-` | `Result<system::InstallResult, String>` | ✅ | <!-- 装上。桌面端返回 restart 后宿主自己退出;安卓端返回 apk 路径交系统装包器 -->
 | [x] | `system.openDataDir` | `open_data_dir` | `sub: Option<String>` | `Result<(), String>` | ❌ |
+| [x] | `system.shortcutStatus` | **新增** | `—` | `ShortcutStatus` | ❌ | <!-- 桌面快捷方式体检：指向哪、还指不指得到。非 Windows 回 supported=false -->
+| [x] | `system.makeShortcut` | **新增** | `—` | `ShortcutStatus` | ❌ | <!-- 建/修桌面快捷方式。绿色包挪一次文件夹，手搓的 .lnk 就指坏了（用户 2026-09-12）-->
 | [x] | `system.pickDirectory` | `pick_directory` | `start: Option<String>` | `Result<Option<String>, String>` | ❌ |
 | [x] | `system.pickFile` | `pick_file` | `start: Option<String>, filter_name: Option<String>, extensions: Option<Vec<String>>` | `Result<Option<String>, String>` | ❌ |
 | [x] | `system.pickLocalFolder` | `pick_local_folder` | `—` | `Result<Option<String>, String>` | ❌ |

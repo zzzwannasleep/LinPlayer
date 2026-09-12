@@ -259,6 +259,7 @@ public partial class MainWindow : Window
         SelfCheckRail();
         SelfCheckRailStress();
         SelfCheckEpView();
+        SelfCheckHeroBand();
         SelfCheckChrome();
         SelfCheckReclick();
         SelfCheckServerIcon();
@@ -950,6 +951,17 @@ public partial class MainWindow : Window
         }));
     }
 
+
+    /// <summary>自检:量一下详情页那条头图带(草稿 03 页第 12 / 13 条)。</summary>
+    private void SelfCheckHeroBand()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_HEROBAND") != "1") return;
+        _ = Task.Delay(3000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (Nav.Current is DetailPage dp) dp.SelfCheckHeroBand();
+            else Console.WriteLine("[头图带] ✗ 当前不是详情页");
+        }));
+    }
 
     /// <summary>
     /// 自检:按名字点一下分集版式那三颗 chip(横排 / 网格 / 列表)。

@@ -445,6 +445,7 @@ public sealed class SettingsPage : PageBase
                     Add(SettingsSections.Danmaku(core));
                     Add(SettingsSections.Backup(core));
                     Add(Storage(core, paths));
+                    Add(Shortcut(core));
                     // 快捷键不挂 Features 开关:它是操作方式,不是一块可下线的功能
                     Add(SettingsKeys.Section(core));
                     // 不挂 Features 开关:它是排查工具,任何版本都得有
@@ -616,6 +617,58 @@ public sealed class SettingsPage : PageBase
                 hint,
             },
         });
+    }
+
+    /// <summary>
+    /// 桌面快捷方式。
+    ///
+    /// <para>绿色包是「解压到哪算哪」—— 挪一次文件夹,用户手搓的那个 .lnk 就指着
+    /// 一个不存在的文件了(用户 2026-09-12:「自动更新完之后,用户自己创建的
+    /// 快捷方式不能使用了」)。所以这颗按钮不是锦上添花:它是那个症状的出口。</para>
+    ///
+    /// <para>非 Windows 上<b>整块不画</b> —— 那儿没有 .lnk 这回事,
+    /// 摆一个必定失败的按钮比不摆更糟。</para>
+    /// </summary>
+    private static Control Shortcut(CoreClient core)
+    {
+        var state = Dim("检查中…");
+        var host = new StackPanel { Spacing = 10, IsVisible = false };
+        var make = new Button { Classes = { "ghost" }, Content = "创建桌面快捷方式" };
+
+        void Show(JsonElement r)
+        {
+            if (!Bool(r, "supported")) return;
+            host.IsVisible = true;
+            var exists = Bool(r, "exists");
+            var ok = Bool(r, "ok");
+            make.Content = exists ? "修复桌面快捷方式" : "创建桌面快捷方式";
+            state.Text = !exists ? "桌面上还没有。"
+                : ok ? "桌面上那个指得对。"
+                // 指坏了要**把它指着哪说出来**:用户才明白「为什么点了没反应」
+                : $"桌面上那个指着「{Str(r, "target")}」,这个文件已经不在了。";
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var r = await core.SystemShortcutStatus(new { });
+                Dispatcher.UIThread.Post(() => Show(r));
+            }
+            catch { /* 问不出来就整块不画 —— 这一块不值得把设置页拖红 */ }
+        });
+        make.Click += async (_, _) =>
+        {
+            make.IsEnabled = false;
+            try { Show(await core.SystemMakeShortcut(new { })); state.Text = "好了,去桌面看看。"; }
+            catch (Exception e) { state.Text = LibraryPage.Advice(e); }
+            finally { make.IsEnabled = true; }
+        };
+
+        host.Children.Add(state);
+        host.Children.Add(make);
+        host.Children.Add(Dim("程序换了位置之后,启动时会自动把已经指坏的快捷方式修回来。"));
+        return Card("桌面快捷方式", host);
     }
 
     private static Control Storage(CoreClient core, JsonElement paths)

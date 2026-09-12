@@ -160,6 +160,12 @@ func lp_init(configJSON *C.char) (ret C.int32_t) {
 		//   不同步的话一张封面都没有,而命令全都正常(最难查的那种)。
 		account.SyncImageAllowlist()
 
+		/* 快捷方式体检。**必须排在 config.Load 之后**:它要往配置里记一句
+		   「exe 现在在哪」,而 Load 之前 Current() 回的是空配置 ——
+		   在那儿保存等于把用户的账号清空(2026-09-12 自检当场撞到)。
+		   放后台:它要起 PowerShell,同步跑就是几百毫秒的冷启动税。 */
+		go system.RepairShortcutsIfMoved()
+
 		// ★ 代理同理:配置里存着代理,冷启动不装上的话「设置里明明开着,
 		//   重启之后就不走代理了」—— 而且一声不吭。
 		if u := config.Current().ProxyConf().ProxyURL(); u != "" {

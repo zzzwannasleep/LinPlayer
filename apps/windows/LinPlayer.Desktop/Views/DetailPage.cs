@@ -451,10 +451,12 @@ public sealed class DetailPage : PageBase
         var series = Str(d, "series_name");
         var isShow = type is "Series" or "Season";
 
-        // ---- ① 头图:全宽出血 ----
+        // ---- ① 头图:通栏 24:8 剧照带 ----
         _heroHost.Content = Hero(d, id, type, name, series);
+        // ---- ② 播放键 / 简介 / 媒体信息:在带子下面,不压在图上 ----
+        body.Children.Add(HeroBody(d, id, type));
 
-        // ---- ② 分集 ----
+        // ---- ③ 分集 ----
         /* 分集这会儿<b>还没到</b>(它是第二条命令)。先放和真内容同尺寸的骨架 ——
            放「加载中…」三个字的话,内容到了这一块会从 20px 撑到上千像素,
            用户正在读的简介会被顶走。 */
@@ -610,160 +612,253 @@ public sealed class DetailPage : PageBase
 
 
     /// <summary>
-    /// 头图:背景大图出血 + 海报 + 标题信息。
+    /// 头图:<b>通栏 24:8 的一条剧照带</b>(草稿 03 页第 12 / 13 条)。
     ///
-    /// <para>这一块<b>不受正文 1560 水槽约束</b>,背景图铺满整个内容区宽度;
-    /// 里面的文字和海报仍然按 1560 对齐,和下面的正文成一条线。
-    /// 都封在 1560 里的话,1920 窗口上图只占中间一条,两侧是死白 ——
-    /// 那不叫背景图,那叫一张插图。</para>
+    /// <para>带子里只回答「这是什么」:艺术字(取不到就用标题)+ 一排元信息片,
+    /// 压在剧照左下;左上浮返回,右上浮收藏 / 下载 / 更多⋯。
+    /// 播放键、简介、媒体信息都在带子<b>下面的正文里</b>,不压在图上。</para>
+    ///
+    /// <para><b>没有海报了。</b> 草稿这一页就没画:剧照已经是这部片的脸,
+    /// 旁边再摆一张 2:3 的同一部片,占掉三分之一宽度而没多说一个字。</para>
     /// </summary>
     private Control Hero(JsonElement d, string id, string type, string name, string series)
     {
-        /* <b>集封面是横的,海报是竖的 —— 两种图不能塞进同一个槽</b>
-           (用户 2026-09-03:「集封面和海报封面/季封面是不一样的,集封面是横着的」)。
-           Emby 给分集的 Primary 是一张 16:9 的**剧照**;塞进 220×330 的 2:3 槽里
-           再 UniformToFill,等于把左右各裁掉三分之一 —— 人脸经常就在被裁掉的那一侧。
-           而且它**不报错**:画面是满的,只是内容错了。
-           392×220 是同一个 16:9,高度比海报矮一截 —— 分集本来也没有那么多头部信息要配。 */
-        var still = type is "Episode";
-        var poster = new Border
-        {
-            Width = still ? 392 : 220, Height = still ? 220 : 330,
-            CornerRadius = new CornerRadius(10), ClipToBounds = true,
-            VerticalAlignment = VerticalAlignment.Top,
-            Background = Tok.Of("PanelAlt"),
-        };
-        TextBlock? crumbRef = null;
-        if (Bool(d, "has_primary"))
-        {
-            var im = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
-            poster.Child = im;
-            _ = Fill(im, Images.EmbyImageUrl(_server, id, "Primary"), still ? 440 : 660);
-        }
+        var band = new Panel { ClipToBounds = true };
 
-        var head = new StackPanel { Spacing = 10 };
-        /* 剧名单独一行,而且**点得动** —— Emby 上点集详情页的剧名就回到剧集主页,
-           我们原来把它和集名拼成一句话(「剧名 · 第 3 集」),那一整句都是死的:
-           从某一集想回到整部剧,只能一路按返回(用户 2026-09-11)。
-           ★ 判据是拿不拿得到 series_id:刮削不全的库上这个字段是空的,
-             那时候照旧只显示文字,不摆一个点了没反应的链接。 */
-        var seriesId = Str(d, "series_id");
-        if (!string.IsNullOrEmpty(series))
+        /* 剧照走 <b>ImageBrush 不走 Image</b> —— Image 会把自己的自然尺寸算进布局,
+           一张 16:9 的图铺到 1600 宽就要 900 的高,带子当场被撑成两倍。
+           画刷不参与测量,高度完全由下面 _rescaleHead 说了算。
+           没刮背景图就回落到海报:总比一块纯色强,而纯色是有些库的常态。 */
+        var brush = new ImageBrush { Stretch = Stretch.UniformToFill, AlignmentY = AlignmentY.Top };
+        var art = new Border
         {
-            var crumb = new TextBlock
-            {
-                Text = series, FontSize = 15, FontWeight = FontWeight.SemiBold,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = Tok.Of(seriesId.Length > 0 ? "Accent" : "Ink2"),
-                HorizontalAlignment = HorizontalAlignment.Left,
-            };
-            if (seriesId.Length > 0)
-            {
-                crumb.Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
-                ToolTip.SetTip(crumb, "回到《" + series + "》");
-                crumb.PointerPressed += (_, _) => Nav.Push(new DetailPage(_core, _server, seriesId));
-            }
-            head.Children.Add(crumb);
-            crumbRef = crumb;
-        }
+            Opacity = 0, Background = brush, ClipToBounds = true,
+            Transitions =
+            [
+                new DoubleTransition
+                {
+                    Property = OpacityProperty,
+                    Duration = TimeSpan.FromMilliseconds(220),
+                    Easing = new CubicEaseOut(),
+                },
+            ],
+        };
+        var pic = Bool(d, "has_backdrop") ? "Backdrop" : Bool(d, "has_primary") ? "Primary" : "";
+        if (pic != "") _ = FillBrush(brush, art, Images.EmbyImageUrl(_server, id, pic), 720);
+        band.Children.Add(art);
+        band.Children.Add(new Border { Background = HeroScrim() });
+        band.Children.Add(new Border { Background = HeroBleed() });
+
+        // ---- 左下:面包屑 + 艺术字 / 标题 + 元信息片 ----
         var titleRef = new TextBlock
         {
-            Text = name,
-            FontSize = 34, FontWeight = FontWeight.SemiBold, TextWrapping = TextWrapping.Wrap,
+            Text = name, FontSize = 34, FontWeight = FontWeight.Bold,
+            TextWrapping = TextWrapping.Wrap, MaxLines = 2,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = Brushes.White, Effect = HeroShadow(),
         };
-        head.Children.Add(titleRef);
+        var titleSlot = new ContentControl { Content = titleRef };
+        var head = new StackPanel { Spacing = 10, VerticalAlignment = VerticalAlignment.Bottom };
+        if (Crumb(d, series) is { } crumb) head.Children.Add(crumb);
+        head.Children.Add(titleSlot);
+        head.Children.Add(Chips(d, type));
+        _ = SwapLogo(titleSlot, id);
 
-        /* 元信息做成<b>一排小片</b>,不是一串用「·」连起来的长句。
-           连成一句的问题不是不好看:它<b>不换行</b>,类型一多就被挤出可视区,
-           而且年份、评分、分级、类型是四种不同的东西,拿同一个分隔符串起来
-           等于告诉眼睛「它们是一类」。片状可以自然折行,也能一眼数清有几项。 */
+        // ---- 左上返回 / 右上动作组(草稿第 12、13 条)----
+        _back.Margin = new Thickness(0);
+        var top = new DockPanel { LastChildFill = false, VerticalAlignment = VerticalAlignment.Top };
+        DockPanel.SetDock(_back, Dock.Left);
+        top.Children.Add(Loose(_back));
+        var acts = HeroActions(d, id, type, name);
+        DockPanel.SetDock(acts, Dock.Right);
+        top.Children.Add(acts);
+
+        var inner = new Grid
+        {
+            Margin = new Thickness(18, 14, 18, 18),
+            RowDefinitions = new RowDefinitions("Auto,*"),
+        };
+        Grid.SetRow(top, 0);
+        Grid.SetRow(head, 1);
+        inner.Children.Add(top);
+        inner.Children.Add(head);
+        band.Children.Add(inner);
+
+        /* 高度照草稿的 <b>24:8</b> 算,两头夹住:1920 上不夹的话一条带子
+           就吃掉 640px,首屏一个内容都看不见;窄窗口上不给下限,
+           艺术字和小片会挤成一坨。 */
+        _rescaleHead = () =>
+        {
+            var w = Bounds.Width;
+            if (w <= 1) return;
+            /* 一张图都没有的条目**不撑高度**,让带子缩到内容那么高 ——
+               撑着的话头顶是四百像素的纯色,而那正是「没刮图」的库的常态。 */
+            band.Height = pic == "" ? double.NaN : Math.Clamp(w * 8 / 24, 232, 420);
+            titleRef.FontSize = Responsive.Font(w, 34, 21);
+            if (titleSlot.Content is Image logo) logo.MaxWidth = Responsive.S(w, 420, 180);
+        };
+        _rescaleHead();
+        return band;
+    }
+
+    /// <summary>压在剧照上的字要读得出来:左下最重,右上留干净给动作组。</summary>
+    private static IBrush HeroScrim() => new LinearGradientBrush
+    {
+        StartPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+        EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
+        GradientStops =
+        {
+            new GradientStop(Color.Parse("#b8000000"), 0),
+            new GradientStop(Color.Parse("#5c000000"), 0.42),
+            new GradientStop(Color.Parse("#00000000"), 0.8),
+        },
+    };
+
+    /// <summary>
+    /// 下沿化开:渐变到<b>页面底色</b>,最后一段完全等于底色 —— 图和正文之间
+    /// 那条硬横线就不存在了。
+    /// <para>底色<b>从主题资源现取</b>,不写死色号:写死的话浅色皮下就是头顶一条黑带。
+    /// 取不到退回深色那一档 —— 退回一个具体值总比画一块纯黑强。</para>
+    /// </summary>
+    private IBrush HeroBleed()
+    {
+        var bg = Color.Parse("#0c0f14");
+        if (this.TryFindResource("Bg", ActualThemeVariant, out var v) && v is ISolidColorBrush sb)
+            bg = sb.Color;
+        return new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+            GradientStops =
+            {
+                new GradientStop(Color.FromArgb(0, bg.R, bg.G, bg.B), 0.62),
+                new GradientStop(Color.FromArgb(130, bg.R, bg.G, bg.B), 0.86),
+                new GradientStop(bg, 1),
+            },
+        };
+    }
+
+    private static IEffect HeroShadow() => new DropShadowEffect
+    {
+        BlurRadius = 16, OffsetX = 0, OffsetY = 2, Color = Colors.Black, Opacity = 0.85,
+    };
+
+    /// <summary>
+    /// 艺术字到了就换掉文字标题。
+    /// <para><b>Item 上没有 has_logo 这个字段</b> —— 有没有只能拉一次看结果。
+    /// 拉不到就保持文字,不留空。</para>
+    /// </summary>
+    private async Task SwapLogo(ContentControl host, string id)
+    {
+        var bmp = await Images.LoadAsync(Program.Core!, Images.EmbyImageUrl(_server, id, "Logo"), 184);
+        if (bmp is null) return;
+        Dispatcher.UIThread.Post(() => host.Content = new Image
+        {
+            Source = bmp, Stretch = Stretch.Uniform,
+            MaxHeight = 64, MaxWidth = Responsive.S(Bounds.Width, 420, 180),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Effect = HeroShadow(),
+        });
+    }
+
+    /// <summary>
+    /// 剧名面包屑,<b>点得动</b> —— Emby 上点集详情页的剧名就回到剧集主页。
+    /// <para>判据是拿不拿得到 series_id:刮削不全的库上它是空的,那时候只显示文字,
+    /// 不摆一个点了没反应的链接。</para>
+    /// </summary>
+    private Control? Crumb(JsonElement d, string series)
+    {
+        if (string.IsNullOrEmpty(series)) return null;
+        var seriesId = Str(d, "series_id");
+        var crumb = new TextBlock
+        {
+            Text = series, FontSize = 15, FontWeight = FontWeight.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = Tok.Of(seriesId.Length > 0 ? "Accent" : "Ink2"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Effect = HeroShadow(),
+        };
+        if (seriesId.Length == 0) return crumb;
+        crumb.Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+        ToolTip.SetTip(crumb, "回到《" + series + "》");
+        crumb.PointerPressed += (_, _) => Nav.Push(new DetailPage(_core, _server, seriesId));
+        return crumb;
+    }
+
+    /// <summary>
+    /// 元信息做成<b>一排小片</b>,不是一串用「·」连起来的长句。
+    ///
+    /// <para>连成一句的问题不是不好看:它<b>不换行</b>,类型一多就被挤出可视区;
+    /// 而且年份、评分、分级、类型是四种不同的东西,同一个分隔符串起来
+    /// 等于告诉眼睛「它们是一类」。</para>
+    ///
+    /// <para>类型 / 标签 / 工作室这三种<b>能点</b>【用户定 2026-09-12】。
+    /// 年份、评分、分级不给点:它们要么不是「按它列一串」的维度,要么点出来是全库。</para>
+    /// </summary>
+    private Control Chips(JsonElement d, string type)
+    {
         var chips = new WrapPanel();
         void Chip(string t) => chips.Children.Add(Views.Chips.Plain(t));
-
-        /* 类型 / 标签 / 工作室这三种片是**能点的**
-           【用户定 2026-09-12:「同时支持点击 标签 工作室 类型 的跳转」】。
-           年份、评分、分级那几种不给点:它们要么不是一个可以「按它列一串」的维度,
-           要么点出来是全库。能点和不能点长得不一样,别让人去试。 */
         void Jump(string kind, string label, string value)
         {
             if (label == "" || value == "") return;
             chips.Children.Add(Views.Chips.Clickable(label,
                 () => Nav.Push(new LibraryGridPage(_core, _server, "", label, (kind, value)))));
         }
-        if (Num(d, "year") > 0) Chip(((int)Num(d, "year")).ToString());
         if (Num(d, "rating") > 0) Chip($"★ {Num(d, "rating"):0.0}");
+        if (Num(d, "year") > 0) Chip(((int)Num(d, "year")).ToString());
         Chip(StatusText(Str(d, "status")));
         Chip(Str(d, "official_rating"));
         if (Num(d, "runtime_secs") > 0) Chip($"{(int)(Num(d, "runtime_secs") / 60)} 分钟");
-        /* 剧的季数用 child_count(Series 上它就是季数)。
-            集数<b>不在这儿写</b> —— 分集还没拉回来,写不出来。
-             它在下面「剧集 · N 季 · 共 M 集」那一行,那时候数据已经在手上了。
-             为了凑一个数去等分集,等于把整个头部又拖回去等那 1.8MB。 */
+        /* 剧的季数用 child_count(Series 上它就是季数)。集数<b>不在这儿写</b> ——
+           分集还没拉回来,写不出来。它在下面「剧集 · N 季 · 共 M 集」那一行。 */
         if (type == "Series" && Num(d, "child_count") > 0) Chip($"{(int)Num(d, "child_count")} 季");
         foreach (var g in Arr(d, "genres").Take(4)) Jump("genre", g, g);
         foreach (var t in Arr(d, "tags").Take(6)) Jump("tag", t, t);
-        /* 工作室点过去要带 **id 不是名字** —— 实测(Emby 4.9.5)`Studios=<名字>`
+        /* 工作室点过去要带 <b>id 不是名字</b> —— 实测(Emby 4.9.5)`Studios=<名字>`
            被完全无视,返回全库 1673 条;`StudioIds=` 才精确命中。 */
         foreach (var st in Named(d, "studios").Take(4)) Jump("studio", st.Name, st.Id);
-        if (chips.Children.Count > 0) head.Children.Add(chips);
+        return chips;
+    }
 
+    /// <summary>剧照右上那一组:收藏 / 下载(整季)/ 更多⋯(草稿 03 页第 13 条)。</summary>
+    private Control HeroActions(JsonElement d, string id, string type, string name)
+    {
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        if (Features.On("card.favorite")) bar.Children.Add(FavButton(d, id));
+        if (type is "Series" or "Season") bar.Children.Add(SeasonDownloadButton(id, type));
+        else if (Playable(type)) bar.Children.Add(DownloadButton(d, id, type, name));
+        bar.Children.Add(MoreButton(d, id, type));
+        return bar;
+    }
+
+    /// <summary>
+    /// 带子下面那一段正文:播放键 → 简介 → 媒体信息(草稿 03 页的 playbar / 简介)。
+    ///
+    /// <para>它们<b>不压在剧照上</b>:简介是唯一一段「宽度越大越好读」的内容,
+    /// 压在图上要么被遮罩吃掉对比度,要么把带子撑成两倍高。</para>
+    /// </summary>
+    private Control HeroBody(JsonElement d, string id, string type)
+    {
+        var col = new StackPanel { Spacing = 14 };
+        col.Children.Add(PlayRow(d, id, type));
         // 标语:没有就整行不画(实测只有约三分之一的条目有)
         var tagline = Str(d, "tagline");
         if (tagline != "")
         {
-            head.Children.Add(new TextBlock
+            col.Children.Add(new TextBlock
             {
                 Text = tagline, FontStyle = FontStyle.Italic, TextWrapping = TextWrapping.Wrap,
                 Foreground = Tok.Of("Ink2"),
             });
         }
-
-        /* 简介放在<b>头图右列</b>,不放到正文里。
-           放正文的话头图右边那一大片是空的 —— 1920 的窗口上,
-           标题 + 几个小片只占掉左边 40%,剩下 60% 什么都没有,
-           而简介正是唯一一段「宽度越大越好读」的内容。
-           (Emby 自己的详情页也是这么排的。) */
         var overview = Str(d, "overview");
-        if (overview != "") head.Children.Add(Overview(overview));
-
-        head.Children.Add(PlayRow(d, id, type));
-        /* 媒体信息 / 版本条。**异步补,不挡头部** ——
-           它要多打一次 PlaybackInfo,为了这一行让海报标题晚出来是本末倒置。 */
-        head.Children.Add(Loose(_mediaHost));
-        if (type is "Movie" or "Episode" or "Video" or "MusicVideo") _ = LoadMedia(id);
-
-        var headRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 26,
-            Children = { poster, head },
-        };
-        /* ☠☠ **窄窗口上这一行必须改成上下排。**
-           海报本身就 220 宽,内容区只剩 330 时它和右边那一列是抢同一条宽度 ——
-           StackPanel 不报错,只是把标题、小片、简介、播放键整片挤到画面外面去。
-           620 是实测的分界:低于它右列已经窄到简介一行放不下十个字。
-           海报与标题的字号另外按档缩,比例(2:3 / 16:9)原样保住。 */
-        _rescaleHead = () =>
-        {
-            var w = Bounds.Width;
-            var narrow = w > 1 && w < 620;
-            headRow.Orientation = narrow ? Orientation.Vertical : Orientation.Horizontal;
-            headRow.Spacing = narrow ? 14 : 26;
-            poster.Width = Responsive.S(w, still ? 392 : 220, still ? 208 : 116);
-            poster.Height = poster.Width * (still ? 220.0 / 392 : 330.0 / 220);
-            titleRef.FontSize = Responsive.Font(w, 34, 21);
-            if (crumbRef is not null) crumbRef.FontSize = Responsive.Font(w, 15, 12.5);
-        };
-        _rescaleHead();
-        // 返回按钮盖在背景图上,不压在它上面一行 —— 压在上面的话图是从页面
-        // 中间才开始的,顶上留一条黑边。换父之前先 Loose 一手,见它的注释。
-        _back.Margin = new Thickness(0, 0, 0, 14);
-        var inner = new Border
-        {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Padding = new Thickness(18, 18, 18, 18),
-            Child = new StackPanel { Spacing = 0, Children = { Loose(_back), headRow } },
-        };
-        return Backdrop(d, id, inner);
+        if (overview != "") col.Children.Add(Overview(overview));
+        /* 媒体信息 / 版本条。**异步补,不挡头部** —— 它要多打一次 PlaybackInfo,
+           为了这一行让标题晚出来是本末倒置。 */
+        col.Children.Add(Loose(_mediaHost));
+        if (Playable(type)) _ = LoadMedia(id);
+        return col;
     }
 
     /// <summary>
@@ -1381,65 +1476,6 @@ public sealed class DetailPage : PageBase
     };
 
     /// <summary>
-    /// 给头部垫一张背景大图。
-    ///
-    /// <para>淡出用的是 <b>OpacityMask</b>,不是「盖一层背景色的渐变」——
-    /// 盖色要知道当前主题的底色,而本仓有深浅两套皮;写死一个色号就等于
-    /// 浅色主题下头顶一道黑边。遮罩让页面底色自己透上来,换皮不用改这里。</para>
-    ///
-    /// <para>没有背景图就<b>原样返回内容</b>,不留空高度 —— 留着的话
-    /// 没刮削背景的条目头顶会空出 420px。</para>
-    /// </summary>
-    private Control Backdrop(JsonElement d, string id, Control content)
-    {
-        if (!Bool(d, "has_backdrop")) return content;
-
-        /* 背景图用 <b>ImageBrush 当底纹</b>,不是塞一个 Image 进去。
-           Image 会<b>把自己的自然尺寸算进布局</b>:一张 16:9 的图铺到 1600 宽,
-           它就要 900 的高,于是头图被撑到近 900px —— 海报底下空出一大片,
-           而那片什么都没有。原来用 `Height = 420` 钉死能挡住这件事,
-           但那样图的下沿又会卡在海报中间。
-           画刷不参与测量:这一层有多高完全由头图内容决定,图自己去适配。 */
-        var brush = new ImageBrush
-        {
-            Stretch = Stretch.UniformToFill,
-            AlignmentY = AlignmentY.Top,
-        };
-        var layer = new Border
-        {
-            Opacity = 0, // 图到了再淡入 —— 直接出现会「啪」地闪一下
-            VerticalAlignment = VerticalAlignment.Stretch,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            Background = brush,
-            ClipToBounds = true,
-            // 上半段实,下半段化开 —— 图和正文之间不要留一条硬边。
-            OpacityMask = new LinearGradientBrush
-            {
-                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-                GradientStops =
-                {
-                    new GradientStop(Colors.White, 0),
-                    new GradientStop(Colors.White, 0.45),
-                    new GradientStop(Color.FromArgb(0, 255, 255, 255), 1),
-                },
-            },
-            Transitions =
-            [
-                new DoubleTransition
-                {
-                    Property = OpacityProperty,
-                    Duration = TimeSpan.FromMilliseconds(220),
-                    Easing = new CubicEaseOut(),
-                },
-            ],
-        };
-
-        _ = FillBrush(brush, layer, Images.EmbyImageUrl(_server, id, "Backdrop"), 720);
-        return new Panel { Children = { layer, content } };
-    }
-
-    /// <summary>
     /// 取背景图 →(取到了才)淡入。
     ///
     /// <para>0.42:实测 0.30 在深色底上<b>几乎看不见</b>,等于白做;
@@ -1802,7 +1838,7 @@ public sealed class DetailPage : PageBase
     {
         var resume = Num(d, "resume_secs");
         var name = Str(d, "name");
-        var playable = type is "Movie" or "Episode" or "Video" or "MusicVideo";
+        var playable = Playable(type);
 
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         if (playable)
@@ -1854,8 +1890,19 @@ public sealed class DetailPage : PageBase
             _ = LabelPlayLater(play);
         }
 
-        // 收藏跟 Features 走 —— 侧栏的「收藏」下线了,这里还留着按钮的话,
-        // 用户收藏完找不到地方看,和「屏蔽了没有解除列表」是同一类坑。
+        return row;
+    }
+
+    /// <summary>可播 = 能直接放的那几种。剧和季得先选到某一集。</summary>
+    private static bool Playable(string type) =>
+        type is "Movie" or "Episode" or "Video" or "MusicVideo";
+
+    /// <summary>
+    /// 收藏。<b>跟 Features 走</b> —— 侧栏的「收藏」下线了,这里还留着按钮的话,
+    /// 用户收藏完找不到地方看,和「屏蔽了没有解除列表」是同一类坑。
+    /// </summary>
+    private Button FavButton(JsonElement d, string id)
+    {
         var fav = new Button
         {
             Classes = { "ghost" },
@@ -1877,108 +1924,174 @@ public sealed class DetailPage : PageBase
             }
             catch (Exception e) { fav.Content = LibraryPage.Advice(e); }
         };
-        if (Features.On("card.favorite")) row.Children.Add(fav);
+        return fav;
+    }
 
-        /* 剧 / 季页面给的是「下载整季」(草稿 03 页第 13 条)。
-           单条下载在这两种页面上没有意义(不知道该下哪一集),而整季有 ——
-           展开由核心层做,界面只报「下了几集、跳过几集」。 */
-        if (type is "Series" or "Season")
+    /// <summary>
+    /// 下载本条。<b>服务器没给下载权限时整个不出现</b>(用户 2026-09-06)——
+    /// 从前是「摆着,点了再由服务端拒」,那是一个专门用来报错的按钮。
+    /// 判据是 Emby 的 Policy.EnableContentDownloading,缺字段一律判否。
+    /// </summary>
+    private Button DownloadButton(JsonElement d, string id, string type, string name)
+    {
+        var dl = new Button { Classes = { "ghost" }, Content = "⭳ 下载", IsVisible = false };
+        _ = CardActions.ShowIfDownloadable(_core, dl);
+        dl.Click += async (_, _) =>
         {
-            var all = new Button { Classes = { "ghost" }, Content = "⭳ 下载整季", IsVisible = false };
-            _ = CardActions.ShowIfDownloadable(_core, all);
-            all.Click += async (_, _) =>
+            dl.IsEnabled = false;
+            try
             {
-                all.IsEnabled = false;
-                try
+                /* container 从媒体信息里取。给错的话文件后缀就错 ——
+                   播放器认后缀,mkv 存成 mp4 有的播放器直接不认。
+                   取不到就交给核心层兜底(它默认 mkv)。 */
+                await _core.DownloadEnqueue(new
                 {
-                    // 剧页面上界面只有季号(分集是按 SeasonNo 分的组,拿不到那一季的 id),
-                    // 所以送剧 id + 季号,由核心层筛。季页面本身就是那一季,不用送。
-                    var r = await _core.DownloadEnqueueSeason(type == "Season"
-                        ? new { parent_id = id, season = (long?)null }
-                        : new { parent_id = id, season = (long?)_pickedSeason });
-                    var got = (int)Num(r, "queued");
-                    var skip = (int)Num(r, "skipped");
-                    all.Content = got > 0
-                        ? $"已加入 {got} 集" + (skip > 0 ? $"(跳过 {skip} 集)" : "")
-                        // 全都在队里时 queued=0。不单独说一句的话这里长得和失败一样
-                        : $"这 {skip} 集都已经在下载列表里了";
-                }
-                catch (Exception e)
-                {
-                    all.Content = LibraryPage.Advice(e);
-                    all.IsEnabled = true;
-                }
-            };
-            row.Children.Add(all);
-        }
+                    item_id = id, type_ = type, title = name,
+                    container = Str(d, "container"),
+                    poster_url = (string?)null,
+                    series_name = Str(d, "series_name"),
+                    season_number = (long)Num(d, "season_no"),
+                    episode_number = (long)Num(d, "episode_no"),
+                });
+                dl.Content = "已加入下载";
+            }
+            catch (Exception e)
+            {
+                // 下载权限是**服务端**判的:没权限时如实说,别写成「网络错误」
+                dl.Content = LibraryPage.Advice(e);
+                dl.IsEnabled = true;
+            }
+        };
+        return dl;
+    }
 
-        /* 下载只对**可播条目**给。给一部剧的总条目下载按钮,点了不知道该下哪一集。
-           而且**服务器没给下载权限时整个不出现**(用户 2026-09-06)——
-           从前是「摆着,点了再由服务端拒」,那是一个专门用来报错的按钮。
-           判据是 Emby 的 Policy.EnableContentDownloading(字段名打真服务器核对过),
-           缺字段一律判否。先建后显:异步拿到权限再点亮,免得按钮插到别人后面去。 */
-        if (playable)
+    /// <summary>
+    /// 下载整季(草稿 03 页第 13 条)。展开在核心层做,这里只报「下了几集、跳过几集」。
+    /// </summary>
+    private Button SeasonDownloadButton(string id, string type)
+    {
+        var all = new Button { Classes = { "ghost" }, Content = "⭳ 下载整季", IsVisible = false };
+        _ = CardActions.ShowIfDownloadable(_core, all);
+        all.Click += async (_, _) =>
         {
-            var dl = new Button { Classes = { "ghost" }, Content = "⭳ 下载", IsVisible = false };
-            _ = CardActions.ShowIfDownloadable(_core, dl);
-            dl.Click += async (_, _) =>
+            all.IsEnabled = false;
+            try
             {
-                dl.IsEnabled = false;
-                try
-                {
-                    /* container 从媒体信息里取。给错的话文件后缀就错 ——
-                       播放器认后缀,mkv 存成 mp4 有的播放器直接不认。
-                       取不到就交给核心层兜底(它默认 mkv)。 */
-                    await _core.DownloadEnqueue(new
-                    {
-                        item_id = id, type_ = type, title = name,
-                        container = Str(d, "container"),
-                        poster_url = (string?)null,
-                    });
-                    dl.Content = "已加入下载";
-                }
-                catch (Exception e)
-                {
-                    // 下载权限是**服务端**判的:没权限时如实说,别写成「网络错误」
-                    dl.Content = LibraryPage.Advice(e);
-                    dl.IsEnabled = true;
-                }
-            };
-            row.Children.Add(dl);
+                // 剧页面上界面只有季号(分集是按 SeasonNo 分的组,拿不到那一季的 id),
+                // 所以送剧 id + 季号,由核心层筛。季页面本身就是那一季,不用送。
+                var r = await _core.DownloadEnqueueSeason(type == "Season"
+                    ? new { parent_id = id, season = (long?)null }
+                    : new { parent_id = id, season = (long?)_pickedSeason });
+                var got = (int)Num(r, "queued");
+                var skip = (int)Num(r, "skipped");
+                all.Content = got > 0
+                    ? $"已加入 {got} 集" + (skip > 0 ? $"(跳过 {skip} 集)" : "")
+                    // 全都在队里时 queued=0。不单独说一句的话这里长得和失败一样
+                    : $"这 {skip} 集都已经在下载列表里了";
+            }
+            catch (Exception e)
+            {
+                all.Content = LibraryPage.Advice(e);
+                all.IsEnabled = true;
+            }
+        };
+        return all;
+    }
 
-            /* 用外部播放器打开。
-                按钮**只在配了外部播放器时才出现**:没配的话点了只会得到
-                 「未设置外部播放器」,那是一条纯噪音 —— 摆一个必定失败的按钮
-                 比没有更糟。所以先问核心层,拿到非空才加。 */
-            var ext = new Button { Classes = { "ghost" }, Content = "⧉ 外部播放器" };
-            ext.Click += async (_, _) =>
+    /// <summary>
+    /// 「更多⋯」锚定菜单(草稿 03 页第 13 条)。
+    ///
+    /// <para>只放<b>真的能用</b>的:标记已看 / 未看全站都有,详情页原来偏偏没有;
+    /// 外部播放器<b>配了才加</b> —— 没配的话点了只得到「未设置外部播放器」,
+    /// 那是一条纯噪音。草稿里的投屏 / 换源当前没有实现,不摆空项。</para>
+    /// </summary>
+    private Button MoreButton(JsonElement d, string id, string type)
+    {
+        var more = new Button { Classes = { "ghost" }, Content = "⋯" };
+        var items = new List<(string Label, Action? Go)>();
+        var played = Bool(d, "played");
+        items.Add((played ? "标记为未看" : "标记为已看", () => _ = MarkPlayed(id, !played)));
+        more.Click += (_, _) => Flyout(more, items);
+        if (Playable(type)) _ = AddExternalPlayer(items, id, Num(d, "resume_secs"));
+        return more;
+    }
+
+    private async Task MarkPlayed(string id, bool played)
+    {
+        try
+        {
+            var s = Nav.Session!;
+            await _core.EmbySetPlayed(new
             {
-                ext.IsEnabled = false;
-                try
-                {
-                    var s = Nav.Session!;
-                    await _core.PlayerPlayExternal(new
-                    {
-                        s.server, s.token, s.user_id, s.device_id,
-                        item_id = id, resume_secs = resume,
-                    });
-                    ext.Content = "已交给外部播放器";
-                }
-                catch (Exception e) { ext.Content = LibraryPage.Advice(e); }
-                finally { ext.IsEnabled = true; }
-            };
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var p = await _core.PlayerGetPlaybackPrefs(new { });
-                    if (Str(p, "external_player") != "")
-                        Dispatcher.UIThread.Post(() => row.Children.Add(ext));
-                }
-                catch { /* 拿不到就当没配 —— 这一个按钮不值得把详情页拖红 */ }
+                s.server, s.token, s.user_id, s.device_id, item_id = id, played,
             });
+            Toast.Show(played ? "已标记为看过" : "已标记为未看");
         }
-        return row;
+        catch (Exception e) { Toast.Error(LibraryPage.Advice(e)); }
+    }
+
+    private async Task AddExternalPlayer(List<(string Label, Action? Go)> items,
+                                         string id, double resume)
+    {
+        try
+        {
+            var p = await _core.PlayerGetPlaybackPrefs(new { });
+            if (Str(p, "external_player") == "") return;
+        }
+        catch { return; } // 拿不到就当没配 —— 这一条不值得把详情页拖红
+        Dispatcher.UIThread.Post(() =>
+            items.Add(("用外部播放器打开", () => _ = External(id, resume))));
+    }
+
+    private async Task External(string id, double resume)
+    {
+        try
+        {
+            var s = Nav.Session!;
+            await _core.PlayerPlayExternal(new
+            {
+                s.server, s.token, s.user_id, s.device_id, item_id = id, resume_secs = resume,
+            });
+            Toast.Show("已交给外部播放器");
+        }
+        catch (Exception e) { Toast.Error(LibraryPage.Advice(e)); }
+    }
+
+    /// <summary>
+    /// 自检:头图那条带子<b>真的是通栏 24:8</b>,而且返回 / 动作组都浮在它上面。
+    ///
+    /// <para>「照草稿做了」这句话本身验不了 —— 高度算错、动作组掉到正文里、
+    /// 剧照没铺满,三样在编译期全是绿的,只有量真实布局才看得出来。</para>
+    /// </summary>
+    internal void SelfCheckHeroBand()
+    {
+        if (_heroHost.Content is not Panel band)
+        {
+            Console.WriteLine("[头图带] ✗ 头图挂点上不是那条带子");
+            return;
+        }
+        var w = band.Bounds.Width;
+        var h = band.Bounds.Height;
+        var want = Math.Clamp(Bounds.Width * 8 / 24, 232, 420);
+        Console.WriteLine($"[头图带] {w:0}×{h:0},页面宽 {Bounds.Width:0},按 24:8 应为 {want:0}");
+        // 通栏:带子宽度就是页面宽度,差一点点是滚动条
+        if (Math.Abs(w - Bounds.Width) > 20)
+            Console.WriteLine($"[头图带] ✗ 没通栏 —— 页面 {Bounds.Width:0} 而带子只有 {w:0}");
+        if (Math.Abs(h - want) > 2)
+            Console.WriteLine($"[头图带] ✗ 高度不是 24:8(实得 {h:0},应为 {want:0})");
+
+        var inBand = band.GetVisualDescendants().OfType<Button>()
+            .Select(b => b.Content as string).Where(x => x is not null).ToList();
+        var back = inBand.Contains("← 返回");
+        var acts = inBand.Count(x => x!.Contains("收藏") || x.StartsWith("⭳ ") || x == "⋯");
+        Console.WriteLine($"[头图带] 带子里的按钮:{string.Join(" / ", inBand)}");
+        if (!back) Console.WriteLine("[头图带] ✗ 返回没浮在剧照上(草稿第 12 条)");
+        if (acts < 2) Console.WriteLine($"[头图带] ✗ 右上动作组只有 {acts} 颗(草稿第 13 条要收藏/下载/更多)");
+        var chips = band.GetVisualDescendants().OfType<WrapPanel>().FirstOrDefault();
+        Console.WriteLine($"[头图带] 元信息片 {chips?.Children.Count ?? -1} 个");
+        if ((chips?.Children.Count ?? 0) == 0) Console.WriteLine("[头图带] ✗ 一个元信息片都没有");
+        // 海报不该再出现:草稿这一页没画它
+        if (back && acts >= 2 && Math.Abs(h - want) <= 2) Console.WriteLine("[头图带] ✓ 通过");
     }
 
     /// <summary>

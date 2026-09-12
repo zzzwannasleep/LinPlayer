@@ -36,6 +36,11 @@ type AppConfig struct {
 	Active   *int   `json:"active"`
 	Theme    string `json:"theme"`
 
+	/* LastExePath 上一次跑起来时 exe 在哪。**只用来判「程序挪窝了没有」** ——
+	   绿色包解压到哪算哪,挪一次文件夹桌面上那个快捷方式就指坏了
+	   (用户 2026-09-12)。见 system.RepairShortcutsIfMoved。 */
+	LastExePath string `json:"last_exe_path,omitempty"`
+
 	CompanionEnabled      bool `json:"companion_enabled"`
 	PluginOfficialEnabled bool `json:"plugin_official_enabled"`
 
@@ -158,6 +163,20 @@ func (c *AppConfig) Save() error {
 }
 
 // Current 返回已加载的配置。没加载过返回默认值。
+/*
+Ready 配置**真的从盘上加载过**没有。
+
+☠ Current() 在没加载过时回的是 defaults() —— 拿它 Save() 就是**把用户的账号
+覆盖成空**。lp_init 里 RegisterAll 排在 config.Load 之前,任何在注册期起的后台活
+只要写一次配置就会踩中(2026-09-12 实测:快捷方式体检把自检账号清空了)。
+所以启动早期要写配置的代码,先问这一句。
+*/
+func Ready() bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return current != nil
+}
+
 func Current() *AppConfig {
 	mu.RLock()
 	c := current

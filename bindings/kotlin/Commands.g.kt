@@ -266,6 +266,8 @@ object LinPlayerCommandNames {
         "system.exportDiagnostics",
         "system.installUpdate",
         "system.openDataDir",
+        "system.shortcutStatus",
+        "system.makeShortcut",
         "system.pickDirectory",
         "system.pickFile",
         "system.pickLocalFolder",
@@ -744,7 +746,7 @@ suspend fun LinPlayerCommands.prefsSetUpdateSettings(args: Map<String, Any?>? = 
 suspend fun LinPlayerCommands.prefsSetWritebackSettings(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setWritebackSettings", args)
 
-// ---- 系统 · system.* (17 条) ----
+// ---- 系统 · system.* (19 条) ----
 suspend fun LinPlayerCommands.systemAfdianSponsorUrl(args: Map<String, Any?>? = null): JsonElement =
     call("system.afdianSponsorUrl", args)
 suspend fun LinPlayerCommands.systemAfdianVerify(args: Map<String, Any?>? = null): JsonElement =
@@ -769,6 +771,10 @@ suspend fun LinPlayerCommands.systemInstallUpdate(args: Map<String, Any?>? = nul
     call("system.installUpdate", args)
 suspend fun LinPlayerCommands.systemOpenDataDir(args: Map<String, Any?>? = null): JsonElement =
     call("system.openDataDir", args)
+suspend fun LinPlayerCommands.systemShortcutStatus(args: Map<String, Any?>? = null): JsonElement =
+    call("system.shortcutStatus", args)
+suspend fun LinPlayerCommands.systemMakeShortcut(args: Map<String, Any?>? = null): JsonElement =
+    call("system.makeShortcut", args)
 suspend fun LinPlayerCommands.systemPickDirectory(args: Map<String, Any?>? = null): JsonElement =
     call("system.pickDirectory", args)
 suspend fun LinPlayerCommands.systemPickFile(args: Map<String, Any?>? = null): JsonElement =

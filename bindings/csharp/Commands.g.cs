@@ -276,6 +276,8 @@ public static class LinPlayerCommandNames
         "system.exportDiagnostics",
         "system.installUpdate",
         "system.openDataDir",
+        "system.shortcutStatus",
+        "system.makeShortcut",
         "system.pickDirectory",
         "system.pickFile",
         "system.pickLocalFolder",
@@ -756,7 +758,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> PrefsSetWritebackSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.setWritebackSettings", args, ct);
 
-    // ---- 系统 · system.* (17 条) ----
+    // ---- 系统 · system.* (19 条) ----
     public static Task<JsonElement> SystemAfdianSponsorUrl(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("system.afdianSponsorUrl", args, ct);
     public static Task<JsonElement> SystemAfdianVerify(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -781,6 +783,10 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("system.installUpdate", args, ct);
     public static Task<JsonElement> SystemOpenDataDir(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("system.openDataDir", args, ct);
+    public static Task<JsonElement> SystemShortcutStatus(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("system.shortcutStatus", args, ct);
+    public static Task<JsonElement> SystemMakeShortcut(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("system.makeShortcut", args, ct);
     public static Task<JsonElement> SystemPickDirectory(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("system.pickDirectory", args, ct);
     public static Task<JsonElement> SystemPickFile(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

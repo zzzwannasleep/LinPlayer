@@ -679,3 +679,37 @@ inj 字段名 asset_size      -> assetSize    : GREEN   ← 没红
   另一部分卡在**窗口法**:`app.call` 往下 20 行之外的取值不归任何命令 ——
   安卓设置页那种「先 call 一次拿回 `prefs`,再往下铺五十行开关」的写法
   整片在门禁视野之外。想被覆盖,就把响应绑到一个**只赋值一次**的变量上。
+
+## 注册期写配置 = 把用户的账号清空 — 2026-09-12
+
+给「快捷方式体检」加了一句「把 exe 现在的位置记进配置」,放在
+`commands.RegisterAll` 里起的后台 goroutine 上。跑一遍自检,设置页变成了登录闸口
+—— `config.json` 里 `"accounts": null`。
+
+根因:`lp_init` 的顺序是 **RegisterAll → paths.EnsureDirs → AdoptPreviousInstall
+→ config.Load**。注册期 `config.Current()` 回的是 `defaults()`(一份空配置),
+拿它 `Save()` 就是把盘上的账号覆盖掉,而且一声不吭。
+
+两层修:
+
+- 那句话挪到 `config.Load()` **之后**再做;
+- `config` 加一个 `Ready()`,启动早期要写配置的代码先问它。
+  光靠「记得放对位置」是守不住的 —— 下一个人不会读这段注释。
+
+★ 这条和 `docs/lessons/build-release.md` 里「migrate_legacy 的 cfg!(test) 守卫
+别摘」是同一类:**配置的写入时机比写入内容更容易出事**,而症状永远是
+「我的服务器没了」,没有任何一行错误日志。
+
+## 真机自检替我抓到了三个只有真跑才现形的东西 — 2026-09-12
+
+同一轮里,`scripts/selfcheck-win.sh` 一次抓到三个编译期全绿的问题:
+
+1. 账号被清空(上一条)。判据是自检跑完去 `grep '"accounts"' config.json`。
+2. 截图变成 237×39 —— 拍到了 PowerShell 的控制台黑框(见 `ui-desktop.md`)。
+3. `.lnk` 读回来是乱码。PowerShell 的 stdout 走**控制台代码页**(简体中文机器上
+   是 GBK),中文路径读回来全错;而它照样是个字符串,后面 `os.Stat` 必然失败,
+   程序会以为每个快捷方式都坏了。修法是脚本头上钉
+   `[Console]::OutputEncoding = [Text.Encoding]::UTF8`。
+
+★ 三个都不是「写错逻辑」,是**环境**。这类东西单测照不到、编译照不到、
+  code review 也照不到 —— 只有真起进程、真读文件、真截屏才现形。
