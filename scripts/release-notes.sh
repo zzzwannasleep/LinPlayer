@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 #
-# 从提交历史生成更新说明。
-#
-#   bash scripts/release-notes.sh <输出文件> [pre|stable]     (模式默认 pre)
+# 从提交历史生成更新说明。输出到 $1(默认 /tmp/notes.md)。
 #
 # ☠ 为什么要有这个脚本:原来发布说明是 workflow 里写死的一段话(下载在哪、
 #   数据目录在哪),**每次发布一字不变**,而应用内的「更新说明」正是读它。
@@ -10,28 +8,16 @@
 #   固定文案最坏的地方不是没用,是它**看起来像更新说明** —— 用户读完会以为
 #   这次就改了这些。
 #
-# 本地跑一遍看效果:bash scripts/release-notes.sh /tmp/notes.md pre && cat /tmp/notes.md
+# 本地跑一遍看效果:bash scripts/release-notes.sh /tmp/notes.md && cat /tmp/notes.md
 set -euo pipefail
 
 OUT="${1:-/tmp/notes.md}"
-MODE="${2:-pre}"
 
-# 对比的是**这个渠道的用户上一个装到的版本**,两个渠道不是同一个:
-#   pre    —— 从上一个发布升上来(预发布、正式版都算)。原来一律对比上一个正式版,
-#             于是 731~742 每一版都写「对比 build730」,清单一版比一版长(用户 2026-09-13)。
-#   stable —— 从上一个正式版升上来。中间的预发布他没装过,只对比上一个预发布会漏掉整段。
-# 从 HEAD~1 往回找:这一版自己的 tag(重跑时可能已经打上了)不能算「上一个」。
-case "$MODE" in
-  pre)    PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD~1 2>/dev/null || true) ;;
-  stable) PREV=$(git describe --tags --abbrev=0 --match 'v*' --exclude '*-pre' HEAD~1 2>/dev/null || true) ;;
-  *)      echo "未知模式:$MODE(只认 pre / stable)" >&2; exit 2 ;;
-esac
-
-if [ -n "$PREV" ]; then
-  RANGE="$PREV..HEAD"
-else
-  RANGE="HEAD"
-fi
+# 列的是**上一个版本到这一版**的提交(预发布、正式版都算上一个)。
+# 原来只认上一个正式版,于是 731~742 每一版都从 730 列起,清单越攒越长(用户 2026-09-13)。
+# 从 HEAD~1 往回找:重跑时这一版自己的 tag 可能已经打上了,它不算「上一个」。
+PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD~1 2>/dev/null || true)
+RANGE="${PREV:+$PREV..}HEAD"
 
 # 一行一条。合并提交不要 —— 它的标题是「Merge branch …」,对用户零信息。
 RAW=$(git log --no-merges --pretty=format:'%s' "$RANGE" 2>/dev/null || true)
@@ -45,8 +31,6 @@ LINES=$(printf '%s\n' "$RAW" \
   | awk '!seen[$0]++' \
   | head -40)
 
-N=$(printf '%s\n' "$RAW" | grep -c '' || true)
-
 {
   echo "## 本次更新"
   echo
@@ -55,10 +39,6 @@ N=$(printf '%s\n' "$RAW" | grep -c '' || true)
     echo "- 这一版没有代码改动(只重新打了一次包)。"
   else
     printf '%s\n' "$LINES" | sed 's/^/- /'
-  fi
-  echo
-  if [ -n "$PREV" ]; then
-    echo "共 $N 次提交,对比 $PREV。"
   fi
 } > "$OUT"
 
