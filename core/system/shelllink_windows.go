@@ -226,3 +226,18 @@ func programsDir() string {
 	s, _ := knownFolder(&folderPrograms)
 	return s
 }
+
+// longPath 把 8.3 短名展开成长名(RUNNER~1 → runneradmin)。
+// 文件不在就展开不了,原样返回 —— 指坏了的快捷方式正是这种。
+func longPath(p string) string {
+	u, err := syscall.UTF16PtrFromString(p)
+	if err != nil {
+		return p
+	}
+	buf := make([]uint16, 32768)
+	n, err := syscall.GetLongPathName(u, &buf[0], uint32(len(buf)))
+	if err != nil || n == 0 || int(n) > len(buf) {
+		return p
+	}
+	return syscall.UTF16ToString(buf[:n])
+}

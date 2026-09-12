@@ -58,8 +58,19 @@ func shortcutStatus() ShortcutStatus {
 	if _, err := os.Stat(st.Target); err != nil {
 		return st
 	}
-	st.Ok = strings.EqualFold(st.Target, exe)
+	st.Ok = samePath(st.Target, exe)
 	return st
+}
+
+/*
+samePath 两条路径是不是同一个文件。
+
+☠ 不能只 EqualFold:外壳读回 .lnk 时会把 8.3 短名展开成长名。CI 实测:
+写进去是 `C:\Users\RUNNER~1\...`,读回来是 `C:\Users\runneradmin\...` ——
+同一个文件,字符串却对不上,于是「快捷方式好好的」被报成「指坏了」。
+*/
+func samePath(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(longPath(a)), filepath.Clean(longPath(b)))
 }
 
 // lnkDirs 会去看的地方:桌面 + 开始菜单(当前用户那一份)。

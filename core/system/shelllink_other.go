@@ -15,6 +15,7 @@ func shellLinkReady() error          { return errNoLnk }
 func writeLnk(lnk, exe string) error { return errNoLnk }
 func lnkTarget(lnk string) string    { return "" }
 func programsDir() string            { return "" }
+func longPath(p string) string       { return p }
 
 func desktopDir() string {
 	home, _ := os.UserHomeDir()

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -103,7 +102,7 @@ func roundTripLnk(t *testing.T, sub, movedDir string) {
 	if _, err := os.Stat(lnk); err != nil {
 		t.Fatalf(".lnk 没落盘: %v", err)
 	}
-	if got := lnkTarget(lnk); !strings.EqualFold(got, exe) {
+	if got := lnkTarget(lnk); !samePath(got, exe) {
 		t.Fatalf("读回来的目标不对:%q,期望 %q", got, exe)
 	}
 
@@ -122,7 +121,7 @@ func roundTripLnk(t *testing.T, sub, movedDir string) {
 	if err := writeLnk(lnk, newExe); err != nil {
 		t.Fatalf("修不回来: %v", err)
 	}
-	if got := lnkTarget(lnk); !strings.EqualFold(got, newExe) {
+	if got := lnkTarget(lnk); !samePath(got, newExe) {
 		t.Fatalf("修完还是指着 %q,期望 %q", got, newExe)
 	}
 }

@@ -769,6 +769,10 @@ Value does not fall within the expected range`,保存路径里测试名那十个
 - 门禁红了先看它**说了什么**;什么都没说,第一件事是让它说话,别猜 —— 猜一轮就是 6 分钟。
 - **编码类 bug 要在本机复现,就找本机代码页编不出的字**(中文机器用韩文 / emoji),
   不要把 CI 当复现环境。
+- 换成 IShellLinkW 之后 CI 又红一次,这回是**同一个文件、两种写法**:runner 的临时目录是
+  8.3 短名(`RUNNER~1`),外壳读回 .lnk 时展开成长名(`runneradmin`),`EqualFold` 对不上。
+  这不只是测试的事 —— `shortcutStatus` 的 `Ok` 也是这么比的。改成两边都 `GetLongPathName`
+  再比(`samePath`)。本机用户目录没有短名,**要自己 `GetShortPathName` 造一个**才复现得出来。
 - 集成测试按路径形状分组(纯 ASCII / 中文 / 系统代码页之外),而且临时目录**别带测试名**,
   否则分组形同虚设。
 - 反向注入可以用 `go test -overlay` 换掉一个文件,**不动工作区** —— 注入期间别的构建
