@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -36,6 +36,17 @@ public sealed class IconLibraryPage : PageBase
 
     private List<JsonElement> _all = [];
 
+    /* 用户自己加的网络源【用户定 2026-09-12:「允许用户自己添加网络源」】。
+       内置那几条只报条数不摆地址 —— 地址走编译期注入,摆到界面上等于把它
+       抄进了用户的截图和日志里。 */
+    private readonly StackPanel _sources = new() { Spacing = 6 };
+    private readonly TextBox _newSource = new()
+    {
+        Classes = { "field" }, Watermark = "粘一个图标源的 JSON 地址(http/https)", MinHeight = 34,
+    };
+    private List<string> _srcList = [];
+    private int _builtin;
+
     public IconLibraryPage(CoreClient core, string serverId, Action onPicked)
     {
         _core = core; _serverId = serverId; _onPicked = onPicked;
@@ -45,6 +56,21 @@ public sealed class IconLibraryPage : PageBase
 
         var upload = new Button { Classes = { "ghost" }, Content = "上传本地图片" };
         upload.Click += async (_, _) => await Upload();
+
+        var addSrc = new Button { Classes = { "ghost" }, Content = "添加网络源…" };
+        addSrc.Click += async (_, _) =>
+        {
+            var url = (_newSource.Text ?? "").Trim();
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                // 本地路径填进来的话,核心层那趟 GET 会一直报「不支持的协议」——
+                // 在这儿说清楚,比让人去看日志强
+                _hint.Text = "网络源要以 http:// 或 https:// 开头。本机图片请用「上传本地图片」。";
+                return;
+            }
+            await SaveSources([.. _srcList, url]);
+            _newSource.Text = "";
+        };
 
         _search.TextChanged += (_, _) => Render();
 
@@ -57,9 +83,10 @@ public sealed class IconLibraryPage : PageBase
                 new StackPanel
                 {
                     Orientation = Orientation.Horizontal, Spacing = 10,
-                    Children = { _search, refresh, upload },
+                    Children = { _search, refresh, upload, addSrc },
                 },
                 _hint,
+                _sources,
                 new ScrollViewer
                 {
                     MaxHeight = 720,
@@ -80,9 +107,14 @@ public sealed class IconLibraryPage : PageBase
             var items = r.TryGetProperty("items", out var it) && it.ValueKind == JsonValueKind.Array
                 ? it.EnumerateArray().ToList() : [];
             var configured = r.TryGetProperty("configured", out var c) && c.ValueKind == JsonValueKind.True;
+            _builtin = r.TryGetProperty("builtin", out var bi) && bi.ValueKind == JsonValueKind.Number
+                ? bi.GetInt32() : 0;
+            _srcList = r.TryGetProperty("sources", out var sc) && sc.ValueKind == JsonValueKind.Array
+                ? sc.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x != "").ToList() : [];
             Dispatcher.UIThread.Post(() =>
             {
                 _all = items;
+                RenderSources();
                 /* 「这个构建没配图标源」和「拉取失败」要**分开说**。
                    前者是永远修不好的(点刷新一百次也没用),后者点一下刷新就好了 ——
                    合成一句「没有图标」的话,用户面对的是同一句话和两种完全不同的处境。 */
@@ -93,6 +125,46 @@ public sealed class IconLibraryPage : PageBase
             });
         }
         catch (Exception e) { Dispatcher.UIThread.Post(() => _hint.Text = LibraryPage.Advice(e)); }
+    }
+
+    /// <summary>把源列表画出来。每条后面一颗「移除」。</summary>
+    private void RenderSources()
+    {
+        _sources.Children.Clear();
+        _sources.Children.Add(Dim(_builtin > 0
+            ? $"内置图标源 {_builtin} 个(地址随构建注入,不在这儿显示)"
+            : "这个构建没有内置图标源。"));
+        foreach (var url in _srcList)
+        {
+            var del = new Button { Classes = { "ghost" }, Content = "移除" };
+            var u = url;
+            del.Click += async (_, _) => await SaveSources(_srcList.Where(x => x != u).ToList());
+            _sources.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 10,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = url, VerticalAlignment = VerticalAlignment.Center,
+                        TextTrimming = TextTrimming.CharacterEllipsis, MaxWidth = 520,
+                    },
+                    del,
+                },
+            });
+        }
+        _sources.Children.Add(_newSource);
+    }
+
+    /// <summary>整表送回去。核心层会顺手把缓存清掉,所以紧跟着重拉一次。</summary>
+    private async Task SaveSources(List<string> list)
+    {
+        try
+        {
+            await _core.PrefsSetIconSources(new { sources = list });
+            await Load(true);
+        }
+        catch (Exception e) { _hint.Text = LibraryPage.Advice(e); }
     }
 
     private void Render()

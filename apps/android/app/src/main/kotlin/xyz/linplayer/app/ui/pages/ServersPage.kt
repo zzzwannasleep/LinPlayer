@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.toRoute
@@ -77,6 +78,16 @@ import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.R
 import xyz.linplayer.app.ui.theme.Sp
+import xyz.linplayer.app.ui.components.Dim2
+import xyz.linplayer.app.data.strList
+import coil3.compose.AsyncImage
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.clickable
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 
 /**
  * 服务器管理(U1.9b)· 底栏第三个 Tab。
@@ -102,6 +113,7 @@ fun ServersPage(nav: NavController) {
     var status by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var menuFor by remember { mutableStateOf<Account?>(null) }
     var editFor by remember { mutableStateOf<Account?>(null) }
+    var iconFor by remember { mutableStateOf<Account?>(null) }
     var confirmDelete by remember { mutableStateOf<Account?>(null) }
     var reload by remember { mutableStateOf(0) }
 
@@ -159,6 +171,7 @@ fun ServersPage(nav: NavController) {
                     LpMenu(menuFor?.id == a.id, { menuFor = null }, Alignment.TopStart, at) {
                         if (!a.isActive) LpMenuItem("设为当前", { menuFor = null; switchTo(a) })
                         LpMenuItem("编辑", { menuFor = null; editFor = a })
+                        LpMenuItem("编辑图标", { menuFor = null; iconFor = a })
                         LpMenuItem("服务器线路",
                             { menuFor = null; nav.navigate(Route.Lines(a.id, a.name)) })
                         LpMenuItem("删除", { menuFor = null; confirmDelete = a }, danger = true)
@@ -174,6 +187,7 @@ fun ServersPage(nav: NavController) {
     }
 
     editFor?.let { a -> EditDialog(a, { editFor = null }) { reload++ } }
+    iconFor?.let { a -> IconDialog(a, { iconFor = null }) { iconCache.remove(a.id); reload++ } }
 
     // 不可逆的删除是**需要二次确认的三类之一**(UI_MOBILE.md §6.2)
     confirmDelete?.let { a ->
@@ -492,3 +506,151 @@ private fun LineRow(l: Line, ms: String, onTap: () -> Unit, onLong: () -> Unit) 
         if (ms.isNotEmpty()) Dim3(ms, Modifier.padding(start = Sp.x8))
     }
 }
+
+/**
+ * 编辑服务器图标
+ * 【用户定 2026-09-12:「服务器编辑的弹窗增加编辑图标功能,支持本地添加、网络源添加,
+ * 同时允许用户自己添加网络源」】。安卓端此前**一个图标入口都没有**。
+ *
+ * ★ 内置源的地址**不显示** —— 它走编译期注入,摆到界面上等于把它抄进用户的截图里。
+ *   只报条数,和「这个构建没配源」分得开就够了。
+ */
+@Composable
+private fun IconDialog(a: Account, onClose: () -> Unit, onChanged: () -> Unit) {
+    val app = LocalApp.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var lib by remember { mutableStateOf<JsonObject?>(null) }
+    var q by remember { mutableStateOf("") }
+    var newSrc by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    suspend fun load(force: Boolean) {
+        lib = runCatching { app.call("prefs.iconLibrary", args("force" to force)) }.getOrNull().obj()
+    }
+    LaunchedEffect(Unit) { load(false) }
+
+    /* 本地图片走 SAF。**类型过滤放到最宽**:实测各家文件管理器给图片的 MIME
+       五花八门,只收图片类型的表现是「选择器里一张图都看不见」——
+       一个打不开的入口。是不是真图片由核心层那一步判。
+       ★ 注释里别写「斜杠星」那个通配:Kotlin 的块注释**会嵌套**,
+         它会当场再开一层,把后面整个文件吞掉(本轮实测踩过)。 */
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val path = copyToCache(ctx, uri)
+        if (path == null) { app.toast("这张图读不出来", ToastKind.Error); return@rememberLauncherForActivityResult }
+        scope.launch {
+            runCatching {
+                app.call("account.setAccountIconFile", args("server_id" to a.id, "file_path" to path))
+            }.onSuccess { onChanged(); app.toast("图标已换", ToastKind.Ok); onClose() }
+                .onFailure { app.report(it) }
+        }
+    }
+
+    suspend fun use(url: String) {
+        runCatching {
+            // 先清缓存再写地址:不清的话旧图标还在缓存里,选了新的也不换 ——
+            // 表现是「点了没反应」,而配置其实已经改了
+            app.call("account.clearAccountIcon", args("server_id" to a.id))
+            app.call("account.updateAccount", args("server_id" to a.id, "icon_url" to url))
+        }.onSuccess { onChanged(); app.toast("图标已换", ToastKind.Ok); onClose() }
+            .onFailure { app.report(it) }
+    }
+
+    val items = lib?.get("items").arr().mapNotNull { it.obj() }
+        .filter { q.isBlank() || (it.str("name") ?: "").contains(q, ignoreCase = true) }
+    val sources = lib.strList("sources")
+    val builtin = lib.long("builtin") ?: 0L
+
+    LpDialog(onClose, "编辑图标") {
+        Row(horizontalArrangement = Arrangement.spacedBy(Sp.x10)) {
+            LpButton("本地图片", { pick.launch(arrayOf("*/*")) }, Modifier.weight(1f), BtnKind.Secondary)
+            LpButton("恢复默认", {
+                scope.launch {
+                    runCatching {
+                        app.call("account.clearAccountIcon", args("server_id" to a.id))
+                        app.call("account.updateAccount", args("server_id" to a.id, "icon_url" to ""))
+                    }.onSuccess { onChanged(); onClose() }.onFailure { app.report(it) }
+                }
+            }, Modifier.weight(1f), BtnKind.Secondary)
+        }
+        Spacer(Modifier.height(Sp.x10))
+        LpField(q, { q = it }, "搜图标名…", label = "图标库")
+        Spacer(Modifier.height(Sp.x10))
+        when {
+            lib == null -> Dim2("正在取图标库…")
+            // 「这个构建没配源」和「拉取失败」要分开说:前者点一百次刷新也没用
+            items.isEmpty() && builtin == 0L && sources.isEmpty() ->
+                Dim2("还没有任何图标源。可以在下面加一个,或者直接选本地图片。")
+            items.isEmpty() -> Dim2("没有匹配的图标。")
+            else -> LazyVerticalGrid(
+                GridCells.Adaptive(72.dp), Modifier.heightIn(max = 260.dp),
+                horizontalArrangement = Arrangement.spacedBy(Sp.x8),
+                verticalArrangement = Arrangement.spacedBy(Sp.x8),
+            ) {
+                items(items.size) { i ->
+                    val e = items[i]
+                    val url = e.str("url").orEmpty()
+                    AsyncImage(
+                        model = url, contentDescription = e.str("name"),
+                        modifier = Modifier.size(64.dp).clickable { scope.launch { use(url) } },
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(Sp.x12))
+        Dim3(if (builtin > 0) "内置图标源 $builtin 个(地址随构建走,不在这儿显示)"
+             else "这个构建没有内置图标源。")
+        sources.forEach { u ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Dim3(u, Modifier.weight(1f))
+                LpButton("移除", {
+                    scope.launch { saveSources(app, sources - u); load(true) }
+                }, kind = BtnKind.Secondary)
+            }
+        }
+        Spacer(Modifier.height(Sp.x8))
+        LpField(newSrc, { newSrc = it }, "粘一个图标源的 JSON 地址", label = "添加网络源")
+        Spacer(Modifier.height(Sp.x10))
+        Row(horizontalArrangement = Arrangement.spacedBy(Sp.x10)) {
+            LpButton("关闭", onClose, Modifier.weight(1f), BtnKind.Secondary)
+            LpButton("添加源", {
+                val u = newSrc.trim()
+                if (!u.startsWith("http")) {
+                    // 本地路径填进来的话核心层那趟 GET 只会报「不支持的协议」,
+                    // 在这儿说清楚比让人去翻日志强
+                    app.toast("网络源要以 http:// 或 https:// 开头", ToastKind.Error)
+                } else {
+                    busy = true
+                    scope.launch {
+                        saveSources(app, sources + u)
+                        newSrc = ""
+                        load(true)
+                        busy = false
+                    }
+                }
+            }, Modifier.weight(1f), loading = busy)
+        }
+    }
+}
+
+/** 整表送回去。核心层会顺手把缓存清掉,所以调用方紧跟着要重拉一次。 */
+private suspend fun saveSources(app: xyz.linplayer.app.data.AppState, list: List<String>) {
+    runCatching {
+        app.call("prefs.setIconSources", args("sources" to jsonArrayOf(list)))
+    }.onFailure { app.report(it) }
+}
+
+/**
+ * SAF 给的是 `content://`,而核心层要的是一条**真路径**。复制到私有目录再交过去。
+ *
+ * 旧的不留:每换一次留一份的话,私有目录里会攒一堆图。
+ */
+private fun copyToCache(ctx: android.content.Context, uri: android.net.Uri): String? = runCatching {
+    ctx.cacheDir.listFiles { f -> f.name.startsWith("srv-icon-") }?.forEach { it.delete() }
+    val dst = java.io.File(ctx.cacheDir, "srv-icon-" + System.currentTimeMillis())
+    ctx.contentResolver.openInputStream(uri)!!.use { i -> dst.outputStream().use { o -> i.copyTo(o) } }
+    if (dst.length() == 0L) { dst.delete(); return null }
+    dst.absolutePath
+}.getOrNull()

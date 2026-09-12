@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"linplayer/core/bus"
+	"linplayer/core/config"
 	"linplayer/core/httpx"
 	"linplayer/core/paths"
 )
@@ -37,8 +38,8 @@ var iconSources string
 // cacheTTL 图标库不常变,一天拉一次够了。
 const cacheTTL = 24 * time.Hour
 
-// IconSources 这个构建配了哪些图标源。
-func IconSources() []string {
+// BuiltinIconSources 这个构建自带哪些图标源(编译期注入 / 自检覆盖)。
+func BuiltinIconSources() []string {
 	var out []string
 	for _, s := range strings.Split(iconSources, ",") {
 		if s = strings.TrimSpace(s); strings.HasPrefix(s, "http") {
@@ -52,6 +53,33 @@ func IconSources() []string {
 			if s = strings.TrimSpace(s); s != "" {
 				out = append(out, s)
 			}
+		}
+	}
+	return out
+}
+
+// UserIconSources 用户自己加的那几条。
+func UserIconSources() []string {
+	out := []string{}
+	for _, s := range config.Current().PrefsOf().IconSourcesExtra {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// IconSources 内置的 + 用户加的,去重后按顺序。
+//
+// ★ 去重是必要的:用户很可能把内置那条也手抄一遍(他看得见地址),
+// 不去重的话同一批图标会在网格里出现两遍,而且没人看得出为什么。
+func IconSources() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, s := range append(BuiltinIconSources(), UserIconSources()...) {
+		if s = strings.TrimRight(strings.TrimSpace(s), "/"); s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
 		}
 	}
 	return out
@@ -187,6 +215,39 @@ func registerIconLibrary() {
 		   后者点一下刷新就好了 —— 而用户看到的是同一句话。 */
 		return map[string]any{
 			"items": items, "configured": len(IconSources()) > 0,
+			// 内置的那几条**只报条数不报地址**:地址走编译期注入,
+			// 摆到界面上等于把它抄进了截图和日志里
+			"builtin": len(BuiltinIconSources()),
+			"sources": UserIconSources(),
 		}, nil
+	})
+
+	// prefs.setIconSources —— 整表替换用户自己加的图标源。
+	//
+	// ★ 整表替换而不是增删各一条:这张表最多几条,来回传一整张比维护
+	//   「删第几条」的序号稳 —— 序号那条路在两端排序不一致时会删错。
+	bus.Register("prefs.setIconSources", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
+		raw, _ := a["sources"].([]any)
+		list := []string{}
+		for _, v := range raw {
+			s, _ := v.(string)
+			s = strings.TrimRight(strings.TrimSpace(s), "/")
+			// 只收 http(s):填个本地路径进来的话,下面那趟 GET 会一直报「不支持的协议」
+			if strings.HasPrefix(s, "http") {
+				list = append(list, s)
+			}
+		}
+		c := config.Current()
+		p := c.PrefsOf()
+		p.IconSourcesExtra = list
+		if err := c.SetPrefs(p); err != nil {
+			return nil, bus.NewErr(bus.EInternal, "%v", err)
+		}
+		if err := c.Save(); err != nil {
+			return nil, bus.NewErr(bus.EInternal, "%v", err)
+		}
+		// 源变了缓存就作废:不清的话加完源点刷新,回来的还是 24 小时前那份
+		_ = os.Remove(iconCachePath())
+		return map[string]any{"sources": list}, nil
 	})
 }

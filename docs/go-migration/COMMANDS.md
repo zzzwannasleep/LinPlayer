@@ -315,6 +315,7 @@
 | [x] | `prefs.getUpdateSettings` | `get_update_settings` | `—` | `UpdateSettings` | ✅ |
 | [x] | `prefs.getWritebackSettings` | `get_writeback_settings` | `—` | `WritebackSettings` | ✅ |
 | [x] | `prefs.iconLibrary` | `icon_library` | `—` | `()` | ✅ |
+| [x] | `prefs.setIconSources` | `—` | `—` | `()` | ✅ |
 | [x] | `prefs.preloadCancel` | `preload_cancel` | `—` | `()` | ❌ |
 | [x] | `prefs.preloadItem` | `preload_item` | `item_id: String, media_source_id: Option<String>` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |

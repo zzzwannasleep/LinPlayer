@@ -1,6 +1,11 @@
 package prefs
 
-import "testing"
+import (
+	"testing"
+
+	"linplayer/core/config"
+	"linplayer/core/paths"
+)
 
 // ★ 真实源的形状:{name, icons:[{name,url,category?}]}。name + url + source 都要拿到。
 func TestParseSource_真实形状(t *testing.T) {
@@ -73,5 +78,39 @@ func TestIconSources_默认为空且只收http(t *testing.T) {
 	got := IconSources()
 	if len(got) != 2 || got[0] != "https://a.example/x.json" || got[1] != "https://b.example/y.json" {
 		t.Fatalf("解出 %v", got)
+	}
+}
+
+// 用户自己加的源要和内置的**并存**,而且去重。
+//
+// ☠ 去重不是洁癖:用户看得见内置源的图标,很可能把同一条地址也手抄一遍 ——
+// 不去重的话同一批图标在网格里出现两遍,而没人看得出为什么。
+func TestIconSources_用户源与内置源并存且去重(t *testing.T) {
+	paths.SetRoot(t.TempDir())
+	if _, err := config.Load(); err != nil {
+		t.Fatal(err)
+	}
+	old := iconSources
+	defer func() { iconSources = old }()
+	iconSources = "https://a.example/x.json"
+
+	c := config.Current()
+	p := c.PrefsOf()
+	// 第二条和内置那条只差一个结尾斜杠 —— 去重要按规整后的串比
+	p.IconSourcesExtra = []string{"https://b.example/y.json", "https://a.example/x.json/"}
+	if err := c.SetPrefs(p); err != nil {
+		t.Fatal(err)
+	}
+
+	got := IconSources()
+	if len(got) != 2 || got[0] != "https://a.example/x.json" || got[1] != "https://b.example/y.json" {
+		t.Fatalf("并存 + 去重不对,实得 %v", got)
+	}
+	// 内置的那几条**只报条数不报地址**:地址走编译期注入,摆到界面上等于抄进截图里
+	if len(BuiltinIconSources()) != 1 {
+		t.Fatalf("内置源数不对: %v", BuiltinIconSources())
+	}
+	if len(UserIconSources()) != 2 {
+		t.Fatalf("用户源数不对: %v", UserIconSources())
 	}
 }

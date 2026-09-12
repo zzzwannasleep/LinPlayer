@@ -241,6 +241,7 @@ object LinPlayerCommandNames {
         "prefs.getUpdateSettings",
         "prefs.getWritebackSettings",
         "prefs.iconLibrary",
+        "prefs.setIconSources",
         "prefs.preloadCancel",
         "prefs.preloadItem",
         "prefs.setDetailBlur",
@@ -676,7 +677,7 @@ suspend fun LinPlayerCommands.translateWhisperDownloadFfmpeg(args: Map<String, A
 suspend fun LinPlayerCommands.translateWhisperModels(args: Map<String, Any?>? = null): JsonElement =
     call("translate.whisperModels", args)
 
-// ---- 设置与偏好 · prefs.* (30 条) ----
+// ---- 设置与偏好 · prefs.* (31 条) ----
 suspend fun LinPlayerCommands.prefsApplyPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.applyPrefs", args)
 suspend fun LinPlayerCommands.prefsCfProxyDisable(args: Map<String, Any?>? = null): JsonElement =
@@ -715,6 +716,8 @@ suspend fun LinPlayerCommands.prefsGetWritebackSettings(args: Map<String, Any?>?
     call("prefs.getWritebackSettings", args)
 suspend fun LinPlayerCommands.prefsIconLibrary(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.iconLibrary", args)
+suspend fun LinPlayerCommands.prefsSetIconSources(args: Map<String, Any?>? = null): JsonElement =
+    call("prefs.setIconSources", args)
 suspend fun LinPlayerCommands.prefsPreloadCancel(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.preloadCancel", args)
 suspend fun LinPlayerCommands.prefsPreloadItem(args: Map<String, Any?>? = null): JsonElement =
