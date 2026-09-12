@@ -358,7 +358,9 @@ func SortFavorites(items []Item, by string) {
 		"评分": func(a, b *Item) bool { return f(a.Rating) > f(b.Rating) },
 		"年份": func(a, b *Item) bool { return i64(a.Year) > i64(b.Year) },
 	}[by]
-	if less == nil {
+	// 第一档就是默认档。认不出的档位落到这里 —— 让 [FavoriteSorts] 真的参与判断,
+	// 而不是摆一张没人读的表:那样「表在核心层」这句话就是假的
+	if less == nil || by == FavoriteSorts[0] {
 		less = func(a, b *Item) bool { return sv(a.DateUpdated) > sv(b.DateUpdated) }
 	}
 	sort.SliceStable(items, func(x, y int) bool { return less(&items[x], &items[y]) })
