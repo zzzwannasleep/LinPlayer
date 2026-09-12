@@ -20,6 +20,18 @@ public class Shot {
   public struct POINT { public int X, Y; }
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+  public delegate bool EnumProc(IntPtr h, IntPtr p);
+  public static System.Collections.Generic.List<IntPtr> TopLevels(int pid) {
+    var list = new System.Collections.Generic.List<IntPtr>();
+    EnumWindows((h, p) => {
+      int wp; GetWindowThreadProcessId(h, out wp);
+      if (wp == pid && IsWindowVisible(h)) list.Add(h);
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int size);
   public struct RECT { public int L,T,R,B; }
 }
@@ -35,7 +47,22 @@ if (-not $p) { Write-Output "没有找到 $ProcName 的窗口"; exit 1 }
 # ★ 判据是「屏幕上那个位置显示的到底是谁」(WindowFromPoint),**不是「谁是前台」**。
 #   一开始写成前台判定,结果自检窗口置顶(Topmost)时 z 序明明在最上、
 #   内容也截得对,却因为前台是别的程序被判失败 —— 判据选错了。
+# ☠ **不能直接用 MainWindowHandle**。.NET 那个属性拿的是“第一个可见的
+#   顶层窗口”—— 鼠标停在界面上弹了个 tooltip 时,它指的就是那个 tooltip。
+#   截出来是一张 237×39 的小图,而脚本照样报“成功”(2026-09-12 连撞四次)。
+#   改成枚举本进程的顶层窗口,取**面积最大**的那个。
 $hwnd = $p.MainWindowHandle
+$best = 0
+foreach ($h in [Shot]::TopLevels($p.Id)) {
+  $rc = New-Object Shot+RECT
+  if ([Shot]::DwmGetWindowAttribute($h, 9, [ref]$rc, 16) -ne 0) {
+    [void][Shot]::GetWindowRect($h, [ref]$rc)
+  }
+  $area = ($rc.R - $rc.L) * ($rc.B - $rc.T)
+  if ($env:LP_SHOT_DEBUG) { Write-Output ("  win {0} {1}x{2}" -f $h, ($rc.R - $rc.L), ($rc.B - $rc.T)) }
+  if ($area -gt $best) { $best = $area; $hwnd = $h }
+}
+if ($env:LP_SHOT_DEBUG) { Write-Output ("  pid={0} main={1} pick={2} area={3}" -f $p.Id, $p.MainWindowHandle, $hwnd, $best) }
 $GA_ROOT = 2
 function Get-Center([Shot+RECT]$rc) {
   $pt = New-Object Shot+POINT
@@ -83,7 +110,18 @@ if ($topNow -ne [IntPtr]::Zero) {
   $rootNow = [Shot]::GetAncestor($topNow, $GA_ROOT)
   $pidNow = 0
   [void][Shot]::GetWindowThreadProcessId($rootNow, [ref]$pidNow)
-  if ($pidNow -eq $p.Id -and $rootNow -ne $hwnd) { $shotHwnd = $rootNow }
+  # ☠ **只有够大的才算弹窗**。不卡面积的话,鼠标恰好停在窗口中心、
+  #   那儿弹了一个 tooltip 时,截出来的就是那个 tooltip ——
+  #   实测得到过一张 237×39 的图,而脚本照样报成功。
+  if ($pidNow -eq $p.Id -and $rootNow -ne $hwnd) {
+    $rc2 = New-Object Shot+RECT
+    if ([Shot]::DwmGetWindowAttribute($rootNow, 9, [ref]$rc2, 16) -ne 0) {
+      [void][Shot]::GetWindowRect($rootNow, [ref]$rc2)
+    }
+    $areaMain = [double](($probe2.R - $probe2.L) * ($probe2.B - $probe2.T))
+    $areaTop  = [double](($rc2.R - $rc2.L) * ($rc2.B - $rc2.T))
+    if ($areaMain -gt 0 -and $areaTop / $areaMain -ge 0.2) { $shotHwnd = $rootNow }
+  }
 }
 $r = New-Object Shot+RECT
 # DWMWA_EXTENDED_FRAME_BOUNDS = 9:拿真实可见边界,GetWindowRect 会多带阴影边

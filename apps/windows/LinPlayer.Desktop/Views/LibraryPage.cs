@@ -1,10 +1,13 @@
-﻿using System.Text.Json;
+﻿using System.Linq;
+using System.Collections.Generic;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
 
@@ -269,6 +272,8 @@ public sealed class LibraryGridPage : PageBase
     private readonly ComboBox _year = new() { Width = 120, MinHeight = 34 };
     /// <summary>筛选条三个下拉的基准宽。换档时按比例缩,见构造里的 Responsive.Watch。</summary>
     private static readonly double[] FilterWidths = [150, 150, 120];
+    /// <summary>已选筛选项那一行(草稿 08 页第 10 条)。一条都没选时整行不占高度。</summary>
+    private readonly WrapPanel _active = new() { ItemSpacing = 10, ItemHeight = double.NaN };
     private int _loaded;
     private int _total = -1;
     private bool _busy;
@@ -303,7 +308,7 @@ public sealed class LibraryGridPage : PageBase
         var head = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 10,
-            Children = { Back(), H1(title) },
+            Children = { Back(), Crumb(title) },
         };
         /* 筛选条用 WrapPanel 不用 StackPanel:三个下拉加起来 440px 宽,
            窗口收窄之后 StackPanel 会把最后一个**直接切掉**,而且一点提示都没有。
@@ -318,7 +323,11 @@ public sealed class LibraryGridPage : PageBase
             b.Margin = new Thickness(0, 0, 0, 6);
             bar.Children.Add(b);
         }
-        var body = new StackPanel { Spacing = 14, Children = { head, bar, _first, _grid, _status } };
+        var body = new StackPanel
+        {
+            Spacing = 14, Children = { head, bar, _active, _first, _grid, _status },
+        };
+        SyncActive();
 
         var box = new Border
         {
@@ -370,6 +379,7 @@ public sealed class LibraryGridPage : PageBase
            追加到刚清空的网格里。 */
         _gen++;
         _busy = false;
+        SyncActive();
         _grid.Clear();
         _loaded = 0;
         _total = -1;
@@ -421,6 +431,130 @@ public sealed class LibraryGridPage : PageBase
         var b = new Button { Classes = { "ghost" }, Content = "← 返回" };
         b.Click += (_, _) => Nav.Back();
         return b;
+    }
+
+    /// <summary>
+    /// 面包屑「媒体库 › 这个库」(草稿 08 页第 8 条)。
+    ///
+    /// <para>「媒体库」那一截走 <see cref="Nav.Top"/> <b>不走返回栈</b>:这一页可能是从
+    /// 详情页的类型片跳过来的,栈上根本没有库列表,返回会退到详情页去。</para>
+    /// </summary>
+    private Control Crumb(string title)
+    {
+        var root = new Button
+        {
+            Classes = { "ghost" }, Content = "媒体库", Padding = new Thickness(6, 2),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+        };
+        root.Click += (_, _) => Nav.Top?.Invoke("NavLibrary");
+        return new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 2,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                root,
+                new TextBlock
+                {
+                    Text = "›", FontSize = 18, Classes = { "dim" },
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                H1(title),
+            },
+        };
+    }
+
+    /// <summary>
+    /// 把「现在筛了什么」画成一行可去掉的片(草稿 08 页第 10 条)。
+    ///
+    /// <para>落地页那一档(类型 / 标签 / 工作室)<b>画出来但不给 ×</b>:
+    /// 这一页存在的理由就是它,去掉之后这一页是什么就说不清了。</para>
+    /// </summary>
+    private void SyncActive()
+    {
+        _active.Children.Clear();
+        if (_facet.Kind != "")
+        {
+            var what = _facet.Kind switch
+            {
+                "genre" => "类型", "tag" => "标签", _ => "工作室",
+            };
+            _active.Children.Add(Chips.Plain($"{what} · {_facet.Value}"));
+        }
+        var n = 0;
+        if (_genre.SelectedIndex > 0)
+        {
+            n++;
+            _active.Children.Add(Chips.Removable($"类型 · {_genre.SelectedItem}", () => Drop(_genre)));
+        }
+        if (_year.SelectedIndex > 0)
+        {
+            n++;
+            _active.Children.Add(Chips.Removable($"年份 · {_year.SelectedItem}", () => Drop(_year)));
+        }
+        // 一条都没有时**连「清除」都不画** —— 一个点了什么都不会变的按钮比没有更糟
+        if (n < 2) return;
+        var clear = new Button { Classes = { "ghost" }, Content = "清除筛选" };
+        clear.Click += (_, _) =>
+        {
+            _suppress = true;
+            _genre.SelectedIndex = 0;
+            _year.SelectedIndex = 0;
+            _suppress = false;
+            Requery();
+        };
+        _active.Children.Add(clear);
+    }
+
+    /// <summary>
+    /// 自检:选一个类型 → 该出一个「类型 · X ✕」的片 → 点那个 ✕ → 该回到一条都没有。
+    ///
+    /// <para>「状态外显」这件事只有真渲染才验得到:片没画出来、× 点了不生效、
+    /// 或者点完片还赖着不走,三样在编译期全是绿的。</para>
+    /// </summary>
+    internal void SelfCheckFilterChips()
+    {
+        if (_genre.ItemCount < 2)
+        {
+            Console.WriteLine("[筛选片] ✗ 类型下拉只有「全部类型」—— 假服务器没给分面?");
+            return;
+        }
+        _genre.SelectedIndex = 1;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var chips = Labels();
+            Console.WriteLine($"[筛选片] 选了「{_genre.SelectedItem}」之后:{Join(chips)}");
+            var want = $"类型 · {_genre.SelectedItem}";
+            if (!chips.Contains(want))
+            {
+                Console.WriteLine($"[筛选片] ✗ 没有「{want}」这一片 —— 筛了什么看不出来");
+                return;
+            }
+            Drop(_genre);
+            Dispatcher.UIThread.Post(() =>
+            {
+                var left = Labels();
+                /* 两件都要判。只判片没没了的话,「✕ 只把片删掉、
+                   筛选其实还在」这个真 bug 照样绿 —— 实测注入过。 */
+                var cleared = _genre.SelectedIndex == 0;
+                Console.WriteLine(left.Count == 0 && cleared
+                    ? "[筛选片] ✓ 点 ✕ 之后那一片没了,筛选也跟着清了"
+                    : $"[筛选片] ✗ 点 ✕ 之后还剩 {Join(left)},"
+                      + $"类型下拉停在「{_genre.SelectedItem}」");
+            }, DispatcherPriority.Background);
+        }, DispatcherPriority.Background);
+    }
+
+    private List<string> Labels() => _active.Children
+        .SelectMany(c => c.GetVisualDescendants().OfType<TextBlock>())
+        .Select(t => t.Text ?? "").Where(t => t != "" && t != "✕").ToList();
+
+    private static string Join(List<string> xs) => xs.Count == 0 ? "(空)" : string.Join(" / ", xs);
+
+    /// <summary>去掉一条筛选 = 把那个下拉拨回「全部」,再走同一条重查。</summary>
+    private void Drop(ComboBox box)
+    {
+        box.SelectedIndex = 0; // 它自己会触发 SelectionChanged → Requery
     }
 
     private async Task LoadMore()

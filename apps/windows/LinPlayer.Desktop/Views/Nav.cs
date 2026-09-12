@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Avalonia.Controls;
 using LinPlayer.Desktop.Core;
 
@@ -47,6 +47,15 @@ public static class Nav
     /// <para>收起不能只 IsVisible=false —— 那样 36px 的行和 212px 的列还在,
     /// 画面会被挤在一个偏右下的框里。行高列宽要一起归零。</para>
     /// </summary>
+    /// <summary>
+    /// 跳到侧栏某个大区(传 <c>"NavLibrary"</c> 这种名字)。由 MainWindow 填上。
+    ///
+    /// <para>面包屑要用它:「媒体库 › 某个库」里点「媒体库」得回到库列表,而这一页
+    /// 可能是从详情页的类型片跳过来的 —— 返回栈上<b>根本没有</b>库列表,
+    /// <see cref="Back"/> 会退到详情页去。</para>
+    /// </summary>
+    public static Action<string>? Top;
+
     public static Action<bool>? Immersive;
 
     /// <summary>

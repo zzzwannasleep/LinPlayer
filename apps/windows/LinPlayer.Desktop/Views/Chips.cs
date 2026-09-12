@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
@@ -18,6 +18,38 @@ internal static class Chips
 {
     private static readonly Thickness Gap = new(0, 0, 10, 10);
     private static readonly Thickness Pad = new(10, 6);
+
+    /// <summary>
+    /// 已选筛选项那种:文字 + 一个 ×,点 × 去掉这一条(草稿 08 页第 10 条)。
+    ///
+    /// <para>筛选状态<b>要外显</b>。只靠下拉框上写着的值的话,三个下拉分散在一行里,
+    /// 「我现在到底筛了什么」得挨个去读;而想去掉一条又得把那个下拉翻回「全部」——
+    /// 那一步没有任何提示说它在哪。</para>
+    /// </summary>
+    internal static Control Removable(string text, Action onRemove)
+    {
+        var b = new Button
+        {
+            Margin = Gap, Padding = new Thickness(10, 6, 6, 6),
+            CornerRadius = new CornerRadius(6),
+            Background = Tok.Of("PanelAlt"),
+            BorderBrush = Tok.Of("Accent"),
+            BorderThickness = new Thickness(1),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 6,
+                Children =
+                {
+                    new TextBlock { Text = text, FontSize = 12.5, Foreground = Tok.Of("Ink") },
+                    new TextBlock { Text = "✕", FontSize = 11, Foreground = Tok.Of("Ink3") },
+                },
+            },
+        };
+        ToolTip.SetTip(b, "去掉这一条筛选");
+        b.Click += (_, _) => onRemove();
+        return b;
+    }
 
     /// <summary>不能点的那种:年份、评分、分级、时长。</summary>
     internal static Control Plain(string text) => new Border

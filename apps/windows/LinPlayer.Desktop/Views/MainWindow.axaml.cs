@@ -139,6 +139,8 @@ public partial class MainWindow : Window
            见 Toast.cs 的文件头。 */
         Toast.Host = (Panel)bar.Parent!;
         Shortcuts.Attach(this);
+        // 面包屑要跳大区(「媒体库 › 某个库」里点「媒体库」),而它不在返回栈上
+        Nav.Top = name => { ShortcutNav(name); };
         // 键位改过没有只有核心层知道。**先挂后读**:读是异步的,
         // 等它读完再挂的话,启动那几百毫秒里按什么都没反应。
         Actions.LoadAsync(_core).ContinueWith(_ => { }, TaskScheduler.Default);
@@ -260,6 +262,7 @@ public partial class MainWindow : Window
         SelfCheckRailStress();
         SelfCheckEpView();
         SelfCheckHeroBand();
+        SelfCheckFilterChips();
         SelfCheckChrome();
         SelfCheckReclick();
         SelfCheckServerIcon();
@@ -951,6 +954,18 @@ public partial class MainWindow : Window
         }));
     }
 
+
+    /// <summary>自检:媒体库的已选筛选片(草稿 08 页第 10 条)。</summary>
+    private void SelfCheckFilterChips()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_FILTERCHIPS") != "1") return;
+        // 分面(类型/年份)是第二条命令,3 秒是它回来 + 下拉重设完的时间
+        _ = Task.Delay(3200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (Nav.Current is LibraryGridPage lg) lg.SelfCheckFilterChips();
+            else Console.WriteLine("[筛选片] ✗ 当前不是媒体库网格页");
+        }));
+    }
 
     /// <summary>自检:量一下详情页那条头图带(草稿 03 页第 12 / 13 条)。</summary>
     private void SelfCheckHeroBand()
