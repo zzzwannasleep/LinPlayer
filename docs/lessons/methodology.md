@@ -743,41 +743,35 @@ inj 字段名 asset_size      -> assetSize    : GREEN   ← 没红
 ☠ 顺带纠正一条断言口径:换回网格时只判「有海报卡」是不够的,
 **要判数目和起手一样** —— 列数没重算、一行只剩一张的退化下屏上仍然有卡,只是少一多半。
 
-## 「exit status 1」不是诊断(2026-09-13)
+## 「exit status 1」不是诊断;WScript.Shell 只认 ANSI 代码页(2026-09-13)
 
-桌面快捷方式那条集成测试在 CI 上红了**四个提交**,日志里只有一句
-`写不出快捷方式: exit status 1` —— PowerShell 自己说了什么,一个字都没带出来。
-`exec.Cmd.Output()` 把 stderr 放在 `ExitError.Stderr` 里,不 `errors.As` 拿出来
-就等于扔了。现在 `psRun` 一律把它拼进 error。
+桌面快捷方式那条集成测试在 CI 上红了**六个提交**。前四个日志里只有一句
+`写不出快捷方式: exit status 1` —— `exec.Cmd.Output()` 把 stderr 放在
+`ExitError.Stderr` 里,不 `errors.As` 取出来就等于扔了。
 
-顺带修掉两处只有在**别的机器上**才现形的东西:
+让它说话之后拿到的是:`$s.TargetPath = ...` 抛 `System.ArgumentException:
+Value does not fall within the expected range`,保存路径里测试名那十个汉字变成了十个 `?`。
 
-- `[Console]::OutputEncoding = [Text.Encoding]::UTF8` **没有控制台的时候会抛**。
-  本地跑 `go test` 有控制台,所以永远复现不出来;而 LinPlayer 自己是 GUI 进程、
-  子进程还带 `HideWindow` —— 那条路上根本没有控制台。改成让值走 **Base64** 回来:
-  全是 ASCII,哪个代码页都改不动它,也不需要控制台。
-- COM(`WScript.Shell`)起不来的机器上「建快捷方式」本来就没有这回事,
-  测试**跳过并打印原因**,不是当成我们的脚本写错。跳过和绿是两件事,日志里看得见。
+☠ 我第一反应是「值在环境变量里被代码页啃了」,把入参改成 Base64 —— **CI 照红**,
+而且这回连「纯 ASCII」那组也红。两处误判:
 
-★ 判据:门禁红了先看**它到底说了什么**;如果它什么都没说,第一件事是让它说话,
-  不是猜。猜一轮 6 分钟,让它说话也是 6 分钟,但后者只需要一轮。
+- 「纯 ASCII」那组不纯:`t.TempDir()` 会把**测试名**(中文)拼进目录名。
+- 真因在 **WScript.Shell 自己**:它内部走系统 ANSI 代码页。简体中文机器(CP936)上
+  拿**韩文目录**一试就复现,抛的是同一个 ArgumentException;en-US 的 runner 上连中文都不行。
+  传输层怎么编码都救不了。
 
-让它说话之后拿到的真话是:
+修法:不再经过 PowerShell / WScript.Shell,Go 里直接调 `IShellLinkW` + `IPersistFile`
+(纯 `syscall`,没加依赖),全程 UTF-16。顺带没了 powershell 黑框、每个 .lnk 起一个进程
+(这条测试从约 4 秒到 0.24 秒)、没有控制台时 `[Console]::OutputEncoding` 会抛的那条坑。
+英文 Windows 上把 LinPlayer 放在中文目录里的用户,原来建快捷方式也是坏的。
 
-```
-$s.TargetPath = $env:LP_EXE   → System.ArgumentException
-Unable to save shortcut "...\Test??????????3725160269\LinPlayer.lnk"
-```
-
-十个 `?` 正好是测试名里那十个汉字。**值走裸文本递进 PowerShell 会被 ANSI 代码页啃掉**
-—— 简体中文机器的 CP936 编得出它们,所以本地怎么跑都是绿的;en-US 的 runner 上
-编不出,就成了一串 `?`,再拿去当路径当然写不出文件。
-**入参也改成 Base64**(出参上一版已经改了),脚本头上解回来。
-
-☠ 顺带踩到 `psValue` 的一个坑:原来是 `$v = <脚本>`,脚本变成多行之后
-**只有第一行**被当成赋值的右边,剩下几行照跑但没人接 —— 回来是空串,而且不报错。
-裹进 `$v = & { ... }` 才对。
-
-★ 还有一条口径:这条集成测试现在**按路径形状分两组跑**(纯 ASCII / 中文+空格)。
-  合成一组的话,en-US 机器上红了分不清是「.lnk 链路坏了」还是「编码坏了」——
-  而这正是它卡住四个提交的原因。
+★ 判据:
+- 门禁红了先看它**说了什么**;什么都没说,第一件事是让它说话,别猜 —— 猜一轮就是 6 分钟。
+- **编码类 bug 要在本机复现,就找本机代码页编不出的字**(中文机器用韩文 / emoji),
+  不要把 CI 当复现环境。
+- 集成测试按路径形状分组(纯 ASCII / 中文 / 系统代码页之外),而且临时目录**别带测试名**,
+  否则分组形同虚设。
+- 反向注入可以用 `go test -overlay` 换掉一个文件,**不动工作区** —— 注入期间别的构建
+  (自检、打包)照样拿到干净的源码。
+- **盯 CI 要盯出问题的那个 job,不是整个 run。** Windows job 两分半就红了,Android job
+  还要再跑三四分钟,等整个 run 结束才报 = 白白晚报三四分钟(用户当场嫌慢)。

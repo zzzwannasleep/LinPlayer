@@ -50,8 +50,8 @@ func TestShouldRepair_按文件名不按路径(t *testing.T) {
 /*
 真写一个 .lnk、真读回来、再把它指坏了修一遍。
 
-☠ 上面那条钉的是判据,而「.lnk 到底写出来没有」只有真跑 PowerShell 才知道:
-COM 对象名写错、参数走错、控制台闪一个黑框 —— 三样在编译期全是绿的。
+☠ 上面那条钉的是判据,而「.lnk 到底写出来没有」只有真调一次 COM 才知道:
+虚表下标错一位、GUID 抄错一个字节 —— 编译期全是绿的。
 */
 func Test快捷方式真写真读真修(t *testing.T) {
 	if runtime.GOOS != "windows" {
@@ -59,18 +59,20 @@ func Test快捷方式真写真读真修(t *testing.T) {
 	}
 	/* ★ COM 起不来就跳过,**而且把原因打出来**。
 	   这不是给失败找台阶:起不来的机器上「建快捷方式」本来就没有这回事,
-	   而脚本写错时 writeLnk 照样会红(它跑的是同一条 psRun)。
+	   而调用写错时 writeLnk 照样会红(它走的是同一条 openLink)。
 	   跳过和绿是两件事 —— 日志里看得见跳过的理由。 */
-	if err := comReady(); err != nil {
-		t.Skipf("这台机器上起不了 WScript.Shell COM:%v —— .lnk 只有真桌面上验得了", err)
+	if err := shellLinkReady(); err != nil {
+		t.Skipf("这台机器上造不出 ShellLink:%v —— .lnk 只有真桌面上验得了", err)
 	}
-	/* 两组路径分开跑,**不是为了多测一遍**:
-	   纯 ASCII 那组钉的是「.lnk 这条链路本身通不通」,中文那组钉的是
-	   「值有没有被哪一层的 ANSI 代码页啃掉」。合成一组的话,
-	   en-US 机器上红了分不清是链路坏了还是编码坏了 —— CI 上正是这么卡了四个提交。 */
+	/* 三组路径分开跑,**不是为了多测一遍**:
+	   纯 ASCII 钉「链路本身通不通」;中文钉 en-US 机器(CI)上的代码页;
+	   **韩文钉简体中文机器上的代码页** —— CP936 编不出它,
+	   所以只有这一组能在本机复现 WScript.Shell 那个坑(实测抛「值不在预期的范围内」)。
+	   合成一组的话,红了分不清是链路坏了还是编码坏了。 */
 	for _, c := range []struct{ why, sub, moved string }{
 		{"纯 ASCII 路径", "plain dir", "moved dir"},
 		{"中文 + 空格路径", "我的 程序", "挪过去 的地方"},
+		{"系统代码页之外的字", "한국 폴더", "옮긴 폴더"},
 	} {
 		t.Run(c.why, func(t *testing.T) { roundTripLnk(t, c.sub, c.moved) })
 	}
@@ -78,7 +80,13 @@ func Test快捷方式真写真读真修(t *testing.T) {
 
 func roundTripLnk(t *testing.T, sub, movedDir string) {
 	t.Helper()
-	dir := t.TempDir()
+	/* ☠ 不用 t.TempDir():它把**测试名**拼进目录名,而测试名是中文 ——
+	   「纯 ASCII」那组其实一点都不纯,CI 上它和中文那组一起红,什么都区分不了。 */
+	dir, err := os.MkdirTemp("", "lnk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
 	exeDir := filepath.Join(dir, sub)
 	if err := os.MkdirAll(exeDir, 0o755); err != nil {
 		t.Fatal(err)

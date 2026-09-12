@@ -18,11 +18,7 @@ package system
 
 import (
 	"context"
-	"encoding/base64"
-	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -42,115 +38,6 @@ type ShortcutStatus struct {
 	// Ok 指的那个文件真的在,而且就是当前这个 exe。
 	Ok  bool   `json:"ok"`
 	Exe string `json:"exe"`
-}
-
-// psRun 跑一小段 PowerShell,值全走**环境变量**递进去。
-//
-// ☠ 不把路径拼进脚本文本里:中文、空格、引号、`$` 任意一个都能把拼出来的那行
-// 弄成另一个意思,而 PowerShell 只会照着错的那行执行,一声不吭。
-//
-// ☠ **输出编码必须自己钉成 UTF-8**。默认走控制台代码页(简体中文机器上是 GBK),
-// 于是「读回来的快捷方式指向哪」在中文路径上是一串乱码 —— 而它照样是个字符串,
-// 后面 os.Stat 必然失败,程序会以为每个快捷方式都坏了。
-// 集成测试当场抓到过:期望「我的 程序」,实得「ÎҵÄ ³ÌÐò」。
-func psRun(script string, env map[string]string) (string, error) {
-	c := exec.Command("powershell", "-NoProfile", "-NonInteractive",
-		"-ExecutionPolicy", "Bypass", "-Command", script)
-	hideConsole(c)
-	c.Env = os.Environ()
-	for k, v := range env {
-		c.Env = append(c.Env, k+"="+v)
-	}
-	out, err := c.Output()
-	/* 把 PowerShell 自己那句话带出来。 只回「exit status 1」的话,
-	   出了问题谁也不知道是脚本写错、还是这台机器上根本起不了那个 COM ——
-	   CI 上红了一整天就是卡在这一句上。 */
-	var ee *exec.ExitError
-	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-		err = fmt.Errorf("%w:%s", err, strings.TrimSpace(string(ee.Stderr)))
-	}
-	return strings.TrimSpace(string(out)), err
-}
-
-/*
-psValue 跑一段 PowerShell 并把它的值取回来。
-
-☠ 值走 **Base64**,不走裸文本。PowerShell 写到重定向管道里用的是控制台代码页
-(简体中文机器上是 GBK),中文路径取回来是一串乱码 —— 而它照样是个字符串,
-后面 os.Stat 必然失败,程序会以为每个快捷方式都坏了。
-上一版靠 `[Console]::OutputEncoding = UTF8` 钉编码,但**没有控制台的时候那一句会抛**
-(GUI 进程 + HideWindow 起的子进程就没有控制台),整条命令当场 exit 1。
-Base64 全是 ASCII,哪个代码页都改不动它,而且不需要控制台。
-*/
-func psValue(script string, env map[string]string) (string, error) {
-	/* 脚本裹进 & { } 里:前面几行是解 Base64 的赋值,不出值,取的是最后那个表达式。
-	   直接写 `$v = <脚本>` 的话,多行脚本只有第一行会被当成赋值的右边,
-	   剩下几行照跑但没人接 —— 回来是空串,而且不报错。 */
-	out, err := psRun("$v = & {\n"+script+"\n}\n"+
-		"[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$v))", env)
-	if err != nil {
-		return "", err
-	}
-	b, err := base64.StdEncoding.DecodeString(out)
-	if err != nil {
-		return "", fmt.Errorf("PowerShell 回的不是 Base64(%q):%w", out, err)
-	}
-	return strings.TrimSpace(string(b)), nil
-}
-
-/*
-psArg 把一个值递进 PowerShell:环境变量里放 Base64,脚本头上解回来。
-
-☠ 直接放原文**在别的机器上会烂**。CI(en-US)实测:路径里那十个汉字到了
-PowerShell 手上是十个 `?` —— 简体中文机器的 ANSI 代码页(CP936)编得出它们,
-所以本地怎么跑都是绿的。Base64 全是 ASCII,中间隔着几层代码页都改不动它。
-*/
-func psArg(name, value string) (string, string, string) {
-	env := "LP_" + name + "_B64"
-	line := "$" + name + " = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:" +
-		env + "))\n"
-	return line, env, base64.StdEncoding.EncodeToString([]byte(value))
-}
-
-// comReady 这台机器上起不起得来 WScript.Shell。起不来就没有 .lnk 这回事
-// (CI 的容器里就没有)—— 调用方据此跳过,而不是把它当成我们的脚本写错了。
-func comReady() error {
-	_, err := psRun("$null = New-Object -ComObject WScript.Shell", nil)
-	return err
-}
-
-// desktopDir 桌面目录。**必须问系统**:OneDrive 接管之后它不在 %USERPROFILE%\Desktop。
-func desktopDir() string {
-	s, err := psValue("[Environment]::GetFolderPath('Desktop')", nil)
-	if err != nil || s == "" {
-		home, _ := os.UserHomeDir()
-		return filepath.Join(home, "Desktop")
-	}
-	return s
-}
-
-// lnkTarget 读一个 .lnk 指向哪。读不出来返回空串(坏文件、不是 .lnk、没权限)。
-func lnkTarget(lnk string) string {
-	decl, env, val := psArg("lnk", lnk)
-	s, err := psValue(decl+"(New-Object -ComObject WScript.Shell).CreateShortcut($lnk).TargetPath",
-		map[string]string{env: val})
-	if err != nil {
-		return ""
-	}
-	return s
-}
-
-// writeLnk 建 / 改一个快捷方式,指向 exe。
-func writeLnk(lnk, exe string) error {
-	dl, el, lv := psArg("lnk", lnk)
-	de, ee, ev := psArg("exe", exe)
-	_, err := psRun(dl+de+`$s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
-$s.TargetPath = $exe
-$s.WorkingDirectory = Split-Path -Parent $exe
-$s.IconLocation = $exe + ',0'
-$s.Description = 'LinPlayer'
-$s.Save()`, map[string]string{el: lv, ee: ev})
-	return err
 }
 
 func shortcutStatus() ShortcutStatus {
@@ -180,7 +67,7 @@ func shortcutStatus() ShortcutStatus {
 // ★ 不扫全盘。这两处是用户真的会放快捷方式的地方,再多扫就是在别人硬盘上乱翻。
 func lnkDirs() []string {
 	dirs := []string{desktopDir()}
-	if s, err := psRun("[Environment]::GetFolderPath('Programs')", nil); err == nil && s != "" {
+	if s := programsDir(); s != "" {
 		dirs = append(dirs, s)
 	}
 	return dirs
@@ -192,7 +79,7 @@ shouldRepair 这一个 .lnk 该不该改回来。<b>两条判据缺一不可</b>
 ① 它指着的文件**已经不在了**;② 它指着的文件名**就是我们这个 exe 的文件名**。
 
 少了②会去改别人的快捷方式;少了①会把用户故意指向另一份安装的链接抢过来。
-拆成纯函数只为可测 —— 真跑一遍要有桌面、有 .lnk、有 PowerShell。
+拆成纯函数只为可测 —— 真跑一遍要有桌面、有 .lnk、有 COM。
 */
 func shouldRepair(target, exeName string, targetExists bool) bool {
 	if target == "" || targetExists {
@@ -236,7 +123,7 @@ func repairBroken(exe string) int {
 /*
 RepairShortcutsIfMoved exe 换了地方才去看快捷方式,没换就一个字都不做。
 
-★ 这个「才」很重要:扫一遍目录 + 每个 .lnk 起一次 PowerShell,放在每次启动上
+★ 这个「才」很重要:扫一遍目录 + 每个 .lnk 读一遍,放在每次启动上
 是白烧几百毫秒。而快捷方式只会因为**exe 挪窝**而失效 —— 覆盖更新是原地换文件。
 
 由 lp_init 在后台调。
