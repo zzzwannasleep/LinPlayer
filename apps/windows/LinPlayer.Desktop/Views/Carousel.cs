@@ -136,50 +136,75 @@ public static class Carousel
     /// 因为它历史上就是 12,改了用户当场看得出来 —— 而这一轮没人要求改首页的间距。</param>
     public static Control Rail<T>(IReadOnlyList<T> items, Func<T, Control> make,
         double artHeight, out ScrollViewer scroller, double gap = RailGap)
+        => Wrap(Virtualized(items, make, Orientation.Horizontal, gap), artHeight, out scroller);
+
+    /// <summary>
+    /// 竖着的那一版:一列会虚拟化的行,自己带滚动条并封顶在 <paramref name="maxHeight"/>。
+    ///
+    /// <para><b>必须封顶。</b> 详情页整页本来就在一个竖向 ScrollViewer 里,
+    /// 不封顶的话外层用无限高去量它,虚拟化面板会把上千行<b>全部造出来</b>
+    /// —— 那正是横排轨道当初要躲开的东西。</para>
+    /// </summary>
+    public static Control Column<T>(IReadOnlyList<T> items, Func<T, Control> make,
+        double maxHeight, out ScrollViewer scroller, double gap = 10)
     {
-        var list = new ItemsControl
+        var sv = new ScrollViewer
+        {
+            MaxHeight = maxHeight,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = Virtualized(items, make, Orientation.Vertical, gap),
+        };
+        scroller = sv;
+        return sv;
+    }
+
+    /// <summary>
+    /// 会虚拟化的一维列表。横排和竖排共用这一份 ——
+    /// 下面那条 null 守卫是拿一次真崩换来的,不该有第二份实现。
+    /// </summary>
+    private static ItemsControl Virtualized<T>(IReadOnlyList<T> items, Func<T, Control> make,
+        Orientation dir, double gap)
+    {
+        var pad = dir == Orientation.Horizontal
+            ? new Thickness(0, 0, gap, 0) : new Thickness(0, 0, 0, gap);
+        return new ItemsControl
         {
             // 这一行就是虚拟化的开关。不设的话默认 StackPanel,全量实例化。
             ItemsPanel = new FuncTemplate<Panel?>(() =>
-                new VirtualizingStackPanel { Orientation = Orientation.Horizontal }),
+                new VirtualizingStackPanel { Orientation = dir }),
             // 间距只能加在**每一项自己**身上:虚拟化面板没有 Spacing,
             // 而外面那层 ItemsControl 的 Spacing 对虚拟化面板不生效。
             /* 第三个参数(supportsRecycling)<b>必须是 false</b>。
                它 2026-09-04 之前是 true —— 而这个模板是**照着数据现造控件**的
                (`make(it)` 里读的是那一条的 id、标题、海报地址)。
-               Avalonia 的 ContentPresenter 一看见 supportsRecycling=true,
-               换内容时就<b>不再走一遍模板</b>,只把旧控件的 DataContext 换掉;
-               我们的卡片一个绑定都没有,于是它<b>原样留在那儿</b> ——
-               表现是横着滑几屏之后卡片开始重复/错位,而且**不报错**,
-               看着像「服务器返回了重复数据」。
-               代价只是滚动时多 new 几个控件;虚拟化省下的是「一千张卡」那个量级,
-                 回收省下的是「屏幕上那七张」,不值得拿正确性换。 */
+               ContentPresenter 一看见 true,换内容时就不再走一遍模板,
+               只把旧控件的 DataContext 换掉;我们的卡片一个绑定都没有,
+               于是它原样留在那儿 —— 表现是滑几屏之后卡片重复/错位,而且不报错。 */
             ItemTemplate = new FuncDataTemplate<T>((it, _) =>
             {
-                /* ☠ <b>这一条可能是 null。</b> 卡片滑出视野时 <see cref="VirtualizingStackPanel"/>
-                   会回收容器,而回收的第一步是把 ContentPresenter 的内容置空 ——
+                /* ☠ <b>这一条可能是 null。</b> 卡片滑出视野时虚拟化面板会回收容器,
+                   而回收的第一步是把 ContentPresenter 的内容置空 ——
                    置空同样触发一次模板构建,入参就是 null。ItemTemplate 是显式给的,
-                   不走 Match,所以拦不住。
-                   而 make 读的是这一条的字段(标题、剧照、id),于是当场 NRE,
+                   不走 Match,拦不住。make 读的是这一条的字段,于是当场 NRE,
                    并且抛在**布局过程里**:这一趟测量整个作废,后面的卡再也造不出来,
                    下一帧重来一遍又抛一次 —— 用户 2026-09-12 看到的
                    「只显示前 7 集、一直往右就卡死」就是这个,不是加载慢。 */
                 if (it is null) return new Control();
                 var c = make(it);
-                c.Margin = new Thickness(0, 0, gap, 0);
+                c.Margin = pad;
                 return c;
             }, false),
             ItemsSource = items,
             /* ☠ 把最后一项那道尾间距**从量程里减掉**。
-               间距只能加在每一项自己身上(虚拟化面板没有 Spacing),于是最后一项
-               后面也挂着一个 gap —— 滑到底之后右边空着一条 16px 的缝,
-               最后一集贴不上边,看着像「还没到底但不动了」
+               间距只能加在每一项自己身上,于是最后一项后面也挂着一个 gap ——
+               滑到底之后边上空着一条缝,最后一集贴不上边,看着像「还没到底但不动了」
                (用户 2026-09-12:「划到底之后…自动把最后一集贴边即可」)。
                负外边距是唯一不用逐项判「是不是最后一个」的改法:虚拟化面板
                手里根本没有全表,而 FuncDataTemplate 拿不到序号。 */
-            Margin = new Thickness(0, 0, -gap, 0),
+            Margin = dir == Orientation.Horizontal
+                ? new Thickness(0, 0, -gap, 0) : new Thickness(0, 0, 0, -gap),
         };
-        return Wrap(list, artHeight, out scroller);
     }
 
     /// <summary>

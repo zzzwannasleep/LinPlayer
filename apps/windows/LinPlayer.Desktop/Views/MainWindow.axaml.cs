@@ -258,6 +258,7 @@ public partial class MainWindow : Window
         SelfCheckServerMenu();
         SelfCheckRail();
         SelfCheckRailStress();
+        SelfCheckEpView();
         SelfCheckChrome();
         SelfCheckReclick();
         SelfCheckServerIcon();
@@ -912,21 +913,32 @@ public partial class MainWindow : Window
     /// 配 <c>fakeemby -eps 1200</c> 用:12 集的夹具上这条必然绿,
     /// 夹具不真实的假绿本仓栽过。</para>
     /// </summary>
+    /// <summary>
+    /// 找分集那条虚拟化列表。<b>按条目数最多的那条挑</b>,不按方向 ——
+    /// 横排是横的,网格 / 列表是竖的,写死方向的话一换版式就说「没找到」。
+    /// </summary>
+    private (VirtualizingStackPanel? Vsp, ScrollViewer? Sv, int Total) EpisodeList()
+    {
+        var best = this.GetVisualDescendants().OfType<VirtualizingStackPanel>()
+            // VirtualizingStackPanel 的直接父级是 ItemsPresenter,不是 ItemsControl ——
+            // 直接 `Parent as ItemsControl` 恒为 null。
+            .Select(v => (Vsp: v, Total: v.FindAncestorOfType<ItemsControl>()?.ItemCount ?? 0))
+            .OrderByDescending(x => x.Total)
+            .FirstOrDefault();
+        return (best.Vsp, best.Vsp?.FindAncestorOfType<ScrollViewer>(), best.Total);
+    }
+
     private void SelfCheckRail()
     {
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_RAIL") != "1") return;
         _ = Task.Delay(3600).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
         {
-            var vsp = this.GetVisualDescendants().OfType<VirtualizingStackPanel>()
-                .FirstOrDefault(v => v.Orientation == Orientation.Horizontal);
+            var (vsp, _, total) = EpisodeList();
             if (vsp is null)
             {
-                Console.WriteLine("[分集轨道] ✗ 一个横向虚拟化面板都没找到 —— 它不在轨道上");
+                Console.WriteLine("[分集轨道] ✗ 一个虚拟化面板都没找到 —— 它不在轨道上");
                 return;
             }
-            // VirtualizingStackPanel 的<b>直接父级是 ItemsPresenter</b>,不是 ItemsControl ——
-            // 直接 `Parent as ItemsControl` 恒为 null,量出来是 -1。
-            var total = vsp.FindAncestorOfType<ItemsControl>()?.ItemCount ?? -1;
             var made = vsp.Children.Count;
             Console.WriteLine($"[分集轨道] 条目 {total} 条,真造出来的卡 {made} 张");
             if (total < 200)
@@ -938,6 +950,26 @@ public partial class MainWindow : Window
         }));
     }
 
+
+    /// <summary>
+    /// 自检:按名字点一下分集版式那三颗 chip(横排 / 网格 / 列表)。
+    ///
+    /// <para>三种版式各自一套滚动容器和一套算行高的算法,只验默认那一种
+    /// 等于另外两种从来没被画过 —— 而它们恰恰是这一轮新加的。</para>
+    /// </summary>
+    private void SelfCheckEpView()
+    {
+        var want = Environment.GetEnvironmentVariable("LP_SELFCHECK_EPVIEW");
+        if (string.IsNullOrEmpty(want)) return;
+        _ = Task.Delay(3000).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var b = this.GetVisualDescendants().OfType<Button>()
+                .FirstOrDefault(x => x.Classes.Contains("chip") && x.Content as string == want);
+            if (b is null) { Console.WriteLine($"[分集版式] ✗ 没找到「{want}」这颗按钮"); return; }
+            b.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Console.WriteLine($"[分集版式] 切到「{want}」,选中态 {b.Classes.Contains("on")}");
+        }));
+    }
 
     /// <summary>
     /// 自检:一路滑过上千集,量 <b>UI 线程有没有被卡住</b>。
@@ -952,26 +984,30 @@ public partial class MainWindow : Window
         if (Environment.GetEnvironmentVariable("LP_SELFCHECK_RAILSTRESS") != "1") return;
         _ = Task.Delay(4200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
         {
-            var vsp = this.GetVisualDescendants().OfType<VirtualizingStackPanel>()
-                .FirstOrDefault(v => v.Orientation == Orientation.Horizontal);
-            var sv = vsp?.FindAncestorOfType<ScrollViewer>();
+            var (vsp, sv, _) = EpisodeList();
             var top = sv is null ? null : TopLevel.GetTopLevel(sv);
-            if (sv is null || top is null) { Console.WriteLine("[轨道压测] 没找到横向轨道"); return; }
-
-            var max = sv.Extent.Width - sv.Viewport.Width;
+            if (vsp is null || sv is null || top is null)
+            {
+                Console.WriteLine("[轨道压测] 没找到分集列表");
+                return;
+            }
+            var sideways = vsp.Orientation == Orientation.Horizontal;
+            var max = sideways ? sv.Extent.Width - sv.Viewport.Width
+                               : sv.Extent.Height - sv.Viewport.Height;
             // 只滑 200 张卡的距离:整条 1200 集要跑一分钟,而卡不卡前二十帧就看得出来
             var goal = Math.Min(max, 230.0 * 200);
             var gaps = new List<double>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var last = 0.0;
             var frames = 0;
+            double At() => sideways ? sv.Offset.X : sv.Offset.Y;
             void Report()
             {
                 var srt = gaps.OrderBy(x => x).ToList();
                 var med = srt.Count > 0 ? srt[srt.Count / 2] : 0;
                 var p95 = srt.Count > 0 ? srt[(int)(srt.Count * 0.95)] : 0;
                 var worst = srt.Count > 0 ? srt[^1] : 0;
-                Console.WriteLine($"[轨道压测] 滑了 {sv.Offset.X:0}/{max:0}px,{frames} 帧," +
+                Console.WriteLine($"[轨道压测] 滑了 {At():0}/{max:0}px,{frames} 帧," +
                                   $"帧间隔 中位 {med:0}ms P95 {p95:0}ms 最长 {worst:0}ms");
                 Console.WriteLine(worst < 200
                     ? "[轨道压测] 全程没有超过 200ms 的停顿"
@@ -985,8 +1021,10 @@ public partial class MainWindow : Window
                 last = now;
                 frames++;
                 // 每帧推三张卡 —— 拖着滑就是这个速度(Smooth.EnableDrag 直接改 Offset)
-                sv.Offset = sv.Offset.WithX(Math.Min(goal, sv.Offset.X + 690));
-                if (sv.Offset.X < goal - 1 && frames < 400) top.RequestAnimationFrame(Frame);
+                sv.Offset = sideways
+                    ? sv.Offset.WithX(Math.Min(goal, sv.Offset.X + 690))
+                    : sv.Offset.WithY(Math.Min(goal, sv.Offset.Y + 690));
+                if (At() < goal - 1 && frames < 400) top.RequestAnimationFrame(Frame);
                 else Report();
             }
             top.RequestAnimationFrame(Frame);

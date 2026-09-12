@@ -90,13 +90,25 @@ public static class Smooth
         for (var v = source; v is not null; v = v.GetVisualParent())
         {
             if (v is not ScrollViewer cand) continue;
-            var canY = cand.Extent.Height - cand.Viewport.Height > 1;
-            var canX = cand.Extent.Width - cand.Viewport.Width > 1;
+            /* 判的是「<b>还能不能往这个方向再走</b>」,不是「滚不滚得动」。
+               只判后者的话,内嵌列表滚到底之后滚轮仍然归它 —— 而它已经不动了,
+               于是鼠标停在这块上整页就再也滚不下去(用户会当成卡住)。
+               分集网格 / 列表是这一轮新加的第四处内嵌滚动区,前三处一直有这个毛病。 */
+            var canY = delta.Y > 0
+                ? cand.Offset.Y > 1
+                : cand.Extent.Height - cand.Viewport.Height - cand.Offset.Y > 1;
+            var canX = delta.X > 0
+                ? cand.Offset.X > 1
+                : cand.Extent.Width - cand.Viewport.Width - cand.Offset.X > 1;
             if (!(delta.Y != 0 && canY) && !(delta.X != 0 && canX)) continue;
             return ReferenceEquals(cand, sv);
         }
         return true; // 一个滚得动的都没找到 —— 那就当是我的
     }
+
+    /// <summary>自检:这一格滚轮归不归 <paramref name="sv"/>。直接问真函数,不抄判断。</summary>
+    internal static bool SelfCheckInnermost(ScrollViewer sv, Visual? source, Vector delta)
+        => Innermost(sv, source, delta);
 
     /// <summary>
     /// 自检:模拟拨一格滚轮。走的是<b>和真滚轮完全同一段逻辑</b> ——

@@ -1476,6 +1476,16 @@ public sealed class DetailPage : PageBase
         // 当前这一季的集表 + 它的滚动容器(「跳到第 N 集」要滚它)
         var shown = new List<CardItem>();
         ScrollViewer? rail = null;
+        // 横排时是 0(按 X 跳),网格/列表时是每行几张(按 Y 跳)
+        var perRow = 0;
+        var rowH = 0.0;
+
+        // 三种版式共用同一张卡 —— 各写一遍的话「点一集去哪」迟早分叉
+        Control EpCard(CardItem it) => new Card(_core, _server, it, true,
+            x => Nav.Push(new DetailPage(_core, _server, x.Id)),
+            // 分辨率 / 码率 / 大小(草稿 03 页第 16 条),缺了回落到时长
+            width: EpisodeCardWidth, subtitle: it.EpisodeSubtitle,
+            title: it.Name, titleLines: 1);
 
         /* 一行,虚拟化,左右翻页(用户 2026-09-03:
            「做成一行的,可以点击左右的按钮滑动展示的」)。
@@ -1492,13 +1502,36 @@ public sealed class DetailPage : PageBase
                而那正是用户点进来要选的东西;集详情页天生就有那一套。
                复用 DetailPage 而不是另写一个「集详情」:一集就是一个条目,
                  它和电影走的是同一段渲染。 */
-            railHost.Content = Carousel.Rail(list,
-                it => new Card(_core, _server, it, true,
-                    x => Nav.Push(new DetailPage(_core, _server, x.Id)),
-                    // 分辨率 / 码率 / 大小(草稿 03 页第 16 条),缺了回落到时长
-                    width: EpisodeCardWidth, subtitle: it.EpisodeSubtitle,
-                    title: it.Name, titleLines: 1),
-                EpisodeCardWidth * 9 / 16, out var sv);
+            ScrollViewer sv;
+            switch (_epView)
+            {
+                case 1:
+                    perRow = Math.Max(1, (int)((EpisodeBoxWidth + Carousel.RailGap)
+                                               / (EpisodeCardWidth + Carousel.RailGap)));
+                    rowH = EpisodeCardWidth * 9 / 16 + EpisodeRowExtra;
+                    var rows = new List<List<CardItem>>();
+                    for (var i = 0; i < list.Count; i += perRow)
+                        rows.Add(list.GetRange(i, Math.Min(perRow, list.Count - i)));
+                    railHost.Content = Carousel.Column(rows, r =>
+                    {
+                        var p = new StackPanel
+                        {
+                            Orientation = Orientation.Horizontal, Spacing = Carousel.RailGap,
+                        };
+                        foreach (var it in r) p.Children.Add(EpCard(it));
+                        return p;
+                    }, EpisodeBoxHeight, out sv);
+                    break;
+                case 2:
+                    perRow = 1;
+                    rowH = EpisodeListRowHeight;
+                    railHost.Content = Carousel.Column(list, EpRow, EpisodeBoxHeight, out sv, 6);
+                    break;
+                default:
+                    perRow = 0;
+                    railHost.Content = Carousel.Rail(list, EpCard, EpisodeCardWidth * 9 / 16, out sv);
+                    break;
+            }
             rail = sv;
         }
 
@@ -1533,10 +1566,14 @@ public sealed class DetailPage : PageBase
             if (i < 0 || i >= shown.Count) return;
             // 虚拟化面板不能按控件求位置(那一张多半还没造出来),按**卡宽 + 间距**算。
             // 间距用 Carousel.RailGap,别再写一个字面量 —— 两处对不上时卡会越滚越偏。
-            if (rail is not null)
+            if (rail is null) return;
+            if (perRow == 0)
                 rail.Offset = rail.Offset.WithX(Math.Max(0,
                     i * (EpisodeCardWidth + Carousel.RailGap)
                     - rail.Viewport.Width / 2 + EpisodeCardWidth / 2));
+            else
+                rail.Offset = rail.Offset.WithY(Math.Max(0,
+                    i / perRow * rowH - rail.Viewport.Height / 2 + rowH / 2));
         }
 
         host.Children.Add(H2(groups.Count <= 1
@@ -1553,7 +1590,36 @@ public sealed class DetailPage : PageBase
         var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 0 };
         if (groups.Count > 1) bar.Children.Add(seasonBtn);
         bar.Children.Add(epBtn);
-        host.Children.Add(bar);
+
+        /* 版式切换,靠右(草稿 03 页第 15 条)。三档不是两档:草稿画的是 ▦/☰,
+           而「横排 + 左右翻页」是用户 2026-09-03 自己点名要的 ——
+           草稿和用户各要一半,那就都留着。找第 300 集时网格/列表比横排快得多,
+           而横排是「接着看下一集」那个动作的版式。 */
+        var viewBar = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 6,
+            HorizontalAlignment = HorizontalAlignment.Right,
+        };
+        var viewBtns = new List<Button>();
+        foreach (var (label, idx) in EpisodeViews.Select((v, i) => (v, i)))
+        {
+            var b = new Button { Classes = { "chip" }, Content = label };
+            b.Click += (_, _) =>
+            {
+                if (_epView == idx) return;
+                _epView = idx;
+                MarkView(viewBtns);
+                if (shown.Count > 0) ShowSeason([.. shown]);
+            };
+            viewBtns.Add(b);
+            viewBar.Children.Add(b);
+        }
+        MarkView(viewBtns);
+        var barRow = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(viewBar, Dock.Right);
+        barRow.Children.Add(viewBar);
+        barRow.Children.Add(bar);
+        host.Children.Add(barRow);
 
         host.Children.Add(railHost);
         // 换档整条重建。shown 要先拷一份 —— ShowSeason 第一句就是 shown.Clear()
@@ -1562,6 +1628,80 @@ public sealed class DetailPage : PageBase
             if (shown.Count > 0) ShowSeason([.. shown]);
         };
         return host;
+    }
+
+    /// <summary>
+    /// 分集版式:0 横排 / 1 网格 / 2 列表。
+    ///
+    /// <para><b>静态</b>是故意的:点一集就是推一页新的 DetailPage,存在实例上等于
+    /// 每点一集都被打回横排。也<b>不落库</b> —— 这是「这会儿想怎么看」,不是设置项。</para>
+    /// </summary>
+    private static int _epView;
+
+    private static readonly string[] EpisodeViews = ["横排", "网格", "列表"];
+
+    private static void MarkView(List<Button> btns)
+    {
+        for (var i = 0; i < btns.Count; i++) btns[i].Classes.Set("on", i == _epView);
+    }
+
+    /// <summary>一张分集卡除了剧照还占多高:标题一行 + 小字一行 + 行间距。</summary>
+    private const double EpisodeRowExtra = 62;
+
+    /// <summary>列表版一行多高。没有剧照,所以只够放一行字。</summary>
+    private const double EpisodeListRowHeight = 40;
+
+    /// <summary>
+    /// 网格 / 列表那一块的高度上限。
+    ///
+    /// <para><b>必须封顶</b>:整页本来就在一个竖向 ScrollViewer 里,不封顶的话
+    /// 外层用无限高去量,虚拟化面板会把上千行全造出来。三行是「一眼扫得完、
+    /// 又不会把相似推荐推出屏幕」的量。</para>
+    /// </summary>
+    private double EpisodeBoxHeight => (EpisodeCardWidth * 9 / 16 + EpisodeRowExtra) * 3;
+
+    /// <summary>网格算列数用的可用宽。还没量到就退回整页宽,_rescaleEpisodes 之后会纠正。</summary>
+    private double EpisodeBoxWidth =>
+        _episodesHost.Bounds.Width > 1 ? _episodesHost.Bounds.Width : Bounds.Width;
+
+    /// <summary>
+    /// 列表版的一行:集号 + 标题 + 那行小字。<b>不放剧照</b> ——
+    /// 列表是给「找第 300 集」用的,一屏得摆得下二十行才有意义。
+    /// </summary>
+    private Control EpRow(CardItem it)
+    {
+        var code = new TextBlock
+        {
+            Text = it.EpisodeCode, Width = 88, Classes = { "dim" },
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var meta = new TextBlock
+        {
+            Text = it.EpisodeSubtitle, Classes = { "dim" },
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0),
+        };
+        var name = new TextBlock
+        {
+            Text = it.Name, TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var row = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(code, Dock.Left);
+        DockPanel.SetDock(meta, Dock.Right);
+        row.Children.Add(code);
+        row.Children.Add(meta);
+        row.Children.Add(name);
+        var b = new Button
+        {
+            Classes = { "ghost" }, Content = row,
+            Padding = new Thickness(10, 6),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
+        b.Click += (_, _) => Nav.Push(new DetailPage(_core, _server, it.Id));
+        // 右键菜单和卡片共用一份:两种版式给两套菜单,用户会以为是两种东西
+        CardActions.Attach(b, _core, it);
+        return b;
     }
 
     /// <summary>

@@ -423,6 +423,63 @@ internal static class Program
             Console.WriteLine("PROBE 网格 ✓ 每一行画的都是自己那一行");
         }
         w.Close();
+
+        // ── Carousel.Column:分集的网格 / 列表两种版式都挂在它上面 ──────────
+        var col = Enumerable.Range(0, 800).Select(i => new RailRow($"行{i}")).ToList();
+        var inner = (Avalonia.Controls.ScrollViewer)Views.Carousel.Column(col,
+            r => new Avalonia.Controls.Button { Height = 40, Content = r.Name }, 300, out _, 6);
+        // 外层是整页那个竖向滚动区。内嵌滚动区的正确归属只有真嵌起来才验得到
+        var outerBody = new Avalonia.Controls.StackPanel();
+        // 上面这块只占一点点:虚拟化面板按**可视区**决定造几个,
+        // 把盒子整个推到窗口外面的话它只造一个,那时「只造了 1 个」不是虚拟化生效,是没画
+        outerBody.Children.Add(new Avalonia.Controls.Border { Height = 40 });
+        outerBody.Children.Add(inner);
+        outerBody.Children.Add(new Avalonia.Controls.Border { Height = 800 });
+        var outer = new Avalonia.Controls.ScrollViewer { Content = outerBody };
+        var w2 = new Avalonia.Controls.Window
+        {
+            Width = 500, Height = 400, ShowInTaskbar = false,
+            SystemDecorations = Avalonia.Controls.SystemDecorations.None,
+            Content = outer,
+        };
+        w2.Show();
+        Pump(500);
+
+        var ivsp = inner.GetVisualDescendants().OfType<Avalonia.Controls.VirtualizingStackPanel>()
+            .FirstOrDefault();
+        var made2 = ivsp?.Children.Count ?? -1;
+        Console.WriteLine($"PROBE 网格 · Column 800 行,封顶 300px,量出来高 {inner.Bounds.Height:0}," +
+                          $"真造出来 {made2} 个");
+        // 下限也要判:盒子塌成一行时「只造了 1 个」看起来也像虚拟化生效
+        if (made2 >= 4 && made2 < 40 && Math.Abs(inner.Bounds.Height - 300) < 2)
+        {
+            Console.WriteLine("PROBE 网格 ✓ Column 会虚拟化(不封顶的话外层用无限高量,800 行全造)");
+        }
+        else { bad++; Console.WriteLine($"PROBE 网格 ✗ Column 造了 {made2} 个 —— 没虚拟化"); }
+
+        // 内层停在顶上:往下拨,这一格该归内层
+        var src = ivsp?.Children.FirstOrDefault();
+        var down = new Vector(0, -1);
+        var atTopInner = Views.Smooth.SelfCheckInnermost(inner, src, down);
+        var atTopOuter = Views.Smooth.SelfCheckInnermost(outer, src, down);
+        if (atTopInner && !atTopOuter)
+        {
+            Console.WriteLine("PROBE 网格 ✓ 内层没到底时,滚轮归内层");
+        }
+        else { bad++; Console.WriteLine($"PROBE 网格 ✗ 内层没到底却判给了外层(内 {atTopInner} 外 {atTopOuter})"); }
+
+        // 内层滚到底:再往下拨,这一格必须交给外层,否则整页从此滚不下去
+        inner.Offset = inner.Offset.WithY(inner.Extent.Height - inner.Viewport.Height);
+        Pump(200);
+        var atEndInner = Views.Smooth.SelfCheckInnermost(inner, src, down);
+        var atEndOuter = Views.Smooth.SelfCheckInnermost(outer, src, down);
+        if (!atEndInner && atEndOuter)
+        {
+            Console.WriteLine("PROBE 网格 ✓ 内层到底之后滚轮交给外层(不交 = 鼠标停这儿整页卡住)");
+        }
+        else { bad++; Console.WriteLine($"PROBE 网格 ✗ 内层到底了还占着滚轮(内 {atEndInner} 外 {atEndOuter})"); }
+        w2.Close();
+
         Console.WriteLine(bad == 0 ? "PROBE 网格 全部通过" : $"PROBE 网格 {bad} 条不过");
         return bad == 0;
     }
