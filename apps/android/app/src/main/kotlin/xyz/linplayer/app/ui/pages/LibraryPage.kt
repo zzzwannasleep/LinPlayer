@@ -76,10 +76,15 @@ import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.Sp
 import xyz.linplayer.app.ui.theme.rememberTone
 
-/** 排序档位。「更新时间」≠「加入时间」—— 前者是这部剧**最近一集**入库的时间,追更要的是它。 */
+/**
+ * 排序档位。「更新时间」≠「加入时间」—— 前者是这部剧**最近一集**入库的时间,追更要的是它。
+ *
+ * 第一条就是默认档【用户定 2026-09-12:「默认从新到旧排序」】。追更的人进库要看的是
+ * 「哪部剧刚更新」,而「加入时间」排出来的是「哪部剧刚被收进来」,老剧更了新集排不上去。
+ */
 private val SORTS = listOf(
-    "加入时间" to "DateCreated",
     "更新时间" to "DateLastContentAdded",
+    "加入时间" to "DateCreated",
     "上映日期" to "PremiereDate",
     "名称 A→Z" to "SortName",
     "年份" to "ProductionYear",
@@ -90,6 +95,19 @@ private val SORTS = listOf(
 private val RATINGS = listOf("不限" to 0, "9 分以上" to 9, "8 分以上" to 8, "7 分以上" to 7, "6 分以上" to 6)
 
 private const val PAGE = 120
+
+/**
+ * 该不该重拉第一页。
+ *
+ * ☠ 这道闸原来只判「手里有没有结果」,于是**换了筛选也当成「已经有了」直接跳过** ——
+ * 界面一动不动(用户 2026-09-12:「移动端媒体库页的筛选不生效,筛选了不会刷新出现筛选结果」)。
+ * 判据必须带上「手里这份是按哪套筛选拉的」。
+ *
+ * @param fetchedAs 手里这份结果对应的筛选签名;还没拉过是 null
+ * @param key 现在这套筛选的签名
+ */
+internal fun needRefetch(hasItems: Boolean, ok: Boolean, fetchedAs: String?, key: String): Boolean =
+    !(hasItems && ok && fetchedAs == key)
 
 /**
  * 媒体库 + 筛选(U1.4)。版式照草稿 02:**库头也取色**。
@@ -121,8 +139,12 @@ fun LibraryPage(nav: NavController, entry: NavBackStackEntry) {
     var genre by xyz.linplayer.app.data.keepState<String?>("$ck.genre") { null }
     var showFilter by remember { mutableStateOf(false) }
     var filters by remember { mutableStateOf<Block<List<String>>>(Block.Loading) }
+    /* 手里这份结果是**按哪套筛选**拉回来的。没有它就分不清「返回这一页」和
+       「换了筛选」,而这两件事下面那道闸要走相反的路 —— 见 LaunchedEffect。 */
+    var fetchedAs by xyz.linplayer.app.data.keepState<String?>("$ck.as") { null }
 
     val hasFilter = genre != null || minRating.second > 0
+    val filterKey = "${sort.second}|${minRating.second}|${genre.orEmpty()}"
 
     /* ☠ **这条命令收的是 `parent_id` + 一个嵌套的 `query` 对象**,不是平铺参数。
        平铺传过去核心层一个都读不到:`parent_id` 空 = 不限库、`query` 缺 = 默认分页,
@@ -154,13 +176,15 @@ fun LibraryPage(nav: NavController, entry: NavBackStackEntry) {
     }
 
     // 进库时**并发**拉分面与第一页条目
-    LaunchedEffect(route.viewId, sort, minRating, genre) {
-        // 已经有这一页的结果就别重拉(筛选变了会带着新的 key 重进这里)
-        if (items.isNotEmpty() && first is Block.Ok) return@LaunchedEffect
-        first = Block.Loading; items = emptyList()
+    LaunchedEffect(route.viewId, filterKey) {
+        // 判据见 [needRefetch] —— [ck] 这个键里不含筛选条件,光看「有没有结果」会漏掉换筛选
+        if (!needRefetch(items.isNotEmpty(), first is Block.Ok, fetchedAs, filterKey)) return@LaunchedEffect
+        first = Block.Loading; items = emptyList(); total = null
+        fetchedAs = filterKey
         coroutineScope {
             launch { fetch(0) }
-            launch {
+            // 分面只跟库走,换筛选不必再拉一遍
+            if (filters !is Block.Ok) launch {
                 filters = when (val r = app.block("emby.getFilters", args("parent_id" to route.viewId))) {
                     is Block.Ok -> Block.Ok(r.value.obj().strList("genres"))
                     is Block.Fail -> r

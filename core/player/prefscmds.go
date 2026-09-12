@@ -25,18 +25,76 @@ import (
 
 var prefsClient *emby.Client
 
-/* 当前生效的画质档。**不落盘**(档位跟这一片的分辨率和窗口大小绑定,
-   记住上一片的只会带来「上次好好的这次不生效」),但要记在进程里 ——
-   移动端的面板每次打开都是新建的,没有这个就回显不出「现在开着哪一档」,
-   用户看到的是一张全都没选中的表。 */
+/* 当前生效的画质档。进程里记一份是因为移动端的面板每次打开都是新建的,
+   没有这个就回显不出「现在开着哪一档」,用户看到的是一张全都没选中的表。 */
 var curShader atomic.Value
 
+// currentShaderLevel 进程里没有就回落到**记住的那一档**(还没起播时就是这条路)。
 func currentShaderLevel() string {
 	v, _ := curShader.Load().(string)
+	if v == "" {
+		v = config.Current().PrefsOf().ShaderLevel
+	}
 	if v == "" {
 		return "off"
 	}
 	return v
+}
+
+// rememberShader 用户**自己挑**的那一档:记进程,也落盘。
+//
+// ★ 2026-08-31 定过「档位故意不持久化」,理由是「档位跟这一片的分辨率和窗口大小绑定」。
+//   那条已作废(用户 2026-09-12:「画面增强需要支持记忆」),而且 2026-09-07 重排之后
+//   六档都带一个不挑尺寸的锐化 pass,原来的理由本身也不成立了。
+// ★ 只有用户的选择走这里。起播时自动挂载失败而退回关闭的那一路**不能**走 ——
+//   一次瞬时失败就把用户记住的档位抹了。
+func rememberShader(level string) {
+	curShader.Store(level)
+	c := config.Current()
+	p := c.PrefsOf()
+	if p.ShaderLevel == level {
+		return
+	}
+	p.ShaderLevel = level
+	if err := c.SetPrefs(p); err == nil {
+		err = c.Save()
+	} else {
+		bus.Logf("warn", "画面增强档位没记住: %v", err)
+	}
+}
+
+// applySavedShader 起播时把记住的那一档挂回去。
+//
+// ★ 编译校验挪到 goroutine 里:那一步要**等真的渲染一帧**才等得到错误,
+//   而这里还在起播路径上,同步等就是白白多出几百毫秒黑屏。
+func applySavedShader(level string) {
+	if level == "" || level == "off" {
+		return
+	}
+	list, err := shaders.Paths(paths.ShaderSourceDir(), level)
+	if err != nil || len(list) == 0 {
+		return
+	}
+	if r := knownBadReason(level, list); r != "" {
+		bus.Logf("warn", "记住的画面增强档位 %s 在这台机器上跑不起来,不挂:%s", level, r)
+		curShader.Store("off")
+		return
+	}
+	clearShaderErr()
+	setProp("glsl-shader-opts", shaders.Opts(level))
+	setProp("glsl-shaders", strings.Join(list, string(filepath.ListSeparator)))
+	curShader.Store(level)
+	go func() {
+		if e := waitShaderCompileError(); e != "" {
+			setProp("glsl-shader-opts", "")
+			setProp("glsl-shaders", "")
+			markShaderBad(level, list, e)
+			curShader.Store("off")
+			bus.Logf("error", "记住的画面增强档位 %s 跑不起来,已退回关闭:%s", level, e)
+			return
+		}
+		markShaderOK(level, list)
+	}()
 }
 
 // registerPrefsCommands 由 RegisterCommands 调用。
@@ -93,7 +151,7 @@ func registerPrefsCommands(version string) {
 		   mpv 每个着色器程序一个进程里只报一次错(实测),所以「等错误冒出来」
 		   这一招只挡得住第一档,后面共用同一个坏文件的全会漏过去。 */
 		if r := knownBadReason(level, list); r != "" {
-			curShader.Store("off")
+			rememberShader("off")
 			return revertedResult(level, r), nil
 		}
 
@@ -103,7 +161,7 @@ func registerPrefsCommands(version string) {
 
 		out := map[string]any{"level": level, "count": len(list)}
 		if len(list) == 0 {
-			curShader.Store("off")
+			rememberShader("off")
 			return out, nil // off:关掉就完事,没有「会不会跑」这回事
 		}
 
@@ -121,12 +179,12 @@ func registerPrefsCommands(version string) {
 			setProp("glsl-shader-opts", "")
 			setProp("glsl-shaders", "")
 			markShaderBad(level, list, e)
-			curShader.Store("off")
+			rememberShader("off")
 			bus.Logf("error", "着色器档位 %s 跑不起来,已退回关闭:%s", level, e)
 			return revertedResult(level, e), nil
 		}
 		markShaderOK(level, list)
-		curShader.Store(level)
+		rememberShader(level)
 		vw, vh := propF("video-params/w"), propF("video-params/h")
 		ow, oh := propF("osd-dimensions/w"), propF("osd-dimensions/h")
 		/* 放大那半跑没跑**只进日志,不进界面**【用户定 2026-09-07:

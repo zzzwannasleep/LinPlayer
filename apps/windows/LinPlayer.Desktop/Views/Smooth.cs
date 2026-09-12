@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 
 namespace LinPlayer.Desktop.Views;
@@ -41,6 +42,8 @@ public static class Smooth
         public int Gen;
         /// <summary>上一帧是什么时候跑的。用来认出「帧不再来了」。</summary>
         public DateTime LastFrame = DateTime.MinValue;
+        /// <summary>这一轮滑完之后要往哪边弹一下。0 = 不弹。见 <see cref="Bounce"/>。</summary>
+        public int BounceDir;
     }
 
     /// <summary>
@@ -146,9 +149,48 @@ public static class Smooth
            于是这里不再对齐当前位置,目标一直叠在那个<b>永远到不了的旧值</b>上 ——
            表现就是用户报的「点左右按钮卡死」:按钮还亮着,点下去一动不动。 */
         if (!StillAlive(d.Running, d.LastFrame)) { d.TargetX = sv.Offset.X; d.TargetY = sv.Offset.Y; }
-        d.TargetX += deltaX;
+        var want = d.TargetX + deltaX;
+        d.TargetX = want;
         Clamp(sv, d);
+        // 要的比剩下的多 = 这一下会撞墙。**撞上了再弹**,不是现在弹
+        if (Math.Abs(want - d.TargetX) > 1) d.BounceDir = Math.Sign(deltaX);
         Run(sv, d);
+    }
+
+    /// <summary>回弹的幅度。够看见就行 —— 再大就成了「内容会自己跑」。</summary>
+    private const double BouncePeak = 14;
+
+    /// <summary>
+    /// 到边了还想往前:让内容探出去一点再弹回来。
+    ///
+    /// <para>没有这一下的时候,滑到尽头的表现是「›」凭空消失、内容纹丝不动 ——
+    /// 用户读到的是「点了没反应」(2026-09-12:「点击了还是会卡死」)。
+    /// 弹的是 <see cref="Control.RenderTransform"/> 不是 Offset:
+    /// ScrollViewer 自己会把越界的 Offset 夹回去,根本弹不出去。</para>
+    /// </summary>
+    public static void Bounce(ScrollViewer sv, int dir)
+    {
+        if (sv.Content is not Control c || TopLevel.GetTopLevel(sv) is not { } top) return;
+        if (c.RenderTransform is not TranslateTransform t)
+        {
+            t = new TranslateTransform();
+            c.RenderTransform = t;
+        }
+        if (Math.Abs(t.X) > 0.1) return;   // 正在弹就别叠,不然会越弹越远
+        const int outFrames = 4, total = 12;
+        var peak = -BouncePeak * dir;
+        var i = 0;
+        void Frame(TimeSpan _)
+        {
+            i++;
+            t.X = i <= outFrames
+                ? peak * i / outFrames
+                : peak * Math.Max(0, (double)(total - i) / (total - outFrames));
+            if (i >= total) { t.X = 0; return; }
+            if (TopLevel.GetTopLevel(sv) is { } tl) tl.RequestAnimationFrame(Frame);
+            else t.X = 0;   // 页面被顶掉了:归位,别把内容留在偏移里
+        }
+        top.RequestAnimationFrame(Frame);
     }
 
     private static void Clamp(ScrollViewer sv, Driver d)
@@ -190,6 +232,7 @@ public static class Smooth
             {
                 sv.Offset = new Vector(d.TargetX, d.TargetY);
                 d.Running = false;
+                if (d.BounceDir != 0) { var b = d.BounceDir; d.BounceDir = 0; Bounce(sv, b); }
                 return;
             }
             sv.Offset = new Vector(cur.X + dx * Approach, cur.Y + dy * Approach);
@@ -242,6 +285,7 @@ public static class Smooth
         var anchorX = 0.0;       // 按下那一刻的指针横坐标
         var armed = false;       // 左键按着,还没越过阈值
         var dragging = false;
+        var over = 0.0;                 // 手最后要去的位置越界了多少 —— 松手时决定弹不弹
         InputElement? pressed = null;   // 按在哪张卡上 —— 起拖时要去取消它的按下态
 
         sv.AddHandler(InputElement.PointerPressedEvent, (object? _, PointerPressedEventArgs e) =>
@@ -273,7 +317,7 @@ public static class Smooth
                 pressed?.RaiseEvent(new PointerCaptureLostEventArgs(pressed, e.Pointer));
                 e.Pointer.Capture(sv);
             }
-            StopAt(sv, fromX - dx);
+            over = StopAt(sv, fromX - dx);
             e.Handled = true;
         }, RoutingStrategies.Tunnel);
 
@@ -281,26 +325,32 @@ public static class Smooth
         {
             // 把抢来的指针还回去 —— 不还的话它一直记在轨道名下
             if (dragging) e.Pointer.Capture(null);
+            // 拖过头了才弹。8px 是手抖的量级,那也弹的话整条轨道会一直在抖
+            if (dragging && Math.Abs(over) > 8) Bounce(sv, Math.Sign(over));
             armed = dragging = false;
+            over = 0;
             pressed = null;
         }, RoutingStrategies.Tunnel);
 
         // 指针被别人抢走(弹窗、切页)时得收手,不然下一次移动会从一个陈旧的锚点算起
-        sv.PointerCaptureLost += (_, _) => armed = dragging = false;
+        sv.PointerCaptureLost += (_, _) => { armed = dragging = false; over = 0; };
     }
 
     /// <summary>
     /// 拖拽期间把驱动器摁在当前位置。
     /// <para>不摁的话手和上一轮缓动同时在改 Offset:松手后内容会自己往回飘一段。</para>
     /// </summary>
-    internal static void StopAt(ScrollViewer sv, double x)
+    /// <returns>手要去的位置越界了多少(带符号)。拖拽靠它决定松手要不要弹。</returns>
+    internal static double StopAt(ScrollViewer sv, double x)
     {
         var d = Drivers.GetValue(sv, _ => new Driver());
         d.Running = false;
         d.Gen++;  // 让上一轮的帧回调下一帧自己退场
+        d.BounceDir = 0;
         d.TargetX = Math.Clamp(x, 0, Math.Max(0, sv.Extent.Width - sv.Viewport.Width));
         d.TargetY = sv.Offset.Y;
         sv.Offset = sv.Offset.WithX(d.TargetX);
+        return x - d.TargetX;
     }
 
     /// <summary>

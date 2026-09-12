@@ -168,7 +168,8 @@ func fetchAsset(ctx context.Context, info *Info, on func(int64)) (string, error)
 		return dst, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, info.AssetURL, nil)
+	// 下载也要走代理:只代理「查版本」的话,墙内查得到新版却下不动
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxied(info.AssetURL), nil)
 	if err != nil {
 		return "", err
 	}

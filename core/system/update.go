@@ -205,6 +205,42 @@ type Info struct {
 	AssetSize int64  `json:"asset_size"`
 }
 
+// GithubProxies 内置的几档 GitHub 代理【用户定 2026-09-12】。
+//
+// ★ 这是**几个现成的档,不是白名单** —— 用户可以在设置里填任何一个自己的。
+//   这类公共代理今天能用明天就 404,写死一张表等于把用户锁在坏掉的那几个上。
+var GithubProxies = []string{
+	"https://gh-proxy.com",
+	"https://ghproxy.net",
+	"https://github.akams.cn",
+}
+
+// proxied 给一条 GitHub 地址套上用户选的代理。这几家的用法一致:
+// 代理基址 + "/" + 原始完整 URL。
+//
+// ★ 只套 GitHub 自己的域。假上游(LP_UPDATE_API)和自建镜像套上去反而打不通,
+//   而那正是测试和排障走的路。
+func proxied(raw string) string {
+	ok := false
+	for _, h := range []string{
+		"https://api.github.com/", "https://github.com/",
+		"https://objects.githubusercontent.com/",
+	} {
+		if strings.HasPrefix(raw, h) {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return raw
+	}
+	base := strings.TrimRight(strings.TrimSpace(config.Current().PrefsOf().UpdateProxy), "/")
+	if base == "" || strings.HasPrefix(raw, base) {
+		return raw
+	}
+	return base + "/" + raw
+}
+
 // getJSON 打 GitHub。
 //
 // ★ 走共享 client(httpx.Client(),第三方公开 API 那条 UA 口径)。
@@ -215,7 +251,7 @@ type Info struct {
 // ★ GitHub 强制要求 User-Agent,不发就是 403(见 [[no-ua-gets-403]])。
 func getJSON(ctx context.Context, url string, out any) error {
 	hdr := http.Header{"Accept": {"application/vnd.github+json"}}
-	body, code, err := httpx.GetJSON(ctx, httpx.Client(), url, hdr)
+	body, code, err := httpx.GetJSON(ctx, httpx.Client(), proxied(url), hdr)
 	if err != nil {
 		return fmt.Errorf("检查更新失败: %w", err)
 	}

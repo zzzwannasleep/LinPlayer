@@ -203,3 +203,36 @@ func TestShaderLevels(t *testing.T) {
 			"新加一族之前先在真机上跑一遍 LP_SHADER=all,别再让编译不过的档位混进来", groups)
 	}
 }
+
+// ★★ 画面增强档位要**记住**(用户 2026-09-12)。
+//
+// 2026-08-31 定过「故意不持久化」,那条已作废。这里钉三件事:
+// 落了盘、重启(= 清掉进程里那份)之后还回得来、而且**起播时自动挂载失败
+// 不许把用户记住的那一档抹掉** —— 一次瞬时失败清空用户的选择是最气人的形态。
+func Test画面增强档位记得住(t *testing.T) {
+	paths.SetRoot(t.TempDir())
+	if _, err := config.Load(); err != nil {
+		t.Fatal(err)
+	}
+	curShader.Store("")
+
+	rememberShader("ak_hq")
+	if got := config.Current().PrefsOf().ShaderLevel; got != "ak_hq" {
+		t.Fatalf("没落盘,盘上是 %q", got)
+	}
+
+	// 重启:进程里那份没了,只剩盘上那份
+	curShader.Store("")
+	if got := currentShaderLevel(); got != "ak_hq" {
+		t.Fatalf("重启后回显不出来,拿到 %q", got)
+	}
+
+	// 起播时挂不上 → 进程里退回 off,但盘上那一档不许动
+	curShader.Store("off")
+	if got := config.Current().PrefsOf().ShaderLevel; got != "ak_hq" {
+		t.Fatalf("一次挂载失败就把用户记住的档位抹了,盘上成了 %q", got)
+	}
+	if got := currentShaderLevel(); got != "off" {
+		t.Fatalf("当前这一次该是关着的,拿到 %q", got)
+	}
+}

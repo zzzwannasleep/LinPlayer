@@ -167,6 +167,12 @@ public sealed class PlayerPage : UserControl
     private readonly TextBlock _msg = new() { Foreground = Brushes.White, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
     private readonly Button _pause;
     private readonly Border _top, _bottom;
+    /* 左侧中间那颗锁【用户定 2026-09-12:「PC端增加锁定按钮在左侧中间,方便用户沉浸式观看」】。
+       锁住之后上下两条**再也不自己冒出来**,只剩这一颗 —— 不然「沉浸」会被
+       自己叫出来的控制条一次次打断。它只管 OSD,不锁键盘:锁掉快捷键的话
+       连暂停和音量都没了,那不是沉浸是瘫痪。 */
+    private readonly Button _lock;
+    private bool _locked;
     /* 三个下拉**同宽**。抽屉里竖排三行,宽度不一样右边缘就是锯齿状 ——
        这种参差在一块半透明面板上特别扎眼,而它只是三个数没对齐。 */
     private readonly ComboBox _audio = new() { Width = 210, MinHeight = 32 };
@@ -785,12 +791,25 @@ public sealed class PlayerPage : UserControl
         _top.Transitions = Fade(OsdInMs);
         _bottom.Transitions = Fade(OsdInMs);
 
+        _lock = Osd("🔓", "锁定界面(锁上之后控制条不再自己出现)");
+        _lock.HorizontalAlignment = HorizontalAlignment.Left;
+        _lock.VerticalAlignment = VerticalAlignment.Center;
+        _lock.Margin = new Thickness(10, 0, 0, 0);
+        _lock.Transitions = Fade(OsdInMs);
+        _lock.Click += (_, _) =>
+        {
+            _locked = !_locked;
+            _lock.Content = _locked ? "🔒" : "🔓";
+            ToolTip.SetTip(_lock, _locked ? "解锁界面" : "锁定界面(锁上之后控制条不再自己出现)");
+            ApplyOsd();
+        };
+
         var root = new Panel
         {
             Background = Brushes.Black,
             // 气泡排在 _bottom <b>之后</b> —— 它要画在控制条上面,而不是被压在下面
             // 弹幕搜索排在 _bottom 之后:它是「旁边那扇窗」,不该被控制条压住
-            Children = { _view, _dm, _top, _bottom, _dmPanel, _skip, _bubble },
+            Children = { _view, _dm, _top, _bottom, _lock, _dmPanel, _skip, _bubble },
         };
         _root = root;
         Content = root;
@@ -3036,17 +3055,32 @@ public sealed class PlayerPage : UserControl
             Log.D("OSD", $"{(on ? "显示" : "收起")}  静止 {(DateTime.UtcNow - _lastMove).TotalMilliseconds:0}ms" +
                          $"  指针在条上={PointerOnOsd()}  指针=({_ptr.X:0},{_ptr.Y:0})" +
                          $"  弹层={_popupOpen}  累计翻转={OsdFlips}");
+        ApplyOsd();
+    }
+
+    /// <summary>
+    /// 把「该不该显示」兑现到三层上。抽出来是因为**锁定键也要走这一段** ——
+    /// 它改的是 <see cref="_locked"/> 而不是 <c>_osdOn</c>,走 ShowOsd 会被
+    /// 开头那句 <c>if (_osdOn == on) return;</c> 挡掉,点了没反应。
+    /// </summary>
+    private void ApplyOsd()
+    {
+        // 锁住时上下两条一律不出来;那颗锁自己仍然跟着 OSD 显隐 ——
+        // 不然锁上之后没有任何东西能解锁
+        var bars = _osdOn && !_locked;
         foreach (var (b, dir) in new[] { (_top, -1.0), (_bottom, 1.0) })
         {
             // 先换过渡再改值:Transitions 是读到「属性变了」那一刻才生效的,
             // 顺序反过来的话这一次仍然按上一次那套时长跑。
-            b.Transitions = Fade(on ? OsdInMs : OsdOutMs);
-            b.Opacity = on ? 1 : 0;
+            b.Transitions = Fade(bars ? OsdInMs : OsdOutMs);
+            b.Opacity = bars ? 1 : 0;
             b.RenderTransform = Avalonia.Media.Transformation.TransformOperations.Parse(
-                on ? "translateY(0px)" : $"translateY({dir * OsdSlide}px)");
-            b.IsHitTestVisible = on;
+                bars ? "translateY(0px)" : $"translateY({dir * OsdSlide}px)");
+            b.IsHitTestVisible = bars;
         }
-        Cursor = new Cursor(on ? StandardCursorType.Arrow : StandardCursorType.None);
+        _lock.Opacity = _osdOn ? 1 : 0;
+        _lock.IsHitTestVisible = _osdOn;
+        Cursor = new Cursor(_osdOn ? StandardCursorType.Arrow : StandardCursorType.None);
     }
 
     /// <summary>OSD 当前是不是亮着。 不能再拿 <c>_top.IsVisible</c> 当判据 —— 它恒真了。</summary>
@@ -3298,16 +3332,6 @@ public sealed class PlayerPage : UserControl
         _ = Send(cmd, new { secs = slot });
     }
 
-    /// <summary>
-    /// 画面增强档位(<c>UI_PC.md</c> §7 底部第七个面板,快捷键 <c>U</c>)。
-    ///
-    /// <para>档位表由<b>核心层</b>给(六档 A/B/C,见 <c>core/shaders</c>),
-    /// UI 不自己写一份 —— 写一份的下场是加档位要改两处,而漏改的那处不报错。</para>
-    ///
-    /// <para><b>档位故意不持久化</b>(2026-08-31 已定,别顺手加)——
-    /// 它跟当前这一片的分辨率和窗口大小绑定,记住上一片的档位只会带来
-    /// 「上次好好的这次不生效」。</para>
-    /// </summary>
     /// <summary>
     /// 自检:<c>LP_SHADER=all</c> —— <b>把全部档位挨个挂一遍</b>,报出哪些编译不过。
     ///

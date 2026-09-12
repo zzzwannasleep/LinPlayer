@@ -508,6 +508,14 @@ public static class SettingsSections
         // 这是个会自己联网的行为,得用户点头
         var auto = new CheckBox { Content = "启动时自动检查更新", IsChecked = Bool(s, "auto_check") };
 
+        /* GitHub 代理。做成**输入框 + 几颗快填按钮**,不是一个下拉:
+           用户点名要「支持用户自定义」,而这类公共代理今天能用明天就 404 ——
+           只给下拉等于把人锁在坏掉的那几个上。档位表来自核心层,不在这儿抄一份。 */
+        var proxy = new TextBox
+        {
+            Watermark = "留空 = 直连 GitHub", Text = Str(s, "proxy"), MinHeight = 34,
+        };
+
         async void Save()
         {
             try
@@ -516,6 +524,7 @@ public static class SettingsSections
                 {
                     channel = channels[Math.Max(0, ch.SelectedIndex)].Item2,
                     auto_check = auto.IsChecked == true,
+                    proxy = proxy.Text ?? "",
                 });
                 hint.Text = "已保存。";
             }
@@ -523,11 +532,25 @@ public static class SettingsSections
         }
         ch.SelectionChanged += (_, _) => Save();
         auto.IsCheckedChanged += (_, _) => Save();
+        proxy.LostFocus += (_, _) => Save();
+
+        var picks = new WrapPanel { ItemSpacing = 6, LineSpacing = 6 };
+        foreach (var (label, value) in Strings(s, "proxies").Select(x => (x, x)).Prepend(("直连", "")))
+        {
+            var b = new Button { Classes = { "chip" }, Content = label };
+            b.Click += (_, _) => { proxy.Text = value; Save(); };
+            picks.Children.Add(b);
+        }
 
         var body = new StackPanel
         {
             Spacing = 10,
-            Children = { Field("更新渠道", ch), auto },
+            Children =
+            {
+                Field("更新渠道", ch), auto,
+                Note("GitHub 在部分网络下连不上。填一个代理,查版本和下载都会走它。"),
+                Field("GitHub 代理", proxy), picks,
+            },
         };
         body.Children.Add(new TextBlock
         {

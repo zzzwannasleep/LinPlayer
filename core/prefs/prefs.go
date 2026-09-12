@@ -247,6 +247,9 @@ func RegisterCommands(version string) {
 		p := config.Current().PrefsOf()
 		return map[string]any{
 			"channel": p.UpdateChannel, "auto_check": p.UpdateAutoCheck,
+			// GitHub 代理:当前值 + 几档现成的。档位表由**核心层**给,
+			// 两端各抄一份的下场是改一处漏一处,而漏掉的那一端不报错
+			"proxy": p.UpdateProxy, "proxies": system.GithubProxies,
 			// ★ 比较用**发行版本号**,不是编译期的包版本 —— 后者和发行包版本没有同步机制。
 			"current_version": version,
 			// **先问再做** —— 覆盖到一半才发现没权限,用户手上就是个装不上
@@ -265,6 +268,10 @@ func RegisterCommands(version string) {
 		}
 		if v, ok := a["auto_check"].(bool); ok {
 			p.UpdateAutoCheck = v
+		}
+		if v, ok := a["proxy"].(string); ok {
+			// 空串是合法值(=直连),所以判的是「传没传」不是「是不是空」
+			p.UpdateProxy = strings.TrimRight(strings.TrimSpace(v), "/")
 		}
 		return p, save(c, p)
 	})

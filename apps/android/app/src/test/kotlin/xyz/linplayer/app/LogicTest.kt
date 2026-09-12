@@ -16,6 +16,7 @@ import xyz.linplayer.app.ui.components.dialogWidth
 import xyz.linplayer.app.ui.components.longShotHeight
 import xyz.linplayer.app.ui.components.longShotSlices
 import xyz.linplayer.app.ui.pages.moved
+import xyz.linplayer.app.ui.pages.needRefetch
 import xyz.linplayer.app.ui.player.DanmakuStyle
 import xyz.linplayer.app.ui.player.DmItem
 import xyz.linplayer.app.ui.player.dmFirstAtOrAfter
@@ -711,5 +712,18 @@ class LogicTest {
         assertTrue("吞了也得留一句日志,否则这类失败永远查不出来", said.contains("application/pgs"))
         safe.reset()
         assertEquals("reset 要透传下去", 1, reset)
+    }
+
+    @Test fun `换了筛选就得重拉只有同一套筛选才能复用`() {
+        val a = "DateLastContentAdded|0|"
+        val b = "DateLastContentAdded|8|"
+        assertFalse("同一套筛选、手里有结果 —— 返回这一页不该白拉一次",
+            needRefetch(hasItems = true, ok = true, fetchedAs = a, key = a))
+        // ☠ 这一条就是用户报的「筛选了不刷新」:手里有上一套筛选的结果
+        assertTrue("换了筛选必须重拉",
+            needRefetch(hasItems = true, ok = true, fetchedAs = a, key = b))
+        assertTrue("还没拉过", needRefetch(hasItems = false, ok = false, fetchedAs = null, key = a))
+        assertTrue("拉过但失败了,下次进来要重试",
+            needRefetch(hasItems = false, ok = false, fetchedAs = a, key = a))
     }
 }

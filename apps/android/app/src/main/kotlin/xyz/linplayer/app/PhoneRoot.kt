@@ -107,6 +107,7 @@ private fun BootSkeleton() {
 
 @Composable
 private fun MainShell() {
+    val app = LocalApp.current
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route.orEmpty()
@@ -185,7 +186,15 @@ private fun MainShell() {
                 composable<Route.Calendar> { CalendarPage(nav) }
                 composable<Route.Settings> { SettingsPage(nav) }
                 composable<Route.SettingsSub> { SettingsSubPage(nav, it) }
-                composable<Route.AddServer> { GatePage(onDone = { nav.popBackStack() }, embedded = true) }
+                /* ☠ 加完服务器**必须重取一次会话**。只 popBackStack 的话:
+                   `emby.login` 已经在核心层把活动服务器换成了新加的这台,
+                   而 UI 手里那份 session 还是老的 —— 于是「当前是哪台」这件事
+                   界面和核心层各说各话,退出重进(boot 一次)才对得上
+                   (用户 2026-09-12:「显示目前服务器是新添加的结果还是原来的服务器,
+                   退出重进才正常」)。 */
+                composable<Route.AddServer> {
+                    GatePage(onDone = { app.refreshSession(); nav.popBackStack() }, embedded = true)
+                }
                 composable<Route.Player> { PlayerPage(nav, it) }
             }
         }

@@ -160,16 +160,6 @@ internal static class Program
     }
 
     /// <summary>
-    /// 选集轨道从头点到尾、再点回来,全程按钮都得点得动。
-    ///
-    /// <para>造的是**真的** <see cref="Views.Carousel.Rail"/>(虚拟化面板 + 两颗真按钮),
-    /// 点的是按钮自己的 Click —— 抄一段 GlideX 出来测的话,测的是那份抄本。</para>
-    ///
-    /// <para>☠ <b>必须开一个真窗口。</b> 没有可视根时 ScrollViewer 的 Extent 恒为 0,
-    /// 而 Extent 是 0 就意味着「滚哪儿都一样」—— 每一句断言都会白白变绿
-    /// (第一版正是这么写的,四条假绿)。所以它不进 CI,跟 selfcheck 一起手跑。</para>
-    /// </summary>
-    /// <summary>
     /// 网速读数自检。纯算术 + 一次真采样,不开窗口,进得了 CI。
     /// </summary>
     private static bool NetProbe()
@@ -199,9 +189,21 @@ internal static class Program
         return bad == 0;
     }
 
+    /// <summary>
+    /// 选集轨道从头点到尾、再点回来,全程按钮都得点得动。
+    ///
+    /// <para>造的是**真的** <see cref="Views.Carousel.Rail"/>(虚拟化面板 + 两颗真按钮),
+    /// 点的是按钮自己的 Click —— 抄一段 GlideX 出来测的话,测的是那份抄本。</para>
+    ///
+    /// <para>☠ <b>必须开一个真窗口。</b> 没有可视根时 ScrollViewer 的 Extent 恒为 0,
+    /// 而 Extent 是 0 就意味着「滚哪儿都一样」—— 每一句断言都会白白变绿
+    /// (第一版正是这么写的,四条假绿)。所以它不进 CI,跟 selfcheck 一起手跑。</para>
+    /// </summary>
     private static bool RailProbe()
     {
-        const int n = 200, cardW = 214;   // 200 条就够逼出量程,再多只是让探针跑几分钟
+        // 条数可从环境覆盖:上千集那一档要单独跑一遍(`LP_RAILPROBE_N=1000`)
+        var n = int.TryParse(Environment.GetEnvironmentVariable("LP_RAILPROBE_N"), out var nn) ? nn : 200;
+        const int cardW = 214;
         var items = Enumerable.Range(1, n).ToList();
         // 卡片用真 Button:轨道里的卡就是 Button,而「拖完松手会不会被当成点击」
         // 只有让真 Button 参与整条路由才测得出来
@@ -284,6 +286,38 @@ internal static class Program
             Click(left);
         }
         Want(sv.Offset.X <= 1, $"连点「‹」{back} 下回到开头(停在 {sv.Offset.X:0})");
+
+        /* **连点不等它滑完。** 上面两段每点一下都等 180ms 滑完,而真人一秒点五下 ——
+           那条路走的是「上一轮还活着」那个分支,和等滑完完全不是同一段代码。
+           用户 2026-09-12:「点击了还是会卡死,稳定复现」。 */
+        Views.Smooth.StopAt(sv, 0);
+        Pump(150);
+        for (var i = 0; i < 40; i++)
+        {
+            right.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+            Pump(20);   // 远小于一次缓动(约 130ms):下一下必定落在上一轮还在跑的时候
+        }
+        Pump(600);      // 手停了,让最后一轮滑完
+        Want(sv.Offset.X > cardW * 4, $"连点 40 下(不等它滑完)确实走了(停在 {sv.Offset.X:0}/{max:0})");
+        var stillMoves = sv.Offset.X;
+        Click(right);
+        Want(sv.Offset.X > stillMoves + 1 || stillMoves >= max - 1,
+            $"连点之后再点一下还走得动(从 {stillMoves:0} 到 {sv.Offset.X:0})");
+
+        /* 到尽头时**最后一张卡要贴着右边缘**(用户 2026-09-12:「自动把最后一集贴边」)。
+           每一项都带 gap 的右外边距,包括最后一项 —— 于是量程里多出一个 gap,
+           滑到底之后右边空着一条 16px 的缝,看着像「还没到底但不动了」。 */
+        Views.Smooth.StopAt(sv, 1e9);
+        Pump(200);
+        var lastCard = sv.GetVisualDescendants().OfType<Avalonia.Controls.Button>()
+            .OrderByDescending(b => b.TranslatePoint(new Point(b.Bounds.Width, 0), w)?.X ?? double.MinValue)
+            .FirstOrDefault();
+        var rightEdge = lastCard?.TranslatePoint(new Point(lastCard.Bounds.Width, 0), w)?.X ?? -1;
+        Want(rightEdge > 0 && Math.Abs(rightEdge - sv.Viewport.Width) < 1.5,
+            $"滑到底时最后一张卡贴着右边缘(卡右沿 {rightEdge:0.#} vs 视口 {sv.Viewport.Width:0})");
+        // 复位:下一条从开头点起,不然它是在尽头点「›」,挪不动是应该的
+        Views.Smooth.StopAt(sv, 0);
+        Pump(150);
 
         /* ③ 驱动器挂着「还在跑」但帧早就不来了 —— 最小化 / 页面被顶掉之后就是这个形状。
               这一条红过:GlideX 原来只判 Running 字段,于是目标一直叠在一个

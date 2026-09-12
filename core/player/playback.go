@@ -70,6 +70,9 @@ func applyPlaybackDefaults(p config.Prefs, isDolbyVision bool) {
 	}
 	setProp("hwdec", hwdec)
 	setProp("speed", strconv.FormatFloat(p.DefaultSpeed, 'f', -1, 64))
+	// 画面增强档位跟着回来【用户定 2026-09-12:「画面增强需要支持记忆」】。
+	// 和上面两项同理:mpv 的 glsl-shaders 跨文件粘连,每次起播都要重设一遍。
+	applySavedShader(p.ShaderLevel)
 }
 
 // Play 起播一个 Emby 条目。返回真正用的续播位置(秒)。

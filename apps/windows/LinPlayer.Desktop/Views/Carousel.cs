@@ -161,6 +161,14 @@ public static class Carousel
                 return c;
             }, false),
             ItemsSource = items,
+            /* ☠ 把最后一项那道尾间距**从量程里减掉**。
+               间距只能加在每一项自己身上(虚拟化面板没有 Spacing),于是最后一项
+               后面也挂着一个 gap —— 滑到底之后右边空着一条 16px 的缝,
+               最后一集贴不上边,看着像「还没到底但不动了」
+               (用户 2026-09-12:「划到底之后…自动把最后一集贴边即可」)。
+               负外边距是唯一不用逐项判「是不是最后一个」的改法:虚拟化面板
+               手里根本没有全表,而 FuncDataTemplate 拿不到序号。 */
+            Margin = new Thickness(0, 0, -gap, 0),
         };
         return Wrap(list, artHeight, out scroller);
     }

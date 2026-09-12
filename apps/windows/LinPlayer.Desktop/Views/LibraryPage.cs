@@ -243,8 +243,9 @@ public sealed class LibraryGridPage : PageBase
     /// </summary>
     private static readonly (string Label, string By, string Order)[] Sorts =
     [
-        ("加入时间", "DateCreated", "Descending"),
+        // 第一条就是默认档【用户定 2026-09-12:「默认从新到旧排序」】
         ("更新时间", "DateLastContentAdded", "Descending"),
+        ("加入时间", "DateCreated", "Descending"),
         ("上映日期", "PremiereDate", "Descending"),
         ("名称 A→Z", "SortName", "Ascending"),
         ("名称 Z→A", "SortName", "Descending"),
@@ -268,6 +269,9 @@ public sealed class LibraryGridPage : PageBase
     private int _total = -1;
     private bool _busy;
     private bool _suppress;
+    /* 筛选的代次。换一次筛选加一,在途的那一次回来发现代次变了就把结果丢掉。
+       没有它的表现是用户报的「筛选了不刷新」—— 见 Requery 与 LoadMore。 */
+    private int _gen;
 
     public LibraryGridPage(CoreClient core, string server, string parentId, string title)
     {
@@ -343,6 +347,14 @@ public sealed class LibraryGridPage : PageBase
     /// </summary>
     private void Requery()
     {
+        /* ☠ **必须换代 + 松开 _busy。** 原来这两句都没有:
+           换筛选时只要有一次请求在途(进库那一次、滚到底那一次),
+           LoadMore 第一行的 `if (_busy) return` 就把这一次换筛选**整个吞掉** ——
+           界面一动不动(用户 2026-09-12:「筛选了不会刷新出现筛选结果,PC 端也是」)。
+           松开之后旧那一次仍在跑,靠代次把它的结果丢掉,否则它会把旧筛选的一页
+           追加到刚清空的网格里。 */
+        _gen++;
+        _busy = false;
         _grid.Clear();
         _loaded = 0;
         _total = -1;
@@ -400,6 +412,7 @@ public sealed class LibraryGridPage : PageBase
     {
         if (_busy || (_total >= 0 && _loaded >= _total)) return;
         _busy = true;
+        var gen = _gen;
         Dispatcher.UIThread.Post(() => _status.Text = "加载中…");
         try
         {
@@ -419,6 +432,8 @@ public sealed class LibraryGridPage : PageBase
                     sort_by = by, sort_order = order, genres, years,
                 },
             });
+            // 等这一趟网络的工夫里用户换了筛选:这批是旧筛选的结果,一个字都不能落地
+            if (gen != _gen) return;
             var items = page.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array
                 ? arr.EnumerateArray().Select(CardItem.From).ToList() : [];
             _total = page.TryGetProperty("total", out var t) && t.ValueKind == JsonValueKind.Number
@@ -427,6 +442,7 @@ public sealed class LibraryGridPage : PageBase
 
             Dispatcher.UIThread.Post(() =>
             {
+                if (gen != _gen) return;   // Post 排队期间换了筛选,同上
                 // 第一页到了就把骨架撤掉。 换排序 / 换筛选时它不再回来 ——
                 // 那时候屏幕上已经有内容了,再闪一次骨架反而像整页重载。
                 _first.IsVisible = false;
@@ -442,12 +458,14 @@ public sealed class LibraryGridPage : PageBase
         {
             Dispatcher.UIThread.Post(() =>
             {
+                if (gen != _gen) return;   // 旧筛选的失败别盖在新筛选的结果上
                 // 失败时骨架也要撤:留着的话「加载失败」那行字底下还有一片在呼吸,
                 // 用户会以为它还在重试。
                 _first.IsVisible = false;
                 _status.Text = $"加载失败:{LibraryPage.Advice(e)}";
             });
         }
-        finally { _busy = false; }
+        // 换过代就别动 _busy:那是新一轮的闩,这里放开会让两轮同时在跑
+        finally { if (gen == _gen) _busy = false; }
     }
 }
