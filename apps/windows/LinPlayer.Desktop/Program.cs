@@ -138,6 +138,15 @@ internal static class Program
            上一轮只钉住了驱动器本身,而用户 2026-09-12 报的还是「点左右按钮卡死」——
            说明该钉的是**整条轨道**:一千条数据 + 真的虚拟化面板 + 真的翻页按钮,
            从头点到尾再点回来。只测驱动器测不出「按钮自己消失了」这一类死法。 */
+        /* 网格回收自检:`LP_GRIDPROBE=1`。和轨道同一族的问题 ——
+           模板复用容器时,滚下去之后行里画的是上一行的内容。同样要开真窗口。 */
+        if (Environment.GetEnvironmentVariable("LP_GRIDPROBE") is { Length: > 0 })
+        {
+            AppBuilder.Configure<App>().UsePlatformDetect().SetupWithoutStarting();
+            Environment.ExitCode = GridProbe() ? 0 : 1;
+            return;
+        }
+
         if (Environment.GetEnvironmentVariable("LP_RAILPROBE") is { Length: > 0 })
         {
             AppBuilder.Configure<App>().UsePlatformDetect().SetupWithoutStarting();
@@ -343,6 +352,85 @@ internal static class Program
     }
 
     /// <summary>
+    /// 竖向网格滚下去之后,每一行画的还是不是自己那一行。
+    ///
+    /// <para>骨架照 <see cref="Views.MediaGrid"/> 搭,行里放 Button 不放 Card ——
+    /// 验的是回收时模板还走不走,那是框架行为,和行里画什么无关。</para>
+    ///
+    /// <para>判据是屏上那几行的<b>文字</b>,不是「模板被调了几次」:
+    /// 复用命中时控件原样留着,调用次数看着完全正常,画面上却是上一行。</para>
+    /// </summary>
+    private static bool GridProbe()
+    {
+        const int rows = 300;
+        var builds = 0;
+        var items = Enumerable.Range(0, rows).Select(i => new RailRow($"行{i}")).ToList();
+        var list = new Avalonia.Controls.ItemsControl
+        {
+            ItemsPanel = new Avalonia.Controls.Templates.FuncTemplate<Avalonia.Controls.Panel?>(
+                () => new Avalonia.Controls.VirtualizingStackPanel()),
+            // 复用那一位从 MediaGrid 取,不抄字面量 —— 抄了就是测抄本
+            ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<RailRow>(
+                (r, _) =>
+                {
+                    builds++;
+                    return new Avalonia.Controls.Button { Height = 90, Content = r is null ? "空" : r.Name };
+                }, Views.MediaGrid.RecycleRows),
+            ItemsSource = items,
+        };
+        var sv = new Avalonia.Controls.ScrollViewer { Content = list };
+        var w = new Avalonia.Controls.Window
+        {
+            Width = 500, Height = 400, ShowInTaskbar = false,
+            SystemDecorations = Avalonia.Controls.SystemDecorations.None,
+            Content = sv,
+        };
+        w.Show();
+        void Pump(int ms)
+        {
+            var t0 = DateTime.UtcNow;
+            while ((DateTime.UtcNow - t0).TotalMilliseconds < ms)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                System.Threading.Thread.Sleep(4);
+            }
+        }
+        Pump(400);
+        // 滚到中段:一路上每一行都被回收过一次
+        sv.Offset = sv.Offset.WithY(90 * 150);
+        Pump(500);
+
+        var bad = 0;
+        var vsp = sv.GetVisualDescendants().OfType<Avalonia.Controls.VirtualizingStackPanel>().First();
+        var wrong = new List<string>();
+        foreach (var child in vsp.Children.OfType<Avalonia.Controls.Presenters.ContentPresenter>())
+        {
+            if (child.DataContext is not RailRow want) continue;
+            var got = (child.Child as Avalonia.Controls.Button)?.Content as string;
+            if (got != want.Name) wrong.Add($"{want.Name}→画的是「{got}」");
+        }
+        // 建了几次是**这条断言算不算数**的前置:只建了屏上那几次 = 容器被原样复用,
+        // 那才有错位的可能;建了上百次说明模板每换一行都重走,压根错不了。
+        Console.WriteLine($"PROBE 网格 · 滚到第 150 行,屏上 {vsp.Children.Count} 行,模板共建 {builds} 次");
+        if (wrong.Count > 0)
+        {
+            bad++;
+            Console.WriteLine($"PROBE 网格 ✗ 有 {wrong.Count} 行画的不是自己的内容:" +
+                              string.Join(" ", wrong.Take(4)));
+        }
+        else
+        {
+            Console.WriteLine("PROBE 网格 ✓ 每一行画的都是自己那一行");
+        }
+        w.Close();
+        Console.WriteLine(bad == 0 ? "PROBE 网格 全部通过" : $"PROBE 网格 {bad} 条不过");
+        return bad == 0;
+    }
+
+    /// <summary>探针用的一条数据。<b>要有字段</b> —— 模板读得到字段,null 才会现形。</summary>
+    private sealed record RailRow(string Name);
+
+    /// <summary>
     /// 选集轨道从头点到尾、再点回来,全程按钮都得点得动。
     ///
     /// <para>造的是**真的** <see cref="Views.Carousel.Rail"/>(虚拟化面板 + 两颗真按钮),
@@ -357,13 +445,20 @@ internal static class Program
         // 条数可从环境覆盖:上千集那一档要单独跑一遍(`LP_RAILPROBE_N=1000`)
         var n = int.TryParse(Environment.GetEnvironmentVariable("LP_RAILPROBE_N"), out var nn) ? nn : 200;
         const int cardW = 214;
-        var items = Enumerable.Range(1, n).ToList();
+        var items = Enumerable.Range(1, n).Select(i => new RailRow($"第 {i} 集")).ToList();
         // 卡片用真 Button:轨道里的卡就是 Button,而「拖完松手会不会被当成点击」
         // 只有让真 Button 参与整条路由才测得出来
         var clicks = 0;
-        var panel = (Avalonia.Controls.Panel)Views.Carousel.Rail(items, _ =>
+        /* 造卡时**必须真的读这一条的字段**。
+           上一版这里是 `_ => new Button()`,把入参整个忽略了 —— 于是
+           「容器被回收时 Avalonia 拿 null 再走一遍模板」这条路,这个探针一次都没走过,
+           而真实调用点(DetailPage 读 it.Name / it.EpisodeSubtitle)在那条路上当场 NRE。
+           用户 2026-09-12:「你的一千集的测试完全没有用」—— 说的就是这个。 */
+        var nullHits = 0;
+        var panel = (Avalonia.Controls.Panel)Views.Carousel.Rail(items, it =>
         {
-            var b = new Avalonia.Controls.Button { Width = cardW, Height = 120 };
+            if (it is null) { nullHits++; return new Avalonia.Controls.Button(); }
+            var b = new Avalonia.Controls.Button { Width = cardW, Height = 120, Content = it.Name };
             b.Click += (_, _) => clicks++;
             return b;
         }, 120, out var sv);
@@ -468,6 +563,13 @@ internal static class Program
         var rightEdge = lastCard?.TranslatePoint(new Point(lastCard.Bounds.Width, 0), w)?.X ?? -1;
         Want(rightEdge > 0 && Math.Abs(rightEdge - sv.Viewport.Width) < 1.5,
             $"滑到底时最后一张卡贴着右边缘(卡右沿 {rightEdge:0.#} vs 视口 {sv.Viewport.Width:0})");
+
+        /* 回收一个容器时 Avalonia 会把它的 Content 置空,而 ContentPresenter
+           **会拿这个 null 再走一遍 ItemTemplate**(ItemTemplate 是显式给的,不走 Match)。
+           模板里读字段就是当场 NRE,而它抛在**布局过程里** ——
+           这一趟测量整个作废,后面的卡再也造不出来,每一帧还重抛一次。
+           表现正是用户报的「只显示前几集 + 一直往右就卡死」。 */
+        Want(nullHits == 0, $"模板没有被拿 null 调过(被调了 {nullHits} 次 = 真实卡片当场 NRE)");
         // 复位:下一条从开头点起,不然它是在尽头点「›」,挪不动是应该的
         Views.Smooth.StopAt(sv, 0);
         Pump(150);

@@ -2767,3 +2767,50 @@ Offset 夹回去,拿 Offset 根本弹不出去。触发点两处:翻页键要的
 
 `StreamRows` / `VersionRows` 抽成纯函数不是为了短 —— 是为了 `LP_MEDIAPROBE`
 钉得住它们。「哪一行该出现」错了不报错,画面上只是少一行。
+
+---
+
+## 虚拟化面板会拿 **null** 再走一遍你的 ItemTemplate(2026-09-12)
+
+症状(用户原话):「PC 端的剧详情页只能显示前 7 集,后面的集数根本没加载出来,
+然后一直往右就卡上加卡、卡死了」。
+
+看着像加载慢,其实**是崩的**。`LP_EPS=1200` 的真机自检里 `build/app.log` 第一行就是:
+
+```
+System.NullReferenceException
+  at DetailPage.<Episodes>b__9(CardItem it)      DetailPage.cs:1496
+  at Carousel.<Rail>b__1(T it, INameScope _)     Carousel.cs:159
+  ...
+  at ContentPresenter.CreateChild / UpdateChild / ContentChanged
+  at ItemsControl.ClearContainerForItemOverride
+  at VirtualizingStackPanel.RecycleElement / RealizeElements / MeasureOverride
+  at LayoutManager.ExecuteMeasurePass
+```
+
+链条:卡片滑出视野 → `VirtualizingStackPanel` 回收容器 → 回收第一步是把
+`ContentPresenter` 的 `Content` **置空** → 置空同样触发一次模板构建,**入参是 null**。
+`ItemTemplate` 是显式给的,不走 `Match`,拦不住。模板里读 `it.Name` 当场 NRE。
+
+要命的是**它抛在布局过程里**:这一趟 measure 整个作废 → 后面的卡再也造不出来
+(= 用户看到的「只有前 7 集」),下一帧重来一遍又抛一次(= 「卡上加卡」)。
+兜网接住了,所以不崩、不报错,只是一直卡。
+
+- 修法:`Carousel.Rail` 的模板第一句 `if (it is null) return new Control();`
+  —— 所有走 Rail 的地方(分集 / 演职员 / 相似 / 媒体信息卡 / 首页轨道)一次修完。
+- 实测:修前每帧抛;修后滑过 200 张卡,**帧间隔中位 11ms、P95 12ms、最长 25ms**。
+- `supportsRecycling: true` 反而躲得过这条(`Build(data, existing)` 直接回 existing),
+  `MediaGrid` 用的就是 true。**它也不会错位** —— `LP_GRIDPROBE` 实测滚到第 150 行,
+  5 行全画自己那一行,模板共建 10 次(容器复用了,模板照走)。
+
+## 「造了几张卡」证明不了滑得顺(2026-09-12)
+
+`LP_SELFCHECK_RAIL` 量的是条目数 vs 真造出来的容器数 —— 1200 条只造 5 张,
+虚拟化确实在,而**页面同时每帧都在抛异常**。两件事互相不否证。
+
+滑得顺的判据只有一个:**相邻两帧的间隔**。`LP_SELFCHECK_RAILSTRESS=1` 每帧推三张卡
+的距离一路滑过 200 集,报中位 / P95 / 最长。跑法:
+
+```
+LP_EPS=1200 LP_RAIL=1 LP_RAILSTRESS=1 LP_WAIT=26 bash scripts/selfcheck-win.sh eps detail:s1
+```

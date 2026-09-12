@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
@@ -33,6 +33,9 @@ public sealed class MediaGrid : ContentControl
     private readonly ItemsControl _list;
     private int _cols = -1;
 
+    /// <summary>行模板复不复用容器。探针拿这一位对账 —— 抄一个字面量过去测的是抄本。</summary>
+    internal const bool RecycleRows = true;
+
     public MediaGrid(CoreClient core, string server, bool wide,
         Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null,
         int titleLines = 2)
@@ -44,7 +47,7 @@ public sealed class MediaGrid : ContentControl
         {
             // 这一行就是虚拟化的开关。不设的话默认是 StackPanel,全量实例化。
             ItemsPanel = new FuncTemplate<Panel?>(() => new VirtualizingStackPanel()),
-            ItemTemplate = new FuncDataTemplate<List<CardItem>>((row, _) => Row(row), true),
+            ItemTemplate = new FuncDataTemplate<List<CardItem>>((row, _) => Row(row), RecycleRows),
         };
         Content = _list;
         HorizontalAlignment = HorizontalAlignment.Stretch;

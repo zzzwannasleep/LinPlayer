@@ -257,6 +257,7 @@ public partial class MainWindow : Window
         SelfCheckSidebar();
         SelfCheckServerMenu();
         SelfCheckRail();
+        SelfCheckRailStress();
         SelfCheckChrome();
         SelfCheckReclick();
         SelfCheckServerIcon();
@@ -934,6 +935,61 @@ public partial class MainWindow : Window
                 Console.WriteLine($"[分集轨道] ✓ 只造了 {made}/{total} —— 虚拟化生效,上千集不会卡死");
             else
                 Console.WriteLine($"[分集轨道] ✗ 造了 {made}/{total} —— 全量实例化,上千集必卡");
+        }));
+    }
+
+
+    /// <summary>
+    /// 自检:一路滑过上千集,量 <b>UI 线程有没有被卡住</b>。
+    ///
+    /// <para>上一条 <see cref="SelfCheckRail"/> 量的是「造了几张卡」—— 那只证明虚拟化在,
+    /// 证明不了滑起来顺。用户 2026-09-12:「PC 端剧详情页只能显示前 7 集,
+    /// 后面的集数根本没加载出来,一直往右就卡死」。判据是<b>相邻两帧的间隔</b>:
+    /// 掉到 200ms 以上就是肉眼可见的一顿,而截图和「造了几张卡」都照不到它。</para>
+    /// </summary>
+    private void SelfCheckRailStress()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_RAILSTRESS") != "1") return;
+        _ = Task.Delay(4200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            var vsp = this.GetVisualDescendants().OfType<VirtualizingStackPanel>()
+                .FirstOrDefault(v => v.Orientation == Orientation.Horizontal);
+            var sv = vsp?.FindAncestorOfType<ScrollViewer>();
+            var top = sv is null ? null : TopLevel.GetTopLevel(sv);
+            if (sv is null || top is null) { Console.WriteLine("[轨道压测] 没找到横向轨道"); return; }
+
+            var max = sv.Extent.Width - sv.Viewport.Width;
+            // 只滑 200 张卡的距离:整条 1200 集要跑一分钟,而卡不卡前二十帧就看得出来
+            var goal = Math.Min(max, 230.0 * 200);
+            var gaps = new List<double>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var last = 0.0;
+            var frames = 0;
+            void Report()
+            {
+                var srt = gaps.OrderBy(x => x).ToList();
+                var med = srt.Count > 0 ? srt[srt.Count / 2] : 0;
+                var p95 = srt.Count > 0 ? srt[(int)(srt.Count * 0.95)] : 0;
+                var worst = srt.Count > 0 ? srt[^1] : 0;
+                Console.WriteLine($"[轨道压测] 滑了 {sv.Offset.X:0}/{max:0}px,{frames} 帧," +
+                                  $"帧间隔 中位 {med:0}ms P95 {p95:0}ms 最长 {worst:0}ms");
+                Console.WriteLine(worst < 200
+                    ? "[轨道压测] 全程没有超过 200ms 的停顿"
+                    : $"[轨道压测] 最长卡了 {worst:0}ms —— 这就是用户说的「卡死」");
+            }
+            void Frame(TimeSpan _)
+            {
+                var now = sw.Elapsed.TotalMilliseconds;
+                // 头两帧不算:第一帧的间隔里混着「排这次回调」本身
+                if (frames >= 2) gaps.Add(now - last);
+                last = now;
+                frames++;
+                // 每帧推三张卡 —— 拖着滑就是这个速度(Smooth.EnableDrag 直接改 Offset)
+                sv.Offset = sv.Offset.WithX(Math.Min(goal, sv.Offset.X + 690));
+                if (sv.Offset.X < goal - 1 && frames < 400) top.RequestAnimationFrame(Frame);
+                else Report();
+            }
+            top.RequestAnimationFrame(Frame);
         }));
     }
 

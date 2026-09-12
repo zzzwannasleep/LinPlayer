@@ -1,4 +1,4 @@
-using Avalonia;
+﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Controls.Primitives;
@@ -156,6 +156,15 @@ public static class Carousel
                  回收省下的是「屏幕上那七张」,不值得拿正确性换。 */
             ItemTemplate = new FuncDataTemplate<T>((it, _) =>
             {
+                /* ☠ <b>这一条可能是 null。</b> 卡片滑出视野时 <see cref="VirtualizingStackPanel"/>
+                   会回收容器,而回收的第一步是把 ContentPresenter 的内容置空 ——
+                   置空同样触发一次模板构建,入参就是 null。ItemTemplate 是显式给的,
+                   不走 Match,所以拦不住。
+                   而 make 读的是这一条的字段(标题、剧照、id),于是当场 NRE,
+                   并且抛在**布局过程里**:这一趟测量整个作废,后面的卡再也造不出来,
+                   下一帧重来一遍又抛一次 —— 用户 2026-09-12 看到的
+                   「只显示前 7 集、一直往右就卡死」就是这个,不是加载慢。 */
+                if (it is null) return new Control();
                 var c = make(it);
                 c.Margin = new Thickness(0, 0, gap, 0);
                 return c;
