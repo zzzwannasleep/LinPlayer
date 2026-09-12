@@ -111,6 +111,13 @@ private fun MainShell() {
     val app = LocalApp.current
     val nav = rememberNavController()
     val entry by nav.currentBackStackEntryAsState()
+    // 「启动时自动检查更新」。放在登录之后:没进门就先弹更新是打扰
+    var newVersion by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<kotlinx.serialization.json.JsonObject?>(null)
+    }
+    LaunchedEffect(Unit) { newVersion = xyz.linplayer.app.ui.pages.autoCheckUpdate(app) }
+    xyz.linplayer.app.ui.pages.UpdateFlow(newVersion) { newVersion = null }
+
     val route = entry?.destination?.route.orEmpty()
     val tab = when {
         route.endsWith("Home") -> 0

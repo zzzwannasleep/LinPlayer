@@ -198,7 +198,8 @@ func pickAsset(names []string, sets [][]string) int {
 type Info struct {
 	// Tag 原始 tag(如 `v1.2.0-build91-pre`)—— 比较**用它**,不是下面那个 Version。
 	Tag string `json:"tag"`
-	// Version 规约成 x.y.z,只给界面显示用。
+	// Version 只脱掉 tag 前面那个 v,构建号照留 —— 规约成 x.y.z 的话,
+	// 预发布渠道一天里的几个 build 在弹窗上长得一模一样(见 DisplayVersion)。
 	Version    string `json:"version"`
 	Name       string `json:"name"`
 	Notes      string `json:"notes"`
@@ -351,14 +352,24 @@ func registerUpdateCommands() {
 		if err != nil {
 			return nil, bus.NewErr(bus.ENetwork, "%v", err)
 		}
-		if info == nil {
-			// ★ 「已是最新」要**明说**。返回 null 的话界面分不清它和「查不动」,
-			//   而这两件事对用户的下一步动作完全不同。
-			return map[string]any{"has_update": false, "current": Version,
-				"can_self_update": CanSelfUpdate()}, nil
-		}
-		return map[string]any{"has_update": true, "current": Version, "update": info,
-			// 一次问清楚:界面要立刻决定是给「下载并安装」还是只给一条下载链接
-			"can_self_update": CanSelfUpdate()}, nil
+		// 「已是最新」要**明说**。返回 null 的话界面分不清它和「查不动」,
+		// 而这两件事对用户的下一步动作完全不同。
+		return CheckResult{
+			HasUpdate: info != nil, Current: Version, Update: info,
+			CanSelfUpdate: CanSelfUpdate(),
+		}, nil
 	})
+}
+
+// CheckResult system.checkUpdate 的回包。
+//
+// 具名类型是为了让字段名门禁能对上账:裸 map 它一律放行,而这条命令的字段名
+// 恰恰栽过 —— 版本号在 [CheckResult.Update] 子对象里,安卓端却直接读顶层的
+// `version`,取到的永远是 null,不管有没有新版都显示「已是最新」。
+type CheckResult struct {
+	HasUpdate bool   `json:"has_update"`
+	Current   string `json:"current"`
+	// 没有更新时是 nil。界面要立刻决定给「下载并安装」还是只给一条下载链接。
+	Update        *Info `json:"update"`
+	CanSelfUpdate bool  `json:"can_self_update"`
 }

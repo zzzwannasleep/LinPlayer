@@ -69,12 +69,14 @@ import xyz.linplayer.app.ui.components.LpCell
 import xyz.linplayer.app.ui.components.LpScaffold
 import xyz.linplayer.app.ui.components.Panel
 import xyz.linplayer.app.ui.components.SegRow
+import xyz.linplayer.app.ui.components.ToneChip
 import xyz.linplayer.app.ui.components.StepperRow
 import xyz.linplayer.app.ui.components.rememberScrolled
 import xyz.linplayer.app.ui.theme.LpIcons
 import xyz.linplayer.app.ui.theme.Lp
 import xyz.linplayer.app.ui.theme.Sp
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.dp
@@ -140,6 +142,8 @@ fun SettingsPage(nav: NavController) {
                     Hairline()
                     LpCell("存储与数据目录", icon = LpIcons.file) { nav.navigate(Route.SettingsSub("storage")) }
                     Hairline()
+                    LpCell("更新", icon = LpIcons.version) { nav.navigate(Route.SettingsSub("update")) }
+                    Hairline()
                     LpCell("关于", icon = LpIcons.info) { nav.navigate(Route.SettingsSub("about")) }
                 }
             }
@@ -169,7 +173,8 @@ fun SettingsSubPage(nav: NavController, entry: NavBackStackEntry) {
         "mpvconf" -> "mpv 配置"; "danmaku" -> "弹幕"
         "backup" -> "备份与还原"
         "prefetch" -> "多线程加载"
-        "blocked" -> "已屏蔽的内容"; "storage" -> "存储与数据目录"; else -> "关于"
+        "blocked" -> "已屏蔽的内容"; "storage" -> "存储与数据目录"
+        "update" -> "更新"; else -> "关于"
     }
 
     LpScaffold(title, subtitle = "设置", onBack = { nav.popBackStack() },
@@ -186,6 +191,7 @@ fun SettingsSubPage(nav: NavController, entry: NavBackStackEntry) {
                     "prefetch" -> PrefetchPanel()
                     "blocked" -> BlockedPanel()
                     "storage" -> StoragePanel()
+                    "update" -> UpdatePanel()
                     else -> AboutPanel()
                 }
             }
@@ -912,12 +918,10 @@ private val UpdateNotesMaxHeight = 320.dp
 @Composable
 private fun AboutPanel() {
     val app = LocalApp.current
-    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val caps by app.caps.collectAsStateWithLifecycle()
     var newest by remember { mutableStateOf<JsonObject?>(null) }
     var checked by remember { mutableStateOf(false) }
-    var prog by remember { mutableStateOf<JsonObject?>(null) }
     // 点一下直接开下载是不对的:手机上多半是流量,而且用户没看见这一版改了什么
     var offer by remember { mutableStateOf<JsonObject?>(null) }
 
@@ -946,12 +950,34 @@ private fun AboutPanel() {
         )
     }
 
+    UpdateFlow(offer) { offer = null }
+}
+
+/**
+ * 有新版之后的两个弹窗:先给说明让人决定,再给进度。
+ *
+ * ★ 抽成顶层有两个各自成立的理由:两个入口(关于页手动查、启动自动查)各写一份的话,
+ *   自动查那份迟早掉队 —— 而它恰恰是用户最少点到、最不容易发现坏掉的那条路;
+ *   另一个是字段名门禁按「调用点往下 30 行」判响应字段,挤在 AboutPanel 里
+ *   它会把进度条那几行算到 `system.checkUpdate` 头上,报一片假红。
+ * ★ 下载跑在 [AppState.bg] 上,不是 `rememberCoroutineScope()`:后者随页面一起死,
+ *   用户退出设置页就再也等不到那句「跳到系统安装界面」。
+ */
+@Composable
+internal fun UpdateFlow(u: JsonObject?, onClose: () -> Unit) {
+    if (u == null) return
+    val app = LocalApp.current
+    val ctx = LocalContext.current
+    // 按 u 记忆:换了个新版本这两格要从头开始,否则上一次的进度会串到这一次
+    var prog by remember(u) { mutableStateOf<JsonObject?>(null) }
+    var downloading by remember(u) { mutableStateOf(false) }
+
     /* 更新说明在这儿是**第一次**被显示出来 —— 之前安卓端从头到尾没有任何地方
        读过 notes,点一下就开始下。说明本身也刚从「每次都一样的下载指引」换成
        这一版真实的提交清单(scripts/release-notes.sh)。 */
-    offer?.let { u ->
+    if (!downloading) {
         val mb = (u.long("asset_size") ?: 0L) / 1048576.0
-        LpDialog({ offer = null }, "新版本 " + (u.str("version") ?: "")) {
+        LpDialog(onClose, "新版本 " + (u.str("version") ?: "")) {
             Column(
                 Modifier
                     .heightIn(max = UpdateNotesMaxHeight)
@@ -962,34 +988,32 @@ private fun AboutPanel() {
                  else "下完会跳到系统安装界面。")
             Spacer(Modifier.height(Sp.x16))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                LpButton("取消", { offer = null })
+                LpButton("取消", onClose)
                 Spacer(Modifier.width(Sp.x10))
                 LpButton("下载并安装", {
-                    offer = null
-                    scope.launch { runUpdate(app, ctx) { prog = it } }
+                    downloading = true
+                    app.bg.launch { runUpdate(app, ctx) { prog = it }; onClose() }
                 })
             }
         }
+        return
     }
 
-    if (prog != null) {
-        val got = prog.long("downloaded") ?: 0L
-        val total = prog.long("total") ?: 0L
-        LpDialog({ }, "正在更新") {
-            if (total > 0) LinearProgressIndicator(
-                progress = { (got.toFloat() / total).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth(),
-            ) else LinearProgressIndicator(Modifier.fillMaxWidth())
-            Spacer(Modifier.height(Sp.x12))
-            Dim2(if (total > 0) "%.1f MB / %.1f MB".format(got / 1048576.0, total / 1048576.0)
-                 else "%.1f MB".format(got / 1048576.0))
-            Spacer(Modifier.height(Sp.x16))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                LpButton("取消", {
-                    scope.launch { runCatching { app.call("system.cancelUpdate") } }
-                    prog = null
-                })
-            }
+    val got = prog.long("downloaded") ?: 0L
+    val total = prog.long("total") ?: 0L
+    LpDialog({ }, "正在更新") {
+        if (total > 0) LinearProgressIndicator(
+            progress = { (got.toFloat() / total).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+        ) else LinearProgressIndicator(Modifier.fillMaxWidth())
+        Spacer(Modifier.height(Sp.x12))
+        Dim2(if (total > 0) "%.1f MB / %.1f MB".format(got / 1048576.0, total / 1048576.0)
+             else "%.1f MB".format(got / 1048576.0))
+        Spacer(Modifier.height(Sp.x16))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            // 只发取消,不在这儿关窗:核心层把档位改成 idle 之后,轮询那一头会自己
+            // 收尾并调 onClose。抢先关窗的话,关掉的是一个还在下载的任务
+            LpButton("取消", { app.bg.launch { runCatching { app.call("system.cancelUpdate") } } })
         }
     }
 }
@@ -1044,4 +1068,138 @@ private fun openInstaller(ctx: Context, path: String, say: (String) -> Unit) {
             .setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
     }.onFailure { say("装不起来:" + it.message) }
+}
+
+// ---------------------------------------------------------------- 更新
+
+/**
+ * 更新渠道:**存字母码,显示中文**。
+ *
+ * 线上值是 `prerelease` 不是 `preview` —— 写错的那一版核心层会顶回
+ * 「未知的更新渠道」,渠道从来就切不过去。两个方向必须互为反函数,
+ * 错开一格的表现是「选了预览版,回来还显示正式版」而一句错都不报。
+ */
+internal val CHANNEL_LABELS = listOf("正式版", "预览版")
+
+internal fun channelLabel(code: String) = if (code == "prerelease") "预览版" else "正式版"
+
+internal fun channelCode(label: String) = if (label == "预览版") "prerelease" else "stable"
+
+/** chip 上只放主机名 —— 一整条 `https://…` 在手机上会把这一排撑出屏幕。 */
+internal fun proxyLabel(url: String) =
+    url.substringAfter("://").trimEnd('/').ifEmpty { "直连" }
+
+/**
+ * 更新设置。
+ *
+ * ☠ 这三项此前**只有桌面端有**:安卓能查能下能装,但渠道、自动检查、GitHub 代理
+ *   一个都改不了 —— 也就是安卓用户只能走正式版直连 GitHub,而直连 GitHub
+ *   恰恰是这条链路在国内最常断的一段。核心层的命令从落地那天起就在,没人接。
+ */
+@Composable
+private fun UpdatePanel() {
+    val app = LocalApp.current
+    val scope = rememberCoroutineScope()
+    var channel by remember { mutableStateOf("stable") }
+    var auto by remember { mutableStateOf(false) }
+    var proxy by remember { mutableStateOf("") }
+    var proxies by remember { mutableStateOf<List<String>>(emptyList()) }
+    var version by remember { mutableStateOf("") }
+    var editing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val o = runCatching { app.call("prefs.getUpdateSettings") }.getOrNull().obj()
+        channel = o.str("channel") ?: "stable"
+        auto = o.bool("auto_check")
+        proxy = o.str("proxy") ?: ""
+        proxies = o.strList("proxies")
+        version = o.str("current_version") ?: ""
+    }
+
+    /** 改完即生效。**失败必须回滚** —— 不回滚的话界面显示的是一个没落盘的值。 */
+    fun push(ch: String, on: Boolean, px: String) {
+        val undo = Triple(channel, auto, proxy)
+        channel = ch; auto = on; proxy = px
+        scope.launch {
+            runCatching {
+                app.call("prefs.setUpdateSettings",
+                    args("channel" to ch, "auto_check" to on, "proxy" to px))
+            }.onFailure {
+                channel = undo.first; auto = undo.second; proxy = undo.third
+                app.report(it)
+            }
+        }
+    }
+
+    Panel(Modifier.padding(Sp.x16)) {
+        SegRow("更新渠道", CHANNEL_LABELS, channelLabel(channel),
+            { v -> push(channelCode(v), auto, proxy) },
+            sub = "预览版一天可能出好几个构建")
+        Hairline()
+        LpCell("启动时自动检查更新", sub = "默认关着 —— 这是个会自己联网的行为",
+            switch = auto, onSwitch = { v -> push(channel, v, proxy) })
+        Hairline()
+        LpCell("GitHub 代理", value = proxyLabel(proxy),
+            sub = "GitHub 连不上时填一个,查版本和下载都走它",
+            onClick = { editing = true })
+        Hairline()
+        LpCell("当前版本", value = version.ifEmpty { "…" }, arrow = false)
+    }
+
+    if (editing) ProxyDialog(proxy, proxies, { editing = false }) { px ->
+        editing = false
+        push(channel, auto, px)
+    }
+}
+
+/**
+ * 代理编辑。
+ *
+ * ★ 输入框 + 几颗快填,不是一个下拉:用户点名要「支持用户自定义」,而这类公共代理
+ *   今天能用明天就 404 —— 只给下拉等于把人锁死在坏掉的那几个上。
+ * ★ 档位表来自核心层,这儿不抄一份:抄的下场是改一处漏一处,漏掉的那端不报错。
+ */
+@Composable
+private fun ProxyDialog(
+    init: String,
+    picks: List<String>,
+    onClose: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var draft by remember { mutableStateOf(init) }
+    LpDialog(onClose, "GitHub 代理") {
+        LpField(draft, { draft = it }, "留空 = 直连 GitHub")
+        Spacer(Modifier.height(Sp.x10))
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Sp.x6),
+        ) {
+            ToneChip("直连", on = draft.isBlank()) { draft = "" }
+            picks.forEach { u ->
+                ToneChip(proxyLabel(u), on = draft.trimEnd('/') == u.trimEnd('/')) { draft = u }
+            }
+        }
+        Spacer(Modifier.height(Sp.x16))
+        Row(horizontalArrangement = Arrangement.spacedBy(Sp.x10)) {
+            LpButton("取消", onClose, Modifier.weight(1f), BtnKind.Secondary)
+            LpButton("保存", { onSave(draft.trim()) }, Modifier.weight(1f))
+        }
+    }
+}
+
+/**
+ * 「启动时自动检查更新」真正生效的地方。
+ *
+ * ☠ 这个偏好在安卓端**从来没有任何人读过** —— 界面上根本没有它,
+ *   核心层存着一个谁都改不了、改了也没人看的值。桌面端六秒后查一次,
+ *   安卓端此前一次都不查。
+ * ★ 延后 6 秒:首屏那几条请求才是用户在等的,更新检查排在它们后面。
+ */
+internal suspend fun autoCheckUpdate(app: AppState): JsonObject? {
+    delay(6000)
+    val s = runCatching { app.call("prefs.getUpdateSettings") }.getOrNull().obj()
+    if (!s.bool("auto_check")) return null
+    // 查不动就安静走开:这不是用户点出来的动作,不该弹错
+    val r = runCatching { app.call("system.checkUpdate") }.getOrNull().obj()
+    return if (r.bool("has_update")) r?.get("update").obj() else null
 }

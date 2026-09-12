@@ -245,16 +245,10 @@ func RegisterCommands(version string) {
 	// ---- 更新 ----
 	bus.Register("prefs.getUpdateSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
 		p := config.Current().PrefsOf()
-		return map[string]any{
-			"channel": p.UpdateChannel, "auto_check": p.UpdateAutoCheck,
-			// GitHub 代理:当前值 + 几档现成的。档位表由**核心层**给,
-			// 两端各抄一份的下场是改一处漏一处,而漏掉的那一端不报错
-			"proxy": p.UpdateProxy, "proxies": system.GithubProxies,
-			// ★ 比较用**发行版本号**,不是编译期的包版本 —— 后者和发行包版本没有同步机制。
-			"current_version": version,
-			// **先问再做** —— 覆盖到一半才发现没权限,用户手上就是个装不上
-			// 也回不去的半吊子。探针是真往安装目录写一个文件再删掉。
-			"can_self_update": system.CanSelfUpdate(),
+		return UpdateSettings{
+			Channel: p.UpdateChannel, AutoCheck: p.UpdateAutoCheck,
+			Proxy: p.UpdateProxy, Proxies: system.GithubProxies,
+			CurrentVersion: version, CanSelfUpdate: system.CanSelfUpdate(),
 		}, nil
 	})
 	bus.Register("prefs.setUpdateSettings", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
@@ -341,4 +335,21 @@ func int64Arg(a map[string]any, k string, def int64) int64 {
 		return int64(v)
 	}
 	return def
+}
+
+// UpdateSettings 更新设置的一次快照。
+//
+// ☠ 用具名类型不是为了好看:字段名门禁按「文档写的返回类型能不能在核心层找到
+// 同名 struct」对账两端,返回裸 map 的命令它**一律放行** —— 那这条命令的
+// 字段名就从来没有被对过账,而对不上的表现只是界面画成空。
+type UpdateSettings struct {
+	Channel   string `json:"channel"`
+	AutoCheck bool   `json:"auto_check"`
+	Proxy     string `json:"proxy"`
+	// 档位表由核心层给。两端各抄一份的下场是改一处漏一处,而漏掉的那一端不报错。
+	Proxies []string `json:"proxies"`
+	// 比较用**发行版本号**,不是编译期的包版本 —— 后者和发行包版本没有同步机制。
+	CurrentVersion string `json:"current_version"`
+	// 先问再做 —— 覆盖到一半才发现没权限,用户手上就是个装不上也回不去的半吊子。
+	CanSelfUpdate bool `json:"can_self_update"`
 }

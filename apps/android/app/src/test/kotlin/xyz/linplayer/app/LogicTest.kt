@@ -30,6 +30,10 @@ import xyz.linplayer.app.ui.pages.defaultVersion
 import xyz.linplayer.app.ui.pages.fmtTime
 import xyz.linplayer.app.ui.pages.artLogoSize
 import xyz.linplayer.app.ui.pages.CORNER_LABELS
+import xyz.linplayer.app.ui.pages.CHANNEL_LABELS
+import xyz.linplayer.app.ui.pages.channelCode
+import xyz.linplayer.app.ui.pages.channelLabel
+import xyz.linplayer.app.ui.pages.proxyLabel
 import xyz.linplayer.app.ui.pages.cornerCode
 import xyz.linplayer.app.ui.pages.cornerLabel
 import xyz.linplayer.app.ui.pages.withScheme
@@ -394,6 +398,34 @@ class LogicTest {
      * ☠ 两个方向必须互为反函数。错开一格的表现是「选了右下,下次进设置显示左上」——
      * 而两个 `when` 各自看都完全正常,一句错都不报。
      */
+    /**
+     * 更新渠道的码和中文标签。
+     *
+     * ☠ 线上值是 `prerelease`,不是 `preview` —— 写成后者的话核心层直接回
+     * 「未知的更新渠道」,**渠道从来就切不过去**,而界面上那一格看起来切好了。
+     * 桌面端在这一条上栽过,注释还留在 SettingsSections.cs 里。
+     */
+    @Test fun `更新渠道的码和中文标签要能来回走`() {
+        CHANNEL_LABELS.forEach { label ->
+            assertEquals("『$label』走一圈变了样", label, channelLabel(channelCode(label)))
+        }
+        listOf("stable", "prerelease").forEach { code ->
+            assertEquals("『$code』走一圈变了样", code, channelCode(channelLabel(code)))
+        }
+        // 认不出的值一律落到正式版:不是落到「预览版」也不是原样透传
+        assertEquals("正式版", channelLabel("nightly"))
+        assertEquals("stable", channelCode("每夜构建"))
+    }
+
+    /** 代理 chip 上只放主机名。留空要显示「直连」,不是一片空白。 */
+    @Test fun `代理地址在按钮上只留主机名`() {
+        assertEquals("gh-proxy.com", proxyLabel("https://gh-proxy.com"))
+        assertEquals("github.akams.cn", proxyLabel("https://github.akams.cn/"))
+        assertEquals("直连", proxyLabel(""))
+        // 没写协议的也得能显示,不能整条吞掉
+        assertEquals("mirror.example", proxyLabel("mirror.example"))
+    }
+
     @Test fun `截屏位置的码和中文标签要能来回走`() {
         CORNER_LABELS.forEach { label ->
             assertEquals("『$label』走一圈变了样", label, cornerLabel(cornerCode(label)))

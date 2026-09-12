@@ -168,3 +168,6 @@ docs/mobile-drafts/
 
 # 截图原图(几十 MB 的 PNG/长截屏)。README 用的是 docs/images/screenshots/ 里的压缩版
 screenshot/
+
+# python 跑 scripts/ 里的门禁时留下的字节码
+__pycache__/

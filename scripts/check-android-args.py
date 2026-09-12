@@ -88,7 +88,9 @@ def go_commands():
 CALL = re.compile(
     r'\b(?:call|block|callJson)\(\s*"([a-z]+\.[A-Za-z]+)"\s*,\s*args\((.*?)\)\s*\)',
     re.S)
-PAIR = re.compile(r'"([a-z_0-9]+)"\s+to\b')
+# ☠ 连**驼峰**一起收。只认蛇形的话 `"autoCheck" to v` 整条从视野里消失,
+# 闸门一声不吁 —— 而核心层清一色蛇形,驼峰正是这条边界上最容易写出来的错。
+PAIR = re.compile(r'"([A-Za-z_0-9]+)"\s+to\b')
 
 # `args(*a.toList().toTypedArray())` —— 参数名在**上面**那个 buildMap 里。
 #
@@ -98,7 +100,7 @@ PAIR = re.compile(r'"([a-z_0-9]+)"\s+to\b')
 #   和「库内搜索搜的是全站」这两条症状,都是从这个盲区长出来的。
 SPREAD = re.compile(
     r'\b(?:call|block|callJson)\(\s*"([a-z]+\.[A-Za-z]+)"\s*,\s*args\(\s*\*\s*(\w+)\s*\.', re.S)
-PUT = re.compile(r'\bput\(\s*"([a-z_0-9]+)"')
+PUT = re.compile(r'\bput\(\s*"([A-Za-z_0-9]+)"')
 
 
 def build_map_keys(src, var, before):

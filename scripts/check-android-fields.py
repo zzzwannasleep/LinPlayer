@@ -126,14 +126,17 @@ NL = chr(10)
 FUNC = re.compile(NL + '(?:@Composable' + NL + ')?(?:private |internal )?fun ')
 # ☠ 新写一个取值器就要加进来。漏掉的表现是**闸门静默少数几处** ——
 # 它照样打「✓ N 处」,只是那几处从来没被对过账(namedList 就这么漏过一次)。
+# ☠ 键名必须连**驼峰**一起收。原来只认 `[a-z_0-9]`,于是 `.str("assetSize")`
+# 这种写法整条从视野里消失 —— 闸门一声不吭。而核心层清一色蛇形,
+# 驼峰恰恰是这条边界上最容易写出来的错(实测注入 hasUpdate / assetSize 都没红)。
 READ = re.compile(
-    r'\.(?:str|dbl|long|bool|boolOrNull|strList|namedList|arr|obj|get)\(\s*"([a-z_0-9]+)"\s*\)')
+    r'\.(?:str|dbl|long|bool|boolOrNull|strList|namedList|arr|obj|get)\(\s*"([A-Za-z_0-9]+)"\s*\)')
 
 
 def main():
     structs = go_struct_fields()
     rets = doc_return_types()
-    bad = checked = 0
+    bad = checked = waved = 0
 
     for base, _, files in os.walk(UI):
         for f in sorted(files):
@@ -146,6 +149,7 @@ def main():
                 cmd = m.group(1)
                 ty = rets.get(cmd, '')
                 if ty in OPAQUE or ty not in structs:
+                    waved += 1
                     continue          # 类型查不到就不判,别造假红
                 fields = flatten(structs, ty)
                 # 窗口右界:下一个调用点、下一个函数头、或 30 行,取最近的一个。
@@ -171,7 +175,12 @@ def main():
     if bad:
         print('\n%d 处响应字段名对不上。这类错**两边都不报错**,只会画成空页。' % bad)
         return 1
-    print('✓ %d 处调用点的响应字段名,核心层都真的发' % checked)
+    # ☠ 覆盖率要**报出来**。只印「✓ N 处」的话它读起来像全覆盖,
+    # 而放行的那些(返回裸 map、或者 COMMANDS.md 的返回类型在核心层查无此名)
+    # 一个字段都没对过账 —— 那正是这类 bug 藏身的地方。
+    print('✓ %d 处调用点的响应字段名,核心层都真的发(另有 %d 处放行:'
+          '返回类型在核心层查不到同名 struct,占 %.0f%%)'
+          % (checked, waved, 100.0 * waved / (checked + waved)))
     return 0
 
 

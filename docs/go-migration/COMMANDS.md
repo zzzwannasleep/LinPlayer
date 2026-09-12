@@ -325,7 +325,7 @@
 | [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setTranslationSettings` | `set_translation_settings` | `settings: tr::TranslationSettings` | `Result<(), String>` | ❌ |
-| [x] | `prefs.setUpdateSettings` | `set_update_settings` | `channel: linplayer_core::update::UpdateChannel, auto_check: bool` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setUpdateSettings` | `set_update_settings` | `channel: String, auto_check: bool, proxy: String` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setWritebackSettings` | `set_writeback_settings` | `settings: WritebackSettings` | `Result<(), String>` | ✅ |
 
 ### 系统 · `system.*` — 17 条
@@ -337,7 +337,7 @@
 | [x] | `system.cacheSize` | `cache_size` | `—` | `Result<u64, String>` | ✅ |
 | [x] | `system.cancelUpdate` | **新增** | `-` | `Result<system::UpdateProgress, String>` | ✅ | <!-- 掐掉在跑的更新下载 -->
 | [x] | `system.capabilities` | **新增** | `-` | `{ commands: string[], ... }` | — | <!-- 本平台支持哪些命令。UI 启动时拿它隐藏入口(SPEC 5.6) -->
-| [x] | `system.checkUpdate` | `check_update` | `—` | `Result<Option<linplayer_core::update::UpdateInfo>, String>` | ✅ |
+| [x] | `system.checkUpdate` | `check_update` | `—` | `CheckResult` | ✅ |
 | [x] | `system.clearCache` | `clear_cache` | `—` | `Result<(), String>` | ✅ |
 | [x] | `system.dataPaths` | `data_paths` | `—` | `DataPaths` | ✅ |
 | [x] | `system.downloadUpdate` | **新增** | `-` | `Result<system::UpdateProgress, String>` | ✅ | <!-- 开下载,立刻返回;进度轮询 system.updateProgress -->
