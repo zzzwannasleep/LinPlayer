@@ -262,7 +262,7 @@ public sealed class Card : Button
     /// 一次 <c>Dispatcher.Post</c>,于是每张卡都必然有一帧是「骨架 + 透明的图」。
     /// 命中时连淡入都不做:那张图上一帧还在屏幕上,给它做入场动画本身就是错的。</para>
     /// </summary>
-    private static void StartArt(CoreClient core, string server, CardItem item, Image target,
+    internal static void StartArt(CoreClient core, string server, CardItem item, Image target,
         int maxH, Control skel, Control placeholder)
     {
         var url = Images.EmbyImageUrl(server, item.Id, "Primary");
@@ -378,5 +378,103 @@ public sealed class Card : Button
             });
         }
         return panel;
+    }
+}
+
+/// <summary>
+/// 列表版式里的一行(草稿 08 页第 9 条)。
+///
+/// <para>它不是「把卡片压扁」——两种版式回答的是两个问题:海报网格回答
+/// 「有什么」(一屏尽量多的封面),列表回答「这一条是什么」(标题一行读完,
+/// 分辨率码率体积排在同一列上,扫一眼就能比)。所以标题在这儿<b>只给一行</b>,
+/// 换行的话下一条的元信息就和这一条对不齐,一列数字对不齐就没法比。</para>
+/// </summary>
+public sealed class MediaRow : Button
+{
+    /// <summary>海报高。行高由它加上下内边距决定 —— 每行一样高,列才对得齐。</summary>
+    private const double ArtHeight = 60;
+
+    public MediaRow(CoreClient core, string server, CardItem item, Action<CardItem>? onOpen)
+    {
+        var artW = ArtHeight * 2 / 3;
+        var img = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
+        var ph = new TextBlock
+        {
+            Text = "🎬", FontSize = 14, Foreground = Tok.Of("Ink3"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsVisible = !item.HasPrimary,
+        };
+        var skel = new Border
+        {
+            Classes = { "skel" }, CornerRadius = new CornerRadius(6),
+            IsVisible = item.HasPrimary,
+        };
+        var art = new Border
+        {
+            Width = artW, Height = ArtHeight, CornerRadius = new CornerRadius(6),
+            ClipToBounds = true, Background = Tok.Of("PanelAlt"),
+            Child = new Panel { Children = { skel, ph, img } },
+        };
+
+        var bits = new List<string>();
+        if (item.EpisodeCode.Length > 0) bits.Add(item.EpisodeCode);
+        if (item.MediaLabel.Length > 0) bits.Add(item.MediaLabel);
+        if (item.RuntimeLabel.Length > 0) bits.Add(item.RuntimeLabel);
+        // 看到哪儿了写成百分比:这一行没有卡面可以画进度条,而「已看 65%」
+        // 说的是同一件事,还省一件要对齐的东西
+        if (item.Progress > 0) bits.Add($"已看 {item.Progress * 100:0}%");
+
+        var text = new StackPanel
+        {
+            Spacing = 2, VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = item.DisplayTitle, FontSize = 13.5, MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
+            },
+        };
+        if (bits.Count > 0)
+        {
+            text.Children.Add(new TextBlock
+            {
+                Text = string.Join("  ·  ", bits), FontSize = 11.5, MaxLines = 1,
+                TextTrimming = TextTrimming.CharacterEllipsis, Foreground = Tok.Of("Ink3"),
+            });
+        }
+
+        // 看完 / 还剩几集:和卡片角标同一条口径(有勾就不写数字,两个都画会自相矛盾)
+        var mark = new TextBlock
+        {
+            FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+            Text = item.Played ? "✓ 看完" : item.UnplayedCount > 0 ? $"{item.UnplayedCount} 集未看" : "",
+            Foreground = item.Played ? Tok.Of("Ok") : Tok.Of("Accent"),
+        };
+
+        var row = new DockPanel { LastChildFill = true };
+        DockPanel.SetDock(art, Dock.Left);
+        DockPanel.SetDock(mark, Dock.Right);
+        art.Margin = new Thickness(0, 0, 10, 0);
+        mark.Margin = new Thickness(10, 0, 0, 0);
+        row.Children.Add(art);
+        row.Children.Add(mark);
+        row.Children.Add(text);
+
+        Content = row;
+        Classes.Add("media");
+        Background = Brushes.Transparent;
+        BorderThickness = new Thickness(0);
+        Padding = new Thickness(6);
+        HorizontalAlignment = HorizontalAlignment.Stretch;
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+        if (onOpen is not null) Click += (_, _) => onOpen(item);
+
+        if (item.HasPrimary) Card.StartArt(core, server, item, img, (int)(ArtHeight * 2), skel, ph);
+        // 右键菜单和卡片走同一处实现 —— 换个版式就少一半功能是最不该有的差别
+        CardActions.Attach(this, core, item);
     }
 }

@@ -95,6 +95,7 @@ func TestSetters拒绝越界而不是悄悄钳(t *testing.T) {
 			map[string]any{"settings": map[string]any{"range": "乱写的"}}},
 		{"更新渠道乱写", 107, "prefs.setUpdateSettings", map[string]any{"channel": "nightly"}},
 		{"模糊强度 500", 108, "prefs.setDetailBlur", map[string]any{"value": float64(500)}},
+		{"视图版式乱写", 109, "prefs.setPrefs", map[string]any{"library_view": "瀑布流"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := call(t, c.seq, c.cmd, c.args)
@@ -406,5 +407,26 @@ func TestSetPrefs记住窗口尺寸(t *testing.T) {
 	p = config.Current().PrefsOf()
 	if p.WindowW != 760 || p.WindowH != 520 || p.WindowMax {
 		t.Fatalf("只改最大化把尺寸带走了: %dx%d max=%v", p.WindowW, p.WindowH, p.WindowMax)
+	}
+}
+
+// 视图版式(草稿 08 页第 9 条)要落盘。
+//
+// ★ 不落盘的表现是「每进一次库都被拨回海报网格」—— 那颗按钮点了有反应,
+// 但选择留不住,用户会当成它坏了。
+func TestSetPrefs记住视图版式(t *testing.T) {
+	setup(t)
+	call(t, 511, "prefs.setPrefs", map[string]any{"library_view": "list"})
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.PrefsOf().LibraryView; got != "list" {
+		t.Fatalf("视图版式没落盘,实得 %q", got)
+	}
+	// 拒掉的那次不能把原值带走
+	call(t, 512, "prefs.setPrefs", map[string]any{"library_view": "瀑布流"})
+	if got := config.Current().PrefsOf().LibraryView; got != "list" {
+		t.Fatalf("被拒的那次把原值改了,实得 %q", got)
 	}
 }

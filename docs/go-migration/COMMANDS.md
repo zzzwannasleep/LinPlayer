@@ -322,7 +322,7 @@
 | [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setHomeSettings` | **新增** | `settings: HomeSettings` | `Result<(), String>` | — | <!-- 写回首页栏目设置 -->
 | [x] | `prefs.setPrefetchSettings` | `set_prefetch_settings` | `settings: PrefetchSettings` | `Result<(), String>` | ✅ |
-| [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool, search_history: Option<Vec<String>>` | `Prefs` | ✅ |
+| [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool, search_history: Option<Vec<String>>, library_view: Option<String>` | `Prefs` | ✅ |
 | [x] | `prefs.pushSearch` | **新增** | `query: String` | `SearchHistory` | ✅ | <!-- 记一次搜索。去重/置顶/封顶都在核心层 —— 三端各写一遍的话「同一个词搜两次会不会出两条」迟早分叉 -->
 | [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |

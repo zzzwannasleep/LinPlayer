@@ -38,6 +38,7 @@ internal static class Actions
         new("nav.favorites",  Global, "去哪儿", "收藏",              "Ctrl+I"),
         new("nav.download",   Global, "去哪儿", "下载",              "Ctrl+J"),
         new("nav.settings",   Global, "去哪儿", "设置",              "Ctrl+,"),
+        new("nav.refresh",    Global, "去哪儿", "重新加载这一页",    "F5 或 Ctrl+R"),
 
         new("win.back",       Global, "窗口",   "返回上一页",        "Alt+← 或 退格 或 侧键1"),
         new("win.sidebar",    Global, "窗口",   "收起 / 展开侧栏",   "Ctrl+B"),

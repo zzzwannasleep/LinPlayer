@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -217,12 +217,13 @@ public sealed class RankCard : Border
                         Padding = new Thickness(6, 2, 6, 2),
                         CornerRadius = new CornerRadius(6),
                         Background = new SolidColorBrush(Color.Parse("#cc000000")),
+                        BorderBrush = Medal(rank), BorderThickness = new Thickness(rank is >= 1 and <= 3 ? 1 : 0),
                         IsVisible = rank > 0,
                         Child = new TextBlock
                         {
                             Text = rank.ToString(),
                             FontSize = 12, FontWeight = FontWeight.Bold,
-                            Foreground = new SolidColorBrush(Color.Parse(rank <= 3 ? "#e0a95b" : "#e8ebf1")),
+                            Foreground = Medal(rank),
                         },
                     },
                 },
@@ -253,6 +254,26 @@ public sealed class RankCard : Border
         var url = RankingPage.Str(e, "image_url");
         if (url.Length > 0) _ = LoadArt(core, url, img, (int)(h * 2));
     }
+
+    /// <summary>
+    /// 前三名的金银铜(草稿 10 页第 33 条)。
+    ///
+    /// <para>三个都是金色的话「第一」和「第三」只能靠读数字分辨,而角标存在的
+    /// 理由正是<b>不用读就看得出来</b>。第四名之后回到普通白 —— 再往下分色
+    /// 就没人认得出哪个是哪个了。</para>
+    /// </summary>
+    private static IBrush Medal(int rank) => new SolidColorBrush(Color.Parse(rank switch
+    {
+        1 => "#e0a95b",   // 金
+        2 => "#c9cfda",   // 银
+        3 => "#c6803f",   // 铜
+        _ => "#e8ebf1",
+    }));
+
+    /// <summary>自检用:某个名次该是什么颜色。<b>探针拿它对账</b> ——
+    /// 抄一份色号过去测的是抄本,改了这儿而没改那儿照样绿。</summary>
+    internal static string MedalHex(int rank) =>
+        ((SolidColorBrush)Medal(rank)).Color.ToString();
 
     private static async Task LoadArt(CoreClient core, string url, Image target, int maxH)
     {

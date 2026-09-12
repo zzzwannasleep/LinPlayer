@@ -143,6 +143,38 @@
           </TransitioningContentControl.PageTransition>
         </TransitioningContentControl>
 
+        <!--
+          搜索 + 刷新:就近放**内容区右上**(草稿 01 页第 5 条)。
+          放在这儿不放在各页顶栏里 —— 十几页各摆一份的话,漏掉的那一页
+            就是「这一页没有搜索」,而用户不会觉得那是设计。
+          随内容滚动淡出:它悬在正文上方,滚下去之后底下就是内容了,
+            杵着不动会盖住卡片(见 MainWindow.axaml.cs 的 OnPageScrolled)。
+        -->
+        <!-- 垫一层不透明底:它悬在正文上方,窄窗口下正文的筛选条会伸到它底下,
+             透明的话两层字叠在一起,谁都读不出来。 -->
+        <Border Name="ContentTools" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,10,18,0" Padding="6" CornerRadius="10"
+                Background="{DynamicResource Panel}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+          <Border.Transitions>
+            <Transitions>
+              <DoubleTransition Property="Opacity" Duration="0:0:0.18" Easing="CubicEaseOut" />
+            </Transitions>
+          </Border.Transitions>
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <Button Name="BtnSearchPill" Classes="ghost" Padding="10,6" CornerRadius="6"
+                    ToolTip.Tip="搜索(Ctrl K)">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <TextBlock Text="⌕ 搜索" FontSize="12.5" VerticalAlignment="Center" />
+                <TextBlock Text="Ctrl K" FontSize="11" VerticalAlignment="Center"
+                           Foreground="{DynamicResource Ink3}" />
+              </StackPanel>
+            </Button>
+            <Button Name="BtnRefresh" Classes="ghost" Content="↻" Padding="10,6"
+                    CornerRadius="6" ToolTip.Tip="重新加载这一页(F5)" />
+          </StackPanel>
+        </Border>
+
         <!-- 出错横幅。
              渲染里抛出的异常**原本会把整个进程打死** —— 没有对话框、没有日志窗口,
                用户看到的是「点了一下,软件没了」。现在由 Dispatcher.UnhandledException

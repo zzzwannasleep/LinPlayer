@@ -299,6 +299,13 @@ type Prefs struct {
 	// 空态写「暂无数据」等于白占一屏,而「上次搜的那个」是这里最可能的下一步。
 	SearchHistory []string `json:"search_history,omitempty"`
 
+	// LibraryView 媒体库网格用哪种版式:grid = 海报网格,list = 列表行
+	// (草稿 08 页第 9 条)。空 = grid。
+	//
+	// ★ 存核心层是因为它是**用户的选择**,不是这一次打开的临时状态 ——
+	// 每进一次库都被拨回网格的话,那颗按钮等于没有。
+	LibraryView string `json:"library_view,omitempty"`
+
 	/* ---- 字幕样式(播放页「字幕」面板,用户 2026-09-08 点名的五项)----
 
 	   ☠ **必须存在核心层。** 这几项是 mpv 的运行时属性,而 mpv 每次冷启动

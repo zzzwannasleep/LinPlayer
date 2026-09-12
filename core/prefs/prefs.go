@@ -81,6 +81,14 @@ func RegisterCommands(version string) {
 		if v, ok := a["window_max"].(bool); ok {
 			p.WindowMax = v
 		}
+		/* 视图版式(草稿 08 页第 9 条)。**认不得的值要拒**,不要悄悄回落成
+		   网格 —— 那样界面上是「点了列表还是网格」,而没人会想到是名字写错了。 */
+		if v, ok := a["library_view"].(string); ok {
+			if v != "grid" && v != "list" {
+				return nil, bus.NewErr(bus.EInvalid, "未知的视图版式: %s", v)
+			}
+			p.LibraryView = v
+		}
 		// 传空数组 = 清空搜索历史。这条是**整表替换**,加一条走 prefs.pushSearch
 		if _, ok := a["search_history"]; ok {
 			p.SearchHistory = config.ClampSearchHistory(strList(a, "search_history"))

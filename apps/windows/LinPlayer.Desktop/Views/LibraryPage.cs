@@ -223,11 +223,17 @@ public sealed class LibraryPage : PageBase
 
     internal static Action<CardItem> OpenDetail(CoreClient core, string server) => item =>
     {
-        // 库本身不是「详情」,点进去是网格
+        // 库本身不是「详情」,点进去是网格。造法一并交给 Nav —— 那是「刷新」的入口
         if (item.Type is "CollectionFolder" or "UserView" or "Folder")
-            Nav.Push(new LibraryGridPage(core, server, item.Id, item.Name));
+        {
+            Nav.Push(new LibraryGridPage(core, server, item.Id, item.Name),
+                () => new LibraryGridPage(core, server, item.Id, item.Name));
+        }
         else
-            Nav.Push(new DetailPage(core, server, item.Id));
+        {
+            Nav.Push(new DetailPage(core, server, item.Id),
+                () => new DetailPage(core, server, item.Id));
+        }
     };
 }
 
@@ -274,6 +280,13 @@ public sealed class LibraryGridPage : PageBase
     private static readonly double[] FilterWidths = [150, 150, 120];
     /// <summary>已选筛选项那一行(草稿 08 页第 10 条)。一条都没选时整行不占高度。</summary>
     private readonly WrapPanel _active = new() { ItemSpacing = 10, ItemHeight = double.NaN };
+    /// <summary>版式开关:海报网格 ⇄ 列表(草稿 08 页第 9 条)。</summary>
+    private readonly Button _view = new() { Classes = { "ghost" }, MinHeight = 34 };
+    /* 上一次选的版式,**进程内记一份**。
+       每进一次库都等一趟偏好往返的话,网格会先按海报铺出来、半秒后再跳成列表 ——
+       那一跳比没有这个功能更难受。真正的存档在核心层(prefs.library_view),
+       这里只是免掉第二次以后的往返。 */
+    private static string? _viewPref;
     private int _loaded;
     private int _total = -1;
     private bool _busy;
@@ -323,6 +336,12 @@ public sealed class LibraryGridPage : PageBase
             b.Margin = new Thickness(0, 0, 0, 6);
             bar.Children.Add(b);
         }
+        _view.Margin = new Thickness(0, 0, 0, 6);
+        _view.Click += (_, _) => PickView(_grid.ListMode ? "grid" : "list", save: true);
+        bar.Children.Add(_view);
+        // 先按记着的那个铺;头一回进来才真去读一趟偏好
+        PickView(_viewPref ?? "grid", save: false);
+        if (_viewPref is null) _ = LoadView();
         var body = new StackPanel
         {
             Spacing = 14, Children = { head, bar, _active, _first, _grid, _status },
@@ -361,6 +380,81 @@ public sealed class LibraryGridPage : PageBase
         Content = sv;
         _ = LoadFilters();
         _ = LoadMore();
+    }
+
+    /// <summary>
+    /// 切版式。<paramref name="save"/> 为 false 是「照着已知的摆一下」,不回写偏好。
+    ///
+    /// <para>按钮上写的是<b>点下去会变成什么</b>,不是现在是什么 ——
+    /// 写现在是什么的话,用户得先猜这颗按钮是状态还是动作。</para>
+    /// </summary>
+    private void PickView(string v, bool save)
+    {
+        var list = v == "list";
+        _grid.ListMode = list;
+        _view.Content = list ? "▦ 网格" : "▤ 列表";
+        ToolTip.SetTip(_view, list ? "换回海报网格" : "换成列表:一行一条,分辨率码率排成一列好比");
+        if (!save) return;
+        _viewPref = v;
+        _ = SaveView(v);
+    }
+
+    private async Task LoadView()
+    {
+        string v;
+        try
+        {
+            var p = await _core.PrefsGetPrefs(new { });
+            v = p.ValueKind == JsonValueKind.Object && p.TryGetProperty("library_view", out var lv)
+                && lv.ValueKind == JsonValueKind.String ? lv.GetString() ?? "" : "";
+        }
+        catch { return; }   // 读不到就用网格 —— 这一页的主体是内容,不是版式
+        if (v != "list") v = "grid";
+        _viewPref = v;
+        Dispatcher.UIThread.Post(() => PickView(v, save: false));
+    }
+
+    /// <summary>存版式。存不上要**说出来** —— 用户下次进来会发现它变回去了。</summary>
+    private async Task SaveView(string v)
+    {
+        try { await _core.PrefsSetPrefs(new { library_view = v }); }
+        catch (Exception e) { Toast.Error(LibraryPage.Advice(e)); }
+    }
+
+    /// <summary>
+    /// 自检:点一下版式按钮该真的换版式。
+    ///
+    /// <para>三件事一起判:<b>行数</b>(列表是一条一行)、<b>行里画的是什么</b>
+    /// (MediaRow 还是 Card)、<b>按钮上的字</b>。只判按钮的话「文案变了、
+    /// 网格没变」这个真 bug 照样绿。</para>
+    /// </summary>
+    internal void SelfCheckView()
+    {
+        int Rows() => _grid.GetVisualDescendants().OfType<MediaRow>().Count();
+        int Cards() => _grid.GetVisualDescendants().OfType<Card>().Count();
+        if (_grid.Count == 0)
+        {
+            Console.WriteLine("[版式] ✗ 网格里一条都没有 —— 假服务器没给条目?");
+            return;
+        }
+        var was = Cards();
+        Console.WriteLine($"[版式] 起手:海报 {was} 张 / 列表行 {Rows()} 行,按钮写「{_view.Content}」");
+        _view.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.Post(() =>
+        {
+            var ok = Rows() > 0 && Cards() == 0 && (string?)_view.Content == "▦ 网格";
+            Console.WriteLine(ok
+                ? $"[版式] ✓ 换成列表了:{Rows()} 行,一张海报卡都不剩"
+                : $"[版式] ✗ 换列表没生效:列表行 {Rows()} / 海报 {Cards()},按钮写「{_view.Content}」");
+            _view.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            /* 换回来要**数得对得上**。 只判「有海报卡」的话,列数没重算、
+               一行只剩一张的退化照样绿 —— 那时候屏上还是有卡,只是少了一多半。 */
+            Dispatcher.UIThread.Post(() => Console.WriteLine(
+                Cards() == was && Rows() == 0
+                    ? $"[版式] ✓ 换回网格了:还是 {Cards()} 张海报"
+                    : $"[版式] ✗ 换不回网格:列表行 {Rows()} / 海报 {Cards()}(起手是 {was})"),
+                DispatcherPriority.Background);
+        }, DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -543,6 +637,15 @@ public sealed class LibraryGridPage : PageBase
                       + $"类型下拉停在「{_genre.SelectedItem}」");
             }, DispatcherPriority.Background);
         }, DispatcherPriority.Background);
+    }
+
+    /// <summary>自检:换成列表<b>停在那儿</b>,给截图看。</summary>
+    internal void SelfCheckShowList()
+    {
+        PickView("list", save: false);
+        Dispatcher.UIThread.Post(() => Console.WriteLine(
+            $"[版式] 列表版式:{_grid.GetVisualDescendants().OfType<MediaRow>().Count()} 行在屏上"),
+            DispatcherPriority.Background);
     }
 
     private List<string> Labels() => _active.Children

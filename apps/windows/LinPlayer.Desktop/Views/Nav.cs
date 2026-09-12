@@ -32,7 +32,16 @@ public sealed record Sess(string server, string token, string user_id, string de
 /// </summary>
 public static class Nav
 {
-    private static readonly Stack<Control> Stack = new();
+    /// <summary>
+    /// 栈上的一层:这一页,以及<b>怎么再造一个一样的</b>。
+    ///
+    /// <para>造法是给「刷新」用的(草稿 01 页第 5 条)。没有它的话刷新只能
+    /// 靠每一页自己实现一个 Refresh(),而漏掉的那一页就是「这一页的刷新是死的」。
+    /// 造不出来的页(播放页)造法留空 —— 那种页刷新本身就是错的。</para>
+    /// </summary>
+    private readonly record struct Entry(Control Page, Func<Control>? Make);
+
+    private static readonly Stack<Entry> Stack = new();
     public static Action<Control>? Host;
 
     public static Sess? Session;
@@ -70,19 +79,36 @@ public static class Nav
     public static int Depth => Stack.Count;
 
     /// <summary>换根:侧栏切页用。清栈 —— 换了大类之后「返回」回到上一大类是错的。</summary>
-    public static void Root(Control page)
+    public static void Root(Control page, Func<Control>? make = null)
     {
         Stack.Clear();
-        Stack.Push(page);
+        Stack.Push(new Entry(page, make));
         Host?.Invoke(page);
     }
 
     /// <summary>栈顶那一页。自检要在跳过去之后对那一页再下指令时用得上。</summary>
-    public static Control? Current => Stack.Count > 0 ? Stack.Peek() : null;
+    public static Control? Current => Stack.Count > 0 ? Stack.Peek().Page : null;
 
-    public static void Push(Control page)
+    public static void Push(Control page, Func<Control>? make = null)
     {
-        Stack.Push(page);
+        Stack.Push(new Entry(page, make));
+        Host?.Invoke(page);
+    }
+
+    /// <summary>这一页重造得出来吗。造不出来时「刷新」那颗按钮**不画** ——
+    /// 摆一颗点了没反应的按钮比没有更糟。</summary>
+    public static bool CanReload => Stack.Count > 0 && Stack.Peek().Make is not null;
+
+    /// <summary>
+    /// 重造当前这一页(刷新)。<b>顶替而不是压栈</b> —— 压栈的话按一次刷新
+    /// 就多欠一次返回,连按五下要按五下返回才回得去。
+    /// </summary>
+    public static void Reload()
+    {
+        if (Stack.Count == 0 || Stack.Peek().Make is not { } make) return;
+        var page = make();
+        Stack.Pop();
+        Stack.Push(new Entry(page, make));
         Host?.Invoke(page);
     }
 
@@ -92,10 +118,10 @@ public static class Nav
     /// <para>不能用 <see cref="Push"/>:一路看下去会攒出一栈播放页,
     /// 返回键要按十几下才回得到详情页 —— 而用户按返回的意图从来都是「回到剧」。</para>
     /// </summary>
-    public static void Replace(Control page)
+    public static void Replace(Control page, Func<Control>? make = null)
     {
         if (Stack.Count > 0) Stack.Pop();
-        Stack.Push(page);
+        Stack.Push(new Entry(page, make));
         Host?.Invoke(page);
     }
 
@@ -105,6 +131,6 @@ public static class Nav
     {
         if (!CanBack) return;
         Stack.Pop();
-        Host?.Invoke(Stack.Peek());
+        Host?.Invoke(Stack.Peek().Page);
     }
 }

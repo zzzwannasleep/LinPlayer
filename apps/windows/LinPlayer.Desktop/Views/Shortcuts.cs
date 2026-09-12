@@ -40,6 +40,9 @@ internal static class Shortcuts
         ["nav.favorites"] = w => w.ShortcutNav("NavFavorites"),
         ["nav.download"] = w => w.ShortcutNav("NavDownload"),
         ["nav.settings"] = w => w.ShortcutNav("NavSettings"),
+        /* 刷新。**重造不出来就不吃这一下**(播放页) —— 吃掉的话 F5 在那儿
+           是一颗死键,而用户会以为整套快捷键都失灵了。 */
+        ["nav.refresh"] = _ => { if (!Nav.CanReload) return false; Nav.Reload(); return true; },
 
         ["win.back"] = _ => { if (!Nav.CanBack) return false; Nav.Back(); return true; },
         ["win.sidebar"] = w => { w.ShortcutToggleSidebar(); return true; },

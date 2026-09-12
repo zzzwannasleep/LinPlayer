@@ -32,6 +32,26 @@ public sealed class MediaGrid : ContentControl
     private readonly List<CardItem> _items = [];
     private readonly ItemsControl _list;
     private int _cols = -1;
+    private bool _listMode;
+
+    /// <summary>
+    /// 列表版式(草稿 08 页第 9 条)。开着时一行一条,走 <see cref="MediaRow"/>。
+    ///
+    /// <para>两句都要:<see cref="Relayout"/> 把列数从「一行几张」改回 1
+    /// (换回来时反过来算),<see cref="Rebuild"/> 把已经铺出去的行重造 ——
+    /// 少了后一句是「点了按钮什么都没发生」,少了前一句是「换回网格之后一行只剩一张」。</para>
+    /// </summary>
+    public bool ListMode
+    {
+        get => _listMode;
+        set
+        {
+            if (_listMode == value) return;
+            _listMode = value;
+            Relayout();
+            Rebuild();
+        }
+    }
 
     /// <summary>行模板复不复用容器。探针拿这一位对账 —— 抄一个字面量过去测的是抄本。</summary>
     internal const bool RecycleRows = true;
@@ -101,7 +121,8 @@ public sealed class MediaGrid : ContentControl
     {
         var avail = Bounds.Width;
         if (avail <= 1) return;
-        var cols = Math.Max(1, (int)((avail + Gap) / (MinCardWidth + Gap)));
+        // 列表版式永远一列,宽度就是整行 —— 那一行自己会横着排海报和文字
+        var cols = _listMode ? 1 : Math.Max(1, (int)((avail + Gap) / (MinCardWidth + Gap)));
         // 均分:整行宽度减掉列间距,再除以列数。这一步之后右边不剩任何余数。
         var w = Math.Floor((avail - Gap * (cols - 1)) / cols);
         if (cols == _cols && Math.Abs(w - _cardWidth) < 1) return;
@@ -135,7 +156,7 @@ public sealed class MediaGrid : ContentControl
         {
             // 还没量到宽度(首次挂载)。先按一行铺出去,Relayout 会立刻纠正。
             var w = Bounds.Width;
-            _cols = w > 1 ? Math.Max(1, (int)((w + Gap) / (MinCardWidth + Gap))) : 1;
+            _cols = _listMode || w <= 1 ? 1 : Math.Max(1, (int)((w + Gap) / (MinCardWidth + Gap)));
         }
         if (_cardWidth <= 0) _cardWidth = MinCardWidth;
         var rows = new List<List<CardItem>>();
@@ -146,6 +167,12 @@ public sealed class MediaGrid : ContentControl
 
     private Control Row(List<CardItem> row)
     {
+        if (_listMode)
+        {
+            return new MediaRow(_core, _server, row[0],
+                _onOpen ?? LibraryPage.OpenDetail(_core, _server))
+            { Margin = new Thickness(0, 0, 0, 2) };
+        }
         var panel = new StackPanel
         {
             Orientation = Orientation.Horizontal,

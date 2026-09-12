@@ -127,6 +127,13 @@ internal static class Program
             return;
         }
 
+        /* 排行榜名次角标自检:`LP_MEDALPROBE=1 LinPlayer.exe`。纯取色,进得了 CI。 */
+        if (Environment.GetEnvironmentVariable("LP_MEDALPROBE") is { Length: > 0 })
+        {
+            Environment.ExitCode = MedalProbe() ? 0 : 1;
+            return;
+        }
+
         /* 媒体信息卡自检:`LP_MEDIAPROBE=1 LinPlayer.exe`。纯取值,进得了 CI。 */
         if (Environment.GetEnvironmentVariable("LP_MEDIAPROBE") is { Length: > 0 })
         {
@@ -266,6 +273,33 @@ internal static class Program
     /// 全缺时必须是<b>空串</b> —— 回落到时长这件事由调用方做,
     /// 这里返回「未知」的话卡上会印出一行「未知」。</para>
     /// </summary>
+    /// <summary>
+    /// 排行榜前三的金银铜(草稿 10 页第 33 条)。
+    ///
+    /// <para>「三个都是金色」这种退化在截图上要盯着看才发现 —— 而它正是
+    /// 这一条要修的原状。所以判据是<b>三个颜色两两不同</b>,不是「有颜色」。</para>
+    /// </summary>
+    private static bool MedalProbe()
+    {
+        var bad = 0;
+        void Say(bool ok, string what)
+        {
+            Console.WriteLine((ok ? "PROBE 名次角标 ✓ " : "PROBE 名次角标 ✗ ") + what);
+            if (!ok) bad++;
+        }
+        var gold = Views.RankCard.MedalHex(1);
+        var silver = Views.RankCard.MedalHex(2);
+        var bronze = Views.RankCard.MedalHex(3);
+        var plain = Views.RankCard.MedalHex(4);
+        Say(gold != silver && silver != bronze && gold != bronze,
+            $"前三两两不同色(金 {gold} / 银 {silver} / 铜 {bronze})");
+        Say(plain != gold && plain != silver && plain != bronze,
+            $"第四名之后回普通色({plain})");
+        Say(Views.RankCard.MedalHex(9) == plain, "第九名和第四名同色");
+        Console.WriteLine(bad == 0 ? "PROBE 名次角标 全部通过" : $"PROBE 名次角标 {bad} 条不过");
+        return bad == 0;
+    }
+
     private static bool EpMetaProbe()
     {
         var bad = 0;

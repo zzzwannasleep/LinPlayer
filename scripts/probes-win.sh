@@ -34,6 +34,7 @@ run LP_NETPROBE    "顶栏网速读数"
 run LP_KEYPROBE    "按键翻成 mpv 键名(input.conf 生效的入口)"
 run LP_EPMETAPROBE "分集卡那行小字(分辨率/码率/大小)"
 run LP_MEDIAPROBE  "媒体信息卡每条流写哪几行"
+run LP_MEDALPROBE  "排行榜前三的金银铜"
 run LP_RAILPROBE   "选集轨道:翻页到头再回来 + 长按拖动"
 run LP_GRIDPROBE   "竖向网格滚下去之后每行画的还是不是自己那行"
 

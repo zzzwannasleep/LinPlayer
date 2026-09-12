@@ -65,21 +65,24 @@ public partial class MainWindow : Window
         SizeChanged += (_, _) => ApplyResponsive();
         // 需要 Emby 会话的页面统一走 Emby():账号是网盘 / 局域网源时 Nav.Session 是 null,
         // 页面里直接解引用会抛在 Task 里 —— 没提示、不崩、就是永远停在「加载中」。
-        this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home());
+        this.FindControl<RadioButton>("NavHome")!.Checked += (_, _) => Nav.Root(Home(), Home);
         /* 「文件浏览」只在当前账号是**浏览型源**时才出现。
            Emby 账号下亮着它,点进去只会拿到一句「当前没有已登录的文件源」——
            那不是功能,那是一个专门用来报错的入口。 */
         this.FindControl<RadioButton>("NavBrowse")!.Checked += (_, _) =>
-            Nav.Root(new BrowsePage(_core!, _sourceName));
+            Nav.Root(new BrowsePage(_core!, _sourceName), () => new BrowsePage(_core!, _sourceName));
         /* 「影视目录」和「文件浏览」是**两页**,不是一页的两种模式。
            资源站有分类、有分页、有分集,不是文件树 —— 塞进文件浏览页的话
            分类要伪装成文件夹、翻页要伪装成一个叫「下一页」的文件夹。
            入口按源的能力显隐:探不到影视目录能力时这一页会自己退回文件浏览。 */
         this.FindControl<RadioButton>("NavCatalog")!.Checked += (_, _) =>
-            Nav.Root(new CatalogPage(_core!, () =>
-                this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true));
+        {
+            Control Make() => new CatalogPage(_core!, () =>
+                this.FindControl<RadioButton>("NavBrowse")!.IsChecked = true);
+            Nav.Root(Make(), Make);
+        };
         // 插件页不需要 Emby 会话:它打的是插件源和本地插件目录,和用户的服务器无关。
-        this.FindControl<RadioButton>("NavPlugins")!.Checked += (_, _) => Nav.Root(new PluginPage(_core!));
+        this.FindControl<RadioButton>("NavPlugins")!.Checked += (_, _) => Nav.Root(new PluginPage(_core!), () => new PluginPage(_core!));
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Emby("媒体库", () => new LibraryPage(_core!));
         /* 侧栏「搜索」<b>不换页</b>,开浮层(草稿 09 页第 34 条)。
            它是一个**动作**不是一个地方:搜完关掉,人还在刚才那一页。
@@ -108,24 +111,32 @@ public partial class MainWindow : Window
         }
         this.FindControl<Border>("SearchScrim")!.PointerPressed += (_, _) => CloseSearch();
         this.FindControl<Button>("SearchClose")!.Click += (_, _) => CloseSearch();
+        // 内容区右上那两颗(草稿 01 页第 5 条)
+        this.FindControl<Button>("BtnSearchPill")!.Click += (_, _) => OpenSearch();
+        this.FindControl<Button>("BtnRefresh")!.Click += (_, _) => Nav.Reload();
+        /* 滚动淡出挂在 <b>PageHost 一处</b>,用冒泡的 ScrollChanged 收 ——
+           每一页各自接一次的话,自己 new ScrollViewer 的那几页必然漏,
+           而漏掉的表现是「只有这一页的搜索按钮会挡住卡片」。 */
+        this.FindControl<ContentControl>("PageHost")!.AddHandler(
+            ScrollViewer.ScrollChangedEvent, OnPageScrolled, RoutingStrategies.Bubble);
         this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Emby("收藏", () => new FavoritesPage(_core!));
         // 聚合视界和观看历史**不需要**当前会话:前者自己遍历账号表,后者读的是本地库
-        this.FindControl<RadioButton>("NavAggregate")!.Checked += (_, _) => Nav.Root(new AggregatePage(_core!));
-        this.FindControl<RadioButton>("NavHistory")!.Checked += (_, _) => Nav.Root(new HistoryPage(_core!));
+        this.FindControl<RadioButton>("NavAggregate")!.Checked += (_, _) => Nav.Root(new AggregatePage(_core!), () => new AggregatePage(_core!));
+        this.FindControl<RadioButton>("NavHistory")!.Checked += (_, _) => Nav.Root(new HistoryPage(_core!), () => new HistoryPage(_core!));
         // 排行榜**不需要** Emby 会话:它打的是弹弹Play / TMDB,和用户的服务器无关。
         // 套 Emby() 的话,网盘用户和没登录的人会被挡在 NoSessionPage 上,
         // 而那页说的是「请先登录服务器」—— 和这一页的实际前提对不上。
-        this.FindControl<RadioButton>("NavRanking")!.Checked += (_, _) => Nav.Root(new RankingPage(_core!));
+        this.FindControl<RadioButton>("NavRanking")!.Checked += (_, _) => Nav.Root(new RankingPage(_core!), () => new RankingPage(_core!));
         // 下载页不要求 Emby 会话:列表读的是本地索引,网盘用户也看得到自己的历史任务
         this.FindControl<RadioButton>("NavDownload")!.Checked += (_, _) =>
         {
             var dl = new DownloadPage(_core!);
-            Nav.Root(dl);
+            Nav.Root(dl, () => new DownloadPage(_core!));
             dl.SelfCheck();          // LP_DL=1 才做事,平时是一句 return
         };
         // 日历同样不要求 Emby 会话:它打的是 Bangumi / Trakt
-        this.FindControl<RadioButton>("NavCalendar")!.Checked += (_, _) => Nav.Root(new CalendarPage(_core!));
-        this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!));
+        this.FindControl<RadioButton>("NavCalendar")!.Checked += (_, _) => Nav.Root(new CalendarPage(_core!), () => new CalendarPage(_core!));
+        this.FindControl<RadioButton>("NavSettings")!.Checked += (_, _) => Nav.Root(new SettingsPage(_core!), () => new SettingsPage(_core!));
 
         /* 基础流程之外的入口在这里统一藏掉。表在 Features.cs —— **只有那一处**。
            散在各页里写 if 的话,过两周没人知道哪些是关着的。
@@ -290,6 +301,8 @@ public partial class MainWindow : Window
         SelfCheckHeroBand();
         SelfCheckFilterChips();
         SelfCheckSearchOverlay();
+        SelfCheckView();
+        SelfCheckTools();
         SelfCheckChrome();
         SelfCheckReclick();
         SelfCheckServerIcon();
@@ -378,7 +391,12 @@ public partial class MainWindow : Window
                     break;
                 }
             case "icons": Nav.Push(new IconLibraryPage(_core, srv, () => { })); break;
-            case "grid": Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库")); break;
+            // 造法也给上 —— 不给的话自检跳过去的页刷新按钮不画,
+            // 而真实路径(点库卡)是给了的,两条路长得不一样就没法照着截图判断
+            case "grid":
+                Nav.Push(new LibraryGridPage(_core, srv, arg, "自检库"),
+                    () => new LibraryGridPage(_core, srv, arg, "自检库"));
+                break;
             case "detail":
                 Nav.Push(new DetailPage(_core, srv, arg));
                 /* 自检:选第 N 个版本再按播放。
@@ -1052,6 +1070,87 @@ public partial class MainWindow : Window
         }));
     }
 
+    /// <summary>
+    /// 自检:媒体库的版式开关(草稿 08 页第 9 条)。
+    ///
+    /// <para><c>LP_VIEW=2</c> 是<b>换成列表就停在那儿</b> —— 截图要看的是列表长什么样,
+    /// 而 =1 那条来回切两次,最后停在网格上(和 LP_DL=2 同一个用法)。</para>
+    /// </summary>
+    private void SelfCheckView()
+    {
+        var want = Environment.GetEnvironmentVariable("LP_SELFCHECK_VIEW");
+        if (want is not ("1" or "2")) return;
+        // 3.2 秒:第一页条目回来 + 网格铺完
+        _ = Task.Delay(3200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
+        {
+            if (Nav.Current is not LibraryGridPage lg) { Console.WriteLine("[版式] ✗ 当前不是媒体库网格页"); return; }
+            if (want == "2") lg.SelfCheckShowList();
+            else lg.SelfCheckView();
+        }));
+    }
+
+    /// <summary>
+    /// 自检:内容区右上那两颗(草稿 01 页第 5 条)。
+    ///
+    /// <para>四件事:<b>在不在</b> → <b>点搜索开不开浮层</b> →
+    /// <b>点刷新是不是真的重造了这一页</b> → <b>滚下去会不会淡出</b>。
+    /// 「重造」判的是<b>页面对象换没换</b> —— 只判按钮点得下去的话,
+    /// 「刷新按钮接了个空实现」这个真 bug 照样绿。</para>
+    /// </summary>
+    private void SelfCheckTools()
+    {
+        if (Environment.GetEnvironmentVariable("LP_SELFCHECK_TOOLS") != "1") return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2800);
+            /* 找控件也要在 UI 线程上。 后台线程上 FindControl 会抛,而这个抛
+               落在 Task 里没人接 —— 表现是整段自检**一个字都不打**,
+               看上去像开关没生效。 */
+            Border tools = null!;
+            Button pill = null!, refresh = null!;
+            object? before = null;
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                tools = this.FindControl<Border>("ContentTools")!;
+                pill = this.FindControl<Button>("BtnSearchPill")!;
+                refresh = this.FindControl<Button>("BtnRefresh")!;
+                Console.WriteLine(tools.IsVisible && pill.IsVisible && refresh.IsVisible
+                    ? "[右上两颗] ✓ 搜索和刷新都在内容区右上"
+                    : $"[右上两颗] ✗ 少了谁:整条={tools.IsVisible} 搜索={pill.IsVisible} 刷新={refresh.IsVisible}");
+                pill.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            });
+            await Task.Delay(500);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                Console.WriteLine(SearchOpen
+                    ? "[右上两颗] ✓ 点搜索开出了浮层"
+                    : "[右上两颗] ✗ 点搜索没反应");
+                CloseSearch();
+                before = Nav.Current;
+                refresh.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            });
+            await Task.Delay(600);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                var now = Nav.Current;
+                Console.WriteLine(now is not null && !ReferenceEquals(now, before)
+                    ? $"[右上两颗] ✓ 刷新真的重造了这一页({now.GetType().Name})"
+                    : "[右上两颗] ✗ 刷新没换页面对象 —— 那颗按钮是死的");
+                // 滚下去要淡出:杵着不动会盖住第一排卡片
+                var sv = this.FindControl<ContentControl>("PageHost")!
+                    .GetVisualDescendants().OfType<ScrollViewer>()
+                    .FirstOrDefault(x => x.Extent.Height > x.Viewport.Height + 1);
+                if (sv is null) { Console.WriteLine("[右上两颗] ✗ 这一页滚不动,淡出没法验"); return; }
+                sv.Offset = sv.Offset.WithY(400);
+            });
+            await Task.Delay(500);
+            await Dispatcher.UIThread.InvokeAsync(() => Console.WriteLine(
+                tools.Opacity < 0.5 && !tools.IsHitTestVisible
+                    ? "[右上两颗] ✓ 滚下去之后淡出了,也点不到了"
+                    : $"[右上两颗] ✗ 滚下去还杵着:不透明度 {tools.Opacity:0.0} 可点={tools.IsHitTestVisible}"));
+        });
+    }
+
     /// <summary>自检:量一下详情页那条头图带(草稿 03 页第 12 / 13 条)。</summary>
     private void SelfCheckHeroBand()
     {
@@ -1465,6 +1564,7 @@ public partial class MainWindow : Window
         this.FindControl<Border>("Sidebar")!.Width = on ? 0 : SidebarWidth;
         this.FindControl<Grid>("TitleBar")!.IsVisible = !on;
         this.FindControl<Border>("Sidebar")!.IsVisible = !on;
+        this.FindControl<Border>("ContentTools")!.IsVisible = !on;
     }
 
     /// <summary>
@@ -1553,8 +1653,13 @@ public partial class MainWindow : Window
     }
 
     /// <summary>需要 Emby 会话的页面。没会话就落到防崩页,别让它自己去解引用 null。</summary>
-    private void Emby(string name, Func<Control> make) =>
-        Nav.Root(Nav.Session is null ? new NoSessionPage(name) : make());
+    private void Emby(string name, Func<Control> make)
+    {
+        // 造法要连「没有会话」这一支一起记下 —— 只记 make 的话,刷新一次
+        // 就会绕过这道守卫,而那正是它存在的理由
+        Control Build() => Nav.Session is null ? new NoSessionPage(name) : make();
+        Nav.Root(Build(), Build);
+    }
 
     /// <summary>侧栏那条「＋ 添加服务器」。选中态跟着当前页走,见 <see cref="Show"/>。</summary>
     private Button? _addRow;
@@ -1576,6 +1681,40 @@ public partial class MainWindow : Window
         if (Perf.On) Perf.Log($"换页 → {page.GetType().Name}");
         this.FindControl<ContentControl>("PageHost")!.Content = page;
         SyncServerSelection(page);
+        SyncTools();
+    }
+
+    /// <summary>
+    /// 内容区右上那两颗的显隐(草稿 01 页第 5 条)。
+    ///
+    /// <para>刷新<b>只在重造得出来的页上画</b>(见 <see cref="Nav.CanReload"/>)——
+    /// 摆一颗点了没反应的按钮比没有更糟。换页时透明度要归位:上一页滚下去
+    /// 把它淡没了,换页之后新的一页在顶上,它却还是隐形的。</para>
+    /// </summary>
+    private void SyncTools()
+    {
+        var tools = this.FindControl<Border>("ContentTools")!;
+        this.FindControl<Button>("BtnRefresh")!.IsVisible = Nav.CanReload;
+        // 播放页整个内容区都是画面,这两颗压在上面就是两块挡视线的方块
+        tools.IsVisible = Nav.Current is not PlayerPage;
+        tools.Opacity = 1;
+        tools.IsHitTestVisible = true;
+    }
+
+    /// <summary>
+    /// 正文一滚下去就淡出。<b>只认真正能竖着滚的那个</b> ——
+    /// 轨道(横向)和选集浮层也会冒泡同一个事件,不筛的话首页一横滚,
+    /// 右上角那两颗就无缘无故消失了。
+    /// </summary>
+    private void OnPageScrolled(object? sender, ScrollChangedEventArgs e)
+    {
+        if (e.Source is not ScrollViewer sv) return;
+        if (sv.Extent.Height <= sv.Viewport.Height + 1) return;
+        var tools = this.FindControl<Border>("ContentTools")!;
+        var top = sv.Offset.Y < 40;
+        tools.Opacity = top ? 1 : 0;
+        // 淡没了还能点中就成了「点空气」—— 底下那张卡才是用户想点的
+        tools.IsHitTestVisible = top;
     }
 
     /// <summary>侧栏服务器区的选中态:要么落在「添加服务器」,要么落在使用中那台。</summary>
@@ -1727,7 +1866,8 @@ public partial class MainWindow : Window
     {
         var id = _isBrowseAccount ? "NavBrowse" : "NavHome";
         this.FindControl<RadioButton>(id)!.IsChecked = true;
-        Nav.Root(_isBrowseAccount ? new BrowsePage(_core!, _sourceName) : Home());
+        Control Make() => _isBrowseAccount ? new BrowsePage(_core!, _sourceName) : Home();
+        Nav.Root(Make(), Make);
     }
 
     /// <summary>

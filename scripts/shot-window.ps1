@@ -51,16 +51,29 @@ if (-not $p) { Write-Output "没有找到 $ProcName 的窗口"; exit 1 }
 #   顶层窗口”—— 鼠标停在界面上弹了个 tooltip 时,它指的就是那个 tooltip。
 #   截出来是一张 237×39 的小图,而脚本照样报“成功”(2026-09-12 连撞四次)。
 #   改成枚举本进程的顶层窗口,取**面积最大**的那个。
+# ☠ 还要**等它够大**。窗口正在恢复成最大化的那一小段里,主窗是
+#   IsWindowVisible=false —— 枚举下来只剩一个 tooltip,面积最大的就是它,
+#   于是又截出一张 237×39(2026-09-13 又撞一次,连着三张小图)。
+#   主窗有 MinWidth=420 / MinHeight=360,比这更小的一定不是它:先转着等。
 $hwnd = $p.MainWindowHandle
 $best = 0
-foreach ($h in [Shot]::TopLevels($p.Id)) {
-  $rc = New-Object Shot+RECT
-  if ([Shot]::DwmGetWindowAttribute($h, 9, [ref]$rc, 16) -ne 0) {
-    [void][Shot]::GetWindowRect($h, [ref]$rc)
+foreach ($try in 1..24) {
+  $best = 0
+  foreach ($h in [Shot]::TopLevels($p.Id)) {
+    $rc = New-Object Shot+RECT
+    if ([Shot]::DwmGetWindowAttribute($h, 9, [ref]$rc, 16) -ne 0) {
+      [void][Shot]::GetWindowRect($h, [ref]$rc)
+    }
+    $area = ($rc.R - $rc.L) * ($rc.B - $rc.T)
+    if ($env:LP_SHOT_DEBUG) { Write-Output ("  win {0} {1}x{2}" -f $h, ($rc.R - $rc.L), ($rc.B - $rc.T)) }
+    if ($area -gt $best) { $best = $area; $hwnd = $h }
   }
-  $area = ($rc.R - $rc.L) * ($rc.B - $rc.T)
-  if ($env:LP_SHOT_DEBUG) { Write-Output ("  win {0} {1}x{2}" -f $h, ($rc.R - $rc.L), ($rc.B - $rc.T)) }
-  if ($area -gt $best) { $best = $area; $hwnd = $h }
+  if ($best -ge 420 * 360) { break }
+  Start-Sleep -Milliseconds 500
+}
+if ($best -lt 420 * 360) {
+  Write-Output ("!! 等了 12 秒也没等到够大的窗口(最大的才 {0} 像素)—— 截出来会是个 tooltip,已中止" -f $best)
+  exit 3
 }
 if ($env:LP_SHOT_DEBUG) { Write-Output ("  pid={0} main={1} pick={2} area={3}" -f $p.Id, $p.MainWindowHandle, $hwnd, $best) }
 $GA_ROOT = 2
