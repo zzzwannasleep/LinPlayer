@@ -47,7 +47,7 @@
 | 媒体源(浏览型 / 影视目录) | `source.*` | 9 | 9 |
 | 弹幕 | `danmaku.*` | 14 | 14 |
 | 插件 | `plugin.*` | 22 | 20 |
-| 下载 | `download.*` | 8 | 7 |
+| 下载 | `download.*` | 9 | 8 |
 | 同步(Trakt / Bangumi / 日历) | `sync.*` | 15 | 15 |
 | 字幕翻译 / Whisper(桌面独占) | `translate.*` | 9 | 0 |
 | 设置与偏好 | `prefs.*` | 27 | 19 |
@@ -245,13 +245,14 @@
 | [x] | `plugin.uiRespond` | `plugin_ui_respond` | `id: u64, value: Option<serde_json::Value>` | `()` | ✅ |
 | [x] | `plugin.uninstall` | `plugin_uninstall` | `id: String` | `Result<(), String>` | ✅ |
 
-### 下载 · `download.*` — 8 条
+### 下载 · `download.*` — 9 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
 | [x] | `download.andApplyUpdate` | `download_and_apply_update` | `—` | `Result<(), String>` | ❌ |
 | [x] | `download.clearCompleted` | `download_clear_completed` | `—` | `usize` | ✅ |
-| [x] | `download.enqueue` | `download_enqueue` | `item_id: String, type_: String, title: String, container: String, poster_url: Option<String>` | `Result<String, String>` | ✅ |
+| [x] | `download.enqueue` | `download_enqueue` | `item_id: String, type_: String, title: String, container: String, poster_url: Option<String>, series_name: Option<String>, season_number: Option<i64>, episode_number: Option<i64>` | `Result<String, String>` | ✅ |
+| [x] | `download.enqueueSeason` | **新增** | `parent_id: String, season: Option<i64>, poster_url: Option<String>` | `SeasonQueued` | ✅ | <!-- 下载整季(草稿 03 页第 13 条)。展开放核心层:三端各写一遍循环的话「已在队里的要不要跳过」迟早会分叉 -->
 | [x] | `download.list` | `download_list` | `—` | `Item` | ✅ |
 | [x] | `download.pause` | `download_pause` | `id: String` | `()` | ✅ |
 | [x] | `download.remove` | `download_remove` | `id: String` | `()` | ✅ |

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -202,12 +202,19 @@ public static class CardActions
             {
                 // container 这儿拿不到(列表命令不发它)。空串 = 交给核心层兜底(默认 mkv),
                 // 和详情页「取不到就交给核心层」同一个口径。
+                // 剧名 / 季集号必须送:分集的 name 常常只是「第 12 集」,
+                // 不送的话两部剧各下一集会撞成同一个文件(见 core 的 fileBase)。
                 var ok = await Run(core, "download.enqueue",
-                    new { item_id = item.Id, type_ = item.Type, title = item.Name, container = "" }, after);
+                    new
+                    {
+                        item_id = item.Id, type_ = item.Type, title = item.Name, container = "",
+                        series_name = item.SeriesName,
+                        season_number = (long)item.SeasonNo, episode_number = (long)item.EpisodeNo,
+                    }, after);
                 Toast.Result(ok, "已加入下载", "加入下载失败");
             };
             items.Add(down);
-            _ = ShowIfDownloadable(core, down);
+            _ = ShowIfDownloadable(core, (Control)down);
         }
 
         var block = new MenuItem { Header = "屏蔽这个", Icon = Icon(G.Block) };
@@ -234,7 +241,7 @@ public static class CardActions
     /// </summary>
     private static readonly Dictionary<string, bool> DownloadOk = [];
 
-    private static async Task ShowIfDownloadable(CoreClient core, MenuItem down)
+    internal static async Task ShowIfDownloadable(CoreClient core, Control down)
     {
         var s = Nav.Session;
         if (s is null) return;

@@ -2837,3 +2837,41 @@ LP_EPS=1200 LP_RAIL=1 LP_RAILSTRESS=1 LP_WAIT=26 bash scripts/selfcheck-win.sh e
 
 列表版**不放剧照**:列表就是给找集用的,一屏摆得下二十行才有意义,
 带剧照一行只放得下三行,那就退化成一个更难看的网格。
+
+## 下载整季:展开放核心层,文件名和展示标题分两处(2026-09-12)
+
+草稿 03 页第 13 条要求剧照右上一组「收藏 / 下载整季 / 更多⋯」。
+之前只有「可播条目」才给下载按钮(`if (playable)`),剧 / 季页面上一颗都没有 ——
+理由是「给一部剧的总条目下载按钮,点了不知道该下哪一集」。整季有答案,所以补上。
+
+**展开放核心层**(`download.enqueueSeason`),不让三端各写一遍循环:
+「已经在队里的要不要跳过」这件事分叉的表现是「点两下就下了两份」。
+两个只有真跑才现形的地方:
+
+- **必须翻到底。** `SeasonEpisodes` 把任何 `Limit` 都夹到 `ServerPageCap`(200),
+  一趟拿完的写法在长季上是**静默少拿**:界面报「已加入 200 集」而用户以为整季都在。
+  出循环要**两道**:「这一页没拿满」和「够 Total 了」。只看 Total 的话,
+  某些 fork 把屏蔽过滤放在发完 Total 之后,真实条数比 Total 少 —— 循环会永远拉空页。
+- **剧页面上拿不到那一季的 id。** 分集是按 `SeasonNo` 分的组,界面手里只有季号。
+  所以命令收 `parent_id`(剧 id 或季 id)+ 可选 `season`,由核心层筛。
+
+### 落盘文件名 ≠ 展示标题
+
+第一版把「剧名 SxxExx 集名」拼进 `Item.Title`,下载页当场显示成
+**「某部剧 S01E12 · 某部剧 S01E12 第 12 集」**—— 因为下载页本来就会用
+`series_name` + `season_number` + `episode_number` 拼一遍。
+
+真正的分工:`Title` 只放集名,文件名走 `download.fileBase(it)`。
+顺带修掉一个一直在的坑:`Enqueue` 原来直接 `SafeName(it.Title)`,
+而分集的 Title 常常只有「第 12 集」—— **两部剧各下一集就撞成同一个文件,
+后一个把前一个覆盖掉,一声不吭**。卡片右键那条下载现在也把
+`series_name` / `season_number` / `episode_number` 送上去。
+
+### fakeemby 不发下载权限位,那两颗按钮从来没被自检点过
+
+`can_download` 读的是 `Policy.EnableContentDownloading`,缺字段一律判否,
+而假服务器的 `Policy` 里只有 `IsAdministrator` —— 于是详情页那两颗下载按钮
+在自检里**永远不出现**,`SelfCheckDownload()` 找不到就静默返回。
+补上这一位之后,`dl:s1` 实测:第一次「已加入 12 集」,
+第二次(队列里已有)「这 12 集都已经在下载列表里了」,落盘 12 个
+`某部剧 S01Exx 第 x 集.mkv`。

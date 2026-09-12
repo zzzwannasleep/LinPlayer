@@ -49,6 +49,10 @@ func ProbeName(ctx context.Context, server string) string {
 // 由 history.RegisterCommands 在启动时填上。
 var OnPlayedChanged func(ctx context.Context, s *Session, itemID string, played bool)
 
+// Shared 已经建好的那个客户端。别的包(下载整季要列分集)拿它去打请求 ——
+// 另建一个等于另一套连接池和 UA。
+func Shared() *Client { return defaultClient }
+
 // RegisterCommands 由 lp_init 调用。
 func RegisterCommands(version string) {
 	defaultClient = NewClient(version)

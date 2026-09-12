@@ -193,6 +193,7 @@ object LinPlayerCommandNames {
         "download.andApplyUpdate",
         "download.clearCompleted",
         "download.enqueue",
+        "download.enqueueSeason",
         "download.list",
         "download.pause",
         "download.remove",
@@ -607,13 +608,15 @@ suspend fun LinPlayerCommands.pluginUiRespond(args: Map<String, Any?>? = null): 
 suspend fun LinPlayerCommands.pluginUninstall(args: Map<String, Any?>? = null): JsonElement =
     call("plugin.uninstall", args)
 
-// ---- 下载 · download.* (8 条) ----
+// ---- 下载 · download.* (9 条) ----
 suspend fun LinPlayerCommands.downloadAndApplyUpdate(args: Map<String, Any?>? = null): JsonElement =
     call("download.andApplyUpdate", args)
 suspend fun LinPlayerCommands.downloadClearCompleted(args: Map<String, Any?>? = null): JsonElement =
     call("download.clearCompleted", args)
 suspend fun LinPlayerCommands.downloadEnqueue(args: Map<String, Any?>? = null): JsonElement =
     call("download.enqueue", args)
+suspend fun LinPlayerCommands.downloadEnqueueSeason(args: Map<String, Any?>? = null): JsonElement =
+    call("download.enqueueSeason", args)
 suspend fun LinPlayerCommands.downloadList(args: Map<String, Any?>? = null): JsonElement =
     call("download.list", args)
 suspend fun LinPlayerCommands.downloadPause(args: Map<String, Any?>? = null): JsonElement =

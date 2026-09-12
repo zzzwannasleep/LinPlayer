@@ -214,7 +214,7 @@ func (m *Manager) Enqueue(it *Item) string {
 	if it.Container == "" {
 		it.Container = "mkv"
 	}
-	it.FilePath = filepath.Join(m.st.dir, SafeName(it.Title)+"."+it.Container)
+	it.FilePath = filepath.Join(m.st.dir, SafeName(fileBase(it))+"."+it.Container)
 	if it.Segments == nil {
 		it.Segments = []Segment{}
 	}
@@ -225,6 +225,27 @@ func (m *Manager) Enqueue(it *Item) string {
 	m.persist()
 	m.processQueue()
 	return id
+}
+
+/*
+fileBase 落盘文件名(不含扩展名)。
+
+☠ **不能直接用 Title**。分集的 Title 常常只是「第 12 集」—— 两部剧各下一集
+就撞成同一个文件,后一个把前一个覆盖掉,而且一声不吭。
+展示标题归界面(它另有一套「剧名 SxxExx · 集名」的拼法),这里只管文件名。
+*/
+func fileBase(it *Item) string {
+	if it.SeriesName == nil || *it.SeriesName == "" {
+		return it.Title
+	}
+	name := *it.SeriesName
+	if it.SeasonNumber != nil && it.EpisodeNumber != nil {
+		name += fmt.Sprintf(" S%02dE%02d", *it.SeasonNumber, *it.EpisodeNumber)
+	}
+	if it.Title != "" {
+		name += " " + it.Title
+	}
+	return name
 }
 
 // Pause 暂停。当前正在下的那条会被掐断(分段各自看 cancel)。

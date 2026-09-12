@@ -203,6 +203,7 @@ public static class LinPlayerCommandNames
         "download.andApplyUpdate",
         "download.clearCompleted",
         "download.enqueue",
+        "download.enqueueSeason",
         "download.list",
         "download.pause",
         "download.remove",
@@ -619,13 +620,15 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> PluginUninstall(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("plugin.uninstall", args, ct);
 
-    // ---- 下载 · download.* (8 条) ----
+    // ---- 下载 · download.* (9 条) ----
     public static Task<JsonElement> DownloadAndApplyUpdate(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("download.andApplyUpdate", args, ct);
     public static Task<JsonElement> DownloadClearCompleted(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("download.clearCompleted", args, ct);
     public static Task<JsonElement> DownloadEnqueue(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("download.enqueue", args, ct);
+    public static Task<JsonElement> DownloadEnqueueSeason(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("download.enqueueSeason", args, ct);
     public static Task<JsonElement> DownloadList(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("download.list", args, ct);
     public static Task<JsonElement> DownloadPause(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

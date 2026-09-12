@@ -1548,6 +1548,8 @@ public sealed class DetailPage : PageBase
         {
             current = idx;
             var g = groups[idx];
+            // 「下载整季」下的就是这一季 —— 两处各记一份季号迟早对不上
+            _pickedSeason = g.Key;
             seasonBtn.Content = (g.Key > 0 ? $"第 {g.Key} 季" : "其它") + $" · {g.Count()} 集  ▾";
             ShowSeason(g.ToList());
             epBtn.Content = $"跳到某一集  ▾";
@@ -1636,6 +1638,9 @@ public sealed class DetailPage : PageBase
     /// <para><b>静态</b>是故意的:点一集就是推一页新的 DetailPage,存在实例上等于
     /// 每点一集都被打回横排。也<b>不落库</b> —— 这是「这会儿想怎么看」,不是设置项。</para>
     /// </summary>
+    /// <summary>季条现在选中的那一季。<b>「下载整季」下的就是它</b>,不是第一季。</summary>
+    private long _pickedSeason;
+
     private static int _epView;
 
     private static readonly string[] EpisodeViews = ["横排", "网格", "列表"];
@@ -1874,6 +1879,39 @@ public sealed class DetailPage : PageBase
         };
         if (Features.On("card.favorite")) row.Children.Add(fav);
 
+        /* 剧 / 季页面给的是「下载整季」(草稿 03 页第 13 条)。
+           单条下载在这两种页面上没有意义(不知道该下哪一集),而整季有 ——
+           展开由核心层做,界面只报「下了几集、跳过几集」。 */
+        if (type is "Series" or "Season")
+        {
+            var all = new Button { Classes = { "ghost" }, Content = "⭳ 下载整季", IsVisible = false };
+            _ = CardActions.ShowIfDownloadable(_core, all);
+            all.Click += async (_, _) =>
+            {
+                all.IsEnabled = false;
+                try
+                {
+                    // 剧页面上界面只有季号(分集是按 SeasonNo 分的组,拿不到那一季的 id),
+                    // 所以送剧 id + 季号,由核心层筛。季页面本身就是那一季,不用送。
+                    var r = await _core.DownloadEnqueueSeason(type == "Season"
+                        ? new { parent_id = id, season = (long?)null }
+                        : new { parent_id = id, season = (long?)_pickedSeason });
+                    var got = (int)Num(r, "queued");
+                    var skip = (int)Num(r, "skipped");
+                    all.Content = got > 0
+                        ? $"已加入 {got} 集" + (skip > 0 ? $"(跳过 {skip} 集)" : "")
+                        // 全都在队里时 queued=0。不单独说一句的话这里长得和失败一样
+                        : $"这 {skip} 集都已经在下载列表里了";
+                }
+                catch (Exception e)
+                {
+                    all.Content = LibraryPage.Advice(e);
+                    all.IsEnabled = true;
+                }
+            };
+            row.Children.Add(all);
+        }
+
         /* 下载只对**可播条目**给。给一部剧的总条目下载按钮,点了不知道该下哪一集。
            而且**服务器没给下载权限时整个不出现**(用户 2026-09-06)——
            从前是「摆着,点了再由服务端拒」,那是一个专门用来报错的按钮。
@@ -1882,17 +1920,7 @@ public sealed class DetailPage : PageBase
         if (playable)
         {
             var dl = new Button { Classes = { "ghost" }, Content = "⭳ 下载", IsVisible = false };
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var s = Nav.Session!;
-                    var perm = await _core.EmbyPermissions(new { s.server, s.token, s.user_id, s.device_id });
-                    if (Bool(perm, "can_download"))
-                        Dispatcher.UIThread.Post(() => dl.IsVisible = true);
-                }
-                catch { /* 问不到权限就不给按钮 —— 宁可少给,也不摆一个必定失败的 */ }
-            });
+            _ = CardActions.ShowIfDownloadable(_core, dl);
             dl.Click += async (_, _) =>
             {
                 dl.IsEnabled = false;
@@ -1953,11 +1981,27 @@ public sealed class DetailPage : PageBase
         return row;
     }
 
-    /// <summary>自检用:点一下「下载」按钮。</summary>
+    /// <summary>
+    /// 自检用:点一下下载按钮。
+    /// <b>两种都要试</b> —— 可播条目上是「下载」,剧 / 季上是「下载整季」,
+    /// 只找前一种的话整季那条链从来没被点过。
+    /// </summary>
     internal void SelfCheckDownload()
     {
-        foreach (var b in this.GetVisualDescendants().OfType<Button>())
-            if ((b.Content as string) == "⭳ 下载") { b.Command?.Execute(null); RaiseClick(b); return; }
+        foreach (var want in new[] { "⭳ 下载", "⭳ 下载整季" })
+            foreach (var b in this.GetVisualDescendants().OfType<Button>())
+                if ((b.Content as string) == want)
+                {
+                    Console.WriteLine($"[下载] 点了「{want}」");
+                    b.Command?.Execute(null);
+                    RaiseClick(b);
+                    // 按钮上那句话就是结果。不印的话「已加入 12 集」和
+                    // 「都已经在队里了」在日志里长得一模一样
+                    _ = Task.Delay(900).ContinueWith(_ => Dispatcher.UIThread.Post(
+                        () => Console.WriteLine($"[下载] 结果:{b.Content}")));
+                    return;
+                }
+        Console.WriteLine("[下载] ✗ 一颗下载按钮都没找到 —— 服务端没给下载权限?");
     }
 
     private static void RaiseClick(Button b) =>

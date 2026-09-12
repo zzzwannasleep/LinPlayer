@@ -569,7 +569,12 @@ func main() {
 		default:
 			// /Users/{id} —— 管理员位
 			writeJSON(w, map[string]any{"Id": "u1", "Name": "自检用户",
-				"Policy": map[string]any{"IsAdministrator": true}})
+				"Policy": map[string]any{
+					"IsAdministrator": true,
+					// 不发这一位的话详情页那两颗下载按钮**永远不出现** ——
+					// 自检也就永远点不到它们。真服务器是发的。
+					"EnableContentDownloading": true,
+				}})
 		}
 	})
 
