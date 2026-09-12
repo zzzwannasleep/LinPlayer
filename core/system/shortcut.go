@@ -18,6 +18,9 @@ package system
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +54,6 @@ type ShortcutStatus struct {
 // 后面 os.Stat 必然失败,程序会以为每个快捷方式都坏了。
 // 集成测试当场抓到过:期望「我的 程序」,实得「ÎҵÄ ³ÌÐò」。
 func psRun(script string, env map[string]string) (string, error) {
-	script = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " + script
 	c := exec.Command("powershell", "-NoProfile", "-NonInteractive",
 		"-ExecutionPolicy", "Bypass", "-Command", script)
 	hideConsole(c)
@@ -60,12 +62,49 @@ func psRun(script string, env map[string]string) (string, error) {
 		c.Env = append(c.Env, k+"="+v)
 	}
 	out, err := c.Output()
+	/* 把 PowerShell 自己那句话带出来。 只回「exit status 1」的话,
+	   出了问题谁也不知道是脚本写错、还是这台机器上根本起不了那个 COM ——
+	   CI 上红了一整天就是卡在这一句上。 */
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		err = fmt.Errorf("%w:%s", err, strings.TrimSpace(string(ee.Stderr)))
+	}
 	return strings.TrimSpace(string(out)), err
+}
+
+/*
+psValue 跑一段 PowerShell 并把它的值取回来。
+
+☠ 值走 **Base64**,不走裸文本。PowerShell 写到重定向管道里用的是控制台代码页
+(简体中文机器上是 GBK),中文路径取回来是一串乱码 —— 而它照样是个字符串,
+后面 os.Stat 必然失败,程序会以为每个快捷方式都坏了。
+上一版靠 `[Console]::OutputEncoding = UTF8` 钉编码,但**没有控制台的时候那一句会抛**
+(GUI 进程 + HideWindow 起的子进程就没有控制台),整条命令当场 exit 1。
+Base64 全是 ASCII,哪个代码页都改不动它,而且不需要控制台。
+*/
+func psValue(script string, env map[string]string) (string, error) {
+	out, err := psRun("$v = "+script+
+		"\n[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$v))", env)
+	if err != nil {
+		return "", err
+	}
+	b, err := base64.StdEncoding.DecodeString(out)
+	if err != nil {
+		return "", fmt.Errorf("PowerShell 回的不是 Base64(%q):%w", out, err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// comReady 这台机器上起不起得来 WScript.Shell。起不来就没有 .lnk 这回事
+// (CI 的容器里就没有)—— 调用方据此跳过,而不是把它当成我们的脚本写错了。
+func comReady() error {
+	_, err := psRun("$null = New-Object -ComObject WScript.Shell", nil)
+	return err
 }
 
 // desktopDir 桌面目录。**必须问系统**:OneDrive 接管之后它不在 %USERPROFILE%\Desktop。
 func desktopDir() string {
-	s, err := psRun("[Environment]::GetFolderPath('Desktop')", nil)
+	s, err := psValue("[Environment]::GetFolderPath('Desktop')", nil)
 	if err != nil || s == "" {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, "Desktop")
@@ -75,7 +114,7 @@ func desktopDir() string {
 
 // lnkTarget 读一个 .lnk 指向哪。读不出来返回空串(坏文件、不是 .lnk、没权限)。
 func lnkTarget(lnk string) string {
-	s, err := psRun(
+	s, err := psValue(
 		`(New-Object -ComObject WScript.Shell).CreateShortcut($env:LP_LNK).TargetPath`,
 		map[string]string{"LP_LNK": lnk})
 	if err != nil {

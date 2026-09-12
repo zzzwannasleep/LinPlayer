@@ -57,6 +57,13 @@ func Test快捷方式真写真读真修(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip(".lnk 是 Windows 的东西")
 	}
+	/* ★ COM 起不来就跳过,**而且把原因打出来**。
+	   这不是给失败找台阶:起不来的机器上「建快捷方式」本来就没有这回事,
+	   而脚本写错时 writeLnk 照样会红(它跑的是同一条 psRun)。
+	   跳过和绿是两件事 —— 日志里看得见跳过的理由。 */
+	if err := comReady(); err != nil {
+		t.Skipf("这台机器上起不了 WScript.Shell COM:%v —— .lnk 只有真桌面上验得了", err)
+	}
 	dir := t.TempDir()
 	// 中文 + 空格:psRun 把值走环境变量递进去,为的就是这一类路径
 	exeDir := filepath.Join(dir, "我的 程序")
