@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Avalonia;
@@ -35,7 +35,8 @@ internal static class Shortcuts
     {
         ["nav.home"] = w => w.ShortcutNav("NavHome"),
         ["nav.library"] = w => w.ShortcutNav("NavLibrary"),
-        ["nav.search"] = w => w.ShortcutNav("NavSearch"),
+        // 搜索是**浮层**不是页,所以不走 ShortcutNav(草稿 09 页第 34 条)
+        ["nav.search"] = w => { w.OpenSearch(); return true; },
         ["nav.favorites"] = w => w.ShortcutNav("NavFavorites"),
         ["nav.download"] = w => w.ShortcutNav("NavDownload"),
         ["nav.settings"] = w => w.ShortcutNav("NavSettings"),
@@ -96,6 +97,8 @@ internal static class Shortcuts
     private static bool Escape(MainWindow w)
     {
         if (_help is not null) { ToggleHelp(w); return true; }
+        // 浮层开着时 Esc 先收浮层 —— 直接退页的话人会莫名其妙被弹回上一页
+        if (w.SearchOpen) { w.CloseSearch(); return true; }
         if (!Nav.CanBack) return false;
         Nav.Back();
         return true;

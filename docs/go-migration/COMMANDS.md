@@ -50,7 +50,7 @@
 | 下载 | `download.*` | 9 | 8 |
 | 同步(Trakt / Bangumi / 日历) | `sync.*` | 15 | 15 |
 | 字幕翻译 / Whisper(桌面独占) | `translate.*` | 9 | 0 |
-| 设置与偏好 | `prefs.*` | 27 | 19 |
+| 设置与偏好 | `prefs.*` | 28 | 20 |
 | 系统 | `system.*` | 15 | 6 |
 | **合计** | | **219** | **181** |
 
@@ -293,7 +293,7 @@
 | [x] | `translate.whisperDownloadFfmpeg` | `whisper_download_ffmpeg` | `—` | `Result<String, String>` | ❌ |
 | [x] | `translate.whisperModels` | `whisper_models` | `—` | `Vec<WhisperModelInfo>` | ❌ |
 
-### 设置与偏好 · `prefs.*` — 27 条
+### 设置与偏好 · `prefs.*` — 28 条
 
 | 移植 | 新命令名 | 现有名 | 参数 | 返回 | 安卓已注册 |
 |:--:|---|---|---|---|:--:|
@@ -322,7 +322,8 @@
 | [x] | `prefs.setDetailBlur` | `set_detail_blur` | `value: u8` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setHomeSettings` | **新增** | `settings: HomeSettings` | `Result<(), String>` | — | <!-- 写回首页栏目设置 -->
 | [x] | `prefs.setPrefetchSettings` | `set_prefetch_settings` | `settings: PrefetchSettings` | `Result<(), String>` | ✅ |
-| [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool` | `Result<(), String>` | ✅ |
+| [x] | `prefs.setPrefs` | `set_prefs` | `audio_lang: Option<String>, sub_lang: Option<String>, sub_enabled: bool, search_history: Option<Vec<String>>` | `Prefs` | ✅ |
+| [x] | `prefs.pushSearch` | **新增** | `query: String` | `SearchHistory` | ✅ | <!-- 记一次搜索。去重/置顶/封顶都在核心层 —— 三端各写一遍的话「同一个词搜两次会不会出两条」迟早分叉 -->
 | [x] | `prefs.setPreloadSettings` | `set_preload_settings` | `settings: PreloadSettings` | `Result<(), String>` | ❌ |
 | [x] | `prefs.setProxy` | `set_proxy` | `config: linplayer_core::ProxyConfig` | `Result<(), String>` | ✅ |
 | [x] | `prefs.setTranslationSettings` | `set_translation_settings` | `settings: tr::TranslationSettings` | `Result<(), String>` | ❌ |

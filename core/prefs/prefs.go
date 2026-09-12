@@ -20,6 +20,11 @@ import (
 	"linplayer/core/system"
 )
 
+// SearchHistory 搜过的词,新的在前。
+type SearchHistory struct {
+	Items []string `json:"items"`
+}
+
 // PrefetchSettings 多线程加载(预取代理)的设置。
 type PrefetchSettings struct {
 	// Servers 按账号主键开:能不能加速取决于对端,不给全开的入口。
@@ -76,7 +81,32 @@ func RegisterCommands(version string) {
 		if v, ok := a["window_max"].(bool); ok {
 			p.WindowMax = v
 		}
+		// 传空数组 = 清空搜索历史。这条是**整表替换**,加一条走 prefs.pushSearch
+		if _, ok := a["search_history"]; ok {
+			p.SearchHistory = config.ClampSearchHistory(strList(a, "search_history"))
+		}
 		return p, save(c, p)
+	})
+
+	/* prefs.pushSearch —— 记一次搜索。
+
+	   去重、置顶、封顶都放核心层:三端各写一遍的话,「同一个词搜两次会不会
+	   出现两个片」这件事迟早分叉,而分叉了没人会报上来。 */
+	bus.Register("prefs.pushSearch", func(ctx context.Context, seq int64, a map[string]any) (any, error) {
+		q := strings.TrimSpace(strArg(a, "query"))
+		c := config.Current()
+		p := c.PrefsOf()
+		if q == "" {
+			return SearchHistory{Items: p.SearchHistory}, nil
+		}
+		kept := []string{q}
+		for _, old := range p.SearchHistory {
+			if old != q {
+				kept = append(kept, old)
+			}
+		}
+		p.SearchHistory = config.ClampSearchHistory(kept)
+		return SearchHistory{Items: p.SearchHistory}, save(c, p)
 	})
 
 	// ---- 多线程加载 ----

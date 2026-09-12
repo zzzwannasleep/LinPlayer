@@ -62,6 +62,9 @@ const (
 	DanmakuLinesMax   = 20
 	// DanmakuAreaMin 滚动弹幕最少占四分之一屏。
 	DanmakuAreaMin = 0.25
+
+	// SearchHistoryMax 搜索历史最多记几条。再多空态那一屏就摆不下了。
+	SearchHistoryMax = 12
 )
 
 // Prefs 播放与全局偏好。
@@ -291,6 +294,10 @@ type Prefs struct {
 	// ★ 它是**这台机器**的东西(路径在别的机器上不存在),但配置本来就是每份安装
 	//   各一份、不跨设备同步 —— 所以放这里不会串。
 	UiFont string `json:"ui_font"`
+
+	// SearchHistory 搜过什么。搜索浮层的空态摆它(草稿 09 页第 34 条)——
+	// 空态写「暂无数据」等于白占一屏,而「上次搜的那个」是这里最可能的下一步。
+	SearchHistory []string `json:"search_history,omitempty"`
 
 	/* ---- 字幕样式(播放页「字幕」面板,用户 2026-09-08 点名的五项)----
 
@@ -576,4 +583,27 @@ func (p Prefs) PrefetchEnabledFor(server string) bool {
 		}
 	}
 	return false
+}
+
+/*
+ClampSearchHistory 搜索历史的规矩:去空、去重(保留先出现的那个)、封顶。
+
+★ 封顶放这儿不放界面:三端各写一遍的话,「记多少条」迟早会说不一样的话,
+而这份表是**跨端共用同一份配置**的。
+*/
+func ClampSearchHistory(in []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+		if len(out) >= SearchHistoryMax {
+			break
+		}
+	}
+	return out
 }

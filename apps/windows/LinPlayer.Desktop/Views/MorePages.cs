@@ -62,7 +62,16 @@ public sealed class SearchPage : PageBase
             VerticalAlignment = VerticalAlignment.Center,
         };
         var status = Dim("");
-        var host = new ContentControl { Content = Empty() };
+        var host = new ContentControl();
+        /* 空态摆<b>搜索历史</b>(草稿 09 页第 34 条)。
+           写「暂无数据」等于白占一屏,而「上次搜的那个」正是这里最可能的下一步。
+           历史落在核心层偏好里(去重/置顶/封顶也在那儿),不在界面自己攒一份 ——
+           三端各攒一份的话「同一个词搜两次会不会出两条」迟早说不一样的话。 */
+        void ShowEmpty(List<string> hist) => host.Content = Empty(hist,
+            q => { box.Text = q; box.CaretIndex = q.Length; },
+            () => _ = ClearHistory(core, ShowEmpty));
+        ShowEmpty([]);
+        _ = LoadHistory(core, ShowEmpty);
 
         var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
         Grid.SetColumn(box, 0);
@@ -88,7 +97,7 @@ public sealed class SearchPage : PageBase
                 // 清空输入框 = 回到空态,不是「没搜到」。两者不能混。
                 _seq++;
                 status.Text = "";
-                host.Content = Empty();
+                _ = LoadHistory(core, ShowEmpty);
                 return;
             }
 
@@ -118,6 +127,7 @@ public sealed class SearchPage : PageBase
                         status.Text = total == 0 ? "" : $"{groups.Count} 台服务器 · 共 {total} 条";
                         host.Content = total == 0 ? NoHit(q, true) : Groups(core, groups);
                     });
+                    _ = Push(core, q);
                     return;
                 }
 
@@ -139,6 +149,9 @@ public sealed class SearchPage : PageBase
                         : LibraryPage.Grid(core, s.server, items, false,
                             LibraryPage.OpenDetail(core, s.server));
                 });
+                /* 搜出来了才记。<b>搜不到的不记</b> —— 历史是「回到刚才那次」的入口,
+                   把一个搜不到的词摆在那儿,点了还是搜不到。 */
+                if (items.Count > 0) _ = Push(core, q);
             }
             catch (Exception e)
             {
@@ -218,14 +231,64 @@ public sealed class SearchPage : PageBase
     internal void SelfCheckQuery(string q) => Dispatcher.UIThread.Post(() => _box.Text = q);
 
     /// <summary>
-    /// 还没搜之前的那一屏。
+    /// 还没搜之前的那一屏:提示 + <b>搜索历史片</b>(草稿 09 页第 34 条)。
     ///
     /// <para>不写「暂无数据」:这里根本不是没数据,是<b>还没问</b>。
-    /// 空态要说清下一步该做什么(§6.4)。</para>
+    /// 一条历史都没有时只画提示,不画一个空的「历史」标题。</para>
     /// </summary>
-    private static Control Empty() => Frame(
-        "🔍", "搜这台服务器上的片名、剧名、演员",
-        "输入后停一下就会自动搜,回车也行。\n结果里默认只有电影和剧集 —— 要找某一集,把上面的「包括分集」勾上。");
+    private static Control Empty(List<string> hist, Action<string> pick, Action clear)
+    {
+        var col = new StackPanel { Spacing = 14 };
+        if (hist.Count > 0)
+        {
+            var row = new WrapPanel();
+            foreach (var q in hist) row.Children.Add(Chips.Clickable(q, () => pick(q)));
+            var head = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 10,
+                Children = { H2("搜过的") },
+            };
+            var del = new Button { Classes = { "ghost" }, Content = "清除历史" };
+            del.Click += (_, _) => clear();
+            head.Children.Add(del);
+            col.Children.Add(head);
+            col.Children.Add(row);
+        }
+        col.Children.Add(Frame(
+            "🔍", "搜这台服务器上的片名、剧名、演员",
+            "输入后停一下就会自动搜,回车也行。\n结果里默认只有电影和剧集 —— 要跨服务器找,把上面的「聚合搜索」勾上。"));
+        return col;
+    }
+
+    /// <summary>拉搜索历史。拉不到就当没有 —— 它不值得把这一页拖红。</summary>
+    private static async Task LoadHistory(CoreClient core, Action<List<string>> show)
+    {
+        List<string> hist;
+        try { hist = Strings(await core.PrefsGetPrefs(new { }), "search_history"); }
+        // 拉不到就当没有:历史是锦上添花,为它把搜索这一屏拖红不值
+        catch { return; }
+        Dispatcher.UIThread.Post(() => show(hist));
+    }
+
+    private static async Task ClearHistory(CoreClient core, Action<List<string>> show)
+    {
+        try { await core.PrefsSetPrefs(new { search_history = Array.Empty<string>() }); }
+        catch (Exception e) { Toast.Error(LibraryPage.Advice(e)); return; }
+        Dispatcher.UIThread.Post(() => show([]));
+    }
+
+    /// <summary>记一笔。失败**不打扰用户** —— 他要的是搜索结果,不是历史。</summary>
+    private static async Task Push(CoreClient core, string q)
+    {
+        try { await core.PrefsPushSearch(new { query = q }); }
+        catch { /* 记不上就算了,下次还能搜 */ }
+    }
+
+    private static List<string> Strings(JsonElement e, string k) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(k, out var v)
+        && v.ValueKind == JsonValueKind.Array
+            ? v.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x != "").ToList()
+            : [];
 
     /// <summary>
     /// 搜不到时的那一屏。

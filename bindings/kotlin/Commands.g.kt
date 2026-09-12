@@ -249,6 +249,7 @@ object LinPlayerCommandNames {
         "prefs.setHomeSettings",
         "prefs.setPrefetchSettings",
         "prefs.setPrefs",
+        "prefs.pushSearch",
         "prefs.setPreloadSettings",
         "prefs.setProxy",
         "prefs.setTranslationSettings",
@@ -682,7 +683,7 @@ suspend fun LinPlayerCommands.translateWhisperDownloadFfmpeg(args: Map<String, A
 suspend fun LinPlayerCommands.translateWhisperModels(args: Map<String, Any?>? = null): JsonElement =
     call("translate.whisperModels", args)
 
-// ---- 设置与偏好 · prefs.* (31 条) ----
+// ---- 设置与偏好 · prefs.* (32 条) ----
 suspend fun LinPlayerCommands.prefsApplyPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.applyPrefs", args)
 suspend fun LinPlayerCommands.prefsCfProxyDisable(args: Map<String, Any?>? = null): JsonElement =
@@ -735,6 +736,8 @@ suspend fun LinPlayerCommands.prefsSetPrefetchSettings(args: Map<String, Any?>? 
     call("prefs.setPrefetchSettings", args)
 suspend fun LinPlayerCommands.prefsSetPrefs(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setPrefs", args)
+suspend fun LinPlayerCommands.prefsPushSearch(args: Map<String, Any?>? = null): JsonElement =
+    call("prefs.pushSearch", args)
 suspend fun LinPlayerCommands.prefsSetPreloadSettings(args: Map<String, Any?>? = null): JsonElement =
     call("prefs.setPreloadSettings", args)
 suspend fun LinPlayerCommands.prefsSetProxy(args: Map<String, Any?>? = null): JsonElement =

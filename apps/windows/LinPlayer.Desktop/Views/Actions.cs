@@ -34,7 +34,7 @@ internal static class Actions
     [
         new("nav.home",       Global, "去哪儿", "首页",              "Ctrl+H"),
         new("nav.library",    Global, "去哪儿", "媒体库",            "Ctrl+L"),
-        new("nav.search",     Global, "去哪儿", "搜索",              "/ 或 Ctrl+F"),
+        new("nav.search",     Global, "去哪儿", "搜索",              "Ctrl+K 或 / 或 Ctrl+F"),
         new("nav.favorites",  Global, "去哪儿", "收藏",              "Ctrl+I"),
         new("nav.download",   Global, "去哪儿", "下载",              "Ctrl+J"),
         new("nav.settings",   Global, "去哪儿", "设置",              "Ctrl+,"),

@@ -259,6 +259,7 @@ public static class LinPlayerCommandNames
         "prefs.setHomeSettings",
         "prefs.setPrefetchSettings",
         "prefs.setPrefs",
+        "prefs.pushSearch",
         "prefs.setPreloadSettings",
         "prefs.setProxy",
         "prefs.setTranslationSettings",
@@ -694,7 +695,7 @@ public static class LinPlayerCommandsExtensions
     public static Task<JsonElement> TranslateWhisperModels(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("translate.whisperModels", args, ct);
 
-    // ---- 设置与偏好 · prefs.* (31 条) ----
+    // ---- 设置与偏好 · prefs.* (32 条) ----
     public static Task<JsonElement> PrefsApplyPrefs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.applyPrefs", args, ct);
     public static Task<JsonElement> PrefsCfProxyDisable(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
@@ -747,6 +748,8 @@ public static class LinPlayerCommandsExtensions
         => c.CallAsync("prefs.setPrefetchSettings", args, ct);
     public static Task<JsonElement> PrefsSetPrefs(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.setPrefs", args, ct);
+    public static Task<JsonElement> PrefsPushSearch(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
+        => c.CallAsync("prefs.pushSearch", args, ct);
     public static Task<JsonElement> PrefsSetPreloadSettings(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)
         => c.CallAsync("prefs.setPreloadSettings", args, ct);
     public static Task<JsonElement> PrefsSetProxy(this ILinPlayerCommands c, object? args = null, CancellationToken ct = default)

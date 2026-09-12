@@ -1,4 +1,4 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="LinPlayer.Desktop.Views.MainWindow"
         Title="LinPlayer"
@@ -157,6 +157,28 @@
                        TextWrapping="Wrap" Foreground="{DynamicResource DangerInk}" />
             <Button Name="ErrorClose" Classes="ghost" Content="知道了" />
           </StackPanel>
+        </Border>
+      </Panel>
+
+      <!--
+        搜索浮层(草稿 09 页第 34 条)。
+        Ctrl K / 侧栏「搜索」唤起,Esc 或点背景收起,**不跳页** ——
+          搜完关掉还在刚才那一页。做成一张页的话,搜一下就把人从媒体库/详情页踢走了。
+        盖侧栏 + 内容区(ColumnSpan=2),**不盖标题栏** ——
+          盖了的话最小化/关闭那三颗按钮就点不到了。
+        内容由 C# 填(就是 SearchPage 那一份,不另写一套搜索)。
+      -->
+      <Panel Name="SearchLayer" Grid.Column="0" Grid.ColumnSpan="2" IsVisible="False">
+        <Border Name="SearchScrim" Background="#99000000" />
+        <Border Name="SearchCard" Margin="26" MaxWidth="1100"
+                CornerRadius="10" Padding="18"
+                Background="{DynamicResource Panel}"
+                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+          <Panel>
+            <ContentControl Name="SearchHost" />
+            <Button Name="SearchClose" Classes="ghost" Content="✕"
+                    HorizontalAlignment="Right" VerticalAlignment="Top" />
+          </Panel>
         </Border>
       </Panel>
     </Grid>

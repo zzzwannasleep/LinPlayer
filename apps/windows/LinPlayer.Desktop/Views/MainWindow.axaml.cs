@@ -81,7 +81,33 @@ public partial class MainWindow : Window
         // 插件页不需要 Emby 会话:它打的是插件源和本地插件目录,和用户的服务器无关。
         this.FindControl<RadioButton>("NavPlugins")!.Checked += (_, _) => Nav.Root(new PluginPage(_core!));
         this.FindControl<RadioButton>("NavLibrary")!.Checked += (_, _) => Emby("媒体库", () => new LibraryPage(_core!));
-        this.FindControl<RadioButton>("NavSearch")!.Checked += (_, _) => Emby("搜索", () => new SearchPage(_core!));
+        /* 侧栏「搜索」<b>不换页</b>,开浮层(草稿 09 页第 34 条)。
+           它是一个**动作**不是一个地方:搜完关掉,人还在刚才那一页。
+           RadioButton 立刻弹回上一项 —— 不弹的话侧栏会一直高亮在「搜索」上,
+           而内容区显示的是别的页。 */
+        var searchNav = this.FindControl<RadioButton>("NavSearch")!;
+        searchNav.Checked += (_, _) =>
+        {
+            if (_navBounce) return;
+            var back = _lastNav;
+            OpenSearch();
+            _navBounce = true;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (back is not null) back.IsChecked = true;
+                else searchNav.IsChecked = false;
+                _navBounce = false;
+            });
+        };
+        foreach (var n in new[] { "NavHome", "NavBrowse", "NavCatalog", "NavLibrary", "NavFavorites",
+                                  "NavAggregate", "NavHistory", "NavDownload", "NavRanking",
+                                  "NavCalendar", "NavPlugins" })
+        {
+            var rb = this.FindControl<RadioButton>(n);
+            if (rb is not null) rb.Checked += (_, _) => _lastNav = rb;
+        }
+        this.FindControl<Border>("SearchScrim")!.PointerPressed += (_, _) => CloseSearch();
+        this.FindControl<Button>("SearchClose")!.Click += (_, _) => CloseSearch();
         this.FindControl<RadioButton>("NavFavorites")!.Checked += (_, _) => Emby("收藏", () => new FavoritesPage(_core!));
         // 聚合视界和观看历史**不需要**当前会话:前者自己遍历账号表,后者读的是本地库
         this.FindControl<RadioButton>("NavAggregate")!.Checked += (_, _) => Nav.Root(new AggregatePage(_core!));
@@ -263,6 +289,7 @@ public partial class MainWindow : Window
         SelfCheckEpView();
         SelfCheckHeroBand();
         SelfCheckFilterChips();
+        SelfCheckSearchOverlay();
         SelfCheckChrome();
         SelfCheckReclick();
         SelfCheckServerIcon();
@@ -286,10 +313,11 @@ public partial class MainWindow : Window
         {
             case "library": this.FindControl<RadioButton>("NavLibrary")!.IsChecked = true; break;
             case "search":
-                this.FindControl<RadioButton>("NavSearch")!.IsChecked = true;
-                // search:某 → 填词并让它自己搜一遍。空态和结果态是**两张不同的页**,
+                // 搜索现在是**浮层**不是页,所以直接开它,不去拨侧栏那颗单选
+                OpenSearch();
+                // search:某 → 填词并让它自己搜一遍。空态和结果态是**两种不同的样子**,
                 // 只截空态等于结果那半从来没被看过。
-                if (arg.Length > 0 && Nav.Current is SearchPage sp2) sp2.SelfCheckQuery(arg);
+                if (arg.Length > 0) _searchPage?.SelfCheckQuery(arg);
                 break;
             case "favorites": this.FindControl<RadioButton>("NavFavorites")!.IsChecked = true; break;
             case "settings": this.FindControl<RadioButton>("NavSettings")!.IsChecked = true; break;
@@ -955,6 +983,63 @@ public partial class MainWindow : Window
     }
 
 
+    /// <summary>
+    /// 自检:搜索浮层(草稿 09 页第 34 条)。
+    ///
+    /// <para>一次走完四件事:<b>Ctrl K 唤起 → 不跳页 → 搜一次 → Esc 收起</b>,
+    /// 再开一次看历史片在不在。四件里哪一件坏了,编译期都看不出来。</para>
+    /// </summary>
+    private void SelfCheckSearchOverlay()
+    {
+        var q = Environment.GetEnvironmentVariable("LP_SELFCHECK_SEARCHOVERLAY");
+        if (string.IsNullOrEmpty(q)) return;
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2600);
+            var before = "";
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                before = Nav.Current?.GetType().Name ?? "无";
+                Shortcuts.SelfCheckPress(this, Key.K, KeyModifiers.Control);
+            });
+            await Task.Delay(700);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                Console.WriteLine(SearchOpen
+                    ? "[搜索浮层] ✓ Ctrl K 唤起了"
+                    : "[搜索浮层] ✗ Ctrl K 没唤起");
+                var now = Nav.Current?.GetType().Name ?? "无";
+                Console.WriteLine(now == before
+                    ? $"[搜索浮层] ✓ 没跳页,底下还是 {now}"
+                    : $"[搜索浮层] ✗ 跳页了:{before} → {now}");
+                _searchPage?.SelfCheckQuery(q);
+            });
+            // 防抖 420ms + 一次真请求
+            await Task.Delay(2200);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                Shortcuts.SelfCheckPress(this, Key.Escape, KeyModifiers.None));
+            await Task.Delay(400);
+            await Dispatcher.UIThread.InvokeAsync(() => Console.WriteLine(
+                SearchOpen ? "[搜索浮层] ✗ Esc 没收起" : "[搜索浮层] ✓ Esc 收起了"));
+            // 再开一次:这一次空态里该有刚才那个词
+            await Task.Delay(300);
+            await Dispatcher.UIThread.InvokeAsync(OpenSearch);
+            await Task.Delay(1200);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                // 片的文字在里面那个 TextBlock 上,不在 Button.Content 上
+                var chips = this.FindControl<Panel>("SearchLayer")!
+                    .GetVisualDescendants().OfType<Button>()
+                    .Select(b => (b.Content as string) ?? (b.Content as TextBlock)?.Text ?? "")
+                    .Where(t => t != "").ToList();
+                Console.WriteLine(chips.Contains(q)
+                    ? $"[搜索浮层] ✓ 空态里有历史片「{q}」"
+                    : $"[搜索浮层] ✗ 空态里没有「{q}」,只有:{string.Join(" / ", chips)}");
+                CloseSearch();
+            });
+        });
+    }
+
     /// <summary>自检:媒体库的已选筛选片(草稿 08 页第 10 条)。</summary>
     private void SelfCheckFilterChips()
     {
@@ -1189,6 +1274,36 @@ public partial class MainWindow : Window
     /// </summary>
     /// <summary>给全局快捷键用的入口。 和侧栏底下那个按钮走**同一句** ——
     /// 另写一套的下场是两条路的折叠状态会分叉。</summary>
+    /// <summary>上一次真正落到的那一项。「搜索」弹回来要弹到它身上。</summary>
+    private RadioButton? _lastNav;
+    private bool _navBounce;
+
+    /// <summary>浮层里那一份搜索。留着是为了自检往里填词 —— 它不在 Nav 栈上。</summary>
+    private SearchPage? _searchPage;
+
+    /// <summary>
+    /// 打开搜索浮层。<b>每次重建</b>:空态要摆最新的搜索历史,而且服务器可能刚换过。
+    /// </summary>
+    internal void OpenSearch()
+    {
+        var layer = this.FindControl<Panel>("SearchLayer")!;
+        _searchPage = new SearchPage(_core!);
+        this.FindControl<ContentControl>("SearchHost")!.Content = _searchPage;
+        layer.IsVisible = true;
+    }
+
+    internal bool SearchOpen => this.FindControl<Panel>("SearchLayer")?.IsVisible == true;
+
+    internal void CloseSearch()
+    {
+        var layer = this.FindControl<Panel>("SearchLayer");
+        if (layer is null || !layer.IsVisible) return;
+        layer.IsVisible = false;
+        // 内容也摘掉:留着的话它还挂在可视树上,图片和在途请求都还活着
+        this.FindControl<ContentControl>("SearchHost")!.Content = null;
+        _searchPage = null;
+    }
+
     internal void ShortcutToggleSidebar() => ToggleSidebar();
 
     /// <summary>给全局快捷键用:窗口最大化 / 还原。</summary>
