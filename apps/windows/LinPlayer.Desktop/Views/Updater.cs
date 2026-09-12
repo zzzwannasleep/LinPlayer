@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Avalonia;
@@ -52,7 +52,10 @@ internal static class Updater
         }
         if (!Flag(r, "has_update") || !r.TryGetProperty("update", out var u))
         {
-            if (!quiet) await Dialogs.Tell(anchor, "检查更新", "已经是最新版本了。");
+            // 版本号要**报全**(带 -buildN)。只说「已是最新」的话,下次它又弹更新时
+            // 用户没有任何东西可以对照 —— 那正是「最新版还提示更新」这条报障的来源
+            if (!quiet) await Dialogs.Tell(anchor, "检查更新",
+                $"已经是最新版本了({Str(r, "current")})。");
             return;
         }
         await Offer(anchor, core, u, Flag(r, "can_self_update"));

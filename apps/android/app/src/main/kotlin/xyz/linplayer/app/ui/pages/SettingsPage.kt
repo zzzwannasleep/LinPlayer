@@ -939,7 +939,8 @@ private fun AboutPanel() {
             onClick = {
                 scope.launch {
                     val u = check()
-                    if (u == null) app.toast("已经是最新版本") else offer = u
+                    // 版本号报全(带 -buildN):下次又弹更新时用户才有东西可以对照
+                    if (u == null) app.toast("已经是最新版本(${caps.version})") else offer = u
                 }
             },
         )

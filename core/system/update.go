@@ -93,10 +93,15 @@ func CompareVersions(a, b string) int {
 	return 0
 }
 
-// NormalizeVersion 规约成 x.y.z,**只给界面显示,不参与比较**(理由见文件头)。
-func NormalizeVersion(raw string) string {
-	p := parseVersion(raw)
-	return fmt.Sprintf("%d.%d.%d", p.major, p.minor, p.patch)
+// DisplayVersion 给界面看的版本串:只去掉 tag 前面那个 `v`,**其余原样留着**。
+//
+// ☠ 这里原来是「规约成 x.y.z」。而预发布渠道一天能出好几个 build
+// (实测 2026-09-12 那天 build731/732/733 前后隔 12 分钟),规约完
+// 三个版本在弹窗上长得一模一样,都叫「新版本 1.1.0」——
+// 用户读到的就是「处于最新版但是依然提示更新,更新完启动再次提示更新」
+// (2026-09-12 原话)。**能区分两个版本的那几位不能抹掉。**
+func DisplayVersion(raw string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(raw), "v"), "V")
 }
 
 // release GitHub 发布的形状,只取我们用得到的字段。
@@ -300,7 +305,7 @@ func CheckUpdate(ctx context.Context, channel, currentTag string) (*Info, error)
 
 	info := &Info{
 		Tag:        rel.TagName,
-		Version:    NormalizeVersion(rel.TagName),
+		Version:    DisplayVersion(rel.TagName),
 		Name:       rel.Name,
 		Notes:      prettifyNotes(rel.Body),
 		HTMLURL:    rel.HTMLURL,

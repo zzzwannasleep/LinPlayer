@@ -166,8 +166,8 @@ func TestCheckUpdate_挑本平台资产并清洗说明(t *testing.T) {
 	if !contains(info.Notes, "• ") {
 		t.Fatalf("列表项没折成圆点:\n%s", info.Notes)
 	}
-	// 显示版本规约成 x.y.z,但比较用的 tag 要原样留着
-	if info.Version != "2.0.0" || info.Tag != "v2.0.0-build5" {
+	// 显示版本只去掉 tag 前面那个 v,构建号必须留着(见 Test界面版本串保留构建号)
+	if info.Version != "2.0.0-build5" || info.Tag != "v2.0.0-build5" {
 		t.Fatalf("version=%q tag=%q —— tag 丢了就没法再比较", info.Version, info.Tag)
 	}
 }
@@ -244,5 +244,25 @@ func Test没配代理就原样直连(t *testing.T) {
 	raw := "https://api.github.com/repos/x/y/releases/latest"
 	if got := proxied(raw); got != raw {
 		t.Fatalf("没配代理却改了地址:%s", got)
+	}
+}
+
+// ☠ 弹窗上那串版本号**必须能区分两个相邻的构建**。
+// 原来它被规约成 x.y.z,而预发布渠道一天出好几个 build(实测 2026-09-12
+// build731/732/733 前后隔 12 分钟)—— 三个版本在弹窗上长得一模一样,
+// 都叫「新版本 1.1.0」。用户读到的就是「处于最新版但是依然提示更新」。
+func Test界面版本串保留构建号(t *testing.T) {
+	for _, c := range [][2]string{
+		{"v1.1.0-build733-pre", "1.1.0-build733-pre"},
+		{"v1.1.0-build730", "1.1.0-build730"},
+		{"1.1.0", "1.1.0"},
+	} {
+		if got := DisplayVersion(c[0]); got != c[1] {
+			t.Fatalf("%s → %q,要 %q", c[0], got, c[1])
+		}
+	}
+	a, b := DisplayVersion("v1.1.0-build732-pre"), DisplayVersion("v1.1.0-build733-pre")
+	if a == b {
+		t.Fatalf("相邻两个构建显示成同一串 %q —— 用户没法分辨「新版本」到底新在哪", a)
 	}
 }

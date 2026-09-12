@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -266,5 +268,90 @@ func TestDownloadUpdate下不全就得判失败(t *testing.T) {
 	// 装这一步必须挡住
 	if r := call(t, 9004, "system.installUpdate", nil); r.OK {
 		t.Fatal("没下好也让装了")
+	}
+}
+
+// ☠ 上面那几条钉的都是**脚本的字符串**,一次都没真跑过。而用户报的两件事
+// (2026-09-12:「自动更新完之后,用户自己创建的快捷方式不能使用了」、
+// 「处于最新版但是依然提示更新,更新完启动再次提示更新」)如果成立,
+// 病灶只可能在「脚本真跑起来之后落到了哪儿」—— 那正是字符串断言照不到的地方。
+// 所以这条真造一个安装目录、真跑一遍 PowerShell、再回来数文件。
+func Test覆盖脚本真跑一遍就地换文件(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("覆盖脚本是 PowerShell,只在 Windows 上跑得起来")
+	}
+	base := t.TempDir()
+	dir := filepath.Join(base, "程序", "LinPlayer") // 中文路径:BOM 那条坑的现场
+	/* ★ 暂存目录**必须摆在安装目录里面** —— 真实布局就是
+	   `<安装目录>/userdata/cache/update/staged/LinPlayer`(绿色包的数据根在 exe 同级)。
+	   摆到外面去测的话,「源在目标里面」这个几何根本没被测到。 */
+	staged := filepath.Join(dir, "userdata", "cache", "update", "staged", "LinPlayer")
+	write := func(p, s string) {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exe := filepath.Join(dir, "LinPlayer.exe")
+	write(exe, "旧")
+	write(filepath.Join(dir, "Theme", "x.axaml"), "旧")
+	write(filepath.Join(dir, "userdata", "accounts.json"), "我的账号")
+	write(filepath.Join(staged, "LinPlayer.exe"), "新")
+	write(filepath.Join(staged, "Theme", "x.axaml"), "新")
+	write(filepath.Join(staged, "lpcore.dll"), "新")
+
+	// 脚本第一句是「等这个 pid 退出」。起一个当场就死的进程,拿它的 pid ——
+	// 随手编一个数字的话,万一撞上真在跑的进程就要干等 120 秒
+	dead := exec.Command("cmd", "/c", "exit")
+	if err := dead.Run(); err != nil {
+		t.Fatal(err)
+	}
+	log := filepath.Join(dir, "userdata", "logs", "update.log")
+	_, body := applyScript("windows", applyPlan{
+		Pid: dead.Process.Pid, Staged: staged, Dir: dir, Exe: exe, Log: log,
+	})
+	script, err := writeScript(filepath.Join(dir, "userdata", "cache", "update"), "apply-update.ps1", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+		"-File", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("脚本没跑完: %v\n%s", err, out)
+	}
+
+	read := func(p string) string {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("读不到 %s: %v", p, err)
+		}
+		return string(b)
+	}
+	// ①「快捷方式失效」如果成立,只可能是 exe 换了地方。这里钉死:**同一个路径**换了内容
+	if got := read(exe); got != "新" {
+		t.Fatalf("exe 原地没换成新的(现在是 %q)—— 版本号也就永远不变,更新完还提示更新", got)
+	}
+	// ② 多出一层 LinPlayer/ = 「更新看着成功其实一次都没换」的那个形状
+	if _, err := os.Stat(filepath.Join(dir, "LinPlayer")); err == nil {
+		t.Fatal("安装目录里多出了一层 LinPlayer/,旧 exe 原地不动")
+	}
+	if got := read(filepath.Join(dir, "Theme", "x.axaml")); got != "新" {
+		t.Fatalf("子目录里的文件没换(现在是 %q)", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "lpcore.dll")); err != nil {
+		t.Fatalf("新增的文件没带过来: %v", err)
+	}
+	// ③ userdata/ 必须原样活着 —— 这就是 robocopy 不许带 /MIR 的全部理由
+	if got := read(filepath.Join(dir, "userdata", "accounts.json")); got != "我的账号" {
+		t.Fatalf("用户数据被动了(现在是 %q)", got)
+	}
+	if _, err := os.Stat(staged); err == nil {
+		t.Fatal("暂存目录没清掉,下次更新会拿它当负载根")
+	}
+	// 源在目标里面,一不小心就会把暂存树自己复制成 <安装目录>/userdata/... 的一份拷贝
+	if _, err := os.Stat(filepath.Join(dir, "userdata", "cache", "update", "staged", "LinPlayer.exe")); err == nil {
+		t.Fatal("暂存目录里被塞进了一份拷贝 —— 源在目标里面时 robocopy 递归到自己身上了")
 	}
 }
