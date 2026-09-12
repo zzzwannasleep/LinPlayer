@@ -211,7 +211,7 @@ public sealed class LibraryPage : PageBase
     /// 网格交给 <see cref="MediaGrid"/> 按行虚拟化:原来是 WrapPanel 一次性 new 完,
     /// 140 条就是一千四百个控件,而真实媒体库上千条,滚到底就是上万个。</para>
     /// </summary>
-    internal static Control Grid(CoreClient core, string server, List<CardItem> items, bool wide,
+    internal static MediaGrid Grid(CoreClient core, string server, List<CardItem> items, bool wide,
         Action<CardItem>? onOpen = null, bool episodeStyle = false, double? width = null,
         int titleLines = 2)
     {
@@ -280,13 +280,8 @@ public sealed class LibraryGridPage : PageBase
     private static readonly double[] FilterWidths = [150, 150, 120];
     /// <summary>已选筛选项那一行(草稿 08 页第 10 条)。一条都没选时整行不占高度。</summary>
     private readonly WrapPanel _active = new() { ItemSpacing = 10, ItemHeight = double.NaN };
-    /// <summary>版式开关:海报网格 ⇄ 列表(草稿 08 页第 9 条)。</summary>
-    private readonly Button _view = new() { Classes = { "ghost" }, MinHeight = 34 };
-    /* 上一次选的版式,**进程内记一份**。
-       每进一次库都等一趟偏好往返的话,网格会先按海报铺出来、半秒后再跳成列表 ——
-       那一跳比没有这个功能更难受。真正的存档在核心层(prefs.library_view),
-       这里只是免掉第二次以后的往返。 */
-    private static string? _viewPref;
+    /// <summary>版式开关:海报网格 ⇄ 列表(草稿 08 页第 9 条)。收藏页那颗共用同一份状态。</summary>
+    private readonly Button _view;
     private int _loaded;
     private int _total = -1;
     private bool _busy;
@@ -336,12 +331,9 @@ public sealed class LibraryGridPage : PageBase
             b.Margin = new Thickness(0, 0, 0, 6);
             bar.Children.Add(b);
         }
+        _view = GridView.Toggle(core, list => _grid.ListMode = list);
         _view.Margin = new Thickness(0, 0, 0, 6);
-        _view.Click += (_, _) => PickView(_grid.ListMode ? "grid" : "list", save: true);
         bar.Children.Add(_view);
-        // 先按记着的那个铺;头一回进来才真去读一趟偏好
-        PickView(_viewPref ?? "grid", save: false);
-        if (_viewPref is null) _ = LoadView();
         var body = new StackPanel
         {
             Spacing = 14, Children = { head, bar, _active, _first, _grid, _status },
@@ -380,45 +372,6 @@ public sealed class LibraryGridPage : PageBase
         Content = sv;
         _ = LoadFilters();
         _ = LoadMore();
-    }
-
-    /// <summary>
-    /// 切版式。<paramref name="save"/> 为 false 是「照着已知的摆一下」,不回写偏好。
-    ///
-    /// <para>按钮上写的是<b>点下去会变成什么</b>,不是现在是什么 ——
-    /// 写现在是什么的话,用户得先猜这颗按钮是状态还是动作。</para>
-    /// </summary>
-    private void PickView(string v, bool save)
-    {
-        var list = v == "list";
-        _grid.ListMode = list;
-        _view.Content = list ? "▦ 网格" : "▤ 列表";
-        ToolTip.SetTip(_view, list ? "换回海报网格" : "换成列表:一行一条,分辨率码率排成一列好比");
-        if (!save) return;
-        _viewPref = v;
-        _ = SaveView(v);
-    }
-
-    private async Task LoadView()
-    {
-        string v;
-        try
-        {
-            var p = await _core.PrefsGetPrefs(new { });
-            v = p.ValueKind == JsonValueKind.Object && p.TryGetProperty("library_view", out var lv)
-                && lv.ValueKind == JsonValueKind.String ? lv.GetString() ?? "" : "";
-        }
-        catch { return; }   // 读不到就用网格 —— 这一页的主体是内容,不是版式
-        if (v != "list") v = "grid";
-        _viewPref = v;
-        Dispatcher.UIThread.Post(() => PickView(v, save: false));
-    }
-
-    /// <summary>存版式。存不上要**说出来** —— 用户下次进来会发现它变回去了。</summary>
-    private async Task SaveView(string v)
-    {
-        try { await _core.PrefsSetPrefs(new { library_view = v }); }
-        catch (Exception e) { Toast.Error(LibraryPage.Advice(e)); }
     }
 
     /// <summary>
@@ -642,7 +595,7 @@ public sealed class LibraryGridPage : PageBase
     /// <summary>自检:换成列表<b>停在那儿</b>,给截图看。</summary>
     internal void SelfCheckShowList()
     {
-        PickView("list", save: false);
+        if (!GridView.IsList) _view.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
         Dispatcher.UIThread.Post(() => Console.WriteLine(
             $"[版式] 列表版式:{_grid.GetVisualDescendants().OfType<MediaRow>().Count()} 行在屏上"),
             DispatcherPriority.Background);

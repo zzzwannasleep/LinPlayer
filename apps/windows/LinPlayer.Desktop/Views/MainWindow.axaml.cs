@@ -1083,7 +1083,9 @@ public partial class MainWindow : Window
         // 3.2 秒:第一页条目回来 + 网格铺完
         _ = Task.Delay(3200).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
         {
-            if (Nav.Current is not LibraryGridPage lg) { Console.WriteLine("[版式] ✗ 当前不是媒体库网格页"); return; }
+            // 收藏页也有这颗按钮(共用 GridView),所以按当前落在哪一页分派
+            if (Nav.Current is FavoritesPage fp) { fp.SelfCheckView(); return; }
+            if (Nav.Current is not LibraryGridPage lg) { Console.WriteLine("[版式] ✗ 当前不是媒体库网格页 / 收藏页"); return; }
             if (want == "2") lg.SelfCheckShowList();
             else lg.SelfCheckView();
         }));

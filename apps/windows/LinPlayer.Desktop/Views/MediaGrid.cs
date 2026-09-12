@@ -1,8 +1,10 @@
-﻿using Avalonia;
+﻿using System.Text.Json;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Threading;
+using LinPlayer.Core;
 using LinPlayer.Desktop.Core;
 
 namespace LinPlayer.Desktop.Views;
@@ -170,7 +172,7 @@ public sealed class MediaGrid : ContentControl
         if (_listMode)
         {
             return new MediaRow(_core, _server, row[0],
-                _onOpen ?? LibraryPage.OpenDetail(_core, _server))
+                _onOpen ?? LibraryPage.OpenDetail(_core, _server), _wide)
             { Margin = new Thickness(0, 0, 0, 2) };
         }
         var panel = new StackPanel
@@ -188,5 +190,68 @@ public sealed class MediaGrid : ContentControl
                 // 分集标题都是「第 N 集」,一行足够;留两行的话时长会掉到空出来的那行下面。
                 titleLines: _episodeStyle ? 1 : _titleLines));
         return panel;
+    }
+}
+
+/// <summary>
+/// 「海报网格还是列表」这件事,<b>全站只有一份</b>(草稿 08 页第 9 条)。
+///
+/// <para>媒体库和收藏页都有这颗按钮。两边各写一份读写偏好的话,「在收藏页换成列表、
+/// 回媒体库还是网格」这种分叉迟早出现,而它不报错 —— 用户只会觉得这个开关时灵时不灵。
+/// 存档在核心层(<c>prefs.library_view</c>),这里只是免掉第二次以后的往返。</para>
+/// </summary>
+internal static class GridView
+{
+    private static string? _cached;
+
+    internal static bool IsList => _cached == "list";
+
+    /// <summary>
+    /// 造那颗按钮。<paramref name="apply"/> 会被立刻调一次(按已知的版式摆好),
+    /// 之后每次点、以及偏好第一次读回来时再调。
+    /// </summary>
+    internal static Button Toggle(CoreClient core, Action<bool> apply)
+    {
+        var btn = new Button { Classes = { "ghost" }, MinHeight = 34 };
+
+        void Show(bool list)
+        {
+            // 按钮上写的是**点下去会变成什么**,不是现在是什么 ——
+            // 写现在是什么的话,用户得先猜这颗按钮是状态还是动作
+            btn.Content = list ? "▦ 网格" : "▤ 列表";
+            ToolTip.SetTip(btn, list ? "换回海报网格" : "换成列表:一行一条,分辨率码率排成一列好比");
+            apply(list);
+        }
+
+        btn.Click += (_, _) =>
+        {
+            _cached = IsList ? "grid" : "list";
+            Show(IsList);
+            _ = Save(core, _cached);
+        };
+        Show(IsList);
+        if (_cached is null) _ = Load(core, Show);
+        return btn;
+    }
+
+    private static async Task Load(CoreClient core, Action<bool> show)
+    {
+        string v;
+        try
+        {
+            var p = await core.PrefsGetPrefs(new { });
+            v = p.ValueKind == JsonValueKind.Object && p.TryGetProperty("library_view", out var lv)
+                && lv.ValueKind == JsonValueKind.String ? lv.GetString() ?? "" : "";
+        }
+        catch { return; }   // 读不到就用网格 —— 这一页的主体是内容,不是版式
+        _cached = v == "list" ? "list" : "grid";
+        Dispatcher.UIThread.Post(() => show(IsList));
+    }
+
+    /// <summary>存版式。存不上要**说出来** —— 用户下次进来会发现它变回去了。</summary>
+    private static async Task Save(CoreClient core, string v)
+    {
+        try { await core.PrefsSetPrefs(new { library_view = v }); }
+        catch (Exception e) { Toast.Error(LibraryPage.Advice(e)); }
     }
 }

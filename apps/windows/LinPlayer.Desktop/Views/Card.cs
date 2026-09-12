@@ -394,9 +394,12 @@ public sealed class MediaRow : Button
     /// <summary>海报高。行高由它加上下内边距决定 —— 每行一样高,列才对得齐。</summary>
     private const double ArtHeight = 60;
 
-    public MediaRow(CoreClient core, string server, CardItem item, Action<CardItem>? onOpen)
+    /// <param name="wide">分集那一档:集封面是**横着的**,塞进 2:3 的框里
+    /// UniformToFill 会左右各裁掉三分之一,而且画面是满的、不报错。</param>
+    public MediaRow(CoreClient core, string server, CardItem item, Action<CardItem>? onOpen,
+        bool wide = false)
     {
-        var artW = ArtHeight * 2 / 3;
+        var artW = wide ? ArtHeight * 16 / 9 : ArtHeight * 2 / 3;
         var img = new Image { Stretch = Stretch.UniformToFill, Opacity = 0, Classes = { "art" } };
         var ph = new TextBlock
         {

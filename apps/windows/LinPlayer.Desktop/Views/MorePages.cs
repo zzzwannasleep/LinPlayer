@@ -2,6 +2,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
+using Avalonia.VisualTree;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -352,12 +353,24 @@ public sealed class FavoritesPage : PageBase
     /// </summary>
     private static readonly string[] Sorts = ["更新时间", "名称", "评分", "年份"];
 
+    /// <summary>版式开关。<b>和媒体库共用同一份状态</b>(<see cref="GridView"/>)——
+    /// 两边各存各的话,「在收藏页换成列表、回媒体库还是网格」这种分叉不报错,
+    /// 用户只会觉得这个开关时灵时不灵。</summary>
+    private readonly Button _view;
+
     public FavoritesPage(CoreClient core)
     {
         var rows = new StackPanel { Spacing = 14, Children = { H1("收藏") } };
         var busy = Dim("加载中…");
         var sort = Sorts[0];
         var picks = new WrapPanel { ItemSpacing = 6, LineSpacing = 6 };
+        /* 版式按重画之后还要在:这一页每换一次排序就整页重来一遍,
+           而那两个网格是新造的 —— 所以按可视树现找,不是记住上一批的引用。 */
+        _view = GridView.Toggle(core, list =>
+        {
+            foreach (var g in this.GetVisualDescendants().OfType<MediaGrid>()) g.ListMode = list;
+        });
+        picks.Children.Add(_view);
         rows.Children.Add(picks);
         rows.Children.Add(busy);
         Content = Scrolled(rows);
@@ -410,13 +423,18 @@ public sealed class FavoritesPage : PageBase
                     if (rest.Count > 0)
                     {
                         if (eps.Count > 0) rows.Children.Add(H2($"影片与剧集 · {rest.Count}"));
-                        rows.Children.Add(LibraryPage.Grid(core, s.server, rest, false));
+                        var g = LibraryPage.Grid(core, s.server, rest, false);
+                        // 新造的网格要跟上当前版式 —— 不跟的话换完排序又回到海报网格
+                        g.ListMode = GridView.IsList;
+                        rows.Children.Add(g);
                     }
                     if (eps.Count > 0)
                     {
                         rows.Children.Add(H2($"分集 · {eps.Count}"));
-                        rows.Children.Add(LibraryPage.Grid(core, s.server, eps, true,
-                            LibraryPage.OpenDetail(core, s.server), episodeStyle: true, width: 214));
+                        var g = LibraryPage.Grid(core, s.server, eps, true,
+                            LibraryPage.OpenDetail(core, s.server), episodeStyle: true, width: 214);
+                        g.ListMode = GridView.IsList;
+                        rows.Children.Add(g);
                     }
                 });
             }
@@ -425,6 +443,39 @@ public sealed class FavoritesPage : PageBase
                 Dispatcher.UIThread.Post(() => busy.Text = $"加载失败:{LibraryPage.Advice(e)}");
             }
         });
+    }
+
+    /// <summary>
+    /// 自检:收藏页的版式开关。
+    ///
+    /// <para>这一页有<b>两个</b>网格(影片与剧集 / 分集),所以判的是「一个海报卡都不剩」——
+    /// 只看第一个网格的话,「分集那一栏没跟上」这个真 bug 照样绿。</para>
+    /// </summary>
+    internal void SelfCheckView()
+    {
+        int Rows() => this.GetVisualDescendants().OfType<MediaRow>().Count();
+        int Cards() => this.GetVisualDescendants().OfType<Card>().Count();
+        var grids = this.GetVisualDescendants().OfType<MediaGrid>().Count();
+        if (Cards() == 0)
+        {
+            Console.WriteLine("[收藏版式] ✗ 一张卡都没有 —— 假服务器没给收藏?");
+            return;
+        }
+        var was = Cards();
+        Console.WriteLine($"[收藏版式] 起手:{grids} 个网格 / 海报 {was} 张 / 列表行 {Rows()} 行");
+        _view.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.Post(() =>
+        {
+            Console.WriteLine(Rows() > 0 && Cards() == 0
+                ? $"[收藏版式] ✓ 两栏一起换成列表了:{Rows()} 行"
+                : $"[收藏版式] ✗ 没换干净:列表行 {Rows()} / 还剩海报 {Cards()}");
+            _view.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Dispatcher.UIThread.Post(() => Console.WriteLine(
+                Cards() == was && Rows() == 0
+                    ? $"[收藏版式] ✓ 换回网格了:还是 {Cards()} 张海报"
+                    : $"[收藏版式] ✗ 换不回网格:列表行 {Rows()} / 海报 {Cards()}(起手是 {was})"),
+                DispatcherPriority.Background);
+        }, DispatcherPriority.Background);
     }
 }
 
