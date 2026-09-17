@@ -195,8 +195,6 @@ public sealed class PlayerPage : UserControl
     /// 值存在这儿而不是控件里 —— 步进器是三个按钮,没有 Value 属性可读。</para>
     /// </summary>
     private double _subDelaySecs, _audDelaySecs;
-    private readonly TextBlock _subDelayText = Label("0.0s");
-    private readonly TextBlock _audDelayText = Label("0.0s");
     /// <summary>倍速。按钮上直接写当前值 —— 一个图标说不出「现在是几倍速」。</summary>
     private readonly Button _speed;
     private double _speedValue = 1.0;
@@ -562,10 +560,10 @@ public sealed class PlayerPage : UserControl
            下拉框**留着当数据模型** —— 选项表和 SelectionChanged 都长在它身上,
              只是不再上屏;弹层把它的选项摊成一列可点的行。
              这样 LoadTracks / PickTrack 那一整套一行都不用动。 */
-        var subDelayRow = Stepper(_subDelayText,
-            d => SetDelay(ref _subDelaySecs, d, _subDelayText, "player.setSubDelay"));
-        var audDelayRow = Stepper(_audDelayText,
-            d => SetDelay(ref _audDelaySecs, d, _audDelayText, "player.setAudioDelay"));
+        var subDelayBlock = DelayBlockFactory("字幕延迟", () => _subDelaySecs,
+            (d, readout) => SetDelay(ref _subDelaySecs, d, readout, "player.setSubDelay"));
+        var audDelayBlock = DelayBlockFactory("音频延迟", () => _audDelaySecs,
+            (d, readout) => SetDelay(ref _audDelaySecs, d, readout, "player.setAudioDelay"));
         _aspect.ItemsSource = Aspects.Select(a => a.Label).ToList();
         _aspect.SelectedIndex = 0;
         _aspect.SelectionChanged += (_, _) =>
@@ -588,13 +586,13 @@ public sealed class PlayerPage : UserControl
            「字幕延迟和音频延迟各自放进音轨按钮和字幕按钮里面」)。
            它本来就是「这条轨对不上」的补救动作,和选轨是同一件事的两步。 */
         _audioBtn = Osd("音轨", "音轨 / 音频延迟");
-        _audioBtn.Click += (_, _) => Pick(_audioBtn, _audio, "音轨", Labeled("音频延迟", audDelayRow), false);
+        _audioBtn.Click += (_, _) => Pick(_audioBtn, _audio, "音轨", audDelayBlock(), false);
         var subsBtn = Osd("字幕", "字幕 / 字幕延迟 / 字幕样式");
         subsBtn.Click += (_, _) => Pick(subsBtn, _subs, "字幕",
             new StackPanel
             {
                 Spacing = 2,
-                Children = { Labeled("字幕延迟", subDelayRow), SubStyleBlock() },
+                Children = { subDelayBlock(), SubStyleBlock() },
             }, false);
 
         /* 弹幕开关。
@@ -3237,6 +3235,36 @@ public sealed class PlayerPage : UserControl
             if (c.Bounds.Width <= 0) return false;
             var at = c.TranslatePoint(default, this);
             return at is { } o && new Rect(o, c.Bounds.Size).Contains(_ptr);
+        }
+    }
+
+    /// <summary>
+    /// 给音轨 / 字幕弹层造延迟步进器。返回工厂而不是控件本身:弹层每次打开都会新建
+    /// 一棵可视树,Avalonia 的一个控件不能同时或先后挂在两个仍存活的父节点下。
+    /// </summary>
+    private static Func<Control> DelayBlockFactory(
+        string label, Func<double> current, Action<double, TextBlock> apply) => () =>
+    {
+        var readout = Label($"{current():0.0}s");
+        return Labeled(label, Stepper(readout, d => apply(d, readout)));
+    };
+
+    /// <summary>回归探针:连续打开两次弹层时,两次拿到的控件必须能各自挂到父节点。</summary>
+    internal static bool PopupBodyProbe()
+    {
+        var value = 0.0;
+        var make = DelayBlockFactory("字幕延迟", () => value, (d, _) => value += d);
+        try
+        {
+            var first = make();
+            _ = new StackPanel { Children = { first } };
+            var second = make();
+            _ = new StackPanel { Children = { second } };
+            return !ReferenceEquals(first, second);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
         }
     }
 

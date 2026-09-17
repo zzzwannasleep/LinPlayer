@@ -61,6 +61,19 @@ internal static class Program
             Environment.ExitCode = bad == 0 ? 0 : 1;
             return;
         }
+        /* 播放页弹层复点自检:`LP_POPUPPROBE=1 LinPlayer.exe`。连续打开同一个弹层时,
+           每次必须得到一棵新的可视树;复用控件会在第二次挂父节点时直接抛异常。 */
+        if (Environment.GetEnvironmentVariable("LP_POPUPPROBE") is { Length: > 0 })
+        {
+            AppBuilder.Configure<App>().UsePlatformDetect().SetupWithoutStarting();
+            var ok = Views.PlayerPage.PopupBodyProbe();
+            Console.WriteLine(ok
+                ? "PROBE 播放弹层 ✓ 连续打开两次使用不同控件树"
+                : "PROBE 播放弹层 ✗ 第二次复用了已有父节点的控件");
+            Environment.ExitCode = ok ? 0 : 1;
+            return;
+        }
+
         /* 选集栏卡死自检:`LP_SCROLLPROBE=1 LinPlayer.exe` 打一行就退,不开窗口。
            判据是「目标去不了时,驱动器退不退得出来」—— 退不出来 = 之后每次点
            左右翻页按钮 Run() 都当场 return,按钮从此是死的(用户 2026-09-08 报的

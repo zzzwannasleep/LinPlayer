@@ -29,6 +29,7 @@ run() { # run <环境变量名> <人话名字>
 }
 
 run LP_SCALEPROBE  "响应式缩放曲线"
+run LP_POPUPPROBE  "播放页音轨/字幕弹层连续打开不复用控件树"
 run LP_SCROLLPROBE "滚动驱动器退不退得出死角"
 run LP_NETPROBE    "顶栏网速读数"
 run LP_KEYPROBE    "按键翻成 mpv 键名(input.conf 生效的入口)"
